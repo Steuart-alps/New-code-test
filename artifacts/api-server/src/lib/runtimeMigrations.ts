@@ -3518,6 +3518,14 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_fuel_client_machine"
     ON "green_fuel_logs" ("client_id", "machine_id")
   `);
+
+  // Phone defect reports, fuel logs, service records and PUWER inspections
+  // carry a device entry ID (mobile outbox replays), recognised only for the
+  // user who created the row.
+  for (const table of ["green_defects", "green_fuel_logs", "green_service_records", "green_puwer_inspections"]) {
+    await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`));
+    await addClientEntryReplayColumns(table);
+  }
 }
 
 // ---- SwimTrack ----

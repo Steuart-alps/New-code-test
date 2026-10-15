@@ -167,6 +167,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/green-records"
+        options={{
+          title: 'Machine records',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="account/delete"
         options={{
           title: 'Delete my account',

@@ -606,6 +606,24 @@ export default function GreenTrackScreen() {
             </Text>
           </View>
         </View>
+        <TouchableOpacity
+          testID="green-open-records"
+          accessibilityRole="button"
+          onPress={() => router.push('/checks/green-records' as any)}
+          activeOpacity={0.75}
+          style={[styles.machineCard, { backgroundColor: colors.card, borderColor: colors.border, marginTop: 10 }]}
+        >
+          <View style={styles.machineIcon}>
+            <Feather name="clipboard" size={20} color={MODULE_COLOR} />
+          </View>
+          <View style={styles.machineBody}>
+            <Text style={[styles.machineName, { color: colors.foreground }]}>Machine records</Text>
+            <Text style={[styles.machineMeta, { color: colors.mutedForeground }]}>
+              Report a defect, log fuel or oil, services and PUWER inspections
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={19} color={colors.mutedForeground} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.section}>

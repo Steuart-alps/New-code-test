@@ -377,5 +377,61 @@ assert.deepEqual(deliveredQueryKeys('pest-visit'), [['pest-visits'], ['dashboard
 assert.deepEqual(deliveredQueryKeys('swim-surveillance'), [['swim-surveillance'], ['track-controls'], ['dashboard-summary']]);
 assert.deepEqual(deliveredQueryKeys('swim-first-aid'), [['swim-first-aid'], ['track-controls'], ['dashboard-summary']]);
 assert.deepEqual(deliveredQueryKeys('swim-incident'), [['swim-incidents'], ['dashboard-summary']]);
+// GreenTrack machine records (defects, fuel logs, service records, PUWER
+// inspections): saved offline, resent unchanged, create paths only (no
+// machine, edit, delete or config paths).
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  const green = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      return { id: 21 };
+    },
+    async onSent() {},
+  });
+  await green.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  const kinds = {
+    'green-defect': '/api/green-track/defects',
+    'green-fuel': '/api/green-track/fuel-logs',
+    'green-service': '/api/green-track/service-records',
+    'green-puwer': '/api/green-track/puwer-inspections',
+  };
+  for (const [kind, path] of Object.entries(kinds)) {
+    assert.ok(RECORD_KINDS.includes(kind), kind);
+    assert.equal(RECORD_PATHS[kind], path);
+    await green.enqueue(record(kind, `${kind}-000001`, { machineId: 4, notes: kind }));
+  }
+  for (const path of ['/api/green-track/defects/5', '/api/green-track/fuel-logs/5', '/api/green-track/machines',
+    '/api/green-track/machines/5', '/api/green-track/config', '/api/green-track/pre-use-checks']) {
+    for (const kind of Object.keys(kinds)) {
+      await assert.rejects(green.enqueue({ ...record(kind, `${kind}-000002`, {}), path }), /cannot be saved/, `${kind} ${path}`);
+    }
+  }
+  await assert.rejects(green.enqueue({ ...record('green-fuel', 'green-fuel-000003', {}), path: kinds['green-puwer'] }), /cannot be saved/,
+    'a fuel log cannot be posted as a PUWER inspection');
+  await green.replay();
+  assert.deepEqual(green.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued', 'queued', 'queued'], 'all wait on the device offline');
+  online = true;
+  await green.replay();
+  assert.deepEqual(green.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent', 'sent', 'sent']);
+  for (const [kind, path] of Object.entries(kinds)) {
+    const attempts = sent.filter((attempt) => attempt.body.clientEntryId === `${kind}-000001`);
+    // A replay stops at the first network failure, so only the oldest entry
+    // was tried while offline.
+    assert.ok(attempts.length >= (kind === 'green-defect' ? 2 : 1), `${kind}: sent once back online`);
+    for (const attempt of attempts) assert.deepEqual(attempt, { path, body: { machineId: 4, notes: kind, clientEntryId: `${kind}-000001` } });
+  }
+  green.suspend();
+}
+for (const [kind, tab] of [['green-defect', 'defect'], ['green-fuel', 'fuel'], ['green-service', 'service'], ['green-puwer', 'puwer']]) {
+  assert.deepEqual(deliveredQueryKeys(kind), [['green-records', tab], ['dashboard-summary']]);
+}
 
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');

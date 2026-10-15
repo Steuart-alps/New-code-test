@@ -15,6 +15,9 @@ try {
   const owner = await createTenant('mobile-replay');
   const other = await createTenant('mobile-replay-other');
   const staff = await createUser(owner, { role: 'client_staff' });
+  // Service records and PUWER inspections are admin-only: the "another user"
+  // check there uses a second admin.
+  const secondAdmin = await createUser(owner, { role: 'client_admin' });
   const site = await owner.request('POST', '/sites', { name: 'Replay site', seedStarterChecks: false });
   assert.equal(site.status, 201, JSON.stringify(site.data));
   const siteId = site.data.id;
@@ -142,9 +145,48 @@ try {
       changed: { severity: 'high' },
       photoReplay: true,
     },
+    {
+      name: 'GreenTrack defect', path: '/green-track/defects', table: 'green_defects',
+      body: {
+        machineId: machine.data.id, reportDate: day, reportedBy: 'Operator', description: 'Cracked guard',
+        severity: 'major', outOfService: true, notes: null,
+      },
+      changed: { severity: 'critical' },
+      photoReplay: true,
+    },
+    {
+      name: 'GreenTrack fuel log', path: '/green-track/fuel-logs', table: 'green_fuel_logs',
+      body: {
+        machineId: machine.data.id, logDate: day, fuelType: 'diesel', quantityLitres: 25.5, engineHours: 512,
+        costPence: 3150, filledBy: 'Operator', notes: null,
+      },
+      changed: { quantityLitres: 30 },
+    },
+    {
+      name: 'GreenTrack service record', path: '/green-track/service-records', table: 'green_service_records',
+      body: {
+        machineId: machine.data.id, serviceDate: day, serviceType: 'scheduled', hoursAtService: 450, nextServiceHours: 550,
+        nextServiceDate: isoDay(180), workPerformed: 'Oil and filter change', servicedBy: 'Mechanic', costPence: 12000, notes: null,
+      },
+      changed: { workPerformed: 'Blade sharpening' },
+      photoReplay: true,
+      otherUser: secondAdmin,
+    },
+    {
+      // A failed inspection raises a Compliance Hub action (database trigger
+      // on insert): a replay must not raise a second one (checked after the loop).
+      name: 'GreenTrack PUWER inspection', path: '/green-track/puwer-inspections', table: 'green_puwer_inspections',
+      body: {
+        machineId: machine.data.id, inspectionDate: day, nextInspectionDate: isoDay(365), inspectionType: 'thorough_examination',
+        inspectorName: 'Inspector', inspectorCompany: 'Safe Co', certRef: 'PUWER-1', safeToOperate: false,
+        defectsFound: 'Worn brake pads', result: 'fail', notes: null,
+      },
+      changed: { certRef: 'PUWER-2' },
+      otherUser: secondAdmin,
+    },
   ];
 
-  for (const { name, path, table, body, changed, photoReplay } of cases) {
+  for (const { name, path, table, body, changed, photoReplay, otherUser = staff } of cases) {
     const before = await count(table, owner.clientId);
     const actionsBefore = await count('compliance_actions', owner.clientId);
     const sent = { ...body, clientEntryId: entryId() };
@@ -168,7 +210,10 @@ try {
     const conflict = await owner.request('POST', path, { ...sent, ...changed });
     assert.equal(conflict.status, 409, `${name}: an entry ID cannot hide a changed payload`);
     assert.equal(conflict.data.code, 'CLIENT_ENTRY_CONFLICT');
-    assert.equal((await staff.request('POST', path, sent)).status, 409, `${name}: the entry belongs to the user who sent it`);
+    assert.equal((await otherUser.request('POST', path, sent)).status, 409, `${name}: the entry belongs to the user who sent it`);
+    if (otherUser !== staff) {
+      assert.equal((await staff.request('POST', path, sent)).status, 403, `${name}: stays a manager-only record`);
+    }
     assert.equal(await count(table, owner.clientId), before + 1, `${name}: exactly one record was created`);
     assert.equal(await count('compliance_actions', owner.clientId), actionsAfterFirst, `${name}: replays add no follow-up actions`);
     if (name === 'legionella') assert.equal(actionsAfterFirst, actionsBefore + 1, 'the failed reading opened one action');
@@ -217,6 +262,11 @@ try {
   const ownSession = (await pool.query('SELECT id FROM swim_sessions WHERE client_id = $1 LIMIT 1', [owner.clientId])).rows[0].id;
   assert.equal((await other.request('POST', '/swim-track/surveillance', { checkDate: day, sessionId: ownSession })).status, 400,
     "surveillance: another client's swim session is refused");
+
+  const puwerActions = Number((await pool.query(
+    "SELECT count(*) FROM track_actions WHERE client_id = $1 AND source_kind = 'green_puwer_inspections'", [owner.clientId],
+  )).rows[0].count);
+  assert.equal(puwerActions, await count('green_puwer_inspections', owner.clientId), 'PUWER: replays raise no second track action');
 
   // RoomTrack room checks: one check per room and day, so each step uses its
   // own room; a second check for a room and day stays a plain 409.
@@ -279,5 +329,5 @@ try {
   assert.equal((await pool.query('SELECT client_entry_id FROM fire_safety_checks WHERE id = $1', [fire.data.id])).rows[0].client_entry_id,
     stored.client_entry_id, 'an edit keeps the original entry ID');
 
-  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, GreenTrack, swim session, surveillance, first-aid and pool incident mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
+  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, GreenTrack (pre-use checks, defects, fuel logs, service records, PUWER inspections), swim session, surveillance, first-aid and pool incident mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
 } finally { await pool.end(); }

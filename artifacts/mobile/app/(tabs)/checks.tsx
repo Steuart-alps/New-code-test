@@ -116,10 +116,10 @@ const MODULES: CheckModule[] = [
   {
     id: 'green',
     label: 'GreenTrack',
-    subtitle: 'Pre-use grounds equipment check',
+    subtitle: 'Pre-use checks, defects & fuel logs',
     icon: 'tool',
     iconColor: '#6f8750',
-    checks: ['Choose machine', 'Check safety points', 'Fuel / charge', 'Sign off'],
+    checks: ['Choose machine', 'Check safety points', 'Sign off', 'Report defects & log fuel'],
   },
   {
     id: 'tree',
