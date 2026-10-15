@@ -320,6 +320,56 @@ async function main() {
     !directCancellationMessage?.html?.includes("/api/fix-track/action/") &&
       !directCancellationMessage?.icsAttachment?.includes("/api/fix-track/action/"));
 
+  // After a successful approval the cancellation's audit state is final: the
+  // queue row and issue record who sent it and when, and neither a repeated
+  // approval (retry or page refresh) nor any other send route dispatches it again.
+  const ownerUserId = ownerMe.data?.user?.id;
+  const directCancellationKey = `fix-track-cancellation-${ownerClientId}-${directCancellationId}-1`;
+  const sentDirectCancellation = JSON.parse((await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `SELECT json_build_object('status',status,'approvedBy',approved_by,'approvedAt',approved_at,
+      'sentBy',sent_by,'sentAt',sent_at,'idempotencyKey',idempotency_key)
+      FROM contractor_email_queue WHERE id=${Number(directCancellationQueue?.id)} AND client_id=${Number(ownerClientId)}`,
+  ])).stdout.trim() || "null");
+  check("approved cancellation queue row is no longer pending and records its sender",
+    sentDirectCancellation?.status === "sent" &&
+      sentDirectCancellation.approvedBy === ownerUserId && !!sentDirectCancellation.approvedAt &&
+      sentDirectCancellation.sentBy === ownerUserId && !!sentDirectCancellation.sentAt &&
+      sentDirectCancellation.idempotencyKey === directCancellationKey,
+    JSON.stringify({ ownerUserId, sentDirectCancellation }));
+  check("approved cancellation leaves the manager queue",
+    !(await owner("GET", "/fix-track/contractor-email-queue")).data?.some((entry) => entry.id === directCancellationQueue?.id));
+  const sentCancellationIssue = (await owner("GET", `/fix-track/issues/${directCancellationId}`)).data;
+  check("approved cancellation records sent status, sender and time on the issue",
+    sentCancellationIssue?.emailRequestStatus === "sent" &&
+      sentCancellationIssue.emailSentBy === ownerUserId &&
+      !!sentCancellationIssue.emailSentAt &&
+      Date.parse(sentCancellationIssue.emailSentAt) >= Date.parse(sentCancellationIssue.emailRequestedAt),
+    JSON.stringify(sentCancellationIssue));
+  const outboxAfterDirectCancellation = await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8");
+  const secondApproval = await owner("POST", `/fix-track/contractor-email-queue/${directCancellationQueue?.id}/approve-and-send`);
+  check("second approval of a sent cancellation is rejected",
+    secondApproval.status === 409, JSON.stringify(secondApproval));
+  const secondEditedApproval = await owner("POST", `/fix-track/contractor-email-queue/${directCancellationQueue?.id}/edit-and-send`, {
+    subject: "Cancelled again", bodyText: "Second attempt.",
+  });
+  check("edited re-approval of a sent cancellation is rejected",
+    secondEditedApproval.status === 409, JSON.stringify(secondEditedApproval));
+  const issueRedispatch = await owner("POST", `/fix-track/issues/${directCancellationId}/send-to-contractor`);
+  check("issue send route cannot redispatch a sent cancellation",
+    issueRedispatch.status >= 400, JSON.stringify(issueRedispatch));
+  check("rejected re-approvals add no provider submission",
+    (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8")) === outboxAfterDirectCancellation);
+  check("outbox holds exactly one submission of the direct cancellation",
+    outboxAfterDirectCancellation.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+      .filter((message) => message.idempotencyKey === directCancellationKey).length === 1);
+  const issueAfterSecondApproval = (await owner("GET", `/fix-track/issues/${directCancellationId}`)).data;
+  check("rejected re-approvals leave the issue's sent audit state unchanged",
+    issueAfterSecondApproval?.emailRequestStatus === "sent" &&
+      issueAfterSecondApproval.emailSentBy === sentCancellationIssue?.emailSentBy &&
+      issueAfterSecondApproval.emailSentAt === sentCancellationIssue?.emailSentAt,
+    JSON.stringify(issueAfterSecondApproval));
+
   // A provider failure on an approved cancellation must leave the stored
   // draft pending for a manager retry, and the retry must hand the provider
   // the same calendar event and idempotency key, exactly once.
