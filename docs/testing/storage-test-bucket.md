@@ -19,6 +19,19 @@ In GitHub these are repository secrets, read only by the `Storage happy-path che
 (`.github/workflows/storage-happy-path.yml`). Until they are set, that workflow reports a skip and
 passes. They never go in Render or in the repository.
 
+## What it checks
+
+One after another, each against a freshly started test API:
+
+- DocTrack and generic document uploads get the right tenant ACL, and another tenant cannot read them.
+- PAT certificate attachments are bundled into the data export.
+- The data export bundles DocTrack documents, SafeTrack risk assessments, contractor-portal
+  certificates, compliance-item certificates and photos with identical bytes, and each CSV points
+  at the archived file. Another tenant's file and a missing file are left out with a reason in
+  `attachment-manifest.csv`. With a small `EXPORT_ATTACHMENT_MAX_BYTES`, files over the cap are
+  left out and the README carries a warning.
+- DocTrack sign-off status and registers.
+
 ## One-time setup (Google Cloud console)
 
 1. **Check the live bucket's location.** Cloud Storage > Buckets, note the Location of the bucket

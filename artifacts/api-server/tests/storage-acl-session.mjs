@@ -209,7 +209,7 @@ export function appDownloadPath(downloadUrl) {
   return `${ORIGIN}${pathname}`;
 }
 
-function psqlScalar(sqlText) {
+export function psqlScalar(sqlText) {
   return new Promise((resolve, reject) => {
     const child = spawn("psql", ["-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-d", process.env.DATABASE_URL, "-f", "-"], {
       stdio: ["pipe", "pipe", "pipe"],
