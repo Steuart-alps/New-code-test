@@ -95,6 +95,9 @@ jobs:
       - name: Department isolation tests
         run: pnpm --filter @workspace/api-server run test:dept-isolation:ci
 
+      - name: Welcome email and verification resend tests
+        run: pnpm --filter @workspace/api-server run test:welcome-email
+
       - name: Enforced CSRF tests
         run: pnpm --filter @workspace/api-server run test:csrf-enforced:ci
 
