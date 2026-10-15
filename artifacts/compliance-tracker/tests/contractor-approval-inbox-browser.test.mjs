@@ -869,3 +869,66 @@ test("an open approvals page drops requests reviewed elsewhere without disturbin
   assert.equal((await queueRow(editing.queueId)).status, "cancelled");
   assert.equal((await queueRow(confirming.queueId)).status, "cancelled");
 });
+
+// Fails every queue load until restored; counts the loads either way.
+async function failQueueLoads(page) {
+  const state = { failing: true, loads: 0 };
+  await page.route(
+    url => url.origin === appOrigin && url.pathname === "/api/fix-track/contractor-email-queue",
+    async route => {
+      state.loads++;
+      if (state.failing) {
+        await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
+      } else {
+        await route.fallback();
+      }
+    },
+  );
+  return state;
+}
+
+test("a failed approvals load shows the error state, not an empty queue, and Try again recovers", async () => {
+  for (const [label, session, restored] of [
+    ["pending", fixtures.manager, "pending"],
+    ["empty", fixtures.otherManager, "empty"],
+  ]) {
+    const { page } = await browserContext(session);
+    const queueLoads = await failQueueLoads(page);
+    await withDiagnostics(page, `failed approvals load (${label})`, async () => {
+      await page.goto(`${appOrigin}/contractor-approvals`);
+      await page.getByText("Unable to load approvals").waitFor();
+      await page.getByText("We couldn't load pending contractor emails. Please try again.", { exact: true }).waitFor();
+      assert.equal(await page.getByText("Approvals may be out of date").count(), 0,
+        `${label}: with nothing loaded there is no stale list to warn about`);
+      assert.equal(await page.getByRole("button", { name: "Try again" }).count(), 1, `${label}: one retry control`);
+      assert.equal(await page.getByText("No pending emails").count(), 0,
+        `${label}: a failed load is not shown as an empty queue`);
+      assert.equal(await page.getByRole("button", { name: /^(Approve & Send|Approve Cancellation)$/ }).count(), 0,
+        `${label}: no approval rows are shown`);
+
+      queueLoads.failing = false;
+      const loadsBeforeRetry = queueLoads.loads;
+      await page.getByRole("button", { name: "Try again" }).click();
+      if (restored === "pending") {
+        await queueCard(page, fixtures.acceptIssue.title).waitFor();
+        assert.equal(await page.getByText("No pending emails").count(), 0);
+      } else {
+        await page.getByText("No pending emails").waitFor();
+      }
+      assert.ok(queueLoads.loads > loadsBeforeRetry, `${label}: Try again requests the queue again`);
+      assert.equal(await page.getByText("Unable to load approvals").count(), 0, `${label}: the error state clears`);
+
+      if (restored === "pending") {
+        // A later failed refresh keeps the last list and says it may be stale.
+        queueLoads.failing = true;
+        await page.getByRole("button", { name: "Refresh approvals" }).click();
+        await page.getByText("Approvals may be out of date").waitFor();
+        await queueCard(page, fixtures.acceptIssue.title).waitFor();
+        assert.equal(await page.getByText("Unable to load approvals").count(), 0);
+        queueLoads.failing = false;
+        await page.getByRole("button", { name: "Refresh approvals" }).click();
+        await page.getByText("Approvals may be out of date").waitFor({ state: "detached" });
+      }
+    });
+  }
+});

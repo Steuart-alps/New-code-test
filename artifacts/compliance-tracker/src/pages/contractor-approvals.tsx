@@ -457,7 +457,8 @@ export default function ContractorApprovalsPage() {
                 </Button>
               </div>
             )}
-            {loadError && (
+            {/* With nothing loaded yet, the error state below speaks for itself. */}
+            {loadError && items.length > 0 && (
               <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium text-amber-950">Approvals may be out of date</p>
