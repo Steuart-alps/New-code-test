@@ -160,6 +160,7 @@ const pure = new Set([
   "test:byte-range", // run-bundled-unit.sh: pure Range header parsing
   "test:stripe-startup-readiness", // fake Stripe/clock; unique mkdtemp bundle
   "test:photo-roundtrip-config", // config gate only: env parsing, no storage or database
+  "test:storage-happy-path-config", // config gate only: env parsing, no storage or database
   "test:email-escaping", // run-bundled-unit.sh: pure renderers, nothing sent
   "test:billing-minimum-quantity", // run-bundled-unit.sh: pure added-site coverage rule
   "test:upload-pixel-cap", // unique temp bundle; in-memory images, no database
@@ -259,7 +260,7 @@ const pureEntrypoints = new Set([
   "private-file-acl.mjs", "staged-photo-creation.mjs", "pattrack-billing.mjs",
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",
-  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "upload-pixel-cap.mjs",
+  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "storage-happy-path-config.test.mjs", "upload-pixel-cap.mjs",
   "trial-lock-allowlist.mjs",
 ]);
 const helperModules = new Set([

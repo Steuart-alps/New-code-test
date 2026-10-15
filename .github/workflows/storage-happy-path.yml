@@ -1,0 +1,122 @@
+name: Storage happy-path checks
+
+# Real Google Cloud Storage round trips for private documents: signed upload,
+# ACL registration, tenant-scoped download and cleanup, against a dedicated
+# non-production bucket (never the application bucket). Needs two repository
+# secrets, GCS_STORAGE_TEST_BUCKET and GCS_STORAGE_TEST_SERVICE_ACCOUNT_JSON
+# (a key for a service account that can only reach that bucket). Until both
+# are set, the job reports that it was skipped and passes.
+on:
+  pull_request:
+    paths:
+      - "artifacts/api-server/src/lib/objectStorage.ts"
+      - "artifacts/api-server/src/lib/objectAcl.ts"
+      - "artifacts/api-server/src/routes/storage.ts"
+      - "artifacts/api-server/src/routes/documents.ts"
+      - "artifacts/api-server/src/routes/doc-track.ts"
+      - "artifacts/api-server/src/routes/export.ts"
+      - "artifacts/api-server/src/routes/sign-off.ts"
+      - "artifacts/api-server/tests/run-storage-happy-path.sh"
+      - "artifacts/api-server/tests/storage-happy-path-fixture.mjs"
+      - "artifacts/api-server/tests/storage-acl-session.mjs"
+      - "artifacts/api-server/tests/doc-track-object-acl.mjs"
+      - "artifacts/api-server/tests/generic-document-object-acl.mjs"
+      - "artifacts/api-server/tests/pat-export-attachments.mjs"
+      - "artifacts/api-server/tests/doc-track-signoff-status.mjs"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/storage-happy-path.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/api-server/src/lib/objectStorage.ts"
+      - "artifacts/api-server/src/lib/objectAcl.ts"
+      - "artifacts/api-server/src/routes/storage.ts"
+      - "artifacts/api-server/src/routes/documents.ts"
+      - "artifacts/api-server/src/routes/doc-track.ts"
+      - "artifacts/api-server/src/routes/export.ts"
+      - "artifacts/api-server/src/routes/sign-off.ts"
+      - "artifacts/api-server/tests/run-storage-happy-path.sh"
+      - "artifacts/api-server/tests/storage-happy-path-fixture.mjs"
+      - "artifacts/api-server/tests/storage-acl-session.mjs"
+      - "artifacts/api-server/tests/doc-track-object-acl.mjs"
+      - "artifacts/api-server/tests/generic-document-object-acl.mjs"
+      - "artifacts/api-server/tests/pat-export-attachments.mjs"
+      - "artifacts/api-server/tests/doc-track-signoff-status.mjs"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/storage-happy-path.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storage-happy-path-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  storage:
+    name: Private document storage round trips
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: complytrack
+          POSTGRES_PASSWORD: complytrack
+          POSTGRES_DB: complytrack
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U complytrack -d complytrack"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Disposable CI service only; never a real database or secret.
+      DATABASE_URL: postgresql://complytrack:complytrack@localhost:5432/complytrack
+      SESSION_SECRET: ci-only-session-secret-not-for-production
+      STORAGE_TEST_CONFIGURED: ${{ secrets.GCS_STORAGE_TEST_BUCKET != '' && secrets.GCS_STORAGE_TEST_SERVICE_ACCOUNT_JSON != '' }}
+
+    steps:
+      - name: Report missing test bucket
+        if: env.STORAGE_TEST_CONFIGURED != 'true'
+        run: |
+          echo "::notice title=Storage happy-path checks skipped::Set the GCS_STORAGE_TEST_BUCKET and GCS_STORAGE_TEST_SERVICE_ACCOUNT_JSON repository secrets to run them."
+
+      - name: Check out repository
+        if: env.STORAGE_TEST_CONFIGURED == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        if: env.STORAGE_TEST_CONFIGURED == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        if: env.STORAGE_TEST_CONFIGURED == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        if: env.STORAGE_TEST_CONFIGURED == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # Same as Render's pre-deploy step; the API applies runtime migrations on boot.
+      - name: Create base database schema
+        if: env.STORAGE_TEST_CONFIGURED == 'true'
+        run: node lib/db/bootstrap.mjs
+
+      # The secrets reach only this step. The runner refuses an application
+      # bucket, hands the test key to the test API alone, and empties the run's
+      # unique prefix on exit.
+      - name: Storage happy-path checks
+        if: env.STORAGE_TEST_CONFIGURED == 'true'
+        env:
+          GCS_STORAGE_TEST_BUCKET: ${{ secrets.GCS_STORAGE_TEST_BUCKET }}
+          GCS_STORAGE_TEST_SERVICE_ACCOUNT_JSON: ${{ secrets.GCS_STORAGE_TEST_SERVICE_ACCOUNT_JSON }}
+          STORAGE_HAPPY_PATH_REQUIRED: "1"
+        run: pnpm --filter @workspace/api-server run test:storage-happy-path
