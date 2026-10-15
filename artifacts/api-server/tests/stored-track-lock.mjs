@@ -1409,6 +1409,64 @@ async function main() {
         { status: rowsOf((await admin("GET", path)).data).some((row) => idOf(row) === betaRecord.data?.id) ? 200 : 0 }, [200]);
     }
   }
+  // BikeTrack is department-scoped the same way. A hire belongs to its own
+  // site, else its bike's; services follow their bike.
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    let bikeCount = 0;
+    const bikeAt = async (siteId) => (await admin("POST", "/bike-track/bikes", {
+      ref: `DEPT-BIKE-${++bikeCount}-${suffix}`, type: "hybrid", siteId,
+    })).data?.id;
+    await siteMove({ label: "BikeTrack bike", createPath: "/bike-track/bikes",
+      create: (siteId) => ({ ref: `MOVE-BIKE-${suffix}`, type: "hybrid", siteId }), move: (siteId) => ({ siteId }) });
+    const moveHireBike = await bikeAt(alphaSite.data.id);
+    await siteMove({ label: "BikeTrack hire", createPath: "/bike-track/hires", idFrom: (data) => data?.hire?.id,
+      create: (siteId) => ({ bikeId: moveHireBike, guestName: "Lock Fixture Guest", hireDate: today, siteId }),
+      move: (siteId) => ({ siteId }) });
+
+    const [alphaBike, betaBike, neutralBike] = [await bikeAt(alphaSite.data.id), await bikeAt(betaSite.data.id), await bikeAt(null)];
+    check("BikeTrack: seed department and site-neutral bikes", [alphaBike, betaBike, neutralBike].every(Number.isInteger));
+    const staffBikes = new Set(rowsOf((await scopedStaff("GET", "/bike-track/bikes")).data).map(idOf));
+    check("BikeTrack: bike list shows own department and site-neutral bikes only",
+      staffBikes.has(alphaBike) && staffBikes.has(neutralBike) && !staffBikes.has(betaBike), JSON.stringify([...staffBikes]));
+    expect("BikeTrack: department staff cannot edit another department's bike",
+      await scopedStaff("PUT", `/bike-track/bikes/${betaBike}`, { notes: bypassMarker }), [403]);
+    expect("BikeTrack: department staff cannot add a bike at another department's site",
+      await scopedStaff("POST", "/bike-track/bikes", { ref: `FOREIGN-BIKE-${suffix}`, type: "hybrid", siteId: betaSite.data.id }), [403]);
+    expect("BikeTrack: department staff cannot hire out another department's bike",
+      await scopedStaff("POST", "/bike-track/hires", { bikeId: betaBike, guestName: "Lock Fixture Guest", hireDate: today }), [403]);
+    expect("BikeTrack: department staff cannot service another department's bike",
+      await scopedStaff("POST", "/bike-track/services", { bikeId: betaBike, serviceDate: today, serviceType: "adhoc" }), [403]);
+    expect("BikeTrack: department staff can hire out their own bike",
+      await scopedStaff("POST", "/bike-track/hires", { bikeId: alphaBike, guestName: "Lock Fixture Guest", hireDate: today }), [201]);
+
+    // Old records: in-department staff get the lock; another department's
+    // record answers 403 with no lock fields, before any date is compared.
+    for (const [label, path, body, idFrom] of [
+      ["hire", "/bike-track/hires", (bikeId) => ({ bikeId, guestName: "Lock Fixture Guest", hireDate: old }), (data) => data?.hire?.id],
+      ["service", "/bike-track/services", (bikeId) => ({ bikeId, serviceDate: old, serviceType: "annual" }), (data) => data?.id],
+    ]) {
+      const alphaOld = idFrom((await admin("POST", path, body(await bikeAt(alphaSite.data.id)))).data);
+      const betaOld = idFrom((await admin("POST", path, body(await bikeAt(betaSite.data.id)))).data);
+      check(`Dept BikeTrack ${label}: seed old records`, Number.isInteger(alphaOld) && Number.isInteger(betaOld));
+      check(`Dept BikeTrack ${label}: in-department old DELETE is locked`, isLocked(await scopedStaff("DELETE", `${path}/${alphaOld}`)));
+      const foreign = await scopedStaff("DELETE", `${path}/${betaOld}`);
+      check(`Dept BikeTrack ${label}: other-department DELETE is forbidden without the lock`,
+        foreign.status === 403 && !lockLeakFields.some((field) => JSON.stringify(foreign.data ?? "").includes(field)),
+        `${foreign.status} ${JSON.stringify(foreign.data)}`);
+      expect(`Dept BikeTrack ${label}: other-department PUT is forbidden`,
+        await scopedStaff("PUT", `${path}/${betaOld}`, { notes: bypassMarker }), [403]);
+      const staffList = new Set(rowsOf((await scopedStaff("GET", path)).data).map(idOf));
+      check(`Dept BikeTrack ${label}: list hides another department's records`,
+        staffList.has(alphaOld) && !staffList.has(betaOld), JSON.stringify([...staffList]));
+      const adminList = new Set(rowsOf((await admin("GET", path)).data).map(idOf));
+      check(`Dept BikeTrack ${label}: admin still sees both`, adminList.has(alphaOld) && adminList.has(betaOld));
+    }
+    const staffSummary = await scopedStaff("GET", "/bike-track/summary");
+    const adminSummary = await admin("GET", "/bike-track/summary");
+    check("BikeTrack: summary counts only the department's bikes",
+      Number(staffSummary.data?.bikes?.total) < Number(adminSummary.data?.bikes?.total),
+      `${JSON.stringify(staffSummary.data?.bikes)} vs ${JSON.stringify(adminSummary.data?.bikes)}`);
+  }
   await siteMove({ label: "FixTrack issue", createPath: "/fix-track/issues",
     create: (siteId) => ({
       title: `Lock move issue ${suffix}`, issueType: "general", location: "Plant room", description: "Lock move",

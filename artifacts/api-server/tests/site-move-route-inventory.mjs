@@ -29,8 +29,8 @@ const notAMove = (reason) => ({ notAMove: reason });
 const gap = (reason) => ({ gap: reason });
 
 const INVENTORY = {
-  "bike-track.ts PUT /bikes/:id": gap("BikeTrack has no department scoping at all (lists, edits and moves are tenant-wide)"),
-  "bike-track.ts PUT /hires/:id": gap("BikeTrack has no department scoping at all (lists, edits and moves are tenant-wide)"),
+  "bike-track.ts PUT /bikes/:id": siteMove("BikeTrack bike"),
+  "bike-track.ts PUT /hires/:id": siteMove("BikeTrack hire"),
   "checklist-templates.ts PUT /checklist-templates": adminOnly("checklist template editor"),
   "compliance-items.ts PATCH /compliance-items/:id/status": notAMove("status-only; checks the item's stored site"),
   "compliance-items.ts PUT /compliance-items/:id": adminOnly("compliance item editor"),

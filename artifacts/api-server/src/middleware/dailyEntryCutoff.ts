@@ -189,8 +189,13 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/swim-track\/incidents\/\d+$/, table: "swim_incidents", date: "incident_date", department: RECORD_SITE_DEPARTMENT },
   { path: /^\/kitchen-weekly\/weekly\/\d+$/, table: "kitchen_weekly_records", date: "week_commencing", department: RECORD_SITE_DEPARTMENT },
   { path: /^\/kitchen-weekly\/probe\/\d+$/, table: "kitchen_probe_checks", date: "check_date", department: RECORD_SITE_DEPARTMENT },
-  { path: /^\/bike-track\/hires\/\d+$/, table: "bike_hire_records", date: "hire_date" },
-  { path: /^\/bike-track\/services\/\d+$/, table: "bike_services", date: "service_date" },
+  // A hire belongs to its own site, else its bike's; a service to its bike's.
+  { path: /^\/bike-track\/hires\/\d+$/, table: "bike_hire_records", date: "hire_date",
+    department: siteDepartment(`COALESCE(record.site_id, (SELECT bike.site_id FROM "bikes" AS bike
+      WHERE bike.id = record.bike_id AND bike.client_id = record.client_id))`) },
+  { path: /^\/bike-track\/services\/\d+$/, table: "bike_services", date: "service_date",
+    department: siteDepartment(`(SELECT bike.site_id FROM "bikes" AS bike
+      WHERE bike.id = record.bike_id AND bike.client_id = record.client_id)`) },
   { path: /^\/green-track\/pre-use-checks\/\d+$/, table: "green_pre_use_checks", date: "check_date" },
   { path: /^\/green-track\/service-records\/\d+$/, table: "green_service_records", date: "service_date" },
   { path: /^\/green-track\/defects\/\d+$/, table: "green_defects", date: "report_date" },
