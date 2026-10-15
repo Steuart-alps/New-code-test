@@ -127,6 +127,14 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > DOCUMENTS
 > • Risk assessments, certificates and training records for your sites
 >
+> MANAGE AND LOOK UP
+> • Work through open corrective actions: update, resolve with a signature, or send to FixTrack
+> • See contractor certificates that are expiring or overdue, and approve contractor emails
+> • Set, assign and review staff tasks
+> • A calendar of what is overdue, due today and coming up
+> • Look up allergen, COSHH and asbestos records on site, even without signal
+> • Check staff training, and hand the phone to staff without a login to sign their documents
+>
 > WORKS ON PATCHY SIGNAL
 > Checks, inspections, hires, issue reports and cleaning schedules you record without a connection are saved on the device and sent automatically when you are back online, without creating duplicates. The app shows what is waiting, what has synced and anything that needs your attention.
 >
