@@ -320,6 +320,100 @@ async function main() {
     !directCancellationMessage?.html?.includes("/api/fix-track/action/") &&
       !directCancellationMessage?.icsAttachment?.includes("/api/fix-track/action/"));
 
+  // A provider failure on an approved cancellation must leave the stored
+  // draft pending for a manager retry, and the retry must hand the provider
+  // the same calendar event and idempotency key, exactly once.
+  const outboxPath = process.env.FIXTRACK_TEST_EMAIL_OUTBOX;
+  const retryCancellationId = await contractorIssue(owner, "calendar-cancellation-retry", "2030-03-20");
+  check("cancellation retry fixture queues its dated assignment",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/request-send`, { mode: "assign" })).status === 200);
+  check("cancellation retry fixture approves its assignment",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/approve-send`)).status === 200);
+  check("cancellation retry fixture dispatches its assignment",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/send-to-contractor`)).status === 200);
+  check("cancellation retry fixture enters the manager approval queue",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/request-cancellation`)).status === 202);
+  const retryCancellationQueue = (await owner("GET", "/fix-track/contractor-email-queue")).data?.find(
+    (entry) => entry.entityId === retryCancellationId && entry.emailType === "cancellation",
+  );
+  check("cancellation retry fixture appears in the manager queue",
+    !!retryCancellationQueue, JSON.stringify(retryCancellationQueue));
+  const retryQueueId = Number(retryCancellationQueue?.id);
+  const storedCancellation = async () => JSON.parse((await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `SELECT json_build_object('status',status,'approvedBy',approved_by,'approvedAt',approved_at,
+      'sentBy',sent_by,'sentAt',sent_at,'lastError',last_error,'ics',ics_content,'icsFilename',ics_filename,
+      'idempotencyKey',idempotency_key,'subject',subject,'bodyHtml',body_html,'bodyText',body_text)
+      FROM contractor_email_queue WHERE id=${retryQueueId} AND client_id=${Number(ownerClientId)}`,
+  ])).stdout.trim() || "null");
+  const beforeFailure = await storedCancellation();
+  const cancellationKey = `fix-track-cancellation-${ownerClientId}-${retryCancellationId}-1`;
+  check("queued cancellation stores its calendar event and provider key",
+    beforeFailure?.ics?.includes(`UID:fix-track-${ownerClientId}-${retryCancellationId}@complytrack`) &&
+      beforeFailure?.ics?.includes("METHOD:CANCEL") &&
+      beforeFailure?.ics?.includes("SEQUENCE:1") &&
+      beforeFailure?.idempotencyKey === cancellationKey,
+    JSON.stringify(beforeFailure));
+
+  // The test outbox is the provider boundary: a directory in its place makes
+  // the submission fail. The captured messages are restored afterwards.
+  const outboxBeforeFailure = await readFile(outboxPath, "utf8");
+  await rm(outboxPath);
+  await mkdir(outboxPath);
+  let failedCancellation;
+  try {
+    failedCancellation = await owner("POST", `/fix-track/contractor-email-queue/${retryQueueId}/approve-and-send`);
+  } finally {
+    await rm(outboxPath, { recursive: true });
+    await writeFile(outboxPath, outboxBeforeFailure);
+  }
+  check("provider failure on a cancellation reports a retryable error",
+    failedCancellation.status === 502, JSON.stringify(failedCancellation));
+  const afterFailure = await storedCancellation();
+  check("failed cancellation stays pending with no approval consumed",
+    afterFailure?.status === "pending" && afterFailure.approvedBy == null && afterFailure.approvedAt == null &&
+      afterFailure.sentBy == null && afterFailure.sentAt == null && !!afterFailure.lastError,
+    JSON.stringify(afterFailure));
+  check("failed cancellation keeps its draft, calendar event and provider key unchanged",
+    afterFailure?.ics === beforeFailure?.ics &&
+      afterFailure?.icsFilename === beforeFailure?.icsFilename &&
+      afterFailure?.idempotencyKey === beforeFailure?.idempotencyKey &&
+      afterFailure?.subject === beforeFailure?.subject &&
+      afterFailure?.bodyHtml === beforeFailure?.bodyHtml &&
+      afterFailure?.bodyText === beforeFailure?.bodyText,
+    JSON.stringify({ beforeFailure, afterFailure }));
+  check("failed cancellation is listed again for manager retry",
+    !!(await owner("GET", "/fix-track/contractor-email-queue")).data?.some((entry) => entry.id === retryQueueId));
+  check("failed cancellation keeps the issue awaiting approval",
+    (await owner("GET", `/fix-track/issues/${retryCancellationId}`)).data?.emailRequestStatus === "pending");
+  check("failed cancellation still locks contractor-facing edits",
+    (await owner("PUT", `/fix-track/issues/${retryCancellationId}`, { targetDate: "2030-03-21" })).status === 409);
+  check("failed cancellation cannot be queued a second time",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/request-cancellation`)).status === 409);
+  check("failed cancellation submitted nothing to the provider",
+    (await readFile(outboxPath, "utf8")) === outboxBeforeFailure);
+
+  const retriedCancellation = await owner("POST", `/fix-track/contractor-email-queue/${retryQueueId}/approve-and-send`);
+  check("manager retry of the failed cancellation succeeds",
+    retriedCancellation.status === 200, JSON.stringify(retriedCancellation));
+  check("a second retry cannot resubmit the delivered cancellation",
+    (await owner("POST", `/fix-track/contractor-email-queue/${retryQueueId}/approve-and-send`)).status === 409);
+  const cancellationSubmissions = (await readFile(outboxPath, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    .filter((message) => message.idempotencyKey === cancellationKey);
+  check("outbox holds exactly one cancellation submission after recovery",
+    cancellationSubmissions.length === 1, JSON.stringify(cancellationSubmissions));
+  check("retry sends the stored cancellation event identity and sequence unchanged",
+    cancellationSubmissions[0]?.icsAttachment === beforeFailure?.ics &&
+      cancellationSubmissions[0]?.icsFilename === beforeFailure?.icsFilename,
+    cancellationSubmissions[0]?.icsAttachment);
+  const afterRetry = await storedCancellation();
+  check("recovered cancellation is recorded as sent",
+    afterRetry?.status === "sent" && !!afterRetry.sentAt && afterRetry.ics === beforeFailure?.ics,
+    JSON.stringify(afterRetry));
+  check("recovered cancellation marks the issue sent",
+    (await owner("GET", `/fix-track/issues/${retryCancellationId}`)).data?.emailRequestStatus === "sent");
+
   check("changing a sent assignment target date succeeds",
     (await owner("PUT", `/fix-track/issues/${calendarId}`, { targetDate: "2030-02-12" })).status === 200);
   check("resend still requires explicit force",
