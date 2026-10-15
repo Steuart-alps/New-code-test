@@ -8,6 +8,7 @@ import { logger } from "../lib/logger";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { escapeHtml, sendSystemEmail } from "../lib/email";
+import { checkStorageAddonPrice } from "../lib/storagePricing";
 
 const router = Router();
 
@@ -256,6 +257,18 @@ router.get("/admin/service-price-preflight", requireAuth, requireConsultant, req
       missing: [],
     });
   }
+});
+
+// Compare the Stripe storage add-on price with the provider rate plus ALPS
+// margin, fresh from Stripe. Read-only: it changes no price or subscription.
+// 200 when in line; 503 when drifted, misconfigured or unreadable (new
+// storage purchases are paused meanwhile); 404 when the add-on is not offered.
+// Platform operators only (PLATFORM_ADMIN_EMAILS).
+// GET /api/admin/storage-price-check
+router.get("/admin/storage-price-check", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
+  const result = await checkStorageAddonPrice({ maxAgeMs: 0 });
+  const status = result.status === "ok" ? 200 : result.status === "not_configured" ? 404 : 503;
+  res.status(status).json(result);
 });
 
 // One-shot demo seed endpoint, gated by a secret token.
