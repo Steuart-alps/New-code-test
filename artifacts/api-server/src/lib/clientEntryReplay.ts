@@ -8,7 +8,8 @@ import { sql } from "drizzle-orm";
  * Replay recognition for mobile outbox submissions (fire, legionella, hot tub,
  * PAT, incident and pool records, GreenTrack pre-use checks, defects, fuel logs,
  * service records and PUWER inspections, swim sessions, surveillance checks,
- * first-aid checks and incidents). The device sends a stable `clientEntryId` with
+ * first-aid checks and incidents; KitchenTrack cleaning logs keep their receipts
+ * in kitchen_cleaning_log_entries because every save updates the same log). The device sends a stable `clientEntryId` with
  * every attempt; the row stores it with a fingerprint of the validated
  * payload under a partial unique index on (client_id, client_entry_id).
  *

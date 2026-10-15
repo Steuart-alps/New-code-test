@@ -491,4 +491,20 @@ for (const [kind, tab] of [['green-defect', 'defect'], ['green-fuel', 'fuel'], [
 assert.deepEqual(deliveredQueryKeys('kitchen-probe'), [['kitchen-probe-checks'], ['dashboard-summary']]);
 assert.deepEqual(deliveredQueryKeys('kitchen-weekly'), [['kitchen-weekly-reviews'], ['dashboard-summary']]);
 
+// Cleaning schedule saves (drafts and sign-offs) go to the upsert route only.
+assert.equal(RECORD_PATHS['cleaning-log'], '/api/kitchen-cleaning/logs');
+assert.ok(RECORD_KINDS.includes('cleaning-log'));
+assert.deepEqual(deliveredQueryKeys('cleaning-log'), [['kitchen-cleaning-log'], ['kitchen-cleaning-history'], ['dashboard-summary']]);
+{
+  const cleaning = new CheckOutbox({
+    storage: { async getItem() { return null; }, async setItem() {} },
+    async send() {}, async onSent() {},
+  });
+  await cleaning.activate(A, 'token-A');
+  const entry = (path) => ({ entryId: 'cleaning-entry-01', kind: 'cleaning-log', path, scopeKey: 'cleaning-log:x', label: 'Cleaning', body: {} });
+  await assert.rejects(cleaning.enqueue(entry('/api/kitchen-cleaning/tasks')), /cannot be saved/);
+  await assert.rejects(cleaning.enqueue(entry('/api/kitchen-cleaning/logs/history')), /cannot be saved/);
+  cleaning.suspend();
+}
+
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');

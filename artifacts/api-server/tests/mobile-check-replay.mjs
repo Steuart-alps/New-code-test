@@ -393,5 +393,73 @@ try {
   assert.equal((await pool.query('SELECT client_entry_id FROM fire_safety_checks WHERE id = $1', [fire.data.id])).rows[0].client_entry_id,
     stored.client_entry_id, 'an edit keeps the original entry ID');
 
+  // KitchenTrack cleaning schedules are one log per kitchen, period and
+  // frequency that each save updates (draft saves, then the sign-off). Device
+  // entry IDs are kept as receipts, so a resend is recognised even after later
+  // saves, and a stale device save never reopens a signed-off schedule.
+  {
+    const logs = async () => count('kitchen_cleaning_logs', owner.clientId);
+    const receipts = async () => count('kitchen_cleaning_log_entries', owner.clientId);
+    const completions = [{ taskId: 1, taskArea: 'Kitchen', taskName: 'Wipe surfaces', done: true, doneBy: 'Cook' }];
+    const draft = { logDate: day, frequency: 'daily', siteId, completions, signedBy: 'Cook', submittedAt: null, clientEntryId: entryId() };
+
+    const first = await owner.request('POST', '/kitchen-cleaning/logs', draft);
+    assert.equal(first.status, 201, `cleaning: first draft creates the log (${JSON.stringify(first.data)})`);
+    const replay = await owner.request('POST', '/kitchen-cleaning/logs', Object.fromEntries(Object.entries(draft).reverse()));
+    assert.equal(replay.status, 200, `cleaning: a lost-response replay is recognised (${JSON.stringify(replay.data)})`);
+    assert.equal(replay.data.id, first.data.id);
+    assert.equal(replay.data.receipt_hash, undefined, 'cleaning: receipt internals are not returned');
+    const changed = await owner.request('POST', '/kitchen-cleaning/logs', { ...draft, signedBy: 'Someone else' });
+    assert.equal(changed.status, 409);
+    assert.equal(changed.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal((await staff.request('POST', '/kitchen-cleaning/logs', draft)).status, 409, 'cleaning: the entry belongs to its sender');
+    assert.equal(await logs(), 1);
+    assert.equal(await receipts(), 1);
+
+    // The sign-off updates the same log; its replay and a late replay of the
+    // earlier draft both change nothing.
+    const signOff = { ...draft, completions: [{ ...completions[0] }], submittedAt: new Date().toISOString(), clientEntryId: entryId() };
+    const signed = await owner.request('POST', '/kitchen-cleaning/logs', signOff);
+    assert.equal(signed.status, 200, JSON.stringify(signed.data));
+    assert.equal(signed.data.id, first.data.id);
+    assert.ok(signed.data.submitted_at);
+    assert.equal((await owner.request('POST', '/kitchen-cleaning/logs', signOff)).status, 200, 'cleaning: sign-off replay');
+    assert.equal((await owner.request('POST', '/kitchen-cleaning/logs', draft)).status, 200, 'cleaning: late draft replay is recognised');
+    const stillSigned = (await pool.query('SELECT submitted_at FROM kitchen_cleaning_logs WHERE id = $1', [first.data.id])).rows[0];
+    assert.ok(stillSigned.submitted_at, 'cleaning: a replayed draft never reopens the signed-off log');
+
+    // A different device save made before the sign-off reached the server.
+    const stale = await staff.request('POST', '/kitchen-cleaning/logs', { ...draft, clientEntryId: entryId() });
+    assert.equal(stale.status, 409, JSON.stringify(stale.data));
+    assert.equal(stale.data.code, 'CLEANING_LOG_SIGNED_OFF');
+    assert.ok((await pool.query('SELECT submitted_at FROM kitchen_cleaning_logs WHERE id = $1', [first.data.id])).rows[0].submitted_at);
+    assert.equal(await logs(), 1);
+    assert.equal(await receipts(), 2);
+
+    // Concurrent attempts of one entry, for a kitchen and for the account-wide
+    // (no kitchen) schedule: one applies, the other replays.
+    for (const [frequency, raceSite] of [['weekly', siteId], ['monthly', null]]) {
+      const racing = { ...draft, frequency, siteId: raceSite, clientEntryId: entryId() };
+      const both = await Promise.all([
+        owner.request('POST', '/kitchen-cleaning/logs', racing),
+        owner.request('POST', '/kitchen-cleaning/logs', racing),
+      ]);
+      assert.deepEqual(both.map((r) => r.status).sort(), [200, 201], `cleaning ${frequency}: ${JSON.stringify(both.map((r) => r.data))}`);
+      assert.equal(both[0].data.id, both[1].data.id);
+    }
+    assert.equal(await logs(), 3);
+
+    // Web saves (no entry ID) keep upserting as before, including after sign-off.
+    const web = await owner.request('POST', '/kitchen-cleaning/logs', { ...signOff, clientEntryId: undefined, signedBy: 'Manager' });
+    assert.equal(web.status, 200, JSON.stringify(web.data));
+    assert.equal(web.data.signed_by, 'Manager');
+    assert.equal(await receipts(), 4);
+
+    // Entry IDs are per client; malformed ones are rejected.
+    const foreign = await other.request('POST', '/kitchen-cleaning/logs', { ...draft, siteId: null });
+    assert.equal(foreign.status, 201, `cleaning: another client's identical ID is independent (${JSON.stringify(foreign.data)})`);
+    assert.equal((await owner.request('POST', '/kitchen-cleaning/logs', { ...draft, clientEntryId: 'short' })).status, 400);
+  }
+
   console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, GreenTrack (pre-use checks, defects, fuel logs, service records, PUWER inspections), swim session, surveillance, first-aid and pool incident mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
 } finally { await pool.end(); }

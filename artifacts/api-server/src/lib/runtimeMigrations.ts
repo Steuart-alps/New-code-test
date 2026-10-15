@@ -4778,6 +4778,24 @@ async function migrateKitchenCleaning() {
     CREATE UNIQUE INDEX IF NOT EXISTS "IDX_kitchen_cleaning_logs_unique"
     ON "kitchen_cleaning_logs" ("client_id", "log_date", "frequency", "site_id")
   `);
+  // Mobile outbox receipts: each device entry ID applied to a cleaning log, so
+  // a resend after a lost response is recognised instead of applied again.
+  // Kept apart from the log row because every save updates that row.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "kitchen_cleaning_log_entries" (
+      "id"                serial PRIMARY KEY,
+      "client_id"         integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "log_id"            integer REFERENCES "kitchen_cleaning_logs"("id") ON DELETE CASCADE,
+      "client_entry_id"   text NOT NULL,
+      "client_entry_hash" text NOT NULL,
+      "created_by"        integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"        timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_cleaning_log_entries_client_entry"
+    ON "kitchen_cleaning_log_entries" ("client_id", "client_entry_id")
+  `);
 }
 
 async function migrateMaintenanceManager() {

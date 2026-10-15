@@ -8,6 +8,13 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin, getActiveDepartmentId } from "../middleware/requireAuth";
 import { createCleaningSchedulePdf, type CleaningScheduleCompletion } from "../lib/cleaningSchedulePdf";
+import {
+  clientEntryFrom,
+  clientEntryIdSchema,
+  isUniqueViolation,
+  respondToStoredEntry,
+  type ClientEntry,
+} from "../lib/clientEntryReplay";
 
 const router = Router();
 
@@ -287,7 +294,39 @@ const logBody = z.object({
   signedBy:    z.string().max(300).nullable().optional(),
   submittedAt: z.string().nullable().optional(),
   siteId:      z.number().int().nullable().optional(),
+  // Stable device entry ID from the mobile outbox (not a credential).
+  clientEntryId: clientEntryIdSchema.optional(),
 });
+
+/**
+ * Device entries applied to cleaning logs. A log is one row per kitchen,
+ * period and frequency that every save updates, so the entry IDs are kept as
+ * receipts in their own table (unique per client) rather than on the log row,
+ * where a later save would overwrite them.
+ */
+async function findCleaningReceipt(executor: Pick<typeof db, "execute">, clientId: number, entry: ClientEntry) {
+  const result = await executor.execute(sql`
+    SELECT r.created_by AS receipt_created_by, r.client_entry_hash AS receipt_hash, l.*
+    FROM kitchen_cleaning_log_entries r
+    LEFT JOIN kitchen_cleaning_logs l ON l.id = r.log_id AND l.client_id = r.client_id
+    WHERE r.client_id = ${clientId} AND r.client_entry_id = ${entry.id}
+    LIMIT 1
+  `);
+  return result.rows[0] as Record<string, any> | undefined;
+}
+
+function respondToCleaningReceipt(res: any, receipt: Record<string, any>, userId: number, entry: ClientEntry) {
+  const { receipt_created_by: createdBy, receipt_hash: hash, ...log } = receipt;
+  return respondToStoredEntry(res, {
+    createdBy: createdBy == null ? null : Number(createdBy),
+    clientEntryHash: hash ?? null,
+  }, userId, entry, () => log);
+}
+
+type LogSaveResult =
+  | { kind: "saved"; status: 200 | 201; row: unknown }
+  | { kind: "receipt"; receipt: Record<string, any> }
+  | { kind: "signed-off" };
 
 // POST upserts — creates or updates the log for that date+frequency
 router.post("/logs", requireAuth, denyViewers, async (req, res) => {
@@ -305,39 +344,86 @@ router.post("/logs", requireAuth, denyViewers, async (req, res) => {
     : sql`site_id = ${scope.siteId}`;
   const userId = req.currentUser!.id;
   const completionsJson = JSON.stringify(completions);
+  // Mobile outbox submissions carry an entry ID; web saves do not.
+  const entry = clientEntryFrom(parsed.data);
 
-  const existing = await db.execute(sql`
-    SELECT id FROM kitchen_cleaning_logs
-    WHERE client_id = ${clientId} AND log_date = ${logDate} AND frequency = ${frequency}
-      AND ${siteMatch}
-    LIMIT 1
-  `);
+  let outcome: LogSaveResult;
+  try {
+    outcome = await db.transaction(async (tx) => {
+      // Lock the log so concurrent saves for this schedule apply one at a time.
+      const existing = await tx.execute(sql`
+        SELECT id, submitted_at FROM kitchen_cleaning_logs
+        WHERE client_id = ${clientId} AND log_date = ${logDate} AND frequency = ${frequency}
+          AND ${siteMatch}
+        LIMIT 1
+        FOR UPDATE
+      `);
+      const current = existing.rows[0] as { id: number; submitted_at: unknown } | undefined;
 
-  if (existing.rows[0]) {
-    const id = (existing.rows[0] as any).id;
-    const result = await db.execute(sql`
-      UPDATE kitchen_cleaning_logs SET
-        completions  = ${completionsJson}::jsonb,
-        signed_by    = ${signedBy ?? null},
-        submitted_at = ${submittedAt ? new Date(submittedAt) : null},
-        site_id      = ${scope.siteId},
-        updated_at   = now()
-      WHERE id = ${id} AND client_id = ${clientId}
-      RETURNING *
-    `);
-    return res.json(result.rows[0]);
+      if (entry) {
+        // A resend of an entry that was already applied (e.g. its response was
+        // lost) changes nothing; looked up after the lock so a concurrent
+        // attempt of the same entry sees the first one's receipt.
+        const receipt = await findCleaningReceipt(tx, clientId, entry);
+        if (receipt) return { kind: "receipt" as const, receipt };
+        // A device save made before the schedule was signed off (elsewhere, or
+        // from another phone) must not reopen or rewrite the signed record.
+        if (current?.submitted_at) return { kind: "signed-off" as const };
+      }
+
+      let row: any;
+      let status: 200 | 201;
+      if (current) {
+        const result = await tx.execute(sql`
+          UPDATE kitchen_cleaning_logs SET
+            completions  = ${completionsJson}::jsonb,
+            signed_by    = ${signedBy ?? null},
+            submitted_at = ${submittedAt ? new Date(submittedAt) : null},
+            site_id      = ${scope.siteId},
+            updated_at   = now()
+          WHERE id = ${current.id} AND client_id = ${clientId}
+          RETURNING *
+        `);
+        row = result.rows[0];
+        status = 200;
+      } else {
+        const result = await tx.execute(sql`
+          INSERT INTO kitchen_cleaning_logs
+            (client_id, site_id, log_date, frequency, completions, signed_by, submitted_at, created_by)
+          VALUES
+             (${clientId}, ${scope.siteId}, ${logDate}, ${frequency},
+             ${completionsJson}::jsonb, ${signedBy ?? null},
+             ${submittedAt ? new Date(submittedAt) : null}, ${userId})
+          RETURNING *
+        `);
+        row = result.rows[0];
+        status = 201;
+      }
+      if (entry) {
+        await tx.execute(sql`
+          INSERT INTO kitchen_cleaning_log_entries (client_id, log_id, client_entry_id, client_entry_hash, created_by)
+          VALUES (${clientId}, ${row.id}, ${entry.id}, ${entry.hash}, ${userId})
+        `);
+      }
+      return { kind: "saved" as const, status, row };
+    });
+  } catch (error) {
+    // A concurrent attempt of the same entry (or another save creating this
+    // log) won the race: answer from what it stored.
+    if (!isUniqueViolation(error)) throw error;
+    const receipt = entry ? await findCleaningReceipt(db, clientId, entry) : undefined;
+    if (receipt) return respondToCleaningReceipt(res, receipt, userId, entry!);
+    return res.status(409).json({ error: "This cleaning schedule was saved at the same time from elsewhere. Reload it and try again." });
   }
 
-  const result = await db.execute(sql`
-    INSERT INTO kitchen_cleaning_logs
-      (client_id, site_id, log_date, frequency, completions, signed_by, submitted_at, created_by)
-    VALUES
-       (${clientId}, ${scope.siteId}, ${logDate}, ${frequency},
-       ${completionsJson}::jsonb, ${signedBy ?? null},
-       ${submittedAt ? new Date(submittedAt) : null}, ${userId})
-    RETURNING *
-  `);
-  res.status(201).json(result.rows[0]);
+  if (outcome.kind === "receipt") return respondToCleaningReceipt(res, outcome.receipt, userId, entry!);
+  if (outcome.kind === "signed-off") {
+    return res.status(409).json({
+      error: "This cleaning schedule was already signed off, so the changes saved on this device were not applied.",
+      code: "CLEANING_LOG_SIGNED_OFF",
+    });
+  }
+  return res.status(outcome.status).json(outcome.row);
 });
 
 export default router;

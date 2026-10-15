@@ -2,7 +2,8 @@
  * Device outbox for check submissions other than KitchenTrack temperatures:
  * the AM/PM daily checklist and the fire, legionella, hot tub, PAT, incident
  * and pool check forms, TreeTrack inspections and GreenTrack machine records
- * (defects, fuel logs, service records, PUWER inspections). Same contract as kitchenOutboxCore: the submission and a
+ * (defects, fuel logs, service records, PUWER inspections), and KitchenTrack cleaning
+ * schedule saves. Same contract as kitchenOutboxCore: the submission and a
  * stable entry ID are written to device storage before the first HTTP
  * attempt, replays send the identical body, and the server recognises a
  * replay of an entry it already applied (clientEntryId), so automatic and
@@ -18,13 +19,13 @@ export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
 export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident' | 'pool-check'
   | 'premises-inspection' | 'tree-inspection' | 'room-check' | 'pest-activity' | 'pest-visit'
   | 'swim-surveillance' | 'swim-first-aid' | 'swim-incident' | 'green-defect' | 'green-fuel' | 'green-service' | 'green-puwer'
-  | 'kitchen-probe' | 'kitchen-weekly';
+  | 'kitchen-probe' | 'kitchen-weekly' | 'cleaning-log';
 
 /** Kinds whose entries are independent records (each gets its own scope). */
 export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident', 'pool-check',
   'premises-inspection', 'tree-inspection', 'room-check', 'pest-activity', 'pest-visit',
   'swim-surveillance', 'swim-first-aid', 'swim-incident', 'green-defect', 'green-fuel', 'green-service', 'green-puwer',
-  'kitchen-probe', 'kitchen-weekly'];
+  'kitchen-probe', 'kitchen-weekly', 'cleaning-log'];
 export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string> = {
   'fire-check': '/api/fire-safety',
   'legionella-check': '/api/legionella',
@@ -46,6 +47,9 @@ export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string>
   'green-puwer': '/api/green-track/puwer-inspections',
   'kitchen-probe': '/api/kitchen-weekly/probe',
   'kitchen-weekly': '/api/kitchen-weekly/weekly',
+  // Upserts the schedule for its kitchen, frequency and period; entries are
+  // delivered oldest first, so a later save never lands before an earlier one.
+  'cleaning-log': '/api/kitchen-cleaning/logs',
 };
 
 /** Query keys to refresh once an entry of this kind has been delivered. */
@@ -72,6 +76,7 @@ export function deliveredQueryKeys(kind: CheckKind): string[][] {
     case 'green-puwer': return [['green-records', 'puwer'], ['dashboard-summary']];
     case 'kitchen-probe': return [['kitchen-probe-checks'], ['dashboard-summary']];
     case 'kitchen-weekly': return [['kitchen-weekly-reviews'], ['dashboard-summary']];
+    case 'cleaning-log': return [['kitchen-cleaning-log'], ['kitchen-cleaning-history'], ['dashboard-summary']];
   }
 }
 export interface CheckEntry {
@@ -125,6 +130,7 @@ const PATHS: Record<CheckKind, RegExp> = {
   'green-puwer': /^\/api\/green-track\/puwer-inspections$/,
   'kitchen-probe': /^\/api\/kitchen-weekly\/probe$/,
   'kitchen-weekly': /^\/api\/kitchen-weekly\/weekly$/,
+  'cleaning-log': /^\/api\/kitchen-cleaning\/logs$/,
 };
 const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
 const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';
