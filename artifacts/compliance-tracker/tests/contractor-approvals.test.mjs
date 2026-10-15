@@ -106,6 +106,31 @@ for (const handler of ["submitApproval", "submitDismissal"]) {
 }
 assert.match(
   source,
+  /window\.setInterval\(refresh, BACKGROUND_REFRESH_MS\)[\s\S]*window\.addEventListener\("focus", refresh\)/,
+  "an open approvals page must refresh on a timer and when the tab regains focus",
+);
+assert.match(
+  source,
+  /reviewInProgressRef\.current =\s*editingId !== null \|\| pendingCancellationConfirmation !== null \|\| submittingId !== null;/,
+  "background refreshes must recognise an open editor, cancellation dialog or in-flight send",
+);
+assert.match(
+  source,
+  /if \(document\.visibilityState !== "visible" \|\| reviewInProgressRef\.current\) return;/,
+  "background refreshes must not start during a review or while the tab is hidden",
+);
+assert.match(
+  source,
+  /!\(background && reviewInProgressRef\.current\)/,
+  "a background refresh that returns after a review started must be discarded",
+);
+assert.match(
+  source,
+  /\} else if \(!background && mountedRef\.current/,
+  "a failed background refresh must keep the current list without an error state",
+);
+assert.match(
+  source,
   /if \(success && mountedRef\.current\) setPendingCancellationConfirmation\(null\)/,
   "the dialog must close only after a successful cancellation request",
 );

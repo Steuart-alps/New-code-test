@@ -803,3 +803,69 @@ test("managers see sent and failed calendar cancellations on the approvals page 
   assert.equal(row.status, "sent");
   assert.equal((await readOutbox()).length, 1, "the retry sends the cancellation once");
 });
+
+test("an open approvals page drops requests reviewed elsewhere without disturbing the manager's own review", async () => {
+  const approvedElsewhere = await queuedCalendarCancellation("fresh-approved", isoDay(33));
+  const editing = await queuedCalendarCancellation("fresh-editing", isoDay(34));
+  const confirming = await queuedCalendarCancellation("fresh-confirming", isoDay(35));
+  const { page } = await browserContext(fixtures.manager);
+  // The page's minute timer runs on a controlled clock.
+  await page.clock.install();
+  const siteHeader = () => page.getByRole("button", { name: new RegExp(`Inbox Alpha site ${suffix}`) });
+  const siteCount = async () => Number((await siteHeader().locator("span.tabular-nums").textContent())?.trim());
+  const anotherManager = (path) => fixtures.owner.request("POST", `/fix-track/contractor-email-queue/${path}`, {});
+  await withDiagnostics(page, "approvals freshness", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, approvedElsewhere.title).waitFor();
+    const search = page.getByPlaceholder(/search/i);
+    await search.fill(`fresh-`);
+    await queueCard(page, confirming.title).waitFor();
+    assert.equal(await siteCount(), 3);
+
+    // Collapsed site and search survive a timed refresh that drops a request
+    // another manager approved.
+    await siteHeader().click();
+    assert.equal(await queueCard(page, approvedElsewhere.title).count(), 0, "the site is collapsed");
+    assert.equal((await anotherManager(`${approvedElsewhere.queueId}/approve-and-send`)).status, 200);
+    await page.clock.fastForward(61_000);
+    for (let waited = 0; (await siteCount()) !== 2 && waited < 10_000; waited += 100) await page.waitForTimeout(100);
+    assert.equal(await siteCount(), 2, "the request approved elsewhere is gone");
+    assert.equal(await search.inputValue(), "fresh-", "the search is kept");
+    assert.equal(await queueCard(page, editing.title).count(), 0, "the site stays collapsed");
+    await siteHeader().click();
+    await queueCard(page, editing.title).waitFor();
+    assert.equal(await queueCard(page, approvedElsewhere.title).count(), 0);
+
+    // An open editor is not replaced, even when its request is dismissed elsewhere.
+    const editingCard = queueCard(page, editing.title);
+    await editingCard.getByRole("button", { name: "Edit" }).click();
+    const subject = editingCard.getByRole("textbox").first();
+    await subject.fill("Manager's unsaved subject");
+    assert.equal((await anotherManager(`${editing.queueId}/cancel`)).status, 200);
+    await page.clock.fastForward(61_000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForTimeout(500);
+    assert.equal(await subject.inputValue(), "Manager's unsaved subject", "the editor keeps its text");
+    await editingCard.getByRole("button", { name: "Cancel Edit" }).click();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await editingCard.waitFor({ state: "detached" });
+
+    // An open cancellation dialog is not closed or emptied by a refresh.
+    const confirmingCard = queueCard(page, confirming.title);
+    await confirmingCard.getByRole("button", { name: "Approve Cancellation" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Approve calendar cancellation?" });
+    await dialog.waitFor();
+    assert.equal((await anotherManager(`${confirming.queueId}/cancel`)).status, 200);
+    await page.clock.fastForward(61_000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForTimeout(500);
+    assert.equal(await dialog.isVisible(), true, "the dialog stays open");
+    assert.equal(await confirmingCard.count(), 1, "the row under the dialog stays");
+    await dialog.getByRole("button", { name: "Keep reviewing" }).click();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await confirmingCard.waitFor({ state: "detached" });
+    assert.equal(await search.inputValue(), "fresh-");
+  });
+  assert.equal((await queueRow(editing.queueId)).status, "cancelled");
+  assert.equal((await queueRow(confirming.queueId)).status, "cancelled");
+});

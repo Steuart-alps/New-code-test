@@ -56,6 +56,11 @@ interface EmailQueueItem {
   lastSendFailed?: boolean;
 }
 
+// An open page re-reads the queue this often (and when the tab regains focus),
+// so requests another manager reviewed drop out without a manual refresh.
+// One small request a minute per open tab; no extra infrastructure.
+const BACKGROUND_REFRESH_MS = 60_000;
+
 type PendingCancellationConfirmation =
   | {
       action: "approve";
@@ -72,6 +77,8 @@ export default function ContractorApprovalsPage() {
   const { activeClientId, user } = useAuth();
   const clientApiFetch = useActiveClientApi();
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(true);
+  loadingRef.current = loading;
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { toast } = useToast();
@@ -93,6 +100,13 @@ export default function ContractorApprovalsPage() {
   // The control that opened the cancellation dialog. The dialog has no Radix
   // trigger, so focus is returned here by hand when it closes.
   const cancellationTriggerRef = useRef<HTMLElement | null>(null);
+  // While a manager is editing a draft, confirming a cancellation or waiting on
+  // a send, background refreshes leave the list alone so nothing they are
+  // working on is replaced or removed underneath them.
+  const reviewInProgressRef = useRef(false);
+  const knownSitesRef = useRef<Set<string>>(new Set());
+  reviewInProgressRef.current =
+    editingId !== null || pendingCancellationConfirmation !== null || submittingId !== null;
   const approvalRefreshStorageKey = getApprovalRefreshStorageKey(
     user?.id ?? null,
     activeClientId,
@@ -112,6 +126,8 @@ export default function ContractorApprovalsPage() {
     );
     refreshStorageKeyRef.current = approvalRefreshStorageKey;
     setItems([]);
+    knownSitesRef.current = new Set();
+    setExpandedSites(new Set());
     newRequestIdsRef.current = persistedState?.newRequestIds ?? [];
     setNewRequestIds(newRequestIdsRef.current);
     knownQueueIdsRef.current = persistedState
@@ -131,15 +147,47 @@ export default function ContractorApprovalsPage() {
     });
   }, [approvalRefreshStorageKey]);
 
-  async function fetchItems() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || reviewInProgressRef.current) return;
+      void loadQueue(true);
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    const timer = window.setInterval(refresh, BACKGROUND_REFRESH_MS);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [activeClientId, approvalRefreshStorageKey]);
+
+  function fetchItems() {
+    return loadQueue(false);
+  }
+
+  /** A background load keeps the current list and shows no loading or error
+   *  state, and is discarded if a review started while it was in flight. */
+  async function loadQueue(background: boolean) {
+    if (background && loadingRef.current) return;
     const fetchGeneration = ++fetchGenerationRef.current;
-    setLoadError(null);
-    setLoading(true);
+    if (!background) {
+      setLoadError(null);
+      setLoading(true);
+    }
     try {
       const res = await clientApiFetch("/fix-track/contractor-email-queue?status=pending");
       if (res.ok) {
         const nextItems = await res.json();
-        if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+        if (
+          mountedRef.current &&
+          fetchGeneration === fetchGenerationRef.current &&
+          !(background && reviewInProgressRef.current)
+        ) {
           const nextQueueIds = new Set<number>(
             nextItems.map((item: EmailQueueItem) => item.id),
           );
@@ -166,11 +214,11 @@ export default function ContractorApprovalsPage() {
           setItems(nextItems);
           setLoadError(null);
         }
-      } else if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+      } else if (!background && mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
         setLoadError("We couldn't load pending contractor emails. Please try again.");
       }
     } catch (e) {
-      if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+      if (!background && mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
         setLoadError("We couldn't load pending contractor emails. Please try again.");
         console.error(e);
       }
@@ -197,10 +245,13 @@ export default function ContractorApprovalsPage() {
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [items, search]);
 
+  // A site opens expanded the first time it appears; refreshes keep whatever
+  // the manager has collapsed or expanded since.
   useEffect(() => {
-    if (grouped.length > 0 && expandedSites.size === 0) {
-      setExpandedSites(new Set(grouped.map(g => g[0])));
-    }
+    const appeared = grouped.map(g => g[0]).filter(site => !knownSitesRef.current.has(site));
+    if (appeared.length === 0) return;
+    appeared.forEach(site => knownSitesRef.current.add(site));
+    setExpandedSites(prev => new Set([...prev, ...appeared]));
   }, [grouped]);
 
   function toggleSite(site: string) {
