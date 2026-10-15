@@ -24,6 +24,13 @@
 //        - disabled or another client's values are rejected for new records
 //        - unrelated edits preserve an unchanged disabled value
 //        - consultant ?clientId context keeps both modules tenant-scoped
+//   2c. Every option-backed record route (incidents, FixTrack issues and
+//       trades, PremisesTrack, PestTrack, BikeTrack, TrainTrack, contractor
+//       CSV import)
+//        - a disabled value is rejected for new records
+//        - an unrelated edit keeps an unchanged disabled value
+//        - re-enabling the value lets new records use it again
+//        - TrainTrack "Other" free text cannot reintroduce a disabled type
 //   3. /api/food-safety/config
 //        - PUT/DELETE require admin (viewer/staff → 403)
 //        - invalid section-toggle values (not "true"/"false") → 400
@@ -665,6 +672,207 @@ async function testCustomTradeAndInspectionValidation(admin, clientAId, clientBI
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 2c. Every form-option-backed record route
+// ─────────────────────────────────────────────────────────────────────────────
+// For each option list and each route that stores one of its values: a new
+// record is rejected once the value is disabled, an existing record keeps the
+// unchanged value through an unrelated edit, and re-enabling the value lets
+// new records use it again.
+async function testDisabledOptionsOnEveryRoute(admin, ts) {
+  console.log("\n── disabled options on every record route ──");
+
+  const setOptions = (key, items) => admin("PUT", `/form-options/${key}`, { items });
+  const fieldOf = (data, ...names) => names.map((name) => data?.[name]).find((v) => v !== undefined);
+
+  async function roundTrip({ label, key, create, edit, storedValue }) {
+    const value = `${label} ${ts}`.slice(0, 60);
+    const spare = `${label} spare ${ts}`.slice(0, 60);
+    expectOk(`${label}: activate custom option`, (await setOptions(key, [value, spare])).status);
+    const first = await create(value, "first");
+    expectOk(`${label}: new record accepts active option`, first.status, [200, 201]);
+    const id = first.data?.id;
+    check(`${label}: created record id`, Number.isInteger(id), `got ${JSON.stringify(first.data)}`);
+
+    expectOk(`${label}: disable option`, (await setOptions(key, [spare])).status);
+    const listed = await admin("GET", "/form-options");
+    check(
+      `${label}: option listed as disabled`,
+      listed.data?.disabled?.[key]?.includes(value) && !listed.data?.options?.[key]?.includes(value),
+      `options=${JSON.stringify(listed.data?.options?.[key])} disabled=${JSON.stringify(listed.data?.disabled?.[key])}`,
+    );
+    expectStatus(`${label}: new record rejects disabled option`, (await create(value, "disabled")).status, 400);
+
+    if (Number.isInteger(id)) {
+      const edited = await edit(id, value, first.data);
+      expectOk(`${label}: unrelated edit keeps unchanged disabled option`, edited.status, [200]);
+      const stored = await storedValue(id, edited);
+      check(`${label}: stored value unchanged after edit`, stored === value, `got ${JSON.stringify(stored)}`);
+    }
+
+    expectOk(`${label}: re-enable option`, (await setOptions(key, [spare, value])).status);
+    expectOk(`${label}: new record accepts re-enabled option`, (await create(value, "re-enabled")).status, [200, 201]);
+    await admin("DELETE", `/form-options/${key}`);
+  }
+
+  await roundTrip({
+    label: "Incident type",
+    key: "incident_types",
+    create: (value, note) => admin("POST", "/incidents", {
+      incidentType: value,
+      incidentDate: isoDate(-1),
+      location: "Kitchen",
+      description: `Disabled-option probe (${note})`,
+      involvedName: "Jane Doe",
+      reportedBy: "Test Reporter",
+      riddorRationale: "Assessed against RIDDOR criteria; no reportable injury or occurrence.",
+    }),
+    edit: (id, value) => admin("PUT", `/incidents/${id}`, { incidentType: value, description: "Edited, type unchanged" }),
+    storedValue: (_id, edited) => edited.data?.incidentType,
+  });
+
+  await roundTrip({
+    label: "FixTrack issue type",
+    key: "fixtrack_issue_types",
+    create: (value, note) => admin("POST", "/fix-track/issues", {
+      title: `Disabled-option probe (${note})`,
+      issueType: value,
+      location: "Plant room",
+      reportedBy: "Config endpoint tester",
+      reportedDate: isoDate(-1),
+    }),
+    edit: (id, value) => admin("PUT", `/fix-track/issues/${id}`, { issueType: value, title: "Edited, type unchanged" }),
+    storedValue: (_id, edited) => fieldOf(edited.data, "issueType", "issue_type"),
+  });
+
+  await roundTrip({
+    label: "FixTrack trade",
+    key: "fixtrack_trades",
+    create: (value, note) => admin("POST", "/contractors", {
+      name: `Disabled-option contractor ${note}`,
+      email: `disabled-option-${note}-${ts}@test.local`,
+      trades: [value],
+    }),
+    edit: (id, _value, record) => admin("PUT", `/contractors/${id}`, {
+      name: "Edited contractor, trades unchanged",
+      email: record.email,
+    }),
+    storedValue: (_id, edited) => edited.data?.trades?.[0],
+  });
+
+  await roundTrip({
+    label: "Premises inspection type",
+    key: "premises_inspection_types",
+    create: (value, note) => admin("POST", "/premises-track", {
+      inspectionDate: isoDate(-2),
+      inspectionType: value,
+      area: "Test kitchen",
+      findings: `Disabled-option probe (${note})`,
+      inspectedBy: "Config endpoint tester",
+    }),
+    edit: (id, value) => admin("PUT", `/premises-track/${id}`, {
+      inspectionDate: isoDate(-2),
+      inspectionType: value,
+      area: "Test kitchen",
+      findings: "Edited, type unchanged",
+      inspectedBy: "Config endpoint tester",
+    }),
+    storedValue: async (id) => {
+      const list = await admin("GET", "/premises-track");
+      return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id)?.inspectionType;
+    },
+  });
+
+  const pestBody = (pestType, evidenceType, notes) => ({
+    recordedDate: isoDate(-1),
+    pestType,
+    evidenceType,
+    location: "Store room",
+    severity: "low",
+    notes,
+  });
+  const pestActivity = async (id) => {
+    const list = await admin("GET", "/pest-track/activity");
+    return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id);
+  };
+  await roundTrip({
+    label: "Pest type",
+    key: "pest_types",
+    create: (value, note) => admin("POST", "/pest-track/activity", pestBody(value, "droppings", note)),
+    edit: (id, value) => admin("PUT", `/pest-track/activity/${id}`, pestBody(value, "droppings", "Edited, type unchanged")),
+    storedValue: (id) => pestActivity(id).then((row) => fieldOf(row, "pestType", "pest_type")),
+  });
+  await roundTrip({
+    label: "Pest evidence type",
+    key: "pest_evidence_types",
+    create: (value, note) => admin("POST", "/pest-track/activity", pestBody("rodent", value, note)),
+    edit: (id, value) => admin("PUT", `/pest-track/activity/${id}`, pestBody("rodent", value, "Edited, evidence unchanged")),
+    storedValue: (id) => pestActivity(id).then((row) => fieldOf(row, "evidenceType", "evidence_type")),
+  });
+
+  await roundTrip({
+    label: "Bike type",
+    key: "bike_types",
+    create: (value, note) => admin("POST", "/bike-track/bikes", { ref: `OPT-${note}-${ts}`.slice(0, 100), type: value }),
+    edit: (id, value) => admin("PUT", `/bike-track/bikes/${id}`, { ref: `OPT-first-${ts}`.slice(0, 100), type: value, notes: "Edited, type unchanged" }),
+    storedValue: (_id, edited) => edited.data?.type,
+  });
+
+  const trainingBody = (trainingType, note) => ({
+    recordType: "internal",
+    staffName: `Disabled-option probe ${note}`,
+    trainingType,
+    trainer: "Test Trainer",
+    completedDate: isoDate(-1),
+  });
+  await roundTrip({
+    label: "TrainTrack type",
+    key: "traintrack_types",
+    create: (value, note) => admin("POST", "/train-track/records", trainingBody(value, note)),
+    edit: (id, value) => admin("PATCH", `/train-track/records/${id}`, { trainingType: value, notes: "Edited, type unchanged" }),
+    storedValue: (_id, edited) => fieldOf(edited.data, "trainingType", "training_type"),
+  });
+
+  // TrainTrack's "Other" accepts typed training names, but not a disabled one.
+  const retired = `Retired training ${ts}`.slice(0, 60);
+  expectOk("TrainTrack Other: activate a named type and Other", (await setOptions("traintrack_types", [retired, "Other"])).status);
+  expectOk("TrainTrack Other: disable the named type", (await setOptions("traintrack_types", ["Other"])).status);
+  expectStatus(
+    "TrainTrack Other: typed disabled type is rejected",
+    (await admin("POST", "/train-track/records", trainingBody(retired.toUpperCase(), "typed-disabled"))).status,
+    400,
+  );
+  expectOk(
+    "TrainTrack Other: other typed names still accepted",
+    (await admin("POST", "/train-track/records", trainingBody(`Bespoke course ${ts}`.slice(0, 60), "typed-new"))).status,
+    [201],
+  );
+  await admin("DELETE", "/form-options/traintrack_types");
+
+  // The contractor CSV import applies the same rule to new contractors.
+  const trade = `CSV trade ${ts}`.slice(0, 60);
+  const importRow = (note) => ({
+    headers: ["Contact name", "Email", "Trades"],
+    rows: [[`CSV contractor ${note}`, `csv-${note}-${ts}@test.local`, trade]],
+    preview: true,
+  });
+  expectOk("CSV import: disable trade", (await setOptions("fixtrack_trades", [`CSV spare ${ts}`.slice(0, 60)])).status);
+  const csvDisabled = await admin("POST", "/imports/contractors", importRow("disabled"));
+  check(
+    "CSV import: new contractor with disabled trade is an error row",
+    csvDisabled.status === 200 && csvDisabled.data?.rows?.[0]?.action === "error",
+    `status=${csvDisabled.status} rows=${JSON.stringify(csvDisabled.data?.rows)}`,
+  );
+  expectOk("CSV import: re-enable trade", (await setOptions("fixtrack_trades", [trade])).status);
+  const csvEnabled = await admin("POST", "/imports/contractors", importRow("enabled"));
+  check(
+    "CSV import: new contractor with re-enabled trade is created",
+    csvEnabled.status === 200 && csvEnabled.data?.rows?.[0]?.action === "create",
+    `status=${csvEnabled.status} rows=${JSON.stringify(csvEnabled.data?.rows)}`,
+  );
+  await admin("DELETE", "/form-options/fixtrack_trades");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 3. /api/food-safety/config
 // ─────────────────────────────────────────────────────────────────────────────
 async function testFoodSafetyConfig(admin, viewer, staff, clientBId, ts) {
@@ -1233,6 +1441,7 @@ async function runSuite() {
   await testRecordValidation(a.session, ts);
   fixtures.probe("after-record-validation");
   await testCustomTradeAndInspectionValidation(a.session, a.clientId, clientBId, ts);
+  await testDisabledOptionsOnEveryRoute(a.session, ts);
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
   await testPushToken(a.session, other, ts);

@@ -196,10 +196,10 @@ export function serialiseOptionState(state: StoredOptionState): string {
 }
 
 /**
- * Load the effective list for one option key for a client: the saved custom
- * list if present and valid, otherwise the hardcoded default.
+ * Load the active and disabled options for one key for a client: the saved
+ * custom list if present and valid, otherwise the hardcoded default.
  */
-export async function getEffectiveOptionList(clientId: number, key: FormOptionKey): Promise<string[]> {
+export async function getEffectiveOptionState(clientId: number, key: FormOptionKey): Promise<StoredOptionState> {
   const rows = await db.select({ value: appSettingsTable.value })
     .from(appSettingsTable)
     .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, settingKey(key))))
@@ -208,8 +208,13 @@ export async function getEffectiveOptionList(clientId: number, key: FormOptionKe
   if (raw) {
     try {
       const check = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key]);
-      if (check.ok) return check.value.active;
+      if (check.ok) return check.value;
     } catch { /* fall through to default */ }
   }
-  return [...FORM_OPTION_DEFAULTS[key]];
+  return { active: [...FORM_OPTION_DEFAULTS[key]], disabled: [] };
+}
+
+/** The active options only: what a new record may use. */
+export async function getEffectiveOptionList(clientId: number, key: FormOptionKey): Promise<string[]> {
+  return (await getEffectiveOptionState(clientId, key)).active;
 }
