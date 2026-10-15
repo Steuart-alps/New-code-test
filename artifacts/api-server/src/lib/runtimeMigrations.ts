@@ -4707,6 +4707,8 @@ async function migrateRoomTrack() {
   await db.execute(sql`ALTER TABLE "room_track_checks" ALTER COLUMN "status" DROP NOT NULL`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_room_track_rooms_client_site" ON "room_track_rooms" ("client_id", "site_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_room_track_checks_client_date" ON "room_track_checks" ("client_id", "check_date", "site_id")`);
+  // Mobile outbox replays (lib/clientEntryReplay.ts); schema: lib/db room-track.
+  await addClientEntryReplayColumns("room_track_checks");
 }
 
 async function migrateKitchenCleaning() {

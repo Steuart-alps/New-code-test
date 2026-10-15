@@ -176,6 +176,8 @@ assert.equal(isRetryableStatus(400), false);
   await assert.rejects(records.enqueue({ ...record('pool-check', 'pool-entry-000001', {}), path: '/api/pool-track/5' }), /cannot be saved/);
   await assert.rejects(records.enqueue({ ...record('tree-inspection', 'tree-entry-000001', {}), path: '/api/tree-track/5' }), /cannot be saved/);
   await assert.rejects(records.enqueue({ ...record('tree-inspection', 'tree-entry-000002', {}), path: '/api/tree-track/status' }), /cannot be saved/);
+  await assert.rejects(records.enqueue({ ...record('room-check', 'room-entry-000001', {}), path: '/api/room-track/rooms' }), /cannot be saved/);
+  await assert.rejects(records.enqueue({ ...record('room-check', 'room-entry-000002', {}), path: '/api/room-track/checks/5' }), /cannot be saved/);
   online = true;
   await records.replay();
   assert.deepEqual(records.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent', 'sent']);
@@ -235,5 +237,35 @@ assert.deepEqual(deliveredQueryKeys('tree-inspection'), [['tree-inspections'], [
   records.suspend();
 }
 assert.deepEqual(deliveredQueryKeys('premises-inspection'), [['premises-inspections'], ['dashboard-summary']]);
+assert.equal(RECORD_PATHS['room-check'], '/api/room-track/checks');
+assert.ok(RECORD_KINDS.includes('room-check'));
+assert.deepEqual(deliveredQueryKeys('room-check'), [['room-track-checks'], ['dashboard-summary']]);
+// RoomTrack room checks wait offline and resend the identical body.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  const rooms = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      return { id: 31, roomId: 4 };
+    },
+    async onSent() {},
+  });
+  await rooms.activate(A, 'token-A');
+  const body = { roomId: 4, siteId: 7, checkDate: '2026-10-12', clean: true, tidy: true, toStandard: false, checkedBy: 'Housekeeper' };
+  await rooms.enqueue({ entryId: 'room-entry-000003', kind: 'room-check', path: RECORD_PATHS['room-check'], scopeKey: 'room-check:room-entry-000003', label: 'Room 4', body });
+  await rooms.replay();
+  assert.equal(rooms.getSnapshot().entries[0].state, 'queued', 'a room check waits on the device while offline');
+  online = true;
+  await rooms.replay();
+  assert.equal(rooms.getSnapshot().entries[0].state, 'sent');
+  assert.ok(sent.length >= 2);
+  for (const attempt of sent) assert.deepEqual(attempt, { path: '/api/room-track/checks', body: { ...body, clientEntryId: 'room-entry-000003' } });
+  assert.deepEqual(rooms.takeResponse('room-entry-000003'), { id: 31, roomId: 4 });
+  rooms.suspend();
+}
 
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');

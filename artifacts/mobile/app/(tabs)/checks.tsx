@@ -122,6 +122,14 @@ const MODULES: CheckModule[] = [
     checks: ['Choose site', 'Record inspection', "What's due", 'Recent inspections'],
   },
   {
+    id: 'room',
+    label: 'RoomTrack',
+    subtitle: 'Daily room housekeeping checks',
+    icon: 'home',
+    iconColor: '#0284c7',
+    checks: ['Pick site', 'Clean / tidy / to standard', 'Notes', 'Recent checks'],
+  },
+  {
     id: 'aqua',
     label: 'AquaTrack',
     subtitle: 'Pool checks & swim sessions',
@@ -161,6 +169,7 @@ export default function ChecksScreen() {
       (mod.id !== 'green' || hasService('greentrack')) &&
       (mod.id !== 'premises' || hasService('premisestrack')) &&
       (mod.id !== 'tree' || hasService('treetrack')) &&
+      (mod.id !== 'room' || hasService('roomtrack')) &&
       (mod.id !== 'aqua' || aquaAccess.any),
   );
 

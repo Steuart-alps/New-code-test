@@ -15,11 +15,11 @@
 export interface CheckOwner { clientId: number; userId: number }
 export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
 export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident' | 'pool-check'
-  | 'premises-inspection' | 'tree-inspection';
+  | 'premises-inspection' | 'tree-inspection' | 'room-check';
 
 /** Kinds whose entries are independent records (each gets its own scope). */
 export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident', 'pool-check',
-  'premises-inspection', 'tree-inspection'];
+  'premises-inspection', 'tree-inspection', 'room-check'];
 export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string> = {
   'fire-check': '/api/fire-safety',
   'legionella-check': '/api/legionella',
@@ -29,6 +29,7 @@ export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string>
   'pool-check': '/api/pool-track',
   'premises-inspection': '/api/premises-track',
   'tree-inspection': '/api/tree-track',
+  'room-check': '/api/room-track/checks',
 };
 
 /** Query keys to refresh once an entry of this kind has been delivered. */
@@ -43,6 +44,7 @@ export function deliveredQueryKeys(kind: CheckKind): string[][] {
     case 'pool-check': return [['pool-checks'], ['track-controls'], ['dashboard-summary']];
     case 'premises-inspection': return [['premises-inspections'], ['dashboard-summary']];
     case 'tree-inspection': return [['tree-inspections'], ['tree-status'], ['dashboard-summary']];
+    case 'room-check': return [['room-track-checks'], ['dashboard-summary']];
   }
 }
 export interface CheckEntry {
@@ -84,6 +86,7 @@ const PATHS: Record<CheckKind, RegExp> = {
   'pool-check': /^\/api\/pool-track$/,
   'premises-inspection': /^\/api\/premises-track$/,
   'tree-inspection': /^\/api\/tree-track$/,
+  'room-check': /^\/api\/room-track\/checks$/,
 };
 const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
 const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';

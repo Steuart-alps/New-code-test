@@ -154,6 +154,58 @@ try {
   )).rows[0].count);
   assert.equal(treeActions, await count('tree_inspections', owner.clientId), 'TreeTrack: replays raise no second track action');
 
+  // RoomTrack room checks: one check per room and day, so each step uses its
+  // own room; a second check for a room and day stays a plain 409.
+  {
+    const name = 'room check';
+    const newRoom = async (roomNumber) => {
+      const room = await owner.request('POST', '/room-track/rooms', { roomNumber, siteId });
+      assert.equal(room.status, 201, JSON.stringify(room.data));
+      return room.data.id;
+    };
+    const roomBody = (roomId) => ({ roomId, siteId, checkDate: day, clean: true, tidy: true, toStandard: false, notes: 'Bin full', checkedBy: 'Housekeeper' });
+    const before = await count('room_track_checks', owner.clientId);
+    const sent = { ...roomBody(await newRoom('101')), clientEntryId: entryId() };
+    const first = await owner.request('POST', '/room-track/checks', sent);
+    assert.equal(first.status, 201, `${name}: first send creates (${JSON.stringify(first.data)})`);
+    const replay = await owner.request('POST', '/room-track/checks', sent);
+    assert.equal(replay.status, 200, `${name}: a lost-response replay is recognised (${JSON.stringify(replay.data)})`);
+    assert.equal(replay.data.id, first.data.id, `${name}: replay returns the stored record`);
+    const reordered = Object.fromEntries(Object.entries(sent).reverse());
+    assert.equal((await owner.request('POST', '/room-track/checks', reordered)).status, 200, `${name}: same payload in another key order`);
+    const conflict = await owner.request('POST', '/room-track/checks', { ...sent, toStandard: true });
+    assert.equal(conflict.status, 409, `${name}: an entry ID cannot hide a changed payload`);
+    assert.equal(conflict.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal((await staff.request('POST', '/room-track/checks', sent)).status, 409, `${name}: the entry belongs to the user who sent it`);
+    const sameDay = await owner.request('POST', '/room-track/checks', { ...sent, clientEntryId: entryId() });
+    assert.equal(sameDay.status, 409, `${name}: a new entry for a room already checked that day is refused`);
+    assert.notEqual(sameDay.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal(await count('room_track_checks', owner.clientId), before + 1, `${name}: exactly one record was created`);
+
+    // A resend still gets the stored check after the room is archived.
+    assert.equal((await owner.request('DELETE', `/room-track/rooms/${sent.roomId}`)).status, 200);
+    assert.equal((await owner.request('POST', '/room-track/checks', sent)).status, 200, `${name}: replay after the room was archived`);
+
+    const racing = { ...roomBody(await newRoom('102')), clientEntryId: entryId() };
+    const both = await Promise.all([owner.request('POST', '/room-track/checks', racing), owner.request('POST', '/room-track/checks', racing)]);
+    assert.deepEqual(both.map((r) => r.status).sort(), [200, 201], `${name}: ${JSON.stringify(both.map((r) => r.data))}`);
+    assert.equal(both[0].data.id, both[1].data.id);
+    assert.equal(await count('room_track_checks', owner.clientId), before + 2);
+
+    // Web submissions without an entry ID behave as before.
+    const webRoom = await newRoom('103');
+    assert.equal((await owner.request('POST', '/room-track/checks', roomBody(webRoom))).status, 201);
+    assert.equal((await owner.request('POST', '/room-track/checks', roomBody(webRoom))).status, 409, `${name}: web keeps one check per room and day`);
+    assert.equal((await owner.request('POST', '/room-track/checks', { ...roomBody(await newRoom('104')), clientEntryId: 'short' })).status, 400, `${name}: entry IDs are validated`);
+    assert.equal(await count('room_track_checks', owner.clientId), before + 3);
+
+    // Updates never accept or overwrite the device entry ID.
+    assert.equal((await owner.request('PUT', `/room-track/checks/${both[0].data.id}`, { notes: 'Edited', clientEntryId: entryId() })).status, 200);
+    assert.equal((await pool.query('SELECT client_entry_id FROM room_track_checks WHERE id = $1', [both[0].data.id])).rows[0].client_entry_id,
+      racing.clientEntryId, `${name}: an edit keeps the original entry ID`);
+    console.log('RoomTrack room check mobile replays: idempotent per user and payload, concurrent-safe, one check per room and day kept.');
+  }
+
   // Updates never accept or overwrite the device entry ID.
   const fire = await owner.request('POST', '/fire-safety', {
     checkType: 'fire_doors', checkDate: day, result: 'pass', siteId, clientEntryId: entryId(),

@@ -32,6 +32,7 @@
     "test:check-outbox": "node tests/check-outbox.mjs",
     "test:client-entry-logic": "node tests/client-entry-logic.mjs",
     "test:tree-track": "node tests/tree-track-logic.mjs",
+    "test:room-track": "node tests/room-track-logic.mjs",
     "test:offline-resilience": "node tests/offline-resilience-logic.mjs",
     "test:auth-offline": "node tests/auth-offline.mjs",
     "test:store-compliance": "node tests/store-compliance.mjs",
