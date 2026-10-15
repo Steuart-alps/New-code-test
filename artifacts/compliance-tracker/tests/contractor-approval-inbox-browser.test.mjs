@@ -955,3 +955,88 @@ test("a failed approvals load shows the error state, not an empty queue, and Try
     });
   }
 });
+
+test("Refresh approvals makes one request and keeps the search, site sections and rows until the new list arrives", async () => {
+  const existing = await queuedCalendarCancellation("refresh-existing", isoDay(36));
+  const { page } = await browserContext(fixtures.manager);
+  const queuePath = "/api/fix-track/contractor-email-queue";
+  let queueRequests = 0;
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === queuePath) queueRequests++;
+  });
+  const siteHeader = () => page.getByRole("button", { name: new RegExp(`Inbox Alpha site ${suffix}`) });
+  const refreshButton = () => page.getByRole("button", { name: /^(Refresh approvals|Refreshing…)$/ });
+
+  // Holds the next queue response until released, so the pending state can be checked.
+  async function holdNextQueueLoad() {
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    let arrived;
+    const intercepted = new Promise(resolve => { arrived = resolve; });
+    let answered;
+    const done = new Promise(resolve => { answered = resolve; });
+    const matcher = url => url.origin === appOrigin && url.pathname === queuePath;
+    const handler = async route => {
+      arrived();
+      await held;
+      // Forwarded to the private API as browserContext does, once released.
+      const original = new URL(route.request().url());
+      const headers = { ...route.request().headers() };
+      if (headers.origin === appOrigin) headers.origin = apiOrigin;
+      const response = await route.fetch({ url: `${apiOrigin}${original.pathname}${original.search}`, headers });
+      await route.fulfill({ response });
+      answered();
+    };
+    await page.route(matcher, handler, { times: 1 });
+    return { intercepted, release: async () => { release(); await done; } };
+  }
+
+  await withDiagnostics(page, "manual refresh", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const search = page.getByPlaceholder("Search emails...");
+    await search.fill("refresh-");
+    const existingCard = queueCard(page, existing.title);
+    await existingCard.waitFor();
+
+    // Expanded site: rows stay visible while the refresh is pending.
+    const firstHold = await holdNextQueueLoad();
+    let added;
+    const before = queueRequests;
+    await refreshButton().click();
+    await firstHold.intercepted;
+    await page.getByRole("button", { name: "Refreshing…" }).and(page.locator(":disabled")).waitFor();
+    await page.getByText("Refreshing approvals…").waitFor();
+    assert.equal(await existingCard.isVisible(), true, "existing rows stay visible during the refresh");
+    assert.equal(await search.inputValue(), "refresh-");
+    // A request queued meanwhile shows that the response, not the old list, is what replaces the rows.
+    added = await queuedCalendarCancellation("refresh-added", isoDay(37));
+    assert.equal(await queueCard(page, added.title).count(), 0, "the new request is not shown before the response");
+    await firstHold.release();
+    await queueCard(page, added.title).waitFor();
+    await page.getByRole("button", { name: "Refresh approvals" }).and(page.locator(":enabled")).waitFor();
+    assert.equal(queueRequests - before, 1, "one refresh makes one queue request");
+    assert.equal(await page.getByText("Refreshing approvals…").count(), 0);
+    assert.equal(await search.inputValue(), "refresh-", "the search is kept after the refresh");
+    assert.equal(await existingCard.isVisible(), true);
+
+    // Collapsed site: it stays collapsed through a refresh.
+    await siteHeader().click();
+    await existingCard.waitFor({ state: "detached" });
+    const secondHold = await holdNextQueueLoad();
+    const beforeSecond = queueRequests;
+    await refreshButton().click();
+    await secondHold.intercepted;
+    await page.getByText("Refreshing approvals…").waitFor();
+    assert.equal(await existingCard.count(), 0, "the collapsed site stays collapsed while refreshing");
+    await secondHold.release();
+    await page.getByRole("button", { name: "Refresh approvals" }).and(page.locator(":enabled")).waitFor();
+    assert.equal(queueRequests - beforeSecond, 1);
+    assert.equal(await existingCard.count(), 0, "the collapsed site stays collapsed after refreshing");
+    assert.equal(Number((await siteHeader().locator("span.tabular-nums").textContent())?.trim()), 2,
+      "the collapsed site's count reflects the refreshed list");
+    assert.equal(await search.inputValue(), "refresh-");
+    await siteHeader().click();
+    await queueCard(page, added.title).waitFor();
+  });
+});
