@@ -139,6 +139,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/pest"
+        options={{
+          title: 'PestTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/safe-track"
         options={{
           title: 'SafeTrack',

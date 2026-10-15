@@ -7,6 +7,7 @@ import { getEffectiveOptionList } from "../lib/formOptions";
 import { createPestControlRegisterPdf } from "../lib/pestControlRegisterPdf";
 import { z } from "zod";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 
 const router = Router();
 
@@ -150,6 +151,9 @@ const VisitBody = z.object({
   notes:              z.string().optional().nullable(),
   siteId:             z.number().int().optional().nullable(),
 });
+// Creation only: the phone's device entry ID (lib/clientEntryReplay.ts), so a
+// resend after a lost response returns the stored visit instead of a duplicate.
+const VisitCreateBody = VisitBody.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 router.get("/visits", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -165,12 +169,23 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const body = VisitBody.safeParse(req.body);
+  const body = VisitCreateBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
    const d = body.data;
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(d);
+  const storedEntry = async () => entry && (await db.select().from(pestVisitsTable)
+    .where(and(eq(pestVisitsTable.clientId, clientId), eq(pestVisitsTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  // Checked before the roster rule: a visit applied before its signer left
+  // the roster is still recognised as already recorded.
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
    const performer = await resolveStaffRoster(clientId, d.signedOffByRosterId, d.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  const [row] = await db.insert(pestVisitsTable).values({
+  let row;
+  try {
+  [row] = await db.insert(pestVisitsTable).values({
     clientId,
     siteId:            d.siteId ?? null,
     visitDate:         d.visitDate,
@@ -184,8 +199,16 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
      signedOffBy:       performer?.performedBy ?? null,
      signedOffByRosterId: performer?.staffRosterId ?? null,
     notes:             d.notes ?? null,
-    createdBy:         req.currentUser!.id,
+    createdBy:         userId,
+    clientEntryId:     entry?.id ?? null,
+    clientEntryHash:   entry?.hash ?? null,
   } as any).returning();
+  } catch (err) {
+    // A concurrent resend of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
   res.status(201).json(row);
 });
 
@@ -252,6 +275,8 @@ const ActivityBody = z.object({
   notes:        z.string().optional().nullable(),
   siteId:       z.number().int().optional().nullable(),
 });
+// Creation only: the phone's device entry ID (see VisitCreateBody).
+const ActivityCreateBody = ActivityBody.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 router.get("/activity", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -267,9 +292,18 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const body = ActivityBody.safeParse(req.body);
+  const body = ActivityCreateBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(d);
+  const storedEntry = async () => entry && (await db.select().from(pestActivityTable)
+    .where(and(eq(pestActivityTable.clientId, clientId), eq(pestActivityTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  // Checked before the roster and option-list rules: an entry applied before
+  // a roster member or option was retired is still recognised as recorded.
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
   const performer = await resolveStaffRoster(clientId, d.recordedByRosterId, d.recordedBy);
   if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -282,7 +316,9 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   if (!allowedPestTypes.includes(d.pestType)) return res.status(400).json({ error: "Invalid pest type" });
   if (!allowedEvidenceTypes.includes(d.evidenceType)) return res.status(400).json({ error: "Invalid evidence type" });
 
-  const [row] = await db.insert(pestActivityTable).values({
+  let row;
+  try {
+  [row] = await db.insert(pestActivityTable).values({
     clientId,
     siteId:       d.siteId ?? null,
     recordedDate: d.recordedDate,
@@ -295,8 +331,16 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
     recordedByRosterId: performer?.staffRosterId ?? null,
     resolved:     d.resolved ?? false,
     notes:        d.notes ?? null,
-    createdBy:    req.currentUser!.id,
+    createdBy:    userId,
+    clientEntryId:   entry?.id ?? null,
+    clientEntryHash: entry?.hash ?? null,
   } as any).returning();
+  } catch (err) {
+    // A concurrent resend of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
   res.status(201).json(row);
 });
 

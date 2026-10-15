@@ -4542,6 +4542,10 @@ async function migratePestTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pest_activity_client" ON "pest_activity" ("client_id")`);
+  // Phone sightings and contractor visits carry a device entry ID (mobile
+  // outbox replays); created_by already exists. Schema: lib/db pest-track.ts.
+  await addClientEntryReplayColumns("pest_visits");
+  await addClientEntryReplayColumns("pest_activity");
 }
 
 async function migrateComplianceHub() {

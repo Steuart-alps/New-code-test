@@ -268,4 +268,50 @@ assert.deepEqual(deliveredQueryKeys('room-check'), [['room-track-checks'], ['das
   rooms.suspend();
 }
 
+// PestTrack sightings and contractor visits: saved offline, resent unchanged,
+// and only the two create paths can be stored (no edits, deletes or config).
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  const pest = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      return { id: 11 };
+    },
+    async onSent() {},
+  });
+  await pest.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  assert.ok(RECORD_KINDS.includes('pest-activity') && RECORD_KINDS.includes('pest-visit'));
+  assert.equal(RECORD_PATHS['pest-activity'], '/api/pest-track/activity');
+  assert.equal(RECORD_PATHS['pest-visit'], '/api/pest-track/visits');
+  await pest.enqueue(record('pest-activity', 'pest-activity-00001', {
+    recordedDate: '2026-10-12', pestType: 'rodent', evidenceType: 'droppings', severity: 'high', siteId: 7,
+  }));
+  await pest.enqueue(record('pest-visit', 'pest-visit-0000001', { visitDate: '2026-10-12', contractorName: 'J Smith', siteId: 7 }));
+  for (const path of ['/api/pest-track/activity/5', '/api/pest-track/visits/5', '/api/pest-track/config']) {
+    await assert.rejects(pest.enqueue({ ...record('pest-activity', 'pest-activity-00002', {}), path }), /cannot be saved/, path);
+    await assert.rejects(pest.enqueue({ ...record('pest-visit', 'pest-visit-0000002', {}), path }), /cannot be saved/, path);
+  }
+  await assert.rejects(pest.enqueue({ ...record('pest-visit', 'pest-visit-0000003', {}), path: RECORD_PATHS['pest-activity'] }), /cannot be saved/,
+    'a visit cannot be posted to the activity log');
+  await pest.replay();
+  assert.deepEqual(pest.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued'], 'both wait on the device offline');
+  online = true;
+  await pest.replay();
+  assert.deepEqual(pest.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent']);
+  const activityAttempts = sent.filter((attempt) => attempt.body.clientEntryId === 'pest-activity-00001');
+  assert.ok(activityAttempts.length >= 2, 'offline attempt then automatic resend');
+  for (const attempt of activityAttempts) assert.deepEqual(attempt, activityAttempts[0], 'every resend is identical, with the same entry ID');
+  assert.ok(sent.every((attempt) => attempt.path === (attempt.body.clientEntryId.startsWith('pest-visit') ? '/api/pest-track/visits' : '/api/pest-track/activity')));
+  pest.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('pest-activity'), [['pest-activity'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('pest-visit'), [['pest-visits'], ['dashboard-summary']]);
+
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');

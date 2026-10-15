@@ -106,6 +106,14 @@ const MODULES: CheckModule[] = [
     checks: ['Pick appliance', 'Pass / fail', 'Test date', 'Notes'],
   },
   {
+    id: 'pest',
+    label: 'PestTrack',
+    subtitle: 'Pest activity & contractor visits',
+    icon: 'crosshair',
+    iconColor: '#b45309',
+    checks: ['Pick site', 'Log a sighting', 'Contractor visit', 'Recent activity'],
+  },
+  {
     id: 'green',
     label: 'GreenTrack',
     subtitle: 'Pre-use grounds equipment check',
@@ -166,6 +174,7 @@ export default function ChecksScreen() {
     (mod) =>
       (mod.id !== 'incident' || hasService('incidenttrack')) &&
       (mod.id !== 'pat' || hasService('pattrack')) &&
+      (mod.id !== 'pest' || hasService('pesttrack')) &&
       (mod.id !== 'green' || hasService('greentrack')) &&
       (mod.id !== 'premises' || hasService('premisestrack')) &&
       (mod.id !== 'tree' || hasService('treetrack')) &&

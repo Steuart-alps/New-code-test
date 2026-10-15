@@ -95,6 +95,22 @@ try {
       },
       changed: { actionSeverity: 'urgent_action' },
     },
+    {
+      name: 'pest activity', path: '/pest-track/activity', table: 'pest_activity',
+      body: {
+        recordedDate: day, pestType: 'rodent', evidenceType: 'droppings', severity: 'high',
+        location: 'Bin store', recordedBy: 'Porter', resolved: false, siteId,
+      },
+      changed: { severity: 'low' },
+    },
+    {
+      name: 'pest visit', path: '/pest-track/visits', table: 'pest_visits',
+      body: {
+        visitDate: day, contractorName: 'J Smith', contractorCompany: 'ABC Pest Control',
+        findings: 'No activity', nextVisitDate: isoDay(90), signedOffBy: 'Manager', siteId,
+      },
+      changed: { findings: 'Droppings in cellar' },
+    },
   ];
 
   for (const { name, path, table, body, changed, photoReplay } of cases) {
