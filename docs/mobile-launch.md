@@ -111,7 +111,7 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > RECORD CHECKS
 > • FireTrack: fire alarm, emergency lighting, extinguisher and fire-walk checks
 > • LegionellaTrack: water temperatures and flushing (L8 / HSG274)
-> • HotTubTrack and AquaTrack: hot tub and pool water tests and swim sessions
+> • HotTubTrack and AquaTrack: hot tub and pool water tests, swim sessions, lifeguard surveillance, first-aid equipment checks and pool incidents
 > • KitchenTrack: food safety diary, temperature checks and cleaning schedules
 > • DailyTrack: opening and closing checklists
 > • PATtrack: portable appliance tests

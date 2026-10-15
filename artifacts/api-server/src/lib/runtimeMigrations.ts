@@ -3627,6 +3627,13 @@ async function migrateSwimTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_swim_incidents_client_date"
     ON "swim_incidents" ("client_id", "incident_date")
   `);
+
+  // Phone surveillance checks, first-aid checks and incidents carry a device
+  // entry ID (mobile outbox replays); created_by identifies whose entry it is.
+  for (const table of ["swim_surveillance_checks", "swim_first_aid_checks", "swim_incidents"]) {
+    await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`));
+    await addClientEntryReplayColumns(table);
+  }
 }
 
 // ---- Check photos & photo requirements ----

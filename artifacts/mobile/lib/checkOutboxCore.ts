@@ -15,11 +15,13 @@
 export interface CheckOwner { clientId: number; userId: number }
 export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
 export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident' | 'pool-check'
-  | 'premises-inspection' | 'tree-inspection' | 'room-check' | 'pest-activity' | 'pest-visit';
+  | 'premises-inspection' | 'tree-inspection' | 'room-check' | 'pest-activity' | 'pest-visit'
+  | 'swim-surveillance' | 'swim-first-aid' | 'swim-incident';
 
 /** Kinds whose entries are independent records (each gets its own scope). */
 export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident', 'pool-check',
-  'premises-inspection', 'tree-inspection', 'room-check', 'pest-activity', 'pest-visit'];
+  'premises-inspection', 'tree-inspection', 'room-check', 'pest-activity', 'pest-visit',
+  'swim-surveillance', 'swim-first-aid', 'swim-incident'];
 export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string> = {
   'fire-check': '/api/fire-safety',
   'legionella-check': '/api/legionella',
@@ -32,6 +34,9 @@ export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string>
   'room-check': '/api/room-track/checks',
   'pest-activity': '/api/pest-track/activity',
   'pest-visit': '/api/pest-track/visits',
+  'swim-surveillance': '/api/swim-track/surveillance',
+  'swim-first-aid': '/api/swim-track/first-aid',
+  'swim-incident': '/api/swim-track/incidents',
 };
 
 /** Query keys to refresh once an entry of this kind has been delivered. */
@@ -49,6 +54,9 @@ export function deliveredQueryKeys(kind: CheckKind): string[][] {
     case 'room-check': return [['room-track-checks'], ['dashboard-summary']];
     case 'pest-activity': return [['pest-activity'], ['dashboard-summary']];
     case 'pest-visit': return [['pest-visits'], ['dashboard-summary']];
+    case 'swim-surveillance': return [['swim-surveillance'], ['track-controls'], ['dashboard-summary']];
+    case 'swim-first-aid': return [['swim-first-aid'], ['track-controls'], ['dashboard-summary']];
+    case 'swim-incident': return [['swim-incidents'], ['dashboard-summary']];
   }
 }
 export interface CheckEntry {
@@ -93,6 +101,9 @@ const PATHS: Record<CheckKind, RegExp> = {
   'room-check': /^\/api\/room-track\/checks$/,
   'pest-activity': /^\/api\/pest-track\/activity$/,
   'pest-visit': /^\/api\/pest-track\/visits$/,
+  'swim-surveillance': /^\/api\/swim-track\/surveillance$/,
+  'swim-first-aid': /^\/api\/swim-track\/first-aid$/,
+  'swim-incident': /^\/api\/swim-track\/incidents$/,
 };
 const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
 const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';

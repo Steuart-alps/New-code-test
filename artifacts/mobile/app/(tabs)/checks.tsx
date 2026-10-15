@@ -140,10 +140,10 @@ const MODULES: CheckModule[] = [
   {
     id: 'aqua',
     label: 'AquaTrack',
-    subtitle: 'Pool checks & swim sessions',
+    subtitle: 'Pool checks, sessions, surveillance, first aid & incidents',
     icon: 'droplet',
     iconColor: '#0ea5e9',
-    checks: ['Pool water quality', 'pH & chlorine', 'Swim sessions', 'Bather records'],
+    checks: ['Pool water quality', 'Swim sessions', 'Lifeguard surveillance', 'First-aid kit', 'Incidents'],
   },
   {
     id: 'premises',

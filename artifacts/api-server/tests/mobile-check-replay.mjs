@@ -111,6 +111,37 @@ try {
       },
       changed: { findings: 'Droppings in cellar' },
     },
+    {
+      name: 'swim surveillance', path: '/swim-track/surveillance', table: 'swim_surveillance_checks',
+      body: {
+        checkDate: day, checkTime: '10:15', batherCount: 12, scanCompleted: true, observations: 'Clear',
+        checkedBy: 'Lifeguard', result: 'pass', siteId,
+      },
+      changed: { batherCount: 20 },
+      photoReplay: true,
+    },
+    {
+      // A kit item not ready fails the check and raises a track action
+      // (database trigger on insert): checked after the loop.
+      name: 'swim first aid', path: '/swim-track/first-aid', table: 'swim_first_aid_checks',
+      body: {
+        checkDate: day, aedOk: true, firstAidKitOk: false, rescuePoleOk: true, throwBagOk: true,
+        spineBoardOk: true, ringBuoyOk: true, oxygenKitOk: true, checkedBy: 'Lifeguard',
+        defectsFound: 'Kit missing plasters', notes: null, siteId,
+      },
+      changed: { defectsFound: 'Ring buoy line frayed' },
+      photoReplay: true,
+    },
+    {
+      name: 'swim incident', path: '/swim-track/incidents', table: 'swim_incidents',
+      body: {
+        incidentDate: day, incidentTime: '14:30', incidentType: 'minor_injury', severity: 'medium',
+        personsInvolved: '1 adult bather', description: 'Grazed knee on pool steps', actionTaken: 'First aid given',
+        reportedTo: null, reportedDate: null, outcome: null, notes: null, siteId,
+      },
+      changed: { severity: 'high' },
+      photoReplay: true,
+    },
   ];
 
   for (const { name, path, table, body, changed, photoReplay } of cases) {
@@ -169,6 +200,23 @@ try {
     "SELECT count(*) FROM track_actions WHERE client_id = $1 AND source_kind = 'tree_inspections'", [owner.clientId],
   )).rows[0].count);
   assert.equal(treeActions, await count('tree_inspections', owner.clientId), 'TreeTrack: replays raise no second track action');
+  const firstAidActions = Number((await pool.query(
+    "SELECT count(*) FROM track_actions WHERE client_id = $1 AND source_kind = 'swim_first_aid_checks'", [owner.clientId],
+  )).rows[0].count);
+  assert.equal(firstAidActions, await count('swim_first_aid_checks', owner.clientId), 'first aid: replays raise no second track action');
+
+  // Swim records only reference this client's own sites and sessions.
+  for (const [path, body] of [
+    ['/swim-track/surveillance', { checkDate: day, siteId }],
+    ['/swim-track/first-aid', { checkDate: day, siteId }],
+    ['/swim-track/incidents', { incidentDate: day, description: 'Slip', siteId }],
+  ]) {
+    const foreign = await other.request('POST', path, { ...body, clientEntryId: entryId() });
+    assert.equal(foreign.status, 400, `${path}: another client's site is refused (${JSON.stringify(foreign.data)})`);
+  }
+  const ownSession = (await pool.query('SELECT id FROM swim_sessions WHERE client_id = $1 LIMIT 1', [owner.clientId])).rows[0].id;
+  assert.equal((await other.request('POST', '/swim-track/surveillance', { checkDate: day, sessionId: ownSession })).status, 400,
+    "surveillance: another client's swim session is refused");
 
   // RoomTrack room checks: one check per room and day, so each step uses its
   // own room; a second check for a room and day stays a plain 409.
@@ -231,5 +279,5 @@ try {
   assert.equal((await pool.query('SELECT client_entry_id FROM fire_safety_checks WHERE id = $1', [fire.data.id])).rows[0].client_entry_id,
     stored.client_entry_id, 'an edit keeps the original entry ID');
 
-  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, GreenTrack and swim session mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
+  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, GreenTrack, swim session, surveillance, first-aid and pool incident mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
 } finally { await pool.end(); }

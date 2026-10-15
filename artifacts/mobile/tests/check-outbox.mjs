@@ -314,4 +314,68 @@ assert.deepEqual(deliveredQueryKeys('room-check'), [['room-track-checks'], ['das
 assert.deepEqual(deliveredQueryKeys('pest-activity'), [['pest-activity'], ['dashboard-summary']]);
 assert.deepEqual(deliveredQueryKeys('pest-visit'), [['pest-visits'], ['dashboard-summary']]);
 
+// AquaTrack surveillance checks, first-aid checks and pool incidents: saved
+// offline, resent unchanged, a server rejection (e.g. photos now required)
+// kept on the device with its reason, and only the three create paths stored.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  let rejectIncidents = false;
+  const swim = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      if (rejectIncidents && entry.kind === 'swim-incident') {
+        throw Object.assign(new Error('At least 1 verified photo(s) are required'), { status: 422 });
+      }
+      return { id: 21 };
+    },
+    async onSent() {},
+  });
+  await swim.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  const kinds = { 'swim-surveillance': 'surveillance', 'swim-first-aid': 'first-aid', 'swim-incident': 'incidents' };
+  for (const [kind, segment] of Object.entries(kinds)) {
+    assert.ok(RECORD_KINDS.includes(kind), kind);
+    assert.equal(RECORD_PATHS[kind], `/api/swim-track/${segment}`);
+  }
+  await swim.enqueue(record('swim-surveillance', 'swim-surveillance-001', { checkDate: '2026-10-12', scanCompleted: true, siteId: 7 }));
+  await swim.enqueue(record('swim-first-aid', 'swim-first-aid-00001', { checkDate: '2026-10-12', aedOk: false, siteId: 7 }));
+  await swim.enqueue(record('swim-incident', 'swim-incident-000001', { incidentDate: '2026-10-12', description: 'Slip', siteId: 7 }));
+  for (const path of [
+    '/api/swim-track/surveillance/5', '/api/swim-track/first-aid/5', '/api/swim-track/incidents/5',
+    '/api/swim-track/sessions', '/api/swim-track/status', '/api/photos/staged',
+  ]) {
+    for (const kind of Object.keys(kinds)) {
+      await assert.rejects(swim.enqueue({ ...record(kind, `${kind}-0000099`, {}), path }), /cannot be saved/, `${kind} ${path}`);
+    }
+  }
+  await assert.rejects(swim.enqueue({ ...record('swim-incident', 'swim-incident-000002', {}), path: RECORD_PATHS['swim-first-aid'] }), /cannot be saved/,
+    'an incident cannot be posted as a first-aid check');
+  await swim.replay();
+  assert.deepEqual(swim.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued', 'queued'], 'all wait on the device offline');
+  online = true;
+  rejectIncidents = true;
+  await swim.replay();
+  const states = Object.fromEntries(swim.getSnapshot().entries.map((entry) => [entry.kind, entry]));
+  assert.equal(states['swim-surveillance'].state, 'sent');
+  assert.equal(states['swim-first-aid'].state, 'sent');
+  assert.equal(states['swim-incident'].state, 'failed', 'a rejected incident stays on the device');
+  assert.match(states['swim-incident'].error, /photo/, 'with the server reason shown');
+  for (const id of ['swim-surveillance-001', 'swim-first-aid-00001', 'swim-incident-000001']) {
+    const attempts = sent.filter((attempt) => attempt.body.clientEntryId === id);
+    // A pass stops at the first network failure, so only the oldest entry was tried offline.
+    assert.ok(attempts.length >= (id === 'swim-surveillance-001' ? 2 : 1), `${id}: offline attempt then automatic resend`);
+    for (const attempt of attempts) assert.deepEqual(attempt, attempts[0], `${id}: every resend is identical, with the same entry ID`);
+  }
+  swim.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('swim-surveillance'), [['swim-surveillance'], ['track-controls'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('swim-first-aid'), [['swim-first-aid'], ['track-controls'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('swim-incident'), [['swim-incidents'], ['dashboard-summary']]);
+
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');
