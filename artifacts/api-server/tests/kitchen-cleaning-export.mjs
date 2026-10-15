@@ -43,7 +43,7 @@ try {
   for (const marker of ['included-site', 'other-site', 'no-site']) assert.match(all, new RegExp(`Task ${marker}`));
   assert.doesNotMatch(all, /outside-range|other-tenant/);
   assert.match(all, /Site: Station kitchen/);
-  assert.match(all, /Site: No site recorded/);
+  assert.match(all, /Site: Account-level \(not tied to a kitchen\)/);
 
   const secondOnly = await download(owner, `&siteId=${second.id}`);
   assert.match(secondOnly, /Site: Station kitchen/);
