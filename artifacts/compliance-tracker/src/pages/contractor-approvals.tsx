@@ -87,6 +87,8 @@ export default function ContractorApprovalsPage() {
   // When the list on screen was last loaded successfully (foreground or background).
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [search, setSearch] = useState("");
+  // "New" shows only requests the latest refreshes found that are not yet reviewed.
+  const [showOnlyNew, setShowOnlyNew] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set());
@@ -133,6 +135,7 @@ export default function ContractorApprovalsPage() {
     refreshStorageKeyRef.current = approvalRefreshStorageKey;
     setItems([]);
     setLastRefreshedAt(null);
+    setShowOnlyNew(false);
     knownSitesRef.current = new Set();
     setExpandedSites(new Set());
     newRequestIdsRef.current = persistedState?.newRequestIds ?? [];
@@ -237,11 +240,15 @@ export default function ContractorApprovalsPage() {
     }
   }
 
+  // Opening a request marks it reviewed, so in the New view the request being
+  // edited, confirmed or sent stays listed until that action is finished.
+  const activeRequestId = editingId ?? pendingCancellationConfirmation?.item.id ?? submittingId;
   const grouped = useMemo(() => {
     const filtered = items.filter(item => 
+      (!showOnlyNew || newRequestIds.includes(item.id) || item.id === activeRequestId) && (
       (item.contractorName?.toLowerCase().includes(search.toLowerCase()) || '') ||
       (item.jobTitle?.toLowerCase().includes(search.toLowerCase()) || '') ||
-      (item.siteName?.toLowerCase().includes(search.toLowerCase()) || '')
+      (item.siteName?.toLowerCase().includes(search.toLowerCase()) || ''))
     );
 
     const map = new Map<string, EmailQueueItem[]>();
@@ -251,7 +258,7 @@ export default function ContractorApprovalsPage() {
       map.get(site)!.push(item);
     }
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [items, search]);
+  }, [items, search, showOnlyNew, newRequestIds, activeRequestId]);
 
   // A site opens expanded the first time it appears; refreshes keep whatever
   // the manager has collapsed or expanded since.
@@ -497,6 +504,28 @@ export default function ContractorApprovalsPage() {
                 Refreshing approvals…
               </div>
             )}
+            {items.length > 0 && (
+              <div role="group" aria-label="Which approvals to show" className="mb-4 inline-flex rounded-md border bg-background p-0.5">
+                <Button
+                  variant={showOnlyNew ? "ghost" : "secondary"}
+                  size="sm"
+                  className="h-8"
+                  aria-pressed={!showOnlyNew}
+                  onClick={() => setShowOnlyNew(false)}
+                >
+                  All pending ({items.length})
+                </Button>
+                <Button
+                  variant={showOnlyNew ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8"
+                  aria-pressed={showOnlyNew}
+                  onClick={() => setShowOnlyNew(true)}
+                >
+                  New ({newRequestIds.length})
+                </Button>
+              </div>
+            )}
             {items.length === 0 ? (
               loadError ? (
                 <div className="text-center py-16 bg-card border rounded-lg">
@@ -513,6 +542,16 @@ export default function ContractorApprovalsPage() {
                   <p className="text-xs mt-1">All contractor emails have been reviewed.</p>
                 </div>
               )
+            ) : showOnlyNew && grouped.length === 0 ? (
+              <div className="text-center py-12 bg-card border rounded-lg text-muted-foreground">
+                <p className="text-sm font-medium text-foreground">
+                  {search ? "No new approval requests match your search" : "No new approval requests"}
+                </p>
+                <p className="text-xs mt-1">Requests found by a refresh appear here until they are reviewed.</p>
+                <Button variant="outline" size="sm" className="mt-4" onClick={() => setShowOnlyNew(false)}>
+                  Show all pending
+                </Button>
+              </div>
             ) : (
               <div className="space-y-4">
                 {grouped.map(([site, siteItems]) => (
@@ -576,6 +615,16 @@ export default function ContractorApprovalsPage() {
                                       >
                                         New
                                       </span>
+                                    )}
+                                    {isNewRequest && (
+                                      <button
+                                        type="button"
+                                        className="text-[11px] text-blue-800 underline underline-offset-2 hover:text-blue-950"
+                                        aria-label={`Mark ${item.jobTitle || "this request"} as reviewed`}
+                                        onClick={() => markRequestReviewed(item.id)}
+                                      >
+                                        Mark reviewed
+                                      </button>
                                     )}
                                     {item.lastSendFailed && (
                                       <span className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700">

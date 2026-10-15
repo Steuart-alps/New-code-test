@@ -591,7 +591,7 @@ test("reminder Edit & Send keeps the reviewed draft through a failed send and di
 });
 
 // A sent, dated assignment whose calendar cancellation now awaits review.
-async function queuedCalendarCancellation(label, targetDate) {
+async function queuedCalendarCancellation(label, targetDate, siteId = fixtures.siteId) {
   const owner = fixtures.owner;
   const contractor = await owner.request("POST", "/contractors", {
     name: `${label} contractor ${suffix}`, email: `inbox-${label}-${suffix}@test.local`,
@@ -600,7 +600,7 @@ async function queuedCalendarCancellation(label, targetDate) {
   const title = `Inbox ${label} ${suffix}`;
   const issue = await owner.request("POST", "/fix-track/issues", {
     title, issueType: "general", location: "Plant room", reportedBy: "Facilities",
-    reportedDate: isoDay(0), siteId: fixtures.siteId, contractorId: contractor.data.id, targetDate,
+    reportedDate: isoDay(0), siteId, contractorId: contractor.data.id, targetDate,
   });
   assert.equal(issue.status, 201, JSON.stringify(issue.data));
   const id = issue.data.id;
@@ -713,7 +713,7 @@ test("dismissing a calendar cancellation keeps the event and calls the cancel en
     await page.goto(`${appOrigin}/contractor-approvals`);
     const card = queueCard(page, cancellation.title);
     await card.getByText("Calendar Cancellation", { exact: true }).waitFor();
-    const dismiss = card.getByRole("button", { name: "Dismiss" });
+    const dismiss = card.getByRole("button", { name: "Dismiss", exact: true });
     const name = "Dismiss calendar cancellation?";
     const description = "Nothing will be sent and the existing calendar event will remain in place.";
 
@@ -1083,5 +1083,66 @@ test("the new-request notice stays quiet on first load, counts new requests, and
     assert.equal(await page.getByText("2 new approval requests found", { exact: true }).count(), 1);
     await page.getByRole("button", { name: "Mark as reviewed" }).click();
     await notice().waitFor({ state: "detached" });
+  });
+});
+
+test("the New view lists only newly found requests, by site and search, until each is reviewed", async () => {
+  const secondSite = await fixtures.owner.request("POST", "/sites", {
+    name: `Inbox Gamma site ${suffix}`, departmentId: fixtures.departmentId, seedStarterChecks: false,
+  });
+  assert.equal(secondSite.status, 201, JSON.stringify(secondSite.data));
+  const { page } = await browserContext(fixtures.manager);
+  const viewButton = (name) => page.getByRole("group", { name: "Which approvals to show" }).getByRole("button", { name });
+  const siteHeader = (name) => page.getByRole("button", { name: new RegExp(`${name} ${suffix}`) });
+  await withDiagnostics(page, "new approvals view", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, fixtures.acceptIssue.title).waitFor();
+    assert.equal(await viewButton(/^All pending/).getAttribute("aria-pressed"), "true");
+    await viewButton(/^New \(0\)$/).waitFor();
+
+    const alpha = await queuedCalendarCancellation("newview-alpha", isoDay(41));
+    const gamma = await queuedCalendarCancellation("newview-gamma", isoDay(42), secondSite.data.id);
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await queueCard(page, gamma.title).waitFor();
+
+    await viewButton(/^New \(2\)$/).click();
+    assert.equal(await viewButton(/^New/).getAttribute("aria-pressed"), "true");
+    await queueCard(page, alpha.title).waitFor();
+    await queueCard(page, gamma.title).waitFor();
+    assert.equal(await queueCard(page, fixtures.acceptIssue.title).count(), 0, "requests already listed are hidden");
+    assert.equal(Number(await siteHeader("Inbox Alpha site").locator("span.tabular-nums").textContent()), 1,
+      "the New view keeps site grouping");
+    assert.equal(Number(await siteHeader("Inbox Gamma site").locator("span.tabular-nums").textContent()), 1);
+
+    const search = page.getByPlaceholder("Search emails...");
+    await search.fill("newview-gamma");
+    await queueCard(page, alpha.title).waitFor({ state: "detached" });
+    await queueCard(page, gamma.title).waitFor();
+    await search.fill("");
+
+    // Marking one reviewed takes it out of the New view only.
+    await queueCard(page, alpha.title).getByRole("button", { name: `Mark ${alpha.title} as reviewed` }).click();
+    await queueCard(page, alpha.title).waitFor({ state: "detached" });
+    await viewButton(/^New \(1\)$/).waitFor();
+    await queueCard(page, gamma.title).waitFor();
+
+    // A request opened for editing stays listed until the edit is closed.
+    const gammaCard = queueCard(page, gamma.title);
+    await gammaCard.getByRole("button", { name: "Edit" }).click();
+    await page.waitForTimeout(300);
+    assert.equal(await gammaCard.getByRole("textbox").first().isVisible(), true, "the editor stays open in the New view");
+    await gammaCard.getByRole("button", { name: "Cancel Edit" }).click();
+    await gammaCard.waitFor({ state: "detached" });
+    await page.getByText("No new approval requests", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Show all pending" }).click();
+
+    // Both are still pending with their approval actions in the full list.
+    assert.equal(await viewButton(/^All pending/).getAttribute("aria-pressed"), "true");
+    for (const request of [alpha, gamma]) {
+      const card = queueCard(page, request.title);
+      await card.getByRole("button", { name: "Approve Cancellation" }).and(page.locator(":enabled")).waitFor();
+      assert.equal(await card.getByLabel("New approval request").count(), 0);
+      assert.equal((await queueRow(request.queueId)).status, "pending");
+    }
   });
 });
