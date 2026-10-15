@@ -2,7 +2,9 @@
 //
 // Every PUT/PATCH route, and every POST on an existing record, whose handler
 // handles a siteId must be listed below with how its department boundary is
-// proven:
+// proven. A handler counts when it names siteId itself or reaches it through a
+// declaration in the same file (a body schema such as updateSchema, or a helper
+// it calls), so a schema that lets siteId through a spread is caught too:
 //   covered    - an integration check shows department staff cannot move the
 //                record to another department's site: either a check label
 //                in a test file, or a record name passed to the siteMove
@@ -27,62 +29,74 @@ const notAMove = (reason) => ({ notAMove: reason });
 const gap = (reason) => ({ gap: reason });
 
 const INVENTORY = {
+  "bike-track.ts PUT /bikes/:id": gap("BikeTrack has no department scoping at all (lists, edits and moves are tenant-wide)"),
+  "bike-track.ts PUT /hires/:id": gap("BikeTrack has no department scoping at all (lists, edits and moves are tenant-wide)"),
   "checklist-templates.ts PUT /checklist-templates": adminOnly("checklist template editor"),
-  "compliance-items.ts PUT /compliance-items/:id": adminOnly("compliance item editor"),
   "compliance-items.ts PATCH /compliance-items/:id/status": notAMove("status-only; checks the item's stored site"),
-  "daily-checklists.ts POST /daily-checklists/:siteId/:date/pm/sign-off": notAMove("site is addressed in the path and access-checked"),
+  "compliance-items.ts PUT /compliance-items/:id": adminOnly("compliance item editor"),
   "daily-checklists.ts POST /daily-checklists/:siteId/:date/:type": notAMove("site is addressed in the path and access-checked"),
+  "daily-checklists.ts POST /daily-checklists/:siteId/:date/pm/sign-off": notAMove("site is addressed in the path and access-checked"),
+  "daily-track-am.ts PUT /:id": siteMove("DailyTrack AM checklist"),
+  "daily-track-pm.ts PUT /:id": siteMove("DailyTrack PM checklist"),
+  "daily-track-pm.ts PUT /signoffs/:id": siteMove("DailyTrack PM sign-off"),
   "doc-track.ts PATCH /documents/:id": covered("scoped staff cannot PATCH DocTrack site", "doc-track-signoff-status.mjs"),
   "fire-safety.ts PUT /:id": siteMove("Fire check"),
   "fire-safety.ts PUT /config": notAMove("per-site settings selected by query"),
-  "fix-track.ts PUT /issues/:id": siteMove("FixTrack issue"),
-  "fix-track.ts POST /issues/:id/request-upload": notAMove("workflow action on the issue's stored site"),
   "fix-track.ts POST /issues/:id/media": notAMove("workflow action on the issue's stored site"),
-  "fix-track.ts POST /issues/:id/request-send": notAMove("workflow action on the issue's stored site"),
-  "fix-track.ts POST /issues/:id/request-cancellation": notAMove("workflow action on the issue's stored site"),
   "fix-track.ts POST /issues/:id/reject-send": notAMove("workflow action on the issue's stored site"),
-  "food-safety.ts PUT /config": adminOnly("diary template settings"),
+  "fix-track.ts POST /issues/:id/request-cancellation": notAMove("workflow action on the issue's stored site"),
+  "fix-track.ts POST /issues/:id/request-send": notAMove("workflow action on the issue's stored site"),
+  "fix-track.ts POST /issues/:id/request-upload": notAMove("workflow action on the issue's stored site"),
+  "fix-track.ts PUT /issues/:id": siteMove("FixTrack issue"),
   "food-safety.ts PUT /:id": notAMove("the record's site is not editable"),
+  "food-safety.ts PUT /config": adminOnly("diary template settings"),
   "green-track.ts PUT /machines/:id": adminOnly("machine register"),
-  "hot-tub.ts PUT /tubs/:id": covered("scoped staff cannot move HotTub asset"),
   "hot-tub.ts PUT /:id": covered("scoped staff cannot move HotTub check"),
   "hot-tub.ts PUT /config": adminOnly("HotTub settings"),
+  "hot-tub.ts PUT /tubs/:id": covered("scoped staff cannot move HotTub asset"),
   "incidents.ts PUT /:id": siteMove("Incident"),
   "kitchen-cleaning.ts PUT /tasks/:id": siteMove("KitchenCleaning task"),
-  "kitchen-weekly.ts PUT /weekly/:id": covered("scoped staff cannot move current KitchenWeekly record"),
   "kitchen-weekly.ts PUT /probe/:id": siteMove("KitchenWeekly probe"),
-  "legionella.ts PUT /outlets/:id": siteMove("Legionella outlet"),
+  "kitchen-weekly.ts PUT /weekly/:id": covered("scoped staff cannot move current KitchenWeekly record"),
   "legionella.ts PUT /:id": covered("scoped staff cannot move current Legionella record"),
   "legionella.ts PUT /config": adminOnly("Legionella settings"),
+  "legionella.ts PUT /outlets/:id": siteMove("Legionella outlet"),
   "notifications.ts POST /notifications/send-reminder/:itemId": adminOnly("manual reminder"),
+  "pat-track.ts POST /failures/:id/location-corrections": adminOnly("failure location corrections"),
   "pat-track.ts PUT /appliances/:id": siteMove("PAT appliance"),
-  "pat-track.ts PUT /equipment-templates/:id": siteMove("PAT equipment template"),
-  "pat-track.ts PUT /rooms/:id": siteMove("PAT room"),
   "pat-track.ts PUT /certificates/:id": siteMove("PAT certificate"),
-  "pest-track.ts PUT /visits/:id": gap("PestTrack has no department scoping at all (lists, edits and moves are tenant-wide)"),
+  "pat-track.ts PUT /equipment-templates/:id": siteMove("PAT equipment template"),
+  "pat-track.ts PUT /failures/:id": notAMove("a failure keeps its certificate's site; reassignment is refused (409)"),
+  "pat-track.ts PUT /replacements/:id": covered("scoped staff cannot move PAT replacement to another department's room"),
+  "pat-track.ts PUT /rooms/:id": siteMove("PAT room"),
+  "pat-track.ts PUT /tests/:id": notAMove("a test keeps its appliance's site; reassignment is refused (409)"),
   "pest-track.ts PUT /activity/:id": gap("PestTrack has no department scoping at all (lists, edits and moves are tenant-wide)"),
+  "pest-track.ts PUT /visits/:id": gap("PestTrack has no department scoping at all (lists, edits and moves are tenant-wide)"),
   "pool-track.ts PUT /:id": siteMove("Pool check"),
   "pool-track.ts PUT /config": notAMove("per-site settings selected by query"),
   "premises-track.ts PUT /:id": covered("scoped staff cannot move Premises inspection"),
+  "registers.ts POST /asbestos/:id/entries": notAMove("entry belongs to an asbestos record the caller can see; no site field"),
   "registers.ts PUT /allergens/:id": siteMove("Allergen register item"),
-  "registers.ts PUT /coshh/:id": siteMove("COSHH register item"),
   "registers.ts PUT /asbestos/:id": siteMove("Asbestos register item"),
-  "room-track.ts PUT /rooms/:id": adminOnly("room register"),
+  "registers.ts PUT /asbestos/entries/:entryId": notAMove("entry belongs to an asbestos record the caller can see; no site field"),
+  "registers.ts PUT /coshh/:id": siteMove("COSHH register item"),
   "room-track.ts PUT /checks/:id": covered("scoped staff cannot move Room check"),
+  "room-track.ts PUT /rooms/:id": adminOnly("room register"),
   // crudFor serves risk assessments, SOPs, training, inductions, competency
   // and handbook with one handler; the training record exercises it.
   "safe-track.ts PUT /:id": siteMove("SafeTrack training record"),
-  "sites.ts POST /sites/:id/documents/request-upload": adminOnly("site documents"),
   "sites.ts POST /sites/:id/documents": adminOnly("site documents"),
+  "sites.ts POST /sites/:id/documents/request-upload": adminOnly("site documents"),
   "staff-roster.ts PATCH /staff-roster/:id": adminOnly("staff roster"),
-  "swim-track.ts PUT /sessions/:id": siteMove("Swim session"),
-  "swim-track.ts PUT /surveillance/:id": siteMove("Swim surveillance"),
   "swim-track.ts PUT /first-aid/:id": siteMove("Swim first-aid"),
   "swim-track.ts PUT /incidents/:id": siteMove("Swim incident"),
+  "swim-track.ts PUT /sessions/:id": siteMove("Swim session"),
+  "swim-track.ts PUT /surveillance/:id": siteMove("Swim surveillance"),
   "tasks.ts PATCH /tasks/:id": siteMove("Staff task"),
+  "tasks.ts POST /tasks/:id/complete": notAMove("completion on a visible task; no site field"),
+  "track-actions.ts PATCH /:id": covered("scoped staff cannot PATCH track action site"),
   "track-actions.ts PATCH /templates/:id": adminOnly("action templates"),
   "track-actions.ts POST /:id/fix-track": notAMove("FixTrack decision on the action's stored site"),
-  "track-actions.ts PATCH /:id": covered("scoped staff cannot PATCH track action site"),
   "track-evidence.ts POST /:id/review": notAMove("evidence review on the action's stored site"),
   "train-track.ts PATCH /records/:id": covered("scoped staff cannot PATCH TrainTrack site"),
   "tree-track.ts PUT /:id": siteMove("Tree inspection"),
@@ -99,6 +113,35 @@ for (const file of routeFiles) {
   const name = basename(file);
   const source = readFileSync(file, "utf8");
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const declarations = new Map();
+  for (const statement of sourceFile.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) declarations.set(declaration.name.text, declaration);
+      }
+    } else if (ts.isFunctionDeclaration(statement) && statement.name) {
+      declarations.set(statement.name.text, statement);
+    }
+  }
+  // True when the handler, or any same-file declaration it references
+  // (transitively), mentions siteId.
+  const reachesSiteId = (handler) => {
+    const seen = new Set();
+    const queue = [handler];
+    while (queue.length) {
+      const node = queue.shift();
+      if (/\bsiteId\b/.test(node.getText(sourceFile))) return true;
+      const walk = (child) => {
+        if (ts.isIdentifier(child) && declarations.has(child.text) && !seen.has(child.text)) {
+          seen.add(child.text);
+          queue.push(declarations.get(child.text));
+        }
+        ts.forEachChild(child, walk);
+      };
+      walk(node);
+    }
+    return false;
+  };
   const visit = (node) => {
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
       && /^(?:router|sub|\w+Router)$/.test(node.expression.expression.getText(sourceFile))
@@ -106,10 +149,10 @@ for (const file of routeFiles) {
       const method = node.expression.name.text.toUpperCase();
       const [pathArg, ...rest] = node.arguments;
       const path = pathArg?.getText(sourceFile).replace(/^["'`]|["'`]$/g, "") ?? "";
-      const handler = rest.at(-1)?.getText(sourceFile) ?? "";
+      const handler = rest.at(-1);
       const middleware = rest.slice(0, -1).map((arg) => arg.getText(sourceFile)).join(" ");
       // A POST without a path parameter creates a record rather than moving one.
-      if (/\bsiteId\b/.test(handler) && (method !== "POST" || /:\w+/.test(path))) {
+      if (handler && reachesSiteId(handler) && (method !== "POST" || /:\w+/.test(path))) {
         found.set(`${name} ${method} ${path}`, { middleware });
       }
     }

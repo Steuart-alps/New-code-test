@@ -1342,6 +1342,38 @@ async function main() {
   await siteMove({ label: "Staff task", createPath: "/tasks", method: "PATCH", list: "/tasks?scope=all",
     create: (siteId) => ({ title: `Lock task ${suffix}`, recurrence: "once", startsOn: today, assigneeRole: "client_staff", siteId }),
     move: (siteId) => ({ siteId }) });
+  // DailyTrack drafts take siteId through their update schema rather than by
+  // name, which the inventory now follows.
+  const alphaQuery = `?siteId=${alphaSite.data?.id}`;
+  await siteMove({ label: "DailyTrack AM checklist", createPath: "/daily-track-am", list: `/daily-track-am${alphaQuery}`,
+    create: (siteId) => ({ checklistType: "kitchen_opening", checkDate: today, items: [], siteId }),
+    move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "DailyTrack PM checklist", createPath: "/daily-track-pm", list: `/daily-track-pm${alphaQuery}`,
+    create: (siteId) => ({ checklistType: "kitchen_closing", checkDate: today, items: [], siteId }),
+    move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "DailyTrack PM sign-off", createPath: "/daily-track-pm/signoffs",
+    list: `/daily-track-pm/signoffs${alphaQuery}`,
+    create: (siteId) => ({ signoffDate: today, managerName: "Lock Fixture", siteId }),
+    move: (siteId) => ({ siteId }) });
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    expect("DailyTrack: department staff cannot start a checklist on another department's site",
+      await scopedStaff("POST", "/daily-track-am", { checklistType: "premises_opening", checkDate: today, items: [], siteId: betaSite.data.id }),
+      [403]);
+    // A replacement's site follows its room, so moving it to another
+    // department's room is the site move to refuse.
+    const moveRoom = async (siteId) => (await admin("POST", "/pat-track/rooms", { siteId, name: `Lock move room B ${siteId} ${suffix}` })).data?.id;
+    const alphaRoom = await moveRoom(alphaSite.data.id), betaRoom = await moveRoom(betaSite.data.id);
+    const moveReplacement = (roomId) => ({ roomId, applianceName: "Lock move kettle", replacedOn: today });
+    const seededReplacement = await admin("POST", "/pat-track/replacements", moveReplacement(alphaRoom));
+    expect("PAT replacement move: seed", seededReplacement, [201]);
+    if (seededReplacement.status === 201) {
+      const replacementId = Number(seededReplacement.data.id);
+      expect("scoped staff cannot move PAT replacement to another department's room",
+        await scopedStaff("PUT", `/pat-track/replacements/${replacementId}`, moveReplacement(betaRoom)), [403]);
+      check("PAT replacement move: keeps its room",
+        Number(sqlRun(`SELECT room_id FROM pat_replacements WHERE id=${replacementId}`).split("\n")[0]) === alphaRoom);
+    }
+  }
   await siteMove({ label: "FixTrack issue", createPath: "/fix-track/issues",
     create: (siteId) => ({
       title: `Lock move issue ${suffix}`, issueType: "general", location: "Plant room", description: "Lock move",
