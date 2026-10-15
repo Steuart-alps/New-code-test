@@ -355,6 +355,19 @@ async function main() {
   });
   check("edited re-approval of a sent cancellation is rejected",
     secondEditedApproval.status === 409, JSON.stringify(secondEditedApproval));
+  check("re-approvals say the draft was already handled",
+    [secondApproval, secondEditedApproval].every(result => result.data?.code === "queue_entry_not_pending"),
+    JSON.stringify([secondApproval.data, secondEditedApproval.data]));
+  const lateDismissal = await owner("POST", `/fix-track/contractor-email-queue/${directCancellationQueue?.id}/cancel`);
+  check("dismissing a sent cancellation says it was already handled",
+    lateDismissal.status === 409 && lateDismissal.data?.code === "queue_entry_not_pending", JSON.stringify(lateDismissal));
+  check("a late dismissal leaves the sent cancellation sent",
+    (await execFile("psql", [process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+      `SELECT status FROM contractor_email_queue WHERE id=${Number(directCancellationQueue?.id)}`,
+    ])).stdout.trim() === "sent");
+  const missingDismissal = await owner("POST", "/fix-track/contractor-email-queue/2147483000/cancel");
+  check("dismissing an unknown draft stays not found",
+    missingDismissal.status === 404 && missingDismissal.data?.code === undefined, JSON.stringify(missingDismissal));
   const issueRedispatch = await owner("POST", `/fix-track/issues/${directCancellationId}/send-to-contractor`);
   check("issue send route cannot redispatch a sent cancellation",
     issueRedispatch.status >= 400, JSON.stringify(issueRedispatch));

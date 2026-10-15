@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { format, isToday } from "date-fns";
 import {
+  ApprovalAlreadyHandledError,
   approveContractorEmail,
   dismissContractorEmail,
 } from "@/lib/contractor-approval-actions";
@@ -76,6 +77,12 @@ type PendingCancellationConfirmation =
       item: EmailQueueItem;
     };
 
+interface UnsentDraft {
+  jobTitle: string;
+  subject: string;
+  text: string;
+}
+
 export default function ContractorApprovalsPage() {
   const [items, setItems] = useState<EmailQueueItem[]>([]);
   const { activeClientId, user } = useAuth();
@@ -97,6 +104,10 @@ export default function ContractorApprovalsPage() {
   const [editSubject, setEditSubject] = useState("");
   const [editText, setEditText] = useState("");
   const [submittingId, setSubmittingId] = useState<number | null>(null);
+  // A manager's edited draft for a request someone else handled first. Kept
+  // on screen (read-only, never sent or saved) so their wording isn't lost.
+  const [unsentDraft, setUnsentDraft] = useState<UnsentDraft | null>(null);
+  const unsentDraftHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const [pendingCancellationConfirmation, setPendingCancellationConfirmation] =
     useState<PendingCancellationConfirmation | null>(null);
   const [newRequestIds, setNewRequestIds] = useState<number[]>([]);
@@ -136,6 +147,7 @@ export default function ContractorApprovalsPage() {
     setItems([]);
     setLastRefreshedAt(null);
     setShowOnlyNew(false);
+    setUnsentDraft(null);
     knownSitesRef.current = new Set();
     setExpandedSites(new Set());
     newRequestIdsRef.current = persistedState?.newRequestIds ?? [];
@@ -337,6 +349,10 @@ export default function ContractorApprovalsPage() {
       setItems(prev => prev.filter(i => i.id !== item.id));
       return true;
     } catch (e: any) {
+      if (e instanceof ApprovalAlreadyHandledError) {
+        if (mountedRef.current) handleAlreadyHandled(item, e, modifiedPreview);
+        return false;
+      }
       if (mountedRef.current) {
         toast({ title: "Error", description: e.message, variant: "destructive" });
       }
@@ -375,6 +391,10 @@ export default function ContractorApprovalsPage() {
       setItems(prev => prev.filter(i => i.id !== item.id));
       return true;
     } catch (e: any) {
+      if (e instanceof ApprovalAlreadyHandledError) {
+        if (mountedRef.current) handleAlreadyHandled(item, e);
+        return false;
+      }
       if (mountedRef.current) {
         toast({ title: "Error", description: e.message, variant: "destructive" });
       }
@@ -383,6 +403,47 @@ export default function ContractorApprovalsPage() {
       if (mountedRef.current) setSubmittingId(null);
     }
   }
+
+  /** The server says the request is no longer pending: someone else approved,
+   *  sent or dismissed it first. Say so, drop the row and reload the list from
+   *  the server, and keep any edits the manager made available to copy. */
+  function handleAlreadyHandled(
+    item: EmailQueueItem,
+    error: ApprovalAlreadyHandledError,
+    modifiedPreview?: { subject: string; text: string },
+  ) {
+    const original = item.emailPreviewJson || {};
+    const edited =
+      modifiedPreview &&
+      (modifiedPreview.subject !== (original.subject || "") || modifiedPreview.text !== (original.text || ""));
+    toast({
+      title: "Already handled",
+      description: `${error.message} Another manager or tab approved or dismissed it first. The list has been refreshed.`,
+    });
+    setEditingId(current => (current === item.id ? null : current));
+    setPendingCancellationConfirmation(current => (current?.item.id === item.id ? null : current));
+    setItems(prev => prev.filter(i => i.id !== item.id));
+    setUnsentDraft(
+      edited
+        ? { jobTitle: item.jobTitle || "this request", subject: modifiedPreview.subject, text: modifiedPreview.text }
+        : null,
+    );
+    void loadQueue(false);
+  }
+
+  async function copyUnsentDraft() {
+    if (!unsentDraft) return;
+    try {
+      await navigator.clipboard.writeText(`${unsentDraft.subject}\n\n${unsentDraft.text}`);
+      toast({ title: "Draft copied" });
+    } catch {
+      toast({ title: "Couldn't copy the draft", description: "Select the text and copy it instead." });
+    }
+  }
+
+  useEffect(() => {
+    if (unsentDraft) unsentDraftHeadingRef.current?.focus();
+  }, [unsentDraft]);
 
   function confirmCancellation(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -497,6 +558,39 @@ export default function ContractorApprovalsPage() {
                   Try again
                 </Button>
               </div>
+            )}
+            {unsentDraft && (
+              <section
+                aria-labelledby="unsent-draft-heading"
+                className="mb-4 space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4"
+              >
+                <div>
+                  <h2
+                    id="unsent-draft-heading"
+                    ref={unsentDraftHeadingRef}
+                    tabIndex={-1}
+                    className="text-sm font-medium text-amber-950 outline-none"
+                  >
+                    Your edits were not sent
+                  </h2>
+                  <p className="text-xs text-amber-900/80">
+                    {unsentDraft.jobTitle} was already approved or dismissed by another manager or in another tab,
+                    so your edited draft was not sent or saved. Copy anything you need, then close it.
+                  </p>
+                </div>
+                <div>
+                  <label htmlFor="unsent-draft-subject" className="text-xs font-medium text-amber-950 mb-1 block">Subject</label>
+                  <Input id="unsent-draft-subject" readOnly value={unsentDraft.subject} className="h-8 bg-background font-mono text-sm" />
+                </div>
+                <div>
+                  <label htmlFor="unsent-draft-body" className="text-xs font-medium text-amber-950 mb-1 block">Body</label>
+                  <Textarea id="unsent-draft-body" readOnly value={unsentDraft.text} className="min-h-[120px] bg-background font-mono text-sm" />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setUnsentDraft(null)}>Close</Button>
+                  <Button variant="outline" size="sm" onClick={() => void copyUnsentDraft()}>Copy draft</Button>
+                </div>
+              </section>
             )}
             {loading && items.length > 0 && (
               <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
@@ -781,6 +875,11 @@ export default function ContractorApprovalsPage() {
             if (trigger?.isConnected) {
               event.preventDefault();
               trigger.focus();
+            } else if (unsentDraftHeadingRef.current) {
+              // The request was already handled and its row is gone; the
+              // manager's unsent edits are shown instead.
+              event.preventDefault();
+              unsentDraftHeadingRef.current.focus();
             }
           }}
         >

@@ -68,6 +68,11 @@ const unusableDraftNote = (err: unknown) =>
 
 /** Respond to a draft whose credentials cannot be used. Nothing is claimed,
  *  approved or sent; the reason is recorded without revealing credentials. */
+/** A queue action on a draft that is no longer pending: another manager (or
+ *  another tab) already approved, sent or dismissed it. The web app keys its
+ *  "already handled" message on this code. */
+const NOT_PENDING_RESPONSE = { code: "queue_entry_not_pending", error: "Queue entry is no longer pending" } as const;
+
 async function refuseUnusableDraft(res: any, err: unknown, queueId: number | null, clientId: number): Promise<boolean> {
   if (!(err instanceof TokenPayloadError)) return false;
   const damaged = isDamagedTokenPayload(err);
@@ -1666,7 +1671,14 @@ router.post("/contractor-email-queue/:queueId/cancel", requireAuth, denyViewers,
     }
     return row;
   });
-  if (!cancelled) return res.status(404).json({ error: "Queue entry not found" });
+  if (!cancelled) {
+    // Already approved, sent or dismissed (by another manager or tab) is told
+    // apart from a draft this manager cannot see, which stays a plain 404.
+    const handled = Number.isInteger(qid) && (await db.execute(sql`SELECT 1 FROM contractor_email_queue
+      WHERE id=${qid} AND client_id=${clientId}${scope} LIMIT 1`)).rows.length > 0;
+    if (handled) return res.status(409).json(NOT_PENDING_RESPONSE);
+    return res.status(404).json({ error: "Queue entry not found" });
+  }
   res.json({ ok: true });
 });
 
@@ -1681,7 +1693,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
   if (!Number.isInteger(qid)) return res.status(400).json({ error: "Invalid queue entry" });
   const pending = (await db.execute(sql`SELECT * FROM contractor_email_queue
     WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} LIMIT 1`)).rows[0] as any;
-  if (!pending) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  if (!pending) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
     hydrateQueuedContent(pending);
   } catch (err) {
@@ -1705,7 +1717,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
     return row;
   });
   if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
-  if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  if (!q) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
     const hydrated = hydrateQueuedContent(q);
     await dispatchStoredContractorEmail({ to: q.to_email, subject: hydrated.subject, html: hydrated.html, text: hydrated.text ?? undefined,
@@ -1748,7 +1760,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
     approved_by,approved_at,sent_by FROM contractor_email_queue
     WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} LIMIT 1`);
   const existingDraft = (existingResult.rows as any[])[0];
-  if (!existingDraft) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  if (!existingDraft) return res.status(409).json(NOT_PENDING_RESPONSE);
   let payload: Record<string, string>;
   try {
     payload = existingDraft.encrypted_token_payload ? decryptTokenPayload(existingDraft.encrypted_token_payload) : {};
@@ -1786,7 +1798,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
     return row;
   });
   if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
-  if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  if (!q) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
     const hydrated = hydrateQueuedContent(q);
     await dispatchStoredContractorEmail({

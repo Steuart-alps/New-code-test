@@ -95,8 +95,8 @@ for (const handler of ["submitApproval", "submitDismissal"]) {
   const body = source.match(new RegExp(`async function ${handler}\\([\\s\\S]*?\\n  \\}\\n`))?.[0] ?? "";
   assert.match(
     body,
-    /return true;\s*\} catch \(e: any\) \{\s*if \(mountedRef\.current\) \{\s*toast\(\{ title: "Error", description: e\.message, variant: "destructive" \}\);\s*\}\s*return false;\s*\} finally \{\s*if \(mountedRef\.current\) setSubmittingId\(null\);/,
-    `${handler} must show the destructive error toast on failure and always reset the submitting state`,
+    /return true;\s*\} catch \(e: any\) \{\s*if \(e instanceof ApprovalAlreadyHandledError\) \{\s*if \(mountedRef\.current\) handleAlreadyHandled\(item, e(?:, modifiedPreview)?\);\s*return false;\s*\}\s*if \(mountedRef\.current\) \{\s*toast\(\{ title: "Error", description: e\.message, variant: "destructive" \}\);\s*\}\s*return false;\s*\} finally \{\s*if \(mountedRef\.current\) setSubmittingId\(null\);/,
+    `${handler} must report an already-handled request, show the destructive error toast on other failures and always reset the submitting state`,
   );
   assert.ok(
     body.indexOf("setItems(prev => prev.filter") > -1 &&
@@ -360,6 +360,7 @@ try {
     dismissContractorEmail,
     CANCELLATION_APPROVAL_CONFIRMATION,
     CANCELLATION_DISMISS_CONFIRMATION,
+    ApprovalAlreadyHandledError,
   } = await import(`${pathToFileURL(helperBundle).href}?t=${Date.now()}`);
 
   const requests = [];
@@ -465,6 +466,45 @@ try {
     assert.equal(requests.length, requestCount + 1, `${requestPath} must be requested exactly once`);
     assert.equal(requests.at(-1).requestPath, requestPath);
   }
+
+  // A draft another manager or tab already handled is reported as such (once,
+  // never retried); other 409s keep the generic failure.
+  const respondWith = (status, body) => ({
+    confirm: () => true,
+    clientApiFetch: async (requestPath, init) => {
+      requests.push({ requestPath, init });
+      return { ok: false, status, json: async () => body };
+    },
+  });
+  const handled = respondWith(409, { code: "queue_entry_not_pending", error: "Queue entry is no longer pending" });
+  const staleCases = [
+    [() => approveContractorEmail({ id: 52, emailType: "cancellation" }, handled), "approve",
+      "This request was already handled, so nothing was sent."],
+    [() => approveContractorEmail({ id: 53, emailType: "assignment" }, handled,
+      { subject: "Edited", text: "Edited." }), "approve",
+      "This request was already handled, so nothing was sent."],
+    [() => dismissContractorEmail({ id: 54, emailType: "cancellation" }, handled), "dismiss",
+      "This request was already handled, so nothing was dismissed."],
+  ];
+  for (const [run, action, message] of staleCases) {
+    const requestCount = requests.length;
+    await assert.rejects(run, error => {
+      assert.ok(error instanceof ApprovalAlreadyHandledError);
+      assert.equal(error.action, action);
+      assert.equal(error.message, message);
+      return true;
+    });
+    assert.equal(requests.length, requestCount + 1, "a handled draft is requested exactly once");
+  }
+  await assert.rejects(
+    () => approveContractorEmail({ id: 55, emailType: "assignment" },
+      respondWith(409, { code: "draft_credentials_damaged", error: "Damaged" })),
+    error => !(error instanceof ApprovalAlreadyHandledError) && error.message === "Failed to approve email",
+  );
+  await assert.rejects(
+    () => dismissContractorEmail({ id: 56, emailType: "assignment" }, respondWith(404, { error: "Queue entry not found" })),
+    error => !(error instanceof ApprovalAlreadyHandledError) && error.message === "Failed to cancel email",
+  );
 } finally {
   await rm(tempDir, { recursive: true, force: true });
 }

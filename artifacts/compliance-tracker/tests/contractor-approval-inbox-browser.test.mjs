@@ -1212,3 +1212,78 @@ test("signing out forgets only that manager's new-approval state, and signing ba
     for (const key of otherKeys) assert.equal(await storedState(page, key), otherState);
   });
 });
+
+test("acting on a request another manager already handled says so, refreshes the list and keeps the manager's edits", async () => {
+  const edited = await queuedCalendarCancellation("stale-edited", isoDay(45));
+  const dismissed = await queuedCalendarCancellation("stale-dismissed", isoDay(46));
+  const approved = await queuedCalendarCancellation("stale-approved", isoDay(47));
+  const untouched = await queuedCalendarCancellation("stale-untouched", isoDay(48));
+  const anotherManager = (path) => fixtures.owner.request("POST", `/fix-track/contractor-email-queue/${path}`, {});
+  const { page } = await browserContext(fixtures.manager);
+  const actions = recordQueueActions(page);
+  const unsent = page.getByRole("region", { name: "Your edits were not sent" });
+  const alreadyHandled = page.locator("li").filter({ hasText: "Already handled" });
+  await withDiagnostics(page, "already handled elsewhere", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, untouched.title).waitFor();
+
+    // Edited, then approved elsewhere before the manager sends.
+    const editedCard = queueCard(page, edited.title);
+    await editedCard.getByRole("button", { name: "Edit" }).click();
+    await editedCard.getByRole("textbox").nth(1).fill("Manager's reworded cancellation body");
+    assert.equal((await anotherManager(`${edited.queueId}/approve-and-send`)).status, 200);
+    const outboxBefore = (await readOutbox()).length;
+    await editedCard.getByRole("button", { name: "Save & Send Cancellation" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Approve calendar cancellation?" });
+    await dialog.getByRole("button", { name: "Approve Cancellation" }).click();
+    await alreadyHandled.waitFor();
+    assert.match(await alreadyHandled.innerText(), /already handled, so nothing was sent[\s\S]*list has been refreshed/);
+    await dialog.waitFor({ state: "detached" });
+    await editedCard.waitFor({ state: "detached" });
+    await unsent.waitFor();
+    assert.equal(await unsent.getByLabel("Body").inputValue(), "Manager's reworded cancellation body");
+    assert.equal(await unsent.getByLabel("Body").getAttribute("readonly"), "");
+    assert.match(await unsent.innerText(), new RegExp(`${edited.title} was already approved or dismissed`));
+    await page.waitForFunction(() => document.activeElement?.id === "unsent-draft-heading");
+    assert.equal((await readOutbox()).length, outboxBefore, "the stale edit sends nothing");
+    const sent = await queueRow(edited.queueId);
+    assert.equal(sent.status, "sent");
+    assert.equal(sent.sent_by, fixtures.owner.userId, "the other manager's send stands");
+    assert.notEqual(sent.body_text, "Manager's reworded cancellation body", "the stale edit is not saved");
+    await unsent.getByRole("button", { name: "Close" }).click();
+    await unsent.waitFor({ state: "detached" });
+
+    // Dismissed elsewhere before the manager dismisses.
+    const dismissedCard = queueCard(page, dismissed.title);
+    assert.equal((await anotherManager(`${dismissed.queueId}/cancel`)).status, 200);
+    await dismissedCard.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Dismiss", exact: true }).click();
+    await page.locator("li").filter({ hasText: "so nothing was dismissed" }).waitFor();
+    await dismissedCard.waitFor({ state: "detached" });
+    assert.equal(await unsent.count(), 0, "no draft to keep when nothing was edited");
+
+    // Approved elsewhere before the manager approves, unedited.
+    const approvedCard = queueCard(page, approved.title);
+    assert.equal((await anotherManager(`${approved.queueId}/approve-and-send`)).status, 200);
+    const outboxBeforeApprove = (await readOutbox()).length;
+    await approvedCard.getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.locator("li").filter({ hasText: "so nothing was sent" }).waitFor();
+    await approvedCard.waitFor({ state: "detached" });
+    assert.equal(await unsent.count(), 0);
+    assert.equal((await readOutbox()).length, outboxBeforeApprove);
+
+    // The rest of the list was reloaded and still works.
+    const untouchedCard = queueCard(page, untouched.title);
+    await untouchedCard.getByRole("button", { name: "Approve Cancellation" }).and(page.locator(":enabled")).waitFor();
+    assert.equal(await page.locator("li.destructive").count(), 0, "no generic error toast");
+  });
+  assert.equal((await queueRow(dismissed.queueId)).status, "cancelled");
+  assert.equal((await queueRow(approved.queueId)).status, "sent");
+  assert.equal((await queueRow(untouched.queueId)).status, "pending");
+  assert.deepEqual(actions, [
+    `/fix-track/contractor-email-queue/${edited.queueId}/edit-and-send`,
+    `/fix-track/contractor-email-queue/${dismissed.queueId}/cancel`,
+    `/fix-track/contractor-email-queue/${approved.queueId}/approve-and-send`,
+  ], "each stale action is tried once and never retried");
+});
