@@ -135,11 +135,10 @@ async function main() {
   check("admin: found beta item", betaItem != null, "no item for beta site");
 
   // Add fire-safety and legionella checks on both sites via admin
-  const uniqueDate = (offset = 0) => {
-    const d = new Date();
-    d.setDate(d.getDate() - offset);
-    return d.toISOString().slice(0, 10);
-  };
+  // The account's own day (Europe/London), which the record lock compares
+  // against; a UTC date is a day behind between 23:00 and 00:00 UTC in BST.
+  const uniqueDate = (offset = 0) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" })
+    .format(new Date(Date.now() - offset * 86400000));
 
   const fireAlpha = await admin("POST", "/fire-safety", {
     checkType: "alarm",
@@ -283,8 +282,8 @@ async function main() {
       (pm?.health === "clear") === (completedPm === expectedSites),
       `totals=${JSON.stringify(totals)} card=${JSON.stringify(pm)}`);
   };
-  const today = new Date().toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const today = uniqueDate(0);
+  const yesterday = uniqueDate(1);
   const draft = await admin("POST", "/daily-track-am", {
     siteId: siteAlphaId, checklistType: "premises_opening", checkDate: today, items: [],
   });
