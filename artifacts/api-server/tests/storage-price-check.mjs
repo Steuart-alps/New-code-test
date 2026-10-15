@@ -32,6 +32,13 @@ const stubs = {
   drizzle: `
     export const eq = (left, right) => ({ left, right });
     export const sql = (strings, ...values) => ({ text: strings.join("?"), values });
+    sql.raw = (text) => ({ text, values: [] });
+    // billing.ts imports offboarding.ts (#116), which needs these at load.
+    export const and = (...conditions) => ({ and: conditions });
+    export const isNull = (column) => ({ isNull: column });
+    export const isNotNull = (column) => ({ isNotNull: column });
+    export const inArray = (column, values) => ({ column, values });
+    export const lt = (left, right) => ({ left, right });
   `,
   db: `
     const state = globalThis.__storagePriceCheckState;

@@ -163,6 +163,10 @@ async function routeApi(route) {
         user: CONSULTANT, client: BUSINESSES[CONSULTANT.clientId].client, billingLocked: false, services: "all",
       });
       case "/api/billing/cancellation-status": return json(route, { accessEndsAt: null });
+      // The header's notification bell (#92) and a contractor's calendar
+      // cancellation history (#99) load alongside the forms under test.
+      case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
+      case "/api/fix-track/calendar-cancellations": return json(route, []);
       case "/api/managed-by": return json(route, null);
       case "/api/sites": return json(route, []);
       case "/api/staff-roster": return json(route, []);
