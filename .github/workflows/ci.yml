@@ -87,6 +87,9 @@ jobs:
       - name: Track record lock decision tests
         run: pnpm --filter @workspace/api-server run test:track-record-lock
 
+      - name: Storage add-on price check test
+        run: pnpm --filter @workspace/api-server run test:storage-price-check
+
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
       - name: Create base database schema

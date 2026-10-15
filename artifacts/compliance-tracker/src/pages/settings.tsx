@@ -102,6 +102,13 @@ function formatCheckedAge(seconds: number): string {
   return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
 }
 
+/** Storage add-on offer from /billing/config: per-GiB monthly price in minor units. */
+type StorageAddonOffer = { unitAmount: number; currency: string; minimumGib: number };
+
+function formatMinorUnits(minorUnits: number, currency: string): string {
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency: currency.toUpperCase() }).format(minorUnits / 100);
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -163,21 +170,29 @@ function StorageUsageCard() {
     }
   };
 
-  // Only offer to buy storage when the storage add-on is configured.
-  const [storageAddonAvailable, setStorageAddonAvailable] = useState(false);
+  // Only offer to buy storage when the storage add-on is configured and its
+  // Stripe price matches the provider rate plus margin (checked server-side).
+  const [storageAddon, setStorageAddon] = useState<StorageAddonOffer | null>(null);
   useEffect(() => {
     let cancelled = false;
-    apiFetch<{ storageAddonAvailable?: boolean; billingAvailable?: boolean }>(withBillingClient("/billing/config", activeClientId))
+    apiFetch<{ storageAddonAvailable?: boolean; billingAvailable?: boolean; storageAddon?: StorageAddonOffer | null }>(withBillingClient("/billing/config", activeClientId))
       .then((config) => {
-        if (!cancelled) setStorageAddonAvailable(config.storageAddonAvailable === true && config.billingAvailable !== false);
+        if (cancelled) return;
+        const offered = config.storageAddonAvailable === true && config.billingAvailable !== false;
+        setStorageAddon(offered && config.storageAddon ? config.storageAddon : null);
       })
-      .catch(() => { if (!cancelled) setStorageAddonAvailable(false); });
+      .catch(() => { if (!cancelled) setStorageAddon(null); });
     return () => { cancelled = true; };
   }, [activeClientId]);
 
+  const excessGib = Math.ceil((usage?.estimatedCost?.excessStorageBytes ?? 0) / (1024 ** 3));
+  const storagePurchaseGib = Math.max(1, storageAddon?.minimumGib ?? 1, excessGib);
+  const storagePurchaseLabel = storageAddon
+    ? `Buy ${storagePurchaseGib} GiB for ${formatMinorUnits(storageAddon.unitAmount * storagePurchaseGib, storageAddon.currency)} / month`
+    : "";
+
   const buyAdditionalStorage = async () => {
-    const excessBytes = usage?.estimatedCost?.excessStorageBytes ?? 0;
-    const gib = Math.max(1, Math.ceil(excessBytes / (1024 ** 3)));
+    const gib = storagePurchaseGib;
     setStoragePurchaseBusy(true);
     try {
       const response = await authenticatedApiFetch(withBillingClient("/billing/storage", activeClientId), {
@@ -267,7 +282,8 @@ function StorageUsageCard() {
                     Downloads are measured separately and are not charged here.
                   </p>
                 )}
-                {storageAddonAvailable && (
+                {storageAddon && (
+                  <>
                   <Button
                     type="button"
                     size="sm"
@@ -277,8 +293,12 @@ function StorageUsageCard() {
                     disabled={storagePurchaseBusy}
                   >
                     {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
-                    {storagePurchaseBusy ? "Adding storage to Stripe…" : "Buy additional storage"}
+                    {storagePurchaseBusy ? "Adding storage to Stripe…" : storagePurchaseLabel}
                   </Button>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatMinorUnits(storageAddon.unitAmount, storageAddon.currency)} per GiB each month, before any VAT. The first month is charged now.
+                  </p>
+                  </>
                 )}
               </div>
             </div>
