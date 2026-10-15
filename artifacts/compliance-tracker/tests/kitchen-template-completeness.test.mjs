@@ -67,6 +67,33 @@ try {
   assert.deepEqual([...completeness.recorded], ["2026-09-01"]);
   assert.deepEqual(completeness.drafts, ["2026-09-02"]);
   assert.deepEqual(completeness.gaps, ["2026-09-03"]);
+  // A closure is not a missing record: it is reported apart from gaps, left
+  // out of the operating-day total, and a record on the day always wins.
+  const withClosure = state.classifyFoodSafetyCompleteness("2026-09-01", "2026-09-05", {
+    missingDates: ["2026-09-03"],
+    draftDates: ["2026-09-02"],
+    nonOperatingDates: ["2026-09-04", "2026-09-05"],
+  });
+  assert.deepEqual([...withClosure.recorded], ["2026-09-01"], "a closed day is not counted as recorded");
+  assert.deepEqual(withClosure.gaps, ["2026-09-03"], "a closed day is not a gap");
+  assert.deepEqual(withClosure.closed, ["2026-09-04", "2026-09-05"]);
+  const days = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05"];
+  assert.deepEqual(state.foodSafetyMonthFigures(days, withClosure), {
+    operatingDays: 3, recorded: 1, drafts: 1, gaps: 1, closed: 2, pct: 33,
+  });
+  assert.equal(
+    state.foodSafetyMonthFigures(["2026-09-04"], withClosure).pct,
+    100,
+    "a month of only closed days is not incomplete",
+  );
+  assert.equal(state.kitchenDayStatus("2026-09-04", "2026-09-10", { hasRecord: false, submitted: false, nonOperating: true }), "nonOperating");
+  assert.equal(state.kitchenDayStatus("2026-09-12", "2026-09-10", { hasRecord: false, submitted: false, nonOperating: true }), "nonOperating", "a planned closure shows before the day");
+  assert.equal(state.kitchenDayStatus("2026-09-03", "2026-09-10", { hasRecord: false, submitted: false, nonOperating: false }), "missing");
+  assert.equal(state.kitchenDayStatus("2026-09-12", "2026-09-10", { hasRecord: false, submitted: false, nonOperating: false }), "future");
+  assert.equal(state.kitchenDayStatus("2026-09-04", "2026-09-10", { hasRecord: true, submitted: false, nonOperating: true }), "draft", "a record wins over a closure");
+  assert.equal(state.kitchenDayStatus("2026-09-04", "2026-09-10", { hasRecord: true, submitted: true, nonOperating: true }), "complete");
+  assert.equal(state.kitchenDayStatus("2026-09-03", "2026-09-10", undefined), "missing");
+
   assert.equal(
     state.foodSafetyCompletenessPath("2026-09-01", "2026-09-03", null),
     "/food-safety/missing-dates?from=2026-09-01&to=2026-09-03",
@@ -193,6 +220,16 @@ try {
     "a refetched record must not become the save baseline",
   );
 
+  // The KitchenTrack calendar labels closed days apart from missing ones.
+  const calendarSource = kitchenSource.slice(
+    kitchenSource.indexOf("function FoodSafetyCompletenessCalendar"),
+    kitchenSource.indexOf("export function DailyDiaryTab"),
+  );
+  assert.match(calendarSource, /status: kitchenDayStatus\(date, today, day\)/, "calendar cells use the shared day status");
+  assert.match(calendarSource, /filter\(\(\{ status \}\) => status === "missing"\)/, "only missing days count as missing");
+  assert.match(calendarSource, /Closed \(not operating\)/, "the legend names closed days");
+  assert.doesNotMatch(calendarSource, /Non-operating \/ future/, "closed days are not lumped in with future days");
+
   const foodSafetySource = await readFile(
     new URL("../src/pages/food-safety.tsx", import.meta.url),
     "utf8",
@@ -207,6 +244,14 @@ try {
     /const \[selectedSiteId, setSelectedSiteId\] = useState<number \| null>\(null\);/,
     "FoodSafety must keep an explicit organisation/site scope",
   );
+
+  assert.match(
+    foodSafetySource,
+    /foodSafetyMonthFigures\(monthDays, \{ recorded, drafts, gaps, closed \}\)/,
+    "monthly figures leave closed days out of the total",
+  );
+  assert.match(foodSafetySource, /operating days submitted/, "the banner counts operating days");
+  assert.match(foodSafetySource, /closed=\{closed\}/, "the calendar draws closed days");
 
   console.log("Kitchen template and completeness tests passed");
 } finally {

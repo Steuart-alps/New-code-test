@@ -1232,6 +1232,8 @@ async function runRuntimeMigrationsOnce() {
     await migrateMobileLoginChallenges();
     await migrateIncidents();
     await migrateComplianceAuditTrail();
+    // Before the audit-log migration, which installs its triggers.
+    await migrateKitchenClosedDays();
     await migrateAuditLog();
     await migrateSousVide();
     await migrateFoodSafetySiteScoping();
@@ -4812,6 +4814,39 @@ async function migrateMobileLoginChallenges() {
     ON "mobile_login_challenges" ("expires_at")
   `);
 }
+// KitchenTrack non-operating days (lib/db/src/schema/kitchen-closed-days.ts).
+// Removal is a soft delete, so the partial unique indexes only cover active
+// closures; one per scope and day, scoped like the diary's own indexes.
+async function migrateKitchenClosedDays() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "kitchen_closed_days" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "closed_date" date NOT NULL,
+      "reason" text NOT NULL,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "removed_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "removed_at" timestamp
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_kitchen_closed_days_client_date"
+      ON "kitchen_closed_days" ("client_id", "closed_date")
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_closed_days_org_date"
+      ON "kitchen_closed_days" ("client_id", "closed_date")
+      WHERE "site_id" IS NULL AND "removed_at" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_closed_days_site_date"
+      ON "kitchen_closed_days" ("client_id", "site_id", "closed_date")
+      WHERE "site_id" IS NOT NULL AND "removed_at" IS NULL
+  `);
+}
+
 async function migrateFoodSafetySiteScoping() {
   // 1. Nullable site_id column (whole-org diary keeps site_id NULL).
   await db.execute(sql`

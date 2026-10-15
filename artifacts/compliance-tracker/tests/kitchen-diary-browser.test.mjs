@@ -12,7 +12,9 @@ import { chromium } from "@playwright/test";
 //   - a refetch that brings a newer server version (another device created or
 //     changed the day) never overwrites unsaved edits, and the save is checked
 //     against the version the edits were made on;
-//   - a clean form shows the newer version, and a saved form is clean again.
+//   - a clean form shows the newer version, and a saved form is clean again;
+//   - the completeness calendar shows an organisation closure as closed, not
+//     missing, and the site scope does not inherit it.
 // The /api/food-safety fixture is stateful and mirrors
 // artifacts/api-server/src/routes/food-safety.ts.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -55,6 +57,15 @@ const YESTERDAY = localDate(-1);
 const TWO_DAYS_AGO = localDate(-2);
 const CLIENT_ID = 23;
 const SITE = { id: 7, name: "Harbour Kitchen" };
+// A whole-organisation closure in the month on screen, away from the days the
+// diary checks use: the 1st, or the month's last day early in a month.
+const CLOSED_DAY = Number(TODAY.slice(8)) > 3
+  ? `${TODAY.slice(0, 8)}01`
+  : `${TODAY.slice(0, 8)}${new Date(Number(TODAY.slice(0, 4)), Number(TODAY.slice(5, 7)), 0).getDate()}`;
+const CLOSURE = {
+  id: 1, date: CLOSED_DAY, reason: "Closed for refurbishment", createdAt: "2026-09-20T09:00:00.000Z",
+  createdByName: "Head Chef", addedAfterDay: false,
+};
 
 // ─── Stateful /api/food-safety fixture ───────────────────────────────────────
 
@@ -114,7 +125,17 @@ async function routeApi(route) {
       case "/api/sites": return json(route, [SITE]);
       case "/api/food-safety/config": return json(route, configFor(siteId));
       case "/api/food-safety": return json(route, [...records.values()].filter(r => r.siteId === siteId));
-      case "/api/food-safety/summary": return json(route, { days: [] });
+      case "/api/food-safety/summary": {
+        // Mirrors the API: a record wins; org and site closures are separate.
+        const year = Number(url.searchParams.get("year")), month = Number(url.searchParams.get("month"));
+        const days = Array.from({ length: new Date(year, month, 0).getDate() }, (_, i) => {
+          const date = `${year}-${String(month).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`;
+          const record = records.get(scopeKey(siteId, date));
+          const closure = !record && siteId == null && date === CLOSED_DAY ? CLOSURE : null;
+          return { date, hasRecord: !!record, submitted: !!record?.submittedAt, nonOperating: !!closure, closure };
+        });
+        return json(route, { year, month, siteId, days });
+      }
     }
     const byDate = path.match(/^\/api\/food-safety\/by-date\/(\d{4}-\d{2}-\d{2})$/);
     if (byDate) {
@@ -210,6 +231,24 @@ try {
   await page.goto(`${baseUrl}/tests/kitchen-diary-harness.html`, { waitUntil: "domcontentloaded" });
   await waitForDiary(page, { date: TODAY, unit: "Org Fridge", correctives: "" });
 
+  // ── A closed day is labelled closed, never missing ──
+  const closedCell = page.locator(`button[title^="${CLOSED_DAY} —"]`);
+  await closedCell.waitFor();
+  assert.equal(await closedCell.getAttribute("data-day-status"), "nonOperating", "the closure shows as closed");
+  assert.match(await closedCell.getAttribute("title"), /closed \(not operating\): Closed for refurbishment · marked by Head Chef/);
+  const attention = page.getByText("Dates needing attention").locator("..");
+  const closedLabel = new Date(`${CLOSED_DAY}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  if (await attention.count()) {
+    assert.doesNotMatch(await attention.innerText(), new RegExp(`\\b${closedLabel} — missing`), "a closed day is not listed as missing");
+  }
+  const missingCells = await page.locator('button[data-day-status="missing"]').count();
+  const missingSummary = page.getByText(/missing days? in /);
+  if (missingCells > 0) {
+    assert.match(await missingSummary.innerText(), new RegExp(`^${missingCells} missing day`), "the missing count leaves the closure out");
+  }
+  assert.match(await page.getByText("Closed days", { exact: true }).locator("..").innerText(), /Closed for refurbishment/);
+  checks.push("calendar: an organisation closure is closed, not missing");
+
   // ── Date change with unsaved edits: Keep editing, then Discard ──
   await correctivesBox(page).fill("Org fridge door reseated");
   await dateInput(page).fill(YESTERDAY);
@@ -302,6 +341,14 @@ try {
   await waitForDiary(page, { date: TWO_DAYS_AGO, unit: "Site Fridge", correctives: "" });
   assert.equal(await discardDialog(page).count(), 0, "a saved form switches without a prompt");
   checks.push("save: the form is clean afterwards");
+
+  // The organisation's closure does not close the site's day.
+  assert.notEqual(
+    await page.locator(`button[title^="${CLOSED_DAY} —"]`).getAttribute("data-day-status"),
+    "nonOperating",
+    "site scope ignores the organisation closure",
+  );
+  checks.push("calendar: the site scope keeps its own closed days");
 
   assert.deepEqual(pageErrors, [], "no page errors");
   const unexpected = unexpectedRequests.filter(entry => !entry.startsWith("GET "));

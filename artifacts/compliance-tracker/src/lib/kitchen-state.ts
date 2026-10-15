@@ -71,23 +71,62 @@ export function daysBetween(from: string, to: string): string[] {
 export type FoodSafetyCompleteness = {
   missingDates: string[];
   draftDates: string[];
+  /** Days marked closed with no diary record: neither recorded nor missing. */
+  nonOperatingDates?: string[];
 };
 
 export function classifyFoodSafetyCompleteness(
   from: string,
   to: string,
   data: FoodSafetyCompleteness,
-): { recorded: Set<string>; drafts: string[]; gaps: string[] } {
+): { recorded: Set<string>; drafts: string[]; gaps: string[]; closed: string[] } {
   const missing = new Set(data.missingDates);
   const drafts = new Set(data.draftDates);
+  const closed = new Set(data.nonOperatingDates ?? []);
   const recorded = new Set(
-    daysBetween(from, to).filter((date) => !missing.has(date) && !drafts.has(date)),
+    daysBetween(from, to).filter((date) => !missing.has(date) && !drafts.has(date) && !closed.has(date)),
   );
   return {
     recorded,
     drafts: data.draftDates,
     gaps: data.missingDates,
+    closed: data.nonOperatingDates ?? [],
   };
+}
+
+/** Month figures over operating days only: closed days are left out of both
+ *  the total and the missing count, so a planned closure is never a gap. */
+export function foodSafetyMonthFigures(
+  monthDays: string[],
+  completeness: { recorded: Set<string>; drafts: string[]; gaps: string[]; closed: string[] },
+): { operatingDays: number; recorded: number; drafts: number; gaps: number; closed: number; pct: number } {
+  const closed = new Set(completeness.closed);
+  const operating = monthDays.filter((date) => !closed.has(date));
+  const recorded = operating.filter((date) => completeness.recorded.has(date)).length;
+  return {
+    operatingDays: operating.length,
+    recorded,
+    drafts: operating.filter((date) => completeness.drafts.includes(date)).length,
+    gaps: operating.filter((date) => completeness.gaps.includes(date)).length,
+    closed: monthDays.length - operating.length,
+    pct: operating.length > 0 ? Math.round((recorded / operating.length) * 100) : 100,
+  };
+}
+
+export type KitchenDayStatus = "complete" | "draft" | "missing" | "nonOperating" | "future";
+
+/** One calendar cell of the KitchenTrack completeness calendar. A record
+ *  always wins over a closure; a closed day without one is non-operating. */
+export function kitchenDayStatus(
+  date: string,
+  today: string,
+  day: { hasRecord?: boolean; submitted?: boolean; nonOperating?: boolean } | undefined,
+): KitchenDayStatus {
+  if (day?.submitted) return "complete";
+  if (day?.hasRecord) return "draft";
+  if (day?.nonOperating) return "nonOperating";
+  if (date > today) return "future";
+  return "missing";
 }
 
 export function foodSafetyCompletenessPath(

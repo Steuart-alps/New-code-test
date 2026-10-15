@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "artifacts/compliance-tracker/src/pages/kitchen.tsx"
+      - "artifacts/compliance-tracker/src/pages/food-safety.tsx"
       - "artifacts/compliance-tracker/src/lib/kitchen-state.ts"
       - "artifacts/compliance-tracker/tests/kitchen-*"
       - "artifacts/compliance-tracker/package.json"
@@ -14,6 +15,7 @@ on:
     branches: [main]
     paths:
       - "artifacts/compliance-tracker/src/pages/kitchen.tsx"
+      - "artifacts/compliance-tracker/src/pages/food-safety.tsx"
       - "artifacts/compliance-tracker/src/lib/kitchen-state.ts"
       - "artifacts/compliance-tracker/tests/kitchen-*"
       - "artifacts/compliance-tracker/package.json"

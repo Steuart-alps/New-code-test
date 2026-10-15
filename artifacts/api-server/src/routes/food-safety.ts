@@ -649,6 +649,150 @@ async function resolveDiarySiteId(
   return site.siteId;
 }
 
+// ── Non-operating (closed) days ───────────────────────────────────────────────
+// A closed day is not a missing diary day. Closures are scoped like the diary
+// (NULL = whole-organisation diary) and the scopes are independent. A day with
+// a diary record always counts as operating, whatever closure exists.
+type ClosedDay = {
+  id: number;
+  date: string;
+  reason: string;
+  createdAt: string;
+  createdByName: string | null;
+  /** Recorded after the day itself, so inspectors can tell planned closures
+   *  from ones added afterwards. */
+  addedAfterDay: boolean;
+};
+
+async function loadClosedDays(
+  clientId: number,
+  siteId: number | null,
+  from: string,
+  to: string,
+): Promise<Map<string, ClosedDay>> {
+  const scope = siteId === null ? sql`c.site_id IS NULL` : sql`c.site_id = ${siteId}`;
+  const result = await db.execute(sql`
+    SELECT c.id, c.closed_date::text AS date, c.reason, c.created_at, u.name AS created_by_name,
+      c.created_at::date > c.closed_date AS added_after_day
+    FROM kitchen_closed_days c
+    LEFT JOIN users u ON u.id = c.created_by
+    WHERE c.client_id = ${clientId} AND ${scope} AND c.removed_at IS NULL
+      AND c.closed_date >= ${from} AND c.closed_date <= ${to}
+    ORDER BY c.closed_date
+  `);
+  const rows = result.rows as Array<{
+    id: number; date: string; reason: string; created_at: string | Date;
+    created_by_name: string | null; added_after_day: boolean;
+  }>;
+  return new Map(rows.map((row) => [row.date, {
+    id: Number(row.id),
+    date: row.date,
+    reason: row.reason,
+    createdAt: new Date(row.created_at).toISOString(),
+    createdByName: row.created_by_name,
+    addedAfterDay: !!row.added_after_day,
+  }]));
+}
+
+const isCalendarDate = (value: unknown): value is string => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const millis = Date.parse(`${value}T00:00:00Z`);
+  return !Number.isNaN(millis) && new Date(millis).toISOString().slice(0, 10) === value;
+};
+const addDays = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+
+// GET /api/food-safety/closed-days?from=YYYY-MM-DD&to=YYYY-MM-DD[&siteId=N]
+router.get("/closed-days", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  const { from, to } = req.query as { from?: string; to?: string };
+  if (!isCalendarDate(from) || !isCalendarDate(to) || from > to || to > addDays(from, 366)) {
+    return void res.status(400).json({ error: "from and to (YYYY-MM-DD) are required, at most 367 days apart" });
+  }
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+  const closed = await loadClosedDays(clientId, siteId, from, to);
+  res.json({ from, to, siteId, closedDays: [...closed.values()] });
+});
+
+const closedDaysSchema = z.object({
+  from: z.string().refine(isCalendarDate),
+  to: z.string().refine(isCalendarDate),
+  reason: z.string().trim().min(1).max(200),
+}).strict();
+
+// POST /api/food-safety/closed-days[?siteId=N] — admin-only. Marks every day
+// from..to as not operating for this diary scope. Refuses days that already
+// have a diary record (they operated); days already closed are left as they are.
+router.post("/closed-days", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  const parsed = closedDaysSchema.safeParse(req.body);
+  if (!parsed.success || parsed.data.from > parsed.data.to || parsed.data.to > addDays(parsed.data.from, 366)) {
+    return void res.status(400).json({ error: "Give a reason and a from/to date range of at most 367 days" });
+  }
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+  const { from, to, reason } = parsed.data;
+
+  const recorded = await db
+    .select({ recordDate: foodSafetyRecordsTable.recordDate })
+    .from(foodSafetyRecordsTable)
+    .where(and(
+      eq(foodSafetyRecordsTable.clientId, clientId),
+      sql`${foodSafetyRecordsTable.recordDate} >= ${from}`,
+      sql`${foodSafetyRecordsTable.recordDate} <= ${to}`,
+      siteScopeCond(siteId),
+    ));
+  if (recorded.length > 0) {
+    return void res.status(409).json({
+      error: "These days already have a diary record, so they cannot be marked closed",
+      code: "KITCHEN_DAY_HAS_RECORD",
+      dates: recorded.map((row) => row.recordDate).sort(),
+    });
+  }
+
+  const userId = req.currentUser!.id;
+  const created: string[] = [];
+  for (let date = from; date <= to; date = addDays(date, 1)) {
+    const conflict = siteId === null
+      ? sql`ON CONFLICT (client_id, closed_date) WHERE site_id IS NULL AND removed_at IS NULL DO NOTHING`
+      : sql`ON CONFLICT (client_id, site_id, closed_date) WHERE site_id IS NOT NULL AND removed_at IS NULL DO NOTHING`;
+    const inserted = await db.execute(sql`
+      INSERT INTO kitchen_closed_days (client_id, site_id, closed_date, reason, created_by)
+      VALUES (${clientId}, ${siteId}, ${date}, ${reason}, ${userId})
+      ${conflict}
+      RETURNING id
+    `);
+    if (inserted.rows.length) created.push(date);
+  }
+  res.status(201).json({ siteId, created });
+});
+
+// DELETE /api/food-safety/closed-days/:id — admin-only. The closure stays in
+// the table (removed_at/removed_by) and in the audit log.
+router.delete("/closed-days/:id", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return void res.status(400).json({ error: "Invalid id" });
+  const found = await db.execute(sql`
+    SELECT site_id FROM kitchen_closed_days
+    WHERE id = ${id} AND client_id = ${clientId} AND removed_at IS NULL
+  `);
+  const row = found.rows[0] as { site_id: number | null } | undefined;
+  if (!row) return void res.status(404).json({ error: "Not found" });
+  if (row.site_id !== null && !(await siteBelongsToClient(Number(row.site_id), clientId, getActiveDepartmentId(req)))) {
+    return void res.status(404).json({ error: "Not found" });
+  }
+  await db.execute(sql`
+    UPDATE kitchen_closed_days SET removed_at = now(), removed_by = ${req.currentUser!.id}
+    WHERE id = ${id} AND client_id = ${clientId} AND removed_at IS NULL
+  `);
+  res.json({ ok: true });
+});
+
 // GET /api/food-safety/mobile-entries/:entryId?recordDate=YYYY-MM-DD[&siteId=N]
 // Whether the server has already applied a device entry for this user. The
 // mobile app asks before turning a rejected entry back into an editable
@@ -770,13 +914,17 @@ router.get("/summary", requireAuth, async (req, res) => {
     ));
 
   const recordsByDate = new Map(records.map((record) => [record.recordDate, record]));
+  const closedDays = await loadClosedDays(clientId, siteId, firstDate, lastDate);
   const days = Array.from({ length: daysInMonth }, (_, index) => {
     const date = `${monthPrefix}-${String(index + 1).padStart(2, "0")}`;
     const record = recordsByDate.get(date);
+    const closure = record ? undefined : closedDays.get(date);
     return {
       date,
       hasRecord: !!record,
       submitted: !!record?.submittedAt,
+      nonOperating: !!closure,
+      closure: closure ?? null,
     };
   });
 
@@ -829,17 +977,21 @@ router.get("/missing-dates", requireAuth, async (req, res) => {
     .filter((record) => !record.submittedAt)
     .map((record) => record.recordDate)
     .sort();
+  const closedDays = await loadClosedDays(clientId, siteId, from, to);
   const missingDates: string[] = [];
+  const nonOperatingDates: string[] = [];
   for (
     let day = fromMillis;
     day <= toMillis;
     day += 86400000
   ) {
     const date = new Date(day).toISOString().slice(0, 10);
-    if (!submittedDates.has(date) && !draftDates.includes(date)) missingDates.push(date);
+    if (submittedDates.has(date) || draftDates.includes(date)) continue;
+    if (closedDays.has(date)) nonOperatingDates.push(date);
+    else missingDates.push(date);
   }
 
-  res.json({ from, to, siteId, missingDates, draftDates });
+  res.json({ from, to, siteId, missingDates, draftDates, nonOperatingDates });
 });
 
 // POST /api/food-safety[?siteId=N]
@@ -1243,9 +1395,11 @@ router.get("/status", requireAuth, async (req, res) => {
   const toUtcDays = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / MS_DAY);
   type KitchenStatus = "ok" | "due_soon" | "overdue" | "never";
 
-  function computeStatus(lastDate: string | null, frequencyDays: number) {
+  // coveredThrough: the last day that needs no record (the last record, or
+  // closed days straight after it). Defaults to the last record.
+  function computeStatus(lastDate: string | null, frequencyDays: number, coveredThrough: string | null = lastDate) {
     if (!lastDate) return { lastDate: null, dueDate: null, status: "never" as KitchenStatus };
-    const dueDays = toUtcDays(lastDate) + frequencyDays;
+    const dueDays = toUtcDays(coveredThrough ?? lastDate) + frequencyDays;
     const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);
     const daysUntilDue = dueDays - todayDays;
     const dueSoonWindow = Math.max(1, Math.ceil(frequencyDays * 0.2));
@@ -1293,6 +1447,32 @@ router.get("/status", requireAuth, async (req, res) => {
     `),
   ]);
 
+  // Closed (non-operating) days in each diary scope, for the daily diary only:
+  // a closure straight after the last diary day is not an overdue day.
+  const today = await getAccountToday(clientId);
+  const closedRows = await db.execute(sql`
+    SELECT site_id, closed_date::text AS closed_date FROM kitchen_closed_days
+    WHERE client_id = ${clientId} AND removed_at IS NULL
+      AND closed_date > ${new Date((todayDays - 400) * MS_DAY).toISOString().slice(0, 10)}
+      AND closed_date <= ${today} ${diaryScope}
+  `);
+  const closedByUnit = new Map<string, Set<string>>();
+  for (const row of closedRows.rows as { site_id: number | null; closed_date: string }[]) {
+    const key = row.site_id == null ? "none" : String(row.site_id);
+    if (!closedByUnit.has(key)) closedByUnit.set(key, new Set());
+    closedByUnit.get(key)!.add(row.closed_date);
+  }
+  const diaryCoveredThrough = (unitId: number | null, lastDate: string | null) => {
+    const closed = closedByUnit.get(unitId === null ? "none" : String(unitId));
+    if (!lastDate || !closed) return lastDate;
+    let covered = lastDate;
+    for (;;) {
+      const next = new Date((toUtcDays(covered) + 1) * MS_DAY).toISOString().slice(0, 10);
+      if (next > today || !closed.has(next)) return covered;
+      covered = next;
+    }
+  };
+
   const byKey = (result: { rows: unknown[] }) => new Map(
     (result.rows as { site_id: number | null; last_date: string | null }[])
       .map(row => [row.site_id == null ? "none" : String(row.site_id), row.last_date]),
@@ -1322,7 +1502,11 @@ router.get("/status", requireAuth, async (req, res) => {
   for (const measure of measures) {
     const perUnit = units
       .filter(unit => !measure.tasks || taskCount(unit.id, measure.tasks) > 0)
-      .map(unit => ({ unit, ...computeStatus(latestFor(measure.map, unit.id, measure.wholeBusiness), measure.frequencyDays) }));
+      .map(unit => {
+        const lastDate = latestFor(measure.map, unit.id, measure.wholeBusiness);
+        const covered = measure.checkType === "daily_diary" ? diaryCoveredThrough(unit.id, lastDate) : lastDate;
+        return { unit, ...computeStatus(lastDate, measure.frequencyDays, covered) };
+      });
     if (!perUnit.length) continue;
     const worst = perUnit.reduce((current, row) => {
       const difference = severity(row.status) - severity(current.status);

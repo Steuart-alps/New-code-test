@@ -20,6 +20,7 @@ import {
   useUpdateFoodSafetyRecord,
   useListSites,
   FoodSafetyRecord,
+  type KitchenClosedDay,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
@@ -50,6 +51,7 @@ import {
   kitchenDiaryHydrationAction,
   kitchenDiaryRecordKey,
   kitchenDiaryScopeKey,
+  kitchenDayStatus,
   kitchenDiarySnapshot,
   parseColdUnits,
   parseJsonArray,
@@ -58,6 +60,7 @@ import {
   stampedLimit,
   shouldDisplayKitchenSection,
   type ColdUnit,
+  type KitchenDayStatus,
   type KitchenDiaryLoaded,
 } from "@/lib/kitchen-state";
 import {
@@ -565,8 +568,6 @@ function ConfigDialog() {
 
 // ── Food Safety Completeness Calendar ────────────────────────────────────────
 
-type FSDayStatus = "complete" | "draft" | "missing" | "nonOperating";
-
 function shiftFSMonth(ym: string, delta: number): string {
   const [y, m] = ym.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
@@ -578,15 +579,102 @@ function fsMonthLabel(ym: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 }
 
+function fsDayLabel(date: string): string {
+  return new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
 interface FSCompletenessCalendarProps {
   siteId?: number | null;
   onPickDay: (date: string) => void;
+}
+
+/** Admin control: mark a run of days as closed (not operating) for the diary
+ *  scope shown. Days with a diary record are refused by the API. */
+function MarkClosedDaysDialog({ siteId, defaultDate, onSaved }: { siteId: number | null; defaultDate: string; onSaved: () => void }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [from, setFrom] = useState(defaultDate);
+  const [to, setTo] = useState(defaultDate);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const siteQuery = siteId == null ? "" : `?siteId=${siteId}`;
+      const res = await apiFetch(`/food-safety/closed-days${siteQuery}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to, reason }),
+      });
+      if (res.status === 409) {
+        const body = await res.json().catch(() => ({}));
+        const dates: string[] = Array.isArray(body?.dates) ? body.dates : [];
+        toast({
+          title: "Not marked closed",
+          description: `${dates.map(fsDayLabel).join(", ")} already ${dates.length === 1 ? "has" : "have"} a diary record, so ${dates.length === 1 ? "it was" : "they were"} open.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!res.ok) {
+        toast({ title: "Not marked closed", description: await getApiErrorMessage(res, "Closed days could not be saved."), variant: "destructive" });
+        return;
+      }
+      toast({ title: "Closed days saved", description: "They no longer count as missing records." });
+      setOpen(false);
+      setReason("");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (next) { setFrom(defaultDate); setTo(defaultDate); } }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7">Mark closed days</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Mark days the kitchen is closed</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Closed days are not counted as missing diary records. Who marked them and when is kept in the audit history.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="closed-from">From</Label>
+            <Input id="closed-from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); if (to < e.target.value) setTo(e.target.value); }} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="closed-to">To</Label>
+            <Input id="closed-to" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="closed-reason">Reason</Label>
+          <Input id="closed-reason" value={reason} maxLength={200} placeholder="e.g. Closed for refurbishment" onChange={(e) => setReason(e.target.value)} />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button disabled={saving || !from || !to || from > to || !reason.trim()} onClick={save}>
+            {saving ? "Saving…" : "Mark closed"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCalendarProps) {
   const today = format(new Date(), "yyyy-MM-dd");
   const currentMonth = today.slice(0, 7);
   const [month, setMonth] = useState(currentMonth);
+  const canAdmin = useCanAdmin();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [removing, setRemoving] = useState<KitchenClosedDay | null>(null);
 
   const [y, m] = month.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
@@ -599,25 +687,38 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
   });
   const summaryByDate = new Map((summary?.days ?? []).map((day) => [day.date, day]));
 
-  const dayStatuses: { date: string; status: FSDayStatus }[] = [];
+  const dayStatuses: { date: string; status: KitchenDayStatus; closure: KitchenClosedDay | null }[] = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const date = `${month}-${String(d).padStart(2, "0")}`;
-    if (date > today) {
-      dayStatuses.push({ date, status: "nonOperating" });
-      continue;
-    }
     const day = summaryByDate.get(date);
-    const status: FSDayStatus = day?.submitted
-      ? "complete"
-      : day?.hasRecord
-      ? "draft"
-      : "missing";
-    dayStatuses.push({ date, status });
+    dayStatuses.push({ date, status: kitchenDayStatus(date, today, day), closure: day?.closure ?? null });
   }
 
   const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Mon = 0
+  // Closed days are never missing: they are counted on their own.
   const missingCount = dayStatuses.filter(({ status }) => status === "missing").length;
+  const closedDays = dayStatuses.filter(({ status }) => status === "nonOperating");
   const actionableDates = dayStatuses.filter(({ status }) => status === "missing" || status === "draft");
+
+  const refreshCompleteness = () => {
+    queryClient.invalidateQueries({
+      predicate: (query) => {
+        const key = query.queryKey[0];
+        return typeof key === "string" && (key.startsWith("/api/food-safety") || key.startsWith("/api/dashboard"));
+      },
+    });
+  };
+
+  const removeClosure = async (closure: KitchenClosedDay) => {
+    const res = await apiFetch(`/food-safety/closed-days/${closure.id}`, { method: "DELETE" });
+    setRemoving(null);
+    if (!res.ok) {
+      toast({ title: "Closed day not removed", description: await getApiErrorMessage(res, "Try again shortly."), variant: "destructive" });
+      return;
+    }
+    toast({ title: "Closed day removed", description: `${fsDayLabel(closure.date)} counts as an operating day again.` });
+    refreshCompleteness();
+  };
 
   return (
     <Card className="mt-6">
@@ -625,9 +726,10 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h3 className="font-semibold text-sm">Monthly Completeness</h3>
-            <p className="text-xs text-muted-foreground">Days where the food safety diary was not completed.</p>
+            <p className="text-xs text-muted-foreground">Days where the food safety diary was not completed. Closed days are not counted as missing.</p>
           </div>
           <div className="flex items-center gap-2">
+            {canAdmin && <MarkClosedDaysDialog siteId={siteId ?? null} defaultDate={month === currentMonth ? today : `${month}-01`} onSaved={refreshCompleteness} />}
             <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setMonth(shiftFSMonth(month, -1))}>←</Button>
             <span className="text-sm font-medium min-w-[130px] text-center">{fsMonthLabel(month)}</span>
             <Button
@@ -653,13 +755,15 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
                 <div key={d} className="text-[10px] text-muted-foreground text-center font-medium py-1">{d}</div>
               ))}
               {Array.from({ length: firstWeekday }).map((_, i) => <div key={`pad-${i}`} />)}
-              {dayStatuses.map(({ date, status }) => (
+              {dayStatuses.map(({ date, status, closure }) => (
                 <button
                   key={date}
-                  disabled={status === "nonOperating"}
-                  onClick={() => { if (status !== "nonOperating") onPickDay(date); }}
+                  data-day-status={status}
+                  disabled={status === "future"}
+                  onClick={() => { if (status !== "future") onPickDay(date); }}
                   title={
-                    status === "nonOperating" ? `${date} — not operating yet` :
+                    status === "future" ? `${date} — future` :
+                    status === "nonOperating" ? `${date} — closed (not operating)${closure ? `: ${closure.reason}${closure.createdByName ? ` · marked by ${closure.createdByName}` : ""}${closure.addedAfterDay ? " · added afterwards" : ""}` : ""}` :
                     status === "complete" ? `${date} — submitted` :
                     status === "draft" ? `${date} — draft saved` :
                     `${date} — no record`
@@ -669,7 +773,8 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
                     status === "complete" && "bg-emerald-100 text-emerald-700 hover:scale-110",
                     status === "draft"    && "bg-amber-100 text-amber-700 hover:scale-110",
                     status === "missing"  && "bg-amber-200 text-amber-800 hover:scale-110",
-                    status === "nonOperating"   && "bg-muted/30 text-muted-foreground/40",
+                    status === "nonOperating" && "bg-slate-100 text-slate-500 border border-dashed border-slate-300 hover:scale-110",
+                    status === "future"   && "bg-muted/30 text-muted-foreground/40",
                   )}
                 >
                   {parseInt(date.slice(8), 10)}
@@ -680,10 +785,12 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300" /> Filled / submitted</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-300" /> Draft only</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-200 border border-amber-300" /> Missing</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-muted/30 border border-border" /> Non-operating / future</span>
-              {missingCount > 0 && (
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-100 border border-dashed border-slate-300" /> Closed (not operating)</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-muted/30 border border-border" /> Future</span>
+              {(missingCount > 0 || closedDays.length > 0) && (
                 <span className="ml-auto font-medium text-amber-700">
                   {missingCount} missing day{missingCount !== 1 ? "s" : ""} in {fsMonthLabel(month)}
+                  {closedDays.length > 0 && <span className="text-muted-foreground font-normal"> · {closedDays.length} closed</span>}
                 </span>
               )}
             </div>
@@ -698,15 +805,55 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
                         ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
                         : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100",
                     )} onClick={() => onPickDay(date)}>
-                      {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} — {status === "missing" ? "missing" : "draft"}
+                      {fsDayLabel(date)} — {status === "missing" ? "missing" : "draft"}
                     </Button>
                   ))}
                 </div>
               </div>
             )}
+            {closedDays.length > 0 && (
+              <div className="mt-4 border-t border-border/50 pt-3">
+                <p className="text-xs font-medium text-foreground">Closed days</p>
+                <ul className="mt-2 space-y-1">
+                  {closedDays.map(({ date, closure }) => (
+                    <li key={date} className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">{fsDayLabel(date)}</span>
+                      {closure && (
+                        <>
+                          <span>{closure.reason}</span>
+                          <span>
+                            · marked by {closure.createdByName ?? "a former user"} on {fsDayLabel(closure.createdAt.slice(0, 10))}
+                            {closure.addedAfterDay && " (added afterwards)"}
+                          </span>
+                          {canAdmin && (
+                            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setRemoving(closure)}>
+                              Remove
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </>
         )}
       </CardContent>
+      <AlertDialog open={removing !== null} onOpenChange={(next) => { if (!next) setRemoving(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this closed day?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removing ? `${fsDayLabel(removing.date)} will count as an operating day again, so it shows as missing until a diary is filled in. The removal is kept in the audit history.` : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (removing) void removeClosure(removing); }}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
