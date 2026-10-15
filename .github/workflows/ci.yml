@@ -66,6 +66,13 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # Fails when openapi.yaml would break clients built against the agreed
+      # baseline (lib/api-spec/openapi.baseline.yaml), e.g. installed phone apps.
+      - name: API contract compatibility check
+        run: |
+          pnpm --filter @workspace/api-spec run test:contract
+          pnpm run check:api-contract
+
       # Regenerates the API client and zod schemas from the OpenAPI spec and
       # fails if the committed output differs. Needs lib/*/dist from Typecheck.
       - name: Generated API client drift check
