@@ -23,6 +23,13 @@ import { objectPathTenantMismatch, patPhotoObjectAccess } from "../lib/patLegacy
 import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
 import { findLiveSubscription } from "../lib/billing";
 import { readStorageRateConfig } from "../lib/storagePricing";
+import {
+  GIB,
+  listScheduledStorageReductions,
+  planIncludedStorageGib,
+  renewingStorageGib,
+  stillPaidReducedGib,
+} from "../lib/storageCapacity";
 import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
@@ -36,11 +43,6 @@ const objectStorageService = new ObjectStorageService();
 // the usage ledger once this router is loaded.
 setStorageUsageRecorder(storageUsageLedger);
 const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
-const GIB = 1024 ** 3;
-const DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE: Record<string, number> = {
-  core: 1,
-  bundle: 1,
-};
 
 storageDownloadRouter.get("/storage/download/:token", async (req: Request, res: Response) => {
   let resolved: Awaited<ReturnType<typeof resolveDownloadToken>> = null;
@@ -80,35 +82,18 @@ async function estimateStorageCost(clientId: number, usedBytes: number, monthlyD
   const rates = readStorageRateConfig();
   if (!rates) return null;
   const { providerUsdPerGibMonth: providerRate, markupPercent } = rates;
-  const rawAllowances = process.env.STORAGE_INCLUDED_GIB_BY_SERVICE;
-  let allowanceMap: Record<string, unknown>;
-  try {
-    allowanceMap = rawAllowances ? JSON.parse(rawAllowances) : DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE;
-  } catch {
-    return null;
-  }
-  if (!allowanceMap || typeof allowanceMap !== "object" || Array.isArray(allowanceMap)) return null;
-  const configuredValues = Object.values(allowanceMap);
-  if (!configuredValues.length || configuredValues.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER / GIB)) return null;
   const [client] = await db.select({ stripeCustomerId: clientsTable.stripeCustomerId })
     .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client?.stripeCustomerId) return null;
   const subscription = await findLiveSubscription(client.stripeCustomerId).catch(() => null);
   if (!subscription) return null;
-  const storagePriceId = process.env.STORAGE_ADDON_PRICE_ID?.trim();
-  const isStorageItem = (item: (typeof subscription.items.data)[number]) =>
-    item.price?.metadata?.service_key === "storage" || (Boolean(storagePriceId) && item.price?.id === storagePriceId);
-  const allowances = subscription.items.data
-    .filter((item) => !isStorageItem(item))
-    .map((item) => String(item.price?.metadata?.service_key ?? ""))
-    .map((key) => Number(allowanceMap[key]))
-    .filter((value) => Number.isFinite(value) && value >= 0);
-  if (!allowances.length) return null;
-  // Storage bought as an add-on (one unit per GiB) adds to the plan allowance.
-  const purchasedGib = subscription.items.data
-    .filter(isStorageItem)
-    .reduce((sum, item) => sum + Math.max(0, Number(item.quantity ?? 0) || 0), 0);
-  const includedBytes = (Math.max(...allowances) + purchasedGib) * GIB;
+  const planGib = planIncludedStorageGib(subscription.items.data);
+  if (planGib === null) return null;
+  // Storage bought as an add-on (one unit per GiB) adds to the plan allowance,
+  // including GiB already reduced for the next renewal but paid until then.
+  const purchasedGib = renewingStorageGib(subscription.items.data)
+    + stillPaidReducedGib(await listScheduledStorageReductions(clientId, subscription.id));
+  const includedBytes = (planGib + purchasedGib) * GIB;
   const excess = Math.max(0, usedBytes - includedBytes);
   const providerMinorUnits = Math.round(providerRate * 100 * excess / GIB);
   const storageMinorUnits = Math.round(
