@@ -92,6 +92,7 @@ const DEFAULT_CHECKS = {
 
   "hot-tub-pdf-export": { stage: "integration", class: "browser", cmd: web("test:hot-tub-pdf") },
   "recovery-code-browser": { stage: "integration", class: "browser", cmd: web("test:recovery-code-browser") },
+  "verify-email-browser": { stage: "integration", class: "browser", cmd: web("test:verify-email-browser") },
   "photo-upload-browser": { stage: "integration", class: "browser", cmd: web("test:photo-upload-browser") },
   "billing-addon-settings-browser": { stage: "integration", class: "browser", cmd: web("test:billing-addon-settings-browser") },
   "required-track-photos-browser": { stage: "integration", class: "browser", cmd: web("test:required-track-photos-browser") },

@@ -62,6 +62,7 @@ run_case() {
   if [ "$behavior" = "reject" ]; then
     sleep 1
     grep -q "Failed to send welcome email" "$LOG_FILE"
+    grep -q "Failed to resend verification email" "$LOG_FILE"
   fi
 
   stop_server
