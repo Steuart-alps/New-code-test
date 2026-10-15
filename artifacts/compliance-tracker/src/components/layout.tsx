@@ -243,7 +243,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </button>
           <div className="flex items-center justify-center gap-2 opacity-40">
             <span className="text-xs font-display italic">by</span>
-            <img src={alpsLogo} alt="Alps Consultancy" className="h-4 grayscale invert" />
+            <img src={alpsLogo} alt="ALPS Consultancy" className="h-4 grayscale invert" />
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

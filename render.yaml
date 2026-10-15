@@ -38,8 +38,10 @@ services:
           property: connectionString
       - key: SESSION_SECRET
         generateValue: true
-      # Set once a custom domain is live; until then the app uses Render's
-      # onrender.com address (RENDER_EXTERNAL_URL).
+      # Set both to https://complytrack.alpsconsultancy.co.uk once that domain is live
+      # on this service; until then the app uses Render's onrender.com address
+      # (RENDER_EXTERNAL_URL). With PUBLIC_SITE_URL set, web pages requested on
+      # the onrender.com address redirect there (API paths do not).
       - key: PUBLIC_APP_URL
         sync: false
       - key: PUBLIC_SITE_URL

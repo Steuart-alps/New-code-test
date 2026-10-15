@@ -65,7 +65,7 @@ export default function ResetPasswordPage() {
             </h1>
             <div className="flex items-center justify-center gap-2 mt-4 relative z-10">
               <span className="text-white/60 text-xs font-display italic">by</span>
-              <img src={alpsLogo} alt="Alps Consultancy" className="h-4 opacity-70 brightness-0 invert" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-4 opacity-70 brightness-0 invert" />
             </div>
           </div>
 

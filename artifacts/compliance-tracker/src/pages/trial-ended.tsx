@@ -341,7 +341,7 @@ export default function TrialEndedPage() {
 
       <div className="mt-8 flex items-center justify-center gap-2 opacity-50">
         <span className="text-sm font-display italic text-[#162D42]">by</span>
-        <img src={alpsLogo} alt="ALPS Consulting" className="h-5 grayscale mix-blend-multiply" />
+        <img src={alpsLogo} alt="ALPS Consultancy" className="h-5 grayscale mix-blend-multiply" />
       </div>
     </div>
   );
