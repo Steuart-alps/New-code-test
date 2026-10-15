@@ -16,10 +16,16 @@ import {
   type TaskItem,
   type TasksResponse,
 } from '@/components/task-list-logic';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { entryStatus } from '@/components/outbox-status-logic';
+import { useOutboxAction } from '@/hooks/useRecordOutbox';
+import { ACTION_TARGETS } from '@/lib/checkOutboxCore';
 
 /**
  * Today's staff tasks (the web's "My tasks today") with "Mark done".
- * Viewers see the business's tasks for today without any action.
+ * Viewers see the business's tasks for today without any action. With no
+ * signal, "Mark done" is saved on this phone and sent automatically (the API
+ * recognises a resend by its entry ID, so it is never recorded twice).
  */
 export function TodayTasks() {
   const colors = useColors();
@@ -33,14 +39,22 @@ export function TodayTasks() {
     enabled: !!user,
   });
 
+  const outbox = useOutboxAction('task-completion');
   const complete = useMutation({
-    mutationFn: (task: TaskItem) => apiFetch(`/api/tasks/${task.id}/complete`, {
-      method: 'POST',
-      body: JSON.stringify({ date: task.occurrenceDate }),
-    }),
-    onSuccess: async () => {
+    mutationFn: async (task: TaskItem) => {
+      const result = await outbox.send(
+        ACTION_TARGETS.taskCompletion(task.id, task.occurrenceDate),
+        { date: task.occurrenceDate },
+        `Mark done · ${task.title} · ${task.occurrenceDate}`,
+      );
+      if (result.state === 'rejected') {
+        throw Object.assign(new Error(result.error), { status: result.entry.rejection === 'conflict' ? 409 : 400 });
+      }
+      return result.state;
+    },
+    onSuccess: async (state) => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      if (state === 'sent') await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: async (err: Error & { status?: number }) => {
       // Someone else already ticked it: show the current state.
@@ -50,7 +64,7 @@ export function TodayTasks() {
         return;
       }
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Not marked done', err.status ? err.message : 'No connection. Try again when you are back online.');
+      Alert.alert('Not marked done', err.message);
     },
   });
 
@@ -76,6 +90,8 @@ export function TodayTasks() {
         list.map((task) => {
           const done = !!task.completion;
           const pending = complete.isPending && complete.variables?.id === task.id;
+          const saved = outbox.pending(ACTION_TARGETS.taskCompletion(task.id, task.occurrenceDate).scopeKey);
+          const savedStatus = saved ? entryStatus(saved) : null;
           return (
             <View
               key={`${task.id}:${task.occurrenceDate}`}
@@ -93,8 +109,19 @@ export function TodayTasks() {
                 >
                   {taskStatusLabel(task)}
                 </Text>
+                {savedStatus ? (
+                  <Text
+                    testID={`task-saved-${task.id}`}
+                    style={[styles.status, { color: saved?.state === 'failed' ? colors.destructive : colors.warning }]}
+                  >
+                    {saved?.state === 'failed' ? `Mark done ${savedStatus.tone === 'conflict' ? 'conflict' : 'not accepted'} — see below`
+                      : saved?.state === 'sending' ? 'Marked done · syncing…' : 'Marked done · saved on this phone'}
+                  </Text>
+                ) : null}
               </View>
-              {canMarkDone(task, user?.role) ? (
+              {saved ? (
+                <Feather name="upload-cloud" size={22} color={saved.state === 'failed' ? colors.destructive : colors.warning} accessibilityLabel="Saved on this phone" />
+              ) : canMarkDone(task, user?.role) ? (
                 <TouchableOpacity
                   testID={`task-done-${task.id}`}
                   accessibilityRole="button"
@@ -112,12 +139,16 @@ export function TodayTasks() {
           );
         })
       )}
+      <View style={styles.outbox}>
+        <OutboxEntries entries={outbox.entries} readError={outbox.readError} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   section: { paddingHorizontal: 16, paddingTop: 20 },
+  outbox: { marginHorizontal: -16 },
   sectionTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', marginBottom: 12 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 8, padding: 14, marginBottom: 10 },
   cardBody: { flex: 1, gap: 3 },

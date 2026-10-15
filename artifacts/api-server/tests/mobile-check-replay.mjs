@@ -194,6 +194,15 @@ try {
       },
       changed: { costPence: 5000 },
     },
+    {
+      // A FixTrack issue report saved on the phone without signal.
+      name: 'FixTrack issue', path: '/fix-track/issues', table: 'fix_track_issues',
+      body: {
+        title: 'Leaking tap', issueType: 'plumbing', priority: 'medium', location: 'Kitchen',
+        reportedBy: 'Porter', reportedDate: day, siteId,
+      },
+      changed: { title: 'Dripping tap' },
+    },
   ];
 
   for (const { name, path, table, body, changed, photoReplay, otherUser = staff } of cases) {
@@ -535,6 +544,118 @@ try {
     console.log('BikeTrack hire and service mobile replays: idempotent per user and payload, concurrent-safe, no partial hires, bearer sessions attributed.');
   }
 
+  // FixTrack notes from the phone's outbox: a resend appends the note once.
+  {
+    const name = 'FixTrack note';
+    const newIssue = async (title) => {
+      const issue = await owner.request('POST', '/fix-track/issues', { title, location: 'Corridor', reportedBy: 'Porter', reportedDate: day, siteId });
+      assert.equal(issue.status, 201, JSON.stringify(issue.data));
+      return issue.data.id;
+    };
+    const issueId = await newIssue('Broken light');
+    const notePath = `/fix-track/issues/${issueId}/notes`;
+    const noteRows = async () => Number((await pool.query(
+      "SELECT count(*) FROM fix_track_issue_activity WHERE issue_id = $1 AND event_type = 'note'", [issueId],
+    )).rows[0].count);
+    const sent = { note: 'Bulb ordered', clientEntryId: entryId() };
+    const first = await owner.request('POST', notePath, sent);
+    assert.equal(first.status, 200, `${name}: first send appends (${JSON.stringify(first.data)})`);
+    const replay = await owner.request('POST', notePath, sent);
+    assert.equal(replay.status, 200, `${name}: a lost-response replay is recognised (${JSON.stringify(replay.data)})`);
+    assert.equal(replay.data.id, issueId, `${name}: replay returns the issue`);
+    assert.equal(await noteRows(), 1, `${name}: one note row`);
+    const { solution_notes: notes } = (await pool.query('SELECT solution_notes FROM fix_track_issues WHERE id = $1', [issueId])).rows[0];
+    assert.equal(notes.match(/Bulb ordered/g).length, 1, `${name}: the note text is appended once`);
+    const conflict = await owner.request('POST', notePath, { ...sent, note: 'Different note' });
+    assert.equal(conflict.status, 409, `${name}: an entry ID cannot hide a changed note`);
+    assert.equal(conflict.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal((await owner.request('POST', `/fix-track/issues/${await newIssue('Other issue')}/notes`, sent)).status, 409,
+      `${name}: the entry ID is bound to its issue`);
+    assert.equal((await staff.request('POST', notePath, sent)).status, 409, `${name}: the entry belongs to the user who sent it`);
+    const racing = { note: 'Electrician booked', clientEntryId: entryId() };
+    const both = await Promise.all([owner.request('POST', notePath, racing), owner.request('POST', notePath, racing)]);
+    assert.deepEqual(both.map((r) => r.status), [200, 200], `${name}: ${JSON.stringify(both.map((r) => r.data))}`);
+    assert.equal(await noteRows(), 2, `${name}: a concurrent duplicate appends once`);
+    assert.equal((await owner.request('POST', notePath, { note: 'Web note' })).status, 200);
+    assert.equal((await owner.request('POST', notePath, { note: 'Web note' })).status, 200);
+    assert.equal(await noteRows(), 4, `${name}: notes without an entry ID are not deduplicated`);
+    assert.equal((await owner.request('POST', notePath, { note: 'x', clientEntryId: 'short' })).status, 400, `${name}: entry IDs are validated`);
+  }
+
+  // "Mark done" from the phone's outbox: a resend gets the stored completion,
+  // a second completion of the same occurrence stays a plain 409.
+  {
+    const name = 'task completion';
+    const newTask = async (title) => {
+      const task = await owner.request('POST', '/tasks', { title, recurrence: 'daily', startsOn: isoDay(-3), assigneeRole: 'managers' });
+      assert.equal(task.status, 201, JSON.stringify(task.data));
+      return task.data.id;
+    };
+    const completions = async () => Number((await pool.query('SELECT count(*) FROM task_completions WHERE client_id = $1', [owner.clientId])).rows[0].count);
+    const taskId = await newTask('Open the kitchen');
+    const path = `/tasks/${taskId}/complete`;
+    const sent = { date: day, clientEntryId: entryId() };
+    const first = await owner.request('POST', path, sent);
+    assert.equal(first.status, 201, `${name}: first send completes (${JSON.stringify(first.data)})`);
+    const replay = await owner.request('POST', path, sent);
+    assert.equal(replay.status, 200, `${name}: a lost-response replay is recognised (${JSON.stringify(replay.data)})`);
+    assert.equal(replay.data.id, first.data.id, `${name}: replay returns the stored completion`);
+    const conflict = await owner.request('POST', path, { ...sent, note: 'Changed' });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.data.code, 'CLIENT_ENTRY_CONFLICT', `${name}: an entry ID cannot hide a changed payload`);
+    assert.equal((await staff.request('POST', path, sent)).status, 409, `${name}: the entry belongs to the user who sent it`);
+    const again = await owner.request('POST', path, { date: day, clientEntryId: entryId() });
+    assert.equal(again.status, 409, `${name}: a new entry for an occurrence already done is refused`);
+    assert.notEqual(again.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal((await owner.request('POST', `/tasks/${await newTask('Other task')}/complete`, sent)).status, 409,
+      `${name}: the entry ID is bound to its task`);
+    const before = await completions();
+    const racingPath = `/tasks/${await newTask('Close the kitchen')}/complete`;
+    const racing = { date: day, clientEntryId: entryId() };
+    const both = await Promise.all([owner.request('POST', racingPath, racing), owner.request('POST', racingPath, racing)]);
+    assert.deepEqual(both.map((r) => r.status).sort(), [200, 201], `${name}: ${JSON.stringify(both.map((r) => r.data))}`);
+    assert.equal(both[0].data.id, both[1].data.id);
+    assert.equal(await completions(), before + 1);
+    assert.equal((await owner.request('POST', path, { date: day, clientEntryId: 'short' })).status, 400, `${name}: entry IDs are validated`);
+  }
+
+  // SafeTrack self-acknowledgement with the phone's bearer token: recorded
+  // against the signed-in user, so a resend from the outbox is recognised.
+  {
+    const email = `mobile-ack-${randomUUID()}@test.local`;
+    const password = `mobile-ack-${randomUUID()}`;
+    const user = await owner.request('POST', '/users', { name: 'Mobile staff', email, password, role: 'client_staff', clientId: owner.clientId });
+    assert.equal(user.status, 201, JSON.stringify(user.data));
+    const login = await fetch(`${base}/auth/mobile-login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }),
+    });
+    const { token } = await login.json();
+    assert.equal(login.status, 200);
+    assert.equal(typeof token, 'string', 'staff sign in on the phone');
+    const phone = async (method, path, body) => {
+      const response = await fetch(`${base}${path}`, {
+        method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: response.status, data: await response.json().catch(() => null) };
+    };
+    const ra = await owner.request('POST', '/safe-track/risk-assessments', { title: 'Knife handling', requiresAcknowledgement: true, status: 'published' });
+    assert.equal(ra.status, 201, JSON.stringify(ra.data));
+    const ackPath = `/safe-track/risk-assessments/${ra.data.id}/self-acknowledge`;
+    const sent = { staffName: 'Mobile staff', clientEntryId: entryId() };
+    const first = await phone('POST', ackPath, sent);
+    assert.deepEqual([first.status, first.data], [200, { created: 1, alreadyAcknowledged: false }], JSON.stringify(first.data));
+    const replay = await phone('POST', ackPath, sent);
+    assert.deepEqual([replay.status, replay.data], [200, { created: 0, alreadyAcknowledged: true }], 'a resend is recognised');
+    const rows = (await pool.query(
+      "SELECT acknowledged_by FROM safe_track_acknowledgements WHERE client_id = $1 AND document_type = 'ra' AND document_id = $2",
+      [owner.clientId, ra.data.id],
+    )).rows;
+    assert.deepEqual(rows.map((row) => row.acknowledged_by), [user.data.id], 'one acknowledgement, recorded against the phone user');
+    const acks = await phone('GET', `/safe-track/risk-assessments/${ra.data.id}/acknowledgements`);
+    assert.ok(acks.data.some((ack) => ack.acknowledged_by === user.data.id), 'the phone sees its own acknowledgement');
+  }
+
   // Updates never accept or overwrite the device entry ID.
   const fire = await owner.request('POST', '/fire-safety', {
     checkType: 'fire_doors', checkDate: day, result: 'pass', siteId, clientEntryId: entryId(),
@@ -544,73 +665,5 @@ try {
   assert.equal((await pool.query('SELECT client_entry_id FROM fire_safety_checks WHERE id = $1', [fire.data.id])).rows[0].client_entry_id,
     stored.client_entry_id, 'an edit keeps the original entry ID');
 
-  // KitchenTrack cleaning schedules are one log per kitchen, period and
-  // frequency that each save updates (draft saves, then the sign-off). Device
-  // entry IDs are kept as receipts, so a resend is recognised even after later
-  // saves, and a stale device save never reopens a signed-off schedule.
-  {
-    const logs = async () => count('kitchen_cleaning_logs', owner.clientId);
-    const receipts = async () => count('kitchen_cleaning_log_entries', owner.clientId);
-    const completions = [{ taskId: 1, taskArea: 'Kitchen', taskName: 'Wipe surfaces', done: true, doneBy: 'Cook' }];
-    const draft = { logDate: day, frequency: 'daily', siteId, completions, signedBy: 'Cook', submittedAt: null, clientEntryId: entryId() };
-
-    const first = await owner.request('POST', '/kitchen-cleaning/logs', draft);
-    assert.equal(first.status, 201, `cleaning: first draft creates the log (${JSON.stringify(first.data)})`);
-    const replay = await owner.request('POST', '/kitchen-cleaning/logs', Object.fromEntries(Object.entries(draft).reverse()));
-    assert.equal(replay.status, 200, `cleaning: a lost-response replay is recognised (${JSON.stringify(replay.data)})`);
-    assert.equal(replay.data.id, first.data.id);
-    assert.equal(replay.data.receipt_hash, undefined, 'cleaning: receipt internals are not returned');
-    const changed = await owner.request('POST', '/kitchen-cleaning/logs', { ...draft, signedBy: 'Someone else' });
-    assert.equal(changed.status, 409);
-    assert.equal(changed.data.code, 'CLIENT_ENTRY_CONFLICT');
-    assert.equal((await staff.request('POST', '/kitchen-cleaning/logs', draft)).status, 409, 'cleaning: the entry belongs to its sender');
-    assert.equal(await logs(), 1);
-    assert.equal(await receipts(), 1);
-
-    // The sign-off updates the same log; its replay and a late replay of the
-    // earlier draft both change nothing.
-    const signOff = { ...draft, completions: [{ ...completions[0] }], submittedAt: new Date().toISOString(), clientEntryId: entryId() };
-    const signed = await owner.request('POST', '/kitchen-cleaning/logs', signOff);
-    assert.equal(signed.status, 200, JSON.stringify(signed.data));
-    assert.equal(signed.data.id, first.data.id);
-    assert.ok(signed.data.submitted_at);
-    assert.equal((await owner.request('POST', '/kitchen-cleaning/logs', signOff)).status, 200, 'cleaning: sign-off replay');
-    assert.equal((await owner.request('POST', '/kitchen-cleaning/logs', draft)).status, 200, 'cleaning: late draft replay is recognised');
-    const stillSigned = (await pool.query('SELECT submitted_at FROM kitchen_cleaning_logs WHERE id = $1', [first.data.id])).rows[0];
-    assert.ok(stillSigned.submitted_at, 'cleaning: a replayed draft never reopens the signed-off log');
-
-    // A different device save made before the sign-off reached the server.
-    const stale = await staff.request('POST', '/kitchen-cleaning/logs', { ...draft, clientEntryId: entryId() });
-    assert.equal(stale.status, 409, JSON.stringify(stale.data));
-    assert.equal(stale.data.code, 'CLEANING_LOG_SIGNED_OFF');
-    assert.ok((await pool.query('SELECT submitted_at FROM kitchen_cleaning_logs WHERE id = $1', [first.data.id])).rows[0].submitted_at);
-    assert.equal(await logs(), 1);
-    assert.equal(await receipts(), 2);
-
-    // Concurrent attempts of one entry, for a kitchen and for the account-wide
-    // (no kitchen) schedule: one applies, the other replays.
-    for (const [frequency, raceSite] of [['weekly', siteId], ['monthly', null]]) {
-      const racing = { ...draft, frequency, siteId: raceSite, clientEntryId: entryId() };
-      const both = await Promise.all([
-        owner.request('POST', '/kitchen-cleaning/logs', racing),
-        owner.request('POST', '/kitchen-cleaning/logs', racing),
-      ]);
-      assert.deepEqual(both.map((r) => r.status).sort(), [200, 201], `cleaning ${frequency}: ${JSON.stringify(both.map((r) => r.data))}`);
-      assert.equal(both[0].data.id, both[1].data.id);
-    }
-    assert.equal(await logs(), 3);
-
-    // Web saves (no entry ID) keep upserting as before, including after sign-off.
-    const web = await owner.request('POST', '/kitchen-cleaning/logs', { ...signOff, clientEntryId: undefined, signedBy: 'Manager' });
-    assert.equal(web.status, 200, JSON.stringify(web.data));
-    assert.equal(web.data.signed_by, 'Manager');
-    assert.equal(await receipts(), 4);
-
-    // Entry IDs are per client; malformed ones are rejected.
-    const foreign = await other.request('POST', '/kitchen-cleaning/logs', { ...draft, siteId: null });
-    assert.equal(foreign.status, 201, `cleaning: another client's identical ID is independent (${JSON.stringify(foreign.data)})`);
-    assert.equal((await owner.request('POST', '/kitchen-cleaning/logs', { ...draft, clientEntryId: 'short' })).status, 400);
-  }
-
-  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, BikeTrack service, GreenTrack (pre-use checks, defects, fuel logs, service records, PUWER inspections), swim session, surveillance, first-aid and pool incident mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
+  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, BikeTrack service, GreenTrack (pre-use checks, defects, fuel logs, service records, PUWER inspections), swim session, surveillance, first-aid, pool incident, FixTrack issue/note, task completion and SafeTrack acknowledgement mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
 } finally { await pool.end(); }

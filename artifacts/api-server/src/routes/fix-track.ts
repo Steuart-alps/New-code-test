@@ -35,6 +35,7 @@ async function markComplianceNotified(q: any, clientId: number): Promise<void> {
       AND (${q.reminder_cycle ?? null}::text IS NULL OR to_char(due_date, 'YYYY-MM-DD') = ${q.reminder_cycle ?? null}::text)`);
 }
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -431,6 +432,10 @@ const issueCreate = z.object({
   siteId:        z.number().int().nullable().optional(),
 });
 
+// Creation only: the phone's outbox sends a stable device entry ID so a resend
+// after a lost response returns the stored issue instead of a duplicate.
+const issuePost = issueCreate.extend({ clientEntryId: clientEntryIdSchema.optional() });
+
 const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
 const issueUpdate = issueCreate.partial().extend({ resolverSignature: drawnSignature.optional() });
 
@@ -564,10 +569,18 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = issueCreate.safeParse(req.body);
+  const parsed = issuePost.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
-  const data = parsed.data;
+  const { clientEntryId: _entryId, ...data } = parsed.data;
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(parsed.data);
+  const storedEntry = async () => entry && (await db.select().from(fixTrackIssuesTable)
+    .where(and(eq(fixTrackIssuesTable.clientId, clientId), eq(fixTrackIssuesTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+
   if (data.status && data.status !== "reported") {
     return res.status(400).json({ error: "New issues must start with reported status" });
   }
@@ -590,15 +603,27 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
     if (autoId != null) contractorId = autoId;
   }
 
-  const [row] = await db.insert(fixTrackIssuesTable)
-    .values({ ...data, contractorId, clientId, createdBy: req.currentUser!.id })
-    .returning();
+  let row;
+  try {
+    [row] = await db.insert(fixTrackIssuesTable)
+      .values({
+        ...data, contractorId, clientId, createdBy: userId,
+        clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
+      })
+      .returning();
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
   await db.insert(fixTrackIssueActivityTable).values({
     clientId,
     issueId: row.id,
     eventType: "status",
     status: row.status,
-    createdBy: (req.session as any).userId ?? null,
+    // The signed-in user (web session or the phone's bearer token).
+    createdBy: userId,
   });
   res.status(201).json(row);
 });
@@ -887,7 +912,9 @@ router.post("/issues/:id/notes", requireAuth, denyViewers, async (req, res) => {
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-  const noteSchema = z.object({ note: z.string().min(1).max(2000) });
+  // The phone's outbox sends a stable device entry ID: a resend after a lost
+  // response returns the issue without appending the note twice.
+  const noteSchema = z.object({ note: z.string().min(1).max(2000), clientEntryId: clientEntryIdSchema.optional() });
   const parsed = noteSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
@@ -896,33 +923,58 @@ router.post("/issues/:id/notes", requireAuth, denyViewers, async (req, res) => {
     ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))`
     : sql``;
 
+  const userId = req.currentUser!.id;
+  const deviceEntry = clientEntryFrom({ ...parsed.data, issueId: id });
+  const storedNote = async () => deviceEntry && (await db.select().from(fixTrackIssueActivityTable)
+    .where(and(eq(fixTrackIssueActivityTable.clientId, clientId), eq(fixTrackIssueActivityTable.clientEntryId, deviceEntry.id)))
+    .limit(1))[0];
+  const replay = async (note: typeof fixTrackIssueActivityTable.$inferSelect) => {
+    const result = await db.execute(sql`SELECT * FROM fix_track_issues WHERE id = ${note.issueId} AND client_id = ${clientId}${deptClause} LIMIT 1`);
+    const issue = (result.rows ?? [])[0];
+    if (!issue) return res.status(404).json({ error: "Not found" });
+    return respondToStoredEntry(res, note, userId, deviceEntry!, () => issue);
+  };
+  const prior = await storedNote();
+  if (deviceEntry && prior) return replay(prior);
+
   const stamp = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   const entry = `[${stamp}] ${parsed.data.note.trim()}`;
 
   // Append server-side in one statement so concurrent notes never clobber
   // each other.
-  const row = await db.transaction(async (tx) => {
-    const result = await tx.execute(sql`
-      UPDATE fix_track_issues
-      SET solution_notes = CASE
-            WHEN solution_notes IS NULL OR solution_notes = '' THEN ${entry}
-            ELSE solution_notes || E'\n\n' || ${entry}
-          END,
-          updated_at = now()
-      WHERE id = ${id} AND client_id = ${clientId}${deptClause}
-      RETURNING *
-    `);
-    const updated = (result.rows ?? [])[0];
-    if (!updated) return null;
-    await tx.insert(fixTrackIssueActivityTable).values({
-      clientId,
-      issueId: id,
-      eventType: "note",
-      note: parsed.data.note.trim(),
-      createdBy: (req.session as any).userId ?? null,
+  let row;
+  try {
+    row = await db.transaction(async (tx) => {
+      const result = await tx.execute(sql`
+        UPDATE fix_track_issues
+        SET solution_notes = CASE
+              WHEN solution_notes IS NULL OR solution_notes = '' THEN ${entry}
+              ELSE solution_notes || E'\n\n' || ${entry}
+            END,
+            updated_at = now()
+        WHERE id = ${id} AND client_id = ${clientId}${deptClause}
+        RETURNING *
+      `);
+      const updated = (result.rows ?? [])[0];
+      if (!updated) return null;
+      await tx.insert(fixTrackIssueActivityTable).values({
+        clientId,
+        issueId: id,
+        eventType: "note",
+        note: parsed.data.note.trim(),
+        // The signed-in user (web session or the phone's bearer token).
+        createdBy: userId,
+        clientEntryId: deviceEntry?.id ?? null,
+        clientEntryHash: deviceEntry?.hash ?? null,
+      });
+      return updated;
     });
-    return updated;
-  });
+  } catch (err) {
+    // A concurrent replay won; its transaction (note and append) stands alone.
+    const raced = deviceEntry && isUniqueViolation(err) ? await storedNote() : undefined;
+    if (deviceEntry && raced) return replay(raced);
+    throw err;
+  }
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });

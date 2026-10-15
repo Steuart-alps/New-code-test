@@ -31,6 +31,7 @@
     "test:kitchen-temperature-flow": "node tests/kitchen-temperature-form-flow.mjs",
     "test:kitchen-outbox": "node tests/kitchen-outbox.mjs",
     "test:check-outbox": "node tests/check-outbox.mjs",
+    "test:outbox-status": "node tests/outbox-status-logic.mjs",
     "test:pest-track": "node tests/pest-track-logic.mjs",
     "test:aqua-extras": "node tests/aqua-extras-logic.mjs",
     "test:green-records": "node tests/green-records-logic.mjs",

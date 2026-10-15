@@ -9,7 +9,7 @@ const source = await readFile(new URL('../lib/checkOutboxCore.ts', import.meta.u
 const js = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { CheckOutbox, checkOutboxKey, isRetryableStatus, RECORD_KINDS, RECORD_PATHS, deliveredQueryKeys } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
+const { CheckOutbox, checkOutboxKey, isRetryableStatus, RECORD_KINDS, RECORD_PATHS, ACTION_TARGETS, deliveredQueryKeys } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
 
 const A = { clientId: 301, userId: 401 };
 const B = { clientId: 301, userId: 402 };
@@ -567,5 +567,80 @@ assert.deepEqual(deliveredQueryKeys('cleaning-log'), [['kitchen-cleaning-log'], 
 }
 assert.deepEqual(deliveredQueryKeys('bike-hire'), [['bike-hires'], ['bike-fleet'], ['dashboard-summary']]);
 assert.deepEqual(deliveredQueryKeys('bike-service'), [['bike-services'], ['bike-services-latest'], ['dashboard-summary']]);
+// Offline staff actions: FixTrack issue reports (a record kind) and notes,
+// "Mark done", SafeTrack and DocTrack acknowledgements. Each is saved before
+// sending, resent identically, limited to its own path shape, and an action
+// can be queued only once per target (notes: once per note). A 409 is kept as
+// a conflict with its reason; a delivered entry records when it was synced.
+{
+  let online = false;
+  let answer = null;
+  const sent = [];
+  const actions = new CheckOutbox({
+    storage,
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      // One rejection, then the server accepts again.
+      if (answer) { const rejection = answer; answer = null; throw rejection; }
+      return { ok: true };
+    },
+    async onSent() {},
+  });
+  await actions.activate({ clientId: 301, userId: 499 }, 'token-actions');
+  assert.ok(RECORD_KINDS.includes('fix-issue'));
+  assert.equal(RECORD_PATHS['fix-issue'], '/api/fix-track/issues');
+  const task = ACTION_TARGETS.taskCompletion(12, '2026-10-12');
+  assert.deepEqual(task, { path: '/api/tasks/12/complete', scopeKey: 'task-completion:12:2026-10-12' });
+  assert.equal(ACTION_TARGETS.safeAck('sops', 4).path, '/api/safe-track/sops/4/self-acknowledge');
+  assert.equal(ACTION_TARGETS.docAck(9).path, '/api/doc-track/documents/9/acknowledge');
+  assert.equal(ACTION_TARGETS.fixNote(3).perEntry, true, 'several notes may wait for one issue');
+  const entry = (kind, entryId, target, body) => ({ entryId, kind, ...target, label: kind, body });
+  await actions.enqueue(entry('fix-issue', 'fix-issue-000001', { path: RECORD_PATHS['fix-issue'], scopeKey: 'fix-issue:fix-issue-000001' },
+    { title: 'Leaking tap', location: 'Kitchen', reportedBy: 'Porter', reportedDate: '2026-10-12' }));
+  await actions.enqueue(entry('task-completion', 'task-done-000001', task, { date: '2026-10-12' }));
+  await assert.rejects(actions.enqueue(entry('task-completion', 'task-done-000002', task, { date: '2026-10-12' })), /already has a saved device entry/,
+    'one unsent "Mark done" per task occurrence');
+  await actions.enqueue(entry('safe-ack', 'safe-ack-0000001', ACTION_TARGETS.safeAck('risk-assessments', 4), { staffName: 'Sam' }));
+  await actions.enqueue(entry('doc-ack', 'doc-ack-00000001', ACTION_TARGETS.docAck(9), { self: true, signature: null }));
+  const note = ACTION_TARGETS.fixNote(3);
+  await actions.enqueue(entry('fix-note', 'fix-note-0000001', { path: note.path, scopeKey: `${note.scopeKey}:fix-note-0000001` }, { note: 'Bulb ordered' }));
+  await actions.enqueue(entry('fix-note', 'fix-note-0000002', { path: note.path, scopeKey: `${note.scopeKey}:fix-note-0000002` }, { note: 'Fitted' }));
+  for (const [kind, path] of [
+    ['fix-issue', '/api/fix-track/issues/3'], ['fix-note', '/api/fix-track/issues/3'], ['fix-note', '/api/fix-track/issues/x/notes'],
+    ['task-completion', '/api/tasks/12'], ['task-completion', '/api/tasks/12/complete?undo=1'],
+    ['safe-ack', '/api/safe-track/training-records/4/self-acknowledge'], ['safe-ack', '/api/safe-track/sops/4/acknowledge'],
+    ['doc-ack', '/api/doc-track/documents/9'], ['doc-ack', '/api/safe-track/sops/9/self-acknowledge'],
+  ]) {
+    await assert.rejects(actions.enqueue(entry(kind, 'blocked-path-0001', { path, scopeKey: `${kind}:blocked` }, {})), /cannot be saved/, path);
+  }
+  await actions.replay();
+  assert.ok(actions.getSnapshot().entries.every((row) => row.state === 'queued'), 'all wait on the device offline');
+  assert.match(actions.getSnapshot().entries[0].error, /Network request failed/, 'the failed attempt is shown');
+  online = true;
+  answer = Object.assign(new Error('This task is already marked done'), { status: 409 });
+  await actions.replay();
+  const [first] = actions.getSnapshot().entries;
+  assert.equal(first.state, 'failed');
+  assert.equal(first.rejection, 'conflict', 'a 409 is shown as a conflict');
+  assert.equal(first.error, 'This task is already marked done', 'with the server reason');
+  await actions.retry(first.entryId);
+  await actions.replay();
+  const delivered = actions.getSnapshot().entries;
+  assert.ok(delivered.every((row) => row.state === 'sent' && row.sentAt && !row.rejection), 'all synced, with the time');
+  // Offline attempt, conflict, retry: always the same body and entry ID.
+  const attempts = sent.filter((attempt) => attempt.body.clientEntryId === 'fix-issue-000001');
+  assert.ok(attempts.length >= 3);
+  for (const attempt of attempts) assert.deepEqual(attempt, attempts[0], 'every resend is identical');
+  assert.ok(sent.some((attempt) => attempt.path === '/api/fix-track/issues/3/notes' && attempt.body.note === 'Fitted'));
+  answer = Object.assign(new Error('Forbidden'), { status: 403 });
+  await actions.enqueue(entry('task-completion', 'task-done-000003', ACTION_TARGETS.taskCompletion(13, '2026-10-12'), { date: '2026-10-12' }));
+  await actions.replay();
+  const rejected = actions.getSnapshot().entries.find((row) => row.entryId === 'task-done-000003');
+  assert.deepEqual([rejected.state, rejected.rejection], ['failed', 'rejected'], 'other rejections are not conflicts');
+  actions.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('task-completion'), [['tasks']]);
+assert.deepEqual(deliveredQueryKeys('fix-issue'), [['fix-track-issues'], ['fix-track-issues-all'], ['dashboard-summary']]);
 
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');

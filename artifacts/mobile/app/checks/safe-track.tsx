@@ -23,6 +23,10 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { entryStatus } from '@/components/outbox-status-logic';
+import { useOutboxAction } from '@/hooks/useRecordOutbox';
+import { ACTION_TARGETS, type SafeTrackDocument } from '@/lib/checkOutboxCore';
 
 const MODULE_COLOR = '#6366f1';
 
@@ -114,13 +118,24 @@ function DocCard({
     ? acks.some((a) => a.acknowledged_by === userId)
     : false;
 
+  // With no signal the acknowledgement is saved on this phone and sent
+  // automatically; the API records one acknowledgement per user and document,
+  // so a resend never creates a second one.
+  const ackOutbox = useOutboxAction('safe-ack');
+  const target = ACTION_TARGETS.safeAck(sub as SafeTrackDocument, id);
+  const saved = ackOutbox.pending(target.scopeKey);
   const { mutate: acknowledge, isPending } = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/safe-track/${sub}/${id}/self-acknowledge`, {
-        method: 'POST',
-        body: JSON.stringify({ staffName: userName }),
-      }),
-    onSuccess: async (data: any) => {
+    mutationFn: async () => {
+      const result = await ackOutbox.send(target, { staffName: userName }, `Acknowledged · ${title}`);
+      if (result.state === 'rejected') throw new Error(result.error);
+      return result;
+    },
+    onSuccess: async (result) => {
+      if (result.state === 'queued') {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return;
+      }
+      const data = result.response as { alreadyAcknowledged?: boolean } | undefined;
       if (data?.alreadyAcknowledged) {
         Alert.alert('Already acknowledged', 'You have already confirmed you have read this document.');
         return;
@@ -167,6 +182,13 @@ function DocCard({
               <Feather name="check-circle" size={14} color="#22c55e" />
               <Text style={styles.ackedText}>Acknowledged</Text>
             </View>
+          ) : saved ? (
+            <View style={styles.ackedBadge} testID={`safe-ack-saved-${sub}-${id}`}>
+              <Feather name="upload-cloud" size={14} color={saved.state === 'failed' ? colors.destructive : colors.warning} />
+              <Text style={[styles.ackedText, { color: saved.state === 'failed' ? colors.destructive : colors.warning }]}>
+                {entryStatus(saved).title}
+              </Text>
+            </View>
           ) : (
             <TouchableOpacity
               style={[styles.ackBtn, { backgroundColor: MODULE_COLOR }, isPending && { opacity: 0.6 }]}
@@ -184,6 +206,12 @@ function DocCard({
       )}
     </View>
   );
+}
+
+// Acknowledgements saved on this phone, with their delivery state.
+function SavedAcknowledgements() {
+  const outbox = useOutboxAction('safe-ack');
+  return <OutboxEntries entries={outbox.entries} readError={outbox.readError} />;
 }
 
 // ── Main screen ───────────────────────────────────────────────────────────────
@@ -321,6 +349,8 @@ export default function SafeTrackScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      <SavedAcknowledgements />
 
       {/* Content */}
       <View style={styles.content}>

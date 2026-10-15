@@ -1,4 +1,5 @@
 import { boolean, date, index, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -48,11 +49,18 @@ export const taskCompletionsTable = pgTable("task_completions", {
   completedBy: integer("completed_by").references(() => usersTable.id, { onDelete: "set null" }),
   completedByName: text("completed_by_name").notNull(),
   note: text("note"),
+  // Mobile outbox entry ID and payload fingerprint: a "Mark done" resent after
+  // a lost response is recognised instead of answering 409. Not a credential.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   completedAt: timestamp("completed_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("UQ_task_completions_task_date").on(table.taskId, table.occurrenceDate),
   index("IDX_task_completions_client").on(table.clientId),
+  uniqueIndex("UQ_task_completions_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
 ]);
 
 export type Task = typeof tasksTable.$inferSelect;
