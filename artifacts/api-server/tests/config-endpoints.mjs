@@ -286,6 +286,29 @@ async function testFormOptions(admin, viewer, staff, ts) {
     `active=${JSON.stringify(afterReenable.data?.options?.incident_types)}, disabled=${JSON.stringify(afterReenable.data?.disabled?.incident_types)}`,
   );
 
+  // Replacing the list more than 50 times builds up more than 50 disabled
+  // options. The saved list must keep loading (newest disabled options kept)
+  // rather than silently reverting to the defaults.
+  const rotations = Array.from({ length: 56 }, (_, i) => `rotated ${i} ${ts}`.slice(0, 60));
+  let rotationFailures = 0;
+  for (const item of rotations) {
+    if ((await admin("PUT", "/form-options/incident_types", { items: [item] })).status !== 200) rotationFailures++;
+  }
+  check("form-options: 56 list replacements saved", rotationFailures === 0, `${rotationFailures} failed`);
+  const afterRotation = await admin("GET", "/form-options");
+  const rotatedDisabled = afterRotation.data?.disabled?.incident_types ?? [];
+  check(
+    "form-options: list with over 50 disabled options still loads",
+    afterRotation.data?.customised?.incident_types === true
+      && JSON.stringify(afterRotation.data?.options?.incident_types) === JSON.stringify([rotations.at(-1)]),
+    `options=${JSON.stringify(afterRotation.data?.options?.incident_types)} customised=${afterRotation.data?.customised?.incident_types}`,
+  );
+  check(
+    "form-options: newest 50 disabled options kept",
+    rotatedDisabled.length === 50 && rotatedDisabled.includes(rotations.at(-2)) && !rotatedDisabled.includes(rotations[0]),
+    `disabled count=${rotatedDisabled.length}`,
+  );
+
   // DELETE resets to default.
   const del = await admin("DELETE", "/form-options/incident_types");
   expectOk("form-options: DELETE resets", del.status);
