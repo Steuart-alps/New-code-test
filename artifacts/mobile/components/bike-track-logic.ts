@@ -25,7 +25,11 @@ export interface Bike {
   active: boolean;
 }
 
-/** GET /bike-track/hires (raw SQL rows, snake_case; dates may carry a time). */
+/**
+ * GET /bike-track/hires, after normalizeBikeHires. The API has returned raw
+ * SQL rows in snake_case and, since the camelCase change, camelCase keys
+ * (guestName, bikeRef…); either is read into this shape. Dates may carry a time.
+ */
 export interface BikeHire {
   id: number;
   bike_id: number;
@@ -41,7 +45,7 @@ export interface BikeHire {
   pre_result: string | null;
 }
 
-/** GET /bike-track/services (raw SQL rows, snake_case). */
+/** GET /bike-track/services, after normalizeBikeServices (snake or camel case). */
 export interface BikeService {
   id: number;
   bike_id: number;
@@ -55,11 +59,71 @@ export interface BikeService {
   bike_name: string | null;
 }
 
-/** GET /bike-track/services/latest (one row per bike). */
+/** GET /bike-track/services/latest (one row per bike), after normalizeLatestServices. */
 export interface BikeLatestService {
   bike_id: number;
   service_date: string;
   next_service_date: string | null;
+}
+
+type Row = Record<string, unknown>;
+const rowsOf = (response: unknown): Row[] =>
+  (Array.isArray(response) ? response : [])
+    .filter((item): item is Row => !!item && typeof item === 'object');
+/** A field under its snake_case or camelCase key, whichever the API sent. */
+const pick = (row: Row, snake: string, camel: string): unknown => row[snake] ?? row[camel];
+const textOr = <T extends string | null>(value: unknown, fallback: T): string | T =>
+  (typeof value === 'string' ? value : value instanceof Date ? value.toISOString() : fallback);
+const numberOrNull = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+const hasId = (row: Row) => Number.isInteger(Number(row.id));
+
+/** GET /bike-track/hires in either key case. */
+export function normalizeBikeHires(response: unknown): BikeHire[] {
+  return rowsOf(response).filter(hasId).map((row) => ({
+    id: Number(row.id),
+    bike_id: Number(pick(row, 'bike_id', 'bikeId')),
+    site_id: numberOrNull(pick(row, 'site_id', 'siteId')),
+    guest_name: textOr(pick(row, 'guest_name', 'guestName'), ''),
+    guest_contact: textOr(pick(row, 'guest_contact', 'guestContact'), null),
+    hire_date: textOr(pick(row, 'hire_date', 'hireDate'), ''),
+    return_date_expected: textOr(pick(row, 'return_date_expected', 'returnDateExpected'), null),
+    deposit_pence: numberOrNull(pick(row, 'deposit_pence', 'depositPence')),
+    status: textOr(row.status, ''),
+    bike_ref: textOr(pick(row, 'bike_ref', 'bikeRef'), ''),
+    bike_name: textOr(pick(row, 'bike_name', 'bikeName'), null),
+    pre_result: textOr(pick(row, 'pre_result', 'preResult'), null),
+  }));
+}
+
+/** GET /bike-track/services in either key case. */
+export function normalizeBikeServices(response: unknown): BikeService[] {
+  return rowsOf(response).filter(hasId).map((row) => ({
+    id: Number(row.id),
+    bike_id: Number(pick(row, 'bike_id', 'bikeId')),
+    service_date: textOr(pick(row, 'service_date', 'serviceDate'), ''),
+    service_type: textOr(pick(row, 'service_type', 'serviceType'), ''),
+    serviced_by: textOr(pick(row, 'serviced_by', 'servicedBy'), null),
+    next_service_date: textOr(pick(row, 'next_service_date', 'nextServiceDate'), null),
+    cost_pence: numberOrNull(pick(row, 'cost_pence', 'costPence')),
+    notes: textOr(row.notes, null),
+    bike_ref: textOr(pick(row, 'bike_ref', 'bikeRef'), ''),
+    bike_name: textOr(pick(row, 'bike_name', 'bikeName'), null),
+  }));
+}
+
+/** GET /bike-track/services/latest in either key case. */
+export function normalizeLatestServices(response: unknown): BikeLatestService[] {
+  return rowsOf(response)
+    .map((row) => ({
+      bike_id: Number(pick(row, 'bike_id', 'bikeId')),
+      service_date: textOr(pick(row, 'service_date', 'serviceDate'), ''),
+      next_service_date: textOr(pick(row, 'next_service_date', 'nextServiceDate'), null),
+    }))
+    .filter((row) => Number.isInteger(row.bike_id));
 }
 
 export const CHECK_ITEMS: readonly { key: string; label: string }[] = [

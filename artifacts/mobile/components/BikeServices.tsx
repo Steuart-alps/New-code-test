@@ -16,6 +16,7 @@ import {
   buildServicePayload,
   dayOf,
   localDate,
+  normalizeBikeServices,
   serviceTypeLabel,
   type Bike,
   type BikeService,
@@ -48,7 +49,7 @@ export function BikeServices({
   const { user } = useAuth();
   const servicesQuery = useQuery<BikeService[]>({
     queryKey: ['bike-services', user?.clientId],
-    queryFn: () => apiFetch('/api/bike-track/services'),
+    queryFn: async () => normalizeBikeServices(await apiFetch('/api/bike-track/services')),
   });
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState<BikeServiceDraft>(emptyDraft);

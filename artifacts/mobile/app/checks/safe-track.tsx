@@ -27,6 +27,7 @@ import { OutboxEntries } from '@/components/OutboxEntries';
 import { entryStatus } from '@/components/outbox-status-logic';
 import { useOutboxAction } from '@/hooks/useRecordOutbox';
 import { ACTION_TARGETS, type SafeTrackDocument } from '@/lib/checkOutboxCore';
+import { acknowledgedByCurrentUser } from '@/components/safe-track-logic';
 
 const MODULE_COLOR = '#6366f1';
 
@@ -61,10 +62,8 @@ interface Handbook {
   createdAt: string;
 }
 
-interface Ack {
-  acknowledged_by: number | null;
-  staff_name: string;
-}
+/** Rows of GET /safe-track/:sub/:id/acknowledgements, read by acknowledgedByCurrentUser. */
+type Ack = Record<string, unknown>;
 
 type TabKey = 'risk' | 'sops' | 'handbook';
 
@@ -114,9 +113,7 @@ function DocCard({
     enabled: requiresAcknowledgement,
   });
 
-  const alreadyAcked = userId != null
-    ? acks.some((a) => a.acknowledged_by === userId)
-    : false;
+  const alreadyAcked = acknowledgedByCurrentUser(acks, userId);
 
   // With no signal the acknowledgement is saved on this phone and sent
   // automatically; the API records one acknowledgement per user and document,

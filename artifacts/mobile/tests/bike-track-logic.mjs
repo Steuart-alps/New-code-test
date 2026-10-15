@@ -13,7 +13,8 @@ const js = ts.transpileModule(source, {
 const {
   CHECK_ITEMS, activeHiresForSite, autoNextService, bikeSiteChoice, bikesForSite, buildHirePayload, buildReturnPayload,
   buildServicePayload, defaultDepositText, defaultExpectedReturn, emptyCheckItems, isConnectionFailure, isOverdueReturn,
-  overallResult, pendingHireBikeIds, poundsToPence, serviceDue,
+  normalizeBikeHires, normalizeBikeServices, normalizeLatestServices, overallResult, pendingHireBikeIds, poundsToPence,
+  serviceDue,
 } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
 
 // The website's twelve checklist items, all passing by default.
@@ -163,4 +164,59 @@ assert.deepEqual([...pending].sort(), [4, 7]);
 assert.equal(isConnectionFailure(new TypeError('Network request failed')), true);
 assert.equal(isConnectionFailure(Object.assign(new Error('Hire already returned'), { status: 409 })), false);
 
-console.log('BikeTrack logic tests passed: website payloads, money and date checks, defaults, site choice, fleet and hires, service due, pending hires, connection failures.');
+// List responses: GET /hires, /services and /services/latest have returned
+// raw snake_case rows and camelCase rows; both read into the same shape.
+const expectedHire = {
+  id: 11, bike_id: 4, site_id: 3, guest_name: 'Alex Guest', guest_contact: '07700 900000',
+  hire_date: '2026-10-14T00:00:00.000Z', return_date_expected: '2026-10-14', deposit_pence: 2000,
+  status: 'active', bike_ref: 'BIKE-01', bike_name: 'Blue', pre_result: 'pass',
+};
+const snakeHire = {
+  id: 11, client_id: 1, site_id: 3, bike_id: 4, guest_name: 'Alex Guest', guest_contact: '07700 900000',
+  hire_date: '2026-10-14T00:00:00.000Z', return_date_expected: '2026-10-14', return_date_actual: null,
+  deposit_pence: 2000, deposit_returned: false, status: 'active', notes: null,
+  bike_ref: 'BIKE-01', bike_name: 'Blue', bike_type: 'hybrid', pre_check_id: 8, pre_result: 'pass',
+  post_check_id: null, post_result: null,
+};
+const camelHire = {
+  id: 11, clientId: 1, siteId: 3, bikeId: 4, guestName: 'Alex Guest', guestContact: '07700 900000',
+  hireDate: '2026-10-14T00:00:00.000Z', returnDateExpected: '2026-10-14', returnDateActual: null,
+  depositPence: 2000, depositReturned: false, status: 'active', notes: null,
+  bikeRef: 'BIKE-01', bikeName: 'Blue', bikeType: 'hybrid', preCheckId: 8, preResult: 'pass',
+  postCheckId: null, postResult: null,
+};
+assert.deepEqual(normalizeBikeHires([snakeHire]), [expectedHire], 'snake_case hires');
+assert.deepEqual(normalizeBikeHires([camelHire]), [expectedHire], 'camelCase hires');
+const camelHires = normalizeBikeHires([camelHire, { ...camelHire, id: 12, siteId: null, bikeId: 5, returnDateExpected: null, guestContact: null }]);
+assert.deepEqual(activeHiresForSite(camelHires, bikes, 3).map((row) => row.id), [11], 'camelCase hires keep their site');
+assert.equal(isOverdueReturn(camelHires[0], '2026-10-15'), true, 'camelCase expected return still marks overdue');
+assert.equal(camelHires[1].guest_contact, null);
+assert.deepEqual(normalizeBikeHires({ error: 'nope' }), []);
+assert.deepEqual(normalizeBikeHires([null, { guestName: 'No id' }]), []);
+
+const expectedService = {
+  id: 21, bike_id: 4, service_date: '2026-10-01', service_type: 'annual', serviced_by: 'Cycle Co',
+  next_service_date: '2027-10-01', cost_pence: 4500, notes: 'New chain', bike_ref: 'BIKE-01', bike_name: 'Blue',
+};
+assert.deepEqual(normalizeBikeServices([{
+  id: 21, client_id: 1, bike_id: 4, service_date: '2026-10-01', service_type: 'annual', serviced_by: 'Cycle Co',
+  next_service_date: '2027-10-01', cost_pence: 4500, notes: 'New chain', created_by: 2,
+  bike_ref: 'BIKE-01', bike_name: 'Blue', bike_type: 'hybrid',
+}]), [expectedService], 'snake_case services');
+assert.deepEqual(normalizeBikeServices([{
+  id: 21, clientId: 1, bikeId: 4, serviceDate: '2026-10-01', serviceType: 'annual', servicedBy: 'Cycle Co',
+  nextServiceDate: '2027-10-01', costPence: 4500, notes: 'New chain', createdBy: 2,
+  bikeRef: 'BIKE-01', bikeName: 'Blue', bikeType: 'hybrid',
+}]), [expectedService], 'camelCase services');
+assert.deepEqual(normalizeBikeServices([{ id: 22, bikeId: 4, serviceDate: '2026-10-01', serviceType: 'adhoc', nextServiceDate: null, costPence: null, bikeRef: 'BIKE-01' }])[0],
+  { id: 22, bike_id: 4, service_date: '2026-10-01', service_type: 'adhoc', serviced_by: null, next_service_date: null, cost_pence: null, notes: null, bike_ref: 'BIKE-01', bike_name: null });
+
+const [snakeLatest] = normalizeLatestServices([{ bike_id: 4, service_date: '2025-10-01', service_type: 'annual', serviced_by: null, next_service_date: '2026-10-01T00:00:00.000Z' }]);
+const [camelLatest] = normalizeLatestServices([{ bikeId: 4, serviceDate: '2025-10-01', serviceType: 'annual', servicedBy: null, nextServiceDate: '2026-10-01T00:00:00.000Z' }]);
+const expectedLatest = { bike_id: 4, service_date: '2025-10-01', next_service_date: '2026-10-01T00:00:00.000Z' };
+assert.deepEqual(snakeLatest, expectedLatest, 'snake_case latest services');
+assert.deepEqual(camelLatest, expectedLatest, 'camelCase latest services');
+assert.deepEqual(serviceDue(camelLatest, '2026-10-15'), { date: '2026-10-01', overdue: true }, 'camelCase rows still show service due');
+assert.deepEqual(normalizeLatestServices([{ serviceDate: '2025-10-01' }]), [], 'a row without a bike is dropped');
+
+console.log('BikeTrack logic tests passed: website payloads, money and date checks, defaults, site choice, fleet and hires, service due, pending hires, connection failures, snake/camel list rows.');

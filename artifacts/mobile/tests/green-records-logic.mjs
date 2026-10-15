@@ -123,5 +123,27 @@ assert.equal(fuelRow.title, 'Hydraulic oil');
 assert.equal(fuelRow.detail, '5 L · 512 h');
 const [puwerRow] = normalizeGreenRecords('puwer', [{ id: 4, machine_id: 1, inspection_date: '2026-10-15', inspection_type: 'loler_examination', safe_to_operate: false }]);
 assert.deepEqual(puwerRow.flag, { label: 'Not safe', tone: 'danger' });
+const [serviceRow] = normalizeGreenRecords('service', [{ id: 5, machine_id: 1, machine_name: 'Mower', service_date: '2026-10-01', service_type: 'annual', work_performed: 'Blades', serviced_by: 'Dealer', next_service_date: '2027-10-01' }]);
+
+// The same lists as camelCase rows (the API's list endpoints have returned
+// both): every field still reads.
+assert.deepEqual(normalizeGreenMachines([
+  { id: 1, clientId: 1, siteId: 3, name: 'Mower', type: 'ride_on', serialNo: 'S1', regNo: null, active: true, siteName: 'Course' },
+  { id: 2, name: 'Old blower', type: 'blower', active: false, siteName: null },
+]), [{ id: 1, name: 'Mower', type: 'ride_on', siteName: 'Course' }], 'camelCase machines');
+assert.deepEqual(normalizeGreenRecords('defect', [{
+  id: 9, machineId: 1, machineName: 'Mower', reportDate: '2026-10-15T00:00:00.000Z', description: 'Cracked guard',
+  severity: 'critical', outOfService: true, status: 'open', reportedBy: 'Operator', reportedByRosterId: null,
+}]), [defectRow], 'camelCase defects');
+assert.deepEqual(normalizeGreenRecords('fuel', [{ id: 3, machineId: 1, logDate: '2026-10-15', fuelType: 'hyd_oil', quantityLitres: '5.00', engineHours: 512 }]),
+  [fuelRow], 'camelCase fuel logs');
+assert.deepEqual(normalizeGreenRecords('puwer', [{ id: 4, machineId: 1, inspectionDate: '2026-10-15', inspectionType: 'loler_examination', safeToOperate: false }]),
+  [puwerRow], 'camelCase PUWER inspections');
+assert.deepEqual(normalizeGreenRecords('service', [{ id: 5, machineId: 1, machineName: 'Mower', serviceDate: '2026-10-01', serviceType: 'annual', workPerformed: 'Blades', servicedBy: 'Dealer', nextServiceDate: '2027-10-01' }]),
+  [serviceRow], 'camelCase service records');
+assert.deepEqual(serviceRow, {
+  id: 5, machineId: 1, machineName: 'Mower', date: '2026-10-01', title: 'Annual service',
+  detail: 'Blades · Dealer', flag: { label: 'Next 2027-10-01', tone: 'muted' },
+});
 
 console.log('GreenTrack machine record tests passed: website payloads, input checks, manager-only records, photo route, list rows.');

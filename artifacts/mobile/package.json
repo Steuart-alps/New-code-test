@@ -40,6 +40,7 @@
     "test:bike-track": "node tests/bike-track-logic.mjs",
     "test:client-entry-logic": "node tests/client-entry-logic.mjs",
     "test:tree-track": "node tests/tree-track-logic.mjs",
+    "test:safe-track": "node tests/safe-track-logic.mjs",
     "test:room-track": "node tests/room-track-logic.mjs",
     "test:registers": "node tests/registers-logic.mjs",
     "test:contractors": "node tests/contractors-logic.mjs",

@@ -42,6 +42,8 @@ import {
   dayOf,
   isOverdueReturn,
   localDate,
+  normalizeBikeHires,
+  normalizeLatestServices,
   pendingHireBikeIds,
   serviceDue,
   type Bike,
@@ -81,12 +83,12 @@ export default function BikeTrackScreen() {
   });
   const hiresQuery = useQuery<BikeHire[]>({
     queryKey: ['bike-hires', user?.clientId],
-    queryFn: () => apiFetch('/api/bike-track/hires?status=active'),
+    queryFn: async () => normalizeBikeHires(await apiFetch('/api/bike-track/hires?status=active')),
     enabled: serviceEnabled,
   });
   const latestServicesQuery = useQuery<BikeLatestService[]>({
     queryKey: ['bike-services-latest', user?.clientId],
-    queryFn: () => apiFetch('/api/bike-track/services/latest'),
+    queryFn: async () => normalizeLatestServices(await apiFetch('/api/bike-track/services/latest')),
     enabled: serviceEnabled,
   });
   const configQuery = useQuery<Record<string, string>>({
