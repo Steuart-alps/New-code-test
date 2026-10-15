@@ -31,6 +31,7 @@
     "test:hot-tub-pdf": "node tests/hot-tub-pdf-browser.test.mjs",
     "test:incident-export-browser": "node tests/incident-export-browser.test.mjs",
     "test:form-options-editor-browser": "node tests/form-options-editor-browser.test.mjs",
+    "test:custom-option-forms-browser": "node tests/custom-option-forms-browser.test.mjs",
     "test:viewer-department-browser": "bash tests/run-viewer-department-browser.sh",
     "test:hot-tub-browser-firefox": "HOT_TUB_BROWSER=firefox node tests/hot-tub-browser.test.mjs",
     "test:hot-tub-browser-webkit": "HOT_TUB_BROWSER=webkit node tests/hot-tub-browser.test.mjs",

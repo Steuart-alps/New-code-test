@@ -31,6 +31,11 @@
 //        - an unrelated edit keeps an unchanged disabled value
 //        - re-enabling the value lets new records use it again
 //        - TrainTrack "Other" free text cannot reintroduce a disabled type
+//   2d. PestTrack pest/evidence types and BikeTrack bike types for two
+//       consultant-selectable clients
+//        - each client's active values are accepted, the other client's are not
+//        - disabled values are rejected for new records; unrelated edits keep them
+//        - option settings are reset afterwards
 //   3. /api/food-safety/config
 //        - PUT/DELETE require admin (viewer/staff → 403)
 //        - invalid section-toggle values (not "true"/"false") → 400
@@ -896,6 +901,114 @@ async function testDisabledOptionsOnEveryRoute(admin, ts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 2d. PestTrack and BikeTrack options across two consultant-selectable clients
+// ─────────────────────────────────────────────────────────────────────────────
+// Each client's custom pest, evidence and bike types are accepted only for that
+// client's records, a disabled value is rejected for new records, and an
+// unrelated edit keeps an unchanged disabled value.
+async function testPestAndBikeOptionsAcrossClients(admin, clientAId, clientBId, ts) {
+  console.log("\n── PestTrack + BikeTrack options across two clients ──");
+
+  const scope = (clientId) => (clientId === clientAId ? "" : `?clientId=${clientId}`);
+  const setOptions = (clientId, key, items) => admin("PUT", `/form-options/${key}${scope(clientId)}`, { items });
+  const pestBody = (pestType, evidenceType, notes) => ({
+    recordedDate: isoDate(-1),
+    pestType,
+    evidenceType,
+    location: "Store room",
+    severity: "low",
+    notes,
+  });
+  const pestRow = async (clientId, id) => {
+    const list = await admin("GET", `/pest-track/activity${scope(clientId)}`);
+    return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id);
+  };
+
+  const lists = [
+    {
+      key: "pest_types",
+      label: "pest type",
+      create: (clientId, value, note) =>
+        admin("POST", `/pest-track/activity${scope(clientId)}`, pestBody(value, "droppings", note)),
+      edit: (clientId, id, value) =>
+        admin("PUT", `/pest-track/activity/${id}${scope(clientId)}`, pestBody(value, "droppings", "Edited, type unchanged")),
+      stored: async (clientId, id) => (await pestRow(clientId, id))?.pestType,
+    },
+    {
+      key: "pest_evidence_types",
+      label: "pest evidence type",
+      create: (clientId, value, note) =>
+        admin("POST", `/pest-track/activity${scope(clientId)}`, pestBody("rodent", value, note)),
+      edit: (clientId, id, value) =>
+        admin("PUT", `/pest-track/activity/${id}${scope(clientId)}`, pestBody("rodent", value, "Edited, evidence unchanged")),
+      stored: async (clientId, id) => (await pestRow(clientId, id))?.evidenceType,
+    },
+    {
+      key: "bike_types",
+      label: "bike type",
+      create: (clientId, value, note) =>
+        admin("POST", `/bike-track/bikes${scope(clientId)}`, { ref: `X-${clientId}-${note}-${ts}`.slice(0, 100), type: value }),
+      edit: (clientId, id, value) =>
+        admin("PUT", `/bike-track/bikes/${id}${scope(clientId)}`, {
+          ref: `X-${clientId}-active-${ts}`.slice(0, 100),
+          type: value,
+          notes: "Edited, type unchanged",
+        }),
+      stored: async (clientId, id) => {
+        const list = await admin("GET", `/bike-track/bikes${scope(clientId)}`);
+        return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id)?.type;
+      },
+    },
+  ];
+
+  try {
+    for (const list of lists) {
+      const valueA = `A ${list.label} ${ts}`.slice(0, 60);
+      const valueB = `B ${list.label} ${ts}`.slice(0, 60);
+      const spareA = `A spare ${list.label} ${ts}`.slice(0, 60);
+
+      expectOk(`${list.label}: save client A custom list`, (await setOptions(clientAId, list.key, [valueA])).status);
+      expectOk(`${list.label}: save client B custom list via ?clientId`, (await setOptions(clientBId, list.key, [valueB])).status);
+
+      const aRecord = await list.create(clientAId, valueA, "active");
+      expectOk(`${list.label}: client A accepts its active value`, aRecord.status, [201]);
+      expectStatus(`${list.label}: client A rejects client B's value`, (await list.create(clientAId, valueB, "foreign")).status, 400);
+      expectOk(`${list.label}: client B accepts its active value`, (await list.create(clientBId, valueB, "active")).status, [201]);
+      expectStatus(`${list.label}: client B rejects client A's value`, (await list.create(clientBId, valueA, "foreign")).status, 400);
+
+      expectOk(`${list.label}: disable client A value`, (await setOptions(clientAId, list.key, [spareA])).status);
+      expectStatus(`${list.label}: client A rejects its disabled value`, (await list.create(clientAId, valueA, "disabled")).status, 400);
+
+      const aId = aRecord.data?.id;
+      if (Number.isInteger(aId)) {
+        expectOk(`${list.label}: unrelated edit keeps disabled value`, (await list.edit(clientAId, aId, valueA)).status, [200]);
+        const stored = await list.stored(clientAId, aId);
+        check(`${list.label}: stored value unchanged after edit`, stored === valueA, `got ${JSON.stringify(stored)}`);
+      } else {
+        check(`${list.label}: client A record id`, false, `got ${JSON.stringify(aRecord.data)}`);
+      }
+      // Back to the defaults before the next list (pest evidence records need
+      // the default pest type).
+      expectOk(`${list.label}: reset client A list`, (await admin("DELETE", `/form-options/${list.key}`)).status);
+      expectOk(`${list.label}: reset client B list`, (await admin("DELETE", `/form-options/${list.key}?clientId=${clientBId}`)).status);
+    }
+  } finally {
+    // Also reset after a failure; the records go with the fixture purge of
+    // both clients.
+    for (const list of lists) {
+      await admin("DELETE", `/form-options/${list.key}`).catch(() => {});
+      await admin("DELETE", `/form-options/${list.key}?clientId=${clientBId}`).catch(() => {});
+    }
+  }
+  const after = await admin("GET", `/form-options?clientId=${clientBId}`);
+  check(
+    "pest/bike options: client B lists reset after the run",
+    lists.every((list) => after.data?.customised?.[list.key] === false),
+    `customised=${JSON.stringify(after.data?.customised)}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 3. /api/food-safety/config
 // ─────────────────────────────────────────────────────────────────────────────
 async function testFoodSafetyConfig(admin, viewer, staff, clientBId, ts) {
@@ -1465,6 +1578,7 @@ async function runSuite() {
   fixtures.probe("after-record-validation");
   await testCustomTradeAndInspectionValidation(a.session, a.clientId, clientBId, ts);
   await testDisabledOptionsOnEveryRoute(a.session, ts);
+  await testPestAndBikeOptionsAcrossClients(a.session, a.clientId, clientBId, ts);
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
   await testPushToken(a.session, other, ts);
