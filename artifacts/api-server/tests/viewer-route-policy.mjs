@@ -43,7 +43,7 @@ const EXCEPTIONS = {
   "auth.ts POST /auth/forgot-password": signIn("password reset email", /\bforgotPasswordRateLimit\b/, /\bforgotPasswordEmailRateLimit\b/),
   "auth.ts POST /auth/reset-password": signIn("password reset with emailed token", /\bresetPasswordRateLimit\b/),
   "auth.ts POST /auth/register": signIn("new business sign-up", /\bregistrationRateLimit\b/),
-  "auth.ts POST /auth/resend-verification": signIn("verification email", /\bregistrationRateLimit\b/),
+  "auth.ts POST /auth/resend-verification": signIn("verification email", /\bresendVerificationRateLimit\b/),
   "auth.ts POST /auth/passkeys/registration/options": ownAccount("start passkey setup", /\bgetPasskeySetupUserId\(req\)/),
   "auth.ts POST /auth/passkeys/registration/verify": ownAccount("finish passkey setup", /\bpendingPasskeyRegistrationUserId\b/, /\bpendingPasskeyRegistrationChallenge\b/),
   "auth.ts DELETE /auth/passkeys/:id": ownAccount("remove own passkey", /\brequireAuth\b/, /passkeysTable\.userId,\s*req\.currentUser!\.id/),

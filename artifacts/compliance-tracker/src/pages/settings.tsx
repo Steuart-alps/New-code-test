@@ -108,10 +108,6 @@ function formatCheckedAge(seconds: number): string {
 /** Storage add-on offer from /billing/config: per-GiB monthly price in minor units. */
 type StorageAddonOffer = { unitAmount: number; currency: string; minimumGib: number };
 
-function formatMinorUnits(minorUnits: number, currency: string): string {
-  return new Intl.NumberFormat("en-GB", { style: "currency", currency: currency.toUpperCase() }).format(minorUnits / 100);
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];

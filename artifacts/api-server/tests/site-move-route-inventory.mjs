@@ -31,6 +31,8 @@ const gap = (reason) => ({ gap: reason });
 const INVENTORY = {
   "bike-track.ts PUT /bikes/:id": siteMove("BikeTrack bike"),
   "bike-track.ts PUT /hires/:id": siteMove("BikeTrack hire"),
+  "certificates.ts POST /items/:itemId/certificates": adminOnly("certificate outcomes"),
+  "certificates.ts POST /items/:itemId/certificates/:id/defects": adminOnly("certificate defects"),
   "checklist-templates.ts PUT /checklist-templates": adminOnly("checklist template editor"),
   "compliance-items.ts PATCH /compliance-items/:id/status": notAMove("status-only; checks the item's stored site"),
   "compliance-items.ts PUT /compliance-items/:id": adminOnly("compliance item editor"),
@@ -42,6 +44,7 @@ const INVENTORY = {
   "doc-track.ts PATCH /documents/:id": covered("scoped staff cannot PATCH DocTrack site", "doc-track-signoff-status.mjs"),
   "fire-safety.ts PUT /:id": siteMove("Fire check"),
   "fire-safety.ts PUT /config": notAMove("per-site settings selected by query"),
+  "fix-track.ts POST /quotes/:quoteId/accept": notAMove("accepts a quote on an issue the caller's department can see; the issue keeps its site"),
   "fix-track.ts POST /issues/:id/media": notAMove("workflow action on the issue's stored site"),
   "fix-track.ts POST /issues/:id/reject-send": notAMove("workflow action on the issue's stored site"),
   "fix-track.ts POST /issues/:id/request-cancellation": notAMove("workflow action on the issue's stored site"),
