@@ -79,6 +79,7 @@ const DEFAULT_CHECKS = {
   "fresh-schema-regression": { stage: "integration", class: "api", cmd: api("test:schema:fresh") },
   "test-twofa-recovery": { stage: "integration", class: "api", cmd: api("test:twofa-recovery") },
   "staff-invitations": { stage: "integration", class: "api", cmd: api("test:staff-invitations") },
+  "welcome-email": { stage: "integration", class: "api", cmd: api("test:welcome-email") },
   "pat-evidence-retention": { stage: "integration", class: "api", cmd: api("test:pat-dept-isolation") },
   "content-filter-endpoints": { stage: "integration", class: "api", cmd: api("test:content-filter") },
   "feedback-triage": { stage: "integration", class: "api", cmd: api("test:feedback-triage") },
