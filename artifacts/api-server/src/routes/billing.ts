@@ -59,6 +59,7 @@ import {
   renewingStorageGib,
   stillPaidReducedGib,
 } from "../lib/storageCapacity";
+import { SUBSCRIPTION_ACCESS_ENDS_AT } from "../lib/offboarding";
 
 const router = Router();
 
@@ -72,19 +73,19 @@ router.get("/cancellation-status", requireAuth, async (req, res) => {
       .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
     if (!client?.customerId) return res.json({ accessEndsAt: null });
     const result = await db.execute(sql`
-      SELECT COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+      SELECT to_timestamp(${SUBSCRIPTION_ACCESS_ENDS_AT}) AS access_ends_at
       FROM stripe.subscriptions s
       WHERE s.customer = ${client.customerId}
         AND s.cancel_at_period_end = true
         AND s.status IN ('active', 'trialing', 'past_due')
-        AND COALESCE(s.cancel_at, s.current_period_end) > now()
+        AND ${SUBSCRIPTION_ACCESS_ENDS_AT} > extract(epoch from now())
         AND NOT EXISTS (
           SELECT 1 FROM stripe.subscriptions live
           WHERE live.customer = s.customer
             AND live.status IN ('active', 'trialing', 'past_due')
             AND COALESCE(live.cancel_at_period_end, false) = false
         )
-      ORDER BY s.current_period_end DESC NULLS LAST
+      ORDER BY ${SUBSCRIPTION_ACCESS_ENDS_AT} DESC NULLS LAST
       LIMIT 1
     `);
     res.json({ accessEndsAt: (result.rows[0] as { access_ends_at: Date | string } | undefined)?.access_ends_at ?? null });

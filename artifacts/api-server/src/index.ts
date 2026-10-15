@@ -86,8 +86,10 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
   logger.info("Stripe schema ready");
 
   const stripeSync = await getStripeSync(onStage);
-  // The managed webhook is keyed by URL: changing PUBLIC_APP_URL registers a
-  // second Stripe webhook rather than replacing the first.
+  // The managed webhook is keyed by URL: after PUBLIC_APP_URL changes, the sync
+  // library deletes the webhook it registered for the old URL and creates one
+  // for the new URL (it also deletes stripe-sync webhooks this database does
+  // not know, e.g. one left by an older deployment on the same Stripe account).
   const webhookBaseUrl = getPublicAppUrl();
   onStage("managed webhook");
   await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
