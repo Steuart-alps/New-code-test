@@ -171,6 +171,70 @@ try {
   assert.match(largeManagerHtml, /7500 outstanding acknowledgements/);
   assert.match(largeManagerHtml, /Additional documents not shown/);
   assert.match(largeManagerHtml, /https:\/\/app\.example\/safe-track/);
+  // Replit #342: accented and non-Latin names, emoji, & < > " and long titles
+  // near the byte cap stay inside it as well-formed, escaped HTML.
+  const managerHtmlFor = async (docs) => {
+    let html = "";
+    await runSafeTrackAckReminderJob({
+      ...deps,
+      getOutstanding: async () => docs,
+      getStaffOutstanding: async () => [],
+      getRecipients: async () => ({ emails: ["manager@test.local"] }),
+      claim: async () => 987655,
+      send: async ({ html: sentHtml }) => { html = sentHtml; },
+      appUrl: () => "https://app.example",
+    });
+    return html;
+  };
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  const assertSafeDigest = (html, docs) => {
+    assert.ok(Buffer.byteLength(html, "utf8") <= MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES, "within the byte cap");
+    assert.doesNotMatch(html, loneSurrogate, "no character cut in half");
+    assert.doesNotMatch(html, /&(?!amp;|lt;|gt;|quot;|#39;)/, "every & starts an escape");
+    assert.doesNotMatch(html, /<(?!\/?(?:!DOCTYPE|html|body|h2|p|table|tbody|tr|td|div|a)\b)/i, "no markup but the template's");
+    for (const tag of ["tr", "td", "div", "p", "table", "a"]) {
+      assert.equal((html.match(new RegExp(`<${tag}\\b`, "g")) ?? []).length,
+        (html.match(new RegExp(`</${tag}>`, "g")) ?? []).length, `<${tag}> balanced`);
+    }
+    const total = docs.reduce((sum, doc) => sum + doc.outstandingCount, 0);
+    assert.match(html, new RegExp(`${total} outstanding acknowledgements? across ${docs.length} required documents?`));
+    assert.match(html, /<a href="https:\/\/app\.example\/safe-track"[^>]*>Open the secure SafeTrack register<\/a>/);
+  };
+  const hostileTitle = `Fire & evacuation <script>alert("x")</script> "Zoë's" plan — `;
+  const unicodeNames = ["Zoë Ågren-Søndergård", "王小明", "Мария Иванова", "<b>Ølaf</b> & co", "Ana 👩🏽‍⚕️ Ruiz",
+    // An emoji straddling the 120-character name limit must not be cut in half.
+    `${"x".repeat(119)}😀 tail`];
+  const unicodeDocs = Array.from({ length: 400 }, (_, index) => ({
+    title: `${hostileTitle}${index} ${"安全手順書".repeat(60)}`,
+    docType: "Risk Assessment",
+    siteName: `Café & Bäckerei <Nord> ${"é".repeat(300)}`,
+    outstanding: unicodeNames,
+    outstandingCount: 12,
+    acknowledgedCount: 3,
+    staffTotal: 15,
+  }));
+  const unicodeHtml = await managerHtmlFor(unicodeDocs);
+  assertSafeDigest(unicodeHtml, unicodeDocs);
+  assert.match(unicodeHtml, /Additional documents not shown/);
+  assert.match(unicodeHtml, /Fire &amp; evacuation &lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; &quot;Zoë&#39;s&quot;/);
+  assert.match(unicodeHtml, /Zoë Ågren-Søndergård, 王小明, Мария Иванова, &lt;b&gt;Ølaf&lt;\/b&gt; &amp; co, Ana 👩🏽‍⚕️ Ruiz/);
+  assert.match(unicodeHtml, /x{119}, and 6 more staff/, "the split emoji is dropped whole");
+  assert.doesNotMatch(unicodeHtml, /<script|<b>|<Nord>/);
+  // Right at the limit: the cut always falls between whole documents, and the
+  // digest uses the space instead of stopping well short of it.
+  const shownRows = (unicodeHtml.match(/<tr>/g) ?? []).length;
+  const oneRow = Buffer.byteLength(unicodeHtml.match(/<tr>[\s\S]*?<\/tr>/)[0], "utf8");
+  assert.ok(shownRows > 0 && shownRows < unicodeDocs.length);
+  assert.ok(Buffer.byteLength(unicodeHtml, "utf8") > MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES - 2 * oneRow, "fills to near the cap");
+  // A digest that fits exactly when one row shorter.
+  const nearCapDocs = unicodeDocs.slice(0, shownRows + 1);
+  const nearCapHtml = await managerHtmlFor(nearCapDocs);
+  assertSafeDigest(nearCapHtml, nearCapDocs);
+  assert.equal((nearCapHtml.match(/<tr>/g) ?? []).length, shownRows);
+  assert.match(nearCapHtml, /Additional documents not shown here: 1 document with 12 outstanding acknowledgements/);
+  const fitsHtml = await managerHtmlFor(unicodeDocs.slice(0, shownRows));
+  assertSafeDigest(fitsHtml, unicodeDocs.slice(0, shownRows));
+  assert.doesNotMatch(fitsHtml, /Additional documents not shown/);
   let fullyAcknowledgedSendCalled = false;
   const fullyAcknowledged = await runSafeTrackAckReminderJob({
     ...deps,

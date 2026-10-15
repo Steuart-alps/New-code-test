@@ -72,7 +72,15 @@ interface RosterStaff {
 }
 
 function esc(value: string | null | undefined): string {
-  return (value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return (value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/** First `max` characters, never splitting an emoji or other surrogate pair. */
+function clip(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const end = /[\uD800-\uDBFF]/.test(value[max - 1] ?? "") ? max - 1 : max;
+  return value.slice(0, end);
 }
 
 /**
@@ -253,7 +261,7 @@ const MAX_TITLE_CHARS_IN_MANAGER_ROW = 300;
 function renderManagerRow(doc: OutstandingDocSummary): string {
   const names = doc.outstanding
     .slice(0, MAX_NAMES_PER_MANAGER_ROW)
-    .map((name) => esc(name.slice(0, MAX_NAME_CHARS_IN_MANAGER_ROW)))
+    .map((name) => esc(clip(name, MAX_NAME_CHARS_IN_MANAGER_ROW)))
     .join(", ");
   const remaining = Math.max(0, doc.outstandingCount - Math.min(doc.outstanding.length, MAX_NAMES_PER_MANAGER_ROW));
   const waitingOn = remaining > 0
@@ -262,9 +270,9 @@ function renderManagerRow(doc: OutstandingDocSummary): string {
 
   return `
     <tr><td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">
-      <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(doc.title.slice(0, MAX_TITLE_CHARS_IN_MANAGER_ROW))}</div>
+      <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(clip(doc.title, MAX_TITLE_CHARS_IN_MANAGER_ROW))}</div>
       <div style="font-size:12px;color:#64748b;margin-top:2px;">
-        ${esc(doc.docType)}${doc.siteName ? ` · ${esc(doc.siteName.slice(0, MAX_TITLE_CHARS_IN_MANAGER_ROW))}` : ""} ·
+        ${esc(doc.docType)}${doc.siteName ? ` · ${esc(clip(doc.siteName, MAX_TITLE_CHARS_IN_MANAGER_ROW))}` : ""} ·
         ${doc.acknowledgedCount}/${doc.staffTotal} acknowledged
       </div>
       <div style="font-size:12px;color:#b45309;margin-top:4px;">

@@ -120,5 +120,8 @@ jobs:
       - name: Schema parity test
         run: pnpm --filter @workspace/api-server run test:schema:parity
 
+      - name: SafeTrack reminder job tests (fresh schema)
+        run: pnpm --filter @workspace/api-server run test:safe-track-ack-reminders:fresh
+
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
