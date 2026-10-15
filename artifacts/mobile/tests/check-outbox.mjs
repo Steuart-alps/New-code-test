@@ -506,5 +506,66 @@ assert.deepEqual(deliveredQueryKeys('cleaning-log'), [['kitchen-cleaning-log'], 
   await assert.rejects(cleaning.enqueue(entry('/api/kitchen-cleaning/logs/history')), /cannot be saved/);
   cleaning.suspend();
 }
+// BikeTrack hires (with their pre-ride check) and service logs: saved offline,
+// resent unchanged. A return updates an existing hire, so its path (and bike
+// edits, deletes, hire edits and settings) can never be stored on the device.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  let refuse = false;
+  const bikes = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      if (refuse) throw Object.assign(new Error('Bike is already on hire'), { status: 409 });
+      return { id: 12 };
+    },
+    async onSent() {},
+  });
+  await bikes.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  assert.ok(RECORD_KINDS.includes('bike-hire') && RECORD_KINDS.includes('bike-service'));
+  assert.equal(RECORD_PATHS['bike-hire'], '/api/bike-track/hires');
+  assert.equal(RECORD_PATHS['bike-service'], '/api/bike-track/services');
+  await bikes.enqueue(record('bike-hire', 'bike-hire-0000001', {
+    bikeId: 4, guestName: 'Alex', hireDate: '2026-10-15', siteId: 7,
+    preHireCheck: { brakesFront: 'pass', overallResult: 'pass', checkDate: '2026-10-15' },
+  }));
+  await bikes.enqueue(record('bike-service', 'bike-service-00001', { bikeId: 4, serviceDate: '2026-10-15', serviceType: 'annual' }));
+  for (const path of [
+    '/api/bike-track/hires/5/return', '/api/bike-track/hires/5', '/api/bike-track/bikes', '/api/bike-track/bikes/4',
+    '/api/bike-track/services/5', '/api/bike-track/config',
+  ]) {
+    await assert.rejects(bikes.enqueue({ ...record('bike-hire', 'bike-hire-0000002', {}), path }), /cannot be saved/, path);
+    await assert.rejects(bikes.enqueue({ ...record('bike-service', 'bike-service-00002', {}), path }), /cannot be saved/, path);
+  }
+  await assert.rejects(bikes.enqueue({ ...record('bike-service', 'bike-service-00003', {}), path: RECORD_PATHS['bike-hire'] }), /cannot be saved/,
+    'a service cannot be posted as a hire');
+  await bikes.replay();
+  assert.deepEqual(bikes.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued'], 'both wait on the device offline');
+  online = true;
+  await bikes.replay();
+  assert.deepEqual(bikes.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent']);
+  const hireAttempts = sent.filter((attempt) => attempt.body.clientEntryId === 'bike-hire-0000001');
+  assert.ok(hireAttempts.length >= 2, 'offline attempt then automatic resend');
+  for (const attempt of hireAttempts) assert.deepEqual(attempt, hireAttempts[0], 'every resend is identical, with the same entry ID and check');
+  assert.ok(sent.every((attempt) => attempt.path === (attempt.body.clientEntryId.startsWith('bike-service') ? '/api/bike-track/services' : '/api/bike-track/hires')));
+
+  // A queued hire whose bike was hired by someone else meanwhile is refused
+  // by the server (409): it is kept on the device for the user, not retried.
+  refuse = true;
+  await bikes.enqueue(record('bike-hire', 'bike-hire-0000004', { bikeId: 4, guestName: 'Sam', hireDate: '2026-10-15', siteId: 7 }));
+  await bikes.replay();
+  const refused = bikes.getSnapshot().entries.find((entry) => entry.entryId === 'bike-hire-0000004');
+  assert.equal(refused.state, 'failed');
+  assert.match(refused.error, /already on hire/);
+  bikes.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('bike-hire'), [['bike-hires'], ['bike-fleet'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('bike-service'), [['bike-services'], ['bike-services-latest'], ['dashboard-summary']]);
 
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');

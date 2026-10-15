@@ -2909,6 +2909,9 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_checks_bike" ON "bike_checks" ("bike_id")`);
+  // Phone hires carry a device entry ID (mobile outbox replays); created_by
+  // already exists. Schema: lib/db bike-track.ts.
+  await addClientEntryReplayColumns("bike_hire_records");
 }
 
 async function migrateBikeServices() {
@@ -2930,6 +2933,9 @@ async function migrateBikeServices() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_services_bike" ON "bike_services" ("bike_id")`);
+  // Phone service logs carry a device entry ID (mobile outbox replays).
+  // bike_services is runtime-only (no Drizzle table).
+  await addClientEntryReplayColumns("bike_services");
 }
 
 // ---- Two-factor authentication ----

@@ -35,6 +35,7 @@
     "test:aqua-extras": "node tests/aqua-extras-logic.mjs",
     "test:green-records": "node tests/green-records-logic.mjs",
     "test:kitchen-extras": "node tests/kitchen-extras-logic.mjs",
+    "test:bike-track": "node tests/bike-track-logic.mjs",
     "test:client-entry-logic": "node tests/client-entry-logic.mjs",
     "test:tree-track": "node tests/tree-track-logic.mjs",
     "test:room-track": "node tests/room-track-logic.mjs",

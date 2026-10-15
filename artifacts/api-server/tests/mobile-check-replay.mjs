@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixtures.mjs';
+import { base, createTenant, createUser, isoDay, pool } from './approval-workflow-fixtures.mjs';
 
 // Mobile outbox replays for fire, legionella, hot tub, PAT, incident and pool
 // records, GreenTrack pre-use checks and swim sessions (lib/clientEntryReplay.ts): a resend of an applied submission by
@@ -25,6 +25,8 @@ try {
   assert.equal(appliance.status, 201, JSON.stringify(appliance.data));
   const machine = await owner.request('POST', '/green-track/machines', { name: 'Ride-on mower', type: 'ride_on_rotary', siteId });
   assert.equal(machine.status, 201, JSON.stringify(machine.data));
+  const serviceBike = await owner.request('POST', '/bike-track/bikes', { ref: 'SVC-01', type: 'hybrid', siteId });
+  assert.equal(serviceBike.status, 201, JSON.stringify(serviceBike.data));
   const day = isoDay(-1);
 
   const cases = [
@@ -183,6 +185,14 @@ try {
       },
       changed: { certRef: 'PUWER-2' },
       otherUser: secondAdmin,
+    },
+    {
+      name: 'bike service', path: '/bike-track/services', table: 'bike_services',
+      body: {
+        bikeId: serviceBike.data.id, serviceDate: day, serviceType: 'annual', servicedBy: 'Cycle Co',
+        nextServiceDate: isoDay(364), costPence: 4500,
+      },
+      changed: { costPence: 5000 },
     },
   ];
 
@@ -384,6 +394,147 @@ try {
   }
   console.log('KitchenTrack probe and weekly mobile replays: idempotent per user and payload, concurrent-safe, one record per date kept.');
 
+  // BikeTrack hires: one hire per bike at a time, created with its pre-ride
+  // check. A resend gets the stored hire and check back even though the bike
+  // is now on hire; nothing is written twice and no second action is opened.
+  {
+    const name = 'bike hire';
+    const newBike = async (ref) => {
+      const bike = await owner.request('POST', '/bike-track/bikes', { ref, type: 'hybrid', siteId });
+      assert.equal(bike.status, 201, JSON.stringify(bike.data));
+      return bike.data.id;
+    };
+    const bikeStatus = async (id) => (await pool.query('SELECT status FROM bikes WHERE id = $1', [id])).rows[0].status;
+    const hireBody = (bikeId) => ({
+      bikeId, guestName: 'Alex Guest', hireDate: day, returnDateExpected: isoDay(1), depositPence: 2000, siteId,
+      preHireCheck: {
+        brakesFront: 'pass', brakesRear: 'pass', tyreFront: 'fail', performedBy: 'Porter', staffRosterId: null,
+        checkDate: day, overallResult: 'fail', checkNotes: 'Soft tyre',
+      },
+    });
+    const bikeActions = async () => Number((await pool.query(
+      "SELECT count(*) FROM track_actions WHERE client_id = $1 AND module = 'bike'", [owner.clientId],
+    )).rows[0].count);
+    const hiresBefore = await count('bike_hire_records', owner.clientId);
+    const checksBefore = await count('bike_checks', owner.clientId);
+    const actionsBefore = await bikeActions();
+
+    const sent = { ...hireBody(await newBike('BIKE-01')), clientEntryId: entryId() };
+    const first = await owner.request('POST', '/bike-track/hires', sent);
+    assert.equal(first.status, 201, `${name}: first send creates (${JSON.stringify(first.data)})`);
+    assert.ok(first.data.hire.id && first.data.preCheck.id, `${name}: hire and pre-ride check`);
+    assert.equal(await bikeStatus(sent.bikeId), 'hired');
+    assert.equal(await bikeActions(), actionsBefore + 1, `${name}: the failed pre-ride check opened one action`);
+    const replay = await owner.request('POST', '/bike-track/hires', sent);
+    assert.equal(replay.status, 200, `${name}: a lost-response replay is recognised although the bike is on hire (${JSON.stringify(replay.data)})`);
+    assert.equal(replay.data.hire.id, first.data.hire.id, `${name}: replay returns the stored hire`);
+    assert.equal(replay.data.preCheck.id, first.data.preCheck.id, `${name}: and its stored pre-ride check`);
+    const reordered = Object.fromEntries(Object.entries(sent).reverse());
+    assert.equal((await owner.request('POST', '/bike-track/hires', reordered)).status, 200, `${name}: same payload in another key order`);
+    const conflict = await owner.request('POST', '/bike-track/hires', { ...sent, guestName: 'Someone Else' });
+    assert.equal(conflict.status, 409, `${name}: an entry ID cannot hide a changed payload`);
+    assert.equal(conflict.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal((await staff.request('POST', '/bike-track/hires', sent)).status, 409, `${name}: the entry belongs to the user who sent it`);
+    const again = await owner.request('POST', '/bike-track/hires', { ...sent, clientEntryId: entryId() });
+    assert.equal(again.status, 409, `${name}: a new hire of a bike already on hire is refused`);
+    assert.notEqual(again.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal(await count('bike_hire_records', owner.clientId), hiresBefore + 1, `${name}: exactly one hire was created`);
+    assert.equal(await count('bike_checks', owner.clientId), checksBefore + 1, `${name}: exactly one pre-ride check was created`);
+    assert.equal(await bikeActions(), actionsBefore + 1, `${name}: replays add no follow-up actions`);
+
+    // Still recognised after the bike came back (the return is a plain update).
+    const returned = await owner.request('POST', `/bike-track/hires/${first.data.hire.id}/return`, { returnDateActual: day });
+    assert.equal(returned.status, 200, JSON.stringify(returned.data));
+    assert.equal((await owner.request('POST', `/bike-track/hires/${first.data.hire.id}/return`, { returnDateActual: day })).status, 409,
+      `${name}: a second return is refused`);
+    assert.equal((await owner.request('POST', '/bike-track/hires', sent)).status, 200, `${name}: replay after the return`);
+    assert.equal(await bikeStatus(sent.bikeId), 'available', `${name}: a replay does not put the bike back on hire`);
+
+    const racing = { ...hireBody(await newBike('BIKE-02')), clientEntryId: entryId() };
+    const both = await Promise.all([owner.request('POST', '/bike-track/hires', racing), owner.request('POST', '/bike-track/hires', racing)]);
+    assert.deepEqual(both.map((r) => r.status).sort(), [200, 201], `${name}: ${JSON.stringify(both.map((r) => r.data))}`);
+    assert.equal(both[0].data.hire.id, both[1].data.hire.id);
+    assert.equal(await count('bike_hire_records', owner.clientId), hiresBefore + 2);
+    assert.equal(await count('bike_checks', owner.clientId), checksBefore + 2, `${name}: the losing racer wrote no check`);
+    // Two different hires of one bike at once (two phones syncing): one wins.
+    const contested = await newBike('BIKE-07');
+    const rivals = await Promise.all([
+      owner.request('POST', '/bike-track/hires', { ...hireBody(contested), clientEntryId: entryId() }),
+      owner.request('POST', '/bike-track/hires', { ...hireBody(contested), guestName: 'Sam Rival', clientEntryId: entryId() }),
+    ]);
+    assert.deepEqual(rivals.map((r) => r.status).sort(), [201, 409], `${name}: ${JSON.stringify(rivals.map((r) => r.data))}`);
+    assert.equal(await count('bike_hire_records', owner.clientId), hiresBefore + 3);
+    assert.equal(await count('bike_checks', owner.clientId), checksBefore + 3, `${name}: the refused rival wrote no check`);
+    // The phone reads the active hires list as raw rows (snake_case) and the
+    // fleet as Drizzle rows (camelCase); see mobile components/bike-track-logic.ts.
+    const listed = (await owner.request('GET', '/bike-track/hires?status=active')).data.find((row) => row.id === both[0].data.hire.id);
+    assert.equal(listed?.bike_ref, 'BIKE-02', JSON.stringify(listed));
+    assert.equal(listed.guest_name, 'Alex Guest');
+    assert.equal(listed.pre_result, 'fail');
+    assert.equal(String(listed.hire_date).slice(0, 10), day);
+    const fleet = (await owner.request('GET', '/bike-track/bikes')).data.find((row) => row.id === racing.bikeId);
+    assert.equal(fleet?.siteId, siteId, JSON.stringify(fleet));
+    assert.equal(fleet.status, 'hired');
+
+    // Nothing is written when the hire is refused part-way.
+    const refusedBike = await newBike('BIKE-03');
+    const badRoster = await owner.request('POST', '/bike-track/hires', {
+      ...hireBody(refusedBike), preHireCheck: { ...hireBody(refusedBike).preHireCheck, staffRosterId: 999999 }, clientEntryId: entryId(),
+    });
+    assert.equal(badRoster.status, 400, JSON.stringify(badRoster.data));
+    const foreignSite = await other.request('POST', '/sites', { name: 'Other business site', seedStarterChecks: false });
+    assert.equal(foreignSite.status, 201, JSON.stringify(foreignSite.data));
+    const crossTenant = await owner.request('POST', '/bike-track/hires', { ...hireBody(refusedBike), siteId: foreignSite.data.id });
+    assert.equal(crossTenant.status, 400, `${name}: another business's site is refused (${JSON.stringify(crossTenant.data)})`);
+    assert.equal(await bikeStatus(refusedBike), 'available', `${name}: a refused hire leaves the bike available`);
+    assert.equal(await count('bike_hire_records', owner.clientId), hiresBefore + 3);
+
+    // Web hires without an entry ID behave as before.
+    const webBike = await newBike('BIKE-04');
+    assert.equal((await owner.request('POST', '/bike-track/hires', hireBody(webBike))).status, 201);
+    assert.equal((await owner.request('POST', '/bike-track/hires', hireBody(webBike))).status, 409, `${name}: web keeps one hire per bike`);
+    assert.equal((await owner.request('POST', '/bike-track/hires', { ...hireBody(await newBike('BIKE-05')), clientEntryId: 'short' })).status, 400,
+      `${name}: entry IDs are validated`);
+    assert.equal(await count('bike_hire_records', owner.clientId), hiresBefore + 4);
+
+    // Updates never accept or overwrite the device entry ID.
+    assert.equal((await owner.request('PUT', `/bike-track/hires/${both[0].data.hire.id}`, { notes: 'Edited', clientEntryId: entryId() })).status, 200);
+    assert.equal((await pool.query('SELECT client_entry_id FROM bike_hire_records WHERE id = $1', [both[0].data.hire.id])).rows[0].client_entry_id,
+      racing.clientEntryId, `${name}: an edit keeps the original entry ID`);
+
+    // The phone signs in with a bearer token (no web session): hires and
+    // services record that user, so the phone's own resend is recognised.
+    const phoneEmail = `bike-phone-${randomUUID()}@test.local`;
+    const phonePassword = `phone-fixture-${randomUUID()}`;
+    const phoneUser = await owner.request('POST', '/users', {
+      name: 'Phone staff', email: phoneEmail, password: phonePassword, clientId: owner.clientId, role: 'client_staff',
+    });
+    assert.equal(phoneUser.status, 201, JSON.stringify(phoneUser.data));
+    const phoneLogin = await fetch(`${base}/auth/mobile-login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: phoneEmail, password: phonePassword }),
+    });
+    const phoneSession = await phoneLogin.json();
+    assert.equal(phoneLogin.status, 200, JSON.stringify(phoneSession));
+    assert.equal(typeof phoneSession.token, 'string', JSON.stringify(phoneSession));
+    const phone = async (path, body) => {
+      const response = await fetch(`${base}${path}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${phoneSession.token}` }, body: JSON.stringify(body),
+      });
+      return { status: response.status, data: await response.json().catch(() => null) };
+    };
+    const phoneHire = { ...hireBody(await newBike('BIKE-06')), clientEntryId: entryId() };
+    const phoneFirst = await phone('/bike-track/hires', phoneHire);
+    assert.equal(phoneFirst.status, 201, JSON.stringify(phoneFirst.data));
+    assert.equal(phoneFirst.data.hire.createdBy, phoneUser.data.id, `${name}: a phone hire records its user`);
+    assert.equal((await phone('/bike-track/hires', phoneHire)).status, 200, `${name}: the phone's resend is recognised`);
+    const phoneService = { bikeId: serviceBike.data.id, serviceDate: day, serviceType: 'adhoc', clientEntryId: entryId() };
+    const serviceFirst = await phone('/bike-track/services', phoneService);
+    assert.equal(serviceFirst.status, 201, JSON.stringify(serviceFirst.data));
+    assert.equal(serviceFirst.data.created_by, phoneUser.data.id, 'a phone service records its user');
+    assert.equal((await phone('/bike-track/services', phoneService)).status, 200, "the phone's service resend is recognised");
+    console.log('BikeTrack hire and service mobile replays: idempotent per user and payload, concurrent-safe, no partial hires, bearer sessions attributed.');
+  }
+
   // Updates never accept or overwrite the device entry ID.
   const fire = await owner.request('POST', '/fire-safety', {
     checkType: 'fire_doors', checkDate: day, result: 'pass', siteId, clientEntryId: entryId(),
@@ -461,5 +612,5 @@ try {
     assert.equal((await owner.request('POST', '/kitchen-cleaning/logs', { ...draft, clientEntryId: 'short' })).status, 400);
   }
 
-  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, GreenTrack (pre-use checks, defects, fuel logs, service records, PUWER inspections), swim session, surveillance, first-aid and pool incident mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
+  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, BikeTrack service, GreenTrack (pre-use checks, defects, fuel logs, service records, PUWER inspections), swim session, surveillance, first-aid and pool incident mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
 } finally { await pool.end(); }

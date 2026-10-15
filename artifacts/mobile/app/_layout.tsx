@@ -153,6 +153,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/bike"
+        options={{
+          title: 'BikeTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/safe-track"
         options={{
           title: 'SafeTrack',

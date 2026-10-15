@@ -114,6 +114,14 @@ const MODULES: CheckModule[] = [
     checks: ['Pick site', 'Log a sighting', 'Contractor visit', 'Recent activity'],
   },
   {
+    id: 'bike',
+    label: 'BikeTrack',
+    subtitle: 'Bike hire, safety checks & services',
+    icon: 'navigation',
+    iconColor: '#0d9488',
+    checks: ['Pick site', 'Fleet status', 'Hire with pre-ride check', 'Return', 'Log a service'],
+  },
+  {
     id: 'green',
     label: 'GreenTrack',
     subtitle: 'Pre-use checks, defects & fuel logs',
@@ -175,6 +183,7 @@ export default function ChecksScreen() {
       (mod.id !== 'incident' || hasService('incidenttrack')) &&
       (mod.id !== 'pat' || hasService('pattrack')) &&
       (mod.id !== 'pest' || hasService('pesttrack')) &&
+      (mod.id !== 'bike' || hasService('biketrack')) &&
       (mod.id !== 'green' || hasService('greentrack')) &&
       (mod.id !== 'premises' || hasService('premisestrack')) &&
       (mod.id !== 'tree' || hasService('treetrack')) &&

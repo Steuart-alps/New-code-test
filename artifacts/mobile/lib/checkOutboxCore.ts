@@ -19,13 +19,15 @@ export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
 export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident' | 'pool-check'
   | 'premises-inspection' | 'tree-inspection' | 'room-check' | 'pest-activity' | 'pest-visit'
   | 'swim-surveillance' | 'swim-first-aid' | 'swim-incident' | 'green-defect' | 'green-fuel' | 'green-service' | 'green-puwer'
-  | 'kitchen-probe' | 'kitchen-weekly' | 'cleaning-log';
+  | 'kitchen-probe' | 'kitchen-weekly' | 'cleaning-log'
+  | 'bike-hire' | 'bike-service';
 
 /** Kinds whose entries are independent records (each gets its own scope). */
 export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident', 'pool-check',
   'premises-inspection', 'tree-inspection', 'room-check', 'pest-activity', 'pest-visit',
   'swim-surveillance', 'swim-first-aid', 'swim-incident', 'green-defect', 'green-fuel', 'green-service', 'green-puwer',
-  'kitchen-probe', 'kitchen-weekly', 'cleaning-log'];
+  'kitchen-probe', 'kitchen-weekly', 'cleaning-log',
+  'bike-hire', 'bike-service'];
 export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string> = {
   'fire-check': '/api/fire-safety',
   'legionella-check': '/api/legionella',
@@ -50,6 +52,8 @@ export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string>
   // Upserts the schedule for its kitchen, frequency and period; entries are
   // delivered oldest first, so a later save never lands before an earlier one.
   'cleaning-log': '/api/kitchen-cleaning/logs',
+  'bike-hire': '/api/bike-track/hires',
+  'bike-service': '/api/bike-track/services',
 };
 
 /** Query keys to refresh once an entry of this kind has been delivered. */
@@ -77,6 +81,8 @@ export function deliveredQueryKeys(kind: CheckKind): string[][] {
     case 'kitchen-probe': return [['kitchen-probe-checks'], ['dashboard-summary']];
     case 'kitchen-weekly': return [['kitchen-weekly-reviews'], ['dashboard-summary']];
     case 'cleaning-log': return [['kitchen-cleaning-log'], ['kitchen-cleaning-history'], ['dashboard-summary']];
+    case 'bike-hire': return [['bike-hires'], ['bike-fleet'], ['dashboard-summary']];
+    case 'bike-service': return [['bike-services'], ['bike-services-latest'], ['dashboard-summary']];
   }
 }
 export interface CheckEntry {
@@ -131,6 +137,8 @@ const PATHS: Record<CheckKind, RegExp> = {
   'kitchen-probe': /^\/api\/kitchen-weekly\/probe$/,
   'kitchen-weekly': /^\/api\/kitchen-weekly\/weekly$/,
   'cleaning-log': /^\/api\/kitchen-cleaning\/logs$/,
+  'bike-hire': /^\/api\/bike-track\/hires$/,
+  'bike-service': /^\/api\/bike-track\/services$/,
 };
 const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
 const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';
