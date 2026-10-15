@@ -17,12 +17,14 @@ export interface CheckOwner { clientId: number; userId: number }
 export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
 export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident' | 'pool-check'
   | 'premises-inspection' | 'tree-inspection' | 'room-check' | 'pest-activity' | 'pest-visit'
-  | 'swim-surveillance' | 'swim-first-aid' | 'swim-incident' | 'green-defect' | 'green-fuel' | 'green-service' | 'green-puwer';
+  | 'swim-surveillance' | 'swim-first-aid' | 'swim-incident' | 'green-defect' | 'green-fuel' | 'green-service' | 'green-puwer'
+  | 'kitchen-probe' | 'kitchen-weekly';
 
 /** Kinds whose entries are independent records (each gets its own scope). */
 export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident', 'pool-check',
   'premises-inspection', 'tree-inspection', 'room-check', 'pest-activity', 'pest-visit',
-  'swim-surveillance', 'swim-first-aid', 'swim-incident', 'green-defect', 'green-fuel', 'green-service', 'green-puwer'];
+  'swim-surveillance', 'swim-first-aid', 'swim-incident', 'green-defect', 'green-fuel', 'green-service', 'green-puwer',
+  'kitchen-probe', 'kitchen-weekly'];
 export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string> = {
   'fire-check': '/api/fire-safety',
   'legionella-check': '/api/legionella',
@@ -42,6 +44,8 @@ export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string>
   'green-fuel': '/api/green-track/fuel-logs',
   'green-service': '/api/green-track/service-records',
   'green-puwer': '/api/green-track/puwer-inspections',
+  'kitchen-probe': '/api/kitchen-weekly/probe',
+  'kitchen-weekly': '/api/kitchen-weekly/weekly',
 };
 
 /** Query keys to refresh once an entry of this kind has been delivered. */
@@ -66,6 +70,8 @@ export function deliveredQueryKeys(kind: CheckKind): string[][] {
     case 'green-fuel': return [['green-records', 'fuel'], ['dashboard-summary']];
     case 'green-service': return [['green-records', 'service'], ['dashboard-summary']];
     case 'green-puwer': return [['green-records', 'puwer'], ['dashboard-summary']];
+    case 'kitchen-probe': return [['kitchen-probe-checks'], ['dashboard-summary']];
+    case 'kitchen-weekly': return [['kitchen-weekly-reviews'], ['dashboard-summary']];
   }
 }
 export interface CheckEntry {
@@ -117,6 +123,8 @@ const PATHS: Record<CheckKind, RegExp> = {
   'green-fuel': /^\/api\/green-track\/fuel-logs$/,
   'green-service': /^\/api\/green-track\/service-records$/,
   'green-puwer': /^\/api\/green-track\/puwer-inspections$/,
+  'kitchen-probe': /^\/api\/kitchen-weekly\/probe$/,
+  'kitchen-weekly': /^\/api\/kitchen-weekly\/weekly$/,
 };
 const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
 const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';

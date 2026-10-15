@@ -71,7 +71,7 @@ export function isUniqueViolation(error: unknown): boolean {
 
 /** Runtime-only tables (raw SQL, snake_case rows) that store device entry IDs. */
 export type RawClientEntryTable = "pool_checks" | "green_pre_use_checks" | "swim_sessions"
-  | "swim_surveillance_checks" | "swim_first_aid_checks" | "swim_incidents" | "green_defects" | "green_fuel_logs" | "green_service_records" | "green_puwer_inspections";
+  | "swim_surveillance_checks" | "swim_first_aid_checks" | "swim_incidents" | "green_defects" | "green_fuel_logs" | "green_service_records" | "green_puwer_inspections" | "kitchen_weekly_records" | "kitchen_probe_checks";
 
 /** The raw row already stored for this client's device entry, if any. */
 export async function findRawStoredEntry(

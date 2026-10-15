@@ -2599,6 +2599,10 @@ async function migrateAuditFixes2026_08() {
     ON "kitchen_probe_checks" ("client_id", "site_id", "check_date")
     WHERE "site_id" IS NOT NULL
   `);
+  // Phone weekly reviews and probe calibrations carry a device entry ID
+  // (mobile outbox replays). Runtime-only tables: no Drizzle schema.
+  await addClientEntryReplayColumns("kitchen_weekly_records");
+  await addClientEntryReplayColumns("kitchen_probe_checks");
 }
 
 async function migrateLegacyCategories() {

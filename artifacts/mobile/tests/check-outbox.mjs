@@ -433,5 +433,62 @@ assert.deepEqual(deliveredQueryKeys('swim-incident'), [['swim-incidents'], ['das
 for (const [kind, tab] of [['green-defect', 'defect'], ['green-fuel', 'fuel'], ['green-service', 'service'], ['green-puwer', 'puwer']]) {
   assert.deepEqual(deliveredQueryKeys(kind), [['green-records', tab], ['dashboard-summary']]);
 }
+// KitchenTrack probe calibrations and weekly reviews: saved offline, resent
+// unchanged, and only the two create paths can be stored (no edits by id).
+// A review the server refuses (one per week already exists) needs the user.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  let refuseWeekly = false;
+  const kitchen = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      if (refuseWeekly && entry.kind === 'kitchen-weekly') {
+        throw Object.assign(new Error('Record already exists for this week'), { status: 409 });
+      }
+      return { id: 21 };
+    },
+    async onSent() {},
+  });
+  await kitchen.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  assert.ok(RECORD_KINDS.includes('kitchen-probe') && RECORD_KINDS.includes('kitchen-weekly'));
+  assert.equal(RECORD_PATHS['kitchen-probe'], '/api/kitchen-weekly/probe');
+  assert.equal(RECORD_PATHS['kitchen-weekly'], '/api/kitchen-weekly/weekly');
+  await kitchen.enqueue(record('kitchen-probe', 'kitchen-probe-00001', {
+    checkDate: '2026-10-14', probes: [{ name: 'Probe 1', iceTemp: '0.2', accurateIce: true }], overallResult: 'pass',
+    signature: 'Manager', submittedAt: '2026-10-14T09:00:00.000Z',
+  }));
+  await kitchen.enqueue(record('kitchen-weekly', 'kitchen-weekly-0001', {
+    weekCommencing: '2026-10-12', checks: { training: 'yes' }, managerSignature: 'Manager', submittedAt: '2026-10-14T09:00:00.000Z',
+  }));
+  for (const path of ['/api/kitchen-weekly/probe/5', '/api/kitchen-weekly/weekly/5', '/api/kitchen-weekly/probe/by-date/2026-10-14']) {
+    await assert.rejects(kitchen.enqueue({ ...record('kitchen-probe', 'kitchen-probe-00002', {}), path }), /cannot be saved/, path);
+    await assert.rejects(kitchen.enqueue({ ...record('kitchen-weekly', 'kitchen-weekly-0002', {}), path }), /cannot be saved/, path);
+  }
+  await assert.rejects(kitchen.enqueue({ ...record('kitchen-weekly', 'kitchen-weekly-0003', {}), path: RECORD_PATHS['kitchen-probe'] }), /cannot be saved/,
+    'a weekly review cannot be posted as a probe check');
+  await kitchen.replay();
+  assert.deepEqual(kitchen.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued'], 'both wait on the device offline');
+  online = true;
+  refuseWeekly = true;
+  await kitchen.replay();
+  const stateOf = (kind) => kitchen.getSnapshot().entries.find((entry) => entry.kind === kind);
+  assert.equal(stateOf('kitchen-probe').state, 'sent');
+  assert.equal(stateOf('kitchen-weekly').state, 'failed', 'a refused review is kept on the device for the user');
+  assert.match(stateOf('kitchen-weekly').error ?? '', /already exists/);
+  const probeAttempts = sent.filter((attempt) => attempt.body.clientEntryId === 'kitchen-probe-00001');
+  assert.ok(probeAttempts.length >= 2, 'offline attempt then automatic resend');
+  for (const attempt of probeAttempts) assert.deepEqual(attempt, probeAttempts[0], 'every resend is identical, with the same entry ID');
+  assert.ok(sent.every((attempt) => attempt.path === (attempt.body.clientEntryId.startsWith('kitchen-weekly') ? '/api/kitchen-weekly/weekly' : '/api/kitchen-weekly/probe')));
+  kitchen.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('kitchen-probe'), [['kitchen-probe-checks'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('kitchen-weekly'), [['kitchen-weekly-reviews'], ['dashboard-summary']]);
 
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');

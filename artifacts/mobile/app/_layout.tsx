@@ -104,6 +104,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/kitchen-extras"
+        options={{
+          title: 'Probe & weekly checks',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/aqua"
         options={{
           title: 'AquaTrack',

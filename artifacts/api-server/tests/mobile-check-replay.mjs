@@ -320,6 +320,70 @@ try {
     console.log('RoomTrack room check mobile replays: idempotent per user and payload, concurrent-safe, one check per room and day kept.');
   }
 
+  // KitchenTrack probe calibrations and weekly reviews: one record per date
+  // (whole business, as the website records them), so each step uses its own
+  // date; a second record for a date stays a plain 409.
+  const kitchenCases = [
+    {
+      name: 'kitchen probe', path: '/kitchen-weekly/probe', table: 'kitchen_probe_checks', dateField: 'checkDate',
+      body: (date) => ({
+        checkDate: date, probes: [{ name: 'Probe 1', iceTemp: '0.3', boilingTemp: '99.8', accurateIce: true, accurateBoiling: true, notes: '' }],
+        overallResult: 'pass', checkedBy: 'Chef', checkedByRosterId: null, signature: 'Manager', notes: null,
+        submittedAt: `${date}T09:00:00.000Z`,
+      }),
+      changed: { overallResult: 'fail' },
+    },
+    {
+      name: 'kitchen weekly', path: '/kitchen-weekly/weekly', table: 'kitchen_weekly_records', dateField: 'weekCommencing',
+      body: (date) => ({
+        weekCommencing: date, checks: { training: 'yes', cleaning: 'no' }, deviations: [{ rule: 'Cleaning', action: 'Re-briefed' }],
+        additional: { issuesThreeTimes: 'no' }, managerSignature: 'Manager', submittedAt: `${date}T09:00:00.000Z`,
+      }),
+      changed: { managerSignature: 'Someone else' },
+    },
+  ];
+  for (const { name, path, table, dateField, body, changed } of kitchenCases) {
+    const before = await count(table, owner.clientId);
+    const sent = { ...body(day), clientEntryId: entryId() };
+    const first = await owner.request('POST', path, sent);
+    assert.equal(first.status, 201, `${name}: first send creates (${JSON.stringify(first.data)})`);
+    assert.equal(Number(first.data.created_by), owner.userId, `${name}: the creator is recorded`);
+    const replay = await owner.request('POST', path, sent);
+    assert.equal(replay.status, 200, `${name}: a lost-response replay is recognised (${JSON.stringify(replay.data)})`);
+    assert.equal(replay.data.id, first.data.id, `${name}: replay returns the stored record`);
+    const reordered = Object.fromEntries(Object.entries(sent).reverse());
+    assert.equal((await owner.request('POST', path, reordered)).status, 200, `${name}: same payload in another key order`);
+    const conflict = await owner.request('POST', path, { ...sent, ...changed });
+    assert.equal(conflict.status, 409, `${name}: an entry ID cannot hide a changed payload`);
+    assert.equal(conflict.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal((await staff.request('POST', path, sent)).status, 409, `${name}: the entry belongs to the user who sent it`);
+    const sameDate = await owner.request('POST', path, { ...sent, clientEntryId: entryId() });
+    assert.equal(sameDate.status, 409, `${name}: a new entry for a date already recorded is refused`);
+    assert.notEqual(sameDate.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal(sameDate.data.id, first.data.id);
+    assert.equal(await count(table, owner.clientId), before + 1, `${name}: exactly one record was created`);
+
+    const racing = { ...body(isoDay(0)), clientEntryId: entryId() };
+    const both = await Promise.all([owner.request('POST', path, racing), owner.request('POST', path, racing)]);
+    assert.deepEqual(both.map((r) => r.status).sort(), [200, 201], `${name}: ${JSON.stringify(both.map((r) => r.data))}`);
+    assert.equal(both[0].data.id, both[1].data.id);
+    assert.equal(await count(table, owner.clientId), before + 2);
+
+    // Web submissions without an entry ID behave as before.
+    const webDate = isoDay(-5);
+    assert.equal((await owner.request('POST', path, body(webDate))).status, 201);
+    assert.equal((await owner.request('POST', path, body(webDate))).status, 409, `${name}: web keeps one record per date`);
+    assert.equal((await owner.request('POST', path, { ...body(isoDay(-6)), clientEntryId: 'short' })).status, 400, `${name}: entry IDs are validated`);
+    assert.equal(await count(table, owner.clientId), before + 3);
+
+    // Updates never accept or overwrite the device entry ID.
+    const updated = await owner.request('PUT', `${path}/${both[0].data.id}`, { [dateField]: isoDay(0), clientEntryId: entryId() });
+    assert.equal(updated.status, 200, JSON.stringify(updated.data));
+    assert.equal((await pool.query(`SELECT client_entry_id FROM ${table} WHERE id = $1`, [both[0].data.id])).rows[0].client_entry_id,
+      racing.clientEntryId, `${name}: an edit keeps the original entry ID`);
+  }
+  console.log('KitchenTrack probe and weekly mobile replays: idempotent per user and payload, concurrent-safe, one record per date kept.');
+
   // Updates never accept or overwrite the device entry ID.
   const fire = await owner.request('POST', '/fire-safety', {
     checkType: 'fire_doors', checkDate: day, result: 'pass', siteId, clientEntryId: entryId(),

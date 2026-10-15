@@ -150,8 +150,10 @@ assert.match(logicSource, /buildKitchenTemperatureWrite\(scope, recordId, body\)
 assert.match(logicSource, /await invalidateKitchenDashboard\(queryClient\)/);
 assert.match(formSource, /coldFood\.map\(\(reading, index\)/);
 const kitchenRoute = await readFile(new URL('../app/checks/kitchen.tsx', import.meta.url), 'utf8');
-assert.match(kitchenRoute, /return <KitchenTemperatureForm \/>;/,
+assert.match(kitchenRoute, /<KitchenTemperatureForm \/>/,
   'the direct KitchenTrack route uses the tested form');
+assert.match(kitchenRoute, /router\.push\('\/checks\/kitchen-extras'/,
+  'the KitchenTrack route links to probe calibration and the weekly review');
 const typedRoute = await readFile(new URL('../app/checks/[type].tsx', import.meta.url), 'utf8');
 assert.match(typedRoute, /if \(isKitchen\) \{\s*return <KitchenTemperatureForm \/>;/,
   'the checks/kitchen route uses the tested form');
