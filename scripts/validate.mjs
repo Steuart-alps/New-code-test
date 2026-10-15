@@ -71,6 +71,7 @@ const DEFAULT_CHECKS = {
   "billing-addon-catalog": { stage: "static", class: "light", cmd: api("test:billing-addon-catalog") },
   "staged-photo-creation": { stage: "static", class: "light", cmd: api("test:staged-photo-creation") },
   "fix-track-priority": { stage: "static", class: "light", cmd: web("test:fix-track-priority") },
+  "generated-client-runtime": { stage: "static", class: "light", cmd: "pnpm --filter @workspace/api-client-react run test:generated-client" },
 
   "test-trial-reminders": { stage: "integration", class: "api", cmd: api("test:trial-reminders") },
   "test-tenant-isolation": { stage: "integration", class: "api", cmd: api("test:isolation:ci") },

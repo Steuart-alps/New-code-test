@@ -66,6 +66,11 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # Regenerates the API client and zod schemas from the OpenAPI spec and
+      # fails if the committed output differs. Needs lib/*/dist from Typecheck.
+      - name: Generated API client drift check
+        run: pnpm run check:api-codegen
+
       - name: Build API
         run: pnpm --filter @workspace/api-server run build
 
@@ -80,6 +85,9 @@ jobs:
 
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
+
+      - name: Generated API client runtime test
+        run: pnpm --filter @workspace/api-client-react run test:generated-client
 
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
