@@ -243,10 +243,10 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site</Label>
-              <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+              <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All sites</SelectItem>
+                  <SelectItem value="none">All sites</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -400,10 +400,10 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site</Label>
-              <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+              <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All sites</SelectItem>
+                  <SelectItem value="none">All sites</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>

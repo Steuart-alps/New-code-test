@@ -865,10 +865,10 @@ function BikeFormDialog({
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Select value={siteId} onValueChange={setSiteId}>
+              <Select value={siteId || "none"} onValueChange={v => setSiteId(v === "none" ? "" : v)}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="No specific site" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No specific site</SelectItem>
+                  <SelectItem value="none">No specific site</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
