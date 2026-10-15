@@ -8,6 +8,7 @@ import { createPestControlRegisterPdf } from "../lib/pestControlRegisterPdf";
 import { z } from "zod";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
+import { resolveSiteAccessScope } from "../lib/siteAccessScope";
 
 const router = Router();
 
@@ -137,15 +138,20 @@ router.get("/register.pdf", requireAuth, requireClientAdmin, async (req, res) =>
 
 // ── Contractor visits ─────────────────────────────────────────────────────────
 
+// Calendar dates as the date inputs send them; anything else is a 400 rather
+// than a database error (which a phone outbox would keep retrying).
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((v) => !Number.isNaN(Date.parse(v)), "Invalid date");
+const optionalIsoDate = z.preprocess((v) => (v === "" ? null : v), isoDate.optional().nullable());
+
 const VisitBody = z.object({
-  visitDate:          z.string().min(1),
+  visitDate:          isoDate,
   contractorName:     z.string().optional().nullable(),
   contractorCompany:  z.string().optional().nullable(),
   areasInspected:     z.string().optional().nullable(),
   findings:           z.string().optional().nullable(),
   treatmentsApplied:  z.string().optional().nullable(),
   recommendations:    z.string().optional().nullable(),
-  nextVisitDate:      z.string().optional().nullable(),
+  nextVisitDate:      optionalIsoDate,
   signedOffBy:        z.string().optional().nullable(),
   signedOffByRosterId: z.number().int().positive().optional().nullable(),
   notes:              z.string().optional().nullable(),
@@ -181,6 +187,7 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
   // the roster is still recognised as already recorded.
   const prior = await storedEntry();
   if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+  if (d.siteId != null && !(await resolveSiteAccessScope(req, res, clientId, d.siteId))) return;
    const performer = await resolveStaffRoster(clientId, d.signedOffByRosterId, d.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   let row;
@@ -225,6 +232,7 @@ router.put("/visits/:id", requireAuth, denyViewers, async (req, res) => {
   const body = VisitBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
    const d = body.data;
+  if (d.siteId != null && !(await resolveSiteAccessScope(req, res, clientId, d.siteId))) return;
    const performer = await resolveStaffPerformerUpdate(clientId, d.signedOffByRosterId, d.signedOffBy, existingVisit.signedOffByRosterId, existingVisit.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   await db.update(pestVisitsTable).set({
@@ -263,7 +271,7 @@ router.delete("/visits/:id", requireAuth, denyViewers, async (req, res) => {
 // ── Pest activity log ─────────────────────────────────────────────────────────
 
 const ActivityBody = z.object({
-  recordedDate: z.string().min(1),
+  recordedDate: isoDate,
   pestType:     z.string().default("rodent"),
   evidenceType: z.string().default("live_sighting"),
   location:     z.string().optional().nullable(),
@@ -304,6 +312,7 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   // a roster member or option was retired is still recognised as recorded.
   const prior = await storedEntry();
   if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+  if (d.siteId != null && !(await resolveSiteAccessScope(req, res, clientId, d.siteId))) return;
   const performer = await resolveStaffRoster(clientId, d.recordedByRosterId, d.recordedBy);
   if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -363,6 +372,7 @@ router.put("/activity/:id", requireAuth, denyViewers, async (req, res) => {
     .where(and(eq(pestActivityTable.id, id), eq(pestActivityTable.clientId, clientId)))
     .limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (d.siteId != null && !(await resolveSiteAccessScope(req, res, clientId, d.siteId))) return;
   const performer = await resolveStaffPerformerUpdate(clientId, d.recordedByRosterId, d.recordedBy, existing.recordedByRosterId, existing.recordedBy);
   if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 

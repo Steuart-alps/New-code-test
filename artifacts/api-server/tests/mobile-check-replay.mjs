@@ -274,10 +274,15 @@ try {
     ['/swim-track/surveillance', { checkDate: day, siteId }],
     ['/swim-track/first-aid', { checkDate: day, siteId }],
     ['/swim-track/incidents', { incidentDate: day, description: 'Slip', siteId }],
+    ['/pest-track/activity', { recordedDate: day, siteId }],
+    ['/pest-track/visits', { visitDate: day, siteId }],
   ]) {
     const foreign = await other.request('POST', path, { ...body, clientEntryId: entryId() });
     assert.equal(foreign.status, 400, `${path}: another client's site is refused (${JSON.stringify(foreign.data)})`);
   }
+  // A malformed date is a clear 400, not a database error the outbox would retry.
+  assert.equal((await owner.request('POST', '/pest-track/visits', { visitDate: '15/10/2026', siteId })).status, 400, 'pest visit: bad date refused');
+  assert.equal((await owner.request('POST', '/pest-track/activity', { recordedDate: '2026-13-45', siteId })).status, 400, 'pest activity: bad date refused');
   const ownSession = (await pool.query('SELECT id FROM swim_sessions WHERE client_id = $1 LIMIT 1', [owner.clientId])).rows[0].id;
   assert.equal((await other.request('POST', '/swim-track/surveillance', { checkDate: day, sessionId: ownSession })).status, 400,
     "surveillance: another client's swim session is refused");
