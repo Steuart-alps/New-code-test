@@ -24,7 +24,7 @@ What's already in the repository:
 
 Run these on your own computer from `artifacts/mobile`. You need Node 24 and the repository up to date on `main`.
 
-1. **Deploy the API first.** Mobile builds from this branch send a `clientEntryId` with each fire, legionella, hot tub, PAT, incident, pool, premises, tree, room and pest record, GreenTrack pre-use check and swim session, so a resend after a lost response doesn't create a duplicate. An older API ignores the field, which would bring the duplicates back. Merge this branch and let Render deploy before you build.
+1. **Deploy the API first.** Mobile builds from this branch send a `clientEntryId` with each fire, legionella, hot tub, PAT, incident, pool, premises, tree, room, pest, bike hire and bike service record, GreenTrack pre-use check, defect, fuel log, service record and PUWER inspection, swim session, lifeguard surveillance check, first-aid check and pool incident, kitchen probe calibration, weekly kitchen review and cleaning schedule save, FixTrack issue report and note, "Mark done" and SafeTrack acknowledgement, so a resend after a lost response doesn't create a duplicate. An older API ignores the field, which would bring the duplicates back. Merge this branch and let Render deploy before you build.
 2. **Apple Developer Program**, £79 a year: <https://developer.apple.com/programs/enroll/>.
    - Enrol as the legal entity, ALPS Consulting Ltd (it trades as ALPS Consultancy; "ALPS Consultancy Ltd" is a different company), so the store shows the company as the seller. That needs a D-U-N-S number, which Apple can look up or request for free.
    - Enrolling as an individual shows your personal name instead.
@@ -112,10 +112,11 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > • FireTrack: fire alarm, emergency lighting, extinguisher and fire-walk checks
 > • LegionellaTrack: water temperatures and flushing (L8 / HSG274)
 > • HotTubTrack and AquaTrack: hot tub and pool water tests, swim sessions, lifeguard surveillance, first-aid equipment checks and pool incidents
-> • KitchenTrack: food safety diary, temperature checks and cleaning schedules
+> • KitchenTrack: food safety diary, temperature checks, cleaning schedules, probe calibration and weekly reviews
 > • DailyTrack: opening and closing checklists
 > • PATtrack: portable appliance tests
-> • GreenTrack: pre-use checks for grounds equipment
+> • GreenTrack: pre-use checks, defect reports, fuel logs, services and PUWER inspections for grounds equipment
+> • BikeTrack: bike hires with pre-ride safety checks, returns and services
 > • PremisesTrack, TreeTrack, RoomTrack and PestTrack: premises inspections, tree inspections, room checks, pest activity and contractor visits
 > • IncidentTrack: accidents and incidents, with RIDDOR deadlines
 >
@@ -127,7 +128,7 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > • Risk assessments, certificates and training records for your sites
 >
 > WORKS ON PATCHY SIGNAL
-> Fire, water, hot tub, pool, PAT, incident, premises, tree, room, pest, daily and kitchen temperature checks you record without a connection are saved on the device and sent automatically when you are back online, without creating duplicates.
+> Checks, inspections, hires, issue reports and cleaning schedules you record without a connection are saved on the device and sent automatically when you are back online, without creating duplicates. The app shows what is waiting, what has synced and anything that needs your attention.
 >
 > SECURE BY DESIGN
 > Each business only sees its own data. Two-factor sign-in protects accounts, and viewer accounts are read-only.

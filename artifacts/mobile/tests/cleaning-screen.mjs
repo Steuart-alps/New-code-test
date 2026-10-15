@@ -282,7 +282,9 @@ try {
   await page.getByText('Signed off by Mobile Tester').waitFor();
   await until(async () => /Sign-off from this device received by the server/.test(await page.getByTestId('cleaning-sync-status').innerText()),
     'the sign-off shows as sent');
-  assert.equal(await page.getByTestId('outbox-entries').count(), 0, 'nothing is left waiting');
+  // The delivered sign-off stays listed as synced; nothing is left waiting.
+  assert.match(await page.getByTestId('outbox-entries').innerText(), /Synced/, 'the delivered sign-off shows as synced');
+  assert.equal(await page.getByTestId(`outbox-send-${signOffId}`).count(), 0, 'nothing is left waiting');
   const attempts = requests.filter((r) => r.method === 'POST' && r.body?.clientEntryId === signOffId);
   assert.ok(attempts.length >= 3, 'offline attempt, lost-response attempt and resend');
   for (const attempt of attempts) assert.deepEqual(attempt.body, attempts[0].body, 'every attempt is identical, with the same entry ID and siteId');
