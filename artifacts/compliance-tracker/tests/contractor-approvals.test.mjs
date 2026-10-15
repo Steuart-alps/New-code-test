@@ -106,6 +106,11 @@ for (const handler of ["submitApproval", "submitDismissal"]) {
 }
 assert.match(
   source,
+  /window\.setInterval\(refresh, BACKGROUND_REFRESH_MS\);[\s\S]{0,300}return \(\) => \{\s*window\.clearInterval\(timer\);[\s\S]{0,250}\};\s*\}, \[activeClientId, approvalRefreshStorageKey\]\);/,
+  "the timed refresh (the only update path when storage and BroadcastChannel are blocked) must stop on unmount and restart when the business changes",
+);
+assert.match(
+  source,
   /window\.setInterval\(refresh, BACKGROUND_REFRESH_MS\)[\s\S]*window\.addEventListener\("focus", refresh\)/,
   "an open approvals page must refresh on a timer and when the tab regains focus",
 );

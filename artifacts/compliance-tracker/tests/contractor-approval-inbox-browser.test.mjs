@@ -1384,3 +1384,96 @@ test("two real tabs on one business share new-request acknowledgments; a tab on 
     await draftCard.getByRole("button", { name: "Cancel Edit" }).click();
   });
 });
+
+test("with browser storage and tab messaging blocked, each tab still finds new requests on its timed refresh, scoped to its business, and stops when it leaves", async () => {
+  const owner = fixtures.owner;
+  const secondClient = await owner.request("POST", "/clients", {
+    name: `Inbox blocked-storage business ${suffix}`, slug: `inbox-blocked-${suffix}`,
+  });
+  assert.equal(secondClient.status, 201, JSON.stringify(secondClient.data));
+  const secondClientId = secondClient.data.id;
+  const secondSite = await owner.request("POST", `/sites?clientId=${secondClientId}`, {
+    name: `Inbox blocked-storage site ${suffix}`, seedStarterChecks: false,
+  });
+  assert.equal(secondSite.status, 201, JSON.stringify(secondSite.data));
+  const otherBusinessRequest = await queuedCalendarCancellation("blocked-other-business", isoDay(53), secondSite.data.id, secondClientId);
+
+  const { context, page: firstTab } = await browserContext(owner);
+  // A privacy-restricted browser: no localStorage and no BroadcastChannel.
+  await context.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() { throw new DOMException("The operation is insecure.", "SecurityError"); },
+    });
+    Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: undefined });
+  });
+  await context.clock.install();
+  const secondTab = await context.newPage();
+  const queueLoads = new Map([[firstTab, []], [secondTab, []]]);
+  for (const [page, loads] of queueLoads) {
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/fix-track/contractor-email-queue") loads.push(url.searchParams.get("clientId"));
+    });
+  }
+  const newBadge = (page, title) => queueCard(page, title).getByLabel("New approval request");
+
+  await withDiagnostics(firstTab, "blocked storage fallback", async () => {
+    for (const page of [firstTab, secondTab]) {
+      await page.goto(`${appOrigin}/contractor-approvals`);
+      await queueCard(page, fixtures.acceptIssue.title).waitFor();
+      assert.deepEqual(await page.evaluate(() => {
+        let storageBlocked = false;
+        try { window.localStorage; } catch { storageBlocked = true; }
+        return { storageBlocked, broadcastChannel: typeof window.BroadcastChannel };
+      }), { storageBlocked: true, broadcastChannel: "undefined" });
+    }
+
+    // A request created elsewhere reaches both tabs on their next timed
+    // refresh, with no reload and no manual refresh.
+    const arrived = await queuedCalendarCancellation("blocked-arrived", isoDay(54));
+    const loadsBefore = queueLoads.get(firstTab).length;
+    await context.clock.fastForward(61_000);
+    await newBadge(firstTab, arrived.title).waitFor();
+    await newBadge(secondTab, arrived.title).waitFor();
+    assert.equal(queueLoads.get(firstTab).length, loadsBefore + 1, "one request per tab per minute");
+    for (const loads of queueLoads.values()) {
+      assert.ok(loads.length > 0 && loads.every(clientId => clientId === String(owner.clientId)),
+        `every refresh is scoped to the selected business: ${loads}`);
+    }
+    assert.equal(await queueCard(firstTab, otherBusinessRequest.title).count(), 0);
+
+    // Leaving the page stops its refresh.
+    await firstTab.locator('a[href="/dashboard"]').first().click();
+    await firstTab.waitForURL(/\/dashboard$/);
+    // The dashboard reads the queue once for its own count; let that settle.
+    await firstTab.waitForLoadState("networkidle");
+    await firstTab.waitForTimeout(500);
+    const afterLeaving = queueLoads.get(firstTab).length;
+    await context.clock.fastForward(181_000);
+    await firstTab.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await secondTab.waitForTimeout(500);
+    assert.equal(queueLoads.get(firstTab).length, afterLeaving, "no refresh after the page unmounts");
+
+    // Choosing the other business: refreshes are scoped to it alone.
+    await firstTab.goto(`${appOrigin}/clients`);
+    const businessCard = firstTab.locator("div").filter({ hasText: `Inbox blocked-storage business ${suffix}` })
+      .filter({ has: firstTab.getByRole("button", { name: "View" }) }).last();
+    await businessCard.getByRole("button", { name: "View" }).click();
+    await firstTab.waitForURL(/\/dashboard$/);
+    await firstTab.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(firstTab, otherBusinessRequest.title).waitFor();
+    const switchedFrom = queueLoads.get(firstTab).length;
+    await queuedCalendarCancellation("blocked-arrived-later", isoDay(55));
+    await context.clock.fastForward(61_000);
+    for (let waited = 0; queueLoads.get(firstTab).length === switchedFrom && waited < 10_000; waited += 100) {
+      await firstTab.waitForTimeout(100);
+    }
+    const switchedLoads = queueLoads.get(firstTab).slice(switchedFrom - 1);
+    assert.ok(switchedLoads.length >= 2 && switchedLoads.every(clientId => clientId === String(secondClientId)),
+      `the other business's refreshes ask only for it: ${switchedLoads}`);
+    assert.equal(await queueCard(firstTab, fixtures.acceptIssue.title).count(), 0);
+    assert.equal(await queueCard(firstTab, arrived.title).count(), 0, "no request from the first business leaks in");
+    assert.equal(await newBadge(firstTab, otherBusinessRequest.title).count(), 0, "a fresh baseline for this business");
+  });
+});
