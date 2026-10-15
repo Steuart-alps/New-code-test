@@ -199,7 +199,7 @@ export function agendaDayLabel(date: string): string {
 
 /**
  * The phone screen for an entry's website link, or null when the phone has
- * no matching screen (compliance check records, COSHH and asbestos registers).
+ * no matching screen (compliance check records).
  */
 export function phoneRouteForCalendarHref(href: string): string | null {
   const path = String(href ?? '').split(/[?#]/, 1)[0].replace(/\/+$/, '');
@@ -209,6 +209,8 @@ export function phoneRouteForCalendarHref(href: string): string | null {
   if (issue) return `/issues/${issue[1]}`;
   if (path === '/pest-track') return '/checks/pest';
   if (path === '/train-track') return '/(tabs)/docs?tab=training';
+  if (path === '/coshh') return '/manage/coshh';
+  if (path === '/asbestos') return '/manage/asbestos';
   return null;
 }
 

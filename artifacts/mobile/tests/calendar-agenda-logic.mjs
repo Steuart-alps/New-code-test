@@ -57,10 +57,12 @@ assert.equal(agendaDayLabel('nonsense'), 'nonsense');
 
 // Links: phone screens where they exist; none for records only the website has.
 assert.equal(phoneRouteForCalendarHref('/contractors/42'), '/manage/contractor/42');
+assert.equal(phoneRouteForCalendarHref('/coshh'), '/manage/coshh');
+assert.equal(phoneRouteForCalendarHref('/asbestos'), '/manage/asbestos');
 assert.equal(phoneRouteForCalendarHref('/fix-track/7'), '/issues/7');
 assert.equal(phoneRouteForCalendarHref('/pest-track'), '/checks/pest');
 assert.equal(phoneRouteForCalendarHref('/train-track'), '/(tabs)/docs?tab=training');
-for (const href of ['/items/3', '/coshh', '/asbestos', '/contractors/abc', '/fix-track/1/edit', '']) {
+for (const href of ['/items/3', '/contractors/abc', '/fix-track/1/edit', '']) {
   assert.equal(phoneRouteForCalendarHref(href), null, href);
 }
 
