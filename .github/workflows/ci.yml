@@ -125,3 +125,9 @@ jobs:
 
       - name: Public-link access history tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:public-link-access
+
+      - name: Shared public-link rate limit tests (two API instances)
+        run: pnpm --filter @workspace/api-server run test:public-link-rate-limit
+
+      - name: Contractor portal tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:contractor-portal:pushed

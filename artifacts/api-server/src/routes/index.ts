@@ -73,7 +73,7 @@ import documentsRouter from "./documents";
 import { staffTrainingRouter } from "./staff-training";
 import dailyChecklistsRouter from "./daily-checklists";
 import feedbackRouter from "./feedback";
-import { publicLinkRateLimit, publicLinkTokenRateLimit } from "../lib/loginRateLimit";
+import { publicLinkRateLimits } from "../lib/loginRateLimit";
 
 const router: IRouter = Router();
 
@@ -86,14 +86,14 @@ router.use("/billing", billingRouter);
 router.use(storageDownloadRouter);
 // Public contractor self-service portal — token-protected, not login-protected.
 // Mount before root-level routers that install requireAuth for all later paths.
-router.use("/contractor-portal", publicLinkRateLimit, publicLinkTokenRateLimit, contractorPortalRouter);
+router.use("/contractor-portal", publicLinkRateLimits, contractorPortalRouter);
 // Public FixTrack token links must also precede routers with root-level auth.
-router.use("/fix-track/action", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackPublicRouter);
-router.use("/fix-track/quotes/public", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackQuoteRouter);
+router.use("/fix-track/action", publicLinkRateLimits, fixTrackPublicRouter);
+router.use("/fix-track/quotes/public", publicLinkRateLimits, fixTrackQuoteRouter);
 // Contractor visit-scheduling links (token-protected).
-router.use("/notifications/public/schedule", publicLinkRateLimit, publicLinkTokenRateLimit, notificationsPublicRouter);
+router.use("/notifications/public/schedule", publicLinkRateLimits, notificationsPublicRouter);
 // Staff document sign-off link (token-protected).
-router.use("/sign-off", publicLinkRateLimit, publicLinkTokenRateLimit, signOffRouter);
+router.use("/sign-off", publicLinkRateLimits, signOffRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
