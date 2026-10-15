@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { aquaTrackAccess } from '@/components/aqua-track-logic';
+import { MANAGE_ITEMS, visibleManageItems } from '@/components/manage-items';
 
 interface CheckModule {
   id: string;
@@ -175,7 +176,8 @@ export default function ChecksScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { hasService } = useAuth();
+  const { user, hasService } = useAuth();
+  const manageCount = visibleManageItems(MANAGE_ITEMS, user?.role, hasService).length;
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const aquaAccess = aquaTrackAccess(hasService);
   const visibleModules = MODULES.filter(
@@ -210,6 +212,24 @@ export default function ChecksScreen() {
       </View>
 
       <View style={styles.content}>
+        {manageCount > 0 ? (
+          <TouchableOpacity
+            testID="checks-manage"
+            accessibilityRole="button"
+            style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'center' }]}
+            onPress={() => router.push('/manage' as any)}
+            activeOpacity={0.75}
+          >
+            <View style={[styles.iconWrap, { backgroundColor: colors.navy + '1a' }]}>
+              <Feather name="briefcase" size={24} color={colors.navy} />
+            </View>
+            <View style={styles.cardBody}>
+              <Text style={[styles.cardTitle, { color: colors.foreground }]}>Manage and look up</Text>
+              <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>Actions, certificates, tasks, registers and training</Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        ) : null}
         {visibleModules.map((mod) => (
           <TouchableOpacity
             key={mod.id}

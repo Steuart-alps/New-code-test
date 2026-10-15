@@ -181,6 +181,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="manage/index"
+        options={{
+          title: 'Manage',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/green-records"
         options={{
           title: 'Machine records',
