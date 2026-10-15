@@ -81,6 +81,9 @@ jobs:
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
 
+      - name: SafeTrack reminder schedule test
+        run: pnpm --filter @workspace/api-zod run test:safe-track-reminder-schedule
+
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
       - name: Create base database schema

@@ -12,63 +12,26 @@ import { sendSystemEmail, getPublicAppUrl } from "./email";
 import { getEntitledServices, isEntitled } from "./services";
 import { getNotificationEmails } from "./getNotificationEmails";
 import { claimEmailDelivery } from "./emailDeliveryClaims";
+import {
+  isSafeTrackReminderDue,
+  parseSafeTrackReminderSettings,
+  safeTrackReminderWindowStart,
+} from "@workspace/api-zod/safe-track-reminder-schedule";
 
-export const SAFE_TRACK_REMINDER_FREQUENCY_SETTING = "safeTrackReminderFrequency";
-export const SAFE_TRACK_REMINDER_TIME_SETTING = "safeTrackReminderTime";
-export const DEFAULT_SAFE_TRACK_REMINDER_FREQUENCY = "daily" as const;
-export const DEFAULT_SAFE_TRACK_REMINDER_TIME = "08:50";
-export const DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE = "Europe/London";
-
-export type SafeTrackReminderFrequency = "daily" | "weekly";
-
-export interface SafeTrackReminderSettings {
-  frequency: SafeTrackReminderFrequency;
-  time: string;
-  timeZone: string;
-}
-
-export function parseSafeTrackReminderSettings(
-  settings: Record<string, string | null | undefined> = {},
-): SafeTrackReminderSettings {
-  const frequency = settings[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] === "weekly"
-    ? "weekly"
-    : DEFAULT_SAFE_TRACK_REMINDER_FREQUENCY;
-  const time = /^\d{2}:[0-5]\d$/.test(settings[SAFE_TRACK_REMINDER_TIME_SETTING] ?? "")
-    ? settings[SAFE_TRACK_REMINDER_TIME_SETTING]!
-    : DEFAULT_SAFE_TRACK_REMINDER_TIME;
-  let timeZone = settings.accountTimezone?.trim() || DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE;
-  try {
-    new Intl.DateTimeFormat("en-GB", { timeZone }).format();
-  } catch {
-    timeZone = DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE;
-  }
-  return { frequency, time, timeZone };
-}
-
-function localScheduleParts(now: Date, timeZone: string): { minutes: number; weekday: string } {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    weekday: "short",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return {
-    minutes: Number(values.hour) * 60 + Number(values.minute),
-    weekday: values.weekday,
-  };
-}
-
-export function isSafeTrackReminderDue(
-  now: Date,
-  settings: SafeTrackReminderSettings,
-): boolean {
-  const [hour, minute] = settings.time.split(":").map(Number);
-  const local = localScheduleParts(now, settings.timeZone);
-  if (local.minutes < hour * 60 + minute) return false;
-  return settings.frequency === "daily" || local.weekday === "Mon";
-}
+// The cadence rules live in a shared module so the Settings preview of the
+// next reminder runs exactly the logic this job does.
+export {
+  SAFE_TRACK_REMINDER_FREQUENCY_SETTING,
+  SAFE_TRACK_REMINDER_TIME_SETTING,
+  DEFAULT_SAFE_TRACK_REMINDER_FREQUENCY,
+  DEFAULT_SAFE_TRACK_REMINDER_TIME,
+  DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE,
+  isSafeTrackReminderDue,
+  parseSafeTrackReminderSettings,
+  safeTrackReminderWindowStart,
+  type SafeTrackReminderFrequency,
+  type SafeTrackReminderSettings,
+} from "@workspace/api-zod/safe-track-reminder-schedule";
 
 export interface OutstandingDocSummary {
   title: string;
@@ -383,7 +346,8 @@ export interface SafeTrackAckReminderDependencies {
   getOutstanding?: (clientId: number) => Promise<OutstandingDocSummary[]>;
   getStaffOutstanding?: (clientId: number) => Promise<OutstandingStaffReminder[]>;
   getRecipients?: (clientId: number) => Promise<{ emails: string[] }>;
-  claim?: (clientId: number, frequency: SafeTrackReminderFrequency) => Promise<number | null>;
+  /** Claim the digest unless one already went out since `windowStart`. */
+  claim?: (clientId: number, windowStart: Date) => Promise<number | null>;
   release?: (claimId: number) => Promise<void>;
   /** Make a claim permanent once at least one email was accepted. */
   confirm?: (claimId: number) => Promise<void>;
@@ -393,14 +357,31 @@ export interface SafeTrackAckReminderDependencies {
 /**
  * A claimed log row is provisional until confirmed: it carries an expiring
  * delivery lease. If the worker dies before confirming, the lease expires and
- * the row stops counting as "recently sent", so the next run retries instead
- * of skipping the whole cadence window.
+ * the row stops counting as sent, so the next run retries instead of skipping
+ * the whole cadence window.
  */
 const LEASE_JOB = "safe-track-ack";
 
+// A log row counts as sent unless its delivery lease expired unconfirmed.
+const countsAsSent = sql`NOT EXISTS (
+           SELECT 1 FROM scheduled_email_claims c
+            WHERE c.job = ${LEASE_JOB} AND c.delivery_key = l.id::text
+              AND c.sent_at IS NULL AND c.lease_expires_at <= now())`;
+
+/** When this account's last SafeTrack reminder went out, for the Settings preview. */
+export async function getSafeTrackReminderLastSentAt(clientId: number): Promise<Date | null> {
+  const result = await db.execute(sql`
+    SELECT max(l.sent_at)::timestamptz AS last_sent_at
+      FROM safe_track_ack_reminder_log l
+     WHERE l.client_id = ${clientId} AND ${countsAsSent}
+  `);
+  const value = ((result.rows ?? [])[0] as any)?.last_sent_at ?? null;
+  return value ? new Date(value) : null;
+}
+
 async function claimReminder(
   clientId: number,
-  frequency: SafeTrackReminderFrequency,
+  windowStart: Date,
 ): Promise<number | null> {
   // The transaction-scoped advisory lock serialises claims for this tenant.
   // The lock is released at commit, after the recent-row check and insert are
@@ -412,11 +393,8 @@ async function claimReminder(
     const recent = await tx.execute(sql`
       SELECT 1 FROM safe_track_ack_reminder_log l
        WHERE l.client_id = ${clientId}
-         AND l.sent_at > now() - (${frequency === "weekly" ? 7 : 1} * interval '1 day')
-         AND NOT EXISTS (
-           SELECT 1 FROM scheduled_email_claims c
-            WHERE c.job = ${LEASE_JOB} AND c.delivery_key = l.id::text
-              AND c.sent_at IS NULL AND c.lease_expires_at <= now())
+         AND l.sent_at >= ${windowStart.toISOString()}::timestamptz
+         AND ${countsAsSent}
       LIMIT 1
     `);
     if ((recent.rows ?? []).length) return null;
@@ -481,9 +459,10 @@ export async function runSafeTrackAckReminderJob(
       const managerEmails = [...new Set(recipients.emails.map((email) => email.trim().toLowerCase()).filter(Boolean))];
       const staffEmails = [...new Map(staffOutstanding.map((reminder) => [reminder.email, reminder])).values()];
       if (!managerEmails.length && !staffEmails.length) continue;
+      const windowStart = safeTrackReminderWindowStart(now(), reminderSettings);
       claimId = await (dependencies.claim
-        ? dependencies.claim(client.id, reminderSettings.frequency)
-        : claimReminder(client.id, reminderSettings.frequency));
+        ? dependencies.claim(client.id, windowStart)
+        : claimReminder(client.id, windowStart));
       if (!claimId) continue;
       result.remindersClaimed++;
 

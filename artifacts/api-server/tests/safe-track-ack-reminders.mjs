@@ -33,6 +33,7 @@ try {
     sql,
     runSafeTrackAckReminderJob,
     getOutstandingSafeTrackAcknowledgements,
+    getSafeTrackReminderLastSentAt,
     parseSafeTrackReminderSettings,
     isSafeTrackReminderDue,
     MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES,
@@ -132,6 +133,20 @@ try {
   assert.equal(one.remindersClaimed + two.remindersClaimed, 1);
   assert.deepEqual(sent.sort(), ["manager@test.local", "staff@test.local"]);
   assert.equal(one.errors + two.errors, 1, "partial email failure remains isolated");
+  // Settings previews the next reminder from the last confirmed send.
+  const lastSentAt = await getSafeTrackReminderLastSentAt(primary);
+  assert.ok(lastSentAt && Math.abs(lastSentAt.getTime() - Date.now()) < 60_000, "last send is readable for the preview");
+  assert.equal(await getSafeTrackReminderLastSentAt(foreign), null);
+  // Later the same Monday is the same weekly window: nothing more is claimed.
+  const sameWindow = await runSafeTrackAckReminderJob({ ...deps, now: () => new Date("2026-01-05T15:00:00.000Z"), send: async () => {} });
+  assert.equal(sameWindow.remindersClaimed, 0);
+  // The next window claims again even though the last send was under 7 days
+  // before it: one reminder per window, not per rolling period.
+  const nextMonday = new Date(Date.now() + 7 * 86_400_000);
+  nextMonday.setUTCDate(nextMonday.getUTCDate() + ((8 - nextMonday.getUTCDay()) % 7));
+  nextMonday.setUTCHours(12, 0, 0, 0);
+  const nextWindow = await runSafeTrackAckReminderJob({ ...deps, now: () => nextMonday, send: async () => {} });
+  assert.equal(nextWindow.remindersClaimed, 1);
   let largeManagerHtml = "";
   const largeDocs = Array.from({ length: 250 }, (_, index) => ({
     title: `Required document ${index} ${"Long title ".repeat(8)}`,
