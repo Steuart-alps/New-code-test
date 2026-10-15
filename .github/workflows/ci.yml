@@ -73,6 +73,11 @@ jobs:
           pnpm --filter @workspace/api-spec run test:contract
           pnpm run check:api-contract
 
+      # Every /api route the server mounts must be in openapi.yaml, excluded
+      # with a reason, or on the shrinking documentation backlog.
+      - name: API route-to-contract inventory
+        run: pnpm --filter @workspace/api-server run test:openapi-routes
+
       # Regenerates the API client and zod schemas from the OpenAPI spec and
       # fails if the committed output differs. Needs lib/*/dist from Typecheck.
       - name: Generated API client drift check
