@@ -286,6 +286,30 @@ export const publicLinkTokenRateLimit = makeLoginRateLimit({
   },
 });
 
+/**
+ * Online privacy-request submissions (the public rights-request form). Five per
+ * source IP and twenty per form link in each hour; production keeps both
+ * counters in Postgres so a restart does not reset them.
+ */
+export const privacyIntakeSubmitRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  namespace: "privacy-intake-ip",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
+export const privacyIntakeLinkSubmitRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  namespace: "privacy-intake-link",
+  key: (req) => `token:${digestBearerToken(String(req.params.token ?? ""))}`,
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
 /** Test-only helper: reset all counters. */
 export function _resetLoginRateLimit() {
   failures.clear();

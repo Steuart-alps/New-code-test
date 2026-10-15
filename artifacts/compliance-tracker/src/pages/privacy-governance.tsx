@@ -1,12 +1,15 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { AlertTriangle, BadgeCheck, Clock3, FileText, Plus, Shield, ShieldAlert } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Clock3, Copy, FileText, Globe, Plus, Shield, ShieldAlert } from "lucide-react";
 import {
   useAddPrivacyRetentionVerification,
   useCreatePrivacyRecord,
+  useDisablePrivacyIntakeLink,
   useGetPrivacyGovernance,
+  usePublishPrivacyIntakeLink,
   useSavePrivacyProgram,
+  useSetPrivacyIntakeAssignee,
   useUpdatePrivacyRecord,
 } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
@@ -33,6 +36,7 @@ type GovernanceData = {
   retentionVerifications: Array<Record<string, any>>;
   processors: RecordItem[];
   breaches: RecordItem[];
+  privacyAdministrators: Array<{ id: number; name: string }>;
 };
 
 type FieldKind = "text" | "textarea" | "select" | "datetime" | "number" | "checkbox" | "nullableBoolean";
@@ -438,10 +442,11 @@ function badgeClass(overdue: boolean) {
     : "border-amber-200 bg-amber-50 text-amber-800";
 }
 
-function RecordCard({ item, verificationCount, latestVerification, onEdit, onVerify }: {
+function RecordCard({ item, verificationCount, latestVerification, administratorNames, onEdit, onVerify }: {
   item: RecordItem;
   verificationCount?: number;
   latestVerification?: Record<string, any>;
+  administratorNames?: Map<number, string>;
   onEdit: (record: RecordItem) => void;
   onVerify?: (record: RecordItem) => void;
 }) {
@@ -460,6 +465,11 @@ function RecordCard({ item, verificationCount, latestVerification, onEdit, onVer
     ["Decision", item.decision?.replaceAll("_", " ") ?? "Not decided"],
     ["Initial deadline", formatDate(item.dueAt)],
     ["Response deadline", formatDate(item.extendedDueAt ?? item.dueAt)],
+    ...(item.source === "public_intake" ? [
+      ["Received through", "Online request form"],
+      ["Requester's reference", item.publicReference],
+      ["Assigned to", item.assignedTo ? administratorNames?.get(item.assignedTo) ?? "A former administrator" : "All administrators"],
+    ] as Array<[string, unknown]> : []),
   ] : item.kind === "retention" ? [
     ["Period / criteria", item.retentionPeriod], ["Trigger", item.retentionTrigger],
     ["Legal hold", item.legalHoldActive ? `Active — ${item.legalHoldReason}` : "None recorded"],
@@ -490,10 +500,11 @@ function RecordCard({ item, verificationCount, latestVerification, onEdit, onVer
           <div className="min-w-0">
             <CardTitle className="text-base">{title}</CardTitle>
             <CardDescription className="mt-1">
-              {item.kind === "rights_request" ? `Request #${String(item.id).padStart(6, "0")}` : item.kind === "breach" ? `Incident #${String(item.id).padStart(6, "0")}` : item.active === false ? "Archived from current records" : "Current record"}
+              {item.kind === "rights_request" ? `Request #${String(item.id).padStart(6, "0")}${item.publicReference ? ` · ${item.publicReference}` : ""}` : item.kind === "breach" ? `Incident #${String(item.id).padStart(6, "0")}` : item.active === false ? "Archived from current records" : "Current record"}
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
+            {item.kind === "rights_request" && item.source === "public_intake" && item.identityStatus !== "verified" && <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700"><Globe className="h-3.5 w-3.5" />Online · identity not verified</span>}
             {timer && <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass(timer.overdue)}`}><Clock3 className="h-3.5 w-3.5" />{timer.label}</span>}
             {item.kind === "retention" && onVerify && <Button size="sm" variant="outline" onClick={() => onVerify(item)}>Record verification</Button>}
             <Button size="sm" variant="outline" onClick={() => onEdit(item)}>Edit</Button>
@@ -514,7 +525,86 @@ function RecordCard({ item, verificationCount, latestVerification, onEdit, onVer
   );
 }
 
-function RecordSection({ title, description, kind, items, saving, verifications, onAdd, onEdit, onVerify, onSave, editor, onCancel }: {
+function IntakeFormCard({ program, administrators, busy, newLink, onPublish, onDisable, onAssign }: {
+  program: PrivacyProgram | null;
+  administrators: Array<{ id: number; name: string }>;
+  busy: boolean;
+  newLink: string | null;
+  onPublish: () => void;
+  onDisable: () => void;
+  onAssign: (assigneeId: number | null) => void;
+}) {
+  const { toast } = useToast();
+  const enabled = Boolean(program?.intakeEnabled);
+  const assigneeId: number | null = program?.intakeAssigneeId ?? null;
+  async function copy() {
+    if (!newLink) return;
+    try {
+      await navigator.clipboard.writeText(newLink);
+      toast({ title: "Link copied" });
+    } catch {
+      toast({ title: "Copy the link by selecting it", variant: "destructive" });
+    }
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base"><Globe className="h-4 w-4" />Online request form</CardTitle>
+        <CardDescription>
+          Give people a link to send you a privacy request. Requests arrive here as unverified, the one-month deadline starts when they are received, and the assigned administrator is emailed without the requester's details.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm">
+          {enabled
+            ? <>The form is live{program?.intakePublishedAt ? ` (current link created ${formatDate(program.intakePublishedAt)})` : ""}.</>
+            : "The form is off. Publishing it creates a link you can add to your privacy notice or website."}
+        </p>
+        {newLink && (
+          <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <Label htmlFor="privacy-intake-link">Your form link</Label>
+            <div className="flex gap-2">
+              <Input id="privacy-intake-link" readOnly value={newLink} onFocus={(event) => event.currentTarget.select()} />
+              <Button type="button" variant="outline" onClick={copy}><Copy className="mr-2 h-4 w-4" />Copy</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Copy it now. For security the link is shown only once; if you lose it, create a new link.</p>
+          </div>
+        )}
+        <div className="space-y-2 md:max-w-sm">
+          <Label htmlFor="privacy-intake-assignee">Assign new requests to</Label>
+          <Select
+            value={assigneeId === null ? "__all" : String(assigneeId)}
+            onValueChange={(value) => onAssign(value === "__all" ? null : Number(value))}
+            disabled={busy}
+          >
+            <SelectTrigger id="privacy-intake-assignee"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">No one: email every administrator</SelectItem>
+              {administrators.map((admin) => <SelectItem key={admin.id} value={String(admin.id)}>{admin.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-wrap gap-2 border-t pt-4">
+          {enabled ? (
+            <>
+              <Button type="button" variant="outline" disabled={busy} onClick={() => {
+                if (window.confirm("Create a new link? The current link will stop working straight away.")) onPublish();
+              }}>Create new link</Button>
+              <Button type="button" variant="outline" disabled={busy} onClick={() => {
+                if (window.confirm("Turn off the online form? The link will stop working. Requests already received are kept.")) onDisable();
+              }}>Turn off form</Button>
+            </>
+          ) : (
+            <Button type="button" disabled={busy} onClick={onPublish}>Publish form</Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecordSection({ title, description, kind, items, saving, verifications, administratorNames, onAdd, onEdit, onVerify, onSave, editor, onCancel }: {
+  administratorNames?: Map<number, string>;
   title: string;
   description: string;
   kind: RecordKind;
@@ -552,6 +642,7 @@ function RecordSection({ title, description, kind, items, saving, verifications,
             item={item}
             verificationCount={matching.length}
             latestVerification={latest}
+            administratorNames={administratorNames}
             onEdit={onEdit}
             onVerify={kind === "retention" ? onVerify : undefined}
           />;
@@ -579,8 +670,17 @@ export default function PrivacyGovernancePage() {
   const createRecordMutation = useCreatePrivacyRecord();
   const updateRecordMutation = useUpdatePrivacyRecord();
   const verificationMutation = useAddPrivacyRetentionVerification();
+  const publishIntakeMutation = usePublishPrivacyIntakeLink();
+  const disableIntakeMutation = useDisablePrivacyIntakeLink();
+  const assignIntakeMutation = useSetPrivacyIntakeAssignee();
+  const [newIntakeLink, setNewIntakeLink] = useState<string | null>(null);
+  const intakeBusy = publishIntakeMutation.isPending || disableIntakeMutation.isPending || assignIntakeMutation.isPending;
   const saving = saveProgramMutation.isPending || createRecordMutation.isPending || updateRecordMutation.isPending || verificationMutation.isPending;
   const data = query.data as unknown as GovernanceData | undefined;
+  const administratorNames = useMemo(
+    () => new Map((data?.privacyAdministrators ?? []).map((admin) => [admin.id, admin.name])),
+    [data?.privacyAdministrators],
+  );
 
   const activeRequests = useMemo(
     () => (data?.rightsRequests ?? []).filter((record) => !["completed", "refused", "withdrawn"].includes(record.status)),
@@ -632,6 +732,35 @@ export default function PrivacyGovernancePage() {
     }
   }
 
+  async function publishIntake() {
+    try {
+      const result = await publishIntakeMutation.mutateAsync({ params: clientParams });
+      setNewIntakeLink(result.url);
+      await refresh();
+      toast({ title: "Online request form published", description: "Copy the link now; it is shown only once." });
+    } catch (error) {
+      toast({ title: "Could not publish the form", description: error instanceof Error ? error.message : "Try again.", variant: "destructive" });
+    }
+  }
+  async function disableIntake() {
+    try {
+      await disableIntakeMutation.mutateAsync({ params: clientParams });
+      setNewIntakeLink(null);
+      await refresh();
+      toast({ title: "Online request form turned off" });
+    } catch (error) {
+      toast({ title: "Could not turn off the form", description: error instanceof Error ? error.message : "Try again.", variant: "destructive" });
+    }
+  }
+  async function assignIntake(assigneeId: number | null) {
+    try {
+      await assignIntakeMutation.mutateAsync({ data: { assigneeId }, params: clientParams });
+      await refresh();
+      toast({ title: "Assignment saved" });
+    } catch (error) {
+      toast({ title: "Could not save the assignment", description: error instanceof Error ? error.message : "Try again.", variant: "destructive" });
+    }
+  }
   async function saveVerification(payload: Record<string, string>) {
     if (!verificationSchedule) return;
     try {
@@ -712,8 +841,9 @@ export default function PrivacyGovernancePage() {
             <RecordSection title="Processing activities" description="Record purposes, data subjects and categories, legal-basis assessments, Article 9 conditions, retention criteria and DPIA screening." kind="activity" items={data.activities} saving={saving} verifications={data.retentionVerifications} editor={editor} onAdd={() => setEditor({ kind: "activity" })} onEdit={setEditor} onVerify={setVerificationSchedule} onSave={saveRecord} onCancel={() => setEditor(null)} />
           </TabsContent>
 
-          <TabsContent value="requests">
-            <RecordSection title="Data-subject rights requests" description="Track access, rectification, erasure, restriction, objection and portability requests with identity checks, decisions and response evidence." kind="rights_request" items={data.rightsRequests} saving={saving} verifications={data.retentionVerifications} editor={editor} onAdd={() => setEditor({ kind: "rights_request" })} onEdit={setEditor} onVerify={setVerificationSchedule} onSave={saveRecord} onCancel={() => setEditor(null)} />
+          <TabsContent value="requests" className="space-y-6">
+            <IntakeFormCard program={data.program} administrators={data.privacyAdministrators ?? []} busy={intakeBusy} newLink={newIntakeLink} onPublish={publishIntake} onDisable={disableIntake} onAssign={assignIntake} />
+            <RecordSection administratorNames={administratorNames} title="Data-subject rights requests" description="Track access, rectification, erasure, restriction, objection and portability requests with identity checks, decisions and response evidence." kind="rights_request" items={data.rightsRequests} saving={saving} verifications={data.retentionVerifications} editor={editor} onAdd={() => setEditor({ kind: "rights_request" })} onEdit={setEditor} onVerify={setVerificationSchedule} onSave={saveRecord} onCancel={() => setEditor(null)} />
           </TabsContent>
 
           <TabsContent value="retention">

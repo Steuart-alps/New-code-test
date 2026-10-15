@@ -43,6 +43,7 @@ import type {
   CreatePrivacyRecordParams,
   CreateSiteRequest,
   DashboardStats,
+  DisablePrivacyIntakeLinkParams,
   ErrorResponse,
   FeedbackReport,
   FeedbackReportConflict,
@@ -98,18 +99,25 @@ import type {
   PremisesInspection,
   PremisesTrackSummary,
   PrivacyGovernanceResponse,
+  PrivacyIntakeAssigneeInput,
+  PrivacyIntakeForm,
+  PrivacyIntakeLinkResult,
+  PrivacyIntakeReceipt,
+  PrivacyIntakeSubmission,
   PrivacyProgram,
   PrivacyProgramInput,
   PrivacyRecord,
   PrivacyRecordInput,
   PrivacyRetentionVerification,
   PrivacyRetentionVerificationInput,
+  PublishPrivacyIntakeLinkParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
   SavePATPresetTemplateBody,
   SavePrivacyProgramParams,
   SendRemindersResponse,
+  SetPrivacyIntakeAssigneeParams,
   Site,
   StorageUsage,
   TestEmailRequest,
@@ -3108,6 +3116,391 @@ export const useSavePrivacyProgram = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSavePrivacyProgramMutationOptions(options));
+    }
+
+export const getPublishPrivacyIntakeLinkUrl = (params?: PublishPrivacyIntakeLinkParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/privacy-governance/intake-link?${stringifiedParams}` : `/api/privacy-governance/intake-link`
+}
+
+/**
+ * Returns the new link once. Only its digest is stored, and any previous link stops working.
+ * @summary Publish the online privacy-request form, or replace its link
+ */
+export const publishPrivacyIntakeLink = async (params?: PublishPrivacyIntakeLinkParams, options?: RequestInit): Promise<PrivacyIntakeLinkResult> => {
+
+  return customFetch<PrivacyIntakeLinkResult>(getPublishPrivacyIntakeLinkUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getPublishPrivacyIntakeLinkMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishPrivacyIntakeLink>>, TError,{params?: PublishPrivacyIntakeLinkParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof publishPrivacyIntakeLink>>, TError,{params?: PublishPrivacyIntakeLinkParams}, TContext> => {
+
+const mutationKey = ['publishPrivacyIntakeLink'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof publishPrivacyIntakeLink>>, {params?: PublishPrivacyIntakeLinkParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  publishPrivacyIntakeLink(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PublishPrivacyIntakeLinkMutationResult = NonNullable<Awaited<ReturnType<typeof publishPrivacyIntakeLink>>>
+
+    export type PublishPrivacyIntakeLinkMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Publish the online privacy-request form, or replace its link
+ */
+export const usePublishPrivacyIntakeLink = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishPrivacyIntakeLink>>, TError,{params?: PublishPrivacyIntakeLinkParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof publishPrivacyIntakeLink>>,
+        TError,
+        {params?: PublishPrivacyIntakeLinkParams},
+        TContext
+      > => {
+      return useMutation(getPublishPrivacyIntakeLinkMutationOptions(options));
+    }
+
+export const getDisablePrivacyIntakeLinkUrl = (params?: DisablePrivacyIntakeLinkParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/privacy-governance/intake-link?${stringifiedParams}` : `/api/privacy-governance/intake-link`
+}
+
+/**
+ * @summary Turn off the online privacy-request form
+ */
+export const disablePrivacyIntakeLink = async (params?: DisablePrivacyIntakeLinkParams, options?: RequestInit): Promise<PrivacyProgram> => {
+
+  return customFetch<PrivacyProgram>(getDisablePrivacyIntakeLinkUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDisablePrivacyIntakeLinkMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disablePrivacyIntakeLink>>, TError,{params?: DisablePrivacyIntakeLinkParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof disablePrivacyIntakeLink>>, TError,{params?: DisablePrivacyIntakeLinkParams}, TContext> => {
+
+const mutationKey = ['disablePrivacyIntakeLink'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disablePrivacyIntakeLink>>, {params?: DisablePrivacyIntakeLinkParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  disablePrivacyIntakeLink(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DisablePrivacyIntakeLinkMutationResult = NonNullable<Awaited<ReturnType<typeof disablePrivacyIntakeLink>>>
+
+    export type DisablePrivacyIntakeLinkMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Turn off the online privacy-request form
+ */
+export const useDisablePrivacyIntakeLink = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disablePrivacyIntakeLink>>, TError,{params?: DisablePrivacyIntakeLinkParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof disablePrivacyIntakeLink>>,
+        TError,
+        {params?: DisablePrivacyIntakeLinkParams},
+        TContext
+      > => {
+      return useMutation(getDisablePrivacyIntakeLinkMutationOptions(options));
+    }
+
+export const getSetPrivacyIntakeAssigneeUrl = (params?: SetPrivacyIntakeAssigneeParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/privacy-governance/intake-assignee?${stringifiedParams}` : `/api/privacy-governance/intake-assignee`
+}
+
+/**
+ * @summary Choose the administrator assigned to online privacy requests
+ */
+export const setPrivacyIntakeAssignee = async (privacyIntakeAssigneeInput: PrivacyIntakeAssigneeInput,
+    params?: SetPrivacyIntakeAssigneeParams, options?: RequestInit): Promise<PrivacyProgram> => {
+
+  return customFetch<PrivacyProgram>(getSetPrivacyIntakeAssigneeUrl(params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(privacyIntakeAssigneeInput)
+  }
+);}
+
+
+
+
+
+export const getSetPrivacyIntakeAssigneeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setPrivacyIntakeAssignee>>, TError,{data: BodyType<PrivacyIntakeAssigneeInput>;params?: SetPrivacyIntakeAssigneeParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setPrivacyIntakeAssignee>>, TError,{data: BodyType<PrivacyIntakeAssigneeInput>;params?: SetPrivacyIntakeAssigneeParams}, TContext> => {
+
+const mutationKey = ['setPrivacyIntakeAssignee'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setPrivacyIntakeAssignee>>, {data: BodyType<PrivacyIntakeAssigneeInput>;params?: SetPrivacyIntakeAssigneeParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  setPrivacyIntakeAssignee(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetPrivacyIntakeAssigneeMutationResult = NonNullable<Awaited<ReturnType<typeof setPrivacyIntakeAssignee>>>
+    export type SetPrivacyIntakeAssigneeMutationBody = BodyType<PrivacyIntakeAssigneeInput>
+    export type SetPrivacyIntakeAssigneeMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Choose the administrator assigned to online privacy requests
+ */
+export const useSetPrivacyIntakeAssignee = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setPrivacyIntakeAssignee>>, TError,{data: BodyType<PrivacyIntakeAssigneeInput>;params?: SetPrivacyIntakeAssigneeParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setPrivacyIntakeAssignee>>,
+        TError,
+        {data: BodyType<PrivacyIntakeAssigneeInput>;params?: SetPrivacyIntakeAssigneeParams},
+        TContext
+      > => {
+      return useMutation(getSetPrivacyIntakeAssigneeMutationOptions(options));
+    }
+
+export const getGetPrivacyIntakeFormUrl = (token: string,) => {
+
+
+
+
+  return `/api/privacy-intake/${token}`
+}
+
+/**
+ * @summary Public - describe a business's online privacy-request form
+ */
+export const getPrivacyIntakeForm = async (token: string, options?: RequestInit): Promise<PrivacyIntakeForm> => {
+
+  return customFetch<PrivacyIntakeForm>(getGetPrivacyIntakeFormUrl(token),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPrivacyIntakeFormQueryKey = (token: string,) => {
+    return [
+    `/api/privacy-intake/${token}`
+    ] as const;
+    }
+
+
+export const getGetPrivacyIntakeFormQueryOptions = <TData = Awaited<ReturnType<typeof getPrivacyIntakeForm>>, TError = ErrorType<void>>(token: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPrivacyIntakeForm>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPrivacyIntakeFormQueryKey(token);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPrivacyIntakeForm>>> = ({ signal }) => getPrivacyIntakeForm(token, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: token !== null && token !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPrivacyIntakeForm>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPrivacyIntakeFormQueryResult = NonNullable<Awaited<ReturnType<typeof getPrivacyIntakeForm>>>
+export type GetPrivacyIntakeFormQueryError = ErrorType<void>
+
+
+/**
+ * @summary Public - describe a business's online privacy-request form
+ */
+
+export function useGetPrivacyIntakeForm<TData = Awaited<ReturnType<typeof getPrivacyIntakeForm>>, TError = ErrorType<void>>(
+ token: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPrivacyIntakeForm>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPrivacyIntakeFormQueryOptions(token,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSubmitPrivacyIntakeRequestUrl = (token: string,) => {
+
+
+
+
+  return `/api/privacy-intake/${token}`
+}
+
+/**
+ * @summary Public - submit a privacy rights request for staff review
+ */
+export const submitPrivacyIntakeRequest = async (token: string,
+    privacyIntakeSubmission: PrivacyIntakeSubmission, options?: RequestInit): Promise<PrivacyIntakeReceipt> => {
+
+  return customFetch<PrivacyIntakeReceipt>(getSubmitPrivacyIntakeRequestUrl(token),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(privacyIntakeSubmission)
+  }
+);}
+
+
+
+
+
+export const getSubmitPrivacyIntakeRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitPrivacyIntakeRequest>>, TError,{token: string;data: BodyType<PrivacyIntakeSubmission>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitPrivacyIntakeRequest>>, TError,{token: string;data: BodyType<PrivacyIntakeSubmission>}, TContext> => {
+
+const mutationKey = ['submitPrivacyIntakeRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitPrivacyIntakeRequest>>, {token: string;data: BodyType<PrivacyIntakeSubmission>}> = (props) => {
+          const {token,data} = props ?? {};
+
+          return  submitPrivacyIntakeRequest(token,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitPrivacyIntakeRequestMutationResult = NonNullable<Awaited<ReturnType<typeof submitPrivacyIntakeRequest>>>
+    export type SubmitPrivacyIntakeRequestMutationBody = BodyType<PrivacyIntakeSubmission>
+    export type SubmitPrivacyIntakeRequestMutationError = ErrorType<void>
+
+    /**
+ * @summary Public - submit a privacy rights request for staff review
+ */
+export const useSubmitPrivacyIntakeRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitPrivacyIntakeRequest>>, TError,{token: string;data: BodyType<PrivacyIntakeSubmission>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitPrivacyIntakeRequest>>,
+        TError,
+        {token: string;data: BodyType<PrivacyIntakeSubmission>},
+        TContext
+      > => {
+      return useMutation(getSubmitPrivacyIntakeRequestMutationOptions(options));
     }
 
 export const getCreatePrivacyRecordUrl = (params?: CreatePrivacyRecordParams,) => {

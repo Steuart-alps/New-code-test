@@ -1,5 +1,5 @@
 import { createInsertSchema } from "drizzle-zod";
-import { boolean, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { z } from "zod/v4";
 import { clientsTable } from "./clients";
 import { usersTable } from "./users";
@@ -18,10 +18,17 @@ export const privacyProgramsTable = pgTable("privacy_programs", {
   processorAgreementReviewedAt: timestamp("processor_agreement_reviewed_at", { withTimezone: true }),
   responsibilitiesNotes: text("responsibilities_notes"),
   privacyOwner: text("privacy_owner"),
+  // Public rights-request form. Only a digest of the link token is stored, so
+  // the link is shown once when published and replaced by rotating it.
+  intakeTokenHash: text("intake_token_hash"),
+  intakePublishedAt: timestamp("intake_published_at", { withTimezone: true }),
+  intakePublishedBy: integer("intake_published_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Administrator assigned to new online requests; null notifies every administrator.
+  intakeAssigneeId: integer("intake_assignee_id").references(() => usersTable.id, { onDelete: "set null" }),
   updatedBy: integer("updated_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [uniqueIndex("UQ_privacy_programs_intake_token").on(t.intakeTokenHash)]);
 
 export const privacyProcessingActivitiesTable = pgTable("privacy_processing_activities", {
   id: serial("id").primaryKey(),
@@ -74,11 +81,17 @@ export const privacyRightsRequestsTable = pgTable("privacy_rights_requests", {
   decidedBy: integer("decided_by").references(() => usersTable.id, { onDelete: "set null" }),
   responseSentAt: timestamp("response_sent_at", { withTimezone: true }),
   responseEvidence: text("response_evidence"),
+  // "staff" (recorded by a manager) or "public_intake" (the online form).
+  source: text("source").notNull().default("staff"),
+  // Reference given to the requester by the online form.
+  publicReference: text("public_reference"),
+  assignedTo: integer("assigned_to").references(() => usersTable.id, { onDelete: "set null" }),
+  adminNotifiedAt: timestamp("admin_notified_at", { withTimezone: true }),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   updatedBy: integer("updated_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [uniqueIndex("UQ_privacy_rights_requests_public_reference").on(t.publicReference)]);
 
 /** Account-level requests, distinct from rights requests for an individual data subject. */
 export const clientDataDeletionRequestsTable = pgTable("client_data_deletion_requests", {

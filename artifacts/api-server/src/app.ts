@@ -42,7 +42,7 @@ app.use(
       req(req) {
         const requestPath = req.url?.split("?")[0] ?? "";
         const redactedPath = requestPath.replace(
-          /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public)\/)[^/]+/g,
+          /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public|privacy-intake|privacy-request)\/)[^/]+/g,
           "$1[redacted]",
         );
         return {
