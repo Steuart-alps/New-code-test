@@ -154,6 +154,7 @@
     "test:staff-invitations": "bash tests/run-staff-invitations.sh",
     "test:welcome-email": "bash tests/run-welcome-email.sh",
     "test:viewer-route-policy": "node tests/viewer-route-policy.mjs",
+    "test:openapi-routes": "node tests/openapi-route-inventory.mjs",
     "test:csrf-origin-policy": "bash tests/run-bundled-unit.sh tests/csrf-origin-policy.ts esm",
     "test:csrf-enforced:ci": "bash tests/run-csrf-enforced.sh",
     "test:byte-range": "bash tests/run-bundled-unit.sh tests/byte-range.ts esm",
@@ -208,6 +209,7 @@
     "esbuild-plugin-pino": "^2.3.3",
     "express-session": "^1.19.0",
     "pino-pretty": "^13",
-    "thread-stream": "3.1.0"
+    "thread-stream": "3.1.0",
+    "yaml": "2.8.3"
   }
 }

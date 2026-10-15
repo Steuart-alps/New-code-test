@@ -1,0 +1,4947 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.2.0
+  description: Compliance Tracker API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: audit-log
+    description: Compliance change history
+  - name: compliance-items
+    description: Compliance item operations
+  - name: categories
+    description: Category operations
+  - name: sites
+    description: Site (location) operations
+  - name: contractors
+    description: Contractor operations
+  - name: certificates
+    description: Certificate operations
+  - name: settings
+    description: App settings
+  - name: notifications
+    description: Notification operations
+  - name: storage
+    description: File storage operations
+  - name: fire-safety
+    description: Fire safety logbook operations
+  - name: food-safety
+    description: Kitchen / food safety diary operations
+  - name: legionella
+    description: Legionella water safety logbook operations (L8/HSG274)
+  - name: pat-track
+    description: PAT testing register operations (appliance inventory and test results)
+  - name: premises-track
+    description: PremisesTrack premises safety inspection operations
+  - name: privacy-governance
+    description: Customer privacy-governance records and rights workflows
+paths:
+  /feedback:
+    get:
+      operationId: listFeedbackReports
+      tags: [feedback]
+      summary: List feedback for the selected client (administrators only)
+      parameters:
+        - in: query
+          name: clientId
+          schema: { type: integer }
+        - in: query
+          name: category
+          schema: { type: string, enum: [feedback, bug, feature] }
+        - in: query
+          name: status
+          schema: { type: string, enum: [new, reviewing, resolved] }
+      responses:
+        "200":
+          description: Reports, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackReport" }
+        "403":
+          description: Not an administrator or not authorised for this client
+  /feedback/{id}:
+    patch:
+      operationId: updateFeedbackReport
+      tags: [feedback]
+      summary: Update the status or internal response for a report in the selected client
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: clientId
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeedbackReportUpdate" }
+      responses:
+        "200":
+          description: Updated report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackReport" }
+        "400":
+          description: Invalid status or note
+        "403":
+          description: Not an administrator or not authorised for this client
+        "404":
+          description: Report not found in the selected client
+        "409":
+          description: >-
+            The report changed after the draft was loaded (expectedRevision is
+            stale). Nothing was saved; the latest saved report is returned for
+            comparison.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackReportConflict" }
+  /feedback/{id}/history:
+    get:
+      operationId: listFeedbackReportHistory
+      tags: [feedback]
+      summary: Review history for a report in the selected client, newest first (administrators only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: clientId
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Accepted status and note changes, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackReviewEvent" }
+        "403":
+          description: Not an administrator or not authorised for this client
+        "404":
+          description: Report not found in the selected client
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /audit-log:
+    get:
+      operationId: listAuditLog
+      tags: [audit-log]
+      summary: List the latest changes in a compliance module
+      description: Returns at most 50 changes, newest first.
+      parameters:
+        - in: query
+          name: module
+          required: true
+          schema:
+            type: string
+            enum: [fire, legionella, kitchen, fix, safe, train, doc, incidents]
+      responses:
+        "200":
+          description: Most recent changes in the selected module
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 50
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+
+  /categories:
+    get:
+      operationId: listCategories
+      tags: [categories]
+      summary: List all categories
+      responses:
+        "200":
+          description: List of categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+    post:
+      operationId: createCategory
+      tags: [categories]
+      summary: Create a category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCategoryRequest"
+      responses:
+        "201":
+          description: Created category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+
+  /categories/{id}:
+    get:
+      operationId: getCategory
+      tags: [categories]
+      summary: Get a single category
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateCategory
+      tags: [categories]
+      summary: Update a category
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCategoryRequest"
+      responses:
+        "200":
+          description: Updated category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+    delete:
+      operationId: deleteCategory
+      tags: [categories]
+      summary: Delete a category
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /sites:
+    get:
+      operationId: listSites
+      tags: [sites]
+      summary: List sites
+      responses:
+        "200":
+          description: List of sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Site"
+    post:
+      operationId: createSite
+      tags: [sites]
+      summary: Create a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSiteRequest"
+      responses:
+        "201":
+          description: Created site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+
+  /sites/{id}:
+    get:
+      operationId: getSite
+      tags: [sites]
+      summary: Get a site
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateSite
+      tags: [sites]
+      summary: Update a site
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSiteRequest"
+      responses:
+        "200":
+          description: Updated site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+    delete:
+      operationId: deleteSite
+      tags: [sites]
+      summary: Delete a site
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /contractors:
+    get:
+      operationId: listContractors
+      tags: [contractors]
+      summary: List all contractors
+      responses:
+        "200":
+          description: List of contractors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Contractor"
+    post:
+      operationId: createContractor
+      tags: [contractors]
+      summary: Create a contractor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContractorRequest"
+      responses:
+        "201":
+          description: Created contractor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contractor"
+
+  /contractors/{id}:
+    get:
+      operationId: getContractor
+      tags: [contractors]
+      summary: Get a contractor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Contractor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contractor"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateContractor
+      tags: [contractors]
+      summary: Update a contractor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContractorRequest"
+      responses:
+        "200":
+          description: Updated contractor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contractor"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteContractor
+      tags: [contractors]
+      summary: Delete a contractor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /contractors/{contractorId}/certificates:
+    get:
+      operationId: listCertificates
+      tags: [certificates]
+      summary: List certificates for a contractor
+      parameters:
+        - name: contractorId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of certificates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Certificate"
+    post:
+      operationId: createCertificate
+      tags: [certificates]
+      summary: Add a certificate to a contractor
+      parameters:
+        - name: contractorId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateRequest"
+      responses:
+        "201":
+          description: Created certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certificate"
+
+  /contractors/{contractorId}/certificates/{id}:
+    put:
+      operationId: updateCertificate
+      tags: [certificates]
+      summary: Update a certificate
+      parameters:
+        - name: contractorId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateRequest"
+      responses:
+        "200":
+          description: Updated certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certificate"
+    delete:
+      operationId: deleteCertificate
+      tags: [certificates]
+      summary: Delete a certificate
+      parameters:
+        - name: contractorId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /items/{itemId}/certificates:
+    get:
+      operationId: listItemCertificates
+      tags: [certificates]
+      summary: List certificates for a compliance item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of certificates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Certificate"
+    post:
+      operationId: createItemCertificate
+      tags: [certificates]
+      summary: Add a certificate to a compliance item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateRequest"
+      responses:
+        "201":
+          description: Created certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certificate"
+
+  /items/{itemId}/certificates/{id}:
+    put:
+      operationId: updateItemCertificate
+      tags: [certificates]
+      summary: Update a compliance item's certificate
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateRequest"
+      responses:
+        "200":
+          description: Updated certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certificate"
+    delete:
+      operationId: deleteItemCertificate
+      tags: [certificates]
+      summary: Delete a compliance item's certificate
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /compliance-items:
+    get:
+      operationId: listComplianceItems
+      tags: [compliance-items]
+      summary: List all compliance items
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, in_progress, completed, overdue]
+        - name: siteId
+          in: query
+          schema:
+            type: integer
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: contractorId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of compliance items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ComplianceItem"
+    post:
+      operationId: createComplianceItem
+      tags: [compliance-items]
+      summary: Create a compliance item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateComplianceItemRequest"
+      responses:
+        "201":
+          description: Created compliance item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceItem"
+
+  /compliance-items/{id}:
+    get:
+      operationId: getComplianceItem
+      tags: [compliance-items]
+      summary: Get a compliance item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Compliance item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceItem"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateComplianceItem
+      tags: [compliance-items]
+      summary: Update a compliance item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateComplianceItemRequest"
+      responses:
+        "200":
+          description: Updated compliance item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceItem"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteComplianceItem
+      tags: [compliance-items]
+      summary: Delete a compliance item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /compliance-items/{id}/status:
+    patch:
+      operationId: updateComplianceItemStatus
+      tags: [compliance-items]
+      summary: Update compliance item status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStatusRequest"
+      responses:
+        "200":
+          description: Updated compliance item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceItem"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [compliance-items]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get all app settings
+      responses:
+        "200":
+          description: Settings object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update app settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppSettings"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+
+  /privacy-governance:
+    get:
+      operationId: getPrivacyGovernance
+      tags: [privacy-governance]
+      summary: Get the current client's privacy-governance records
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Privacy profile, processing records, rights requests and incident records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyGovernanceResponse"
+
+  /privacy-governance/program:
+    put:
+      operationId: savePrivacyProgram
+      tags: [privacy-governance]
+      summary: Save the client's controller and processor responsibilities
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyProgramInput"
+      responses:
+        "200":
+          description: Saved privacy profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyProgram"
+
+  /privacy-governance/records:
+    post:
+      operationId: createPrivacyRecord
+      tags: [privacy-governance]
+      summary: Add a processing, rights, retention, processor or breach record
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyRecordInput"
+      responses:
+        "201":
+          description: Created privacy record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyRecord"
+
+  /privacy-governance/records/{kind}/{id}:
+    put:
+      operationId: updatePrivacyRecord
+      tags: [privacy-governance]
+      summary: Update a privacy record without changing its tenant
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [activity, rights_request, retention, processor, breach]
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyRecordInput"
+      responses:
+        "200":
+          description: Updated privacy record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyRecord"
+
+  /privacy-governance/retention-schedules/{id}/verifications:
+    post:
+      operationId: addPrivacyRetentionVerification
+      tags: [privacy-governance]
+      summary: Record evidence of deletion, an active legal hold or a deletion exception
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyRetentionVerificationInput"
+      responses:
+        "201":
+          description: Recorded verification evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyRetentionVerification"
+
+  /storage/usage:
+    get:
+      operationId: getStorageUsage
+      tags: [storage]
+      summary: Get storage usage for the current account
+      responses:
+        "200":
+          description: Current retained storage usage and warning configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageUsage"
+
+  /notifications/send-reminders:
+    post:
+      operationId: sendReminders
+      tags: [notifications]
+      summary: Send email reminders to contractors with upcoming due dates
+      responses:
+        "200":
+          description: Reminder send result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendRemindersResponse"
+
+  /notifications/send-reminder/{itemId}:
+    post:
+      operationId: sendReminderForItem
+      tags: [notifications]
+      summary: Send an email reminder for a single compliance check
+      parameters:
+        - in: path
+          name: itemId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reminder send result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestEmailResponse"
+
+  /notifications/test-email:
+    post:
+      operationId: testEmail
+      tags: [notifications]
+      summary: Send a test email to verify SMTP settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestEmailRequest"
+      responses:
+        "200":
+          description: Test email result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestEmailResponse"
+
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a presigned upload URL for a file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestUploadUrlBody"
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestUploadUrlResponse"
+
+  /fire-safety:
+    get:
+      operationId: listFireSafetyChecks
+      tags: [fire-safety]
+      summary: List fire safety logbook entries
+      parameters:
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/FireCheckType"
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of fire safety checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireSafetyCheck"
+    post:
+      operationId: createFireSafetyCheck
+      tags: [fire-safety]
+      summary: Record a fire safety check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFireSafetyCheckRequest"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireSafetyCheck"
+
+  /fire-safety/status:
+    get:
+      operationId: getFireSafetyStatus
+      tags: [fire-safety]
+      summary: Per-check-type due status (last done, next due, overdue flags)
+      parameters:
+        - in: query
+          name: siteId
+          description: Use the site's checks and its risk-assessed frequencies.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Status per check type
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireSafetyStatus"
+        "400":
+          description: The site is not one of this client's sites
+        "403":
+          description: The site belongs to a department the caller cannot see
+
+  /fire-safety/{id}:
+    put:
+      operationId: updateFireSafetyCheck
+      tags: [fire-safety]
+      summary: Update a fire safety check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFireSafetyCheckRequest"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireSafetyCheck"
+    delete:
+      operationId: deleteFireSafetyCheck
+      tags: [fire-safety]
+      summary: Delete a fire safety check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /food-safety/config:
+    get:
+      operationId: getFoodSafetyConfig
+      tags: [food-safety]
+      summary: Get kitchen configuration (fridge/freezer counts, temperature limits)
+      parameters:
+        - in: query
+          name: siteId
+          description: >-
+            When provided, returns the effective config for that site
+            (defaults ← client-level ← site-level) plus which keys are
+            overridden at the site level via _siteOverrides.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Kitchen configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyConfig"
+    put:
+      operationId: updateFoodSafetyConfig
+      tags: [food-safety]
+      summary: Update kitchen configuration
+      description: >-
+        Only keys present in the body are written. A key sent with value null
+        clears that key: for a site-scoped PUT (with siteId) it removes the
+        site override so the key inherits the client-level value; for a
+        client-level PUT it removes the stored value so the key reverts to the
+        default.
+      parameters:
+        - in: query
+          name: siteId
+          description: When provided, writes site-scoped overrides for that site.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FoodSafetyConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+    delete:
+      operationId: resetFoodSafetyConfig
+      tags: [food-safety]
+      summary: Reset kitchen configuration to defaults
+      parameters:
+        - in: query
+          name: siteId
+          description: >-
+            When provided, clears only that site's overrides. Without it,
+            resets the client-level template to defaults.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reset to defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyConfig"
+
+  /fire-safety/config:
+    get:
+      operationId: getFireSafetyConfig
+      tags: [fire-safety]
+      summary: Get Fire safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Return the site-specific FireTrack control profile.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Fire safety configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireSafetyConfig"
+    put:
+      operationId: updateFireSafetyConfig
+      tags: [fire-safety]
+      summary: Update Fire safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Save the site-specific FireTrack control profile.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireSafetyConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireSafetyConfig"
+
+  /legionella/config:
+    get:
+      operationId: getLegionellaConfig
+      tags: [legionella]
+      summary: Get Water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Return the site-specific LegionellaTrack control profile.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Water safety configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegionellaConfig"
+    put:
+      operationId: updateLegionellaConfig
+      tags: [legionella]
+      summary: Update Water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Save the site-specific LegionellaTrack control profile.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegionellaConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegionellaConfig"
+
+  /hot-tub:
+    get:
+      operationId: listHotTubChecks
+      tags: [legionella]
+      summary: List hot tub water safety logbook entries
+      parameters:
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/HotTubCheckType"
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of hot tub checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HotTubCheck"
+    post:
+      operationId: createHotTubCheck
+      tags: [legionella]
+      summary: Record a hot tub water safety check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHotTubCheckRequest"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubCheck"
+
+  /hot-tub/config:
+    get:
+      operationId: getHotTubConfig
+      tags: [legionella]
+      summary: Get hot tub water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Return the site-specific HotTubTrack control profile.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Hot tub configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubConfig"
+    put:
+      operationId: updateHotTubConfig
+      tags: [legionella]
+      summary: Update hot tub water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          description: Save the site-specific HotTubTrack control profile.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HotTubConfigUpdate"
+      responses:
+        "200":
+          description: Updated hot tub configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubConfig"
+
+  /hot-tub/{id}:
+    put:
+      operationId: updateHotTubCheck
+      tags: [legionella]
+      summary: Update a hot tub check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateHotTubCheckRequest"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubCheck"
+
+  /bike-track/config:
+    get:
+      operationId: getBikeTrackConfig
+      tags: [bike-track]
+      summary: Get Bike hire configuration
+      responses:
+        "200":
+          description: Bike hire configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BikeTrackConfig"
+    put:
+      operationId: updateBikeTrackConfig
+      tags: [bike-track]
+      summary: Update Bike hire configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BikeTrackConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BikeTrackConfig"
+
+  /green-track/config:
+    get:
+      operationId: getGreenTrackConfig
+      tags: [green-track]
+      summary: Get GreenTrack configuration
+      responses:
+        "200":
+          description: GreenTrack configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackConfig"
+    put:
+      operationId: updateGreenTrackConfig
+      tags: [green-track]
+      summary: Update GreenTrack configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackConfig"
+
+  /incidents/config:
+    get:
+      operationId: getIncidentConfig
+      tags: [incidents]
+      summary: Get Incident configuration
+      responses:
+        "200":
+          description: Incident configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentConfig"
+    put:
+      operationId: updateIncidentConfig
+      tags: [incidents]
+      summary: Update Incident configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IncidentConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentConfig"
+
+  /pat-track/config:
+    get:
+      operationId: getPATTrackConfig
+      tags: [pat-track]
+      summary: Get PAT testing configuration
+      responses:
+        "200":
+          description: PAT testing configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATTrackConfig"
+    put:
+      operationId: updatePATTrackConfig
+      tags: [pat-track]
+      summary: Update PAT testing configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PATTrackConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATTrackConfig"
+
+  /pat-track/appliances:
+    get:
+      operationId: listPATAppliances
+      tags: [pat-track]
+      summary: List PAT appliances with their latest test summary
+      responses:
+        "200":
+          description: List of appliances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PATAppliance"
+    post:
+      operationId: createPATAppliance
+      tags: [pat-track]
+      summary: Add a PAT appliance to the register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePATApplianceRequest"
+      responses:
+        "201":
+          description: Created appliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATAppliance"
+
+  /pat-track/appliances/{id}:
+    put:
+      operationId: updatePATAppliance
+      tags: [pat-track]
+      summary: Update a PAT appliance
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePATApplianceRequest"
+      responses:
+        "200":
+          description: Updated appliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATAppliance"
+    delete:
+      operationId: deletePATAppliance
+      tags: [pat-track]
+      summary: Delete a PAT appliance
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /pat-track/tests:
+    get:
+      operationId: listPATTests
+      tags: [pat-track]
+      summary: List PAT test records
+      parameters:
+        - in: query
+          name: applianceId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of test records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PATTest"
+    post:
+      operationId: createPATTest
+      tags: [pat-track]
+      summary: Record a PAT test result
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePATTestRequest"
+      responses:
+        "201":
+          description: Created test record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATTest"
+
+  /pat-track/tests/{id}:
+    put:
+      operationId: updatePATTest
+      tags: [pat-track]
+      summary: Update a PAT test record
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePATTestRequest"
+      responses:
+        "200":
+          description: Updated test record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATTest"
+    delete:
+      operationId: deletePATTest
+      tags: [pat-track]
+      summary: Delete a PAT test record
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /pat-track/status:
+    get:
+      operationId: getPATTrackStatus
+      tags: [pat-track]
+      summary: PAT register status summary (overdue / due-soon counts)
+      responses:
+        "200":
+          description: Status summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATTrackStatus"
+
+  /pat-track/preset-templates:
+    get:
+      operationId: getPATPresetTemplates
+      tags: [pat-track]
+      summary: Get per-client customised appliance preset templates
+      responses:
+        "200":
+          description: Map of preset key to appliance item list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PATPresetItem"
+
+  /pat-track/preset-templates/{key}:
+    put:
+      operationId: savePATPresetTemplate
+      tags: [pat-track]
+      summary: Save a customised appliance preset template
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PATPresetItem"
+              required: [items]
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+    delete:
+      operationId: deletePATPresetTemplate
+      tags: [pat-track]
+      summary: Reset a preset template back to built-in defaults
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /premises-track:
+    get:
+      operationId: listPremisesInspections
+      tags: [premises-track]
+      summary: List premises inspections
+      parameters:
+        - in: query
+          name: from
+          schema:
+            type: string
+        - in: query
+          name: to
+          schema:
+            type: string
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/PremisesInspectionStatus"
+      responses:
+        "200":
+          description: List of premises inspections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PremisesInspection"
+    post:
+      operationId: createPremisesInspection
+      tags: [premises-track]
+      summary: Record a premises inspection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePremisesInspectionRequest"
+      responses:
+        "201":
+          description: Created inspection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PremisesInspection"
+
+  /premises-track/summary:
+    get:
+      operationId: getPremisesTrackSummary
+      tags: [premises-track]
+      summary: Premises inspection status summary
+      responses:
+        "200":
+          description: Summary counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PremisesTrackSummary"
+
+  /premises-track/{id}:
+    put:
+      operationId: updatePremisesInspection
+      tags: [premises-track]
+      summary: Update a premises inspection
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePremisesInspectionRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+    delete:
+      operationId: deletePremisesInspection
+      tags: [premises-track]
+      summary: Delete a premises inspection
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /pool-track/config:
+    get:
+      operationId: getPoolTrackConfig
+      tags: [pool-track]
+      summary: Get Pool configuration
+      responses:
+        "200":
+          description: Pool configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PoolTrackConfig"
+    put:
+      operationId: updatePoolTrackConfig
+      tags: [pool-track]
+      summary: Update Pool configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PoolTrackConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PoolTrackConfig"
+
+  /food-safety:
+    get:
+      operationId: listFoodSafetyRecords
+      tags: [food-safety]
+      summary: List food safety diary record summaries (dates and submission state)
+      parameters:
+        - in: query
+          name: siteId
+          description: >-
+            Scope to a site's diary. Omit for the whole-organisation diary
+            (records with no site). Must belong to the caller's client.
+          schema:
+            type: integer
+        - in: query
+          name: date
+          description: When provided, returns the single record for that date in the given scope (or null).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of record summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FoodSafetyRecordSummary"
+    post:
+      operationId: createFoodSafetyRecord
+      tags: [food-safety]
+      summary: Create a daily food safety record
+      parameters:
+        - in: query
+          name: siteId
+          description: Scope the new record to a site. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFoodSafetyRecordRequest"
+      responses:
+        "201":
+          description: Created record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyRecord"
+
+  /food-safety/by-date/{date}:
+    get:
+      operationId: getFoodSafetyRecordByDate
+      tags: [food-safety]
+      summary: Get the food safety record for a specific date
+      parameters:
+        - in: path
+          name: date
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Record for the date (null if none)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyRecord"
+        "404":
+          description: No record for this date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /food-safety/summary:
+    get:
+      operationId: getFoodSafetySummary
+      tags: [food-safety]
+      summary: Get daily food safety diary completeness for a month
+      parameters:
+        - in: query
+          name: year
+          required: true
+          schema:
+            type: integer
+            minimum: 1000
+            maximum: 9999
+        - in: query
+          name: month
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Completeness status for every calendar day in the requested month
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyMonthlySummary"
+        "400":
+          description: Invalid year, month, or site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /food-safety/missing-dates:
+    get:
+      operationId: getFoodSafetyMissingDates
+      tags: [food-safety]
+      summary: List missing and unsubmitted food safety diary dates in a bounded range
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Explicit diary completion gaps for the requested inclusive date range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyMissingDatesResponse"
+
+  /food-safety/{id}:
+    put:
+      operationId: updateFoodSafetyRecord
+      tags: [food-safety]
+      summary: Update a food safety record
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFoodSafetyRecordRequest"
+      responses:
+        "200":
+          description: Updated record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyRecord"
+
+  /legionella:
+    get:
+      operationId: listLegionellaChecks
+      tags: [legionella]
+      summary: List Legionella water safety logbook entries
+      parameters:
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/LegionellaCheckType"
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of Legionella checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LegionellaCheck"
+    post:
+      operationId: createLegionellaCheck
+      tags: [legionella]
+      summary: Record a Legionella water safety check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLegionellaCheckRequest"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegionellaCheck"
+
+  /legionella/status:
+    get:
+      operationId: getLegionellaStatus
+      tags: [legionella]
+      summary: Per-check-type due status for Legionella (last done, next due, overdue)
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Status per check type
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LegionellaStatus"
+
+  /legionella/monitoring-plan:
+    get:
+      operationId: getLegionellaMonitoringPlan
+      tags: [legionella]
+      summary: Read the site's approved or review-required monitoring plan
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site monitoring plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+    put:
+      operationId: updateLegionellaMonitoringPlan
+      tags: [legionella]
+      summary: Approve the site plan or flag a material change
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaterMonitoringPlanInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+
+  /hot-tub/monitoring-plan:
+    get:
+      operationId: getHotTubMonitoringPlan
+      tags: [hot-tub]
+      summary: Read the site's spa monitoring plan
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site monitoring plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+    put:
+      operationId: updateHotTubMonitoringPlan
+      tags: [hot-tub]
+      summary: Approve the spa plan or flag a material change
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaterMonitoringPlanInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+
+  /pool-track/monitoring-plan:
+    get:
+      operationId: getPoolMonitoringPlan
+      tags: [pool-track]
+      summary: Read the site's pool monitoring plan
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site monitoring plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+    put:
+      operationId: updatePoolMonitoringPlan
+      tags: [pool-track]
+      summary: Approve the pool plan or flag a material change
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaterMonitoringPlanInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+
+  /legionella/{id}:
+    put:
+      operationId: updateLegionellaCheck
+      tags: [legionella]
+      summary: Update a Legionella check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLegionellaCheckRequest"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegionellaCheck"
+    delete:
+      operationId: deleteLegionellaCheck
+      tags: [legionella]
+      summary: Delete a Legionella check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+components:
+  schemas:
+    FeedbackReport:
+      type: object
+      required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, updatedByName, revision, submitterName]
+      properties:
+        id: { type: integer }
+        clientId: { type: integer }
+        category: { type: string, enum: [feedback, bug, feature] }
+        summary: { type: string }
+        details: { type: string }
+        pagePath: { type: [string, "null"] }
+        emailStatus: { type: string }
+        createdAt: { type: string, format: date-time }
+        status: { type: string, enum: [new, reviewing, resolved] }
+        internalNote: { type: string }
+        updatedAt: { type: [string, "null"], format: date-time }
+        updatedBy: { type: [integer, "null"] }
+        updatedByName: { type: [string, "null"] }
+        revision: { type: integer, minimum: 0 }
+        submitterName: { type: [string, "null"] }
+    FeedbackReportUpdate:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision]
+      properties:
+        expectedRevision:
+          type: integer
+          minimum: 0
+          description: The report revision the draft was based on; a stale value returns 409.
+        status: { type: string, enum: [new, reviewing, resolved] }
+        internalNote: { type: string, maxLength: 5000 }
+    FeedbackReportConflict:
+      type: object
+      required: [error, report]
+      properties:
+        error: { type: string }
+        report: { $ref: "#/components/schemas/FeedbackReport" }
+    FeedbackReviewEvent:
+      type: object
+      required: [id, reportId, revision, actorId, actorName, previousStatus, status, previousInternalNote, internalNote, createdAt]
+      properties:
+        id: { type: integer }
+        reportId: { type: integer }
+        revision: { type: integer }
+        actorId: { type: [integer, "null"] }
+        actorName: { type: [string, "null"] }
+        previousStatus: { type: string, enum: [new, reviewing, resolved] }
+        status: { type: string, enum: [new, reviewing, resolved] }
+        previousInternalNote: { type: string }
+        internalNote: { type: string }
+        createdAt: { type: string, format: date-time }
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    AuditLogEntry:
+      type: object
+      required: [id, tableName, rowId, action, changedBy, changedAt, diff, actorName]
+      properties:
+        id:
+          type: integer
+        tableName:
+          type: string
+        rowId:
+          type: integer
+        action:
+          type: string
+          enum: [create, update, delete]
+        changedBy:
+          type: [integer, "null"]
+        changedAt:
+          type: string
+          format: date-time
+        diff:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/AuditFieldChange"
+        actorName:
+          type: [string, "null"]
+
+    AuditFieldChange:
+      type: object
+      required: [before, after]
+      properties:
+        before: {}
+        after: {}
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        color:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - color
+        - createdAt
+
+    CreateCategoryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+      required:
+        - name
+
+    UpdateCategoryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+
+    Site:
+      type: object
+      properties:
+        departmentId:
+          type: integer
+          nullable: true
+        id:
+          type: integer
+        clientId:
+          type: integer
+        name:
+          type: string
+        responsiblePerson:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - name
+        - createdAt
+        - updatedAt
+
+    CreateSiteRequest:
+      type: object
+      properties:
+        departmentId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        responsiblePerson:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+      required:
+        - name
+
+    UpdateSiteRequest:
+      type: object
+      properties:
+        departmentId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        responsiblePerson:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+
+    Contractor:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        company:
+          type: string
+          nullable: true
+        email:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        gasSafeNumber:
+          type: string
+          nullable: true
+        publicLiabilityExpiry:
+          type: string
+          format: date
+          nullable: true
+        dbsCheckDate:
+          type: string
+          format: date
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - email
+        - createdAt
+        - updatedAt
+
+    CreateContractorRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        company:
+          type: string
+          nullable: true
+        email:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        gasSafeNumber:
+          type: string
+          maxLength: 30
+          nullable: true
+        publicLiabilityExpiry:
+          type: string
+          format: date
+          nullable: true
+        dbsCheckDate:
+          type: string
+          format: date
+          nullable: true
+      required:
+        - name
+        - email
+
+    Certificate:
+      type: object
+      properties:
+        id:
+          type: integer
+        contractorId:
+          type: integer
+          nullable: true
+        itemId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        fileUrl:
+          type: string
+          nullable: true
+        issueDate:
+          type: string
+          format: date-time
+          nullable: true
+        expiryDate:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - createdAt
+
+    CreateCertificateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        fileUrl:
+          type: string
+          nullable: true
+        issueDate:
+          type: string
+          format: date-time
+          nullable: true
+        expiryDate:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+      required:
+        - name
+
+    ComplianceItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, in_progress, completed, overdue]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        categoryId:
+          type: integer
+          nullable: true
+        categoryName:
+          type: string
+          nullable: true
+        categoryColor:
+          type: string
+          nullable: true
+        contractorId:
+          type: integer
+          nullable: true
+        contractorName:
+          type: string
+          nullable: true
+        contractorEmail:
+          type: string
+          nullable: true
+        assignedTo:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+        leadTimeDays:
+          type: integer
+          nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+        notificationSentAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - status
+        - priority
+        - createdAt
+        - updatedAt
+
+    CreateComplianceItemRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, in_progress, completed, overdue]
+          default: pending
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          default: medium
+        siteId:
+          type: integer
+          nullable: true
+        categoryId:
+          type: integer
+          nullable: true
+        contractorId:
+          type: integer
+          nullable: true
+        assignedTo:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+        leadTimeDays:
+          type: integer
+          nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+        notes:
+          type: string
+          nullable: true
+      required:
+        - title
+
+    UpdateComplianceItemRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, in_progress, completed, overdue]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        siteId:
+          type: integer
+          nullable: true
+        categoryId:
+          type: integer
+          nullable: true
+        contractorId:
+          type: integer
+          nullable: true
+        assignedTo:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+        leadTimeDays:
+          type: integer
+          nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+        notes:
+          type: string
+          nullable: true
+
+    UpdateStatusRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, in_progress, completed, overdue]
+      required:
+        - status
+
+    DashboardStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        pending:
+          type: integer
+        inProgress:
+          type: integer
+        completed:
+          type: integer
+        overdue:
+          type: integer
+        criticalItems:
+          type: integer
+        dueSoon:
+          type: integer
+        completionRate:
+          type: number
+        contractorsCount:
+          type: integer
+        certificatesExpiringSoon:
+          type: integer
+      required:
+        - total
+        - pending
+        - inProgress
+        - completed
+        - overdue
+        - criticalItems
+        - dueSoon
+        - completionRate
+        - contractorsCount
+        - certificatesExpiringSoon
+
+    PrivacyProgramInput:
+      type: object
+      properties:
+        customerRole:
+          type: string
+          enum: [controller, joint_controller, processor, mixed]
+        controllerName:
+          type: string
+          nullable: true
+        controllerContact:
+          type: string
+          nullable: true
+        dpoContact:
+          type: string
+          nullable: true
+        noticeUrl:
+          type: string
+          nullable: true
+        noticeVersion:
+          type: string
+          nullable: true
+        noticeReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        processorAgreementStatus:
+          type: string
+          enum: [not_assessed, in_place, pending, not_required]
+        processorAgreementReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        responsibilitiesNotes:
+          type: string
+          nullable: true
+        privacyOwner:
+          type: string
+          nullable: true
+      required:
+        - customerRole
+        - controllerName
+        - controllerContact
+        - dpoContact
+        - noticeUrl
+        - noticeVersion
+        - noticeReviewedAt
+        - processorAgreementStatus
+        - processorAgreementReviewedAt
+        - responsibilitiesNotes
+        - privacyOwner
+
+    PrivacyProgram:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyProgramInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, updatedBy, createdAt, updatedAt]
+
+    PrivacyProcessingActivityInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [activity]
+        name:
+          type: string
+          minLength: 1
+        purpose:
+          type: string
+          minLength: 1
+        dataSubjects:
+          type: string
+          minLength: 1
+        dataCategories:
+          type: string
+          minLength: 1
+        article6Basis:
+          type: string
+          enum: [consent, contract, legal_obligation, vital_interests, public_task, legitimate_interests, other]
+        article6Rationale:
+          type: string
+          nullable: true
+        specialCategoryData:
+          type: boolean
+        article9Condition:
+          type: string
+          nullable: true
+        article9Rationale:
+          type: string
+          nullable: true
+        recipients:
+          type: string
+          nullable: true
+        transferDetails:
+          type: string
+          nullable: true
+        retentionCriteria:
+          type: string
+          minLength: 1
+        securityMeasures:
+          type: string
+          nullable: true
+        dpiaClassification:
+          type: string
+          enum: [not_screened, not_required, required, in_progress, completed]
+        dpiaRationale:
+          type: string
+          nullable: true
+        dpiaCompletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        owner:
+          type: string
+          nullable: true
+        reviewDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        active:
+          type: boolean
+      required: [kind, name, purpose, dataSubjects, dataCategories, article6Basis, article6Rationale, specialCategoryData, article9Condition, article9Rationale, recipients, transferDetails, retentionCriteria, securityMeasures, dpiaClassification, dpiaRationale, dpiaCompletedAt, owner, reviewDueAt, active]
+
+    PrivacyProcessingActivity:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyProcessingActivityInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyRightsRequestInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [rights_request]
+        requestType:
+          type: string
+          enum: [access, rectification, erasure, restriction, portability, objection, other]
+        subjectName:
+          type: string
+          minLength: 1
+        subjectContact:
+          type: string
+          nullable: true
+        scopeDescription:
+          type: string
+          minLength: 1
+        receivedAt:
+          type: string
+          format: date-time
+        extendedDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        extensionReason:
+          type: string
+          nullable: true
+        identityStatus:
+          type: string
+          enum: [not_started, in_progress, verified, failed]
+        identityMethod:
+          type: string
+          nullable: true
+        identityEvidence:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [received, in_progress, waiting_for_information, completed, refused, withdrawn]
+        decision:
+          type: string
+          enum: [granted, partially_granted, refused, not_applicable]
+          nullable: true
+        decisionRationale:
+          type: string
+          nullable: true
+        responseSentAt:
+          type: string
+          format: date-time
+          nullable: true
+        responseEvidence:
+          type: string
+          nullable: true
+      required: [kind, requestType, subjectName, subjectContact, scopeDescription, receivedAt, extendedDueAt, extensionReason, identityStatus, identityMethod, identityEvidence, status, decision, decisionRationale, responseSentAt, responseEvidence]
+
+    PrivacyRightsRequest:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyRightsRequestInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            dueAt:
+              type: string
+              format: date-time
+            identityVerifiedAt:
+              type: string
+              format: date-time
+              nullable: true
+            identityVerifiedBy:
+              type: integer
+              nullable: true
+            decidedAt:
+              type: string
+              format: date-time
+              nullable: true
+            decidedBy:
+              type: integer
+              nullable: true
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, dueAt, identityVerifiedAt, identityVerifiedBy, decidedAt, decidedBy, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyRetentionScheduleInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [retention]
+        recordCategory:
+          type: string
+          minLength: 1
+        scopeDescription:
+          type: string
+          minLength: 1
+        retentionPeriod:
+          type: string
+          minLength: 1
+        retentionTrigger:
+          type: string
+          minLength: 1
+        justification:
+          type: string
+          minLength: 1
+        legalHoldActive:
+          type: boolean
+        legalHoldReason:
+          type: string
+          nullable: true
+        deletionException:
+          type: boolean
+        deletionExceptionReason:
+          type: string
+          nullable: true
+        reviewDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        active:
+          type: boolean
+      required: [kind, recordCategory, scopeDescription, retentionPeriod, retentionTrigger, justification, legalHoldActive, legalHoldReason, deletionException, deletionExceptionReason, reviewDueAt, active]
+
+    PrivacyRetentionSchedule:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyRetentionScheduleInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyProcessorInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [processor]
+        organizationName:
+          type: string
+          minLength: 1
+        role:
+          type: string
+          enum: [processor, subprocessor]
+        parentProcessor:
+          type: string
+          nullable: true
+        serviceDescription:
+          type: string
+          minLength: 1
+        dataCategories:
+          type: string
+          minLength: 1
+        processingCountries:
+          type: string
+          minLength: 1
+        transferMechanism:
+          type: string
+          enum: [not_assessed, no_restricted_transfer, adequacy, uk_idta, eu_scc, uk_addendum, other]
+        transferSafeguards:
+          type: string
+          nullable: true
+        transferAssessment:
+          type: string
+          nullable: true
+        agreementStatus:
+          type: string
+          enum: [not_assessed, in_place, pending, not_required]
+        agreementReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        transferReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        active:
+          type: boolean
+      required: [kind, organizationName, role, parentProcessor, serviceDescription, dataCategories, processingCountries, transferMechanism, transferSafeguards, transferAssessment, agreementStatus, agreementReviewedAt, transferReviewedAt, reviewDueAt, active]
+
+    PrivacyProcessor:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyProcessorInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyBreachInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [breach]
+        discoveredAt:
+          type: string
+          format: date-time
+        occurredFrom:
+          type: string
+          format: date-time
+          nullable: true
+        occurredTo:
+          type: string
+          format: date-time
+          nullable: true
+        description:
+          type: string
+          minLength: 1
+        dataCategories:
+          type: string
+          minLength: 1
+        affectedSubjectsEstimate:
+          type: integer
+          minimum: 0
+          nullable: true
+        affectedRecordsEstimate:
+          type: integer
+          minimum: 0
+          nullable: true
+        riskLevel:
+          type: string
+          enum: [under_assessment, unlikely, risk, high_risk]
+        assessmentStatus:
+          type: string
+          enum: [assessing, contained, closed]
+        assessmentRationale:
+          type: string
+          nullable: true
+        containmentSteps:
+          type: string
+          nullable: true
+        authorityNotificationRequired:
+          type: boolean
+          nullable: true
+        authorityNotifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        authorityNotificationReference:
+          type: string
+          nullable: true
+        individualNotificationRequired:
+          type: boolean
+          nullable: true
+        individualNotificationDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        individualsNotifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        evidence:
+          type: string
+          nullable: true
+      required: [kind, discoveredAt, occurredFrom, occurredTo, description, dataCategories, affectedSubjectsEstimate, affectedRecordsEstimate, riskLevel, assessmentStatus, assessmentRationale, containmentSteps, authorityNotificationRequired, authorityNotifiedAt, authorityNotificationReference, individualNotificationRequired, individualNotificationDueAt, individualsNotifiedAt, evidence]
+
+    PrivacyBreach:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyBreachInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            authorityNotificationDueAt:
+              type: string
+              format: date-time
+            assessedAt:
+              type: string
+              format: date-time
+              nullable: true
+            assessedBy:
+              type: integer
+              nullable: true
+            closedAt:
+              type: string
+              format: date-time
+              nullable: true
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, authorityNotificationDueAt, assessedAt, assessedBy, closedAt, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyRecordInput:
+      oneOf:
+        - $ref: "#/components/schemas/PrivacyProcessingActivityInput"
+        - $ref: "#/components/schemas/PrivacyRightsRequestInput"
+        - $ref: "#/components/schemas/PrivacyRetentionScheduleInput"
+        - $ref: "#/components/schemas/PrivacyProcessorInput"
+        - $ref: "#/components/schemas/PrivacyBreachInput"
+      discriminator:
+        propertyName: kind
+        mapping:
+          activity: "#/components/schemas/PrivacyProcessingActivityInput"
+          rights_request: "#/components/schemas/PrivacyRightsRequestInput"
+          retention: "#/components/schemas/PrivacyRetentionScheduleInput"
+          processor: "#/components/schemas/PrivacyProcessorInput"
+          breach: "#/components/schemas/PrivacyBreachInput"
+
+    PrivacyRecord:
+      oneOf:
+        - $ref: "#/components/schemas/PrivacyProcessingActivity"
+        - $ref: "#/components/schemas/PrivacyRightsRequest"
+        - $ref: "#/components/schemas/PrivacyRetentionSchedule"
+        - $ref: "#/components/schemas/PrivacyProcessor"
+        - $ref: "#/components/schemas/PrivacyBreach"
+      discriminator:
+        propertyName: kind
+        mapping:
+          activity: "#/components/schemas/PrivacyProcessingActivity"
+          rights_request: "#/components/schemas/PrivacyRightsRequest"
+          retention: "#/components/schemas/PrivacyRetentionSchedule"
+          processor: "#/components/schemas/PrivacyProcessor"
+          breach: "#/components/schemas/PrivacyBreach"
+
+    PrivacyRetentionVerificationInput:
+      type: object
+      properties:
+        outcome:
+          type: string
+          enum: [deletion_verified, legal_hold_confirmed, exception_confirmed]
+        recordsReviewed:
+          type: string
+          minLength: 1
+        verificationMethod:
+          type: string
+          minLength: 1
+        evidence:
+          type: string
+          minLength: 1
+      required: [outcome, recordsReviewed, verificationMethod, evidence]
+
+    PrivacyRetentionVerification:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyRetentionVerificationInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            scheduleId:
+              type: integer
+            verifiedBy:
+              type: integer
+              nullable: true
+            verifiedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, scheduleId, verifiedBy, verifiedAt]
+
+    PrivacyGovernanceResponse:
+      type: object
+      properties:
+        program:
+          anyOf:
+            - $ref: "#/components/schemas/PrivacyProgram"
+            - type: "null"
+        activities:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyProcessingActivity"
+        rightsRequests:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyRightsRequest"
+        retentionSchedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyRetentionSchedule"
+        retentionVerifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyRetentionVerification"
+        processors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyProcessor"
+        breaches:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyBreach"
+      required: [program, activities, rightsRequests, retentionSchedules, retentionVerifications, processors, breaches]
+
+    AppSettings:
+      type: object
+      properties:
+        smtpHost:
+          type: string
+          nullable: true
+        smtpPort:
+          type: string
+          nullable: true
+        smtpUser:
+          type: string
+          nullable: true
+        smtpPass:
+          type: string
+          nullable: true
+        smtpFrom:
+          type: string
+          nullable: true
+        smtpFromName:
+          type: string
+          nullable: true
+        defaultLeadTimeDays:
+          type: string
+          nullable: true
+        contractorComplianceLeadTimeDays:
+          type: string
+          nullable: true
+        companyName:
+          type: string
+          nullable: true
+        accountTimezone:
+          type: string
+          nullable: true
+        storageWarningThresholdBytes:
+          type: string
+          pattern: "^[0-9]+$"
+          nullable: true
+
+    StorageUsage:
+      type: object
+      required:
+        - usedBytes
+        - objectCount
+        - warningThresholdBytes
+        - warning
+        - monthlyDownloadBytes
+        - monthlyDownloadTrackingAvailable
+        - month
+        - estimatedCost
+        - usageCheckedAt
+        - usageAgeSeconds
+        - usageRefreshing
+      properties:
+        usedBytes:
+          type: integer
+          minimum: 0
+        usageCheckedAt:
+          type: ["string", "null"]
+          format: date-time
+          description: When the totals were last reconciled with the storage provider; null before the first check.
+        usageAgeSeconds:
+          type: ["integer", "null"]
+          minimum: 0
+          description: Seconds since usageCheckedAt. Uploads and deletions since then are already included.
+        usageRefreshing:
+          type: boolean
+          description: A reconciliation with the storage provider is running; totals may change shortly.
+        objectCount:
+          type: integer
+          minimum: 0
+        warningThresholdBytes:
+          type: integer
+          minimum: 1
+        warning:
+          type: boolean
+        monthlyDownloadBytes:
+          type: ["integer", "null"]
+          minimum: 0
+        monthlyDownloadTrackingAvailable:
+          type: boolean
+        month:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}$"
+        estimatedCost:
+          type: object
+          nullable: true
+          required: [currency, storageMinorUnits, downloadMinorUnits, totalMinorUnits, includedStorageBytes, excessStorageBytes, providerMinorUnits, markupMinorUnits, markupPercent]
+          properties:
+            currency:
+              type: string
+              enum: [USD]
+            storageMinorUnits:
+              type: integer
+              minimum: 0
+            downloadMinorUnits:
+              type: integer
+              minimum: 0
+            totalMinorUnits:
+              type: integer
+              minimum: 0
+            includedStorageBytes:
+              type: integer
+              minimum: 0
+            excessStorageBytes:
+              type: integer
+              minimum: 0
+            providerMinorUnits:
+              type: integer
+              minimum: 0
+            markupMinorUnits:
+              type: integer
+              minimum: 0
+            markupPercent:
+              type: number
+              minimum: 0
+
+    SendRemindersResponse:
+      type: object
+      properties:
+        sent:
+          type: integer
+        skipped:
+          type: integer
+        errors:
+          type: integer
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              itemId:
+                type: integer
+              title:
+                type: string
+              contractorEmail:
+                type: string
+              status:
+                type: string
+                enum: [sent, skipped, error]
+              reason:
+                type: string
+                nullable: true
+            required:
+              - itemId
+              - title
+              - contractorEmail
+              - status
+      required:
+        - sent
+        - skipped
+        - errors
+        - details
+
+    TestEmailRequest:
+      type: object
+      properties:
+        to:
+          type: string
+      required:
+        - to
+
+    TestEmailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+        - message
+
+    RequestUploadUrlBody:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+      required:
+        - name
+        - size
+        - contentType
+
+    RequestUploadUrlResponse:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+      required:
+        - uploadURL
+        - objectPath
+
+    FireCheckType:
+      type: string
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel]
+
+    FireSafetyCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        checkType:
+          $ref: "#/components/schemas/FireCheckType"
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - checkType
+        - checkDate
+        - result
+        - createdAt
+        - updatedAt
+
+    CreateFireSafetyCheckRequest:
+      type: object
+      properties:
+        checkType:
+          $ref: "#/components/schemas/FireCheckType"
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+      required:
+        - checkType
+        - checkDate
+        - result
+
+    UpdateFireSafetyCheckRequest:
+      type: object
+      properties:
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+
+    FireSafetyStatus:
+      type: object
+      properties:
+        checkType:
+          $ref: "#/components/schemas/FireCheckType"
+        frequencyDays:
+          type: integer
+        lastDate:
+          type: string
+          nullable: true
+        lastResult:
+          type: string
+          enum: [pass, fail, action_required]
+          nullable: true
+        dueDate:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ok, due_soon, overdue, never]
+        siteId:
+          type: integer
+          nullable: true
+          description: The site this row's status comes from; across all sites, the worst site for this check type. Null when no site is visible.
+        siteName:
+          type: string
+          nullable: true
+          description: Name of the site in siteId.
+        siteCount:
+          type: integer
+          description: How many visible sites were assessed for this check type.
+        sitesAffected:
+          type: integer
+          description: How many of those sites are overdue or have never recorded the check.
+      required:
+        - checkType
+        - frequencyDays
+        - lastResult
+        - status
+
+    FireSafetyConfig:
+      type: object
+      properties:
+        fire_alarm_zones:
+          type: string
+        fire_extinguisher_points:
+          type: string
+        fire_show_drill:
+          type: string
+        fire_default_performer:
+          type: string
+        fire_escape_routes:
+          type: string
+        fire_frequency_days:
+          type: string
+          description: JSON object mapping check types to risk-assessed intervals in days.
+        siteId:
+          type: integer
+          nullable: true
+        controlProfile:
+          $ref: "#/components/schemas/FireControlProfile"
+
+    FireControlProfile:
+      type: object
+      properties:
+        riskAssessmentReference: { type: string, nullable: true }
+        riskAssessmentDate: { type: string, format: date, nullable: true }
+        nextReviewDate: { type: string, format: date, nullable: true }
+        responsiblePerson: { type: string, nullable: true }
+        ukNation: { type: string, enum: [england, scotland, wales, northern_ireland], nullable: true }
+        evacuationPeepArrangements: { type: string, nullable: true }
+        maintenanceEvidenceReference: { type: string, nullable: true }
+        defectClosureVerification: { type: string, nullable: true }
+        frequencyDays:
+          type: object
+          additionalProperties: { type: integer, minimum: 1, maximum: 3650 }
+
+    LegionellaConfig:
+      type: object
+      properties:
+        water_non_sentinel_outlets:
+          type: string
+        water_default_performer:
+          type: string
+        water_sentinel_outlets:
+          type: string
+        water_frequency_days:
+          type: string
+          description: JSON object mapping check types to risk-assessed intervals in days.
+        siteId:
+          type: integer
+          nullable: true
+        effectiveTemperatureLimits:
+          type: object
+          description: Effective minimum and maximum temperatures for each temperature check type.
+          additionalProperties:
+            $ref: "#/components/schemas/TemperatureLimit"
+        controlProfile:
+          $ref: "#/components/schemas/LegionellaControlProfile"
+
+    LegionellaControlProfile:
+      type: object
+      properties:
+        systemInventoryReference: { type: string, nullable: true }
+        writtenControlSchemeReference: { type: string, nullable: true }
+        riskAssessmentReference: { type: string, nullable: true }
+        riskAssessmentReviewDate: { type: string, format: date, nullable: true }
+        competentPerson: { type: string, nullable: true }
+        samplingLabRecordReference: { type: string, nullable: true }
+        controlLimitsRationale: { type: string, nullable: true }
+        remedialVerificationReference: { type: string, nullable: true }
+        schemeReviewDate: { type: string, format: date, nullable: true }
+        ukNation: { type: string, enum: [england, scotland, wales, northern_ireland], nullable: true }
+        frequencyDays:
+          type: object
+          additionalProperties: { type: integer, minimum: 1, maximum: 3650 }
+        temperatureLimits:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/TemperatureLimit"
+
+    TemperatureLimit:
+      type: object
+      properties:
+        min: { type: number }
+        max: { type: number }
+
+    HotTubCheckType:
+      type: string
+      enum: [water_chemistry, temperature, filter_clean, cover_inspection, drain_refill, microbiological_test, risk_assessment]
+
+    HotTubCheck:
+      type: object
+      properties:
+        id: { type: integer }
+        clientId: { type: integer }
+        siteId: { type: integer, nullable: true }
+        hotTubId: { type: integer, nullable: true }
+        checkType:
+          $ref: "#/components/schemas/HotTubCheckType"
+        checkDate: { type: string }
+        result:
+          type: string
+          description: New records use pass or fail; historical action_required records remain readable.
+          enum: [pass, fail, action_required]
+        session:
+          type: string
+          enum: [morning, midday, evening]
+          nullable: true
+        phValue: { type: number, nullable: true }
+        sanitiserLevel: { type: number, nullable: true }
+        temperature: { type: number, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        performedBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, clientId, checkType, checkDate, result, createdAt, updatedAt]
+
+    CreateHotTubCheckRequest:
+      type: object
+      description: pH and sanitiserLevel are required for water_chemistry; temperature is required for temperature checks.
+      allOf:
+        - if:
+            properties:
+              checkType:
+                const: water_chemistry
+          then:
+            required: [phValue, sanitiserLevel]
+        - if:
+            properties:
+              checkType:
+                const: temperature
+          then:
+            required: [temperature]
+      properties:
+        checkType:
+          $ref: "#/components/schemas/HotTubCheckType"
+        checkDate: { type: string }
+        result: { type: string, enum: [pass, fail] }
+        session:
+          type: string
+          enum: [morning, midday, evening]
+          nullable: true
+        phValue: { type: number, nullable: true }
+        sanitiserLevel: { type: number, nullable: true }
+        temperature: { type: number, nullable: true }
+        siteId: { type: integer, nullable: true }
+        hotTubId: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        performedBy: { type: string, nullable: true }
+      required: [checkType, checkDate, result]
+
+    UpdateHotTubCheckRequest:
+      type: object
+      description: For an existing water_chemistry check, phValue and sanitiserLevel are required; for an existing temperature check, temperature is required.
+      properties:
+        checkDate: { type: string }
+        result: { type: string, enum: [pass, fail] }
+        session:
+          type: string
+          enum: [morning, midday, evening]
+          nullable: true
+        phValue: { type: number, nullable: true }
+        sanitiserLevel: { type: number, nullable: true }
+        temperature: { type: number, nullable: true }
+        siteId: { type: integer, nullable: true }
+        hotTubId: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        performedBy: { type: string, nullable: true }
+
+    HotTubConfig:
+      type: object
+      properties:
+        siteId: { type: integer, nullable: true }
+        operatingRanges:
+          $ref: "#/components/schemas/HotTubOperatingRanges"
+        controlProfile:
+          type: object
+          nullable: true
+          additionalProperties: true
+        disclaimer: { type: string }
+      required: [siteId, operatingRanges, disclaimer]
+
+    HotTubConfigUpdate:
+      type: object
+      properties:
+        operatingRanges:
+          $ref: "#/components/schemas/HotTubOperatingRanges"
+
+    HotTubOperatingRanges:
+      type: object
+      properties:
+        ph:
+          type: object
+          properties:
+            min: { type: number, minimum: 0, maximum: 14 }
+            max: { type: number, minimum: 0, maximum: 14 }
+          required: [min, max]
+        sanitiser:
+          type: object
+          properties:
+            min: { type: number, minimum: 0 }
+            max: { type: number, minimum: 0 }
+          required: [min, max]
+        temperature:
+          type: object
+          properties:
+            max: { type: number, exclusiveMinimum: 0, maximum: 40 }
+          required: [max]
+      required: [ph, sanitiser, temperature]
+
+    BikeTrackConfig:
+      type: object
+      properties:
+        bike_default_deposit_pence:
+          type: string
+        bike_hire_duration_hours:
+          type: string
+        bike_require_helmet:
+          type: string
+        bike_overdue_repeat_interval_days:
+          type: string
+          enum: ['0', '1', '3', '7', '14']
+
+    GreenTrackConfig:
+      type: object
+      properties:
+        green_show_fuel:
+          type: string
+        green_default_operators:
+          type: string
+
+    IncidentConfig:
+      type: object
+      properties:
+        incident_departments:
+          type: string
+        incident_default_reporter:
+          type: string
+        incident_show_investigation:
+          type: string
+        incident_locations:
+          type: string
+
+    OkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+
+    PATAppliance:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        applianceType:
+          type: string
+        location:
+          type: string
+          nullable: true
+        assetTag:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        lastTestDate:
+          type: string
+          nullable: true
+        lastResult:
+          type: string
+          nullable: true
+        nextTestDate:
+          type: string
+          nullable: true
+        lastTestedBy:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - name
+        - applianceType
+        - active
+
+    CreatePATApplianceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        applianceType:
+          type: string
+        location:
+          type: string
+          nullable: true
+        assetTag:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        active:
+          type: boolean
+      required:
+        - name
+
+    PATTest:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        applianceId:
+          type: integer
+        testDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        nextTestDate:
+          type: string
+          nullable: true
+        testedBy:
+          type: string
+          nullable: true
+        visualInspection:
+          type: string
+          nullable: true
+          enum: [pass, fail, na]
+        earthContinuityOhms:
+          type: string
+          nullable: true
+        insulationMohms:
+          type: string
+          nullable: true
+        operatingCurrent:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        applianceName:
+          type: string
+          nullable: true
+        assetTag:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - applianceId
+        - testDate
+        - result
+
+    CreatePATTestRequest:
+      type: object
+      properties:
+        applianceId:
+          type: integer
+        testDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        nextTestDate:
+          type: string
+          nullable: true
+        testedBy:
+          type: string
+          nullable: true
+        visualInspection:
+          type: string
+          nullable: true
+          enum: [pass, fail, na]
+        earthContinuityOhms:
+          type: string
+          nullable: true
+        insulationMohms:
+          type: string
+          nullable: true
+        operatingCurrent:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+      required:
+        - applianceId
+        - testDate
+        - result
+
+    PATTrackStatus:
+      type: object
+      properties:
+        totalAppliances:
+          type: integer
+        untested:
+          type: integer
+        overdue:
+          type: integer
+        dueSoon:
+          type: integer
+        ok:
+          type: integer
+      required:
+        - totalAppliances
+        - untested
+        - overdue
+        - dueSoon
+        - ok
+
+    PATPresetItem:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+      required:
+        - name
+        - type
+
+    PremisesInspectionStatus:
+      type: string
+      enum: [open, actioned, closed]
+
+    PremisesInspection:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        inspectionDate:
+          type: string
+        nextInspectionDate:
+          type: ["string", "null"]
+        inspectionType:
+          type: string
+        area:
+          type: string
+          nullable: true
+        findings:
+          type: string
+          nullable: true
+        hazardDetails:
+          type: string
+          nullable: true
+        actionRequired:
+          type: string
+          nullable: true
+        actionTaken:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/PremisesInspectionStatus"
+        inspectedBy:
+          type: string
+          nullable: true
+        createdBy:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - inspectionDate
+        - inspectionType
+        - status
+
+    CreatePremisesInspectionRequest:
+      type: object
+      properties:
+        inspectionDate:
+          type: string
+        nextInspectionDate:
+          type: ["string", "null"]
+        inspectionType:
+          type: string
+        area:
+          type: string
+          nullable: true
+        findings:
+          type: string
+          nullable: true
+        hazardDetails:
+          type: string
+          nullable: true
+        actionRequired:
+          type: string
+          nullable: true
+        actionTaken:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/PremisesInspectionStatus"
+        inspectedBy:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+      required:
+        - inspectionDate
+
+    PremisesTrackSummary:
+      type: object
+      properties:
+        open:
+          type: integer
+        actioned:
+          type: integer
+        closed:
+          type: integer
+        overdue:
+          type: integer
+        total:
+          type: integer
+      required:
+        - open
+        - actioned
+        - closed
+        - overdue
+        - total
+
+    PATTrackConfig:
+      type: object
+      properties:
+        pat_show_earth_bond:
+          type: string
+        pat_show_insulation:
+          type: string
+        pat_default_tester:
+          type: string
+        pat_retest_months:
+          type: string
+        pat_locations:
+          type: string
+
+    PoolTrackConfig:
+      type: object
+      properties:
+        pool_name:
+          type: string
+        pool_ph_min:
+          type: string
+        pool_ph_max:
+          type: string
+        pool_free_chlor_min:
+          type: string
+        pool_free_chlor_max:
+          type: string
+        pool_temp_min:
+          type: string
+        pool_temp_max:
+          type: string
+        pool_track_air_temp:
+          type: string
+        pool_default_performer:
+          type: string
+
+    FoodSafetyConfig:
+      type: object
+      properties:
+        food_temperature_rules:
+          type: string
+          description: Validated JSON containing numeric min/max ranges and maximum cooling minutes; authoritative for new readings.
+        food_cold_units:
+          type: string
+          nullable: true
+        food_default_hot_items:
+          type: string
+          nullable: true
+        food_default_holding_items:
+          type: string
+          nullable: true
+        food_default_sv_items:
+          type: string
+          nullable: true
+        food_probe_names:
+          type: string
+          nullable: true
+        food_show_deliveries:
+          type: string
+          nullable: true
+        food_show_cold_food:
+          type: string
+          nullable: true
+        food_show_hot_temperature:
+          type: string
+          nullable: true
+        food_show_cooling:
+          type: string
+          nullable: true
+        food_show_reheating:
+          type: string
+          nullable: true
+        food_show_hot_holding:
+          type: string
+          nullable: true
+        food_show_sous_vide:
+          type: string
+          nullable: true
+        food_num_fridges:
+          type: string
+          nullable: true
+        food_num_freezers:
+          type: string
+          nullable: true
+        food_jurisdiction:
+          description: Food-safety jurisdiction used to choose the standard reheating limit.
+          type: string
+          enum:
+            - scotland
+            - england_wales
+            - northern_ireland
+          nullable: true
+        food_cooking_limit:
+          type: string
+          nullable: true
+        food_cooling_limit:
+          type: string
+          nullable: true
+        food_reheating_limit:
+          type: string
+          nullable: true
+        food_hot_holding_limit:
+          type: string
+          nullable: true
+        _siteOverrides:
+          description: >-
+            Keys that are overridden at the site level for the requested site.
+            Only present when the config is fetched with a siteId.
+          type: array
+          items:
+            type: string
+
+    FoodSafetyRecordSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        recordDate:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - recordDate
+
+    FoodSafetyMissingDatesResponse:
+      type: object
+      required:
+        - from
+        - to
+        - siteId
+        - missingDates
+        - draftDates
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        missingDates:
+          type: array
+          description: Dates with no food safety diary record.
+          items:
+            type: string
+            format: date
+        draftDates:
+          type: array
+          description: Dates with a diary record that has not been submitted.
+          items:
+            type: string
+            format: date
+
+    FoodSafetyMonthlySummaryDay:
+      type: object
+      required:
+        - date
+        - hasRecord
+        - submitted
+      properties:
+        date:
+          type: string
+          format: date
+        hasRecord:
+          type: boolean
+          description: Whether a diary record exists for this date.
+        submitted:
+          type: boolean
+          description: Whether the diary record has been submitted.
+
+    FoodSafetyMonthlySummary:
+      type: object
+      required:
+        - year
+        - month
+        - siteId
+        - days
+      properties:
+        year:
+          type: integer
+        month:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/FoodSafetyMonthlySummaryDay"
+
+    FoodSafetyRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        recordDate:
+          type: string
+        deliveries:
+          type: array
+          items: {}
+        coldFood:
+          type: array
+          items: {}
+        hotTemperature:
+          type: array
+          items: {}
+        hotHolding:
+          type: array
+          items: {}
+        cookingLimit:
+          type: string
+        coolingLimit:
+          type: string
+        reheatingLimit:
+          type: string
+        hotHoldingLimit:
+          type: string
+        correctives:
+          type: string
+          nullable: true
+        managerSignature:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - recordDate
+        - createdAt
+        - updatedAt
+
+    CreateFoodSafetyRecordRequest:
+      type: object
+      properties:
+        mobileEntryId:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{12,100}$'
+          description: Stable device submission identifier retained across retries.
+        recordDate:
+          type: string
+        deliveries:
+          type: array
+          items: {}
+        coldFood:
+          type: array
+          items: {}
+        hotTemperature:
+          type: array
+          items: {}
+        hotHolding:
+          type: array
+          items: {}
+        cookingLimit:
+          type: string
+        coolingLimit:
+          type: string
+        reheatingLimit:
+          type: string
+        hotHoldingLimit:
+          type: string
+        correctives:
+          type: string
+        managerSignature:
+          type: string
+        submittedAt:
+          type: string
+      required:
+        - recordDate
+
+    UpdateFoodSafetyRecordRequest:
+      type: object
+      properties:
+        mobileEntryId:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{12,100}$'
+          description: Stable device submission identifier retained across retries; requires mobileTemperatureLog and mobileRecordDate.
+        mobileRecordDate:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Original device-local diary date; must match the target record.
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+          description: Updated-at value returned when the web diary was loaded.
+        expectedRecord:
+          $ref: "#/components/schemas/FoodSafetyRecordSnapshot"
+        mobileTemperatureLog:
+          $ref: "#/components/schemas/MobileTemperatureLog"
+        deliveries:
+          type: array
+          items: {}
+        coldFood:
+          type: array
+          items: {}
+        hotTemperature:
+          type: array
+          items: {}
+        hotHolding:
+          type: array
+          items: {}
+        cookingLimit:
+          type: string
+        coolingLimit:
+          type: string
+        reheatingLimit:
+          type: string
+        hotHoldingLimit:
+          type: string
+        correctives:
+          type: string
+        managerSignature:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    FoodSafetyRecordSnapshot:
+      type: object
+      description: The web diary baseline used for safe three-way merging.
+      properties:
+        deliveries:
+          type: array
+          items: {}
+        coldFood:
+          type: array
+          items: {}
+        hotTemperature:
+          type: array
+          items: {}
+        cooling:
+          type: array
+          items: {}
+        reheating:
+          type: array
+          items: {}
+        hotHolding:
+          type: array
+          items: {}
+        sousVide:
+          type: array
+          items: {}
+        cookingLimit:
+          type: string
+          nullable: true
+        coolingLimit:
+          type: string
+          nullable: true
+        reheatingLimit:
+          type: string
+          nullable: true
+        hotHoldingLimit:
+          type: string
+          nullable: true
+        correctives:
+          type: string
+          nullable: true
+        managerSignature:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+        staffRosterId:
+          type: integer
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    MobileTemperatureLog:
+      type: object
+      required:
+        - coldFood
+        - expectedColdFood
+        - expectedCorrectives
+      properties:
+        coldFood:
+          type: array
+          items: {}
+        expectedColdFood:
+          type: array
+          items: {}
+        delivery:
+          type: object
+          additionalProperties: true
+        hotHolding:
+          type: object
+          additionalProperties: true
+        hotTemperature:
+          type: object
+          additionalProperties: true
+        cooling:
+          type: object
+          additionalProperties: true
+        reheating:
+          type: object
+          additionalProperties: true
+        correctives:
+          type: string
+        expectedCorrectives:
+          type: string
+          nullable: true
+
+    LegionellaCheckType:
+      type: string
+      enum: [calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, cold_nonsent_temp, cold_tank_inspection, cold_tank_clean, calorifier_inspection, calorifier_clean, shower_clean, tmv_service, outlet_flush]
+
+    LegionellaCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        checkType:
+          $ref: "#/components/schemas/LegionellaCheckType"
+        checkDate:
+          type: string
+        result:
+          type: string
+          description: New records use pass or fail; historical action_required records remain readable.
+          enum: [pass, fail, action_required]
+        temperature:
+          type: string
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - checkType
+        - checkDate
+        - result
+        - createdAt
+        - updatedAt
+
+    CreateLegionellaCheckRequest:
+      type: object
+      description: temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.
+      allOf:
+        - if:
+            properties:
+              checkType:
+                enum: [calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, cold_nonsent_temp]
+          then:
+            required: [temperature]
+      properties:
+        checkType:
+          $ref: "#/components/schemas/LegionellaCheckType"
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        temperature:
+          type: number
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+      required:
+        - checkType
+        - checkDate
+        - result
+
+    UpdateLegionellaCheckRequest:
+      type: object
+      description: For an existing temperature check, temperature is required. New results use pass or fail.
+      properties:
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        temperature:
+          type: number
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+
+    LegionellaStatus:
+      type: object
+      properties:
+        checkType:
+          $ref: "#/components/schemas/LegionellaCheckType"
+        frequencyDays:
+          type: ["integer", "null"]
+        lastDate:
+          type: string
+          nullable: true
+        lastResult:
+          type: string
+          enum: [pass, fail, action_required]
+          nullable: true
+        dueDate:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ok, due_soon, overdue, never, plan_required]
+      required:
+        - checkType
+        - frequencyDays
+        - lastResult
+        - status
+
+    WaterMonitoringPlanInput:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [approve, flag_change]
+        riskAssessmentReference:
+          type: string
+        writtenSchemeReference:
+          type: string
+        competentPerson:
+          type: string
+        materialChangeNote:
+          type: string
+        frequencies:
+          type: object
+          additionalProperties:
+            type: integer
+      required: [action]
+
+    WaterMonitoringPlanResult:
+      type: object
+      properties:
+        profile:
+          type: object
+          additionalProperties: true
+        approved:
+          type: boolean
+      required: [profile, approved]
