@@ -231,5 +231,5 @@ try {
   assert.equal((await pool.query('SELECT client_entry_id FROM fire_safety_checks WHERE id = $1', [fire.data.id])).rows[0].client_entry_id,
     stored.client_entry_id, 'an edit keeps the original entry ID');
 
-  console.log('Fire, legionella, hot tub, PAT, incident, pool, GreenTrack and swim session mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
+  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, GreenTrack and swim session mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
 } finally { await pool.end(); }

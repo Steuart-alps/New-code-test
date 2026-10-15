@@ -24,7 +24,7 @@ What's already in the repository:
 
 Run these on your own computer from `artifacts/mobile`. You need Node 24 and the repository up to date on `main`.
 
-1. **Deploy the API first.** Mobile builds from this branch send a `clientEntryId` with each fire, legionella, hot tub, PAT, incident and pool record, GreenTrack pre-use check and swim session, so a resend after a lost response doesn't create a duplicate. An older API ignores the field, which would bring the duplicates back. Merge this branch and let Render deploy before you build.
+1. **Deploy the API first.** Mobile builds from this branch send a `clientEntryId` with each fire, legionella, hot tub, PAT, incident, pool, premises, tree, room and pest record, GreenTrack pre-use check and swim session, so a resend after a lost response doesn't create a duplicate. An older API ignores the field, which would bring the duplicates back. Merge this branch and let Render deploy before you build.
 2. **Apple Developer Program**, £79 a year: <https://developer.apple.com/programs/enroll/>.
    - Enrol as the legal entity, ALPS Consulting Ltd (it trades as ALPS Consultancy; "ALPS Consultancy Ltd" is a different company), so the store shows the company as the seller. That needs a D-U-N-S number, which Apple can look up or request for free.
    - Enrolling as an individual shows your personal name instead.
@@ -116,6 +116,7 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > • DailyTrack: opening and closing checklists
 > • PATtrack: portable appliance tests
 > • GreenTrack: pre-use checks for grounds equipment
+> • PremisesTrack, TreeTrack, RoomTrack and PestTrack: premises inspections, tree inspections, room checks, pest activity and contractor visits
 > • IncidentTrack: accidents and incidents, with RIDDOR deadlines
 >
 > REPORT AND FIX ISSUES
@@ -126,7 +127,7 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > • Risk assessments, certificates and training records for your sites
 >
 > WORKS ON PATCHY SIGNAL
-> Fire, water, hot tub, pool, PAT, incident, daily and kitchen temperature checks you record without a connection are saved on the device and sent automatically when you are back online, without creating duplicates.
+> Fire, water, hot tub, pool, PAT, incident, premises, tree, room, pest, daily and kitchen temperature checks you record without a connection are saved on the device and sent automatically when you are back online, without creating duplicates.
 >
 > SECURE BY DESIGN
 > Each business only sees its own data. Two-factor sign-in protects accounts, and viewer accounts are read-only.

@@ -160,6 +160,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/green"
+        options={{
+          title: 'GreenTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="account/delete"
         options={{
           title: 'Delete my account',
