@@ -16,13 +16,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  CalendarCancellationHistory,
+  calendarCancellationHistoryKey,
+} from "@/components/calendar-cancellation-history";
 import { 
   CheckCircle2, Search, Building, MapPin, RefreshCw,
   ChevronDown, ChevronRight, Loader2, Pencil, Send, CalendarX2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { format, isToday } from "date-fns";
 import {
+  ApprovalAlreadyHandledError,
   approveContractorEmail,
   dismissContractorEmail,
 } from "@/lib/contractor-approval-actions";
@@ -48,6 +54,16 @@ interface EmailQueueItem {
   contractorName: string | null;
   jobTitle: string | null;
   quote?: any;
+  lastSendFailed?: boolean;
+}
+
+// An open page re-reads the queue this often (and when the tab regains focus),
+// so requests another manager reviewed drop out without a manual refresh.
+// One small request a minute per open tab; no extra infrastructure.
+const BACKGROUND_REFRESH_MS = 60_000;
+
+function formatRefreshTime(date: Date): string {
+  return isToday(date) ? format(date, "HH:mm:ss") : format(date, "dd MMM yyyy, HH:mm");
 }
 
 type PendingCancellationConfirmation =
@@ -61,20 +77,37 @@ type PendingCancellationConfirmation =
       item: EmailQueueItem;
     };
 
+interface UnsentDraft {
+  jobTitle: string;
+  subject: string;
+  text: string;
+}
+
 export default function ContractorApprovalsPage() {
   const [items, setItems] = useState<EmailQueueItem[]>([]);
   const { activeClientId, user } = useAuth();
   const clientApiFetch = useActiveClientApi();
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(true);
+  loadingRef.current = loading;
   const [loadError, setLoadError] = useState<string | null>(null);
+  // When the list on screen was last loaded successfully (foreground or background).
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [search, setSearch] = useState("");
+  // "New" shows only requests the latest refreshes found that are not yet reviewed.
+  const [showOnlyNew, setShowOnlyNew] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set());
   
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editSubject, setEditSubject] = useState("");
   const [editText, setEditText] = useState("");
   const [submittingId, setSubmittingId] = useState<number | null>(null);
+  // A manager's edited draft for a request someone else handled first. Kept
+  // on screen (read-only, never sent or saved) so their wording isn't lost.
+  const [unsentDraft, setUnsentDraft] = useState<UnsentDraft | null>(null);
+  const unsentDraftHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const [pendingCancellationConfirmation, setPendingCancellationConfirmation] =
     useState<PendingCancellationConfirmation | null>(null);
   const [newRequestIds, setNewRequestIds] = useState<number[]>([]);
@@ -83,6 +116,16 @@ export default function ContractorApprovalsPage() {
   const fetchGenerationRef = useRef(0);
   const knownQueueIdsRef = useRef<Set<number> | null>(null);
   const refreshStorageKeyRef = useRef<string | null>(null);
+  // The control that opened the cancellation dialog. The dialog has no Radix
+  // trigger, so focus is returned here by hand when it closes.
+  const cancellationTriggerRef = useRef<HTMLElement | null>(null);
+  // While a manager is editing a draft, confirming a cancellation or waiting on
+  // a send, background refreshes leave the list alone so nothing they are
+  // working on is replaced or removed underneath them.
+  const reviewInProgressRef = useRef(false);
+  const knownSitesRef = useRef<Set<string>>(new Set());
+  reviewInProgressRef.current =
+    editingId !== null || pendingCancellationConfirmation !== null || submittingId !== null;
   const approvalRefreshStorageKey = getApprovalRefreshStorageKey(
     user?.id ?? null,
     activeClientId,
@@ -102,6 +145,11 @@ export default function ContractorApprovalsPage() {
     );
     refreshStorageKeyRef.current = approvalRefreshStorageKey;
     setItems([]);
+    setLastRefreshedAt(null);
+    setShowOnlyNew(false);
+    setUnsentDraft(null);
+    knownSitesRef.current = new Set();
+    setExpandedSites(new Set());
     newRequestIdsRef.current = persistedState?.newRequestIds ?? [];
     setNewRequestIds(newRequestIdsRef.current);
     knownQueueIdsRef.current = persistedState
@@ -121,15 +169,47 @@ export default function ContractorApprovalsPage() {
     });
   }, [approvalRefreshStorageKey]);
 
-  async function fetchItems() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || reviewInProgressRef.current) return;
+      void loadQueue(true);
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    const timer = window.setInterval(refresh, BACKGROUND_REFRESH_MS);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [activeClientId, approvalRefreshStorageKey]);
+
+  function fetchItems() {
+    return loadQueue(false);
+  }
+
+  /** A background load keeps the current list and shows no loading or error
+   *  state, and is discarded if a review started while it was in flight. */
+  async function loadQueue(background: boolean) {
+    if (background && loadingRef.current) return;
     const fetchGeneration = ++fetchGenerationRef.current;
-    setLoadError(null);
-    setLoading(true);
+    if (!background) {
+      setLoadError(null);
+      setLoading(true);
+    }
     try {
       const res = await clientApiFetch("/fix-track/contractor-email-queue?status=pending");
       if (res.ok) {
         const nextItems = await res.json();
-        if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+        if (
+          mountedRef.current &&
+          fetchGeneration === fetchGenerationRef.current &&
+          !(background && reviewInProgressRef.current)
+        ) {
           const nextQueueIds = new Set<number>(
             nextItems.map((item: EmailQueueItem) => item.id),
           );
@@ -154,13 +234,14 @@ export default function ContractorApprovalsPage() {
             nextNewRequestIds,
           );
           setItems(nextItems);
+          setLastRefreshedAt(new Date());
           setLoadError(null);
         }
-      } else if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+      } else if (!background && mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
         setLoadError("We couldn't load pending contractor emails. Please try again.");
       }
     } catch (e) {
-      if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+      if (!background && mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
         setLoadError("We couldn't load pending contractor emails. Please try again.");
         console.error(e);
       }
@@ -171,11 +252,15 @@ export default function ContractorApprovalsPage() {
     }
   }
 
+  // Opening a request marks it reviewed, so in the New view the request being
+  // edited, confirmed or sent stays listed until that action is finished.
+  const activeRequestId = editingId ?? pendingCancellationConfirmation?.item.id ?? submittingId;
   const grouped = useMemo(() => {
     const filtered = items.filter(item => 
+      (!showOnlyNew || newRequestIds.includes(item.id) || item.id === activeRequestId) && (
       (item.contractorName?.toLowerCase().includes(search.toLowerCase()) || '') ||
       (item.jobTitle?.toLowerCase().includes(search.toLowerCase()) || '') ||
-      (item.siteName?.toLowerCase().includes(search.toLowerCase()) || '')
+      (item.siteName?.toLowerCase().includes(search.toLowerCase()) || ''))
     );
 
     const map = new Map<string, EmailQueueItem[]>();
@@ -185,12 +270,15 @@ export default function ContractorApprovalsPage() {
       map.get(site)!.push(item);
     }
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [items, search]);
+  }, [items, search, showOnlyNew, newRequestIds, activeRequestId]);
 
+  // A site opens expanded the first time it appears; refreshes keep whatever
+  // the manager has collapsed or expanded since.
   useEffect(() => {
-    if (grouped.length > 0 && expandedSites.size === 0) {
-      setExpandedSites(new Set(grouped.map(g => g[0])));
-    }
+    const appeared = grouped.map(g => g[0]).filter(site => !knownSitesRef.current.has(site));
+    if (appeared.length === 0) return;
+    appeared.forEach(site => knownSitesRef.current.add(site));
+    setExpandedSites(prev => new Set([...prev, ...appeared]));
   }, [grouped]);
 
   function toggleSite(site: string) {
@@ -223,10 +311,15 @@ export default function ContractorApprovalsPage() {
     );
   }
 
-  function handleApprove(item: EmailQueueItem, modifiedPreview?: { subject: string; text: string }) {
+  function handleApprove(
+    item: EmailQueueItem,
+    modifiedPreview?: { subject: string; text: string },
+    trigger?: HTMLElement,
+  ) {
     markRequestReviewed(item.id);
     if (item.emailType === "cancellation") {
       setPendingCancellationConfirmation({ action: "approve", item, modifiedPreview });
+      cancellationTriggerRef.current = trigger ?? null;
       return;
     }
     void submitApproval(item, modifiedPreview);
@@ -256,19 +349,26 @@ export default function ContractorApprovalsPage() {
       setItems(prev => prev.filter(i => i.id !== item.id));
       return true;
     } catch (e: any) {
+      if (e instanceof ApprovalAlreadyHandledError) {
+        if (mountedRef.current) handleAlreadyHandled(item, e, modifiedPreview);
+        return false;
+      }
       if (mountedRef.current) {
         toast({ title: "Error", description: e.message, variant: "destructive" });
       }
       return false;
     } finally {
       if (mountedRef.current) setSubmittingId(null);
+      // A sent or failed cancellation changes the cancellation history.
+      if (isCancellation) void queryClient.invalidateQueries({ queryKey: calendarCancellationHistoryKey });
     }
   }
 
-  function handleCancel(item: EmailQueueItem) {
+  function handleCancel(item: EmailQueueItem, trigger?: HTMLElement) {
     markRequestReviewed(item.id);
     if (item.emailType === "cancellation") {
       setPendingCancellationConfirmation({ action: "dismiss", item });
+      cancellationTriggerRef.current = trigger ?? null;
       return;
     }
     void submitDismissal(item);
@@ -291,6 +391,10 @@ export default function ContractorApprovalsPage() {
       setItems(prev => prev.filter(i => i.id !== item.id));
       return true;
     } catch (e: any) {
+      if (e instanceof ApprovalAlreadyHandledError) {
+        if (mountedRef.current) handleAlreadyHandled(item, e);
+        return false;
+      }
       if (mountedRef.current) {
         toast({ title: "Error", description: e.message, variant: "destructive" });
       }
@@ -299,6 +403,47 @@ export default function ContractorApprovalsPage() {
       if (mountedRef.current) setSubmittingId(null);
     }
   }
+
+  /** The server says the request is no longer pending: someone else approved,
+   *  sent or dismissed it first. Say so, drop the row and reload the list from
+   *  the server, and keep any edits the manager made available to copy. */
+  function handleAlreadyHandled(
+    item: EmailQueueItem,
+    error: ApprovalAlreadyHandledError,
+    modifiedPreview?: { subject: string; text: string },
+  ) {
+    const original = item.emailPreviewJson || {};
+    const edited =
+      modifiedPreview &&
+      (modifiedPreview.subject !== (original.subject || "") || modifiedPreview.text !== (original.text || ""));
+    toast({
+      title: "Already handled",
+      description: `${error.message} Another manager or tab approved or dismissed it first. The list has been refreshed.`,
+    });
+    setEditingId(current => (current === item.id ? null : current));
+    setPendingCancellationConfirmation(current => (current?.item.id === item.id ? null : current));
+    setItems(prev => prev.filter(i => i.id !== item.id));
+    setUnsentDraft(
+      edited
+        ? { jobTitle: item.jobTitle || "this request", subject: modifiedPreview.subject, text: modifiedPreview.text }
+        : null,
+    );
+    void loadQueue(false);
+  }
+
+  async function copyUnsentDraft() {
+    if (!unsentDraft) return;
+    try {
+      await navigator.clipboard.writeText(`${unsentDraft.subject}\n\n${unsentDraft.text}`);
+      toast({ title: "Draft copied" });
+    } catch {
+      toast({ title: "Couldn't copy the draft", description: "Select the text and copy it instead." });
+    }
+  }
+
+  useEffect(() => {
+    if (unsentDraft) unsentDraftHeadingRef.current?.focus();
+  }, [unsentDraft]);
 
   function confirmCancellation(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -333,6 +478,12 @@ export default function ContractorApprovalsPage() {
             <p className="text-muted-foreground text-sm mt-1">
               Review and approve outbound emails before they are sent to contractors.
             </p>
+            {lastRefreshedAt && (
+              <p className="text-xs text-muted-foreground mt-1" data-testid="approvals-last-updated">
+                Last updated{" "}
+                <time dateTime={lastRefreshedAt.toISOString()}>{formatRefreshTime(lastRefreshedAt)}</time>
+              </p>
+            )}
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <Button
@@ -388,12 +539,19 @@ export default function ContractorApprovalsPage() {
                 </Button>
               </div>
             )}
-            {loadError && (
+            {/* With nothing loaded yet, the error state below speaks for itself. */}
+            {loadError && items.length > 0 && (
               <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium text-amber-950">Approvals may be out of date</p>
                   <p className="text-xs text-amber-900/80">
                     {loadError} Showing the last successful approval list below.
+                    {lastRefreshedAt && (
+                      <>
+                        {" "}It was last updated at{" "}
+                        <time dateTime={lastRefreshedAt.toISOString()}>{formatRefreshTime(lastRefreshedAt)}</time>.
+                      </>
+                    )}
                   </p>
                 </div>
                 <Button variant="outline" size="sm" onClick={fetchItems} className="shrink-0">
@@ -401,10 +559,65 @@ export default function ContractorApprovalsPage() {
                 </Button>
               </div>
             )}
+            {unsentDraft && (
+              <section
+                aria-labelledby="unsent-draft-heading"
+                className="mb-4 space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4"
+              >
+                <div>
+                  <h2
+                    id="unsent-draft-heading"
+                    ref={unsentDraftHeadingRef}
+                    tabIndex={-1}
+                    className="text-sm font-medium text-amber-950 outline-none"
+                  >
+                    Your edits were not sent
+                  </h2>
+                  <p className="text-xs text-amber-900/80">
+                    {unsentDraft.jobTitle} was already approved or dismissed by another manager or in another tab,
+                    so your edited draft was not sent or saved. Copy anything you need, then close it.
+                  </p>
+                </div>
+                <div>
+                  <label htmlFor="unsent-draft-subject" className="text-xs font-medium text-amber-950 mb-1 block">Subject</label>
+                  <Input id="unsent-draft-subject" readOnly value={unsentDraft.subject} className="h-8 bg-background font-mono text-sm" />
+                </div>
+                <div>
+                  <label htmlFor="unsent-draft-body" className="text-xs font-medium text-amber-950 mb-1 block">Body</label>
+                  <Textarea id="unsent-draft-body" readOnly value={unsentDraft.text} className="min-h-[120px] bg-background font-mono text-sm" />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setUnsentDraft(null)}>Close</Button>
+                  <Button variant="outline" size="sm" onClick={() => void copyUnsentDraft()}>Copy draft</Button>
+                </div>
+              </section>
+            )}
             {loading && items.length > 0 && (
               <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Refreshing approvals…
+              </div>
+            )}
+            {items.length > 0 && (
+              <div role="group" aria-label="Which approvals to show" className="mb-4 inline-flex rounded-md border bg-background p-0.5">
+                <Button
+                  variant={showOnlyNew ? "ghost" : "secondary"}
+                  size="sm"
+                  className="h-8"
+                  aria-pressed={!showOnlyNew}
+                  onClick={() => setShowOnlyNew(false)}
+                >
+                  All pending ({items.length})
+                </Button>
+                <Button
+                  variant={showOnlyNew ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8"
+                  aria-pressed={showOnlyNew}
+                  onClick={() => setShowOnlyNew(true)}
+                >
+                  New ({newRequestIds.length})
+                </Button>
               </div>
             )}
             {items.length === 0 ? (
@@ -423,6 +636,16 @@ export default function ContractorApprovalsPage() {
                   <p className="text-xs mt-1">All contractor emails have been reviewed.</p>
                 </div>
               )
+            ) : showOnlyNew && grouped.length === 0 ? (
+              <div className="text-center py-12 bg-card border rounded-lg text-muted-foreground">
+                <p className="text-sm font-medium text-foreground">
+                  {search ? "No new approval requests match your search" : "No new approval requests"}
+                </p>
+                <p className="text-xs mt-1">Requests found by a refresh appear here until they are reviewed.</p>
+                <Button variant="outline" size="sm" className="mt-4" onClick={() => setShowOnlyNew(false)}>
+                  Show all pending
+                </Button>
+              </div>
             ) : (
               <div className="space-y-4">
                 {grouped.map(([site, siteItems]) => (
@@ -487,6 +710,21 @@ export default function ContractorApprovalsPage() {
                                         New
                                       </span>
                                     )}
+                                    {isNewRequest && (
+                                      <button
+                                        type="button"
+                                        className="text-[11px] text-blue-800 underline underline-offset-2 hover:text-blue-950"
+                                        aria-label={`Mark ${item.jobTitle || "this request"} as reviewed`}
+                                        onClick={() => markRequestReviewed(item.id)}
+                                      >
+                                        Mark reviewed
+                                      </button>
+                                    )}
+                                    {item.lastSendFailed && (
+                                      <span className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700">
+                                        Last send failed
+                                      </span>
+                                    )}
                                     <span className="text-xs text-muted-foreground">
                                       {format(new Date(item.createdAt), "dd MMM, HH:mm")}
                                     </span>
@@ -507,7 +745,7 @@ export default function ContractorApprovalsPage() {
                                   <div className="flex items-center gap-2 shrink-0">
                                     <Button
                                       variant="outline" size="sm"
-                                       onClick={() => handleCancel(item)}
+                                       onClick={event => handleCancel(item, event.currentTarget)}
                                       disabled={submittingId === item.id}
                                       className="h-8"
                                     >
@@ -523,7 +761,7 @@ export default function ContractorApprovalsPage() {
                                     </Button>
                                     <Button
                                       size="sm"
-                                       onClick={() => handleApprove(item)}
+                                       onClick={event => handleApprove(item, undefined, event.currentTarget)}
                                       disabled={submittingId === item.id}
                                        className={cn(
                                          "h-8 text-white",
@@ -580,7 +818,7 @@ export default function ContractorApprovalsPage() {
                                        <Button
                                          size="sm"
                                          className={isCancellation ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"}
-                                         onClick={() => handleApprove(item, { subject: editSubject, text: editText })}
+                                         onClick={event => handleApprove(item, { subject: editSubject, text: editText }, event.currentTarget)}
                                          disabled={submittingId === item.id}
                                        >
                                         {submittingId === item.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
@@ -617,6 +855,7 @@ export default function ContractorApprovalsPage() {
             )}
           </>
         )}
+        <CalendarCancellationHistory />
       </div>
       <AlertDialog
         open={pendingCancellationConfirmation !== null}
@@ -627,7 +866,23 @@ export default function ContractorApprovalsPage() {
           if (!open && !isSubmittingCancellation) setPendingCancellationConfirmation(null);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          onCloseAutoFocus={event => {
+            // Back to the row's button if it is still there (the dialog was
+            // dismissed or the request failed); otherwise Radix's default.
+            const trigger = cancellationTriggerRef.current;
+            cancellationTriggerRef.current = null;
+            if (trigger?.isConnected) {
+              event.preventDefault();
+              trigger.focus();
+            } else if (unsentDraftHeadingRef.current) {
+              // The request was already handled and its row is gone; the
+              // manager's unsent edits are shown instead.
+              event.preventDefault();
+              unsentDraftHeadingRef.current.focus();
+            }
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>
               {pendingCancellationConfirmation?.action === "approve"

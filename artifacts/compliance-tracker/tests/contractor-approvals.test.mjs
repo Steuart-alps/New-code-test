@@ -91,6 +91,49 @@ assert.match(
   /<AlertDialogAction[\s\S]*disabled=\{/,
   "the dialog confirm action must be disabled while the request is pending",
 );
+for (const handler of ["submitApproval", "submitDismissal"]) {
+  const body = source.match(new RegExp(`async function ${handler}\\([\\s\\S]*?\\n  \\}\\n`))?.[0] ?? "";
+  assert.match(
+    body,
+    /return true;\s*\} catch \(e: any\) \{\s*if \(e instanceof ApprovalAlreadyHandledError\) \{\s*if \(mountedRef\.current\) handleAlreadyHandled\(item, e(?:, modifiedPreview)?\);\s*return false;\s*\}\s*if \(mountedRef\.current\) \{\s*toast\(\{ title: "Error", description: e\.message, variant: "destructive" \}\);\s*\}\s*return false;\s*\} finally \{\s*if \(mountedRef\.current\) setSubmittingId\(null\);/,
+    `${handler} must report an already-handled request, show the destructive error toast on other failures and always reset the submitting state`,
+  );
+  assert.ok(
+    body.indexOf("setItems(prev => prev.filter") > -1 &&
+      body.indexOf("setItems(prev => prev.filter") < body.indexOf("} catch"),
+    `${handler} must remove the row only after a successful response`,
+  );
+}
+assert.match(
+  source,
+  /window\.setInterval\(refresh, BACKGROUND_REFRESH_MS\);[\s\S]{0,300}return \(\) => \{\s*window\.clearInterval\(timer\);[\s\S]{0,250}\};\s*\}, \[activeClientId, approvalRefreshStorageKey\]\);/,
+  "the timed refresh (the only update path when storage and BroadcastChannel are blocked) must stop on unmount and restart when the business changes",
+);
+assert.match(
+  source,
+  /window\.setInterval\(refresh, BACKGROUND_REFRESH_MS\)[\s\S]*window\.addEventListener\("focus", refresh\)/,
+  "an open approvals page must refresh on a timer and when the tab regains focus",
+);
+assert.match(
+  source,
+  /reviewInProgressRef\.current =\s*editingId !== null \|\| pendingCancellationConfirmation !== null \|\| submittingId !== null;/,
+  "background refreshes must recognise an open editor, cancellation dialog or in-flight send",
+);
+assert.match(
+  source,
+  /if \(document\.visibilityState !== "visible" \|\| reviewInProgressRef\.current\) return;/,
+  "background refreshes must not start during a review or while the tab is hidden",
+);
+assert.match(
+  source,
+  /!\(background && reviewInProgressRef\.current\)/,
+  "a background refresh that returns after a review started must be discarded",
+);
+assert.match(
+  source,
+  /\} else if \(!background && mountedRef\.current/,
+  "a failed background refresh must keep the current list without an error state",
+);
 assert.match(
   source,
   /if \(success && mountedRef\.current\) setPendingCancellationConfirmation\(null\)/,
@@ -150,6 +193,16 @@ assert.match(
   source,
   /Showing the last successful approval list below\./,
   "refresh failures must explain that the last successful list remains visible",
+);
+assert.match(
+  source,
+  /setItems\(nextItems\);\s*setLastRefreshedAt\(new Date\(\)\);/,
+  "only a successful queue load may advance the last-updated time",
+);
+assert.match(
+  source,
+  /Showing the last successful approval list below\.[\s\S]{0,200}It was last updated at/,
+  "the stale-list warning must say when the shown list was last updated",
 );
 assert.match(
   source,
@@ -312,6 +365,7 @@ try {
     dismissContractorEmail,
     CANCELLATION_APPROVAL_CONFIRMATION,
     CANCELLATION_DISMISS_CONFIRMATION,
+    ApprovalAlreadyHandledError,
   } = await import(`${pathToFileURL(helperBundle).href}?t=${Date.now()}`);
 
   const requests = [];
@@ -388,6 +442,74 @@ try {
   assert.equal(quoteDismissed.confirmed, true);
   assert.equal(confirmations.at(-1), "Are you sure you want to cancel this email request?");
   assert.equal(requests.at(-1).requestPath, "/fix-track/contractor-email-queue/46/cancel");
+
+  // A failed server response rejects with the message the page shows in its
+  // destructive toast, after exactly one request, for every action kind.
+  const failingActions = {
+    confirm: () => true,
+    clientApiFetch: async (requestPath, init) => {
+      requests.push({ requestPath, init });
+      return { ok: false, status: 502 };
+    },
+  };
+  const failures = [
+    [() => approveContractorEmail({ id: 47, emailType: "assignment" }, failingActions),
+      "Failed to approve email", "/fix-track/contractor-email-queue/47/approve-and-send"],
+    [() => approveContractorEmail({ id: 48, emailType: "cancellation" }, failingActions),
+      "Failed to approve email", "/fix-track/contractor-email-queue/48/approve-and-send"],
+    [() => approveContractorEmail({ id: 49, emailType: "cancellation" }, failingActions,
+      { subject: "Calendar cancellation: Revised", text: "Revised." }),
+      "Failed to approve email", "/fix-track/contractor-email-queue/49/edit-and-send"],
+    [() => dismissContractorEmail({ id: 50, emailType: "assignment" }, failingActions),
+      "Failed to cancel email", "/fix-track/contractor-email-queue/50/cancel"],
+    [() => dismissContractorEmail({ id: 51, emailType: "cancellation" }, failingActions),
+      "Failed to cancel email", "/fix-track/contractor-email-queue/51/cancel"],
+  ];
+  for (const [run, message, requestPath] of failures) {
+    const requestCount = requests.length;
+    await assert.rejects(run, { message }, `${requestPath} must reject on a failed response`);
+    assert.equal(requests.length, requestCount + 1, `${requestPath} must be requested exactly once`);
+    assert.equal(requests.at(-1).requestPath, requestPath);
+  }
+
+  // A draft another manager or tab already handled is reported as such (once,
+  // never retried); other 409s keep the generic failure.
+  const respondWith = (status, body) => ({
+    confirm: () => true,
+    clientApiFetch: async (requestPath, init) => {
+      requests.push({ requestPath, init });
+      return { ok: false, status, json: async () => body };
+    },
+  });
+  const handled = respondWith(409, { code: "queue_entry_not_pending", error: "Queue entry is no longer pending" });
+  const staleCases = [
+    [() => approveContractorEmail({ id: 52, emailType: "cancellation" }, handled), "approve",
+      "This request was already handled, so nothing was sent."],
+    [() => approveContractorEmail({ id: 53, emailType: "assignment" }, handled,
+      { subject: "Edited", text: "Edited." }), "approve",
+      "This request was already handled, so nothing was sent."],
+    [() => dismissContractorEmail({ id: 54, emailType: "cancellation" }, handled), "dismiss",
+      "This request was already handled, so nothing was dismissed."],
+  ];
+  for (const [run, action, message] of staleCases) {
+    const requestCount = requests.length;
+    await assert.rejects(run, error => {
+      assert.ok(error instanceof ApprovalAlreadyHandledError);
+      assert.equal(error.action, action);
+      assert.equal(error.message, message);
+      return true;
+    });
+    assert.equal(requests.length, requestCount + 1, "a handled draft is requested exactly once");
+  }
+  await assert.rejects(
+    () => approveContractorEmail({ id: 55, emailType: "assignment" },
+      respondWith(409, { code: "draft_credentials_damaged", error: "Damaged" })),
+    error => !(error instanceof ApprovalAlreadyHandledError) && error.message === "Failed to approve email",
+  );
+  await assert.rejects(
+    () => dismissContractorEmail({ id: 56, emailType: "assignment" }, respondWith(404, { error: "Queue entry not found" })),
+    error => !(error instanceof ApprovalAlreadyHandledError) && error.message === "Failed to cancel email",
+  );
 } finally {
   await rm(tempDir, { recursive: true, force: true });
 }

@@ -3936,7 +3936,7 @@ async function migrateFixTrackV2() {
       CHECK ("event_type" IN (
         'status', 'note',
         'email_requested', 'email_approved', 'email_rejected',
-        'email_invalidated', 'email_sent'
+        'email_invalidated', 'email_sent', 'email_failed'
       ))
   `);
   await db.execute(sql`

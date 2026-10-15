@@ -19,6 +19,32 @@ export const CANCELLATION_APPROVAL_CONFIRMATION =
 export const CANCELLATION_DISMISS_CONFIRMATION =
   "Dismiss this calendar cancellation? Nothing will be sent and the existing calendar event will remain in place.";
 
+/** The API's code for an action on a draft that is no longer pending. */
+export const QUEUE_ENTRY_NOT_PENDING = "queue_entry_not_pending";
+
+/** Another manager or tab already approved, sent or dismissed the request, so
+ *  this action changed nothing. */
+export class ApprovalAlreadyHandledError extends Error {
+  constructor(readonly action: "approve" | "dismiss") {
+    super(
+      action === "approve"
+        ? "This request was already handled, so nothing was sent."
+        : "This request was already handled, so nothing was dismissed.",
+    );
+    this.name = "ApprovalAlreadyHandledError";
+  }
+}
+
+async function isAlreadyHandled(response: Response) {
+  if (response.status !== 409 || typeof response.json !== "function") return false;
+  try {
+    const body = await response.json();
+    return body?.code === QUEUE_ENTRY_NOT_PENDING;
+  } catch {
+    return false;
+  }
+}
+
 export async function approveContractorEmail(
   item: ContractorApprovalItem,
   actions: ContractorApprovalActions,
@@ -35,7 +61,10 @@ export async function approveContractorEmail(
     `/fix-track/contractor-email-queue/${item.id}/${endpoint}`,
     { method: "POST", body: JSON.stringify(payload) },
   );
-  if (!response.ok) throw new Error("Failed to approve email");
+  if (!response.ok) {
+    if (await isAlreadyHandled(response)) throw new ApprovalAlreadyHandledError("approve");
+    throw new Error("Failed to approve email");
+  }
   return { confirmed: true as const, response };
 }
 
@@ -53,6 +82,9 @@ export async function dismissContractorEmail(
     `/fix-track/contractor-email-queue/${item.id}/cancel`,
     { method: "POST" },
   );
-  if (!response.ok) throw new Error("Failed to cancel email");
+  if (!response.ok) {
+    if (await isAlreadyHandled(response)) throw new ApprovalAlreadyHandledError("dismiss");
+    throw new Error("Failed to cancel email");
+  }
   return { confirmed: true as const, response };
 }
