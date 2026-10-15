@@ -40,6 +40,7 @@ import {
   configuredUnits,
   deviceLocalCalendarDate,
   hydrateColdReadings,
+  reheatingTargetLabel,
   type ColdReading,
   type FoodSafetyColdConfig,
 } from './kitchen-temperature-form-logic';
@@ -95,6 +96,7 @@ interface FoodSafetyRecord {
   deliveries?: DeliveryReading[];
   hotHolding?: HotHoldingReading[];
   correctives?: string | null;
+  reheatingLimit?: string | null;
   submittedAt?: string | null;
 }
 
@@ -661,7 +663,11 @@ function KitchenTemperatureFields() {
         <CoreTemperatureCard
           title="Reheating"
           icon="rotate-cw"
-          target={`Target: ${temperatureAssessment.rules ? temperatureRangeLabel(temperatureAssessment.rules.reheating) : 'Review numeric rules'}`}
+          target={`Target: ${reheatingTargetLabel(
+            existingRecord?.reheatingLimit,
+            config?.food_reheating_limit,
+            temperatureAssessment.rules ? temperatureRangeLabel(temperatureAssessment.rules.reheating) : null,
+          )}`}
           value={reheating}
           onChange={(value) => { markDirty(); setReheating(value); }}
         />

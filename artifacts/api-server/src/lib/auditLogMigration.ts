@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 export const AUDITED_TABLES = [
   "fire_safety_checks", "legionella_checks", "food_safety_records",
   "fix_track_issues", "safe_risk_assessments", "train_track_records",
-  "doc_track_documents", "incidents",
+  "doc_track_documents", "incidents", "kitchen_closed_days",
 ] as const;
 
 /**

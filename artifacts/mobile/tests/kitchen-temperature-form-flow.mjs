@@ -17,6 +17,7 @@ const {
   hydrateColdReadings,
   invalidateKitchenDashboard,
   kitchenDiaryScope,
+  reheatingTargetLabel,
   saveKitchenTemperatureDiary,
 } = await import(`data:text/javascript,${encodeURIComponent(javascript)}`);
 
@@ -149,6 +150,20 @@ assert.match(formSource, /return kitchenOutbox\.enqueue\(/,
 assert.match(logicSource, /buildKitchenTemperatureWrite\(scope, recordId, body\)/);
 assert.match(logicSource, /await invalidateKitchenDashboard\(queryClient\)/);
 assert.match(formSource, /coldFood\.map\(\(reading, index\)/);
+// Reheating target: a new diary shows the scope's configured limit (Scotland
+// 82°C, England/Wales 75°C), which the server stamps when the app sends none;
+// an existing diary keeps the limit stamped on it.
+assert.equal(reheatingTargetLabel(undefined, 'Above 82°C', '≥ 82°C'), 'Above 82°C');
+assert.equal(reheatingTargetLabel(undefined, 'Above 75°C', '≥ 75°C'), 'Above 75°C');
+assert.equal(reheatingTargetLabel('Above 82°C', 'Above 75°C', '≥ 75°C'), 'Above 82°C',
+  'a diary stamped under Scotland keeps 82°C after the site moves to England/Wales');
+assert.equal(reheatingTargetLabel('', 'Above 75°C', '≥ 75°C'), 'Above 75°C');
+assert.equal(reheatingTargetLabel(null, null, '≥ 75°C'), '≥ 75°C');
+assert.equal(reheatingTargetLabel(null, undefined, null), 'Review numeric rules');
+assert.match(formSource, /reheatingTargetLabel\(\s*existingRecord\?\.reheatingLimit,\s*config\?\.food_reheating_limit,/,
+  'the reheating card shows the stamped limit, else the configured one');
+assert.doesNotMatch(formSource, /reheatingLimit\s*:/,
+  'the app never sends a reheating limit, so the server stamps the site\'s target');
 const kitchenRoute = await readFile(new URL('../app/checks/kitchen.tsx', import.meta.url), 'utf8');
 assert.match(kitchenRoute, /return <KitchenTemperatureForm \/>;/,
   'the direct KitchenTrack route uses the tested form');

@@ -1695,6 +1695,18 @@ export interface FoodSafetyMissingDatesResponse {
   missingDates: string[];
   /** Dates with a diary record that has not been submitted. */
   draftDates: string[];
+  /** Dates marked closed (non-operating) with no diary record. Not counted as missing. */
+  nonOperatingDates?: string[];
+}
+
+export interface KitchenClosedDay {
+  id: number;
+  date: string;
+  reason: string;
+  createdAt: string;
+  createdByName: string | null;
+  /** The closure was recorded after the day itself. */
+  addedAfterDay: boolean;
 }
 
 export interface FoodSafetyMonthlySummaryDay {
@@ -1703,6 +1715,31 @@ export interface FoodSafetyMonthlySummaryDay {
   hasRecord: boolean;
   /** Whether the diary record has been submitted. */
   submitted: boolean;
+  /** The diary scope was marked closed and has no record for this date, so it is not a missing day. */
+  nonOperating: boolean;
+  closure: KitchenClosedDay | null;
+}
+
+export interface KitchenClosedDaysList {
+  from: string;
+  to: string;
+  siteId: number | null;
+  closedDays: KitchenClosedDay[];
+}
+
+export interface KitchenClosedDaysInput {
+  from: string;
+  to: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  reason: string;
+}
+
+export interface KitchenClosedDaysCreated {
+  siteId: number | null;
+  created: string[];
 }
 
 export interface FoodSafetyMonthlySummary {
@@ -2214,6 +2251,22 @@ siteId?: number;
 export type GetFoodSafetyMissingDatesParams = {
 from: string;
 to: string;
+/**
+ * Scope to a site's diary. Omit for the whole-organisation diary.
+ */
+siteId?: number;
+};
+
+export type ListKitchenClosedDaysParams = {
+from: string;
+to: string;
+/**
+ * Scope to a site's diary. Omit for the whole-organisation diary.
+ */
+siteId?: number;
+};
+
+export type CreateKitchenClosedDaysParams = {
 /**
  * Scope to a site's diary. Omit for the whole-organisation diary.
  */

@@ -3465,7 +3465,16 @@ export const GetFoodSafetySummaryResponse = zod.object({
   "days": zod.array(zod.object({
   "date": zod.date(),
   "hasRecord": zod.boolean().describe('Whether a diary record exists for this date.'),
-  "submitted": zod.boolean().describe('Whether the diary record has been submitted.')
+  "submitted": zod.boolean().describe('Whether the diary record has been submitted.'),
+  "nonOperating": zod.boolean().describe('The diary scope was marked closed and has no record for this date, so it is not a missing day.'),
+  "closure": zod.object({
+  "id": zod.number(),
+  "date": zod.date(),
+  "reason": zod.string(),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "addedAfterDay": zod.boolean().describe('The closure was recorded after the day itself.')
+}).nullable()
 }))
 })
 
@@ -3484,7 +3493,67 @@ export const GetFoodSafetyMissingDatesResponse = zod.object({
   "to": zod.date(),
   "siteId": zod.number().nullable(),
   "missingDates": zod.array(zod.date()).describe('Dates with no food safety diary record.'),
-  "draftDates": zod.array(zod.date()).describe('Dates with a diary record that has not been submitted.')
+  "draftDates": zod.array(zod.date()).describe('Dates with a diary record that has not been submitted.'),
+  "nonOperatingDates": zod.array(zod.date()).optional().describe('Dates marked closed (non-operating) with no diary record. Not counted as missing.')
+})
+
+
+/**
+ * @summary List days marked closed (non-operating) for a diary scope
+ */
+export const ListKitchenClosedDaysQueryParams = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const ListKitchenClosedDaysResponse = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "siteId": zod.number().nullable(),
+  "closedDays": zod.array(zod.object({
+  "id": zod.number(),
+  "date": zod.date(),
+  "reason": zod.string(),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "addedAfterDay": zod.boolean().describe('The closure was recorded after the day itself.')
+}))
+})
+
+
+/**
+ * @summary Mark a range of days closed (non-operating) for a diary scope (admins)
+ */
+export const CreateKitchenClosedDaysQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const createKitchenClosedDaysBodyReasonMax = 200;
+
+
+
+export const CreateKitchenClosedDaysBody = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "reason": zod.string().min(1).max(createKitchenClosedDaysBodyReasonMax)
+})
+
+export const CreateKitchenClosedDaysResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "created": zod.array(zod.date())
+})
+
+
+/**
+ * @summary Remove a closure (admins); it stays in the history
+ */
+export const RemoveKitchenClosedDayParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RemoveKitchenClosedDayResponse = zod.object({
+  "ok": zod.boolean()
 })
 
 
