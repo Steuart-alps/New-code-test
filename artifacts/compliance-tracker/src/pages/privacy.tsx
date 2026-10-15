@@ -2,7 +2,7 @@ import { LegalLayout } from "./legal-layout";
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="17 July 2026">
+    <LegalLayout title="Privacy Policy" updated="15 October 2026">
       <section>
         <h2>1. Who we are</h2>
         <p>
@@ -16,6 +16,9 @@ export default function PrivacyPage() {
         <ul>
           <li><strong>Account details</strong> — your name, email address, business name, and password (stored securely hashed, never in plain text).</li>
           <li><strong>Your compliance data</strong> — sites, compliance items, documents, contractor details, and other records you choose to enter.</li>
+          <li><strong>Photos</strong> — photos you or your team attach as evidence to checks, issues and other records, from the camera or the photo library.</li>
+          <li><strong>Incident reports</strong> — details of people involved in accidents and incidents, which can include health information such as injuries sustained and first aid given. Only users your business allows can see these health details.</li>
+          <li><strong>Phone notification tokens</strong> — if you allow notifications in the ComplyTrack mobile app, a token identifying your device for push notifications, stored against your account and deleted when you sign out.</li>
           <li><strong>Billing information</strong> — handled by our payment provider, Stripe. We never see or store your full card details.</li>
           <li><strong>Usage information</strong> — basic technical logs (such as IP address and login times) used for security and troubleshooting.</li>
         </ul>
@@ -25,6 +28,7 @@ export default function PrivacyPage() {
         <ul>
           <li>To provide and operate the service (legal basis: performance of a contract).</li>
           <li>To send service emails such as password resets, trial reminders, and compliance-deadline notifications (performance of a contract).</li>
+          <li>To send notifications to your phone, such as tasks due and reminders, if you allow them in the mobile app (performance of a contract).</li>
           <li>To process subscription payments through Stripe (performance of a contract).</li>
           <li>To secure the service and prevent abuse (legitimate interests).</li>
         </ul>
@@ -36,6 +40,8 @@ export default function PrivacyPage() {
         <ul>
           <li><strong>Stripe</strong> — payment processing and subscription billing.</li>
           <li><strong>Hosting and email providers</strong> — to run the application, store data, and deliver service emails.</li>
+          <li><strong>Google Cloud Storage</strong> — to store photos and files attached to records.</li>
+          <li><strong>Expo, Apple and Google</strong> — to deliver push notifications to the mobile app. They receive the device token and the notification text, not your records.</li>
         </ul>
         <p>
           These providers act under contract and may process data outside the UK/EEA; where they do, appropriate
@@ -78,7 +84,22 @@ export default function PrivacyPage() {
         </p>
       </section>
       <section>
-        <h2>9. Changes and contact</h2>
+        <h2>9. The ComplyTrack mobile app</h2>
+        <p>
+          The mobile app signs in to the same account as the website and does not create accounts. It does not collect
+          your location, contacts or microphone, and contains no advertising, third-party analytics or tracking.
+        </p>
+        <ul>
+          <li>The app asks for camera and photo library access only so you can attach evidence photos.</li>
+          <li>Your sign-in is kept in the device's secure storage. Checks recorded without a connection are kept on the device until they are sent, and are only sent for the account that recorded them.</li>
+          <li>
+            Business owners can request deletion of their business's data in the app (Profile &gt; Delete my account) or in
+            Settings on the website. Staff accounts are removed by their manager; you can also contact us to request deletion.
+          </li>
+        </ul>
+      </section>
+      <section>
+        <h2>10. Changes and contact</h2>
         <p>
           We may update this policy from time to time; material changes will be notified in the app or by email. For
           privacy questions or to exercise your rights, contact ALPS Consulting Ltd via{" "}

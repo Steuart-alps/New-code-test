@@ -3308,6 +3308,20 @@ async function migrateDocDepartment() {
   `);
 }
 
+// Mobile replay keys (lib/clientEntryReplay.ts) for a runtime-only table: a
+// stable device entry ID plus a payload fingerprint, unique per client when
+// present, so a phone resending after a lost response gets the stored row
+// back instead of creating a duplicate. Web submissions leave both null.
+async function addClientEntryReplayColumns(table: string) {
+  await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_id" text`));
+  await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_hash" text`));
+  await db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_${table}_client_entry_id"
+    ON "${table}" ("client_id", "client_entry_id")
+    WHERE "client_entry_id" IS NOT NULL
+  `));
+}
+
 // ---- Pool Track ----
 async function migratePoolTrack() {
   await db.execute(sql`
@@ -3339,6 +3353,7 @@ async function migratePoolTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_pool_checks_client_date"
     ON "pool_checks" ("client_id", "check_date")
   `);
+  await addClientEntryReplayColumns("pool_checks");
 }
 
 // ---- Green Track ----
@@ -3403,6 +3418,10 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_pre_use_client_date"
     ON "green_pre_use_checks" ("client_id", "check_date")
   `);
+  // Who submitted the check (the operator may be someone else); needed to
+  // recognise a phone's own resend.
+  await db.execute(sql`ALTER TABLE "green_pre_use_checks" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+  await addClientEntryReplayColumns("green_pre_use_checks");
 
   // Scheduled service records
   await db.execute(sql`
@@ -3530,6 +3549,7 @@ async function migrateSwimTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_swim_sessions_client_date"
     ON "swim_sessions" ("client_id", "session_date")
   `);
+  await addClientEntryReplayColumns("swim_sessions");
 
   // Periodic lifeguard surveillance checks (every 15-20 min during session)
   await db.execute(sql`
