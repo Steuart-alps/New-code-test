@@ -7,6 +7,7 @@
 import { sql } from "drizzle-orm";
 import { ObjectStorageService } from "./objectStorage";
 import { listTenantAttachmentObjectPaths } from "./attachmentReferences";
+import { listRetainedRiddorReceiptPaths } from "./riddorReceipts";
 import { countClientStoredObjects, type ClientStorageEraser } from "./offboarding";
 
 /**
@@ -14,6 +15,8 @@ import { countClientStoredObjects, type ClientStorageEraser } from "./offboardin
  * references, filtered by the ACL owner) and deletes each one. Throws — so the
  * caller's deletion transaction rolls back and retries tomorrow — when storage
  * is unconfigured while the tenant still has stored files, or any delete fails.
+ * HSE receipts bound to RIDDOR submission events are kept with those retained
+ * events.
  */
 export const eraseClientStorageObjects: ClientStorageEraser = async (clientId, executor) => {
   const storage = new ObjectStorageService();
@@ -30,7 +33,9 @@ export const eraseClientStorageObjects: ClientStorageEraser = async (clientId, e
     ...await listTenantAttachmentObjectPaths(executor, clientId),
     ...(ledger.rows as Array<{ object_path: string }>).map((row) => row.object_path),
   ];
-  const owned = await storage.listTenantStorageObjects(clientId, [...new Set(referenced)]);
+  const retained = new Set(await listRetainedRiddorReceiptPaths(executor, clientId));
+  const owned = (await storage.listTenantStorageObjects(clientId, [...new Set(referenced)]))
+    .filter((object) => !retained.has(object.objectPath));
   for (const object of owned) {
     await storage.deleteTenantObject(object.objectPath, clientId);
   }
