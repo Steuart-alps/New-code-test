@@ -747,3 +747,59 @@ test("dismissing a calendar cancellation keeps the event and calls the cancel en
   `)).rows;
   assert.equal(issue.email_request_status, "rejected");
 });
+
+test("managers see sent and failed calendar cancellations on the approvals page and the contractor's page", async () => {
+  const cancellation = await queuedCalendarCancellation("history", isoDay(32));
+  const [{ contractor_id: contractorId }] = (await db.execute(sql`
+    SELECT contractor_id FROM contractor_email_queue WHERE id=${cancellation.queueId}
+  `)).rows;
+  await clearOutbox();
+  const page = fixtures.managerPage;
+  const historyEntry = () => page.getByRole("region", { name: "Calendar cancellations" })
+    .getByRole("listitem").filter({ hasText: cancellation.title });
+  await withDiagnostics(page, "calendar cancellation history", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const card = queueCard(page, cancellation.title);
+    await card.getByText("Calendar Cancellation", { exact: true }).waitFor();
+    assert.equal(await historyEntry().count(), 0, "a cancellation awaiting first approval is not history yet");
+
+    // The provider boundary fails: the outbox path becomes a directory.
+    await rm(outboxPath, { force: true });
+    await mkdir(outboxPath);
+    try {
+      await card.getByRole("button", { name: "Approve Cancellation" }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: "Approve Cancellation" }).click();
+      await page.getByText("Failed to approve email").first().waitFor();
+    } finally {
+      await rm(outboxPath, { recursive: true, force: true });
+      await writeFile(outboxPath, "");
+    }
+    await page.getByRole("button", { name: "Keep reviewing" }).click();
+    const failed = historyEntry();
+    await failed.getByText("Send failed").waitFor();
+    assert.match(await failed.innerText(), /Not sent, awaiting a retry/);
+    assert.equal(await failed.getByText("Sent", { exact: true }).count(), 0, "a failed send is not shown as sent");
+
+    await page.reload();
+    await card.getByText("Last send failed").waitFor();
+    await card.getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.getByText("Calendar cancellation approved and sent").first().waitFor();
+    await card.waitFor({ state: "detached" });
+    const sent = historyEntry();
+    await sent.getByText("Sent", { exact: true }).waitFor();
+    const sentText = await sent.innerText();
+    assert.match(sentText, /by Approval fixture user/, "the record names the manager who sent it");
+    assert.match(sentText, /After 1 failed attempt/);
+    assert.match(sentText, new RegExp(`inbox-history-${suffix}@test\\.local`), "the record names the contractor's address");
+    assert.equal(await sent.getByText("Send failed").count(), 0);
+
+    await page.goto(`${appOrigin}/contractors/${contractorId}`);
+    const onContractor = historyEntry();
+    await onContractor.getByText("Sent", { exact: true }).waitFor();
+    assert.match(await onContractor.innerText(), /by Approval fixture user/);
+  });
+  const row = await queueRow(cancellation.queueId);
+  assert.equal(row.status, "sent");
+  assert.equal((await readOutbox()).length, 1, "the retry sends the cancellation once");
+});

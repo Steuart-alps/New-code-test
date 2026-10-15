@@ -16,6 +16,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  CalendarCancellationHistory,
+  calendarCancellationHistoryKey,
+} from "@/components/calendar-cancellation-history";
 import { 
   CheckCircle2, Search, Building, MapPin, RefreshCw,
   ChevronDown, ChevronRight, Loader2, Pencil, Send, CalendarX2
@@ -48,6 +53,7 @@ interface EmailQueueItem {
   contractorName: string | null;
   jobTitle: string | null;
   quote?: any;
+  lastSendFailed?: boolean;
 }
 
 type PendingCancellationConfirmation =
@@ -69,6 +75,7 @@ export default function ContractorApprovalsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set());
   
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -270,6 +277,8 @@ export default function ContractorApprovalsPage() {
       return false;
     } finally {
       if (mountedRef.current) setSubmittingId(null);
+      // A sent or failed cancellation changes the cancellation history.
+      if (isCancellation) void queryClient.invalidateQueries({ queryKey: calendarCancellationHistoryKey });
     }
   }
 
@@ -496,6 +505,11 @@ export default function ContractorApprovalsPage() {
                                         New
                                       </span>
                                     )}
+                                    {item.lastSendFailed && (
+                                      <span className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700">
+                                        Last send failed
+                                      </span>
+                                    )}
                                     <span className="text-xs text-muted-foreground">
                                       {format(new Date(item.createdAt), "dd MMM, HH:mm")}
                                     </span>
@@ -626,6 +640,7 @@ export default function ContractorApprovalsPage() {
             )}
           </>
         )}
+        <CalendarCancellationHistory />
       </div>
       <AlertDialog
         open={pendingCancellationConfirmation !== null}
