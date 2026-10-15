@@ -2,7 +2,7 @@ name: CI
 
 # The required gate for every change: typecheck, both production builds, the
 # core API suites (tenant isolation, module routes, department isolation,
-# enforced CSRF) against a disposable Postgres, and the production schema-shape
+# stored-date locks and site moves, viewer read-only, enforced CSRF) against a disposable Postgres, and the production schema-shape
 # checks (schema parity, dashboard accuracy on a drizzle-kit push base). The browser workflows next to
 # this file stay path-filtered; this one runs on every pull request.
 on:
@@ -94,6 +94,14 @@ jobs:
 
       - name: Department isolation tests
         run: pnpm --filter @workspace/api-server run test:dept-isolation:ci
+
+      # Record locks, department non-disclosure and site moves (the checks that
+      # tests/site-move-route-inventory.mjs requires for every site-move route).
+      - name: Stored-date lock and site-move tests
+        run: pnpm --filter @workspace/api-server run test:stored-track-lock
+
+      - name: Viewer read-only tests
+        run: pnpm --filter @workspace/api-server run test:viewer-read-only
 
       - name: Enforced CSRF tests
         run: pnpm --filter @workspace/api-server run test:csrf-enforced:ci
