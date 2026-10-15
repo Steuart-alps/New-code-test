@@ -281,39 +281,52 @@ function renderManagerRow(doc: OutstandingDocSummary): string {
     </td></tr>`;
 }
 
-function managerEmailHtml(
-  visibleDocs: OutstandingDocSummary[],
-  allDocs: OutstandingDocSummary[],
-  appUrl: string,
-): string {
-  const totalOutstanding = allDocs.reduce((sum, doc) => sum + doc.outstandingCount, 0);
-  const hiddenDocs = allDocs.length - visibleDocs.length;
-  const hiddenOutstanding = allDocs
-    .slice(visibleDocs.length)
-    .reduce((sum, doc) => sum + doc.outstandingCount, 0);
-  const overflowNotice = hiddenDocs > 0
-    ? `<p style="font-size:12px;color:#b45309;">Additional documents not shown here: ${hiddenDocs} document${hiddenDocs === 1 ? "" : "s"} with ${hiddenOutstanding} outstanding acknowledgement${hiddenOutstanding === 1 ? "" : "s"}. Open the secure register for the complete list.</p>`
-    : "";
-  const rows = visibleDocs.map(renderManagerRow).join("");
+function overflowNotice(hiddenDocs: number, hiddenOutstanding: number): string {
+  if (hiddenDocs <= 0) return "";
+  return `<p style="font-size:12px;color:#b45309;">Additional documents not shown here: ${hiddenDocs} document${hiddenDocs === 1 ? "" : "s"} with ${hiddenOutstanding} outstanding acknowledgement${hiddenOutstanding === 1 ? "" : "s"}. Open the secure register for the complete list.</p>`;
+}
 
-  return `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#334155;">
+/**
+ * The manager digest, built in one pass: each row is rendered and measured
+ * once and rows stop as soon as the byte budget is spent, so a tenant with
+ * thousands of documents costs no more than the rows that fit.
+ */
+function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
+  const totalOutstanding = docs.reduce((sum, doc) => sum + doc.outstandingCount, 0);
+  const head = `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#334155;">
     <h2 style="color:#0f172a;">SafeTrack acknowledgements outstanding</h2>
-    <p>${totalOutstanding} outstanding acknowledgement${totalOutstanding === 1 ? "" : "s"} across ${allDocs.length} required document${allDocs.length === 1 ? "" : "s"}. Open the secure register to review and follow up.</p>
-    ${overflowNotice}
-    <table style="width:100%;border-collapse:collapse;"><tbody>${rows}</tbody></table>
+    <p>${totalOutstanding} outstanding acknowledgement${totalOutstanding === 1 ? "" : "s"} across ${docs.length} required document${docs.length === 1 ? "" : "s"}. Open the secure register to review and follow up.</p>
+    `;
+  const tableOpen = `
+    <table style="width:100%;border-collapse:collapse;"><tbody>`;
+  const tail = `</tbody></table>
     <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open the secure SafeTrack register</a></p>
     <p style="font-size:12px;color:#64748b;">Sign in to review the complete acknowledgement details and follow up.</p>
   </body></html>`;
-}
+  const shellBytes = Buffer.byteLength(head + tableOpen + tail, "utf8");
+  // Room for the overflow notice at its longest, in case rows are left out.
+  const noticeBytes = Buffer.byteLength(overflowNotice(docs.length, totalOutstanding), "utf8");
 
-function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
-  const visibleDocs: OutstandingDocSummary[] = [];
+  const rows: string[] = [];
+  const rowBytes: number[] = [];
+  let usedBytes = shellBytes;
   for (const doc of docs) {
-    const candidate = managerEmailHtml([...visibleDocs, doc], docs, appUrl);
-    if (Buffer.byteLength(candidate, "utf8") > MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES) break;
-    visibleDocs.push(doc);
+    const row = renderManagerRow(doc);
+    const bytes = Buffer.byteLength(row, "utf8");
+    if (usedBytes + bytes > MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES) break;
+    rows.push(row);
+    rowBytes.push(bytes);
+    usedBytes += bytes;
   }
-  return managerEmailHtml(visibleDocs, docs, appUrl);
+  if (rows.length < docs.length) {
+    // Some rows are left out: make room for the notice saying so.
+    while (rows.length && usedBytes + noticeBytes > MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES) {
+      rows.pop();
+      usedBytes -= rowBytes.pop()!;
+    }
+  }
+  const hiddenOutstanding = docs.slice(rows.length).reduce((sum, doc) => sum + doc.outstandingCount, 0);
+  return head + overflowNotice(docs.length - rows.length, hiddenOutstanding) + tableOpen + rows.join("") + tail;
 }
 
 function buildStaffEmailHtml(

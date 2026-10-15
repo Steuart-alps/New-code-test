@@ -235,6 +235,21 @@ try {
   const fitsHtml = await managerHtmlFor(unicodeDocs.slice(0, shownRows));
   assertSafeDigest(fitsHtml, unicodeDocs.slice(0, shownRows));
   assert.doesNotMatch(fitsHtml, /Additional documents not shown/);
+  // Replit #341: thousands of documents render in one bounded pass.
+  const manyDocs = Array.from({ length: 20_000 }, (_, index) => ({
+    title: `Doc ${index}`, docType: "SOP", siteName: null,
+    outstanding: ["Sam"], outstandingCount: 1, acknowledgedCount: 0, staffTotal: 1,
+  }));
+  const started = performance.now();
+  const manyHtml = await managerHtmlFor(manyDocs);
+  const elapsedMs = performance.now() - started;
+  console.log(`20,000-document digest built in ${elapsedMs.toFixed(0)} ms`);
+  assertSafeDigest(manyHtml, manyDocs);
+  const manyShown = (manyHtml.match(/<tr>/g) ?? []).length;
+  assert.ok(manyShown > 100 && manyShown < manyDocs.length);
+  assert.match(manyHtml, new RegExp(`Additional documents not shown here: ${manyDocs.length - manyShown} documents with ${manyDocs.length - manyShown} outstanding acknowledgements`));
+  // One pass takes a few ms; rebuilding the digest per document took ~170 ms.
+  assert.ok(elapsedMs < 100, `digest took ${elapsedMs} ms`);
   let fullyAcknowledgedSendCalled = false;
   const fullyAcknowledged = await runSafeTrackAckReminderJob({
     ...deps,
