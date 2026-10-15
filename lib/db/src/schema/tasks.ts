@@ -33,11 +33,18 @@ export const tasksTable = pgTable("tasks", {
   /** Archived tasks stop producing occurrences; history is kept. */
   active: boolean("active").notNull().default(true),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Mobile outbox entry ID and payload fingerprint: a task a manager created
+  // on the phone and resent after a lost response is not created twice.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
   index("IDX_tasks_client").on(table.clientId),
   index("IDX_tasks_assignee").on(table.assigneeUserId),
+  uniqueIndex("UQ_tasks_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
 ]);
 
 /** Who ticked one occurrence of a task done, and when. */

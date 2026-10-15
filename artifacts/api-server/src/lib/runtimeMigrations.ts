@@ -2094,10 +2094,12 @@ async function runRuntimeMigrationsOnce() {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_survey_history_record_idx" ON "asbestos_survey_history" ("client_id", "record_id")`);
 
     // Mobile outbox replays (lib/clientEntryReplay.ts) for FixTrack issue
-    // reports and notes and "Mark done". Schema: lib/db fix-track, tasks.
+    // reports and notes, "Mark done" and tasks a manager creates on the
+    // phone. Schema: lib/db fix-track, tasks.
     await addClientEntryReplayColumns("fix_track_issues");
     await addClientEntryReplayColumns("fix_track_issue_activity");
     await addClientEntryReplayColumns("task_completions");
+    await addClientEntryReplayColumns("tasks");
 
     logger.info("Runtime migrations complete");
   } catch (err) {

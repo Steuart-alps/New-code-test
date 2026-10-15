@@ -19,6 +19,15 @@ export interface ManageItem {
 }
 
 export const MANAGE_ITEMS: ManageItem[] = [
+  {
+    id: 'tasks',
+    label: 'Tasks',
+    subtitle: 'Set, assign and review routine jobs for your team',
+    icon: 'check-square',
+    iconColor: '#2563eb',
+    route: '/manage/tasks',
+    audience: 'managers',
+  },
 ];
 
 /** Client admins and consultants manage the business; staff and viewers don't. */

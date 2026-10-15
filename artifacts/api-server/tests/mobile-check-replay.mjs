@@ -624,6 +624,46 @@ try {
     assert.equal((await owner.request('POST', path, { date: day, clientEntryId: 'short' })).status, 400, `${name}: entry IDs are validated`);
   }
 
+  // A task a manager creates on the phone (queued offline): a resend gets the
+  // stored task back, never a second copy. Edits never take an entry ID.
+  {
+    const name = 'task create';
+    const taskRows = async () => Number((await pool.query('SELECT count(*) FROM tasks WHERE client_id = $1', [owner.clientId])).rows[0].count);
+    const before = await taskRows();
+    const sent = { title: 'Check the fire exits', instruction: 'Walk every route', siteId, recurrence: 'weekly', startsOn: isoDay(2), assigneeRole: 'client_staff', clientEntryId: entryId() };
+    const first = await owner.request('POST', '/tasks', sent);
+    assert.equal(first.status, 201, `${name}: first send creates (${JSON.stringify(first.data)})`);
+    assert.equal(first.data.createdBy, owner.userId, `${name}: recorded against the manager`);
+    const replay = await owner.request('POST', '/tasks', sent);
+    assert.equal(replay.status, 200, `${name}: a lost-response replay is recognised (${JSON.stringify(replay.data)})`);
+    assert.equal(replay.data.id, first.data.id, `${name}: replay returns the stored task`);
+    assert.equal(await taskRows(), before + 1, `${name}: one task row`);
+    const conflict = await owner.request('POST', '/tasks', { ...sent, title: 'Different task' });
+    assert.equal(conflict.status, 409, `${name}: an entry ID cannot hide a changed task`);
+    assert.equal(conflict.data.code, 'CLIENT_ENTRY_CONFLICT');
+    assert.equal((await secondAdmin.request('POST', '/tasks', sent)).status, 409, `${name}: the entry belongs to the manager who sent it`);
+    assert.equal((await staff.request('POST', '/tasks', sent)).status, 403, `${name}: staff still cannot create tasks`);
+    const foreignSite = await other.request('POST', '/tasks', sent);
+    assert.equal(foreignSite.status, 400, `${name}: another business's site is refused, not replayed`);
+    const { siteId: _site, ...noSite } = sent;
+    assert.equal((await other.request('POST', '/tasks', noSite)).status, 201, `${name}: entry IDs are per client`);
+    const racing = { title: 'Lock the bin store', recurrence: 'once', startsOn: isoDay(1), assigneeRole: 'managers', clientEntryId: entryId() };
+    const both = await Promise.all([owner.request('POST', '/tasks', racing), owner.request('POST', '/tasks', racing)]);
+    assert.deepEqual(both.map((r) => r.status).sort(), [200, 201], `${name}: ${JSON.stringify(both.map((r) => r.data))}`);
+    assert.equal(both[0].data.id, both[1].data.id);
+    assert.equal(await taskRows(), before + 2, `${name}: a concurrent duplicate creates once`);
+    const web = { title: 'Web task', recurrence: 'daily', startsOn: isoDay(0), assigneeRole: 'client_staff' };
+    assert.equal((await owner.request('POST', '/tasks', web)).status, 201);
+    assert.equal((await owner.request('POST', '/tasks', web)).status, 201);
+    assert.equal(await taskRows(), before + 4, `${name}: tasks without an entry ID are not deduplicated`);
+    assert.equal((await owner.request('POST', '/tasks', { ...web, clientEntryId: 'short' })).status, 400, `${name}: entry IDs are validated`);
+    assert.equal((await owner.request('PATCH', `/tasks/${first.data.id}`, { title: 'Edited', clientEntryId: entryId() })).status, 400,
+      `${name}: an edit never takes an entry ID`);
+    const reassigned = await owner.request('PATCH', `/tasks/${first.data.id}`, { assigneeUserId: staff.userId, assigneeRole: null });
+    assert.equal(reassigned.status, 200, `${name}: reassigning works (${JSON.stringify(reassigned.data)})`);
+    assert.equal(reassigned.data.clientEntryId, sent.clientEntryId, `${name}: an edit keeps the original entry ID`);
+  }
+
   // SafeTrack self-acknowledgement with the phone's bearer token: recorded
   // against the signed-in user, so a resend from the outbox is recognised.
   {
@@ -670,5 +710,5 @@ try {
   assert.equal((await pool.query('SELECT client_entry_id FROM fire_safety_checks WHERE id = $1', [fire.data.id])).rows[0].client_entry_id,
     stored.client_entry_id, 'an edit keeps the original entry ID');
 
-  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, BikeTrack service, GreenTrack (pre-use checks, defects, fuel logs, service records, PUWER inspections), swim session, surveillance, first-aid, pool incident, FixTrack issue/note, task completion and SafeTrack acknowledgement mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
+  console.log('Fire, legionella, hot tub, PAT, incident, pool, PremisesTrack, TreeTrack, PestTrack, BikeTrack service, GreenTrack (pre-use checks, defects, fuel logs, service records, PUWER inspections), swim session, surveillance, first-aid, pool incident, FixTrack issue/note, task completion, task create and SafeTrack acknowledgement mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
 } finally { await pool.end(); }

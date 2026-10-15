@@ -3,7 +3,8 @@
  * the AM/PM daily checklist and the fire, legionella, hot tub, PAT, incident
  * and pool check forms, TreeTrack inspections and GreenTrack machine records
  * (defects, fuel logs, service records, PUWER inspections), KitchenTrack cleaning
- * schedule saves, plus the staff actions that work offline (FixTrack issue
+ * schedule saves, tasks a manager creates on site, plus the staff actions
+ * that work offline (FixTrack issue
  * reports and notes, "Mark done" on today's tasks, SafeTrack and DocTrack
  * acknowledgements). Same contract as kitchenOutboxCore: the submission and a
  * stable entry ID are written to device storage before the first HTTP
@@ -23,7 +24,7 @@ export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 
   | 'swim-surveillance' | 'swim-first-aid' | 'swim-incident' | 'green-defect' | 'green-fuel' | 'green-service' | 'green-puwer'
   | 'kitchen-probe' | 'kitchen-weekly' | 'cleaning-log'
   | 'bike-hire' | 'bike-service'
-  | 'fix-issue' | OfflineActionKind;
+  | 'fix-issue' | 'task-create' | OfflineActionKind;
 /** Actions on an existing server record (path carries its ID): one unsent entry per target. */
 export type OfflineActionKind = 'fix-note' | 'task-completion' | 'safe-ack' | 'doc-ack';
 export type DeliveryRejection = 'conflict' | 'rejected';
@@ -33,7 +34,7 @@ export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-che
   'premises-inspection', 'tree-inspection', 'room-check', 'pest-activity', 'pest-visit',
   'swim-surveillance', 'swim-first-aid', 'swim-incident', 'green-defect', 'green-fuel', 'green-service', 'green-puwer',
   'kitchen-probe', 'kitchen-weekly', 'cleaning-log',
-  'bike-hire', 'bike-service', 'fix-issue'];
+  'bike-hire', 'bike-service', 'fix-issue', 'task-create'];
 export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist' | OfflineActionKind>, string> = {
   'fire-check': '/api/fire-safety',
   'legionella-check': '/api/legionella',
@@ -61,6 +62,8 @@ export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist' | Offline
   'bike-hire': '/api/bike-track/hires',
   'bike-service': '/api/bike-track/services',
   'fix-issue': '/api/fix-track/issues',
+  // A new task a manager sets on site; edits and archiving need a connection.
+  'task-create': '/api/tasks',
 };
 export type SafeTrackDocument = 'risk-assessments' | 'sops' | 'handbook';
 /** Path and scope of each offline action: one unsent entry per target, or per entry when perEntry. */
@@ -102,6 +105,7 @@ export function deliveredQueryKeys(kind: CheckKind): string[][] {
     case 'fix-issue': return [['fix-track-issues'], ['fix-track-issues-all'], ['dashboard-summary']];
     case 'fix-note': return [['fix-track-issue'], ['fix-track-issues'], ['fix-track-issues-all']];
     case 'task-completion': return [['tasks']];
+    case 'task-create': return [['tasks']];
     case 'safe-ack': return [['safetrack-acks']];
     case 'doc-ack': return [['doc-track-my-acknowledgements'], ['doctrack-documents'], ['traintrack-records']];
   }
@@ -165,6 +169,7 @@ const PATHS: Record<CheckKind, RegExp> = {
   'bike-hire': /^\/api\/bike-track\/hires$/,
   'bike-service': /^\/api\/bike-track\/services$/,
   'fix-issue': /^\/api\/fix-track\/issues$/,
+  'task-create': /^\/api\/tasks$/,
   'fix-note': /^\/api\/fix-track\/issues\/\d{1,9}\/notes$/,
   'task-completion': /^\/api\/tasks\/\d{1,9}\/complete$/,
   'safe-ack': /^\/api\/safe-track\/(risk-assessments|sops|handbook)\/\d{1,9}\/self-acknowledge$/,
