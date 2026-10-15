@@ -175,16 +175,34 @@ export default function ContractorApprovalsPage() {
       if (document.visibilityState !== "visible" || reviewInProgressRef.current) return;
       void loadQueue(true);
     };
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") refresh();
+    // A hidden, frozen or back/forward-cached tab may have missed storage and
+    // BroadcastChannel updates. On return it first takes this user and
+    // client's stored acknowledgments (indicators only: rows and any open
+    // draft are untouched), then re-reads the queue unless a review is open.
+    const reconcileAndRefresh = () => {
+      if (document.visibilityState !== "visible") return;
+      const persistedState = readPersistedApprovalRefreshState(window, refreshStorageKeyRef.current);
+      if (persistedState) {
+        knownQueueIdsRef.current = new Set(persistedState.knownQueueIds);
+        newRequestIdsRef.current = persistedState.newRequestIds;
+        setNewRequestIds(persistedState.newRequestIds);
+      }
+      refresh();
+    };
+    const reconcileOnPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) reconcileAndRefresh();
     };
     const timer = window.setInterval(refresh, BACKGROUND_REFRESH_MS);
     window.addEventListener("focus", refresh);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
+    document.addEventListener("visibilitychange", reconcileAndRefresh);
+    document.addEventListener("resume", reconcileAndRefresh);
+    window.addEventListener("pageshow", reconcileOnPageShow);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", reconcileAndRefresh);
+      document.removeEventListener("resume", reconcileAndRefresh);
+      window.removeEventListener("pageshow", reconcileOnPageShow);
     };
   }, [activeClientId, approvalRefreshStorageKey]);
 

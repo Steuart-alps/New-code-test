@@ -1477,3 +1477,124 @@ test("with browser storage and tab messaging blocked, each tab still finds new r
     assert.equal(await newBadge(firstTab, otherBusinessRequest.title).count(), 0, "a fresh baseline for this business");
   });
 });
+
+test("a frozen, hidden or back-cached approvals tab catches up on its own business's indicators when it returns", async () => {
+  const owner = fixtures.owner;
+  const secondClient = await owner.request("POST", "/clients", {
+    name: `Inbox lifecycle business ${suffix}`, slug: `inbox-lifecycle-${suffix}`,
+  });
+  assert.equal(secondClient.status, 201, JSON.stringify(secondClient.data));
+  const secondClientId = secondClient.data.id;
+  const secondSite = await owner.request("POST", `/sites?clientId=${secondClientId}`, {
+    name: `Inbox lifecycle site ${suffix}`, seedStarterChecks: false,
+  });
+  assert.equal(secondSite.status, 201, JSON.stringify(secondSite.data));
+  const otherBusinessBefore = await queuedCalendarCancellation("life-other-before", isoDay(56), secondSite.data.id, secondClientId);
+
+  const { context, page: resumingTab } = await browserContext(owner);
+  // No timed refresh fires during the test: only the return to the tab can
+  // bring it up to date.
+  await context.clock.install();
+  const actingTab = await context.newPage();
+  const otherBusinessTab = await context.newPage();
+  await otherBusinessTab.addInitScript(({ userId, clientId }) => {
+    window.sessionStorage.setItem("complytrack:activeClient", JSON.stringify({ userId, clientId }));
+  }, { userId: owner.userId, clientId: secondClientId });
+  // Headless Chromium never hides or freezes a tab (CDP's freeze is ignored
+  // for a visible page), so the lifecycle is simulated: a "frozen" tab misses
+  // storage and BroadcastChannel deliveries, reports hidden and gets the
+  // lifecycle events a browser sends.
+  for (const page of [resumingTab, otherBusinessTab]) {
+    await page.addInitScript(() => {
+      window.__frozen = false;
+      window.addEventListener("storage", event => {
+        if (window.__frozen) event.stopImmediatePropagation();
+      }, true);
+      const addListener = BroadcastChannel.prototype.addEventListener;
+      BroadcastChannel.prototype.addEventListener = function (type, listener, options) {
+        return addListener.call(this, type, function (event) {
+          if (!window.__frozen) return listener.call(this, event);
+        }, options);
+      };
+    });
+  }
+  const setState = (page, { frozen, visibility, events }) => page.evaluate(({ frozen, visibility, events }) => {
+    window.__frozen = frozen;
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+    for (const event of events) {
+      if (event === "pageshow") window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      else document.dispatchEvent(new Event(event));
+    }
+  }, { frozen, visibility, events });
+  const freeze = page => setState(page, { frozen: true, visibility: "hidden", events: ["visibilitychange", "freeze"] });
+  const queueClients = new Map([[resumingTab, []], [otherBusinessTab, []]]);
+  for (const [page, clients] of queueClients) {
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/fix-track/contractor-email-queue") clients.push(url.searchParams.get("clientId"));
+    });
+  }
+  const newBadge = (page, title) => queueCard(page, title).getByLabel("New approval request");
+  const reviewInActingTab = async title => {
+    await actingTab.getByRole("button", { name: "Refresh approvals" }).click();
+    await queueCard(actingTab, title).getByRole("button", { name: `Mark ${title} as reviewed` }).click();
+    await newBadge(actingTab, title).waitFor({ state: "detached" });
+  };
+
+  await withDiagnostics(resumingTab, "approvals tab lifecycle", async () => {
+    for (const page of [resumingTab, actingTab, otherBusinessTab]) await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(resumingTab, fixtures.acceptIssue.title).waitFor();
+    await queueCard(actingTab, fixtures.acceptIssue.title).waitFor();
+    await queueCard(otherBusinessTab, otherBusinessBefore.title).waitFor();
+
+    // While two tabs are frozen: a request arrives and another tab finds and
+    // reviews it; a second arrives unseen; the other business gains one too.
+    await freeze(resumingTab);
+    await freeze(otherBusinessTab);
+    const reviewedElsewhere = await queuedCalendarCancellation("life-reviewed", isoDay(57));
+    await reviewInActingTab(reviewedElsewhere.title);
+    const unseen = await queuedCalendarCancellation("life-unseen", isoDay(58));
+    const otherBusinessArrived = await queuedCalendarCancellation("life-other-arrived", isoDay(59), secondSite.data.id, secondClientId);
+    await resumingTab.waitForTimeout(300);
+    assert.equal(await queueCard(resumingTab, reviewedElsewhere.title).count(), 0, "a frozen tab requests nothing");
+    const resumingLoads = queueClients.get(resumingTab).length;
+    const otherLoads = queueClients.get(otherBusinessTab).length;
+
+    // Resumed while still in the background: nothing yet. Shown: catch up.
+    for (const page of [resumingTab, otherBusinessTab]) {
+      await setState(page, { frozen: false, visibility: "hidden", events: ["resume"] });
+    }
+    await resumingTab.waitForTimeout(300);
+    assert.equal(queueClients.get(resumingTab).length, resumingLoads, "a background tab waits until it is shown");
+    for (const page of [resumingTab, otherBusinessTab]) {
+      await setState(page, { frozen: false, visibility: "visible", events: ["visibilitychange"] });
+    }
+    await newBadge(resumingTab, unseen.title).waitFor();
+    await queueCard(resumingTab, reviewedElsewhere.title).waitFor();
+    assert.equal(await newBadge(resumingTab, reviewedElsewhere.title).count(), 0,
+      "a request reviewed in another tab while this one was frozen is not New");
+    assert.equal(await queueCard(resumingTab, otherBusinessArrived.title).count(), 0);
+    await newBadge(otherBusinessTab, otherBusinessArrived.title).waitFor();
+    assert.equal(await queueCard(otherBusinessTab, unseen.title).count(), 0, "no rows from the other business");
+    assert.equal(await queueCard(otherBusinessTab, reviewedElsewhere.title).count(), 0);
+    assert.deepEqual(queueClients.get(resumingTab).slice(resumingLoads), [String(owner.clientId)]);
+    assert.deepEqual(queueClients.get(otherBusinessTab).slice(otherLoads), [String(secondClientId)]);
+    // The acknowledgment is not undone for the tab that made it.
+    await actingTab.waitForTimeout(300);
+    assert.equal(await newBadge(actingTab, reviewedElsewhere.title).count(), 0);
+
+    // Restored from the back/forward cache with an open draft: indicators
+    // catch up, the draft stays and the rows are not reloaded under it.
+    const draftCard = queueCard(resumingTab, fixtures.acceptIssue.title);
+    await draftCard.getByRole("button", { name: "Edit" }).click();
+    await draftCard.getByRole("textbox").nth(1).fill("Draft kept across the back/forward cache");
+    await setState(resumingTab, { frozen: true, visibility: "hidden", events: ["visibilitychange"] });
+    await reviewInActingTab(unseen.title);
+    const beforeRestore = queueClients.get(resumingTab).length;
+    await setState(resumingTab, { frozen: false, visibility: "visible", events: ["pageshow"] });
+    await newBadge(resumingTab, unseen.title).waitFor({ state: "detached" });
+    assert.equal(await draftCard.getByRole("textbox").nth(1).inputValue(), "Draft kept across the back/forward cache");
+    assert.equal(queueClients.get(resumingTab).length, beforeRestore, "no reload while a draft is open");
+    await draftCard.getByRole("button", { name: "Cancel Edit" }).click();
+  });
+});

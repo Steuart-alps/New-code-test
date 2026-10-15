@@ -106,7 +106,7 @@ for (const handler of ["submitApproval", "submitDismissal"]) {
 }
 assert.match(
   source,
-  /window\.setInterval\(refresh, BACKGROUND_REFRESH_MS\);[\s\S]{0,300}return \(\) => \{\s*window\.clearInterval\(timer\);[\s\S]{0,250}\};\s*\}, \[activeClientId, approvalRefreshStorageKey\]\);/,
+  /window\.setInterval\(refresh, BACKGROUND_REFRESH_MS\);[\s\S]{0,600}return \(\) => \{\s*window\.clearInterval\(timer\);[\s\S]{0,600}\};\s*\}, \[activeClientId, approvalRefreshStorageKey\]\);/,
   "the timed refresh (the only update path when storage and BroadcastChannel are blocked) must stop on unmount and restart when the business changes",
 );
 assert.match(
