@@ -19,6 +19,7 @@ import { addMonthsUtc } from "../lib/complianceCompletion";
 import {
   CERTIFICATE_OUTCOMES, DEFECT_CODES, createDefect, defectsForCertificates, fixTrackIssueTypeFor, outcomeMovesDueDate,
 } from "../lib/certificateOutcomes";
+import { ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
@@ -64,6 +65,30 @@ async function assertItemAccess(req: Request, itemId: number): Promise<Item | nu
 async function withDefects(clientId: number, certs: Cert[]) {
   const defects = await defectsForCertificates(clientId, certs.map((c) => c.id));
   return certs.map((c) => ({ ...c, defects: defects.get(c.id) ?? [] }));
+}
+
+/**
+ * A certificate file arrives through the generic presigned upload, which only
+ * reserves a tenant path. Registering it on the certificate is what grants the
+ * tenant ACL, so the file can be viewed and included in data exports, and a
+ * caller cannot attach another tenant's object. Sends the error response and
+ * returns false when the file cannot be secured.
+ */
+async function secureCertificateFile(req: Request, res: any, fileUrl: string, clientId: number): Promise<boolean> {
+  try {
+    await new ObjectStorageService().finalizeTenantUpload(fileUrl, clientId);
+    return true;
+  } catch (err) {
+    if (err instanceof ObjectOwnershipError) {
+      res.status(403).json({ error: "File does not belong to this client" });
+    } else if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Uploaded file not found" });
+    } else {
+      req.log.error({ err }, "Could not secure certificate file");
+      res.status(503).json({ error: "File storage is temporarily unavailable. Please try again later." });
+    }
+    return false;
+  }
 }
 
 // ----- Item-scoped certificates -----
@@ -164,6 +189,7 @@ router.post("/items/:itemId/certificates", requireAuth, denyViewers, requireClie
   const item = await assertItemAccess(req, itemId);
   if (!item) return void res.status(404).json({ error: "Compliance item not found" });
   const { defects = [], ...body } = parsed.data;
+  if (body.fileUrl && !await secureCertificateFile(req, res, body.fileUrl, item.clientId)) return;
   const [cert] = await db.insert(certificatesTable)
     .values({ ...body, outcome: body.outcome ?? "not_stated", itemId, contractorId: null })
     .returning();
@@ -189,6 +215,8 @@ router.put("/items/:itemId/certificates/:id", requireAuth, denyViewers, requireC
   const [before] = await db.select().from(certificatesTable)
     .where(and(eq(certificatesTable.id, id), eq(certificatesTable.itemId, itemId)));
   if (!before) return void res.status(404).json({ error: "Certificate not found" });
+  if (parsed.data.fileUrl && parsed.data.fileUrl !== before.fileUrl
+    && !await secureCertificateFile(req, res, parsed.data.fileUrl, item.clientId)) return;
   const [cert] = await db
     .update(certificatesTable)
     .set(parsed.data)

@@ -63,16 +63,33 @@ node tests/storage-happy-path-fixture.mjs preflight
 pnpm run build
 TEST_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
 export API_BASE="http://127.0.0.1:${TEST_PORT}/api"
-NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
-SERVER_PID=$!
-for _ in $(seq 1 45); do
-  if curl -sf -m 2 "http://127.0.0.1:${TEST_PORT}/readyz" >/dev/null 2>&1; then break; fi
-  kill -0 "$SERVER_PID" 2>/dev/null || { echo "Test API exited before readiness" >&2; exit 1; }
-  sleep 1
-done
-curl -sf -m 2 "http://127.0.0.1:${TEST_PORT}/readyz" >/dev/null
 
-node tests/doc-track-object-acl.mjs
-node tests/generic-document-object-acl.mjs
-node tests/pat-export-attachments.mjs
-node tests/doc-track-signoff-status.mjs
+# Each suite gets a freshly started API: registration is rate limited per
+# address in memory, and every suite signs up its own tenants.
+start_api() {
+  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  SERVER_PID=$!
+  for _ in $(seq 1 45); do
+    if curl -sf -m 2 "http://127.0.0.1:${TEST_PORT}/readyz" >/dev/null 2>&1; then return 0; fi
+    kill -0 "$SERVER_PID" 2>/dev/null || { echo "Test API exited before readiness" >&2; exit 1; }
+    sleep 1
+  done
+  curl -sf -m 2 "http://127.0.0.1:${TEST_PORT}/readyz" >/dev/null
+}
+stop_api() {
+  kill "$SERVER_PID" >/dev/null 2>&1 || true
+  wait "$SERVER_PID" 2>/dev/null || true
+  SERVER_PID=""
+}
+
+for suite in \
+  tests/doc-track-object-acl.mjs \
+  tests/generic-document-object-acl.mjs \
+  tests/pat-export-attachments.mjs \
+  tests/export-attachments-storage.mjs \
+  tests/doc-track-signoff-status.mjs; do
+  echo "== $suite"
+  start_api
+  node "$suite"
+  stop_api
+done
