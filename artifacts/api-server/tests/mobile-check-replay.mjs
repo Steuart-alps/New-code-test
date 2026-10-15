@@ -85,6 +85,16 @@ try {
       },
       changed: { findings: 'Different findings' },
     },
+    {
+      // A failed inspection raises a track action (database trigger on
+      // insert): a replay must not raise a second one (checked after the loop).
+      name: 'TreeTrack', path: '/tree-track', table: 'tree_inspections',
+      body: {
+        checkType: 'visual_assessment', checkDate: day, result: 'fail', actionSeverity: 'action_required',
+        treeRef: 'T1', location: 'North boundary', inspector: 'Arborist', followUpDate: isoDay(30), siteId, notes: null,
+      },
+      changed: { actionSeverity: 'urgent_action' },
+    },
   ];
 
   for (const { name, path, table, body, changed, photoReplay } of cases) {
@@ -137,6 +147,12 @@ try {
     }
     assert.equal((await owner.request('POST', path, { ...body, clientEntryId: 'short' })).status, 400, `${name}: entry IDs are validated`);
   }
+
+  // TreeTrack: one track action per stored failed inspection, none per replay.
+  const treeActions = Number((await pool.query(
+    "SELECT count(*) FROM track_actions WHERE client_id = $1 AND source_kind = 'tree_inspections'", [owner.clientId],
+  )).rows[0].count);
+  assert.equal(treeActions, await count('tree_inspections', owner.clientId), 'TreeTrack: replays raise no second track action');
 
   // Updates never accept or overwrite the device entry ID.
   const fire = await owner.request('POST', '/fire-safety', {

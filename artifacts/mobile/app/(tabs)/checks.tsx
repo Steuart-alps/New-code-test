@@ -114,6 +114,14 @@ const MODULES: CheckModule[] = [
     checks: ['Choose machine', 'Check safety points', 'Fuel / charge', 'Sign off'],
   },
   {
+    id: 'tree',
+    label: 'TreeTrack',
+    subtitle: 'Tree inspection logbook',
+    icon: 'feather',
+    iconColor: '#16a34a',
+    checks: ['Choose site', 'Record inspection', "What's due", 'Recent inspections'],
+  },
+  {
     id: 'aqua',
     label: 'AquaTrack',
     subtitle: 'Pool checks & swim sessions',
@@ -152,6 +160,7 @@ export default function ChecksScreen() {
       (mod.id !== 'pat' || hasService('pattrack')) &&
       (mod.id !== 'green' || hasService('greentrack')) &&
       (mod.id !== 'premises' || hasService('premisestrack')) &&
+      (mod.id !== 'tree' || hasService('treetrack')) &&
       (mod.id !== 'aqua' || aquaAccess.any),
   );
 

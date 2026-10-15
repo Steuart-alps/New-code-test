@@ -2792,6 +2792,8 @@ async function migrateTreeTrack() {
     END $$
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_client" ON "tree_inspections" ("client_id")`);
+  // Mobile replay keys (created_by is added above). Schema: lib/db tree-inspections.
+  await addClientEntryReplayColumns("tree_inspections");
 }
 
 // ---- BikeTrack ----

@@ -174,6 +174,8 @@ assert.equal(isRetryableStatus(400), false);
   await assert.rejects(records.enqueue({ ...record('pat-test', 'pat-entry-000001', {}), path: '/api/pat-track/appliances' }), /cannot be saved/);
   await assert.rejects(records.enqueue({ ...record('incident', 'incident-entry-02', {}), path: '/api/incidents/5' }), /cannot be saved/);
   await assert.rejects(records.enqueue({ ...record('pool-check', 'pool-entry-000001', {}), path: '/api/pool-track/5' }), /cannot be saved/);
+  await assert.rejects(records.enqueue({ ...record('tree-inspection', 'tree-entry-000001', {}), path: '/api/tree-track/5' }), /cannot be saved/);
+  await assert.rejects(records.enqueue({ ...record('tree-inspection', 'tree-entry-000002', {}), path: '/api/tree-track/status' }), /cannot be saved/);
   online = true;
   await records.replay();
   assert.deepEqual(records.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent', 'sent']);
@@ -189,6 +191,9 @@ assert.deepEqual(deliveredQueryKeys('pat-test'), [['pat-tests'], ['pat-appliance
 assert.deepEqual(deliveredQueryKeys('daily-checklist'), [['daily-checklist'], ['daily-overview']]);
 assert.equal(RECORD_PATHS['pool-check'], '/api/pool-track');
 assert.deepEqual(deliveredQueryKeys('pool-check'), [['pool-checks'], ['track-controls'], ['dashboard-summary']]);
+assert.ok(RECORD_KINDS.includes('tree-inspection'), 'TreeTrack inspections are independent records');
+assert.equal(RECORD_PATHS['tree-inspection'], '/api/tree-track');
+assert.deepEqual(deliveredQueryKeys('tree-inspection'), [['tree-inspections'], ['tree-status'], ['dashboard-summary']]);
 
 // PremisesTrack inspections: saved offline, resent unchanged under one entry
 // ID, and only the create path is accepted.

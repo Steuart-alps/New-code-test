@@ -10,7 +10,7 @@ export type RecordSendResult =
   | { state: 'rejected'; entry: CheckEntry; error: string };
 
 /**
- * Sends a record form (fire, legionella, hot tub, PAT, incident, pool) through the
+ * Sends a record form (fire, legionella, hot tub, PAT, incident, pool, tree) through the
  * persisted check outbox. The body and its entry ID are saved on the device
  * before the first attempt; a lost connection leaves the entry queued and it
  * is resent automatically with the same ID, which the server recognises, so

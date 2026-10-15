@@ -1,7 +1,7 @@
 /**
  * Device outbox for check submissions other than KitchenTrack temperatures:
  * the AM/PM daily checklist and the fire, legionella, hot tub, PAT, incident
- * and pool check forms. Same contract as kitchenOutboxCore: the submission and a
+ * and pool check forms and TreeTrack inspections. Same contract as kitchenOutboxCore: the submission and a
  * stable entry ID are written to device storage before the first HTTP
  * attempt, replays send the identical body, and the server recognises a
  * replay of an entry it already applied (clientEntryId), so automatic and
@@ -15,11 +15,11 @@
 export interface CheckOwner { clientId: number; userId: number }
 export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
 export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident' | 'pool-check'
-  | 'premises-inspection';
+  | 'premises-inspection' | 'tree-inspection';
 
 /** Kinds whose entries are independent records (each gets its own scope). */
 export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident', 'pool-check',
-  'premises-inspection'];
+  'premises-inspection', 'tree-inspection'];
 export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string> = {
   'fire-check': '/api/fire-safety',
   'legionella-check': '/api/legionella',
@@ -28,6 +28,7 @@ export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string>
   incident: '/api/incidents',
   'pool-check': '/api/pool-track',
   'premises-inspection': '/api/premises-track',
+  'tree-inspection': '/api/tree-track',
 };
 
 /** Query keys to refresh once an entry of this kind has been delivered. */
@@ -41,6 +42,7 @@ export function deliveredQueryKeys(kind: CheckKind): string[][] {
     case 'incident': return [['incidents'], ['dashboard-summary']];
     case 'pool-check': return [['pool-checks'], ['track-controls'], ['dashboard-summary']];
     case 'premises-inspection': return [['premises-inspections'], ['dashboard-summary']];
+    case 'tree-inspection': return [['tree-inspections'], ['tree-status'], ['dashboard-summary']];
   }
 }
 export interface CheckEntry {
@@ -81,6 +83,7 @@ const PATHS: Record<CheckKind, RegExp> = {
   incident: /^\/api\/incidents$/,
   'pool-check': /^\/api\/pool-track$/,
   'premises-inspection': /^\/api\/premises-track$/,
+  'tree-inspection': /^\/api\/tree-track$/,
 };
 const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
 const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';
