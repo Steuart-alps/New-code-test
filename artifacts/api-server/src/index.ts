@@ -49,6 +49,7 @@ import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuran
 import { runTrackActionReminderJob } from "./lib/trackActionReminders";
 import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
+import { runScheduledStoragePriceAudit, STORAGE_PRICE_AUDIT_CRON } from "./lib/storagePriceAudit";
 import { cleanupStagedPhotoUploads } from "./lib/stagedPhotoCleanup";
 import { purgeExpiredAnalyticsEvents } from "./lib/analytics";
 import { ObjectStorageService } from "./lib/objectStorage";
@@ -411,6 +412,11 @@ function startScheduler() {
   // changes prices, products, subscriptions or charges.
   schedule(SERVICE_PRICE_AUDIT_CRON, "service-price-audit", () => runScheduledServicePriceAudit());
   logger.info("Stripe service-price audit scheduler started (hourly at :25)");
+
+  // Storage add-on price vs provider rate plus margin. Purchases pause on
+  // drift; this alerts operators once per finding and reports recovery.
+  schedule(STORAGE_PRICE_AUDIT_CRON, "storage-price-audit", () => runScheduledStoragePriceAudit());
+  logger.info("Storage add-on price audit scheduler started (hourly at :35)");
 }
 async function runTrialReminders() {
   logger.info("Running trial ending reminder job...");
@@ -629,6 +635,7 @@ async function startApplication() {
   setTimeout(() => void runMonitoredJob("trial-reminders", runTrialReminders), 20_000);
   // First catalogue audit after the startup preflight; deduped across restarts.
   setTimeout(() => void runMonitoredJob("service-price-audit", () => runScheduledServicePriceAudit()), 30_000);
+  setTimeout(() => void runMonitoredJob("storage-price-audit", () => runScheduledStoragePriceAudit()), 35_000);
   setTimeout(() => {
     void runMonitoredJob("fixtrack-alert-recovery", () => runFixTrackOverdueAlertJob(undefined, { recoverOnly: true }));
   }, 25_000);

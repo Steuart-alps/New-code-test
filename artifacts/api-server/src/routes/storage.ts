@@ -22,6 +22,7 @@ import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDep
 import { objectPathTenantMismatch, patPhotoObjectAccess } from "../lib/patLegacyHistoryScope";
 import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
 import { findLiveSubscription } from "../lib/billing";
+import { readStorageRateConfig } from "../lib/storagePricing";
 import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
@@ -36,8 +37,6 @@ const objectStorageService = new ObjectStorageService();
 setStorageUsageRecorder(storageUsageLedger);
 const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 const GIB = 1024 ** 3;
-const DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH = 0.015;
-const DEFAULT_ALPS_STORAGE_MARKUP_PERCENT = 20;
 const DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE: Record<string, number> = {
   core: 1,
   bundle: 1,
@@ -76,11 +75,11 @@ storageDownloadRouter.get("/storage/download/:token", async (req: Request, res: 
 });
 
 async function estimateStorageCost(clientId: number, usedBytes: number, monthlyDownloadBytes: number) {
-  const rawRate = process.env.STORAGE_PROVIDER_USD_PER_GIB_MONTH?.trim();
-  const providerRate = rawRate ? Number(rawRate) : DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH;
-  const rawMarkup = process.env.STORAGE_ALPS_MARKUP_PERCENT?.trim();
-  const markupPercent = rawMarkup ? Number(rawMarkup) : DEFAULT_ALPS_STORAGE_MARKUP_PERCENT;
-  if (!Number.isFinite(providerRate) || providerRate < 0 || !Number.isFinite(markupPercent) || markupPercent < 0) return null;
+  // Same rate source as the Stripe price check (storagePricing.ts), so the
+  // estimate and the add-on price are judged against one calculation.
+  const rates = readStorageRateConfig();
+  if (!rates) return null;
+  const { providerUsdPerGibMonth: providerRate, markupPercent } = rates;
   const rawAllowances = process.env.STORAGE_INCLUDED_GIB_BY_SERVICE;
   let allowanceMap: Record<string, unknown>;
   try {

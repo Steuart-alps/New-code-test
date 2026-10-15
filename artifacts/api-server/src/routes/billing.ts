@@ -39,6 +39,12 @@ import {
   verifyClientDiscountCode,
 } from "../lib/alpsDiscount";
 import { logger } from "../lib/logger";
+import {
+  checkStorageAddonPrice,
+  evaluateStorageAddonPrice,
+  rememberStoragePriceCheck,
+  type StoragePriceInput,
+} from "../lib/storagePricing";
 import { BILLING_UNVERIFIED_ERROR, getBillingReadiness, isBillingActivationAllowed } from "../lib/stripeStartup";
 import { getPublicAppUrl } from "../lib/email";
 import { z } from "zod";
@@ -182,6 +188,17 @@ router.get("/config", requireAuth, async (req, res) => {
       }
     }
 
+    const storagePrice = publishableKey && isBillingActivationAllowed()
+      ? await checkStorageAddonPrice().catch(() => null)
+      : null;
+    const storageAddon = storagePrice?.status === "ok"
+      ? {
+          unitAmount: storagePrice.configuredUnitAmount,
+          currency: storagePrice.currency,
+          minimumGib: storagePrice.minimumPurchaseGib ?? 1,
+        }
+      : null;
+
     res.json({
       publishableKey,
       subscription,
@@ -195,7 +212,10 @@ router.get("/config", requireAuth, async (req, res) => {
       // Checkout and add-ons are unavailable while Stripe is unconfigured or
       // its catalogue unverified; a lapsed trial keeps access meanwhile.
       billingAvailable: Boolean(publishableKey) && isBillingActivationAllowed(),
-      storageAddonAvailable: Boolean(process.env.STORAGE_ADDON_PRICE_ID?.trim()),
+      // Offered only while the Stripe price matches the provider rate plus
+      // margin; the price and minimum quantity are shown before buying.
+      storageAddonAvailable: storageAddon !== null,
+      storageAddon,
       services: {
         entitled,
         addons: activeAddons,
@@ -698,6 +718,28 @@ router.post("/storage", requireAuth, requireRole("consultant", "client_admin"), 
       || unitAmount < 1
     ) {
       return res.status(503).json({ error: "Storage add-on price must be an active monthly price in the subscription currency" });
+    }
+
+    // Never charge a price that has drifted from the provider rate plus
+    // margin the customer was shown; pause purchases and alert instead.
+    const priceCheck = evaluateStorageAddonPrice(price as unknown as StoragePriceInput);
+    rememberStoragePriceCheck(priceCheck);
+    if (priceCheck.status !== "ok") {
+      req.log.error({ clientId, storagePriceCheck: priceCheck }, "Storage add-on purchase refused: price out of line with provider rate");
+      return res.status(503).json({
+        error: "Buying extra storage is paused while we update its price. You have not been charged.",
+        code: "STORAGE_PRICE_UNDER_REVIEW",
+      });
+    }
+    // The first month is one up-front charge, which Stripe refuses below its
+    // minimum (e.g. GBP 0.30), so smaller purchases are rejected explicitly.
+    const minimumGib = priceCheck.minimumPurchaseGib ?? 1;
+    if (parsed.data.gib < minimumGib) {
+      return res.status(400).json({
+        error: `The smallest storage purchase is ${minimumGib} GiB, because card payments below ${(priceCheck.stripeMinimumChargeMinorUnits! / 100).toFixed(2)} ${price.currency.toUpperCase()} can't be taken.`,
+        code: "STORAGE_PURCHASE_BELOW_MINIMUM",
+        minimumGib,
+      });
     }
 
     const existingItem = subscription.items.data.find(

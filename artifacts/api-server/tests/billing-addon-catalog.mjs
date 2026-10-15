@@ -194,6 +194,7 @@ const stubs = {
     export const hashDiscountCode = (value) => value;
     export const issueClientDiscountCode = async () => ({});
     export const normaliseAlpsDiscountCode = (value) => value;
+    export const redeemAlpsDiscountOnSubscription = async () => ({});
     export const releaseAlpsDiscountReservation = async () => {};
     export const reserveAlpsDiscount = async () => null;
     export const verifyClientDiscountCode = async () => false;
