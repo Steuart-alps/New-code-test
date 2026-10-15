@@ -5,10 +5,12 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./kitchen-temperature": "./src/kitchen-temperature.ts"
+    "./kitchen-temperature": "./src/kitchen-temperature.ts",
+    "./safe-track-reminder-schedule": "./src/safe-track-reminder-schedule.ts"
   },
   "scripts": {
-    "test:kitchen-temperature": "node tests/kitchen-temperature.mjs"
+    "test:kitchen-temperature": "node tests/kitchen-temperature.mjs",
+    "test:safe-track-reminder-schedule": "node tests/safe-track-reminder-schedule.mjs"
   },
   "dependencies": {
     "zod": "catalog:"

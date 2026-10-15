@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
-import { useGetSettings, useGetStorageUsage, type AppSettings } from "@workspace/api-client-react";
+import {
+  useGetSettings, useGetStorageUsage, type AppSettings,
+  nextSafeTrackReminder, parseSafeTrackReminderSettings, SAFE_TRACK_REMINDER_CHECK_MINUTES,
+} from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -17,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive, CalendarClock } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { clearModuleActivation, trackModuleActivation, trackServiceActionOutcome } from "@/lib/analytics";
@@ -1648,7 +1651,6 @@ function BillingCard() {
 
   useEffect(() => {
     fetchConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeClientId]);
 
   // Module picker for checkout, pre-selected with the modules chosen at signup.
@@ -2277,6 +2279,86 @@ const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
   { value: "UTC", label: "UTC" },
 ];
 
+function timezoneLabel(timeZone: string): string {
+  return TIMEZONE_OPTIONS.find((option) => option.value === timeZone)?.label ?? timeZone;
+}
+
+// ── SafeTrack reminder preview ───────────────────────────────────────────────
+// Runs the scheduler's own rules (shared with the API) on the form's current,
+// possibly unsaved, values. Informational only: the server decides each send.
+function SafeTrackReminderPreview({ frequency, time, timeZone, lastSentAt, unsaved }: {
+  frequency: string;
+  time: string;
+  timeZone: string;
+  lastSentAt: string | null;
+  unsaved: boolean;
+}) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const schedule = parseSafeTrackReminderSettings({
+    safeTrackReminderFrequency: frequency,
+    safeTrackReminderTime: time,
+    accountTimezone: timeZone,
+  });
+  const lastSent = lastSentAt && !Number.isNaN(Date.parse(lastSentAt)) ? new Date(lastSentAt) : null;
+  const next = useMemo(
+    () => nextSafeTrackReminder(now, schedule, lastSent),
+    [now, schedule.frequency, schedule.time, schedule.timeZone, lastSentAt],
+  );
+
+  const dayKey = (at: Date) => new Intl.DateTimeFormat("en-CA", {
+    timeZone: schedule.timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(at);
+  const describe = (at: Date) => {
+    const today = dayKey(now);
+    const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const day = dayKey(at) === today ? "Today"
+      : dayKey(at) === tomorrow ? "Tomorrow"
+      : new Intl.DateTimeFormat("en-GB", { timeZone: schedule.timeZone, weekday: "long", day: "numeric", month: "long" }).format(at);
+    const clock = new Intl.DateTimeFormat("en-GB", { timeZone: schedule.timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at);
+    return `${day} at ${clock}`;
+  };
+
+  return (
+    <div
+      className="rounded-md border border-primary/20 bg-background p-3 text-sm space-y-1.5"
+      role="status"
+      aria-live="polite"
+      data-testid="safetrack-reminder-preview"
+    >
+      <div className="flex items-start gap-2">
+        <CalendarClock className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+        <p>
+          <span className="font-medium">Next expected reminder: </span>
+          {next ? describe(next.at) : "Not scheduled"}
+          <span className="text-muted-foreground"> ({timezoneLabel(schedule.timeZone)})</span>
+        </p>
+      </div>
+      <div className="text-xs text-muted-foreground space-y-1 pl-6">
+        {next?.late && (
+          <p>
+            Today's delivery time has passed and no reminder has gone out yet, so it is due at the next check.
+          </p>
+        )}
+        {time !== schedule.time && <p>No valid time entered, so the default of {schedule.time} applies.</p>}
+        <p>
+          Times use the account timezone, set under General Preferences above.
+          {schedule.frequency === "weekly" ? " Weekly reminders go out on Mondays." : ""}
+        </p>
+        <p>
+          This is a guide, not a booking. A reminder is only sent if SafeTrack sign-offs are still outstanding then.
+          The server checks every {SAFE_TRACK_REMINDER_CHECK_MINUTES} minutes, so an email can arrive a few minutes after the time shown.
+        </p>
+        {lastSent && <p>Last reminder sent: {describe(lastSent)}.</p>}
+        {unsaved && <p className="text-amber-700 dark:text-amber-400">Previewing unsaved changes. Save settings to apply them.</p>}
+      </div>
+    </div>
+  );
+}
+
 // ── Photo requirement labels ─────────────────────────────────────────────────
 const PHOTO_ENTITY_LABELS: Record<string, string> = {
   fire_safety_check: "FireTrack — fire safety checks",
@@ -2665,7 +2747,7 @@ export default function SettingsPage() {
                 <div className="space-y-1.5 col-span-2">
                   <Label>Account Timezone</Label>
                   <p className="text-xs text-muted-foreground">
-                    Used for daily entry dates and the staff correction cutoff. Existing accounts default to UK time (Europe/London).
+                    Used for daily entry dates, the staff correction cutoff and SafeTrack reminder times. Existing accounts default to UK time (Europe/London).
                   </p>
                   <Select
                     value={formData.accountTimezone || "Europe/London"}
@@ -2735,6 +2817,17 @@ export default function SettingsPage() {
                     />
                   </div>
                 </div>
+                <SafeTrackReminderPreview
+                  frequency={formData.safeTrackReminderFrequency}
+                  time={formData.safeTrackReminderTime}
+                  timeZone={formData.accountTimezone || "Europe/London"}
+                  lastSentAt={(settings as any)?.safeTrackReminderLastSentAt ?? null}
+                  unsaved={
+                    formData.safeTrackReminderFrequency !== ((settings as any)?.safeTrackReminderFrequency || "daily")
+                    || formData.safeTrackReminderTime !== ((settings as any)?.safeTrackReminderTime || "08:50")
+                    || (formData.accountTimezone || "Europe/London") !== (settings?.accountTimezone || "Europe/London")
+                  }
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Admin / Owner Notification Email</Label>

@@ -18,6 +18,7 @@ import {
 import {
   SAFE_TRACK_REMINDER_FREQUENCY_SETTING,
   SAFE_TRACK_REMINDER_TIME_SETTING,
+  getSafeTrackReminderLastSentAt,
 } from "../lib/safeTrackAckReminders";
 import { REQUIRE_TWO_FACTOR_SETTING } from "../lib/twoFactorPolicy";
 import { isAllowedTenantSender, sanitizeSenderName } from "../lib/email";
@@ -96,6 +97,23 @@ function settingsResponse(
   }
   settings.resendApiKey = null;
   settings.resendApiKeySet = manager ? !!stored.get("resendApiKey")?.trim() : false;
+  return settings;
+}
+
+/**
+ * Adds when the last SafeTrack reminder went out (managers only, read-only)
+ * so Settings can preview the next one without offering a send the scheduler
+ * would skip as already done.
+ */
+async function settingsWithReminderStatus(
+  clientId: number,
+  rows: Array<{ key: string; value: string | null }>,
+  role: string,
+): Promise<Record<string, string | boolean | null>> {
+  const settings = settingsResponse(rows, role);
+  const manager = role === "client_admin" || role === "consultant";
+  const lastSent = manager ? await getSafeTrackReminderLastSentAt(clientId).catch(() => null) : null;
+  settings.safeTrackReminderLastSentAt = lastSent?.toISOString() ?? null;
   return settings;
 }
 
@@ -182,7 +200,7 @@ router.get("/settings", requireAuth, async (req, res) => {
     .from(appSettingsTable)
     .where(eq(appSettingsTable.clientId, clientId));
 
-  res.json(settingsResponse(rows, req.currentUser!.role));
+  res.json(await settingsWithReminderStatus(clientId, rows, req.currentUser!.role));
 });
 
 router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
@@ -355,7 +373,7 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     .from(appSettingsTable)
     .where(eq(appSettingsTable.clientId, clientId));
 
-  res.json(settingsResponse(rows, req.currentUser!.role));
+  res.json(await settingsWithReminderStatus(clientId, rows, req.currentUser!.role));
 });
 
 export default router;
