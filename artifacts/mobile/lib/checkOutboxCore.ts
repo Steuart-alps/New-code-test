@@ -1,7 +1,7 @@
 /**
  * Device outbox for check submissions other than KitchenTrack temperatures:
- * the AM/PM daily checklist and the fire, legionella, hot tub, PAT and
- * incident forms. Same contract as kitchenOutboxCore: the submission and a
+ * the AM/PM daily checklist and the fire, legionella, hot tub, PAT, incident
+ * and pool check forms. Same contract as kitchenOutboxCore: the submission and a
  * stable entry ID are written to device storage before the first HTTP
  * attempt, replays send the identical body, and the server recognises a
  * replay of an entry it already applied (clientEntryId), so automatic and
@@ -14,16 +14,17 @@
  */
 export interface CheckOwner { clientId: number; userId: number }
 export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
-export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident';
+export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident' | 'pool-check';
 
 /** Kinds whose entries are independent records (each gets its own scope). */
-export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident'];
+export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident', 'pool-check'];
 export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string> = {
   'fire-check': '/api/fire-safety',
   'legionella-check': '/api/legionella',
   'hot-tub-check': '/api/hot-tub',
   'pat-test': '/api/pat-track/tests',
   incident: '/api/incidents',
+  'pool-check': '/api/pool-track',
 };
 
 /** Query keys to refresh once an entry of this kind has been delivered. */
@@ -35,6 +36,7 @@ export function deliveredQueryKeys(kind: CheckKind): string[][] {
     case 'hot-tub-check': return [['hot-tub-status'], ['track-controls'], ['dashboard-summary']];
     case 'pat-test': return [['pat-tests'], ['pat-appliances'], ['dashboard-summary']];
     case 'incident': return [['incidents'], ['dashboard-summary']];
+    case 'pool-check': return [['pool-checks'], ['track-controls'], ['dashboard-summary']];
   }
 }
 export interface CheckEntry {
@@ -73,6 +75,7 @@ const PATHS: Record<CheckKind, RegExp> = {
   'hot-tub-check': /^\/api\/hot-tub$/,
   'pat-test': /^\/api\/pat-track\/tests$/,
   incident: /^\/api\/incidents$/,
+  'pool-check': /^\/api\/pool-track$/,
 };
 const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
 const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';

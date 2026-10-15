@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixtures.mjs';
 
-// Mobile outbox replays for fire, legionella, hot tub, PAT and incident
-// records (lib/clientEntryReplay.ts): a resend of an applied submission by
+// Mobile outbox replays for fire, legionella, hot tub, PAT, incident and pool
+// records, GreenTrack pre-use checks and swim sessions (lib/clientEntryReplay.ts): a resend of an applied submission by
 // the same user with the same payload returns the stored row (200) and
 // creates nothing; a changed payload, another user or a concurrent duplicate
 // never creates a second record. Records without an entry ID are unchanged.
@@ -20,6 +20,8 @@ try {
   const siteId = site.data.id;
   const appliance = await owner.request('POST', '/pat-track/appliances', { name: 'Kettle', siteId });
   assert.equal(appliance.status, 201, JSON.stringify(appliance.data));
+  const machine = await owner.request('POST', '/green-track/machines', { name: 'Ride-on mower', type: 'ride_on_rotary', siteId });
+  assert.equal(machine.status, 201, JSON.stringify(machine.data));
   const day = isoDay(-1);
 
   const cases = [
@@ -54,9 +56,30 @@ try {
       },
       changed: { description: 'Tripped on a step' },
     },
+    {
+      name: 'pool', path: '/pool-track', table: 'pool_checks',
+      body: { checkType: 'routine', checkDate: day, phLevel: 7.4, freeChlorine: 1.5, siteId },
+      changed: { phLevel: 7.8 },
+    },
+    {
+      name: 'GreenTrack', path: '/green-track/pre-use-checks', table: 'green_pre_use_checks',
+      body: {
+        machineId: machine.data.id, checkDate: day, operator: 'Operator',
+        checklistItems: [{ key: 'tyres', label: 'Tyres', section: 'General', status: 'ok' }],
+      },
+      changed: { notes: 'Different notes' },
+      // Photo receipts are single-use, so a resend may carry new ones.
+      photoReplay: true,
+    },
+    {
+      name: 'swim session', path: '/swim-track/sessions', table: 'swim_sessions',
+      body: { sessionDate: day, sessionType: 'public_swim', lifeguardName: 'Lifeguard', preSessionResult: 'pass', siteId },
+      changed: { notes: 'Different notes' },
+      photoReplay: true,
+    },
   ];
 
-  for (const { name, path, table, body, changed } of cases) {
+  for (const { name, path, table, body, changed, photoReplay } of cases) {
     const before = await count(table, owner.clientId);
     const actionsBefore = await count('compliance_actions', owner.clientId);
     const sent = { ...body, clientEntryId: entryId() };
@@ -71,6 +94,11 @@ try {
     // Key order is not part of the payload identity.
     const reordered = Object.fromEntries(Object.entries(sent).reverse());
     assert.equal((await owner.request('POST', path, reordered)).status, 200, `${name}: same payload in another key order`);
+    if (photoReplay) {
+      const resent = await owner.request('POST', path, { ...sent, photoUploadIds: [] });
+      assert.equal(resent.status, 200, `${name}: photo receipts are not part of the payload identity (${JSON.stringify(resent.data)})`);
+      assert.equal(resent.data.id, first.data.id);
+    }
 
     const conflict = await owner.request('POST', path, { ...sent, ...changed });
     assert.equal(conflict.status, 409, `${name}: an entry ID cannot hide a changed payload`);
@@ -111,5 +139,5 @@ try {
   assert.equal((await pool.query('SELECT client_entry_id FROM fire_safety_checks WHERE id = $1', [fire.data.id])).rows[0].client_entry_id,
     stored.client_entry_id, 'an edit keeps the original entry ID');
 
-  console.log('Fire, legionella, hot tub, PAT and incident mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
+  console.log('Fire, legionella, hot tub, PAT, incident, pool, GreenTrack and swim session mobile replays: idempotent per user and payload, concurrent-safe, per-client, web unaffected.');
 } finally { await pool.end(); }

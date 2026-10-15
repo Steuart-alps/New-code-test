@@ -5,6 +5,9 @@ import { getClientId, requireClientAdmin, requireAuth, denyViewers } from "../mi
 import { appSettingsTable } from "@workspace/db/schema";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/stagedPhotoReceipts";
+import {
+  findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, stagedPhotoEntry,
+} from "../lib/clientEntryReplay";
 
 const router = Router();
 
@@ -290,6 +293,8 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
 
     let parsedChecklist: Array<{ key: string; label: string; section: string; status: "ok" | "fail" | "na"; note?: string }> | null = null;
     if (checklistItems !== undefined) {
@@ -318,6 +323,10 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
     const performer = await resolveStaffRoster(clientId, operatorRosterId, operator);
     if (operatorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
+    const userId = req.currentUser!.id;
+    const prior = await findRawStoredEntry("green_pre_use_checks", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
+
     // The checklist is the source of truth. Never persist caller-supplied
     // aliases such as "advisory" as a newly recorded observation.
     const canonicalResult = parsedChecklist
@@ -335,14 +344,16 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
         INSERT INTO green_pre_use_checks (
            client_id, machine_id, check_date, operator, operator_roster_id,
           fluid_levels_ok, tyres_ok, blades_ok, guards_ok, controls_ok, lights_ok, cleanliness_ok,
-           defect_noted, result, notes, checklist_items, fuel_level, submitted_at
+           defect_noted, result, notes, checklist_items, fuel_level, submitted_at,
+           created_by, client_entry_id, client_entry_hash
         ) VALUES (
            ${clientId}, ${machineId}, ${checkDate}, ${performer?.performedBy ?? operator?.trim() ?? null}, ${performer?.staffRosterId ?? null},
           ${fluidLevelsOk ?? null}, ${tyresOk ?? null}, ${bladesOk ?? null},
           ${guardsOk ?? null}, ${controlsOk ?? null}, ${lightsOk ?? null}, ${cleanlinessOk ?? null},
            ${parsedChecklist?.some(item => item.status === "fail") ?? defectNoted ?? false},
            ${canonicalResult}, ${notes?.trim() ?? null}, ${parsedChecklist ? JSON.stringify(parsedChecklist) : null},
-           ${fuelLevel?.trim() ?? null}, now()
+           ${fuelLevel?.trim() ?? null}, now(),
+           ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
         )
         RETURNING *
       `);
@@ -351,6 +362,12 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
+    // A concurrent resend of the same device entry won the insert.
+    const entry = stagedPhotoEntry(req.body);
+    if (entry && entry !== "invalid" && isUniqueViolation(err)) {
+      const raced = await findRawStoredEntry("green_pre_use_checks", getClientId(req)!, entry);
+      if (raced) return respondToRawStoredEntry(res, raced, req.currentUser!.id, entry);
+    }
     res.status(500).json({ error: "Failed to create pre-use check" });
   }
 });
