@@ -4644,6 +4644,8 @@ async function migratePremisesTrack() {
   `);
   await db.execute(sql`ALTER TABLE "premises_inspections" ADD COLUMN IF NOT EXISTS "next_inspection_date" date`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_premises_inspections_client" ON "premises_inspections" ("client_id", "inspection_date")`);
+  // Mobile outbox replays (lib/clientEntryReplay.ts). Schema: lib/db premises-track.
+  await addClientEntryReplayColumns("premises_inspections");
 }
 
 async function migrateRoomTrack() {

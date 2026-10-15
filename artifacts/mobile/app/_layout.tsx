@@ -132,6 +132,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/premises"
+        options={{
+          title: 'PremisesTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="account/delete"
         options={{
           title: 'Delete my account',

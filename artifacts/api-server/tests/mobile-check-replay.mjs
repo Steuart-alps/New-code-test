@@ -77,6 +77,14 @@ try {
       changed: { notes: 'Different notes' },
       photoReplay: true,
     },
+    {
+      name: 'premises inspection', path: '/premises-track', table: 'premises_inspections',
+      body: {
+        inspectionDate: day, inspectionType: 'hazard', area: 'Stairwell', findings: 'Loose stair nosing',
+        hazardDetails: 'Trip hazard', actionRequired: 'Refix the nosing', status: 'open', inspectedBy: 'Inspector', siteId,
+      },
+      changed: { findings: 'Different findings' },
+    },
   ];
 
   for (const { name, path, table, body, changed, photoReplay } of cases) {

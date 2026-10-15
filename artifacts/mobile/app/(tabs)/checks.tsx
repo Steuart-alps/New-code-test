@@ -122,6 +122,14 @@ const MODULES: CheckModule[] = [
     checks: ['Pool water quality', 'pH & chlorine', 'Swim sessions', 'Bather records'],
   },
   {
+    id: 'premises',
+    label: 'PremisesTrack',
+    subtitle: 'Premises inspections',
+    icon: 'home',
+    iconColor: '#64748b',
+    checks: ['Pick site', 'Findings & hazards', 'Action required / taken', 'Next inspection due'],
+  },
+  {
     id: 'safe-track',
     label: 'SafeTrack',
     subtitle: 'Risk assessments & safety documents',
@@ -143,6 +151,7 @@ export default function ChecksScreen() {
       (mod.id !== 'incident' || hasService('incidenttrack')) &&
       (mod.id !== 'pat' || hasService('pattrack')) &&
       (mod.id !== 'green' || hasService('greentrack')) &&
+      (mod.id !== 'premises' || hasService('premisestrack')) &&
       (mod.id !== 'aqua' || aquaAccess.any),
   );
 

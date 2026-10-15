@@ -190,4 +190,45 @@ assert.deepEqual(deliveredQueryKeys('daily-checklist'), [['daily-checklist'], ['
 assert.equal(RECORD_PATHS['pool-check'], '/api/pool-track');
 assert.deepEqual(deliveredQueryKeys('pool-check'), [['pool-checks'], ['track-controls'], ['dashboard-summary']]);
 
+// PremisesTrack inspections: saved offline, resent unchanged under one entry
+// ID, and only the create path is accepted.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  const records = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      return { id: 21, status: 'open' };
+    },
+    async onSent() {},
+  });
+  await records.activate(A, 'token-A');
+  assert.ok(RECORD_KINDS.includes('premises-inspection'));
+  assert.equal(RECORD_PATHS['premises-inspection'], '/api/premises-track');
+  const premises = (entryId, path = RECORD_PATHS['premises-inspection']) => ({
+    entryId, kind: 'premises-inspection', path, scopeKey: `premises-inspection:${entryId}`, label: 'Premises inspection',
+    body: { inspectionDate: '2026-10-12', inspectionType: 'hazard', area: 'Stairwell', findings: 'Loose nosing', status: 'open', siteId: 7 },
+  });
+  await records.enqueue(premises('premises-entry-0001'));
+  await records.replay();
+  assert.deepEqual(records.getSnapshot().entries.map((entry) => entry.state), ['queued'], 'saved on the device while offline');
+  await assert.rejects(records.enqueue(premises('premises-entry-0002', '/api/premises-track/5')), /cannot be saved/);
+  await assert.rejects(records.enqueue(premises('premises-entry-0003', '/api/premises-track/summary')), /cannot be saved/);
+  online = true;
+  await records.replay();
+  assert.deepEqual(records.getSnapshot().entries.map((entry) => entry.state), ['sent']);
+  assert.ok(sent.length >= 2, 'offline attempt then automatic resend');
+  for (const attempt of sent) {
+    assert.equal(attempt.path, '/api/premises-track');
+    assert.deepEqual(attempt.body, { ...premises('premises-entry-0001').body, clientEntryId: 'premises-entry-0001' },
+      'every resend is identical, with the same entry ID');
+  }
+  assert.deepEqual(records.takeResponse('premises-entry-0001'), { id: 21, status: 'open' });
+  records.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('premises-inspection'), [['premises-inspections'], ['dashboard-summary']]);
+
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');
