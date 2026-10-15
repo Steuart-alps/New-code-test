@@ -207,8 +207,8 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/pat-track\/failures\/\d+$/, table: "pat_failures", date: "created_at",
     department: siteDepartment(`(SELECT certificate.site_id FROM "pat_certificates" AS certificate
       WHERE certificate.id = record.certificate_id AND certificate.client_id = record.client_id)`) },
-  { path: /^\/pest-track\/visits\/\d+$/, table: "pest_visits", date: "visit_date" },
-  { path: /^\/pest-track\/activity\/\d+$/, table: "pest_activity", date: "recorded_date" },
+  { path: /^\/pest-track\/visits\/\d+$/, table: "pest_visits", date: "visit_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/pest-track\/activity\/\d+$/, table: "pest_activity", date: "recorded_date", department: RECORD_SITE_DEPARTMENT },
   { path: /^\/safe-track\/training-records\/\d+$/, table: "safe_training_records", date: "completed_at", department: RECORD_SITE_DEPARTMENT },
   { path: /^\/safe-track\/inductions\/\d+$/, table: "safe_inductions", date: "start_date", department: RECORD_SITE_DEPARTMENT },
   { path: /^\/safe-track\/competency\/\d+$/, table: "safe_competency_signoffs", date: "signed_off_at", department: RECORD_SITE_DEPARTMENT },

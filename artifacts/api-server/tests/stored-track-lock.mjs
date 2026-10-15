@@ -1145,6 +1145,14 @@ async function main() {
     body: withSite({ checkType: "visual_assessment", checkDate: old, result: "pass", treeRef: "LOCK-DEPT", inspector: "Lock Fixture" }),
   });
   await departmentDelete({
+    label: "Dept PestTrack visit", createPath: "/pest-track/visits", adminDelete: [200, 204],
+    body: withSite({ visitDate: old, contractorName: "Lock Pest Control", findings: "none" }),
+  });
+  await departmentDelete({
+    label: "Dept PestTrack activity", createPath: "/pest-track/activity", adminDelete: [200, 204],
+    body: withSite({ recordedDate: old, pestType: "rodent", evidenceType: "droppings" }),
+  });
+  await departmentDelete({
     // Incidents keep their RIDDOR trail, so even an admin DELETE is refused.
     label: "Dept Incident", createPath: "/incidents", adminDelete: [409],
     body: withSite({ incidentDate: old, location: "Lock room", description: "Lock fixture incident", involvedName: "Lock Fixture", reportedBy: "Lock Fixture", riddorRationale: "Lock fixture: not reportable" }),
@@ -1372,6 +1380,33 @@ async function main() {
         await scopedStaff("PUT", `/pat-track/replacements/${replacementId}`, moveReplacement(betaRoom)), [403]);
       check("PAT replacement move: keeps its room",
         Number(sqlRun(`SELECT room_id FROM pat_replacements WHERE id=${replacementId}`).split("\n")[0]) === alphaRoom);
+    }
+  }
+  // PestTrack is department-scoped like the other tracks: lists, the status
+  // card and writes (the phone app uses the same routes).
+  const pestVisit = (siteId) => ({ visitDate: today, contractorName: "Lock Pest Control", findings: "none", siteId });
+  const pestActivity = (siteId) => ({ recordedDate: today, pestType: "rodent", evidenceType: "droppings", siteId });
+  await siteMove({ label: "PestTrack visit", createPath: "/pest-track/visits", create: pestVisit, move: pestVisit });
+  await siteMove({ label: "PestTrack activity", createPath: "/pest-track/activity", create: pestActivity, move: pestActivity });
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    for (const [label, path, body] of [["visit", "/pest-track/visits", pestVisit], ["activity", "/pest-track/activity", pestActivity]]) {
+      const alphaRecord = await admin("POST", path, body(alphaSite.data.id));
+      const betaRecord = await admin("POST", path, body(betaSite.data.id));
+      const neutralRecord = await admin("POST", path, body(null));
+      expect(`PestTrack ${label}: seed department and site-neutral records`,
+        { status: Math.max(alphaRecord.status, betaRecord.status, neutralRecord.status) }, [201]);
+      const listed = await scopedStaff("GET", path);
+      expect(`PestTrack ${label}: department staff can list`, listed, [200]);
+      const ids = new Set(rowsOf(listed.data).map(idOf));
+      check(`PestTrack ${label}: list shows own department and site-neutral records only`,
+        ids.has(alphaRecord.data?.id) && ids.has(neutralRecord.data?.id) && !ids.has(betaRecord.data?.id),
+        JSON.stringify([...ids]));
+      expect(`PestTrack ${label}: department staff cannot record at another department's site`,
+        await scopedStaff("POST", path, body(betaSite.data.id)), [403]);
+      expect(`PestTrack ${label}: department staff can record at their own site`,
+        await scopedStaff("POST", path, body(alphaSite.data.id)), [201]);
+      expect(`PestTrack ${label}: admin still sees other departments`,
+        { status: rowsOf((await admin("GET", path)).data).some((row) => idOf(row) === betaRecord.data?.id) ? 200 : 0 }, [200]);
     }
   }
   await siteMove({ label: "FixTrack issue", createPath: "/fix-track/issues",
