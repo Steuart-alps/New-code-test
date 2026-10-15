@@ -2,6 +2,7 @@
   "routes/admin.ts": [
     "GET /api/admin/data-deletion-requests",
     "GET /api/admin/service-price-preflight",
+    "GET /api/admin/storage-price-check",
     "GET /api/data-deletion/request",
     "PATCH /api/admin/data-deletion-requests/:id/review",
     "POST /api/admin/ensure-service-prices",
@@ -65,6 +66,7 @@
     "GET /api/billing/invoices",
     "GET /api/billing/modules",
     "GET /api/billing/plans",
+    "GET /api/billing/storage",
     "POST /api/billing/checkout",
     "POST /api/billing/discount-code",
     "POST /api/billing/discount-code/redeem",
@@ -72,7 +74,8 @@
     "POST /api/billing/portal",
     "POST /api/billing/refresh-access",
     "POST /api/billing/services",
-    "POST /api/billing/storage"
+    "POST /api/billing/storage",
+    "POST /api/billing/storage/reduce"
   ],
   "routes/calendar.ts": [
     "GET /api/calendar"
@@ -99,6 +102,7 @@
     "GET /api/compliance-hub/profile",
     "PATCH /api/compliance-hub/actions/:id",
     "POST /api/compliance-hub/actions",
+    "POST /api/compliance-hub/actions/:id/fix-track",
     "PUT /api/compliance-hub/profile"
   ],
   "routes/consultant-portfolio.ts": [
@@ -200,6 +204,7 @@
   "routes/fix-track.ts": [
     "DELETE /api/fix-track/issues/:id",
     "GET /api/fix-track/alert-settings",
+    "GET /api/fix-track/calendar-cancellations",
     "GET /api/fix-track/contractor-email-queue",
     "GET /api/fix-track/contractor-email-queue/count",
     "GET /api/fix-track/contractors/suggest",
@@ -276,8 +281,10 @@
     "GET /api/incidents",
     "GET /api/incidents/:id/actions",
     "GET /api/incidents/:id/riddor-history",
+    "GET /api/incidents/:id/riddor-history/:eventId/receipt",
     "GET /api/incidents/summary",
     "POST /api/incidents",
+    "POST /api/incidents/riddor-receipts/request-upload",
     "PUT /api/incidents/:id"
   ],
   "routes/inspection-pack.ts": [
@@ -540,6 +547,11 @@
     "POST /api/track-evidence",
     "POST /api/track-evidence/:id/review"
   ],
+  "routes/track-owners.ts": [
+    "DELETE /api/track-owners/:id",
+    "GET /api/track-owners",
+    "PUT /api/track-owners"
+  ],
   "routes/train-track.ts": [
     "DELETE /api/train-track/records/:id",
     "GET /api/train-track/records",
@@ -553,12 +565,18 @@
     "POST /api/tree-track",
     "PUT /api/tree-track/:id"
   ],
+  "routes/user-notifications.ts": [
+    "GET /api/notifications",
+    "POST /api/notifications/:id/read",
+    "POST /api/notifications/read-all"
+  ],
   "routes/users.ts": [
     "DELETE /api/users/:id",
     "GET /api/users",
     "POST /api/users",
     "POST /api/users/:id/resend-invite",
     "POST /api/users/:id/reset-2fa",
+    "POST /api/users/:id/revoke-invite",
     "PUT /api/users/:id"
   ],
   "routes/w3w.ts": [
