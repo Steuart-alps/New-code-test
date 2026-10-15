@@ -1191,6 +1191,74 @@ async function main() {
     });
   }
 
+  // Another department's record id must answer exactly like an id that does
+  // not exist, so department-scoped staff cannot probe for records. Nothing
+  // foreign changes, and client admins still reach every record.
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    const missingId = 2_000_000_000;
+    const sameAsMissing = async (label, method, path, body, readBack) => {
+      const foreign = await scopedStaff(method, path(readBack.id), body);
+      const missing = await scopedStaff(method, path(missingId), body);
+      check(`${label}: other-department id is refused`, [403, 404].includes(foreign.status),
+        `${foreign.status} ${JSON.stringify(foreign.data)}`);
+      check(`${label}: other-department id answers like a missing id`,
+        foreign.status === missing.status && JSON.stringify(foreign.data) === JSON.stringify(missing.data),
+        `foreign ${foreign.status} ${JSON.stringify(foreign.data)} / missing ${missing.status} ${JSON.stringify(missing.data)}`);
+      const stored = await readBack.read();
+      check(`${label}: other-department record unchanged`,
+        Boolean(stored) && !JSON.stringify(stored).includes(bypassMarker), JSON.stringify(stored));
+    };
+
+    const betaTrain = await admin("POST", "/train-track/records", {
+      recordType: "internal", staffName: "Lock Fixture", trainingType: "Safety", trainer: "Admin",
+      completedDate: today, siteId: betaSite.data.id,
+    });
+    expect("Foreign TrainTrack: seed current record", betaTrain, [201]);
+    if (betaTrain.status === 201) {
+      const readTrain = async () => (await admin("GET", "/train-track/records")).data?.find?.((row) => row.id === betaTrain.data.id);
+      const trainPath = (id) => `/train-track/records/${id}`;
+      await sameAsMissing("Foreign TrainTrack PATCH", "PATCH", trainPath, { notes: bypassMarker },
+        { id: betaTrain.data.id, read: readTrain });
+      await sameAsMissing("Foreign TrainTrack DELETE", "DELETE", trainPath, undefined,
+        { id: betaTrain.data.id, read: readTrain });
+      expect("Foreign TrainTrack: admin PATCH still works",
+        await admin("PATCH", trainPath(betaTrain.data.id), { notes: "admin edit" }), [200]);
+    }
+
+    const betaAction = await admin("POST", "/track-actions", {
+      module: "fire", title: `Foreign action ${suffix}`, severity: "monitor", siteId: betaSite.data.id,
+    });
+    expect("Foreign TrackAction: seed action", betaAction, [201]);
+    if (betaAction.status === 201) {
+      const readAction = async () => (await admin("GET", "/track-actions?module=fire")).data?.find?.((row) => row.id === betaAction.data.id);
+      await sameAsMissing("Foreign TrackAction PATCH", "PATCH", (id) => `/track-actions/${id}`,
+        { ownerName: bypassMarker }, { id: betaAction.data.id, read: readAction });
+      await sameAsMissing("Foreign TrackAction FixTrack decision", "POST", (id) => `/track-actions/${id}/fix-track`,
+        { create: false }, { id: betaAction.data.id, read: readAction });
+      const afterDecision = await readAction();
+      check("Foreign TrackAction: FixTrack decision not recorded",
+        (afterDecision?.fixTrackDisposition ?? afterDecision?.fix_track_disposition) !== "not_needed",
+        JSON.stringify(afterDecision));
+      expect("Foreign TrackAction: admin PATCH still works",
+        await admin("PATCH", `/track-actions/${betaAction.data.id}`, { ownerName: "Admin owner" }), [200]);
+    }
+
+    // DocTrack uploads need object storage, so the document row is seeded
+    // directly; every request below still goes through the API.
+    const betaDocId = Number(sqlRun(`INSERT INTO doc_track_documents (client_id, site_id, title, category)
+      VALUES (${Number(clientId)}, ${Number(betaSite.data.id)}, 'Foreign lock document', 'policy') RETURNING id`).split("\n")[0]);
+    check("Foreign DocTrack: seed document", Number.isInteger(betaDocId) && betaDocId > 0);
+    if (Number.isInteger(betaDocId) && betaDocId > 0) {
+      const readDoc = async () => (await admin("GET", "/doc-track/documents")).data?.find?.((row) => row.id === betaDocId);
+      const docPath = (id) => `/doc-track/documents/${id}`;
+      await sameAsMissing("Foreign DocTrack PATCH", "PATCH", docPath, { description: bypassMarker },
+        { id: betaDocId, read: readDoc });
+      await sameAsMissing("Foreign DocTrack DELETE", "DELETE", docPath, undefined, { id: betaDocId, read: readDoc });
+      expect("Foreign DocTrack: admin PATCH still works",
+        await admin("PATCH", docPath(betaDocId), { description: "admin edit" }), [200]);
+    }
+  }
+
   // A different tenant must not be able to reach a mapped record. Use a real
   // foreign staff session so this also exercises the staff lock path's
   // client-scoped lookup rather than relying only on an admin 404.
@@ -1219,8 +1287,17 @@ async function main() {
     const foreignAttempt = await foreignStaff("PUT", `/pat-track/tests/${tenantProbeId}`, {
       applianceId: 1, testDate: today, result: "pass",
     });
+    // Staff get one answer for any record they cannot reach (403 on
+    // department-scoped tracks), so another tenant's id looks like a missing one.
+    const missingAttempt = await foreignStaff("PUT", "/pat-track/tests/2000000000", {
+      applianceId: 1, testDate: today, result: "pass",
+    });
     check("foreign tenant cannot mutate mapped record",
-      foreignAttempt.status === 404, `${foreignAttempt.status} ${JSON.stringify(foreignAttempt.data)}`);
+      [403, 404].includes(foreignAttempt.status), `${foreignAttempt.status} ${JSON.stringify(foreignAttempt.data)}`);
+    check("foreign tenant id answers like a missing id",
+      foreignAttempt.status === missingAttempt.status
+        && JSON.stringify(foreignAttempt.data) === JSON.stringify(missingAttempt.data),
+      `${foreignAttempt.status} ${JSON.stringify(foreignAttempt.data)} / ${missingAttempt.status} ${JSON.stringify(missingAttempt.data)}`);
   }
 
   console.log(`stored-track-lock: ${passed} passed, ${failures.length} failed`);

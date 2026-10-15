@@ -303,8 +303,10 @@ async function findStoredEntryDate(
     entry_date?: string | Date | null;
     record_department_id?: number | null;
   } | undefined;
-  if (!row) return "missing";
   const departmentId = getActiveDepartmentId(req);
+  // Department-scoped staff get the same answer for another department's
+  // record and for one that does not exist, so ids reveal nothing.
+  if (!row) return lookup.department && departmentId !== null ? "forbidden" : "missing";
   if (lookup.department && departmentId !== null
     && row.record_department_id != null && row.record_department_id !== departmentId) {
     return "forbidden";
