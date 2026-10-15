@@ -53,6 +53,7 @@ const DailyTrackPmPage = lazy(() => import("@/pages/daily-track-pm"));
 const DailyTrackStatusPage = lazy(() => import("@/pages/daily-track-status"));
 const StaffRosterPage = lazy(() => import("@/pages/staff-roster"));
 const SignOffPage = lazy(() => import("@/pages/sign-off"));
+const PrivacyRequestPage = lazy(() => import("@/pages/privacy-request"));
 const ContractorPortalPage = lazy(() => import("@/pages/contractor-portal"));
 const ContractorApprovalsPage = lazy(() => import("@/pages/contractor-approvals"));
 const ContractorQuotePage = lazy(() => import("@/pages/contractor-quote"));
@@ -148,6 +149,7 @@ function ProtectedRoutes() {
   if (location.startsWith("/verify-email")) return <VerifyEmailPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
+  if (location.startsWith("/privacy-request/")) return <PrivacyRequestPage />;
   if (location.startsWith("/contractor-portal/")) return <Route path="/contractor-portal/:token" component={ContractorPortalPage} />;
   if (location.startsWith("/contractor-quote/")) return <ContractorQuotePage />;
   if (location === "/kiosk") return <KioskPage />;

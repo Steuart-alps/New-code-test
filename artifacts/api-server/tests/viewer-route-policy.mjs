@@ -23,6 +23,10 @@ function routeException(file, method, path) {
   if (name === "fix-track-public.ts" || name === "contractor-portal.ts" || name === "sign-off.ts") {
     return "public token portal";
   }
+  // privacyIntakePublicRouter, mounted at /privacy-intake.
+  if (name === "privacy-intake-public.ts" && method === "POST" && path === "/:token") {
+    return "public privacy-request form token";
+  }
   // notificationsPublicRouter, mounted at /notifications/public/schedule.
   if (name === "notifications.ts" && method === "POST" && path === "/:token") {
     return "public scheduling token";

@@ -52,6 +52,7 @@ import reportsRouter from "./reports";
 import inspectionPackRouter from "./inspection-pack";
 import calendarRouter from "./calendar";
 import privacyGovernanceRouter from "./privacy-governance";
+import privacyIntakePublicRouter from "./privacy-intake-public";
 import dashboardSummaryRouter from "./dashboard-summary";
 import complianceHubRouter from "./compliance-hub";
 import trackActionsRouter from "./track-actions";
@@ -93,6 +94,8 @@ router.use("/fix-track/quotes/public", publicLinkRateLimit, publicLinkTokenRateL
 router.use("/notifications/public/schedule", publicLinkRateLimit, publicLinkTokenRateLimit, notificationsPublicRouter);
 // Staff document sign-off link (token-protected).
 router.use("/sign-off", publicLinkRateLimit, publicLinkTokenRateLimit, signOffRouter);
+// Public privacy rights-request form (token-protected).
+router.use("/privacy-intake", publicLinkRateLimit, publicLinkTokenRateLimit, privacyIntakePublicRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);

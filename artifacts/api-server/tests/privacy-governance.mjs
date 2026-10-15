@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -85,6 +85,161 @@ function addCalendarMonth(date) {
 
 function exportEntry(zipPath, entryName) {
   return execFileSync("unzip", ["-p", zipPath, entryName], { encoding: "utf8" });
+}
+
+// Public form calls carry no session cookie, exactly like a member of the public.
+async function publicCall(method, path, body) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => null);
+  return { status: response.status, data, response };
+}
+
+async function capturedEmails() {
+  const path = process.env.TEST_EMAIL_CAPTURE_PATH;
+  if (!path) return null;
+  const raw = await readFile(path, "utf8").catch(() => "");
+  return raw.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+async function checkOnlineIntake({ managerA, managerB, viewer, staff, stamp, profile }) {
+  const a = `?clientId=${managerA.clientId}`;
+  expectStatus("viewer cannot publish the online form", await viewer("POST", `/privacy-governance/intake-link${a}`), 403);
+  expectStatus("staff cannot publish the online form", await staff("POST", `/privacy-governance/intake-link${a}`), 403);
+  expectStatus("anonymous caller cannot publish the online form", await makeSession()("POST", "/privacy-governance/intake-link"), 401);
+
+  const before = await managerA.session("GET", `/privacy-governance${a}`);
+  check("online form starts off", before.data?.program?.intakeEnabled === false, JSON.stringify(before.data?.program?.intakeEnabled));
+  check("administrators list includes the manager", before.data?.privacyAdministrators?.some((admin) => admin.id === managerA.user.id));
+
+  const published = await managerA.session("POST", `/privacy-governance/intake-link${a}`);
+  expectStatus("manager publishes the online form", published, 201);
+  const url = published.data?.url ?? "";
+  const token = url.split("/privacy-request/")[1] ?? "";
+  check("form link has a 43-character random token", /^[A-Za-z0-9_-]{43}$/.test(token), url);
+  check("form link does not contain the tenant id", !url.includes(`clientId`) && !new RegExp(`/${managerA.clientId}(/|$)`).test(url), url);
+  check("publish response does not expose the stored digest", !JSON.stringify(published.data).includes("intakeTokenHash"));
+  check("publish response marks the form live", published.data?.program?.intakeEnabled === true);
+
+  const after = await managerA.session("GET", `/privacy-governance${a}`);
+  check("privacy records never include the link or digest", !JSON.stringify(after.data).includes(token) && !JSON.stringify(after.data).includes("intakeTokenHash"));
+
+  const form = await publicCall("GET", `/privacy-intake/${token}`);
+  expectStatus("public form opens without signing in", form, 200);
+  check("public form names the controller", form.data?.organisationName === profile.controllerName, form.data?.organisationName);
+  check("public form links the privacy notice", form.data?.privacyNoticeUrl === profile.noticeUrl);
+  check("public form does not reveal the tenant id", !JSON.stringify(form.data).includes("clientId"));
+  expectStatus("unknown form link is not found", await publicCall("GET", `/privacy-intake/${"x".repeat(43)}`), 404);
+  expectStatus("malformed form link is not found", await publicCall("GET", "/privacy-intake/abc"), 404);
+
+  expectStatus("assignee must administer this business", await managerA.session("PUT", `/privacy-governance/intake-assignee${a}`, { assigneeId: managerB.user.id }), 400);
+  const assigned = await managerA.session("PUT", `/privacy-governance/intake-assignee${a}`, { assigneeId: managerA.user.id });
+  expectStatus("manager assigns online requests", assigned, 200);
+  check("assignee is saved", assigned.data?.intakeAssigneeId === managerA.user.id);
+
+  // Submission 1 of the five the per-IP limiter allows each hour.
+  const subject = `ONLINE-SUBJECT-${stamp}`;
+  const subjectEmail = `online-${stamp}@example.test`;
+  const details = `ONLINE-DETAILS-${stamp}: please send me a copy of my records`;
+  const submitted = await publicCall("POST", `/privacy-intake/${token}`, {
+    requestType: "access",
+    name: subject,
+    email: subjectEmail,
+    details,
+    // A client id in the body is ignored: the link decides the business.
+    clientId: managerB.clientId,
+  });
+  expectStatus("public submission is accepted", submitted, 201);
+  const reference = submitted.data?.reference;
+  check("requester gets a reference", /^PR-[2-9A-HJ-NP-Z]{8}$/.test(reference ?? ""), reference);
+  check("receipt does not expose internal ids", submitted.data && !("id" in submitted.data) && !("clientId" in submitted.data));
+
+  const records = await managerA.session("GET", `/privacy-governance${a}`);
+  const online = records.data?.rightsRequests?.find((row) => row.publicReference === reference);
+  check("online request reaches the business's Privacy Centre", Boolean(online));
+  check("online request is marked as from the form", online?.source === "public_intake");
+  check("online request starts unverified", online?.identityStatus === "not_started" && online?.status === "received");
+  check("online request has no staff author", online?.createdBy === null);
+  check("online request is assigned to the chosen administrator", online?.assignedTo === managerA.user.id);
+  check("online request keeps the requester's details", online?.subjectName === subject && online?.subjectContact === subjectEmail && online?.scopeDescription === details);
+  check(
+    "receipt time starts the one-month deadline",
+    online && online.dueAt === addCalendarMonth(new Date(online.receivedAt)).toISOString(),
+    `${online?.receivedAt} -> ${online?.dueAt}`,
+  );
+  check("receipt time is the server's", online && Math.abs(Date.parse(online.receivedAt) - Date.now()) < 5 * 60_000);
+  const other = await managerB.session("GET", `/privacy-governance?clientId=${managerB.clientId}`);
+  check("online request is not visible to another business", !JSON.stringify(other.data).includes(subject));
+
+  const audit = await managerA.session("GET", `/audit-events${a}&entityType=privacy_rights_request&entityId=${online?.id}`);
+  expectStatus("manager reads the request's audit trail", audit, 200);
+  const created = audit.data?.find?.((row) => row.action === "created");
+  check("online request creation is audited", created?.metadata?.source === "public_intake" && created?.actorId === null);
+  check("audit metadata leaves out subject details", !JSON.stringify(audit.data).includes(subject) && !JSON.stringify(audit.data).includes(subjectEmail) && !JSON.stringify(audit.data).includes("ONLINE-DETAILS"));
+
+  const emails = await capturedEmails();
+  if (emails) {
+    // Delivery runs after the response; give it a moment.
+    let matching = [];
+    for (let i = 0; i < 20 && matching.length === 0; i++) {
+      matching = ((await capturedEmails()) ?? []).filter((email) => email.subject?.includes(reference));
+      if (!matching.length) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    check("assigned administrator is emailed", matching.length === 1 && matching[0].to === managerA.email, JSON.stringify(matching.map((email) => email.to)));
+    const body = JSON.stringify(matching);
+    check("notification leaves out subject details", !body.includes(subject) && !body.includes(subjectEmail) && !body.includes("ONLINE-DETAILS"));
+    const notified = await managerA.session("GET", `/privacy-governance${a}`);
+    check("notification time is recorded", Boolean(notified.data?.rightsRequests?.find((row) => row.publicReference === reference)?.adminNotifiedAt));
+  } else {
+    console.log("(email capture not configured; skipping notification checks)");
+  }
+
+  // Submission 2: invalid bodies are refused.
+  expectStatus("submission needs an email address", await publicCall("POST", `/privacy-intake/${token}`, {
+    requestType: "access", name: "No email", email: "", details: "x",
+  }), 400);
+
+  const rotated = await managerA.session("POST", `/privacy-governance/intake-link${a}`);
+  expectStatus("manager replaces the form link", rotated, 201);
+  const newToken = (rotated.data?.url ?? "").split("/privacy-request/")[1] ?? "";
+  check("replacement link differs", newToken.length === 43 && newToken !== token);
+  expectStatus("old link stops working", await publicCall("GET", `/privacy-intake/${token}`), 404);
+  expectStatus("new link works", await publicCall("GET", `/privacy-intake/${newToken}`), 200);
+
+  expectStatus("manager turns the form off", await managerA.session("DELETE", `/privacy-governance/intake-link${a}`), 200);
+  expectStatus("form link stops working when off", await publicCall("GET", `/privacy-intake/${newToken}`), 404);
+  // Submission 3.
+  expectStatus("submissions are refused when off", await publicCall("POST", `/privacy-intake/${newToken}`, {
+    requestType: "erasure", name: "Late", email: "late@example.test", details: "x",
+  }), 404);
+
+  const trail = await managerA.session("GET", `/audit-events${a}&entityType=privacy_program`);
+  const actions = (trail.data ?? []).map((row) => row.action);
+  check("link changes are audited", ["intake_link_published", "intake_link_rotated", "intake_link_disabled"].every((action) => actions.includes(action)), actions.join(","));
+  check("audit trail never holds the link", !JSON.stringify(trail.data).includes(token) && !JSON.stringify(trail.data).includes(newToken));
+
+  const republished = await managerA.session("POST", `/privacy-governance/intake-link${a}`);
+  const liveToken = (republished.data?.url ?? "").split("/privacy-request/")[1] ?? "";
+  const countBefore = (await managerA.session("GET", `/privacy-governance${a}`)).data?.rightsRequests?.length;
+  // Submission 4: the spam trap looks successful but stores nothing.
+  const trapped = await publicCall("POST", `/privacy-intake/${liveToken}`, {
+    requestType: "access", name: "Bot", email: "bot@example.test", details: "spam", website: "https://spam.example",
+  });
+  expectStatus("spam-trap submission looks accepted", trapped, 201);
+  const countAfter = (await managerA.session("GET", `/privacy-governance${a}`)).data?.rightsRequests?.length;
+  check("spam-trap submission stores nothing", countBefore === countAfter, `${countBefore} -> ${countAfter}`);
+  // Submission 5 is allowed; the sixth from this IP within the hour is not.
+  expectStatus("fifth submission in the hour is accepted", await publicCall("POST", `/privacy-intake/${liveToken}`, {
+    requestType: "objection", name: `Fifth ${stamp}`, email: `fifth-${stamp}@example.test`, details: "Please stop marketing to me",
+  }), 201);
+  const limited = await publicCall("POST", `/privacy-intake/${liveToken}`, {
+    requestType: "objection", name: `Sixth ${stamp}`, email: `sixth-${stamp}@example.test`, details: "Over the limit",
+  });
+  expectStatus("submissions are rate-limited per source", limited, 429);
+  check("rate limit says when to retry", Number(limited.response.headers.get("retry-after")) > 0);
 }
 
 async function main() {
@@ -313,6 +468,8 @@ async function main() {
   });
   expectStatus("create breach assessment", breach, 201);
   check("breach timer is 72 hours from discovery", breach.data?.authorityNotificationDueAt === "2024-01-04T08:15:00.000Z", `got ${breach.data?.authorityNotificationDueAt}`);
+
+  await checkOnlineIntake({ managerA, managerB, viewer, staff, stamp, profile });
 
   const tempDir = await mkdtemp(join(tmpdir(), "privacy-governance-"));
   try {

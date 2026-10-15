@@ -11,6 +11,10 @@ export type PrivacyProgram = PrivacyProgramInput & ({
   id: number;
   clientId: number;
   updatedBy: number | null;
+  intakeEnabled: boolean;
+  intakePublishedAt: Date | null;
+  intakePublishedBy: number | null;
+  intakeAssigneeId: number | null;
   createdAt: Date;
   updatedAt: Date;
 });
