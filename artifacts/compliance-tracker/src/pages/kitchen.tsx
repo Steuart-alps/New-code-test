@@ -45,14 +45,25 @@ import CleaningScheduleTab from "./kitchen-cleaning";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  isKitchenDiaryDirty,
   isKitchenTemplateReady,
+  kitchenDiaryHydrationAction,
+  kitchenDiaryRecordKey,
+  kitchenDiaryScopeKey,
+  kitchenDiarySnapshot,
   parseColdUnits,
   parseJsonArray,
   parseStringArray,
+  requestKitchenDiaryScopeChange,
   stampedLimit,
   shouldDisplayKitchenSection,
   type ColdUnit,
+  type KitchenDiaryLoaded,
 } from "@/lib/kitchen-state";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // CookSafe All-in-One Record field shapes
 type DeliveryRow = {
@@ -702,7 +713,7 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
 
 // ── Daily Diary tab ───────────────────────────────────────────────────────────
 
-function DailyDiaryTab() {
+export function DailyDiaryTab() {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
   // Which site's diary we're viewing/filling. null = the legacy client-wide
@@ -767,66 +778,96 @@ function DailyDiaryTab() {
   const [sousVide, setSousVide] = useState<SousVideRow[]>([]);
   const [correctives, setCorrectives] = useState("");
   const [managerSignature, setManagerSignature] = useState(user?.name ?? "");
-  const hydratedScopeRef = useRef<string | null>(null);
+  // What the form last loaded from, or saved to, the server for this
+  // date/site scope. Unsaved edits are measured against it, never against
+  // whatever the latest server response happens to be.
+  const [loaded, setLoaded] = useState<(KitchenDiaryLoaded & { record: FoodSafetyRecord | null }) | null>(null);
+  const [pendingScope, setPendingScope] = useState<{ date: string; siteId: number | null } | null>(null);
+  const scopeKey = kitchenDiaryScopeKey(selectedSiteId, selectedDate);
+  const currentSnapshot = kitchenDiarySnapshot({
+    deliveries, coldFood, cooking, cooling, reheating, hotHolding, sousVide, correctives, managerSignature,
+  });
+  const isDirty = isKitchenDiaryDirty(loaded, scopeKey, currentSnapshot);
+  const formReady = loaded?.scope === scopeKey;
+  // The server version the edits are based on. Saves are checked against it,
+  // so a newer version that arrived meanwhile is merged or reported as a
+  // conflict instead of being overwritten.
+  const baseRecord = formReady ? loaded.record : null;
 
   useEffect(() => {
     if (recordLoading || configLoading) return;
-    const hydrationKey = `${selectedSiteId ?? "all"}:${selectedDate}:${record?.id ?? "new"}`;
-    if (hydratedScopeRef.current === hydrationKey) return;
+    const recordKey = kitchenDiaryRecordKey(record);
+    // A refetch or late response must not replace unsaved edits, except a
+    // day filed elsewhere: it is locked, so the filed version is shown.
+    const keepEdits = isDirty && !record?.submittedAt;
+    if (kitchenDiaryHydrationAction(loaded, scopeKey, recordKey, keepEdits) !== "hydrate") return;
 
+    let next: {
+      deliveries: DeliveryRow[]; coldFood: ColdFoodRow[]; cooking: CookingRow[]; cooling: CoolingRow[];
+      reheating: ReheatingRow[]; hotHolding: HotHoldingRow[]; sousVide: SousVideRow[];
+      correctives: string; managerSignature: string;
+    };
     if (record) {
-      setDeliveries((record.deliveries || []) as DeliveryRow[]);
-      setColdFood((record.coldFood || []) as ColdFoodRow[]);
-
       // Support old combined-row format (cookTimeStart field) — migrate to split arrays
       const rawHot: any[] = (record.hotTemperature || []) as any[];
       const isOldFormat = rawHot.some(r => "cookTimeStart" in r || "coolTimeStart" in r);
-      if (isOldFormat) {
-        setCooking(rawHot.map(r => ({ item: r.item || "", timeStart: r.cookTimeStart || "", timeFinish: r.cookTimeFinish || "", coreTemp: r.cookCoreTemp || "" })));
-        setCooling(rawHot.filter(r => r.coolTimeStart || r.coolTimeFinish).map(r => ({ item: r.item || "", timeStart: r.coolTimeStart || "", timeFinish: r.coolTimeFinish || "", coreTemp: "" })));
-        setReheating(rawHot.filter(r => r.reheatCoreTemp).map(r => ({ item: r.item || "", timeStart: "", timeFinish: "", coreTemp: r.reheatCoreTemp || "" })));
-      } else {
-        setCooking(rawHot as CookingRow[]);
-        setCooling(((record as any).cooling || []) as CoolingRow[]);
-        setReheating(((record as any).reheating || []) as ReheatingRow[]);
-      }
-
-      setHotHolding((record.hotHolding || []) as HotHoldingRow[]);
-      setSousVide(((record as any).sousVide || []) as SousVideRow[]);
-      setCorrectives(record.correctives || "");
-      setManagerSignature(record.managerSignature || user?.name || "");
+      next = {
+        deliveries: (record.deliveries || []) as DeliveryRow[],
+        coldFood: (record.coldFood || []) as ColdFoodRow[],
+        cooking: isOldFormat
+          ? rawHot.map(r => ({ item: r.item || "", timeStart: r.cookTimeStart || "", timeFinish: r.cookTimeFinish || "", coreTemp: r.cookCoreTemp || "" }))
+          : rawHot as CookingRow[],
+        cooling: isOldFormat
+          ? rawHot.filter(r => r.coolTimeStart || r.coolTimeFinish).map(r => ({ item: r.item || "", timeStart: r.coolTimeStart || "", timeFinish: r.coolTimeFinish || "", coreTemp: "" }))
+          : ((record as any).cooling || []) as CoolingRow[],
+        reheating: isOldFormat
+          ? rawHot.filter(r => r.reheatCoreTemp).map(r => ({ item: r.item || "", timeStart: "", timeFinish: "", coreTemp: r.reheatCoreTemp || "" }))
+          : ((record as any).reheating || []) as ReheatingRow[],
+        hotHolding: (record.hotHolding || []) as HotHoldingRow[],
+        sousVide: ((record as any).sousVide || []) as SousVideRow[],
+        correctives: record.correctives || "",
+        managerSignature: record.managerSignature || user?.name || "",
+      };
     } else {
       // New record — initialise from template
-      const coldRows: ColdFoodRow[] = templateColdUnits.map(u => ({
-        unit: u.name, tempAm: "", tempPm: "", correctiveAction: "",
-      }));
-      const cookingRows: CookingRow[] = templateHotItems.map(item => ({
-        item, timeStart: "", timeFinish: "", coreTemp: "",
-      }));
-      const holdingRows: HotHoldingRow[] = templateHoldingItems.map(item => ({
-        item, coreTemp: "", timeOfCheck: "",
-      }));
-      const svRows: SousVideRow[] = templateSvItems.map(item => ({
-        item, targetTemp: "", waterTemp: "", timeStarted: "", timeFinished: "", coreTemp: "", result: "", notes: "",
-      }));
-      setDeliveries([]);
-      setColdFood(coldRows);
-      setCooking(cookingRows);
-      setCooling([]);
-      setReheating([]);
-      setHotHolding(holdingRows);
-      setSousVide(svRows);
-      setCorrectives("");
-      setManagerSignature("");
+      next = {
+        deliveries: [],
+        coldFood: templateColdUnits.map(u => ({
+          unit: u.name, tempAm: "", tempPm: "", correctiveAction: "",
+        })),
+        cooking: templateHotItems.map(item => ({
+          item, timeStart: "", timeFinish: "", coreTemp: "",
+        })),
+        cooling: [],
+        reheating: [],
+        hotHolding: templateHoldingItems.map(item => ({
+          item, coreTemp: "", timeOfCheck: "",
+        })),
+        sousVide: templateSvItems.map(item => ({
+          item, targetTemp: "", waterTemp: "", timeStarted: "", timeFinished: "", coreTemp: "", result: "", notes: "",
+        })),
+        correctives: "",
+        managerSignature: "",
+      };
     }
-    hydratedScopeRef.current = hydrationKey;
+    setDeliveries(next.deliveries);
+    setColdFood(next.coldFood);
+    setCooking(next.cooking);
+    setCooling(next.cooling);
+    setReheating(next.reheating);
+    setHotHolding(next.hotHolding);
+    setSousVide(next.sousVide);
+    setCorrectives(next.correctives);
+    setManagerSignature(next.managerSignature);
+    setLoaded({ scope: scopeKey, recordKey, snapshot: kitchenDiarySnapshot(next), record: record ?? null });
   }, [
     config,
     configLoading,
+    isDirty,
+    loaded,
     record,
     recordLoading,
-    selectedDate,
-    selectedSiteId,
+    scopeKey,
     templateColdUnits,
     templateHoldingItems,
     templateHotItems,
@@ -834,22 +875,47 @@ function DailyDiaryTab() {
     user?.name,
   ]);
 
+  // Date and site changes replace the form, so unsaved edits need a
+  // deliberate discard; "Keep editing" stays on the current day and site.
+  const applyScope = (next: { date: string; siteId: number | null }) => {
+    setPendingScope(null);
+    setSelectedDate(next.date);
+    setSelectedSiteId(next.siteId);
+  };
+  const changeScope = (next: { date: string; siteId: number | null }) => {
+    if (!next.date) return;
+    const decision = requestKitchenDiaryScopeChange(
+      scopeKey,
+      kitchenDiaryScopeKey(next.siteId, next.date),
+      isDirty,
+      createRecord.isPending || updateRecord.isPending,
+    );
+    if (decision === "confirm") setPendingScope(next);
+    else if (decision === "switch") applyScope(next);
+  };
+  useEffect(() => {
+    if (!isDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isDirty]);
+
   // Historical records retain the limits that were filed with them. The
   // current template applies only when starting a new diary day.
-  const entryCookingLimit = stampedLimit(record?.cookingLimit, cookingLimit);
-  const entryCoolingLimit = stampedLimit(record?.coolingLimit, coolingLimit);
-  const entryReheatingLimit = stampedLimit(record?.reheatingLimit, reheatingLimit);
-  const entryHotHoldingLimit = stampedLimit(record?.hotHoldingLimit, hotHoldingLimit);
+  const entryCookingLimit = stampedLimit(baseRecord?.cookingLimit, cookingLimit);
+  const entryCoolingLimit = stampedLimit(baseRecord?.coolingLimit, coolingLimit);
+  const entryReheatingLimit = stampedLimit(baseRecord?.reheatingLimit, reheatingLimit);
+  const entryHotHoldingLimit = stampedLimit(baseRecord?.hotHoldingLimit, hotHoldingLimit);
 
   // A later template change must not hide evidence already stored on an older
   // record. Empty sections still follow the current template.
-  const displayDeliveries = shouldDisplayKitchenSection(showDeliveries, !!record && deliveries.length > 0);
-  const displayColdFood = shouldDisplayKitchenSection(showColdFood, !!record && coldFood.length > 0);
-  const displayHotTemp = shouldDisplayKitchenSection(showHotTemp, !!record && cooking.length > 0);
-  const displayCooling = shouldDisplayKitchenSection(showCooling, !!record && cooling.length > 0);
-  const displayReheating = shouldDisplayKitchenSection(showReheating, !!record && reheating.length > 0);
-  const displayHotHolding = shouldDisplayKitchenSection(showHotHolding, !!record && hotHolding.length > 0);
-  const displaySousVide = shouldDisplayKitchenSection(showSousVide, !!record && sousVide.length > 0);
+  const displayDeliveries = shouldDisplayKitchenSection(showDeliveries, !!baseRecord && deliveries.length > 0);
+  const displayColdFood = shouldDisplayKitchenSection(showColdFood, !!baseRecord && coldFood.length > 0);
+  const displayHotTemp = shouldDisplayKitchenSection(showHotTemp, !!baseRecord && cooking.length > 0);
+  const displayCooling = shouldDisplayKitchenSection(showCooling, !!baseRecord && cooling.length > 0);
+  const displayReheating = shouldDisplayKitchenSection(showReheating, !!baseRecord && reheating.length > 0);
+  const displayHotHolding = shouldDisplayKitchenSection(showHotHolding, !!baseRecord && hotHolding.length > 0);
+  const displaySousVide = shouldDisplayKitchenSection(showSousVide, !!baseRecord && sousVide.length > 0);
 
   // Invalidate the record queries for the current diary scope.
   const invalidateRecords = () => {
@@ -859,7 +925,9 @@ function DailyDiaryTab() {
     queryClient.invalidateQueries({ queryKey: getGetFoodSafetySummaryQueryKey().slice(0, 1) });
   };
   const handleDiaryConflict = (error: any) => {
-    hydratedScopeRef.current = null;
+    // Deliberate reload: the save was refused, so the latest diary replaces
+    // the form (the toast tells staff to review and re-enter).
+    setLoaded(null);
     const latest = error?.data?.record;
     if (latest) {
       queryClient.setQueryData(
@@ -878,13 +946,13 @@ function DailyDiaryTab() {
 
   const buildData = (submittedAt?: string) => ({
     recordDate: selectedDate,
-    deliveries: record || showDeliveries ? deliveries : [],
-    coldFood: record || showColdFood ? coldFood : [],
-    hotTemperature: record || showHotTemp ? cooking : [],
-    cooling: record || showCooling ? cooling : [],
-    reheating: record || showReheating ? reheating : [],
-    hotHolding: record || showHotHolding ? hotHolding : [],
-    sousVide: record || showSousVide ? sousVide : [],
+    deliveries: baseRecord || showDeliveries ? deliveries : [],
+    coldFood: baseRecord || showColdFood ? coldFood : [],
+    hotTemperature: baseRecord || showHotTemp ? cooking : [],
+    cooling: baseRecord || showCooling ? cooling : [],
+    reheating: baseRecord || showReheating ? reheating : [],
+    hotHolding: baseRecord || showHotHolding ? hotHolding : [],
+    sousVide: baseRecord || showSousVide ? sousVide : [],
     cookingLimit: entryCookingLimit,
     coolingLimit: entryCoolingLimit,
     reheatingLimit: entryReheatingLimit,
@@ -897,7 +965,7 @@ function DailyDiaryTab() {
     try {
       const rules = parseKitchenTemperatureRules(config?.food_temperature_rules);
       const units = JSON.parse(config?.food_cold_units || "[]");
-      const failures = assessKitchenTemperatures(record as unknown as Record<string, unknown> | null, buildData(), rules, units);
+      const failures = assessKitchenTemperatures(baseRecord as unknown as Record<string, unknown> | null, buildData(), rules, units);
       return { failures, error: "", rules };
     } catch (problem) {
       return { failures: [] as KitchenTemperatureFailure[], error: problem instanceof Error ? problem.message : "Numeric rules could not be evaluated", rules: null };
@@ -917,22 +985,39 @@ function DailyDiaryTab() {
     return true;
   };
 
-  const handleSaveDraft = async () => {
-    if (!validateTemperatures()) return;
-    const data = buildData(undefined);
+  // After a save the form is clean against what was sent. The saved record
+  // becomes the base for further edits; if nothing was typed meanwhile, the
+  // form reloads it (picking up rows merged in from other devices).
+  const markSaved = (saved: unknown, savedScope: string, savedSnapshot: string) => {
+    const savedRecord = saved && typeof saved === "object" && "recordDate" in saved
+      ? saved as FoodSafetyRecord : null;
+    if (savedRecord) {
+      queryClient.setQueryData(getGetFoodSafetyRecordByDateQueryKey(selectedDate, recordParams), savedRecord);
+    }
+    setLoaded(current => current && current.scope === savedScope
+      ? { scope: savedScope, recordKey: "saved", snapshot: savedSnapshot, record: savedRecord ?? current.record }
+      : current);
+  };
 
-    if (record) {
+  const handleSaveDraft = async () => {
+    if (!formReady || !validateTemperatures()) return;
+    const data = buildData(undefined);
+    const savedScope = scopeKey;
+    const savedSnapshot = currentSnapshot;
+
+    if (baseRecord) {
       updateRecord.mutate(
         {
-          id: record.id,
+          id: baseRecord.id,
           data: {
             ...data,
-            expectedUpdatedAt: record.updatedAt,
-            expectedRecord: buildDiaryBaseline(record),
+            expectedUpdatedAt: baseRecord.updatedAt,
+            expectedRecord: buildDiaryBaseline(baseRecord),
           },
         },
         {
-          onSuccess: () => {
+          onSuccess: (saved) => {
+            markSaved(saved, savedScope, savedSnapshot);
             invalidateRecords();
             toast({ title: "Draft saved" });
           },
@@ -949,11 +1034,17 @@ function DailyDiaryTab() {
       createRecord.mutate(
         { data, params: recordParams },
         {
-          onSuccess: () => {
+          onSuccess: (saved) => {
+            markSaved(saved, savedScope, savedSnapshot);
             invalidateRecords();
             toast({ title: "Draft created" });
           },
           onError: (error: any) => {
+            // Someone else started this day after the form loaded.
+            if (error?.status === 409) {
+              handleDiaryConflict(error);
+              return;
+            }
             toast({ title: "Failed to create", description: error.message, variant: "destructive" });
           },
         }
@@ -962,13 +1053,16 @@ function DailyDiaryTab() {
   };
 
   const handleSubmit = async () => {
-    if (!validateTemperatures()) return;
+    if (!formReady || !validateTemperatures()) return;
     if (!managerSignature.trim()) {
       toast({ title: "Manager signature required", variant: "destructive" });
       return;
     }
     const data = buildData(new Date().toISOString());
-    const onSuccess = () => {
+    const savedScope = scopeKey;
+    const savedSnapshot = currentSnapshot;
+    const onSuccess = (saved: unknown) => {
+      markSaved(saved, savedScope, savedSnapshot);
       invalidateRecords();
       toast({ title: "Diary filed", description: "Kitchen diary signed off and stored." });
     };
@@ -979,13 +1073,13 @@ function DailyDiaryTab() {
       }
       toast({ title: "Failed to submit", description: error.message, variant: "destructive" });
     };
-    if (record) {
+    if (baseRecord) {
       updateRecord.mutate({
-        id: record.id,
+        id: baseRecord.id,
         data: {
           ...data,
-          expectedUpdatedAt: record.updatedAt,
-          expectedRecord: buildDiaryBaseline(record),
+          expectedUpdatedAt: baseRecord.updatedAt,
+          expectedRecord: buildDiaryBaseline(baseRecord),
         },
       }, { onSuccess, onError });
     } else {
@@ -1005,6 +1099,26 @@ function DailyDiaryTab() {
         <p className="font-medium">Outside configured limits — record the action taken. Each new failed observation opens a manager-verified follow-up.</p>
         {temperatureAssessment.failures.map((failure, index) => <p key={index}>{failure.label} · {failure.field}: {kitchenFailureValue(failure)}{!failure.actionTaken ? " — corrective action required" : " — action recorded"}</p>)}
       </div>}
+      <AlertDialog open={pendingScope !== null} onOpenChange={(open) => { if (!open) setPendingScope(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Save your draft before changing date or site, or discard these changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (pendingScope) applyScope(pendingScope); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Date Picker */}
       <Card>
         <CardHeader className="border-b border-border/50 pb-4">
@@ -1024,7 +1138,7 @@ function DailyDiaryTab() {
             <Input
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => changeScope({ date: e.target.value, siteId: selectedSiteId })}
               className="max-w-xs"
             />
             {sites && sites.length > 0 && (
@@ -1032,7 +1146,7 @@ function DailyDiaryTab() {
                 <Label className="text-sm">Site:</Label>
                 <select
                   value={selectedSiteId ?? ""}
-                  onChange={(e) => setSelectedSiteId(e.target.value === "" ? null : Number(e.target.value))}
+                  onChange={(e) => changeScope({ date: selectedDate, siteId: e.target.value === "" ? null : Number(e.target.value) })}
                   className="h-9 rounded-sm border border-input bg-background px-2 text-sm"
                 >
                   <option value="">Organisation diary</option>
@@ -1046,7 +1160,7 @@ function DailyDiaryTab() {
         </CardContent>
       </Card>
 
-      {recordLoading || configLoading ? (
+      {recordLoading || configLoading || !formReady ? (
         <Card>
           <CardContent className="p-12 flex justify-center">
             <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
@@ -1623,7 +1737,7 @@ function DailyDiaryTab() {
               {records.slice(0, 10).map((r) => (
                 <button
                   key={r.id}
-                  onClick={() => setSelectedDate(r.recordDate)}
+                  onClick={() => changeScope({ date: r.recordDate, siteId: selectedSiteId })}
                   className="w-full p-4 hover:bg-muted/20 transition-colors text-left flex items-center justify-between"
                 >
                   <div className="flex items-center gap-3">
@@ -1650,7 +1764,7 @@ function DailyDiaryTab() {
       {/* Monthly completeness calendar */}
       <FoodSafetyCompletenessCalendar
         siteId={selectedSiteId}
-        onPickDay={(d) => { setSelectedDate(d); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+        onPickDay={(d) => { changeScope({ date: d, siteId: selectedSiteId }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
       />
     </div>
   );

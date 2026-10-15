@@ -76,6 +76,51 @@ try {
     "/food-safety/missing-dates?from=2026-09-01&to=2026-09-03&siteId=42",
   );
 
+  // ── Unsaved diary edits survive date/site changes and late responses ──
+  const today = state.kitchenDiaryScopeKey(null, "2026-10-15");
+  const tomorrow = state.kitchenDiaryScopeKey(null, "2026-10-16");
+  const siteToday = state.kitchenDiaryScopeKey(7, "2026-10-15");
+  assert.notEqual(today, siteToday, "organisation and site diaries are different scopes");
+  const blank = state.kitchenDiarySnapshot({ deliveries: [], correctives: "" });
+  const edited = state.kitchenDiarySnapshot({ deliveries: [{ supplier: "Brakes" }], correctives: "" });
+  const loadedNew = { scope: today, recordKey: "new", snapshot: blank };
+
+  // Dirty means "differs from what this scope loaded", not "differs from the
+  // latest server response".
+  assert.equal(state.isKitchenDiaryDirty(null, today, edited), false, "nothing loaded yet is not dirty");
+  assert.equal(state.isKitchenDiaryDirty(loadedNew, today, blank), false);
+  assert.equal(state.isKitchenDiaryDirty(loadedNew, today, edited), true);
+  assert.equal(state.isKitchenDiaryDirty(loadedNew, siteToday, edited), false,
+    "values left over from another scope are not that scope's edits");
+
+  // Date change and organisation-to-site switch: unsaved edits need a
+  // deliberate discard, a clean form switches straight away.
+  assert.equal(state.requestKitchenDiaryScopeChange(today, tomorrow, true, false), "confirm");
+  assert.equal(state.requestKitchenDiaryScopeChange(today, siteToday, true, false), "confirm");
+  assert.equal(state.requestKitchenDiaryScopeChange(today, tomorrow, false, false), "switch");
+  assert.equal(state.requestKitchenDiaryScopeChange(today, siteToday, false, false), "switch");
+  assert.equal(state.requestKitchenDiaryScopeChange(today, siteToday, false, true), "confirm",
+    "a save still in flight also needs a decision");
+  assert.equal(state.requestKitchenDiaryScopeChange(today, today, true, false), "ignore");
+
+  // Late record/template responses and refetches never overwrite dirty fields.
+  const someoneElsesDay = state.kitchenDiaryRecordKey({ id: 9, updatedAt: "2026-10-15T09:00:00Z" });
+  assert.equal(state.kitchenDiaryHydrationAction(loadedNew, today, someoneElsesDay, true), "keep-edits",
+    "a diary another device created meanwhile does not replace unsaved edits");
+  assert.equal(state.kitchenDiaryHydrationAction(loadedNew, today, "new", true), "skip",
+    "a refetch of the same version leaves the form alone");
+  assert.equal(state.kitchenDiaryHydrationAction(loadedNew, today, someoneElsesDay, false), "hydrate",
+    "a clean form shows the newer server version");
+  const loadedRecord = { scope: today, recordKey: someoneElsesDay, snapshot: edited };
+  const updatedElsewhere = state.kitchenDiaryRecordKey({ id: 9, updatedAt: "2026-10-15T09:05:00Z" });
+  assert.equal(state.kitchenDiaryHydrationAction(loadedRecord, today, updatedElsewhere, true), "keep-edits");
+  assert.equal(state.kitchenDiaryHydrationAction(loadedRecord, today, someoneElsesDay, false), "skip");
+  assert.equal(state.kitchenDiaryHydrationAction(loadedNew, tomorrow, "new", true), "hydrate",
+    "after a discarded scope change the new day loads");
+  assert.equal(state.kitchenDiaryHydrationAction(loadedNew, siteToday, someoneElsesDay, true), "hydrate",
+    "after a discarded organisation-to-site switch the site's diary loads");
+  assert.equal(state.kitchenDiaryHydrationAction(null, today, "new", false), "hydrate");
+
   const kitchenSource = await readFile(
     new URL("../src/pages/kitchen.tsx", import.meta.url),
     "utf8",
@@ -92,12 +137,12 @@ try {
   );
   assert.match(
     kitchenSource,
-    /const hydrationKey = `\$\{selectedSiteId \?\? "all"\}:\$\{selectedDate\}:\$\{record\?\.id \?\? "new"\}`;/,
+    /const scopeKey = kitchenDiaryScopeKey\(selectedSiteId, selectedDate\);/,
     "hydration must reset when date or selected site changes",
   );
   assert.match(
     kitchenSource,
-    /const cookingRows: CookingRow\[\] = templateHotItems\.map/,
+    /cooking: templateHotItems\.map/,
     "new diary days must be initialised from the effective template",
   );
   assert.match(
@@ -107,13 +152,45 @@ try {
   );
   assert.match(
     kitchenSource,
-    /stampedLimit\(record\?\.cookingLimit, cookingLimit\)/,
+    /stampedLimit\(baseRecord\?\.cookingLimit, cookingLimit\)/,
     "historical cooking limits must use the stamped value",
   );
   assert.match(
     kitchenSource,
-    /shouldDisplayKitchenSection\(showColdFood, !!record && coldFood\.length > 0\)/,
+    /shouldDisplayKitchenSection\(showColdFood, !!baseRecord && coldFood\.length > 0\)/,
     "populated historical sections must remain visible",
+  );
+
+  assert.match(
+    kitchenSource,
+    /kitchenDiaryHydrationAction\(loaded, scopeKey, recordKey, keepEdits\) !== "hydrate"\) return;/,
+    "the diary only hydrates when the decision says so",
+  );
+  for (const control of [
+    /onChange=\{\(e\) => changeScope\(\{ date: e\.target\.value, siteId: selectedSiteId \}\)\}/,
+    /onChange=\{\(e\) => changeScope\(\{ date: selectedDate, siteId: e\.target\.value === "" \? null : Number\(e\.target\.value\) \}\)\}/,
+    /onClick=\{\(\) => changeScope\(\{ date: r\.recordDate, siteId: selectedSiteId \}\)\}/,
+    /onPickDay=\{\(d\) => \{ changeScope\(\{ date: d, siteId: selectedSiteId \}\);/,
+  ]) {
+    assert.match(kitchenSource, control, "every date and site control goes through the unsaved-edits check");
+  }
+  const diarySource = kitchenSource.slice(kitchenSource.indexOf("function DailyDiaryTab"));
+  assert.doesNotMatch(
+    diarySource.slice(diarySource.indexOf("const changeScope")),
+    /setSelected(Date|SiteId)\(/,
+    "date and site only change through applyScope",
+  );
+  assert.match(kitchenSource, /<AlertDialogTitle>Discard unsaved changes\?<\/AlertDialogTitle>/);
+  assert.match(kitchenSource, /<AlertDialogCancel>Keep editing<\/AlertDialogCancel>/);
+  assert.match(
+    kitchenSource,
+    /expectedRecord: buildDiaryBaseline\(baseRecord\)/,
+    "saves are checked against the version the edits were made on",
+  );
+  assert.doesNotMatch(
+    kitchenSource,
+    /expectedRecord: buildDiaryBaseline\(record\)/,
+    "a refetched record must not become the save baseline",
   );
 
   const foodSafetySource = await readFile(
