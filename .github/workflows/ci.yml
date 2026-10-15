@@ -63,6 +63,11 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      # Runs before the root typecheck, while no lib declaration outputs exist,
+      # so the mobile check must build the API client it references itself.
+      - name: Typecheck mobile app from a clean checkout
+        run: pnpm --filter @workspace/mobile run typecheck
+
       - name: Typecheck
         run: pnpm run typecheck
 

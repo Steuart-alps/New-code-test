@@ -14,7 +14,7 @@
     "dev": "pnpm exec expo start",
     "build": "node scripts/build.js",
     "serve": "node server/serve.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "flock -s /tmp/complytrack-api-codegen.lock sh -c 'pnpm exec tsc --build ../../lib/api-client-react && tsc -p tsconfig.json --noEmit'",
     "test:cleaning-schedule": "node tests/cleaning-schedule-logic.mjs",
     "test:cleaning-draft": "node tests/cleaning-draft-logic.mjs",
     "test:aqua-track": "node tests/aqua-track-logic.mjs",
