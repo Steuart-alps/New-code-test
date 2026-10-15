@@ -216,6 +216,34 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="manage/contractors"
+        options={{
+          title: 'Contractors',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/contractor/[id]"
+        options={{
+          title: 'Contractor',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/contractor-approvals"
+        options={{
+          title: 'Contractor approvals',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/calendar"
+        options={{
+          title: 'Calendar',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/green-records"
         options={{
           title: 'Machine records',

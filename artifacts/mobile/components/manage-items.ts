@@ -58,6 +58,16 @@ export const MANAGE_ITEMS: ManageItem[] = [
     route: '/manage/asbestos',
     audience: 'everyone',
   },
+  // The website shows Contractors and Calendar to every role, and their read
+  // APIs only require sign-in; contractor email approvals inside are managers only.
+  {
+    id: 'contractors', label: 'Contractors', subtitle: 'Certificates expiring or overdue, contacts and approvals',
+    icon: 'briefcase', iconColor: '#7c3aed', route: '/manage/contractors', audience: 'everyone',
+  },
+  {
+    id: 'calendar', label: 'Calendar', subtitle: 'What is due: overdue, today, this week and later',
+    icon: 'calendar', iconColor: '#2563eb', route: '/manage/calendar', audience: 'everyone',
+  },
 ];
 
 /** Client admins and consultants manage the business; staff and viewers don't. */
