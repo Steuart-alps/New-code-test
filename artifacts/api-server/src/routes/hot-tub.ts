@@ -69,6 +69,13 @@ router.get("/tubs", requireAuth, async (req, res) => {
         ? false
         : null;
   if (activeFilter === null) return res.status(400).json({ error: "Invalid active filter" });
+  // Optional case-insensitive match on the tub's name or its site's name.
+  const searchParam = req.query.search;
+  if (searchParam !== undefined && (typeof searchParam !== "string" || searchParam.length > 200)) {
+    return res.status(400).json({ error: "Invalid search" });
+  }
+  const search = searchParam?.trim() ?? "";
+  const searchPattern = `%${search.replace(/[\\%_]/g, ch => `\\${ch}`)}%`;
   const departmentId = getActiveDepartmentId(req);
   const rows = await db.execute(sql`
     SELECT ht.id, ht.client_id, ht.site_id, ht.name, ht.description, ht.active,
@@ -86,6 +93,10 @@ router.get("/tubs", requireAuth, async (req, res) => {
         )
       )` : sql``}
       ${activeFilter !== undefined ? sql`AND ht.active = ${activeFilter}` : sql``}
+      ${search ? sql`AND (
+        ht.name ILIKE ${searchPattern} ESCAPE '\\'
+        OR s.name ILIKE ${searchPattern} ESCAPE '\\'
+      )` : sql``}
     ORDER BY ht.active DESC, ht.name
   `);
   res.json(rows.rows ?? rows);
