@@ -1040,3 +1040,48 @@ test("Refresh approvals makes one request and keeps the search, site sections an
     await queueCard(page, added.title).waitFor();
   });
 });
+
+test("the new-request notice stays quiet on first load, counts new requests, and clears when reviewed", async () => {
+  // A fresh browser context has no saved baseline, as on a manager's first visit.
+  const { page } = await browserContext(fixtures.manager);
+  const notice = () => page.getByText(/^\d+ new approval requests? found$/);
+  const newBadge = (title) => queueCard(page, title).getByLabel("New approval request");
+  async function refreshTo(title) {
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await queueCard(page, title).waitFor();
+  }
+  await withDiagnostics(page, "new-request notice", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, fixtures.acceptIssue.title).waitFor();
+    await page.getByTestId("approvals-last-updated").waitFor();
+    assert.equal(await notice().count(), 0, "the first load does not call existing requests new");
+    assert.equal(await page.getByLabel("New approval request").count(), 0);
+
+    const first = await queuedCalendarCancellation("notice-first", isoDay(38));
+    await refreshTo(first.title);
+    await page.getByText("1 new approval request found", { exact: true }).waitFor();
+    await newBadge(first.title).waitFor();
+    assert.equal(await newBadge(fixtures.acceptIssue.title).count(), 0, "requests already listed are not marked new");
+
+    await page.getByRole("button", { name: "Mark as reviewed" }).click();
+    await notice().waitFor({ state: "detached" });
+    assert.equal(await page.getByLabel("New approval request").count(), 0, "Mark as reviewed clears every New marker");
+
+    const second = await queuedCalendarCancellation("notice-second", isoDay(39));
+    const third = await queuedCalendarCancellation("notice-third", isoDay(40));
+    await refreshTo(third.title);
+    await page.getByText("2 new approval requests found", { exact: true }).waitFor();
+    await newBadge(second.title).waitFor();
+    await newBadge(third.title).waitFor();
+    assert.equal(await newBadge(first.title).count(), 0, "a reviewed request does not become new again");
+
+    // The notice survives a reload, and an unchanged refresh adds nothing.
+    await page.reload();
+    await page.getByText("2 new approval requests found", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await page.getByRole("button", { name: "Refresh approvals" }).and(page.locator(":enabled")).waitFor();
+    assert.equal(await page.getByText("2 new approval requests found", { exact: true }).count(), 1);
+    await page.getByRole("button", { name: "Mark as reviewed" }).click();
+    await notice().waitFor({ state: "detached" });
+  });
+});
