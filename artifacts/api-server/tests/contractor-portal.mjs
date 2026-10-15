@@ -6,10 +6,13 @@ import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import { build } from "esbuild";
 import crypto from "node:crypto";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 const BASE = process.env.API_BASE;
 if (!BASE) throw new Error("API_BASE is required; use tests/run-contractor-portal.sh");
 const dir = path.dirname(fileURLToPath(import.meta.url));
+// Every account email carries this run's id so cleanup removes only its tenants.
+const runId = resolveRunId();
 const outDir = await mkdtemp(path.join(dir, ".build-contractor-portal-"));
 let failures = 0, passed = 0;
 function check(name, condition, detail = "") {
@@ -31,7 +34,7 @@ function session() {
 }
 async function tenant(label) {
   const request = session();
-  const email = `portal-${label}-${Date.now()}-${Math.random()}@test.local`;
+  const email = `portal-${label}-${runId}@test.local`;
   const reg = await request("POST", "/auth/register", { name: `${label} manager`, email, password: "password-123" });
   check(`${label} registration`, [200, 201].includes(reg.status), String(reg.status));
   if (!reg.data?.verificationToken) throw new Error("test registration did not return verificationToken");
@@ -81,7 +84,7 @@ try {
     && String(created.data?.dbsExpiryDate).startsWith("2028-01-01"));
 
   check("anonymous cannot issue", (await publicRequest("POST", `/contractors/${contractorId}/portal-link`, {})).status === 401);
-  const viewerEmail = `portal-viewer-${Date.now()}@test.local`;
+  const viewerEmail = `portal-viewer-${runId}@test.local`;
   check("manager creates viewer", (await owner.request("POST", "/users", {
     name: "Viewer", email: viewerEmail, password: "password-123", role: "client_viewer", active: true,
   })).status === 201);
@@ -307,9 +310,23 @@ try {
 
   console.log(`${passed} contractor portal route checks passed, ${failures} failed`);
 } finally {
+  // Remove only this run's tenants, including the audit_log rows their records
+  // produced, which would otherwise block DELETE FROM clients
+  // (tests/fixture-ownership.mjs).
+  let cleanupConnection = null;
   try {
-    if (db && clientIds.length) await db.execute(sql`DELETE FROM clients WHERE id IN (${clientIds[0]}, ${clientIds[1]})`);
-  } catch (error) { console.error("Cleanup failed:", error); failures++; }
+    if (pool) {
+      cleanupConnection = await pool.connect();
+      await cleanupConnection.query(buildOwnedFixturePurgeSql({
+        runId, clientIds: clientIds.filter((id) => Number.isSafeInteger(id)),
+      }));
+    }
+  } catch (error) {
+    await cleanupConnection?.query("ROLLBACK").catch(() => {});
+    console.error("Cleanup failed:", error); failures++;
+  } finally {
+    cleanupConnection?.release();
+  }
   await pool?.end().catch(() => {});
   await rm(outDir, { recursive: true, force: true });
 }

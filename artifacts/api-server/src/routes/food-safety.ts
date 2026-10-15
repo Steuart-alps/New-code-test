@@ -957,7 +957,7 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
     ...(recordedAt ? { _recordedAt: recordedAt } : {}),
   };
   const rowJson = JSON.stringify(storedRow);
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
   const reheatingLimit = section === "reheating"
     ? await resolveReheatingLimit(clientId, siteId)
     : undefined;

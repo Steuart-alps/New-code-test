@@ -201,19 +201,25 @@ if (phase === "after-restart") {
   const copies = new Map();
   for (const doc of safeDocs) {
     const table = { ra: "safe_risk_assessments", sop: "safe_sops", handbook: "safe_handbook" }[doc.type];
-    const [copy] = await query(`SELECT c.id, c.department, c.title, c.requires_acknowledgement FROM ${table} s
+    const [copy] = await query(`SELECT c.id, c.department, c.site_id, c.title, c.requires_acknowledgement FROM ${table} s
       JOIN doc_track_documents c ON c.id = s.migrated_doc_id AND c.client_id = s.client_id
       WHERE s.id = ${lit(doc.id)} AND s.client_id = ${lit(alpha.clientId)}`);
     assert.ok(copy, `${doc.type}:${doc.id} was copied into DocTrack on restart`);
     assert.equal(copy.title, doc.title, `${doc.type}:${doc.id} copy title`);
     assert.equal(copy.department, doc.department, `${doc.type}:${doc.id} (${doc.title}) copy keeps department ${doc.department}`);
-    copies.set(copy.id, doc);
+    copies.set(copy.id, { ...doc, copySiteId: copy.site_id });
   }
   for (const [name, staffId] of Object.entries(staff)) {
     const listed = await listFor(alpha, staffId);
+    const [member] = await query(`SELECT site_id FROM staff_roster WHERE id = ${lit(staffId)}`);
     for (const [copyId, source] of copies) {
-      assert.equal(listed.has(`doc:${copyId}`), listed.has(`${source.type}:${source.id}`),
-        `${name}: DocTrack copy of ${source.title} is listed exactly when the source is`);
+      // A copy keeps its source's site, and DocTrack (manager overview, staff
+      // "my documents", acknowledgement eligibility) scopes by site as well
+      // as department: the copy is listed when the source is and the staff
+      // member is at the copy's site (or it has none).
+      const atCopySite = source.copySiteId == null || source.copySiteId === member.site_id;
+      assert.equal(listed.has(`doc:${copyId}`), listed.has(`${source.type}:${source.id}`) && atCopySite,
+        `${name}: DocTrack copy of ${source.title} is listed exactly when the source is and the staff member is at its site`);
     }
   }
   // The one-off repair gave copies made before the fix their department.

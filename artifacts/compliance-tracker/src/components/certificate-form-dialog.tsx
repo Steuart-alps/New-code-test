@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAppMutations } from "@/hooks/use-app-data";
+import { format } from "date-fns";
 import { useUpload } from "@/hooks/use-upload";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -92,12 +93,17 @@ export function CertificateFormDialog({
     }
   });
 
+  // "Change" only swaps the existing file display for the picker; the saved
+  // file stays linked unless a new one is chosen.
+  const [changingFile, setChangingFile] = useState(false);
+  useEffect(() => setChangingFile(false), [certificate, isOpen]);
+
   useEffect(() => {
     if (certificate) {
       form.reset({
         name: certificate.name,
-        issueDate: certificate.issueDate ? new Date(certificate.issueDate).toISOString().slice(0, 16) : "",
-        expiryDate: certificate.expiryDate ? new Date(certificate.expiryDate).toISOString().slice(0, 16) : "",
+        issueDate: certificate.issueDate ? format(new Date(certificate.issueDate), "yyyy-MM-dd'T'HH:mm") : "",
+        expiryDate: certificate.expiryDate ? format(new Date(certificate.expiryDate), "yyyy-MM-dd'T'HH:mm") : "",
         notes: certificate.notes || "",
         outcome: certificate.outcome ?? "not_stated",
       });
@@ -314,7 +320,7 @@ export function CertificateFormDialog({
 
           <div className="space-y-1.5">
             <Label>Certificate File</Label>
-            {!certificate?.fileUrl && !selectedFile ? (
+            {(!certificate?.fileUrl || changingFile) && !selectedFile ? (
               <div className="border-2 border-dashed border-border rounded-xl p-6 flex flex-col items-center justify-center text-center bg-muted/20 hover:bg-muted/50 transition-colors relative">
                 <input
                   type="file"
@@ -345,7 +351,7 @@ export function CertificateFormDialog({
                   size="sm"
                   onClick={() => {
                     setSelectedFile(null);
-                    if (certificate) certificate.fileUrl = null; // visual clear only
+                    setChangingFile(true); // visual clear only
                   }}
                 >
                   Change

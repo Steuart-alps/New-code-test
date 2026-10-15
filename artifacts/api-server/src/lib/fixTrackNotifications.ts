@@ -19,12 +19,14 @@ export async function generateActionTokens(
   issueId: number,
   clientId: number,
   contractorId: number,
+  // The caller's transaction, when it already holds a lock on the issue row.
+  executor: Pick<typeof db, "execute"> = db,
 ): Promise<ActionTokens> {
   const bookedToken    = newBearerToken();
   const completedToken = newBearerToken();
   const expiresAt      = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-  await db.execute(sql`
+  await executor.execute(sql`
     INSERT INTO fix_track_action_tokens (token, token_hash, issue_id, client_id, contractor_id, action, expires_at)
     VALUES
       (NULL, ${digestBearerToken(bookedToken)},    ${issueId}, ${clientId}, ${contractorId}, 'booked',    ${expiresAt}),

@@ -529,13 +529,14 @@ export default function SafeTrackPage() {
     delete payload.id; delete payload.clientId; delete payload.createdBy;
     delete payload.createdAt; delete payload.updatedAt;
     try {
-      if (editing) {
-        await apiFetch(`${base}/${sub}/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) });
-      } else {
-        await apiFetch(`${base}/${sub}`, { method: "POST", body: JSON.stringify(payload) });
-      }
+      const res = editing
+        ? await apiFetch(`${base}/${sub}/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(`${base}/${sub}`, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "Could not save this record"));
       setDialogOpen(false);
       load();
+    } catch (err: any) {
+      toast({ title: "Save failed", description: err.message, variant: "destructive" });
     } finally { setSaving(false); }
   }
 
@@ -866,7 +867,7 @@ function RaForm({ form, setForm }: { form: any; setForm: any }) {
     <F label="Description"><Textarea value={form.description ?? ""} onChange={e => setForm({ ...form, description: e.target.value })} rows={3} /></F>
     <F label="Assessed By"><Input value={form.assessedBy ?? ""} onChange={e => setForm({ ...form, assessedBy: e.target.value })} placeholder="Name" /></F>
     <div className="grid grid-cols-2 gap-4">
-      <F label="Review Date"><Input type="date" value={form.reviewDate ?? ""} onChange={e => setForm({ ...form, reviewDate: e.target.value })} /></F>
+      <F label="Review Date"><Input type="date" value={form.reviewDate ?? ""} onChange={e => setForm({ ...form, reviewDate: e.target.value || null })} /></F>
       <F label="Version"><Input value={form.version ?? "1.0"} onChange={e => setForm({ ...form, version: e.target.value })} placeholder="1.0" /></F>
     </div>
     <F label="Status">

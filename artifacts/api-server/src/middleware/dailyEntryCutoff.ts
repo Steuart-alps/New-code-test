@@ -317,6 +317,24 @@ function findPathDate(path: string): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * Weekly reviews and weekly/monthly cleaning logs are dated by the start of
+ * the period they cover (week commencing / month start), so their correction
+ * window runs from the period's last day rather than its first.
+ */
+function lockReferenceDate(path: string, body: unknown, entryDate: string): string {
+  const frequency = body && typeof body === "object" ? (body as Record<string, unknown>).frequency : undefined;
+  const cleaningLog = /^\/kitchen-cleaning\/logs\/?$/.test(path);
+  const weekly = /^\/kitchen-weekly\/weekly(?:\/|$)/.test(path) || (cleaningLog && frequency === "weekly");
+  const monthly = cleaningLog && frequency === "monthly";
+  if (!weekly && !monthly) return entryDate;
+  const end = new Date(`${entryDate}T00:00:00.000Z`);
+  if (Number.isNaN(end.getTime())) return entryDate;
+  if (weekly) end.setUTCDate(end.getUTCDate() + 6);
+  else end.setUTCMonth(end.getUTCMonth() + 1, 0);
+  return end.toISOString().slice(0, 10);
+}
+
 function calendarDay(date: string): number {
   return Math.floor(Date.parse(`${date}T00:00:00.000Z`) / 86_400_000);
 }
@@ -391,7 +409,7 @@ export function getDailyEntryCutoffDecision(
   const clock = localClock(now, normalizeAccountTimezone(timeZone));
   const entryDate = findEntryDate(req.body) ?? findEntryDate(req.query) ?? findPathDate(req.path);
   const isPastGraceWindow = entryDate != null
-    && calendarDay(clock.date) - calendarDay(entryDate) > 1;
+    && calendarDay(clock.date) - calendarDay(lockReferenceDate(req.path, req.body, entryDate)) > 1;
 
   if (isPastGraceWindow) {
     return {

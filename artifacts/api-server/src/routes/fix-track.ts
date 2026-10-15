@@ -599,7 +599,7 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
     issueId: row.id,
     eventType: "status",
     status: row.status,
-    createdBy: (req.session as any).userId ?? null,
+    createdBy: req.currentUser?.id ?? null,
   });
   res.status(201).json(row);
 });
@@ -731,7 +731,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         issueId: id,
         eventType: "status",
         status: data.status,
-        createdBy: (req.session as any).userId ?? null,
+        createdBy: req.currentUser?.id ?? null,
       });
     }
     // The linked module action completes with the repair. A job a contractor
@@ -849,7 +849,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         issueId: id,
         eventType: "email_invalidated",
         note: "Contractor email content changed; manager reapproval required",
-        createdBy: (req.session as any).userId ?? null,
+        createdBy: req.currentUser?.id ?? null,
       });
     }
     return { kind: "updated" as const, row: updated[0] };
@@ -927,7 +927,7 @@ router.post("/issues/:id/notes", requireAuth, denyViewers, async (req, res) => {
       issueId: id,
       eventType: "note",
       note: parsed.data.note.trim(),
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser?.id ?? null,
     });
     return updated;
   });
@@ -1363,12 +1363,12 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     }
     await tx.update(fixTrackIssuesTable).set({
       emailRequestMode: parsed.data.mode, emailRequestStatus: "pending",
-      emailRequestedBy: (req.session as any).userId ?? null, emailRequestedAt: new Date(),
+      emailRequestedBy: req.currentUser?.id ?? null, emailRequestedAt: new Date(),
       emailApprovedBy: null, emailApprovedAt: null, emailSentBy: null, emailSentAt: null, updatedAt: new Date(),
     }).where(and(...requestConditions));
     await tx.insert(fixTrackIssueActivityTable).values({
       clientId, issueId: id, eventType: "email_requested", note: parsed.data.mode,
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser?.id ?? null,
     });
     await tx.execute(sql`
     INSERT INTO contractor_email_queue
@@ -1381,7 +1381,7 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
        ${JSON.stringify({ subject: previewSubject, text: previewText, html: previewHtml })}::jsonb,
        ${null}, ${quoteToken ? digestBearerToken(quoteToken) : null}, ${quoteToken ? sql`now() + interval '30 days'` : null},
        ${encryptedTokenPayload},
-      ${(req.session as any).userId ?? null}, ${randomUUID()}
+      ${req.currentUser?.id ?? null}, ${randomUUID()}
     FROM fix_track_issues i
     LEFT JOIN sites s ON s.id = i.site_id
     JOIN contractors c ON c.id = i.contractor_id
@@ -1472,7 +1472,7 @@ router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async 
     const updated = await tx.update(fixTrackIssuesTable).set({
       emailRequestMode: "assign",
       emailRequestStatus: "pending",
-      emailRequestedBy: (req.session as any).userId ?? null,
+      emailRequestedBy: req.currentUser?.id ?? null,
       emailRequestedAt: new Date(),
       emailApprovedBy: null,
       emailApprovedAt: null,
@@ -1487,7 +1487,7 @@ router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async 
       issueId: id,
       eventType: "email_requested",
       note: "cancellation",
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser?.id ?? null,
     });
     await tx.execute(sql`
       INSERT INTO contractor_email_queue
@@ -1497,7 +1497,7 @@ router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async 
       SELECT ${clientId}, i.id, 'fix_track', i.id, s.department_id, i.contractor_id, 'assign', 'cancellation',
         c.email, ${persisted.subject}, ${persisted.html}, ${persisted.text}, ${icsContent},
         ${calendarFilename(draft.title)}, ${JSON.stringify(persisted.preview)}::jsonb,
-        ${(req.session as any).userId ?? null},
+        ${req.currentUser?.id ?? null},
         ${`fix-track-cancellation-${clientId}-${id}-${nextCalendarSequence(draft.previous_ics)}`}
       FROM fix_track_issues i
       LEFT JOIN sites s ON s.id=i.site_id
@@ -1640,7 +1640,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
       FROM contractor_email_queue WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope}`)).rows[0] as any;
     if (pending && !(await reminderDraftStillCurrent(tx, pending))) return SUPERSEDED;
     const claimed = await tx.execute(sql`UPDATE contractor_email_queue
-      SET status='sending', approved_by=${(req.session as any).userId ?? null}, approved_at=now(), sent_by=${(req.session as any).userId ?? null}, updated_at=now()
+      SET status='sending', approved_by=${req.currentUser?.id ?? null}, approved_at=now(), sent_by=${req.currentUser?.id ?? null}, updated_at=now()
       WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} RETURNING *`);
     const row = (claimed.rows as any[])[0];
     if (row?.entity_type === "fix_track" && row.entity_id) {
@@ -1660,7 +1660,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
     await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now() WHERE id=${qid} AND status='sending'`);
     if (q.entity_type === "fix_track" && q.entity_id) {
       await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
-        email_sent_by=${(req.session as any).userId ?? null}, email_sent_at=now(), updated_at=now()
+        email_sent_by=${req.currentUser?.id ?? null}, email_sent_at=now(), updated_at=now()
         WHERE id=${q.entity_id} AND client_id=${clientId}`);
     } else if (q.entity_type === "compliance" && q.entity_id) {
       await markComplianceNotified(q, clientId);
@@ -1721,8 +1721,8 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
     if (pending && !(await reminderDraftStillCurrent(tx, pending))) return SUPERSEDED;
     const rows = await tx.execute(sql`UPDATE contractor_email_queue SET subject=${persisted.subject}, body_html=${persisted.html}, body_text=${persisted.text},
       email_preview_json=${JSON.stringify(persisted.preview)}::jsonb,
-      status='sending', approved_by=${(req.session as any).userId ?? null}, approved_at=now(),
-      sent_by=${(req.session as any).userId ?? null}, updated_at=now()
+      status='sending', approved_by=${req.currentUser?.id ?? null}, approved_at=now(),
+      sent_by=${req.currentUser?.id ?? null}, updated_at=now()
       WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} RETURNING *`);
     const row = (rows.rows as any[])[0];
     if (row?.entity_type === "fix_track" && row.entity_id) await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='sending',updated_at=now() WHERE id=${row.entity_id} AND client_id=${clientId} AND email_request_status='pending'`);
@@ -1747,7 +1747,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
       WHERE id=${qid} AND client_id=${clientId} AND status='sending'`);
     if (q.issue_id) {
       await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
-        email_sent_by=${(req.session as any).userId ?? null}, email_sent_at=now(), updated_at=now()
+        email_sent_by=${req.currentUser?.id ?? null}, email_sent_at=now(), updated_at=now()
         WHERE id=${q.issue_id} AND client_id=${clientId}`);
     } else if (q.entity_type === "compliance" && q.entity_id) {
       await markComplianceNotified(q, clientId);
@@ -1803,41 +1803,43 @@ router.post("/quotes/:quoteId/accept", requireAuth, denyViewers, async (req, res
   const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR s.department_id=${deptId})`;
   const out = await db.transaction(async (tx) => {
     const r = await tx.execute(sql`SELECT qs.*,q.*,i.title,i.description,i.location,i.issue_type,i.priority,
-      s.name AS site_name,c.name AS contractor_name
+      i.site_id,i.target_date,s.name AS site_name,c.name AS contractor_name,q.to_email AS contractor_email,
+      cl.name AS company_name,
+      (SELECT ics_content FROM contractor_email_queue
+        WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
+        ORDER BY created_at DESC LIMIT 1) AS previous_ics
       FROM fix_track_quote_submissions qs
       JOIN contractor_email_queue q ON q.id=qs.queue_id JOIN fix_track_issues i ON i.id=q.issue_id
+      JOIN clients cl ON cl.id=i.client_id
       LEFT JOIN sites s ON s.id=i.site_id LEFT JOIN contractors c ON c.id=q.contractor_id
       WHERE qs.id=${id} AND qs.client_id=${clientId} AND qs.status='submitted'${deptScope}
       FOR UPDATE OF qs,q,i`);
     const q = (r.rows as any[])[0]; if (!q) return null;
-    const subject = `Job Assigned: ${q.title}`;
-    const text = [
-      `Dear ${q.contractor_name ?? "Contractor"},`,
-      `The job "${q.title}" has been assigned to you.`,
-      `Site: ${q.site_name ?? "Not specified"}`,
-      `Location: ${q.location ?? "Not specified"}`,
-      `Type: ${q.issue_type}`,
-      `Priority: ${q.priority}`,
-      q.description ?? "",
-    ].filter(Boolean).join("\n");
-    const html = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b">
-      <p>Dear ${escapeHtml(q.contractor_name ?? "Contractor")},</p>
-      <p>The following job has been assigned to you.</p>
-      <h2>${escapeHtml(q.title)}</h2>
-      <p><strong>Site:</strong> ${escapeHtml(q.site_name ?? "Not specified")}<br>
-      <strong>Location:</strong> ${escapeHtml(q.location ?? "Not specified")}<br>
-      <strong>Type:</strong> ${escapeHtml(q.issue_type)}<br>
-      <strong>Priority:</strong> ${escapeHtml(q.priority)}</p>
-      ${q.description ? `<p>${escapeHtml(q.description)}</p>` : ""}
-    </div>`;
+    // Same draft as request-send's "assign" mode: booked/completed links held
+    // only in the encrypted payload, plus the calendar invite.
+    const tokens = await generateActionTokens(q.issue_id, clientId, q.contractor_id, tx);
+    const tokenPayload = { booked: tokens.bookedToken, completed: tokens.completedToken };
+    const icsContent = fixTrackCalendarInvite(q, await getClientSenderEmail(clientId), clientId, q.issue_id, nextCalendarSequence(q.previous_ics));
+    const icsFilename = icsContent ? calendarFilename(q.title) : null;
+    const rendered = await sendContractorAssignmentEmail({
+      contractorName: q.contractor_name ?? "Contractor", contractorEmail: q.contractor_email,
+      issueTitle: q.title, issueType: q.issue_type, issuePriority: q.priority,
+      issueLocation: q.location, issueDescription: q.description, siteName: q.site_name,
+      companyName: q.company_name, bookedToken: tokens.bookedToken, completedToken: tokens.completedToken,
+      baseUrl: getPublicAppUrl(), clientId, siteDocuments: await siteDocumentsForContractorEmail(q.site_id, clientId),
+      icsAttachment: icsContent ?? undefined, icsFilename: icsFilename ?? undefined, previewOnly: true,
+    });
+    const persisted = placeholderizeQueuedDraft(rendered.subject, rendered.html,
+      rendered.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), tokenPayload);
     await tx.execute(sql`UPDATE fix_track_quote_submissions SET status='accepted' WHERE id=${id}`);
     await tx.execute(sql`UPDATE fix_track_issues SET contractor_id=${q.contractor_id}, email_request_mode='assign',
       email_request_status='pending', updated_at=now() WHERE id=${q.issue_id} AND client_id=${clientId}`);
     await tx.execute(sql`INSERT INTO contractor_email_queue
-      (client_id,issue_id,entity_type,entity_id,department_id,contractor_id,mode,email_type,to_email,subject,body_html,body_text,email_preview_json,requested_by,idempotency_key)
+      (client_id,issue_id,entity_type,entity_id,department_id,contractor_id,mode,email_type,to_email,subject,body_html,body_text,
+       ics_content,ics_filename,email_preview_json,encrypted_token_payload,requested_by,idempotency_key)
       VALUES (${clientId},${q.issue_id},'fix_track',${q.issue_id},${q.department_id},${q.contractor_id},'assign','assignment',${q.to_email},
-      ${subject},${html},${text},
-      ${JSON.stringify({ subject, text, html })},${(req.session as any).userId ?? null},${randomUUID()})`);
+      ${persisted.subject},${persisted.html},${persisted.text},${icsContent},${icsFilename},
+      ${JSON.stringify(persisted.preview)},${encryptTokenPayload(tokenPayload)},${req.currentUser?.id ?? null},${randomUUID()})`);
     return q;
   });
   if (!out) return res.status(404).json({ error: "Quote not found" });
@@ -1860,7 +1862,7 @@ router.post("/issues/:id/approve-send", requireAuth, denyViewers, async (req, re
   const result = await db.execute(sql`
     UPDATE fix_track_issues
     SET email_request_status = 'approved',
-        email_approved_by = ${(req.session as any).userId ?? null},
+        email_approved_by = ${req.currentUser?.id ?? null},
         email_approved_at = now(),
         updated_at = now()
     WHERE id = ${id} AND client_id = ${clientId}
@@ -1875,7 +1877,7 @@ router.post("/issues/:id/approve-send", requireAuth, denyViewers, async (req, re
     issueId: id,
     eventType: "email_approved",
     note: row.email_request_mode,
-    createdBy: (req.session as any).userId ?? null,
+    createdBy: req.currentUser?.id ?? null,
   });
   res.json({ ok: true, mode: row.email_request_mode });
 });
@@ -1920,7 +1922,7 @@ router.post("/issues/:id/reject-send", requireAuth, denyViewers, async (req, res
     issueId: id,
     eventType: "email_rejected",
     note: row.emailRequestMode ?? null,
-    createdBy: (req.session as any).userId ?? null,
+    createdBy: req.currentUser?.id ?? null,
   });
   res.json({ ok: true });
 });
@@ -1996,8 +1998,8 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   }
   const queueRow = await db.transaction(async (tx) => {
     const queued = await tx.execute(sql`UPDATE contractor_email_queue
-      SET status='sending', approved_by=COALESCE(approved_by,${(req.session as any).userId ?? null}),
-        approved_at=COALESCE(approved_at,now()), sent_by=${(req.session as any).userId ?? null}, updated_at=now()
+      SET status='sending', approved_by=COALESCE(approved_by,${req.currentUser?.id ?? null}),
+        approved_at=COALESCE(approved_at,now()), sent_by=${req.currentUser?.id ?? null}, updated_at=now()
       WHERE status='pending' AND id=(SELECT id FROM contractor_email_queue WHERE client_id=${clientId}
         AND entity_type='fix_track' AND entity_id=${id} AND status='pending'
         AND mode=${mode}${queueDepartmentScope(req)} ORDER BY created_at DESC LIMIT 1)
@@ -2019,7 +2021,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     await db.execute(sql`UPDATE contractor_email_queue SET status='sent',sent_at=now(),updated_at=now()
       WHERE id=${queueRow.id} AND client_id=${clientId} AND status='sending'`);
     await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
-      email_sent_by=${(req.session as any).userId ?? null},email_sent_at=now(),updated_at=now()
+      email_sent_by=${req.currentUser?.id ?? null},email_sent_at=now(),updated_at=now()
       WHERE id=${id} AND client_id=${clientId}`);
     return res.json({ ok: true, message: mode === "quote" ? "Quote request sent to contractor" : "Email sent to contractor" });
   } catch (err) {

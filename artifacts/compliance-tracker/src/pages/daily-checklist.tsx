@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { format } from "date-fns";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
@@ -32,7 +33,7 @@ interface Submission {
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+  return format(new Date(), "yyyy-MM-dd");
 }
 
 export default function DailyChecklistPage({ type }: { type: "am" | "pm" }) {

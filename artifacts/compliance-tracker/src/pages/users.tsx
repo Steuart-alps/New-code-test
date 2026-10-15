@@ -339,7 +339,15 @@ export default function UsersPage() {
 
   async function deleteUser(id: number) {
     if (!confirm("Remove this user?")) return;
-    await apiFetch(`/users/${id}`, { method: "DELETE" });
+    setActionMessage(null);
+    const res = await apiFetch(`/users/${id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      setActionMessage({ kind: "error", text: data?.error ?? "Failed to remove user" });
+    } else if (data?.deactivated) {
+      // Users named in the audit trail are kept, deactivated, so the record stays complete.
+      setActionMessage({ kind: "success", text: `${data.name} has recorded activity in the audit trail, so they were deactivated rather than removed.` });
+    }
     load();
   }
 

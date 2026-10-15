@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "@e965/xlsx";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,12 +77,12 @@ function StaffDialog({
         editing ? `/staff-roster/${editing.id}` : "/staff-roster",
         { method: editing ? "PATCH" : "POST", body: JSON.stringify(body) },
       );
-      if (!res.ok) throw new Error("Save failed");
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "Please try again."));
       toast({ title: editing ? "Staff member updated" : "Staff member added" });
       onSaved();
       onClose();
-    } catch {
-      toast({ title: "Save failed", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Save failed", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setSaving(false);
     }
