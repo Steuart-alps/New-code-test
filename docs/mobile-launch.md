@@ -26,7 +26,7 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 
 1. **Deploy the API first.** Mobile builds from this branch send a `clientEntryId` with each fire, legionella, hot tub, PAT and incident record, so a resend after a lost response doesn't create a duplicate. An older API ignores the field, which would bring the duplicates back. Merge this branch and let Render deploy before you build.
 2. **Apple Developer Program**, £79 a year: <https://developer.apple.com/programs/enroll/>.
-   - Enrol as an organisation (ALPS Consultancy Ltd) so the store shows the company as the seller. That needs a D-U-N-S number, which Apple can look up or request for free.
+   - Enrol as the legal entity, ALPS Consulting Ltd (it trades as ALPS Consultancy; "ALPS Consultancy Ltd" is a different company), so the store shows the company as the seller. That needs a D-U-N-S number, which Apple can look up or request for free.
    - Enrolling as an individual shows your personal name instead.
 3. **Google Play Console**, US$25 one-off: <https://play.google.com/console/signup>.
    - Choose an **organisation** account (it also needs the D-U-N-S number).
@@ -89,10 +89,10 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 | Name (30 max) | ComplyTrack |
 | Subtitle (30 max) | Health & safety compliance |
 | Category | Primary: Business. Secondary: Productivity |
-| Support URL | https://alpsconsultancy.co.uk |
+| Support URL | https://www.alpsconsultancy.co.uk |
 | Marketing URL | https://complytrack.alpsconsultancy.co.uk |
 | Privacy policy URL | https://complytrack.alpsconsultancy.co.uk/privacy |
-| Copyright | 2026 ALPS Consultancy Ltd |
+| Copyright | 2026 ALPS Consulting Ltd |
 | Keywords (100 max) | `health and safety,compliance,fire safety,legionella,PAT testing,RIDDOR,HACCP,checklist,audit,risk` |
 
 **Promotional text** (170 characters max; this can be changed without a new review):
@@ -139,7 +139,7 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 - **Short description** (80 max): `Log health & safety checks, report issues and track compliance on site.`
 - **Full description:** use the App Store description above (Google allows 4,000 characters, so it fits as is).
 - **Category:** Business. **Tags:** Business, Productivity.
-- **Contact details:** website `https://alpsconsultancy.co.uk`, and the support email address you want to publish (required).
+- **Contact details:** website `https://www.alpsconsultancy.co.uk`, and the support email address you want to publish (required).
 - **Store graphics:**
   - 512×512 icon: resize `assets/images/app-icon.png`.
   - 1024×500 feature graphic: the navy `#061537` background with the shield and "ComplyTrack".

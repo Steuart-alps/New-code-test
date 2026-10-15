@@ -326,7 +326,7 @@ export default function LoginScreen() {
             <Text
               style={[styles.footer, { color: colors.mutedForeground }]}
             >
-              ComplyTrack by ALPS Consulting
+              ComplyTrack by ALPS Consultancy
             </Text>
              </>}
             <View style={styles.legalRow}>
