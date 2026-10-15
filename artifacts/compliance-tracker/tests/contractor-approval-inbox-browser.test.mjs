@@ -918,16 +918,39 @@ test("a failed approvals load shows the error state, not an empty queue, and Try
       assert.ok(queueLoads.loads > loadsBeforeRetry, `${label}: Try again requests the queue again`);
       assert.equal(await page.getByText("Unable to load approvals").count(), 0, `${label}: the error state clears`);
 
+      const lastUpdated = page.getByTestId("approvals-last-updated").locator("time");
+      await lastUpdated.waitFor();
+      const recoveredAt = await lastUpdated.getAttribute("datetime");
+      assert.ok(Date.parse(recoveredAt) > 0, `${label}: the successful retry shows when the list was updated`);
+
       if (restored === "pending") {
-        // A later failed refresh keeps the last list and says it may be stale.
+        // A later failed refresh keeps the last list and its time, and says
+        // the list may be stale and how old it is.
+        await page.waitForTimeout(1100);
         queueLoads.failing = true;
         await page.getByRole("button", { name: "Refresh approvals" }).click();
-        await page.getByText("Approvals may be out of date").waitFor();
+        const warning = page.getByText("Approvals may be out of date").locator("..");
+        await warning.waitFor();
         await queueCard(page, fixtures.acceptIssue.title).waitFor();
         assert.equal(await page.getByText("Unable to load approvals").count(), 0);
+        assert.equal(await lastUpdated.getAttribute("datetime"), recoveredAt,
+          "a failed refresh does not move the last-updated time");
+        assert.equal(await warning.locator("time").getAttribute("datetime"), recoveredAt,
+          "the stale-list warning shows when the list was last updated");
+        assert.match(await warning.innerText(), /It was last updated at \d{2}:\d{2}:\d{2}\./);
+
         queueLoads.failing = false;
         await page.getByRole("button", { name: "Refresh approvals" }).click();
-        await page.getByText("Approvals may be out of date").waitFor({ state: "detached" });
+        await page.getByText("Refreshing approvals…").waitFor({ state: "detached" });
+        let refreshedAt = await lastUpdated.getAttribute("datetime");
+        for (let waited = 0; refreshedAt === recoveredAt && waited < 10_000; waited += 100) {
+          await page.waitForTimeout(100);
+          refreshedAt = await lastUpdated.getAttribute("datetime");
+        }
+        assert.ok(Date.parse(refreshedAt) > Date.parse(recoveredAt),
+          "a successful refresh moves the last-updated time forward");
+        assert.equal(await page.getByText("Approvals may be out of date").count(), 0,
+          "a successful refresh removes the stale-list warning");
       }
     });
   }

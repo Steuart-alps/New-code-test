@@ -26,7 +26,7 @@ import {
   ChevronDown, ChevronRight, Loader2, Pencil, Send, CalendarX2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { format, isToday } from "date-fns";
 import {
   approveContractorEmail,
   dismissContractorEmail,
@@ -61,6 +61,10 @@ interface EmailQueueItem {
 // One small request a minute per open tab; no extra infrastructure.
 const BACKGROUND_REFRESH_MS = 60_000;
 
+function formatRefreshTime(date: Date): string {
+  return isToday(date) ? format(date, "HH:mm:ss") : format(date, "dd MMM yyyy, HH:mm");
+}
+
 type PendingCancellationConfirmation =
   | {
       action: "approve";
@@ -80,6 +84,8 @@ export default function ContractorApprovalsPage() {
   const loadingRef = useRef(true);
   loadingRef.current = loading;
   const [loadError, setLoadError] = useState<string | null>(null);
+  // When the list on screen was last loaded successfully (foreground or background).
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [search, setSearch] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -126,6 +132,7 @@ export default function ContractorApprovalsPage() {
     );
     refreshStorageKeyRef.current = approvalRefreshStorageKey;
     setItems([]);
+    setLastRefreshedAt(null);
     knownSitesRef.current = new Set();
     setExpandedSites(new Set());
     newRequestIdsRef.current = persistedState?.newRequestIds ?? [];
@@ -212,6 +219,7 @@ export default function ContractorApprovalsPage() {
             nextNewRequestIds,
           );
           setItems(nextItems);
+          setLastRefreshedAt(new Date());
           setLoadError(null);
         }
       } else if (!background && mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
@@ -402,6 +410,12 @@ export default function ContractorApprovalsPage() {
             <p className="text-muted-foreground text-sm mt-1">
               Review and approve outbound emails before they are sent to contractors.
             </p>
+            {lastRefreshedAt && (
+              <p className="text-xs text-muted-foreground mt-1" data-testid="approvals-last-updated">
+                Last updated{" "}
+                <time dateTime={lastRefreshedAt.toISOString()}>{formatRefreshTime(lastRefreshedAt)}</time>
+              </p>
+            )}
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <Button
@@ -464,6 +478,12 @@ export default function ContractorApprovalsPage() {
                   <p className="text-sm font-medium text-amber-950">Approvals may be out of date</p>
                   <p className="text-xs text-amber-900/80">
                     {loadError} Showing the last successful approval list below.
+                    {lastRefreshedAt && (
+                      <>
+                        {" "}It was last updated at{" "}
+                        <time dateTime={lastRefreshedAt.toISOString()}>{formatRefreshTime(lastRefreshedAt)}</time>.
+                      </>
+                    )}
                   </p>
                 </div>
                 <Button variant="outline" size="sm" onClick={fetchItems} className="shrink-0">

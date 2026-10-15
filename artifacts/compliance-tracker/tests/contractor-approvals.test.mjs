@@ -191,6 +191,16 @@ assert.match(
 );
 assert.match(
   source,
+  /setItems\(nextItems\);\s*setLastRefreshedAt\(new Date\(\)\);/,
+  "only a successful queue load may advance the last-updated time",
+);
+assert.match(
+  source,
+  /Showing the last successful approval list below\.[\s\S]{0,200}It was last updated at/,
+  "the stale-list warning must say when the shown list was last updated",
+);
+assert.match(
+  source,
   /loading && items\.length === 0/,
   "a refresh must keep an existing approval list visible while it runs",
 );
