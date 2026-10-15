@@ -1096,6 +1096,101 @@ async function main() {
     staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
   });
 
+  // Staff DELETE across departments: the department boundary answers before
+  // the date lock, so an out-of-scope old record gives a plain 403 that says
+  // nothing about its date, while an in-scope one is locked as usual.
+  const lockLeakFields = ["TRACK_RECORD_LOCKED", "cutoffDate", "lockAfterHours", "correction window"];
+  const departmentDelete = async ({ label, createPath, path = createPath, body, adminDelete, prepare = () => true }) => {
+    if (![200, 201].includes(alphaSite.status) || ![200, 201].includes(betaSite.status)) return;
+    const alphaOld = await admin("POST", createPath, body(alphaSite.data.id));
+    const betaOld = await admin("POST", createPath, body(betaSite.data.id));
+    expect(`${label}: seed in-department old record`, alphaOld, [201]);
+    expect(`${label}: seed other-department old record`, betaOld, [201]);
+    const alphaId = alphaOld.data?.id, betaId = betaOld.data?.id;
+    if (!Number.isInteger(alphaId) || !Number.isInteger(betaId)) {
+      check(`${label}: seeded ids available`, false, `${JSON.stringify(alphaOld.data)} ${JSON.stringify(betaOld.data)}`);
+      return;
+    }
+    check(`${label}: prepare old fixtures`, prepare(alphaId) && prepare(betaId));
+    const inScope = await scopedStaff("DELETE", `${path}/${alphaId}`);
+    check(`${label}: in-department old DELETE is locked`, isLocked(inScope), `${inScope.status} ${JSON.stringify(inScope.data)}`);
+    const outOfScope = await scopedStaff("DELETE", `${path}/${betaId}`);
+    check(`${label}: other-department old DELETE is forbidden`, outOfScope.status === 403,
+      `${outOfScope.status} ${JSON.stringify(outOfScope.data)}`);
+    check(`${label}: other-department DELETE does not reveal the lock`,
+      !lockLeakFields.some((field) => JSON.stringify(outOfScope.data ?? "").includes(field)),
+      JSON.stringify(outOfScope.data));
+    const outOfScopePut = await scopedStaff("PUT", `${path}/${betaId}`, { notes: bypassMarker });
+    check(`${label}: other-department old PUT is forbidden`, outOfScopePut.status === 403,
+      `${outOfScopePut.status} ${JSON.stringify(outOfScopePut.data)}`);
+    expect(`${label}: admin DELETE of other-department record unchanged`,
+      await admin("DELETE", `${path}/${betaId}`), adminDelete);
+  };
+  const withSite = (fields) => (siteId) => ({ ...fields, siteId });
+  await departmentDelete({
+    label: "Dept Fire check", createPath: "/fire-safety", adminDelete: [200, 204],
+    body: withSite({ checkType: "alarm", checkDate: old, result: "pass", performedBy: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    label: "Dept Legionella check", createPath: "/legionella", adminDelete: [200, 204],
+    body: withSite({ checkType: "calorifier_temp", checkDate: old, result: "pass", temperature: 60, performedBy: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    // 409 is HotTub's own rule: a check with a linked safety action is kept.
+    label: "Dept HotTub check", createPath: "/hot-tub", adminDelete: [200, 204, 409],
+    body: withSite({ checkType: "water_chemistry", checkDate: old, result: "pass", phValue: 7.4, sanitiserLevel: 2, performedBy: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    label: "Dept Tree inspection", createPath: "/tree-track", adminDelete: [200, 204],
+    body: withSite({ checkType: "visual_assessment", checkDate: old, result: "pass", treeRef: "LOCK-DEPT", inspector: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    // Incidents keep their RIDDOR trail, so even an admin DELETE is refused.
+    label: "Dept Incident", createPath: "/incidents", adminDelete: [409],
+    body: withSite({ incidentDate: old, location: "Lock room", description: "Lock fixture incident", involvedName: "Lock Fixture", reportedBy: "Lock Fixture", riddorRationale: "Lock fixture: not reportable" }),
+  });
+  await departmentDelete({
+    label: "Dept Premises inspection", createPath: "/premises-track", adminDelete: [200, 204],
+    body: withSite({ inspectionDate: old, nextInspectionDate: iso(30), inspectionType: "routine", area: "Lock area", findings: "None", status: "closed", inspectedBy: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    label: "Dept TrainTrack record", createPath: "/train-track/records", adminDelete: [200, 204],
+    body: withSite({ recordType: "internal", staffName: "Lock Fixture", trainingType: "Safety", trainer: "Admin", completedDate: old }),
+  });
+  for (const [label, collection, fields] of [
+    ["Dept Swim session", "/swim-track/sessions", { sessionDate: old, sessionType: "public_swim", preSessionResult: "pass", poolClosed: false }],
+    ["Dept Swim surveillance", "/swim-track/surveillance", { checkDate: old, checkTime: "10:00", scanCompleted: true }],
+    ["Dept Swim first-aid", "/swim-track/first-aid", { checkDate: old, aedOk: true }],
+    ["Dept Swim incident", "/swim-track/incidents", { incidentDate: old, description: "Lock fixture incident" }],
+  ]) {
+    await departmentDelete({ label, createPath: collection, body: withSite(fields), adminDelete: [200] });
+  }
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    // PAT evidence is never deleted (405 for everyone), but staff in another
+    // department must still get the boundary response rather than the lock.
+    const roomFor = async (siteId) => (await admin("POST", "/pat-track/rooms", { siteId, name: `Dept lock room ${siteId} ${suffix}` })).data?.id;
+    const roomIds = { [alphaSite.data.id]: await roomFor(alphaSite.data.id), [betaSite.data.id]: await roomFor(betaSite.data.id) };
+    const certificateIds = {};
+    await departmentDelete({
+      label: "Dept PAT certificate", createPath: "/pat-track/certificates", adminDelete: [405],
+      body: (siteId) => ({ siteId, visitDate: old, certificateRef: `DEPT-LOCK-${siteId}`, roomIds: [roomIds[siteId]] }),
+    });
+    for (const siteId of [alphaSite.data.id, betaSite.data.id]) {
+      certificateIds[siteId] = (await admin("POST", "/pat-track/certificates", {
+        siteId, visitDate: old, certificateRef: `DEPT-LOCK-FAIL-${siteId}`, roomIds: [roomIds[siteId]],
+      })).data?.id;
+    }
+    await departmentDelete({
+      label: "Dept PAT replacement", createPath: "/pat-track/replacements", adminDelete: [405],
+      body: (siteId) => ({ roomId: roomIds[siteId], applianceName: "Lock kettle", replacedOn: old }),
+    });
+    await departmentDelete({
+      label: "Dept PAT failure", createPath: "/pat-track/failures", adminDelete: [405],
+      body: (siteId) => ({ certificateId: certificateIds[siteId], roomId: roomIds[siteId], applianceName: "Lock toaster" }),
+      prepare: (id) => backdateCreatedAt("pat_failures", id, 3),
+    });
+  }
+
   // A different tenant must not be able to reach a mapped record. Use a real
   // foreign staff session so this also exercises the staff lock path's
   // client-scoped lookup rather than relying only on an admin 404.

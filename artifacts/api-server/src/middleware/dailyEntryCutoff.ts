@@ -157,28 +157,38 @@ function isTrackWrite(req: Pick<Request, "method" | "path">): boolean {
  * update body (which is itself mutable).  This is deliberately an explicit
  * allowlist: both halves are SQL identifiers and must never come from a URL.
  * Metadata/configuration routes are intentionally absent.
+ *
+ * `department` is a SQL expression (over the `record` alias) giving the
+ * department of the record's site, for tracks whose routes are department
+ * scoped. Department-scoped staff get the boundary's 403 for another
+ * department's record before any date is compared, so the lock response never
+ * reveals that record or its date.
  */
-export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: string; siteScoped?: boolean }> = [
-  { path: /^\/food-safety\/\d+$/, table: "food_safety_records", date: "record_date" },
-  { path: /^\/fire-safety\/\d+$/, table: "fire_safety_checks", date: "check_date" },
-  { path: /^\/legionella\/\d+$/, table: "legionella_checks", date: "check_date", siteScoped: true },
-  { path: /^\/hot-tub\/\d+$/, table: "hot_tub_checks", date: "check_date" },
-  { path: /^\/tree-track\/\d+$/, table: "tree_inspections", date: "check_date" },
-  { path: /^\/pool-track\/\d+$/, table: "pool_checks", date: "check_date" },
-  { path: /^\/daily-track-am\/\d+$/, table: "daily_checklists", date: "check_date" },
-  { path: /^\/daily-track-pm\/\d+$/, table: "daily_checklists", date: "check_date" },
-  { path: /^\/daily-track-pm\/signoffs\/\d+$/, table: "daily_manager_signoffs", date: "signoff_date" },
-  { path: /^\/incidents\/\d+$/, table: "incidents", date: "incident_date" },
-  { path: /^\/premises-track\/\d+$/, table: "premises_inspections", date: "inspection_date" },
-  { path: /^\/room-track\/checks\/\d+$/, table: "room_track_checks", date: "check_date" },
+const siteDepartment = (siteId: string) =>
+  `(SELECT site.department_id FROM "sites" AS site WHERE site.id = ${siteId} AND site.client_id = record.client_id)`;
+const RECORD_SITE_DEPARTMENT = siteDepartment("record.site_id");
+
+export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: string; department?: string }> = [
+  { path: /^\/food-safety\/\d+$/, table: "food_safety_records", date: "record_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/fire-safety\/\d+$/, table: "fire_safety_checks", date: "check_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/legionella\/\d+$/, table: "legionella_checks", date: "check_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/hot-tub\/\d+$/, table: "hot_tub_checks", date: "check_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/tree-track\/\d+$/, table: "tree_inspections", date: "check_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/pool-track\/\d+$/, table: "pool_checks", date: "check_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/daily-track-am\/\d+$/, table: "daily_checklists", date: "check_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/daily-track-pm\/\d+$/, table: "daily_checklists", date: "check_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/daily-track-pm\/signoffs\/\d+$/, table: "daily_manager_signoffs", date: "signoff_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/incidents\/\d+$/, table: "incidents", date: "incident_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/premises-track\/\d+$/, table: "premises_inspections", date: "inspection_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/room-track\/checks\/\d+$/, table: "room_track_checks", date: "check_date", department: RECORD_SITE_DEPARTMENT },
   { path: /^\/staff-training\/\d+$/, table: "staff_training_records", date: "issued_at" },
-  { path: /^\/train-track\/records\/\d+$/, table: "train_track_records", date: "completed_date" },
-  { path: /^\/swim-track\/sessions\/\d+$/, table: "swim_sessions", date: "session_date" },
-  { path: /^\/swim-track\/surveillance\/\d+$/, table: "swim_surveillance_checks", date: "check_date" },
-  { path: /^\/swim-track\/first-aid\/\d+$/, table: "swim_first_aid_checks", date: "check_date" },
-  { path: /^\/swim-track\/incidents\/\d+$/, table: "swim_incidents", date: "incident_date" },
-  { path: /^\/kitchen-weekly\/weekly\/\d+$/, table: "kitchen_weekly_records", date: "week_commencing", siteScoped: true },
-  { path: /^\/kitchen-weekly\/probe\/\d+$/, table: "kitchen_probe_checks", date: "check_date", siteScoped: true },
+  { path: /^\/train-track\/records\/\d+$/, table: "train_track_records", date: "completed_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/swim-track\/sessions\/\d+$/, table: "swim_sessions", date: "session_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/swim-track\/surveillance\/\d+$/, table: "swim_surveillance_checks", date: "check_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/swim-track\/first-aid\/\d+$/, table: "swim_first_aid_checks", date: "check_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/swim-track\/incidents\/\d+$/, table: "swim_incidents", date: "incident_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/kitchen-weekly\/weekly\/\d+$/, table: "kitchen_weekly_records", date: "week_commencing", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/kitchen-weekly\/probe\/\d+$/, table: "kitchen_probe_checks", date: "check_date", department: RECORD_SITE_DEPARTMENT },
   { path: /^\/bike-track\/hires\/\d+$/, table: "bike_hire_records", date: "hire_date" },
   { path: /^\/bike-track\/services\/\d+$/, table: "bike_services", date: "service_date" },
   { path: /^\/green-track\/pre-use-checks\/\d+$/, table: "green_pre_use_checks", date: "check_date" },
@@ -186,15 +196,22 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/green-track\/defects\/\d+$/, table: "green_defects", date: "report_date" },
   { path: /^\/green-track\/puwer-inspections\/\d+$/, table: "green_puwer_inspections", date: "inspection_date" },
   { path: /^\/green-track\/fuel-logs\/\d+$/, table: "green_fuel_logs", date: "log_date" },
-  { path: /^\/pat-track\/tests\/\d+$/, table: "pat_tests", date: "test_date" },
-  { path: /^\/pat-track\/certificates\/\d+$/, table: "pat_certificates", date: "visit_date" },
-  { path: /^\/pat-track\/replacements\/\d+$/, table: "pat_replacements", date: "replaced_on" },
-  { path: /^\/pat-track\/failures\/\d+$/, table: "pat_failures", date: "created_at" },
+  // PAT tests keep the department recorded with them; the others follow the
+  // site recorded with the replacement, or the failure's certificate.
+  { path: /^\/pat-track\/tests\/\d+$/, table: "pat_tests", date: "test_date",
+    department: `COALESCE(record.department_id_snapshot, ${siteDepartment("record.site_id_snapshot")})` },
+  { path: /^\/pat-track\/certificates\/\d+$/, table: "pat_certificates", date: "visit_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/pat-track\/replacements\/\d+$/, table: "pat_replacements", date: "replaced_on",
+    department: siteDepartment(`COALESCE(record.site_id_snapshot, (SELECT room.site_id FROM "pat_rooms" AS room
+      WHERE room.id = record.room_id AND room.client_id = record.client_id))`) },
+  { path: /^\/pat-track\/failures\/\d+$/, table: "pat_failures", date: "created_at",
+    department: siteDepartment(`(SELECT certificate.site_id FROM "pat_certificates" AS certificate
+      WHERE certificate.id = record.certificate_id AND certificate.client_id = record.client_id)`) },
   { path: /^\/pest-track\/visits\/\d+$/, table: "pest_visits", date: "visit_date" },
   { path: /^\/pest-track\/activity\/\d+$/, table: "pest_activity", date: "recorded_date" },
-  { path: /^\/safe-track\/training-records\/\d+$/, table: "safe_training_records", date: "completed_at" },
-  { path: /^\/safe-track\/inductions\/\d+$/, table: "safe_inductions", date: "start_date" },
-  { path: /^\/safe-track\/competency\/\d+$/, table: "safe_competency_signoffs", date: "signed_off_at" },
+  { path: /^\/safe-track\/training-records\/\d+$/, table: "safe_training_records", date: "completed_at", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/safe-track\/inductions\/\d+$/, table: "safe_inductions", date: "start_date", department: RECORD_SITE_DEPARTMENT },
+  { path: /^\/safe-track\/competency\/\d+$/, table: "safe_competency_signoffs", date: "signed_off_at", department: RECORD_SITE_DEPARTMENT },
 ];
 
 /**
@@ -277,21 +294,19 @@ async function findStoredEntryDate(
   // ordinary tagged parameters (never interpolated into SQL text).
   const result = await db.execute(sql`
     SELECT ${sql.raw(`record."${lookup.date}"`)} AS entry_date
-      ${lookup.siteScoped ? sql`, site.department_id AS site_department_id` : sql``}
+      ${lookup.department ? sql`, ${sql.raw(lookup.department)} AS record_department_id` : sql``}
     FROM ${sql.raw(`"${lookup.table}"`)} AS record
-      ${lookup.siteScoped ? sql`LEFT JOIN "sites" AS site
-        ON site.id = record.site_id AND site.client_id = record.client_id` : sql``}
     WHERE record.id = ${id} AND record.client_id = ${clientId}
     LIMIT 1
   `);
   const row = (result as any).rows?.[0] as {
     entry_date?: string | Date | null;
-    site_department_id?: number | null;
+    record_department_id?: number | null;
   } | undefined;
   if (!row) return "missing";
   const departmentId = getActiveDepartmentId(req);
-  if (lookup.siteScoped && departmentId !== null
-    && row.site_department_id !== null && row.site_department_id !== departmentId) {
+  if (lookup.department && departmentId !== null
+    && row.record_department_id != null && row.record_department_id !== departmentId) {
     return "forbidden";
   }
   if (!row.entry_date) return null;
