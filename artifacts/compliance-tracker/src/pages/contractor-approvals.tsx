@@ -83,6 +83,9 @@ export default function ContractorApprovalsPage() {
   const fetchGenerationRef = useRef(0);
   const knownQueueIdsRef = useRef<Set<number> | null>(null);
   const refreshStorageKeyRef = useRef<string | null>(null);
+  // The control that opened the cancellation dialog. The dialog has no Radix
+  // trigger, so focus is returned here by hand when it closes.
+  const cancellationTriggerRef = useRef<HTMLElement | null>(null);
   const approvalRefreshStorageKey = getApprovalRefreshStorageKey(
     user?.id ?? null,
     activeClientId,
@@ -223,10 +226,15 @@ export default function ContractorApprovalsPage() {
     );
   }
 
-  function handleApprove(item: EmailQueueItem, modifiedPreview?: { subject: string; text: string }) {
+  function handleApprove(
+    item: EmailQueueItem,
+    modifiedPreview?: { subject: string; text: string },
+    trigger?: HTMLElement,
+  ) {
     markRequestReviewed(item.id);
     if (item.emailType === "cancellation") {
       setPendingCancellationConfirmation({ action: "approve", item, modifiedPreview });
+      cancellationTriggerRef.current = trigger ?? null;
       return;
     }
     void submitApproval(item, modifiedPreview);
@@ -265,10 +273,11 @@ export default function ContractorApprovalsPage() {
     }
   }
 
-  function handleCancel(item: EmailQueueItem) {
+  function handleCancel(item: EmailQueueItem, trigger?: HTMLElement) {
     markRequestReviewed(item.id);
     if (item.emailType === "cancellation") {
       setPendingCancellationConfirmation({ action: "dismiss", item });
+      cancellationTriggerRef.current = trigger ?? null;
       return;
     }
     void submitDismissal(item);
@@ -507,7 +516,7 @@ export default function ContractorApprovalsPage() {
                                   <div className="flex items-center gap-2 shrink-0">
                                     <Button
                                       variant="outline" size="sm"
-                                       onClick={() => handleCancel(item)}
+                                       onClick={event => handleCancel(item, event.currentTarget)}
                                       disabled={submittingId === item.id}
                                       className="h-8"
                                     >
@@ -523,7 +532,7 @@ export default function ContractorApprovalsPage() {
                                     </Button>
                                     <Button
                                       size="sm"
-                                       onClick={() => handleApprove(item)}
+                                       onClick={event => handleApprove(item, undefined, event.currentTarget)}
                                       disabled={submittingId === item.id}
                                        className={cn(
                                          "h-8 text-white",
@@ -580,7 +589,7 @@ export default function ContractorApprovalsPage() {
                                        <Button
                                          size="sm"
                                          className={isCancellation ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"}
-                                         onClick={() => handleApprove(item, { subject: editSubject, text: editText })}
+                                         onClick={event => handleApprove(item, { subject: editSubject, text: editText }, event.currentTarget)}
                                          disabled={submittingId === item.id}
                                        >
                                         {submittingId === item.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
@@ -627,7 +636,18 @@ export default function ContractorApprovalsPage() {
           if (!open && !isSubmittingCancellation) setPendingCancellationConfirmation(null);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          onCloseAutoFocus={event => {
+            // Back to the row's button if it is still there (the dialog was
+            // dismissed or the request failed); otherwise Radix's default.
+            const trigger = cancellationTriggerRef.current;
+            cancellationTriggerRef.current = null;
+            if (trigger?.isConnected) {
+              event.preventDefault();
+              trigger.focus();
+            }
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>
               {pendingCancellationConfirmation?.action === "approve"

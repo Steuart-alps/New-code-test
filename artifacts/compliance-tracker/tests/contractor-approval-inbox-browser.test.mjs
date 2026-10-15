@@ -589,3 +589,161 @@ test("reminder Edit & Send keeps the reviewed draft through a failed send and di
     assert.equal(await contractorEmailCount(), 1);
   });
 });
+
+// A sent, dated assignment whose calendar cancellation now awaits review.
+async function queuedCalendarCancellation(label, targetDate) {
+  const owner = fixtures.owner;
+  const contractor = await owner.request("POST", "/contractors", {
+    name: `${label} contractor ${suffix}`, email: `inbox-${label}-${suffix}@test.local`,
+  });
+  assert.equal(contractor.status, 201, JSON.stringify(contractor.data));
+  const title = `Inbox ${label} ${suffix}`;
+  const issue = await owner.request("POST", "/fix-track/issues", {
+    title, issueType: "general", location: "Plant room", reportedBy: "Facilities",
+    reportedDate: isoDay(0), siteId: fixtures.siteId, contractorId: contractor.data.id, targetDate,
+  });
+  assert.equal(issue.status, 201, JSON.stringify(issue.data));
+  const id = issue.data.id;
+  for (const [step, expected] of [["request-send", 200], ["approve-send", 200], ["send-to-contractor", 200]]) {
+    const result = await owner.request("POST", `/fix-track/issues/${id}/${step}`, step === "request-send" ? { mode: "assign" } : undefined);
+    assert.equal(result.status, expected, `${step}: ${JSON.stringify(result.data)}`);
+  }
+  const requested = await owner.request("POST", `/fix-track/issues/${id}/request-cancellation`);
+  assert.equal(requested.status, 202, JSON.stringify(requested.data));
+  const [row] = await queueRowsForIssue(id, "cancellation");
+  assert.equal(row?.status, "pending");
+  return { id, title, queueId: row.id };
+}
+
+// Every queue action the page sends, by path, so a test can show a dialog
+// dismissal sent nothing and a confirmation sent exactly one request.
+function recordQueueActions(page) {
+  const actions = [];
+  page.on("request", request => {
+    const { pathname } = new URL(request.url());
+    if (request.method() === "POST" && /^\/api\/fix-track\/contractor-email-queue\/\d+\//.test(pathname)) {
+      actions.push(pathname.replace(/^\/api/, ""));
+    }
+  });
+  return actions;
+}
+
+async function focusedElement(page) {
+  return page.evaluate(() => {
+    const element = document.activeElement;
+    return {
+      text: element?.textContent?.trim() ?? "",
+      inDialog: !!element?.closest('[role="alertdialog"]'),
+    };
+  });
+}
+
+// The dialog is announced as an alert dialog named by its title and described
+// by its consequence, and it takes focus on its safe "Keep reviewing" action.
+async function expectAccessibleDialog(page, name, description) {
+  const dialog = page.getByRole("alertdialog", { name });
+  await dialog.waitFor();
+  const described = await dialog.evaluate(element => element.getAttribute("aria-describedby")
+    ?.split(/\s+/).map(id => document.getElementById(id)?.textContent?.trim()).join(" "));
+  assert.equal(described, description, `${name} is described by its consequence`);
+  assert.deepEqual(await focusedElement(page), { text: "Keep reviewing", inDialog: true },
+    `${name} opens with focus on Keep reviewing`);
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("Tab");
+    assert.equal((await focusedElement(page)).inDialog, true, `${name} keeps keyboard focus inside the dialog`);
+  }
+  return dialog;
+}
+
+test("calendar cancellation approval dialog works by keyboard and is announced to screen readers", async () => {
+  const cancellation = await queuedCalendarCancellation("approve-dialog", isoDay(30));
+  await clearOutbox();
+  const page = fixtures.managerPage;
+  const actions = recordQueueActions(page);
+  await withDiagnostics(page, "cancellation approval dialog", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const card = queueCard(page, cancellation.title);
+    await card.getByText("Calendar Cancellation", { exact: true }).waitFor();
+    const approve = card.getByRole("button", { name: "Approve Cancellation" });
+    const name = "Approve calendar cancellation?";
+    const description = "This will send the contractor a cancellation notice and remove the previously sent calendar event.";
+
+    // Opened from the keyboard, Escape closes it and returns focus to the row.
+    await approve.focus();
+    await page.keyboard.press("Enter");
+    await expectAccessibleDialog(page, name, description);
+    await page.keyboard.press("Escape");
+    await page.getByRole("alertdialog").waitFor({ state: "detached" });
+    assert.deepEqual(await focusedElement(page), { text: "Approve Cancellation", inDialog: false },
+      "closing the dialog returns focus to Approve Cancellation");
+
+    // Keep reviewing, chosen with the keyboard, also closes it without sending.
+    await page.keyboard.press("Enter");
+    await expectAccessibleDialog(page, name, description);
+    await page.getByRole("button", { name: "Keep reviewing" }).focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("alertdialog").waitFor({ state: "detached" });
+    assert.deepEqual(actions, [], "dismissing the dialog sends nothing");
+    assert.equal((await queueRow(cancellation.queueId)).status, "pending");
+    await card.waitFor();
+
+    // Confirming sends exactly one approval of this cancellation.
+    await approve.click();
+    const dialog = await expectAccessibleDialog(page, name, description);
+    await dialog.getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.getByText("Calendar cancellation approved and sent").first().waitFor();
+    await dialog.waitFor({ state: "detached" });
+    await card.waitFor({ state: "detached" });
+    assert.deepEqual(actions, [`/fix-track/contractor-email-queue/${cancellation.queueId}/approve-and-send`]);
+  });
+  const row = await queueRow(cancellation.queueId);
+  assert.equal(row.status, "sent");
+  assert.equal(row.approved_by, fixtures.manager.userId);
+  const outbox = await readOutbox();
+  assert.equal(outbox.length, 1, "one cancellation is sent");
+  assert.match(outbox[0].icsAttachment ?? "", /METHOD:CANCEL/);
+});
+
+test("dismissing a calendar cancellation keeps the event and calls the cancel endpoint only after confirmation", async () => {
+  const cancellation = await queuedCalendarCancellation("dismiss-dialog", isoDay(31));
+  await clearOutbox();
+  const page = fixtures.managerPage;
+  const actions = recordQueueActions(page);
+  await withDiagnostics(page, "cancellation dismissal dialog", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const card = queueCard(page, cancellation.title);
+    await card.getByText("Calendar Cancellation", { exact: true }).waitFor();
+    const dismiss = card.getByRole("button", { name: "Dismiss" });
+    const name = "Dismiss calendar cancellation?";
+    const description = "Nothing will be sent and the existing calendar event will remain in place.";
+
+    await dismiss.focus();
+    await page.keyboard.press("Enter");
+    await expectAccessibleDialog(page, name, description);
+    await page.keyboard.press("Escape");
+    await page.getByRole("alertdialog").waitFor({ state: "detached" });
+    assert.deepEqual(await focusedElement(page), { text: "Dismiss", inDialog: false },
+      "closing the dialog returns focus to Dismiss");
+
+    await dismiss.click();
+    const keep = await expectAccessibleDialog(page, name, description);
+    await keep.getByRole("button", { name: "Keep reviewing" }).click();
+    await page.getByRole("alertdialog").waitFor({ state: "detached" });
+    assert.deepEqual(actions, [], "keeping the request sends nothing");
+    assert.equal((await queueRow(cancellation.queueId)).status, "pending");
+
+    await dismiss.click();
+    const dialog = await expectAccessibleDialog(page, name, description);
+    await dialog.getByRole("button", { name: "Dismiss" }).click();
+    await page.getByText("Calendar cancellation dismissed").first().waitFor();
+    await dialog.waitFor({ state: "detached" });
+    await card.waitFor({ state: "detached" });
+    assert.deepEqual(actions, [`/fix-track/contractor-email-queue/${cancellation.queueId}/cancel`]);
+  });
+  assert.equal((await queueRow(cancellation.queueId)).status, "cancelled");
+  assert.equal(await contractorEmailCount(), 0, "dismissal sends nothing, so the calendar event stays");
+  const [issue] = (await db.execute(sql`
+    SELECT email_request_status FROM fix_track_issues WHERE id=${cancellation.id}
+  `)).rows;
+  assert.equal(issue.email_request_status, "rejected");
+});
