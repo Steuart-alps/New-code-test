@@ -68,6 +68,25 @@ export const MANAGE_ITEMS: ManageItem[] = [
     id: 'calendar', label: 'Calendar', subtitle: 'What is due: overdue, today, this week and later',
     icon: 'calendar', iconColor: '#2563eb', route: '/manage/calendar', audience: 'everyone',
   },
+  {
+    id: 'training',
+    label: 'TrainTrack',
+    subtitle: 'Staff training: expired, expiring and missing certificates',
+    icon: 'award',
+    iconColor: '#7c3aed',
+    route: '/manage/training',
+    audience: 'everyone',
+    service: 'traintrack',
+  },
+  {
+    id: 'staff-sign-off',
+    label: 'Hand the phone to staff to sign',
+    subtitle: 'Staff without a login read and sign their documents',
+    icon: 'edit-3',
+    iconColor: '#0f766e',
+    route: '/manage/staff-sign-off',
+    audience: 'managers',
+  },
 ];
 
 /** Client admins and consultants manage the business; staff and viewers don't. */

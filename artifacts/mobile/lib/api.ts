@@ -54,6 +54,11 @@ export function setToken(token: string | null): void {
   _token = token;
 }
 
+/** The signed-in bearer, for requests apiFetch cannot make (image headers). */
+export function getToken(): string | null {
+  return _token;
+}
+
 /**
  * Register the handler for a 401 on a request made with the signed-in
  * bearer (AuthContext clears credentials and the router returns to login).

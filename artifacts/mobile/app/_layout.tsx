@@ -244,6 +244,27 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="manage/training"
+        options={{
+          title: 'TrainTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/training-person"
+        options={{
+          title: 'Training records',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/staff-sign-off"
+        options={{
+          title: 'Staff sign-off',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/green-records"
         options={{
           title: 'Machine records',

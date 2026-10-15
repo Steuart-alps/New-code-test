@@ -44,6 +44,8 @@
     "test:registers": "node tests/registers-logic.mjs",
     "test:contractors": "node tests/contractors-logic.mjs",
     "test:calendar-agenda": "node tests/calendar-agenda-logic.mjs",
+    "test:train-track": "node tests/train-track-logic.mjs",
+    "test:staff-sign-off": "node tests/staff-sign-off-logic.mjs",
     "test:offline-resilience": "node tests/offline-resilience-logic.mjs",
     "test:auth-offline": "node tests/auth-offline.mjs",
     "test:store-compliance": "node tests/store-compliance.mjs",
