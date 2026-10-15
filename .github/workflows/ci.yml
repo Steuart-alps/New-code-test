@@ -99,6 +99,9 @@ jobs:
       - name: Enforced CSRF tests
         run: pnpm --filter @workspace/api-server run test:csrf-enforced:ci
 
+      - name: Settings and dropdown option tests
+        run: pnpm --filter @workspace/api-server run test:config:ci
+
       # Record locks, department non-disclosure and site moves (the checks that
       # tests/site-move-route-inventory.mjs requires for every site-move route).
       - name: Stored-date lock and site-move tests
