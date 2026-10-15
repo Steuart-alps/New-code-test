@@ -58,6 +58,7 @@ import trackActionsRouter from "./track-actions";
 import trackEvidenceRouter from "./track-evidence";
 import auditEventsRouter from "./audit-events";
 import auditLogRouter from "./audit-log";
+import publicLinkAccessRouter from "./public-link-access";
 import analyticsRouter from "./analytics";
 import registersRouter from "./registers";
 
@@ -160,6 +161,7 @@ router.use(csvImportsRouter);
 router.use(consultantPortfolioRouter);
 router.use("/audit-events", auditEventsRouter);
 router.use("/audit-log", auditLogRouter);
+router.use("/public-link-access", publicLinkAccessRouter);
 router.use("/track-actions", trackActionsRouter);
 router.use("/track-evidence", trackEvidenceRouter);
 router.use(setupRouter, tasksRouter);

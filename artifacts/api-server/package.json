@@ -21,6 +21,7 @@
     "test:kitchen-cleaning-export": "bash tests/run-fresh-schema.sh tests/kitchen-cleaning-export.mjs",
     "test:content-filter": "bash tests/run-fresh-schema.sh tests/content-filter-endpoints.mjs",
     "test:feedback-triage": "bash tests/run-fresh-schema.sh tests/feedback-triage.mjs",
+    "test:public-link-access": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/public-link-access.mjs",
     "test:analytics": "bash tests/run-fresh-schema.sh tests/analytics.mjs",
     "test:client-data-deletion-feedback": "bash tests/run-fresh-schema.sh tests/client-data-deletion-feedback.mjs",
     "test:retention-clock": "bash tests/run-fresh-schema.sh tests/retention-clock.mjs",

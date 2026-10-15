@@ -89,6 +89,7 @@ import type {
   ListLegionellaChecksParams,
   ListPATTestsParams,
   ListPremisesInspectionsParams,
+  ListPublicLinkAccessParams,
   OkResponse,
   PATAppliance,
   PATTest,
@@ -104,6 +105,7 @@ import type {
   PrivacyRecordInput,
   PrivacyRetentionVerification,
   PrivacyRetentionVerificationInput,
+  PublicLinkAccessPage,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
@@ -567,6 +569,91 @@ export function useListAuditLog<TData = Awaited<ReturnType<typeof listAuditLog>>
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListAuditLogQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListPublicLinkAccessUrl = (params?: ListPublicLinkAccessParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/public-link-access?${stringifiedParams}` : `/api/public-link-access`
+}
+
+/**
+ * Client admins and consultants only. Newest first, scoped to the active business. Entries never include link tokens; linkRef is a short prefix of the stored SHA-256 fingerprint so repeat use of one link can be matched without exposing the credential.
+ * @summary List recent public-link access for the signed-in business
+ */
+export const listPublicLinkAccess = async (params?: ListPublicLinkAccessParams, options?: RequestInit): Promise<PublicLinkAccessPage> => {
+
+  return customFetch<PublicLinkAccessPage>(getListPublicLinkAccessUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPublicLinkAccessQueryKey = (params?: ListPublicLinkAccessParams,) => {
+    return [
+    `/api/public-link-access`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListPublicLinkAccessQueryOptions = <TData = Awaited<ReturnType<typeof listPublicLinkAccess>>, TError = ErrorType<unknown>>(params?: ListPublicLinkAccessParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPublicLinkAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPublicLinkAccessQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPublicLinkAccess>>> = ({ signal }) => listPublicLinkAccess(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPublicLinkAccess>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPublicLinkAccessQueryResult = NonNullable<Awaited<ReturnType<typeof listPublicLinkAccess>>>
+export type ListPublicLinkAccessQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List recent public-link access for the signed-in business
+ */
+
+export function useListPublicLinkAccess<TData = Awaited<ReturnType<typeof listPublicLinkAccess>>, TError = ErrorType<unknown>>(
+ params?: ListPublicLinkAccessParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPublicLinkAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPublicLinkAccessQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

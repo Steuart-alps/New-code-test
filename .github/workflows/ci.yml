@@ -122,3 +122,6 @@ jobs:
 
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
+
+      - name: Public-link access history tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:public-link-access
