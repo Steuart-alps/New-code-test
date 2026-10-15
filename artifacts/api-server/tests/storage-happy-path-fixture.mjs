@@ -10,11 +10,17 @@
 //   GCS_STORAGE_TEST_SERVICE_ACCOUNT_JSON   service-account key JSON, or
 //   GCS_STORAGE_TEST_CREDENTIALS_FILE       a path to that key file
 //   GCS_STORAGE_TEST_PROJECT_ID             optional; defaults to the key's project
+//   STORAGE_HAPPY_PATH_REQUIRED=1           fail instead of skip when none is set
+//
+// `check` exits 78 (SKIP_EXIT_CODE) when no GCS_STORAGE_TEST_* variable is set,
+// so release validation reports an intentional skip rather than a pass. A
+// partial configuration, or an application bucket, always fails.
 import { Storage } from "@google-cloud/storage";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { applicationBuckets, normalizeBucketName } from "./photo-roundtrip-config.mjs";
 
+export const SKIP_EXIT_CODE = 78;
 const PREFIX_PATTERN = /^private\/integration-[0-9a-f]{32}$/;
 const BUCKET_PATTERN = /^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/;
 
@@ -27,7 +33,8 @@ export function storageFixtureConfigured() {
  * Resolve the dedicated-bucket configuration from an environment that still
  * carries the application's storage variables, so a clash can be detected.
  * Returns { ok: true, bucket, credentials, projectId, applicationBuckets } or
- * { ok: false, reason }. The reason never contains credential text.
+ * { ok: false, unconfigured, reason }; `unconfigured` means no test variable is
+ * set at all. The reason never contains credential text.
  */
 export function resolveStorageTestConfig(env, { readFile = (path) => readFileSync(path, "utf8") } = {}) {
   const bucket = normalizeBucketName(env.GCS_STORAGE_TEST_BUCKET);
@@ -38,7 +45,8 @@ export function resolveStorageTestConfig(env, { readFile = (path) => readFileSyn
     !inlineCredentials && !credentialsFile && "GCS_STORAGE_TEST_SERVICE_ACCOUNT_JSON or GCS_STORAGE_TEST_CREDENTIALS_FILE",
   ].filter(Boolean);
   if (missing.length) {
-    return { ok: false, reason: `Required-storage tests need a dedicated non-production bucket: set ${missing.join(" and ")}` };
+    const unconfigured = !bucket && !inlineCredentials && !credentialsFile && !String(env.GCS_STORAGE_TEST_PROJECT_ID ?? "").trim();
+    return { ok: false, unconfigured, reason: `Required-storage tests need a dedicated non-production bucket: set ${missing.join(" and ")}` };
   }
   if (!BUCKET_PATTERN.test(bucket)) {
     return { ok: false, reason: "GCS_STORAGE_TEST_BUCKET is not a valid bucket name" };
@@ -163,7 +171,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } else if (["check", "bucket", "application-buckets", "service-account-json", "project-id"].includes(mode)) {
     const config = resolveStorageTestConfig(process.env);
     if (!config.ok) {
-      console.error(config.reason);
+      if (mode === "check" && config.unconfigured && process.env.STORAGE_HAPPY_PATH_REQUIRED !== "1") {
+        console.log(`SKIP: storage happy-path checks did not run. ${config.reason} (docs/testing/storage-test-bucket.md)`);
+        process.exit(SKIP_EXIT_CODE);
+      }
+      console.error(config.unconfigured ? `${config.reason} (STORAGE_HAPPY_PATH_REQUIRED=1)` : config.reason);
       process.exit(1);
     }
     if (mode === "check") {

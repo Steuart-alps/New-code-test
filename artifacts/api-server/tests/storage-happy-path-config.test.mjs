@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { resolveStorageTestConfig } from "./storage-happy-path-fixture.mjs";
+import { resolveStorageTestConfig, SKIP_EXIT_CODE } from "./storage-happy-path-fixture.mjs";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const credentials = JSON.stringify({
@@ -18,9 +18,11 @@ const configured = { GCS_STORAGE_TEST_BUCKET: "complytrack-storage-test", GCS_ST
 // Unconfigured, or a bucket without its own key: refuse with a clear reason.
 let result = resolveStorageTestConfig({});
 assert.equal(result.ok, false);
+assert.equal(result.unconfigured, true);
 assert.match(result.reason, /GCS_STORAGE_TEST_BUCKET/);
 result = resolveStorageTestConfig({ GCS_STORAGE_TEST_BUCKET: "complytrack-storage-test", GCS_SERVICE_ACCOUNT_JSON: credentials });
 assert.equal(result.ok, false, "the application key is never borrowed for the test bucket");
+assert.equal(result.unconfigured, false);
 assert.match(result.reason, /GCS_STORAGE_TEST_SERVICE_ACCOUNT_JSON/);
 
 // Configured with a distinct bucket: run, and remember the application buckets.
@@ -62,12 +64,20 @@ for (const bad of ["{\"type\":\"authorized_user\",\"refresh_token\":\"secret-val
 }
 assert.equal(resolveStorageTestConfig({ ...configured, GCS_STORAGE_TEST_BUCKET: "../bad" }).ok, false);
 
-// The CLI the runner calls: refusal exits 1 without printing credentials.
+// The CLI the runner calls. Nothing configured is an intentional skip (78),
+// reported as SKIP, unless STORAGE_HAPPY_PATH_REQUIRED=1; a partial
+// configuration always fails; refusals never print credentials.
 const script = fileURLToPath(new URL("./storage-happy-path-fixture.mjs", import.meta.url));
 const run = (args, env) => spawnSync(process.execPath, [script, ...args], { env: { PATH: process.env.PATH, ...env }, encoding: "utf8" });
 let cli = run(["check"], {});
+assert.equal(cli.status, SKIP_EXIT_CODE);
+assert.match(cli.stdout, /^SKIP: storage happy-path checks did not run/);
+cli = run(["check"], { STORAGE_HAPPY_PATH_REQUIRED: "1" });
 assert.equal(cli.status, 1);
-assert.match(cli.stderr, /dedicated non-production bucket/);
+assert.match(cli.stderr, /dedicated non-production bucket.*STORAGE_HAPPY_PATH_REQUIRED=1/);
+cli = run(["check"], { GCS_STORAGE_TEST_BUCKET: "complytrack-storage-test" });
+assert.equal(cli.status, 1, "a bucket without its key is a misconfiguration, not a skip");
+assert.match(cli.stderr, /GCS_STORAGE_TEST_SERVICE_ACCOUNT_JSON/);
 cli = run(["check"], { ...configured, PRIVATE_OBJECT_DIR: "/complytrack-storage-test/private" });
 assert.equal(cli.status, 1);
 assert.doesNotMatch(cli.stdout + cli.stderr, /PRIVATE KEY/);

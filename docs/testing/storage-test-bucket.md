@@ -50,6 +50,16 @@ An empty bucket with a 1-day clean-up rule stores almost nothing, and each run m
 small requests, so the Google Cloud charge should be pennies a month at most. Each workflow run
 uses a few minutes of GitHub Actions time; it runs only when storage code changes or on demand.
 
+## Release validation
+
+`node scripts/validate.mjs --all` (or `node scripts/validate.mjs storage-happy-path`) includes
+these checks in its integration stage. With no `GCS_STORAGE_TEST_*` variable set, the step prints
+`SKIP: storage happy-path checks did not run` and the summary lists it as
+`SKIP (not configured)`, never as a pass. Set `STORAGE_HAPPY_PATH_REQUIRED=1` to make a missing
+bucket fail instead. A partly set configuration, or a test bucket that matches an application
+bucket, always fails. When it runs, the suites run one after another only after the bucket
+pre-check passes, and the run's folder is emptied afterwards whether they pass or fail.
+
 ## Running it elsewhere
 
 Any machine with `DATABASE_URL` (a test database), `SESSION_SECRET` and the variables above can

@@ -2,15 +2,24 @@
 # Required-storage integration run. Never points cleanup at the application bucket.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-source tests/api-integration-lock.sh
 
 # The dedicated bucket and its test-only service-account key come from the
 # GCS_STORAGE_TEST_* variables (see storage-happy-path-fixture.mjs). The check
 # refuses a bucket that any application storage variable names, including the
 # /bucket/... paths in PRIVATE_OBJECT_DIR and PUBLIC_OBJECT_SEARCH_PATHS.
+# Exit 78 is an intentional skip (nothing configured here): release validation
+# reports it as SKIP, and STORAGE_HAPPY_PATH_REQUIRED=1 turns it into a failure.
+set +e
+node tests/storage-happy-path-fixture.mjs check
+status=$?
+set -e
+[ "$status" = "0" ] || exit "$status"
+
+# Suites run serially, only after the fixture preflight passes, and the exit
+# trap empties the run prefix after a pass or a failure.
+source tests/api-integration-lock.sh
 : "${DATABASE_URL:?Set DATABASE_URL to a development/test database; suites purge and verify only their own fixture rows}"
 : "${SESSION_SECRET:?Set SESSION_SECRET for the test API}"
-node tests/storage-happy-path-fixture.mjs check
 APPLICATION_BUCKETS="$(node tests/storage-happy-path-fixture.mjs application-buckets)"
 TEST_SERVICE_ACCOUNT_JSON="$(node tests/storage-happy-path-fixture.mjs service-account-json)"
 TEST_PROJECT_ID="$(node tests/storage-happy-path-fixture.mjs project-id)"
