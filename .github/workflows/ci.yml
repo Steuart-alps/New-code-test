@@ -81,6 +81,9 @@ jobs:
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
 
+      - name: Calendar invite fixture test
+        run: pnpm --filter @workspace/api-server run test:calendar-invite-compatibility
+
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
       - name: Create base database schema
