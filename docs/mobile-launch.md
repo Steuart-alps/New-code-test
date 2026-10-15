@@ -1,7 +1,7 @@
 # ComplyTrack mobile: App Store and Google Play launch pack
 
 This covers how to ship `artifacts/mobile` (Expo SDK 57) as EAS standalone builds.
-Expo Go stays the development loop (`pnpm --filter @workspace/mobile run dev`).
+Expo Go stays the development loop (`pnpm --filter @workspace/mobile run dev`). After an Expo CLI, Node or system package change, run `pnpm --filter @workspace/mobile run test:expo-start`: it starts the same dev server, checks Metro and the Expo Go manifest come up, and fails on fatal native-tool errors such as missing shared libraries (CI runs it too).
 Every native-only feature must stay optional when its module is missing, because
 Expo Go doesn't include it.
 

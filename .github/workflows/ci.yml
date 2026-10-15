@@ -68,6 +68,11 @@ jobs:
       - name: Typecheck mobile app from a clean checkout
         run: pnpm --filter @workspace/mobile run typecheck
 
+      # Starts the Expo Go dev server (pnpm run dev) and checks Metro and the
+      # Expo Go manifest come up without fatal native-tool errors.
+      - name: Phone app startup smoke check
+        run: pnpm --filter @workspace/mobile run test:expo-start
+
       - name: Typecheck
         run: pnpm run typecheck
 
