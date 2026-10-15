@@ -19,6 +19,7 @@
     "test:cleaning-schedule-export": "bash tests/run-fresh-schema.sh tests/cleaning-schedule-export.mjs",
     "test:inspection-pack-calendar": "bash tests/run-fresh-schema.sh tests/inspection-pack-calendar.mjs",
     "test:kitchen-cleaning-export": "bash tests/run-fresh-schema.sh tests/kitchen-cleaning-export.mjs",
+    "test:kitchen-cleaning-legacy": "bash tests/run-fresh-schema.sh tests/kitchen-cleaning-legacy-records.mjs",
     "test:content-filter": "bash tests/run-fresh-schema.sh tests/content-filter-endpoints.mjs",
     "test:feedback-triage": "bash tests/run-fresh-schema.sh tests/feedback-triage.mjs",
     "test:analytics": "bash tests/run-fresh-schema.sh tests/analytics.mjs",
