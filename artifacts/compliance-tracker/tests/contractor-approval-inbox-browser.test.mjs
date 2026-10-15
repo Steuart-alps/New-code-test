@@ -19,7 +19,7 @@ import { chromium } from "@playwright/test";
 import { createServer as createViteServer } from "vite";
 import {
   base as apiBase, db, sql, pool, runReminderJob, createTenant, createUser,
-  readOutbox, clearOutbox, isoDay,
+  readOutbox, clearOutbox, isoDay, requestSession, currentTotp,
 } from "../../api-server/tests/approval-workflow-fixtures.mjs";
 
 if (process.env.FRESH_SCHEMA_BROWSER_POLICY !== "1") {
@@ -1144,5 +1144,71 @@ test("the New view lists only newly found requests, by site and search, until ea
       assert.equal(await card.getByLabel("New approval request").count(), 0);
       assert.equal((await queueRow(request.queueId)).status, "pending");
     }
+  });
+});
+
+test("signing out forgets only that manager's new-approval state, and signing back in starts fresh", async () => {
+  const email = `inbox-signout-${suffix}@test.local`;
+  const password = `inbox-signout-${suffix}`;
+  const created = await fixtures.owner.request("POST", "/users", {
+    name: "Sign-out manager", email, password, clientId: fixtures.owner.clientId,
+    role: "client_staff", departmentId: fixtures.departmentId,
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  const flagged = await fixtures.owner.request("PUT", `/users/${created.data.id}`, { isMaintenanceManager: true });
+  assert.equal(flagged.status, 200, JSON.stringify(flagged.data));
+  const session = requestSession({ browserPolicy: true });
+  const login = await session("POST", "/auth/login", { email, password });
+  assert.equal(login.data?.requires2faSetup, true, JSON.stringify(login.data));
+  const setup = await session("GET", "/auth/2fa/setup");
+  assert.equal((await session("POST", "/auth/2fa/enable", { code: currentTotp(setup.data.secret) })).status, 200);
+
+  const ownKey = `complytrack:contractor-approvals:${created.data.id}:${fixtures.owner.clientId}`;
+  // Another manager's state, and a user id that shares this one's leading digits.
+  const otherKeys = [
+    `complytrack:contractor-approvals:${fixtures.manager.userId}:${fixtures.owner.clientId}`,
+    `complytrack:contractor-approvals:${created.data.id}1:${fixtures.owner.clientId}`,
+  ];
+  const otherState = JSON.stringify({ knownQueueIds: [1, 2], newRequestIds: [2] });
+  const storedState = (page, key) => page.evaluate(storageKey => window.localStorage.getItem(storageKey), key);
+  const newBadge = (title) => queueCard(page, title).getByLabel("New approval request");
+
+  const { page } = await browserContext({ request: session });
+  await withDiagnostics(page, "sign-out clears approval state", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, fixtures.acceptIssue.title).waitFor();
+    const before = await queuedCalendarCancellation("signout-before", isoDay(43));
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(before.title).waitFor();
+    assert.ok(JSON.parse(await storedState(page, ownKey)).newRequestIds.includes(before.queueId));
+    await page.evaluate(({ keys, value }) => keys.forEach(key => window.localStorage.setItem(key, value)),
+      { keys: otherKeys, value: otherState });
+
+    await page.getByTestId("button-sign-out").click();
+    await page.waitForFunction(key => window.localStorage.getItem(key) === null, ownKey);
+    for (const key of otherKeys) assert.equal(await storedState(page, key), otherState, `${key} is left alone`);
+
+    await page.goto(`${appOrigin}/login`);
+    await page.getByLabel("Email address").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByLabel("Authentication code").fill(currentTotp(setup.data.secret));
+    await page.getByRole("button", { name: "Verify" }).click();
+    await page.getByTestId("button-sign-out").waitFor();
+
+    // A fresh baseline: the request acknowledged as new before signing out is
+    // listed but no longer marked, and nothing else is either.
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, before.title).waitFor();
+    await page.getByRole("group", { name: "Which approvals to show" }).getByRole("button", { name: "New (0)" }).waitFor();
+    assert.equal(await newBadge(before.title).count(), 0);
+    assert.deepEqual(JSON.parse(await storedState(page, ownKey)).newRequestIds, []);
+
+    // Requests the server gains after signing in are still flagged.
+    const after = await queuedCalendarCancellation("signout-after", isoDay(44));
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(after.title).waitFor();
+    assert.equal(await newBadge(before.title).count(), 0);
+    for (const key of otherKeys) assert.equal(await storedState(page, key), otherState);
   });
 });
