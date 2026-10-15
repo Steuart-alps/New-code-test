@@ -122,3 +122,7 @@ jobs:
 
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
+
+      # Warning job and banner against synced Stripe rows in the current API shape.
+      - name: Cancellation warning tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:cancellation-warnings:fresh
