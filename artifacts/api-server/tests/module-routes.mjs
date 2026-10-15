@@ -43,7 +43,7 @@ function expectOk(name, status, allowed = [200, 201]) {
   check(name, allowed.includes(status), `expected ${allowed.join("/")}, got ${status}`);
 }
 
-function makeSession() {
+function makeSession(defaultHeaders = {}) {
   let cookie = "";
   return async function request(method, path, body) {
     const res = await fetch(`${BASE}${path}`, {
@@ -51,6 +51,7 @@ function makeSession() {
       headers: {
         "Content-Type": "application/json",
         ...(cookie ? { cookie } : {}),
+        ...defaultHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -791,7 +792,9 @@ async function testCleaningSiteFiltering(req, siteId, otherSiteId) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function runSuite() {
-  const req = makeSession();
+  // The owner deliberately writes past-dated records (one day per module so
+  // runs never collide), which owners may do with a reason.
+  const req = makeSession({ "X-Override-Reason": encodeURIComponent("Module routes fixture: past-dated record") });
 
   // Register a fresh account. Track it before anything can fail so the
   // finally block in main() always knows what this run owns.

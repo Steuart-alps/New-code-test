@@ -31,6 +31,13 @@ const STEPS = [
   { label: "Starter checks", icon: ClipboardCheck },
   { label: "First record", icon: Sparkles },
 ];
+/** "12 months (every year)", "60 months (every 5 years)". */
+function intervalLabel(months: number): string {
+  if (months % 12 !== 0) return `${months} month${months === 1 ? "" : "s"}`;
+  const years = months / 12;
+  return `${months} months (every ${years === 1 ? "year" : `${years} years`})`;
+}
+
 const selectClass = "w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
 export default function SetupPage() {
@@ -273,7 +280,7 @@ export default function SetupPage() {
                                   <span className="block text-sm font-medium">{c.title}</span>
                                   <span className="block text-xs text-muted-foreground">
                                     {c.state === "customised" ? "Already on your list and edited, so it is left as it is."
-                                      : c.frequencyMonths ? `Repeats every ${c.frequencyMonths} months.` : "Interval set by your premises or competent person."}
+                                      : c.frequencyMonths ? `Repeats every ${intervalLabel(c.frequencyMonths)}.` : "Interval set by your premises or competent person."}
                                   </span>
                                 </span>
                               </label>

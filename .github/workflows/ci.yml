@@ -81,6 +81,12 @@ jobs:
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
 
+      - name: Web client override-reason retry test
+        run: pnpm --filter @workspace/api-client-react run test:custom-fetch-override-reason
+
+      - name: Track record lock decision tests
+        run: pnpm --filter @workspace/api-server run test:track-record-lock
+
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
       - name: Create base database schema
@@ -128,3 +134,9 @@ jobs:
 
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
+
+      - name: Checklist results and FixTrack job tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:checklist-results-fixtrack
+
+      - name: Owner late-edit reason tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:owner-late-edit-reason

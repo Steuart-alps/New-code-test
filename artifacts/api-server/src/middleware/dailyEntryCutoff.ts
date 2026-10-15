@@ -4,7 +4,9 @@ import type { NextFunction, Request, Response } from "express";
  * Track records are day-bound operational evidence. Staff have the record's
  * scheduled day plus the following local calendar day to complete corrections.
  * After that 24-hour grace window, the record is immutable for staff. Client
- * admins and consultants retain the correction/backfill override.
+ * admins and consultants (account owners) may still correct, delete or
+ * backfill an older record, but only with a reason (the X-Override-Reason
+ * header), which is kept in the audit trail.
  *
  * Keep this guard at the API boundary so web, mobile, and other clients share
  * the same rule. The date field is intentionally best-effort because legacy
@@ -319,16 +321,72 @@ function calendarDay(date: string): number {
   return Math.floor(Date.parse(`${date}T00:00:00.000Z`) / 86_400_000);
 }
 
+/** Roles that may change records past the correction window, with a reason. */
+export function isRecordOwnerRole(role: unknown): boolean {
+  return role === "client_admin" || role === "consultant";
+}
+
+/**
+ * Workflow records rather than dated evidence: FixTrack jobs and track
+ * actions carry reported/target/due dates that are routinely in the past
+ * (an overdue job), and their edit forms resend them. Owners change these
+ * without a reason, as before; the staff rule for them is unchanged.
+ */
+export const OWNER_REASON_EXEMPT_PREFIXES = ["/fix-track", "/track-actions"] as const;
+
+function isOwnerReasonExempt(path: string): boolean {
+  return OWNER_REASON_EXEMPT_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`));
+}
+
+/** Request header carrying an owner's reason (URI-encoded by clients). */
+export const OVERRIDE_REASON_HEADER = "x-override-reason";
+export const OVERRIDE_REASON_MIN_LENGTH = 5;
+export const OVERRIDE_REASON_MAX_LENGTH = 500;
+
+/**
+ * Pure: the usable reason from an X-Override-Reason header value, or null.
+ * Clients URI-encode the text so any characters survive HTTP headers; a value
+ * that is not valid URI encoding is taken as sent. Control characters and
+ * runs of whitespace collapse to single spaces; the result is trimmed, must
+ * have at least OVERRIDE_REASON_MIN_LENGTH characters and is capped at
+ * OVERRIDE_REASON_MAX_LENGTH.
+ */
+export function parseOverrideReason(value: unknown): string | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string") return null;
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    decoded = raw;
+  }
+  // eslint-disable-next-line no-control-regex
+  const reason = decoded.replace(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
+  if (reason.length < OVERRIDE_REASON_MIN_LENGTH) return null;
+  return reason.slice(0, OVERRIDE_REASON_MAX_LENGTH).trim();
+}
+
+export type DailyEntryCutoffDecision = {
+  blocked: boolean;
+  today: string;
+  /**
+   * record_lock: staff (and anyone who is not an owner) cannot write it.
+   * override_reason_required: an owner can, but only with a reason.
+   */
+  reason?: "record_lock" | "override_reason_required";
+  /** The record date that fell outside the correction window. */
+  entryDate?: string;
+};
+
 export function getDailyEntryCutoffDecision(
   req: Pick<Request, "method" | "path" | "body"> & { query?: unknown },
   user: { role?: string } | null | undefined,
   now = new Date(),
   timeZone = DEFAULT_ACCOUNT_TIMEZONE,
-): { blocked: boolean; today: string; reason?: string } {
+): DailyEntryCutoffDecision {
   if (!isTrackWrite(req as Request)) return { blocked: false, today: "" };
-  if (user?.role === "client_admin" || user?.role === "consultant") {
-    return { blocked: false, today: "" };
-  }
+  const owner = isRecordOwnerRole(user?.role);
+  if (owner && isOwnerReasonExempt(req.path)) return { blocked: false, today: "" };
 
   const clock = localClock(now, normalizeAccountTimezone(timeZone));
   const entryDate = findEntryDate(req.body) ?? findEntryDate(req.query) ?? findPathDate(req.path);
@@ -339,10 +397,113 @@ export function getDailyEntryCutoffDecision(
     return {
       blocked: true,
       today: clock.date,
-      reason: "record_lock",
+      reason: owner ? "override_reason_required" : "record_lock",
+      entryDate,
     };
   }
   return { blocked: false, today: clock.date };
+}
+
+const OVERRIDE_REASON_REQUIRED_MESSAGE = "This record is more than a day old. Add a reason to change it.";
+
+/**
+ * Owners (client admins and consultants) may write a record past the
+ * correction window only with a reason. The window is judged as for staff:
+ * by the stored date for ID-addressed records, and by the requested date
+ * (body, query or path), so a current record cannot be moved to an older day,
+ * nor a new one backfilled there, without a reason either. Each accepted
+ * reason is written to audit_events before the route runs; if that write
+ * fails the request is refused rather than let through unaudited.
+ */
+async function enforceOwnerOverrideReason(req: Request, res: Response, next: NextFunction) {
+  const user = req.currentUser;
+  const now = new Date();
+  const lookup = storedDateLookup(req.path);
+  let lateEntryDate: string | null = null;
+  let cutoffDate = "";
+  let recordId = 0;
+  let deferToRoute = false;
+  try {
+    const timeZone = await findAccountTimezone(req);
+    if (lookup) {
+      const storedDate = await findStoredEntryDate(req, timeZone);
+      // Unknown, other-tenant or other-department records: the route gives
+      // its own 404/403, and nothing is audited for a record the caller
+      // cannot see.
+      if (storedDate === "missing" || storedDate === "forbidden") {
+        deferToRoute = true;
+      } else {
+        recordId = Number(req.path.match(/\/(\d+)$/)?.[1] ?? 0);
+        if (storedDate) {
+          const stored = getDailyEntryCutoffDecision(
+            { method: req.method, path: req.path, body: { recordDate: storedDate } },
+            user,
+            now,
+            timeZone,
+          );
+          if (stored.blocked) {
+            lateEntryDate = storedDate;
+            cutoffDate = stored.today;
+          }
+        }
+      }
+    }
+    if (!deferToRoute && !lateEntryDate) {
+      const requested = getDailyEntryCutoffDecision(req, user, now, timeZone);
+      if (requested.blocked && requested.entryDate) {
+        lateEntryDate = requested.entryDate;
+        cutoffDate = requested.today;
+      }
+    }
+  } catch {
+    res.status(500).json({ error: lookup ? "Unable to verify record date" : "Unable to verify account timezone" });
+    return;
+  }
+  if (deferToRoute || !lateEntryDate) {
+    next();
+    return;
+  }
+
+  const reason = parseOverrideReason(req.get(OVERRIDE_REASON_HEADER));
+  if (!reason) {
+    res.status(423).json({
+      error: OVERRIDE_REASON_REQUIRED_MESSAGE,
+      code: "OVERRIDE_REASON_REQUIRED",
+      cutoffDate,
+      entryDate: lateEntryDate,
+      minReasonLength: OVERRIDE_REASON_MIN_LENGTH,
+    });
+    return;
+  }
+
+  try {
+    // Lazy imports keep this module loadable without a database (see
+    // findStoredEntryDate).
+    const [{ appendAuditEvent }, { getClientId }] = await Promise.all([
+      import("../lib/audit"),
+      import("./requireAuth"),
+    ]);
+    // The tenant comes only from the authenticated, access-checked context.
+    const clientId = getClientId(req);
+    if (!clientId) throw new Error("No business selected for the override audit event");
+    await appendAuditEvent(req, {
+      clientId,
+      entityType: "track_record",
+      entityId: Number.isInteger(recordId) && recordId > 0 ? recordId : 0,
+      action: "late_edit_override",
+      metadata: {
+        method: req.method,
+        path: req.path,
+        entryDate: lateEntryDate,
+        reason,
+        role: user?.role ?? null,
+      },
+    });
+  } catch {
+    res.status(500).json({ error: "Unable to record the reason for this change" });
+    return;
+  }
+  next();
 }
 
 export async function enforceDailyEntryCutoff(req: Request, res: Response, next: NextFunction) {
@@ -365,10 +526,12 @@ export async function enforceDailyEntryCutoff(req: Request, res: Response, next:
       return;
     }
   }
+  if (isTrackWrite(req) && req.currentUser && isRecordOwnerRole(req.currentUser.role)) {
+    await enforceOwnerOverrideReason(req, res, next);
+    return;
+  }
   const lookup = storedDateLookup(req.path);
-  const staffTrackWrite = isTrackWrite(req) && req.currentUser
-    && req.currentUser.role !== "client_admin"
-    && req.currentUser.role !== "consultant";
+  const staffTrackWrite = isTrackWrite(req) && req.currentUser;
   let timeZone = DEFAULT_ACCOUNT_TIMEZONE;
   if (staffTrackWrite) {
     try {

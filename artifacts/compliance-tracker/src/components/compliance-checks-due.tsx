@@ -2,14 +2,19 @@ import { Link } from "wouter";
 import { AlertTriangle, ArrowRight, CalendarClock, Clock } from "lucide-react";
 import { useListComplianceItems, type ComplianceItem } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
+import { needsActionLabel } from "@/components/badges";
 
 const DUE_SOON_DAYS = 30;
 const MAX_ROWS = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const STATE_RANK: Record<"action" | "overdue" | "due_soon", number> = { action: 0, overdue: 1, due_soon: 2 };
 
-type DueState = "overdue" | "due_soon";
+type DueState = "action" | "overdue" | "due_soon";
 
 function dueState(item: ComplianceItem, now: number): DueState | null {
+  // An unsatisfactory newest certificate or open remedial defects need action
+  // whatever the due date (and even when the check is marked completed).
+  if (item.needsAction) return "action";
   if (item.status === "completed") return null;
   const due = item.dueDate ? new Date(item.dueDate).getTime() : null;
   if (item.status === "overdue" || (due !== null && due < now)) return "overdue";
@@ -18,6 +23,7 @@ function dueState(item: ComplianceItem, now: number): DueState | null {
 }
 
 function dueLabel(item: ComplianceItem, now: number): string {
+  if (item.needsAction) return needsActionLabel(item);
   if (!item.dueDate) return "Overdue";
   const days = Math.round((new Date(item.dueDate).getTime() - now) / DAY_MS);
   if (days < 0) return `${Math.abs(days)} day${days === -1 ? "" : "s"} overdue`;
@@ -39,14 +45,15 @@ export function ComplianceChecksDue({ siteId = null }: { siteId?: number | null 
     .map((item) => ({ item, state: dueState(item, now) }))
     .filter((row): row is { item: ComplianceItem; state: DueState } => row.state !== null)
     .sort((a, b) =>
-      (a.state === "overdue" ? 0 : 1) - (b.state === "overdue" ? 0 : 1) ||
+      STATE_RANK[a.state] - STATE_RANK[b.state] ||
       (a.item.dueDate ? new Date(a.item.dueDate).getTime() : 0) - (b.item.dueDate ? new Date(b.item.dueDate).getTime() : 0));
+  const actionNeeded = flagged.filter((row) => row.state === "action").length;
   const overdue = flagged.filter((row) => row.state === "overdue").length;
-  const dueSoon = flagged.length - overdue;
+  const dueSoon = flagged.length - overdue - actionNeeded;
   const noDueDate = items.filter((item) => item.status !== "completed" && item.status !== "overdue" && !item.dueDate).length;
 
   if (flagged.length === 0 && noDueDate === 0) return null;
-  const hasOverdue = overdue > 0;
+  const hasOverdue = overdue > 0 || actionNeeded > 0;
 
   return (
     <section
@@ -64,6 +71,7 @@ export function ComplianceChecksDue({ siteId = null }: { siteId?: number | null 
           {flagged.length === 0
             ? "Compliance checks need due dates"
             : [
+                actionNeeded ? `${actionNeeded} need${actionNeeded === 1 ? "s" : ""} remedial action` : "",
                 overdue ? `${overdue} compliance check${overdue === 1 ? "" : "s"} overdue` : "",
                 dueSoon ? `${dueSoon} due in the next ${DUE_SOON_DAYS} days` : "",
               ].filter(Boolean).join(" · ")}
@@ -81,11 +89,11 @@ export function ComplianceChecksDue({ siteId = null }: { siteId?: number | null 
                 href={`/items/${item.id}`}
                 className={cn(
                   "flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm border bg-white hover:bg-muted/30 transition-colors",
-                  state === "overdue" ? "border-red-200" : "border-amber-200",
+                  state !== "due_soon" ? "border-red-200" : "border-amber-200",
                 )}
               >
                 <div className="min-w-0">
-                  <p className={cn("font-medium truncate", state === "overdue" ? "text-red-900" : "text-amber-900")}>{item.title}</p>
+                  <p className={cn("font-medium truncate", state !== "due_soon" ? "text-red-900" : "text-amber-900")}>{item.title}</p>
                   {(item.siteName || item.categoryName) && (
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
                       {[item.siteName, item.categoryName].filter(Boolean).join(" · ")}
@@ -94,9 +102,9 @@ export function ComplianceChecksDue({ siteId = null }: { siteId?: number | null 
                 </div>
                 <span className={cn(
                   "inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full shrink-0",
-                  state === "overdue" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700",
+                  state !== "due_soon" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700",
                 )}>
-                  {state === "overdue" ? <AlertTriangle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                  {state !== "due_soon" ? <AlertTriangle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
                   {dueLabel(item, now)}
                 </span>
               </Link>

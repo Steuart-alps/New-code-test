@@ -126,11 +126,11 @@ const MODULES = [
     activeBorder: "border-blue-500",
     activeBg: "bg-blue-50",
     required: false,
-    description: "Workplace safety management — record risk assessments, incidents, toolbox talks, and corrective actions in one place.",
+    description: "Workplace safety management — record risk assessments, incidents, staff sign-off of policies, and corrective actions in one place.",
     features: [
       "Risk assessment records and review dates",
       "Incident and near-miss reporting",
-      "Toolbox talk attendance records",
+      "Staff sign-off of policies and procedures",
       "Corrective action tracking",
       "Timestamped safety audit history",
     ],
@@ -265,15 +265,10 @@ const MODULES = [
 const FEATURES = [
   { icon: Users, title: "Multi-Site Ready", desc: "Manage compliance across one site or many. Each location's records, contractors, and tasks kept neatly separate." },
   { icon: Bell, title: "Automated Reminders", desc: "Contractors and staff get email reminders as deadlines approach — so nothing slips through the cracks." },
-  { icon: FileText, title: "Full Audit Trail", desc: "Every action is timestamped and logged — your digital paper trail for inspections and audits." },
+  { icon: FileText, title: "Audit Trail", desc: "Key safety records keep a timestamped history of who changed what — your digital paper trail for inspections and audits." },
   { icon: BarChart3, title: "Live Status Dashboard", desc: "See your compliance status at a glance and spot issues long before they become problems." },
   { icon: Lock, title: "Role-Based Access", desc: "Invite your team — and your H&S consultant — with exactly the right level of access." },
-  { icon: Zap, title: "Calendar Invites Built In", desc: "Every reminder includes a calendar attachment so contractors and staff can book the work straight in." },
-];
-
-const TESTIMONIALS = [
-  { quote: "We used to chase contractors over email and spreadsheets. ComplyTrack does it all for us automatically — our certificates are always up to date.", author: "Sarah M.", role: "Operations Manager, Leeds" },
-  { quote: "We manage compliance across four sites. Having everything in one place — and giving our consultant view-only access when needed — has been a game-changer.", author: "James K.", role: "Facilities Director, London" },
+  { icon: Zap, title: "Calendar Invites Built In", desc: "Contractor reminders and FixTrack jobs include a calendar attachment, so the work can be booked straight in." },
 ];
 
 // ─── Pricing builder (interactive) ────────────────────────────────────────────
@@ -451,7 +446,7 @@ export default function LandingPage() {
             </div>
             <div className="hidden sm:flex items-center gap-3 pl-4 border-l border-white/20">
               <span className="text-sm text-white/60 font-display italic">by</span>
-              <img src={alpsLogo} alt="ALPS Consulting" className="h-6 opacity-80 brightness-0 invert" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 opacity-80 brightness-0 invert" />
             </div>
           </div>
           <div className="flex items-center gap-4 sm:gap-6">
@@ -474,7 +469,7 @@ export default function LandingPage() {
               <span className="text-primary italic">Done Right.</span>
             </h1>
             <p className="text-xl text-white/70 mb-12 max-w-2xl mx-auto leading-relaxed font-light">
-              A modular compliance platform from ALPS Consulting. Choose the modules your business needs — fire safety, food hygiene, water safety — and pay only for what you use.
+              A modular compliance platform from ALPS Consultancy. Choose the modules your business needs — fire safety, food hygiene, water safety — and pay only for what you use.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-5">
               <Button size="lg" className="px-10 py-7 text-lg bg-primary hover:bg-primary/90 text-primary-foreground rounded-[2px] w-full sm:w-auto" onClick={() => navigate("/signup")}>
@@ -591,27 +586,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Testimonials */}
-      <section className="bg-[#162D42] py-32 px-6">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-4xl sm:text-5xl font-display text-center mb-20 text-white">Understated confidence</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-10">
-            {TESTIMONIALS.map((t) => (
-              <div key={t.author} className="bg-white/5 border border-white/10 p-10">
-                <div className="flex gap-1 mb-6">
-                  {Array.from({ length: 5 }).map((_, i) => <Star key={i} className="w-4 h-4 fill-primary text-primary" />)}
-                </div>
-                <p className="text-white/80 mb-8 text-xl font-display italic leading-relaxed">"{t.quote}"</p>
-                <div>
-                  <p className="font-semibold text-sm tracking-wide uppercase text-white">{t.author}</p>
-                  <p className="text-sm text-white/50 mt-1 font-light">{t.role}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Final CTA */}
       <section className="py-32 px-6 bg-[#F7F2E4] text-center">
         <div className="max-w-2xl mx-auto">
@@ -636,7 +610,7 @@ export default function LandingPage() {
             <div className="hidden sm:block w-px h-6 bg-white/20" />
             <div className="flex items-center gap-3">
               <span className="text-sm font-display italic text-white/60">by</span>
-              <img src={alpsLogo} alt="ALPS Consulting" className="h-6 opacity-70 brightness-0 invert" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 opacity-70 brightness-0 invert" />
             </div>
           </div>
           <p className="text-sm font-light">© {new Date().getFullYear()} ALPS Consulting Ltd. All rights reserved.</p>
