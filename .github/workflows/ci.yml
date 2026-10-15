@@ -110,6 +110,9 @@ jobs:
       - name: Welcome email and verification resend tests
         run: pnpm --filter @workspace/api-server run test:welcome-email
 
+      - name: Water-safety department isolation tests
+        run: pnpm --filter @workspace/api-server run test:water-dept-isolation:ci
+
       - name: Enforced CSRF tests
         run: pnpm --filter @workspace/api-server run test:csrf-enforced:ci
 
