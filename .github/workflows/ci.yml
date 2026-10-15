@@ -169,3 +169,6 @@ jobs:
 
       - name: Owner late-edit reason tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:owner-late-edit-reason
+
+      - name: Hot tub registry search tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:hot-tub-registry:pushed

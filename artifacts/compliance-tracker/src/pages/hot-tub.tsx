@@ -1103,11 +1103,25 @@ function ManageTubsDialog({
   const { toast } = useToast();
   const { activeClientId } = useAuth();
   const [activityFilter, setActivityFilter] = useState<TubActivityFilter>("all");
+  const [tubSearch, setTubSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(tubSearch.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [tubSearch]);
 
-  const { data: tubs = [], refetch } = useQuery<HotTub[]>({
-    queryKey: ["hot-tubs-mgmt", activeClientId, activityFilter],
-    queryFn: () => apiFetch(`/hot-tub/tubs${activityFilter === "all" ? "" : `?active=${activityFilter === "active"}`}`),
+  const { data: tubs = [], refetch, isFetching } = useQuery<HotTub[]>({
+    queryKey: ["hot-tubs-mgmt", activeClientId, activityFilter, debouncedSearch],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (activityFilter !== "all") params.set("active", String(activityFilter === "active"));
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      const qs = params.toString();
+      return apiFetch(`/hot-tub/tubs${qs ? `?${qs}` : ""}`);
+    },
     enabled: open && !!activeClientId,
+    // Keep the current list on screen while the next search loads.
+    placeholderData: previous => previous,
   });
 
   const [adding, setAdding] = useState(false);
@@ -1131,6 +1145,8 @@ function ManageTubsDialog({
         }),
       });
       setNewName(""); setNewDesc(""); setNewSiteId(""); setAdding(false);
+      // Clear the search so the new tub is not hidden by it.
+      setTubSearch(""); setDebouncedSearch("");
       toast({ title: "Tub added" });
       refetch(); onChanged();
     } catch (e: any) {
@@ -1171,24 +1187,40 @@ function ManageTubsDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <Select value={activityFilter} onValueChange={v => setActivityFilter(v as TubActivityFilter)}>
-          <SelectTrigger className="rounded-sm">
-            <Filter className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All tubs</SelectItem>
-            <SelectItem value="active">Active tubs</SelectItem>
-            <SelectItem value="inactive">Inactive tubs</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              type="search"
+              aria-label="Search tubs by tub or site name"
+              placeholder="Search tub or site name…"
+              value={tubSearch}
+              onChange={e => setTubSearch(e.target.value)}
+              maxLength={200}
+              className="pl-9 rounded-sm"
+            />
+          </div>
+          <Select value={activityFilter} onValueChange={v => setActivityFilter(v as TubActivityFilter)}>
+            <SelectTrigger className="rounded-sm sm:w-44" aria-label="Filter tubs by activity">
+              <Filter className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All tubs</SelectItem>
+              <SelectItem value="active">Active tubs</SelectItem>
+              <SelectItem value="inactive">Inactive tubs</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1" aria-busy={isFetching}>
           {tubs.length === 0 && !adding && (
             <p className="text-sm text-muted-foreground text-center py-6">
-              {activityFilter === "all"
-                ? "No tubs registered yet. Add your first one below."
-                : `No ${activityFilter} tubs found.`}
+              {debouncedSearch
+                ? `No ${activityFilter === "all" ? "" : `${activityFilter} `}tubs match "${debouncedSearch}".`
+                : activityFilter === "all"
+                  ? "No tubs registered yet. Add your first one below."
+                  : `No ${activityFilter} tubs found.`}
             </p>
           )}
 
