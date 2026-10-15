@@ -591,8 +591,10 @@ test("reminder Edit & Send keeps the reviewed draft through a failed send and di
 });
 
 // A sent, dated assignment whose calendar cancellation now awaits review.
-async function queuedCalendarCancellation(label, targetDate, siteId = fixtures.siteId) {
-  const owner = fixtures.owner;
+async function queuedCalendarCancellation(label, targetDate, siteId = fixtures.siteId, clientId = null) {
+  // A consultant owner reaches another of their businesses with ?clientId=.
+  const inClient = clientId === null ? "" : `?clientId=${clientId}`;
+  const owner = { request: (method, apiPath, body) => fixtures.owner.request(method, `${apiPath}${inClient}`, body) };
   const contractor = await owner.request("POST", "/contractors", {
     name: `${label} contractor ${suffix}`, email: `inbox-${label}-${suffix}@test.local`,
   });
@@ -1286,4 +1288,99 @@ test("acting on a request another manager already handled says so, refreshes the
     `/fix-track/contractor-email-queue/${dismissed.queueId}/cancel`,
     `/fix-track/contractor-email-queue/${approved.queueId}/approve-and-send`,
   ], "each stale action is tried once and never retried");
+});
+
+test("two real tabs on one business share new-request acknowledgments; a tab on another business is untouched", async () => {
+  const owner = fixtures.owner;
+  const secondClient = await owner.request("POST", "/clients", {
+    name: `Inbox second business ${suffix}`, slug: `inbox-second-${suffix}`,
+  });
+  assert.equal(secondClient.status, 201, JSON.stringify(secondClient.data));
+  const secondClientId = secondClient.data.id;
+  const secondSite = await owner.request("POST", `/sites?clientId=${secondClientId}`, {
+    name: `Inbox second-business site ${suffix}`, seedStarterChecks: false,
+  });
+  assert.equal(secondSite.status, 201, JSON.stringify(secondSite.data));
+  const otherBusinessRequest = await queuedCalendarCancellation("tabs-other-business", isoDay(50), secondSite.data.id, secondClientId);
+
+  // One browser profile (shared localStorage and cookies), three tabs.
+  const { context, page: firstTab } = await browserContext(owner);
+  const secondTab = await context.newPage();
+  const otherBusinessTab = await context.newPage();
+  await otherBusinessTab.addInitScript(({ userId, clientId }) => {
+    window.sessionStorage.setItem("complytrack:activeClient", JSON.stringify({ userId, clientId }));
+  }, { userId: owner.userId, clientId: secondClientId });
+  const ownKey = `complytrack:contractor-approvals:${owner.userId}:${owner.clientId}`;
+  const otherBusinessKey = `complytrack:contractor-approvals:${owner.userId}:${secondClientId}`;
+  const stored = (page, key) => page.evaluate(storageKey => window.localStorage.getItem(storageKey), key);
+  const newBadge = (page, title) => queueCard(page, title).getByLabel("New approval request");
+  const notice = page => page.getByText(/new approval requests? found/);
+  const queueLoads = new Map();
+  for (const page of [firstTab, secondTab, otherBusinessTab]) {
+    queueLoads.set(page, 0);
+    page.on("request", request => {
+      if (new URL(request.url()).pathname === "/api/fix-track/contractor-email-queue") {
+        queueLoads.set(page, queueLoads.get(page) + 1);
+      }
+    });
+  }
+
+  await withDiagnostics(firstTab, "two real tabs", async () => {
+    for (const page of [firstTab, secondTab, otherBusinessTab]) await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(firstTab, fixtures.acceptIssue.title).waitFor();
+    await queueCard(secondTab, fixtures.acceptIssue.title).waitFor();
+    await queueCard(otherBusinessTab, otherBusinessRequest.title).waitFor();
+    assert.equal(await queueCard(otherBusinessTab, fixtures.acceptIssue.title).count(), 0, "the third tab is on the other business");
+
+    // A request found by one tab's refresh is New in both tabs on this business.
+    const arrived = await queuedCalendarCancellation("tabs-arrived", isoDay(51));
+    await firstTab.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(firstTab, arrived.title).waitFor();
+    await secondTab.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(secondTab, arrived.title).waitFor();
+    // The other business has a New request of its own.
+    const otherBusinessArrived = await queuedCalendarCancellation("tabs-other-arrived", isoDay(52), secondSite.data.id, secondClientId);
+    await otherBusinessTab.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(otherBusinessTab, otherBusinessArrived.title).waitFor();
+    const otherBusinessBefore = await stored(otherBusinessTab, otherBusinessKey);
+    assert.ok(otherBusinessBefore, "the other business has its own stored baseline");
+
+    // The second tab has a draft open when the first tab acknowledges.
+    const draftCard = queueCard(secondTab, fixtures.acceptIssue.title);
+    await draftCard.getByRole("button", { name: "Edit" }).click();
+    const draftBody = draftCard.getByRole("textbox").nth(1);
+    await draftBody.fill("Second tab's unsent wording");
+    const rowsBefore = await secondTab.getByRole("button", { name: /^(Approve & Send|Approve Cancellation)$/ }).count();
+    await secondTab.evaluate(key => {
+      window.__approvalStorageEvents = [];
+      window.addEventListener("storage", event => {
+        if (event.key === key) window.__approvalStorageEvents.push(event.newValue);
+      });
+    }, ownKey);
+    const loadsBefore = { second: queueLoads.get(secondTab), other: queueLoads.get(otherBusinessTab) };
+
+    await queueCard(firstTab, arrived.title).getByRole("button", { name: `Mark ${arrived.title} as reviewed` }).click();
+    await newBadge(firstTab, arrived.title).waitFor({ state: "detached" });
+
+    // The browser delivers a native storage event, and the second tab drops the
+    // marker without reloading or touching its rows or draft.
+    await secondTab.waitForFunction(() => window.__approvalStorageEvents.length > 0);
+    await newBadge(secondTab, arrived.title).waitFor({ state: "detached" });
+    assert.equal(await notice(secondTab).count(), 0);
+    assert.equal(await draftBody.inputValue(), "Second tab's unsent wording");
+    assert.equal(await draftCard.getByRole("button", { name: /^Save & Send/ }).isVisible(), true, "the editor stays open");
+    assert.equal(await secondTab.getByRole("button", { name: /^(Approve & Send|Approve Cancellation)$/ }).count(), rowsBefore);
+    await queueCard(secondTab, arrived.title).waitFor();
+    assert.equal(queueLoads.get(secondTab), loadsBefore.second, "the acknowledgment arrives without a list reload");
+    assert.deepEqual(JSON.parse(await stored(secondTab, ownKey)).newRequestIds, []);
+
+    // The tab on the other business is unchanged.
+    assert.equal(await stored(otherBusinessTab, otherBusinessKey), otherBusinessBefore);
+    assert.equal(queueLoads.get(otherBusinessTab), loadsBefore.other);
+    await queueCard(otherBusinessTab, otherBusinessRequest.title).waitFor();
+    assert.equal(await queueCard(otherBusinessTab, arrived.title).count(), 0);
+    assert.equal(await newBadge(otherBusinessTab, otherBusinessArrived.title).count(), 1, "its own New marker stays");
+    assert.equal(await notice(otherBusinessTab).textContent(), "1 new approval request found");
+    await draftCard.getByRole("button", { name: "Cancel Edit" }).click();
+  });
 });
