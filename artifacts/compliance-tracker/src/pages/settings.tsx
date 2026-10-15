@@ -113,8 +113,191 @@ function formatBytes(bytes: number): string {
   return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[unit]}`;
 }
 
+type StorageCapacity =
+  | { subscribed: false }
+  | {
+    subscribed: true;
+    usedBytes: number;
+    planIncludedGib: number | null;
+    renewingGib: number;
+    paidGibThisPeriod: number;
+    minimumGib: number | null;
+    periodEndsAt: string | null;
+    unitAmount: number | null;
+    currency: string | null;
+    scheduled: Array<{ fromGib: number; toGib: number; effectiveAt: string; requestedAt: string }>;
+    canReduce: boolean;
+    reduceUnavailableReason: string | null;
+  };
+
+function formatUkDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/London" });
+}
+
+function formatMinorUnits(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency: currency.toUpperCase() }).format(amount / 100);
+  } catch {
+    return `${(amount / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
+const STORAGE_REDUCE_UNAVAILABLE: Record<string, string> = {
+  needed_by_files: "Your retained files need all of your extra storage, so it can't be reduced at the moment.",
+  usage_unchecked: "We're still checking how much storage your files use. Reducing will be available once that check finishes.",
+  pricing_unavailable: "Storage pricing is unavailable for this subscription, so it can't be reduced right now.",
+  needs_support: "Your subscription has more than one storage line. Please contact support to reduce it.",
+};
+
+/**
+ * Paid extra storage: what renews, what is still paid for this period, and a
+ * reduction that applies from the next renewal. Never deletes files.
+ */
+function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: number | null; onChanged: () => void }) {
+  const { toast } = useToast();
+  const capacityQuery = useQuery({
+    queryKey: ["/api/billing/storage", activeClientId],
+    enabled: activeClientId !== null,
+    retry: false,
+    queryFn: () => apiFetch<StorageCapacity>(withBillingClient("/billing/storage", activeClientId)),
+  });
+  const capacity = capacityQuery.data;
+  const [targetGib, setTargetGib] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const requestIdRef = useRef<string | null>(null);
+
+  const minimumGib = capacity?.subscribed ? capacity.minimumGib : null;
+  useEffect(() => {
+    if (minimumGib !== null) setTargetGib(String(minimumGib));
+  }, [minimumGib]);
+
+  if (!capacity?.subscribed) return null;
+  if (capacity.renewingGib === 0 && capacity.paidGibThisPeriod === 0) return null;
+
+  const price = (gib: number) =>
+    capacity.unitAmount !== null && capacity.currency ? formatMinorUnits(capacity.unitAmount * gib, capacity.currency) : null;
+  const target = Number(targetGib);
+  const targetValid = Number.isInteger(target)
+    && capacity.minimumGib !== null
+    && target >= capacity.minimumGib
+    && target < capacity.renewingGib;
+  const periodEnd = capacity.periodEndsAt ? formatUkDate(capacity.periodEndsAt) : "the end of this billing period";
+
+  const reduce = async () => {
+    // One id per dialog, so retrying a lost response can't apply it twice.
+    requestIdRef.current ??= crypto.randomUUID();
+    setBusy(true);
+    try {
+      const response = await authenticatedApiFetch(withBillingClient("/billing/storage/reduce", activeClientId), {
+        method: "POST",
+        body: JSON.stringify({ targetGib: target, requestId: requestIdRef.current }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);
+      requestIdRef.current = null;
+      setConfirmOpen(false);
+      toast({
+        title: "Storage reduction confirmed",
+        description: `Stripe has been updated. From ${formatUkDate(data.effectiveAt)} your subscription renews with ${data.toGib} GiB of extra storage. You keep ${data.paidGibThisPeriod} GiB until then.`,
+      });
+      await capacityQuery.refetch();
+      onChanged();
+    } catch (err: any) {
+      toast({ title: "Couldn't reduce storage", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-lg border p-4" data-testid="paid-storage">
+      <div>
+        <p className="text-sm text-muted-foreground">Extra storage you pay for</p>
+        <p className="mt-1 text-lg font-semibold">
+          {capacity.renewingGib} GiB each month{price(capacity.renewingGib) ? ` (${price(capacity.renewingGib)} / month)` : ""}
+        </p>
+        {capacity.planIncludedGib !== null && (
+          <p className="text-xs text-muted-foreground">On top of the {capacity.planIncludedGib} GiB included with your plan.</p>
+        )}
+      </div>
+
+      {capacity.scheduled.map((row) => (
+        <div key={`${row.requestedAt}-${row.toGib}`} className="flex gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Reduction confirmed on {formatUkDate(row.requestedAt)}: from {formatUkDate(row.effectiveAt)} your subscription renews with {row.toGib} GiB instead of {row.fromGib} GiB.
+          </span>
+        </div>
+      ))}
+      {capacity.paidGibThisPeriod > capacity.renewingGib && (
+        <p className="text-sm">You keep {capacity.paidGibThisPeriod} GiB of extra storage until {periodEnd}, because this month is already paid for.</p>
+      )}
+
+      {capacity.minimumGib !== null && capacity.planIncludedGib !== null && (
+        <p className="text-sm text-muted-foreground" data-testid="storage-minimum">
+          {capacity.minimumGib > 0
+            ? `Your retained files (${formatBytes(capacity.usedBytes)}) need at least ${capacity.minimumGib} GiB of extra storage, so you can't go below that.`
+            : `Your retained files (${formatBytes(capacity.usedBytes)}) fit in the ${capacity.planIncludedGib} GiB included with your plan, so you can remove all extra storage.`}
+        </p>
+      )}
+
+      {capacity.canReduce ? (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="storage-renew-gib">Renew with (GiB of extra storage)</Label>
+            <Input
+              id="storage-renew-gib"
+              type="number"
+              min={capacity.minimumGib ?? 0}
+              max={capacity.renewingGib - 1}
+              step="1"
+              value={targetGib}
+              onChange={(event) => setTargetGib(event.target.value)}
+            />
+          </div>
+          <Button type="button" variant="outline" disabled={!targetValid || busy} onClick={() => { requestIdRef.current = null; setConfirmOpen(true); }}>
+            Reduce from next renewal
+          </Button>
+        </div>
+      ) : capacity.renewingGib > 0 && capacity.reduceUnavailableReason && STORAGE_REDUCE_UNAVAILABLE[capacity.reduceUnavailableReason] ? (
+        <p className="text-sm text-muted-foreground">{STORAGE_REDUCE_UNAVAILABLE[capacity.reduceUnavailableReason]}</p>
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        Reductions start at your next renewal. Files are never deleted and access is never cut off; there's no refund for the current month.
+      </p>
+
+      <Dialog open={confirmOpen} onOpenChange={(open) => { if (!busy) setConfirmOpen(open); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reduce extra storage to {targetValid ? target : "…"} GiB?</DialogTitle>
+            <DialogDescription asChild>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm">
+                <li>
+                  From {periodEnd}, your subscription renews with {target} GiB instead of {capacity.renewingGib} GiB
+                  {price(capacity.renewingGib) && price(target) ? ` (${price(capacity.renewingGib)} → ${price(target)} a month)` : ""}.
+                </li>
+                <li>You keep {capacity.paidGibThisPeriod} GiB until then. Nothing is refunded for the current month.</li>
+                <li>No files are deleted and nobody loses access. If your files grow, you can buy storage again.</li>
+              </ul>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmOpen(false)}>Keep my storage</Button>
+            <Button type="button" disabled={!targetValid || busy} onClick={reduce}>
+              {busy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+              {busy ? "Updating Stripe…" : "Confirm reduction"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function StorageUsageCard() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { activeClientId } = useAuth();
   const [thresholdGb, setThresholdGb] = useState("5");
   const [saving, setSaving] = useState(false);
@@ -190,6 +373,7 @@ function StorageUsageCard() {
         description: `${gib} GiB has been added to your monthly Stripe subscription.`,
       });
       await usageQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["/api/billing/storage", activeClientId] });
     } catch (err: any) {
       toast({ title: "Couldn't add storage", description: err.message, variant: "destructive" });
     } finally {
@@ -281,6 +465,7 @@ function StorageUsageCard() {
                 )}
               </div>
             </div>
+            <PaidStorageSection activeClientId={activeClientId} onChanged={() => { void usageQuery.refetch(); }} />
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span>{percent}% of warning level</span>

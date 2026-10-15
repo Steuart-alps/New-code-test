@@ -115,7 +115,7 @@ const freshSchema = new Set([
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
   "test:inspection-pack-calendar",
   "test:kitchen-cleaning-export", "test:pat-register-access",
-  "test:storage-metering", "test:storage-usage-snapshot",
+  "test:storage-metering", "test:storage-usage-snapshot", "test:storage-capacity-reduction",
   "test:content-filter",
   "test:feedback-triage", "test:contractor-token-security",
   "test:contractor-key-rotation",
