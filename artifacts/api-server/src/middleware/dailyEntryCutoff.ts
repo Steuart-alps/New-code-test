@@ -71,6 +71,7 @@ const ENTRY_DATE_FIELDS = [
   "recordedDate",
   "hireDate",
   "replacementDate",
+  "replacedOn",
   "resolvedDate",
   "riskAssessmentDate",
   "reviewDate",
@@ -129,9 +130,26 @@ function localClock(now: Date, timeZone: string): LocalClock {
   };
 }
 
-function isTrackWrite(req: Request): boolean {
+/**
+ * Express routes paths case-insensitively, ignores a trailing slash and
+ * decodes percent-encoded segments, so `/PAT-TRACK/tests/%37/` reaches the
+ * same handler as `/pat-track/tests/7`. Every lock decision reads this
+ * canonical form so no other spelling of a route can skip the check.
+ */
+export function canonicalTrackPath(path: string): string {
+  let decoded = path;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    // Malformed escapes are rejected by Express before any handler runs.
+  }
+  return decoded.toLowerCase().replace(/\/+$/, "") || "/";
+}
+
+function isTrackWrite(req: Pick<Request, "method" | "path">): boolean {
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return false;
-  return TRACK_WRITE_PREFIXES.some(prefix => req.path === prefix || req.path.startsWith(`${prefix}/`));
+  const path = canonicalTrackPath(req.path);
+  return TRACK_WRITE_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`));
 }
 
 /**
@@ -208,7 +226,8 @@ export function futureCheckDate(
   now = new Date(),
   timeZone = DEFAULT_ACCOUNT_TIMEZONE,
 ): { date: string; today: string } | null {
-  const rule = NO_FUTURE_CHECK_DATE_ROUTES.find(route => route.method === req.method && route.path.test(req.path));
+  const path = canonicalTrackPath(req.path);
+  const rule = NO_FUTURE_CHECK_DATE_ROUTES.find(route => route.method === req.method && route.path.test(path));
   if (!rule || !req.body || typeof req.body !== "object") return null;
   const value = (req.body as Record<string, unknown>)[rule.field];
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}/.test(value)) return null;
@@ -217,7 +236,21 @@ export function futureCheckDate(
 }
 
 function storedDateLookup(path: string) {
-  return STORED_DATE_LOOKUPS.find(lookup => lookup.path.test(path));
+  const canonical = canonicalTrackPath(path);
+  return STORED_DATE_LOOKUPS.find(lookup => lookup.path.test(canonical));
+}
+
+/**
+ * A mapped record path whose id is not plain digits, such as `+7`, ` 7` or
+ * `0x7`. Routes parse ids with Number() or a Postgres integer cast, which
+ * accept those spellings, so staff writes to them are refused rather than
+ * treated as unmapped. Word and date segments (`/signoffs`, `/2026-10-12`)
+ * are sibling routes and pass through.
+ */
+export function isNonCanonicalRecordPath(path: string): boolean {
+  const match = canonicalTrackPath(path).match(/^(.*\/)([^/]+)$/);
+  if (!match || /^(?:\d+|[a-z][a-z0-9_-]*|\d{4}-\d{2}-\d{2})$/.test(match[2])) return false;
+  return storedDateLookup(`${match[1]}0`) !== undefined;
 }
 
 async function findStoredEntryDate(
@@ -237,7 +270,7 @@ async function findStoredEntryDate(
   // This middleware runs before routers are mounted, so route params are not
   // populated yet.  The mapping regex guarantees the final numeric segment is
   // the record id (including nested/composite routes).
-  const idText = req.path.match(/\/(\d+)$/)?.[1];
+  const idText = canonicalTrackPath(req.path).match(/\/(\d+)$/)?.[1];
   const id = Number(idText);
   if (!clientId || !Number.isInteger(id) || id <= 0) return "missing";
   // Identifiers are selected only from STORED_DATE_LOOKUPS above; values remain
@@ -331,7 +364,7 @@ export function getDailyEntryCutoffDecision(
   }
 
   const clock = localClock(now, normalizeAccountTimezone(timeZone));
-  const entryDate = findEntryDate(req.body) ?? findEntryDate(req.query) ?? findPathDate(req.path);
+  const entryDate = findEntryDate(req.body) ?? findEntryDate(req.query) ?? findPathDate(canonicalTrackPath(req.path));
   const isPastGraceWindow = entryDate != null
     && calendarDay(clock.date) - calendarDay(entryDate) > 1;
 
@@ -346,7 +379,8 @@ export function getDailyEntryCutoffDecision(
 }
 
 export async function enforceDailyEntryCutoff(req: Request, res: Response, next: NextFunction) {
-  if (req.currentUser && NO_FUTURE_CHECK_DATE_ROUTES.some(route => route.method === req.method && route.path.test(req.path))) {
+  const canonicalPath = canonicalTrackPath(req.path);
+  if (req.currentUser && NO_FUTURE_CHECK_DATE_ROUTES.some(route => route.method === req.method && route.path.test(canonicalPath))) {
     // Judge the date on the account's own calendar (default Europe/London).
     let accountTimezone = DEFAULT_ACCOUNT_TIMEZONE;
     try {
@@ -370,6 +404,10 @@ export async function enforceDailyEntryCutoff(req: Request, res: Response, next:
     && req.currentUser.role !== "client_admin"
     && req.currentUser.role !== "consultant";
   let timeZone = DEFAULT_ACCOUNT_TIMEZONE;
+  if (staffTrackWrite && isNonCanonicalRecordPath(req.path)) {
+    res.status(404).json({ error: "Record not found" });
+    return;
+  }
   if (staffTrackWrite) {
     try {
       timeZone = await findAccountTimezone(req);

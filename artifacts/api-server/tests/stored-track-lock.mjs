@@ -1,6 +1,8 @@
 // Integration coverage for the date lock's authoritative, server-side lookup.
 // This deliberately uses separate admin and staff cookies: a request body must
 // not be able to make an old stored record look current.
+import { execFileSync } from "node:child_process";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 let passed = 0;
 const failures = [];
@@ -832,6 +834,267 @@ async function main() {
       (await staff("PATCH", path, { completedDate: today, notes: "forged" })).status === 423);
     expect("TrainTrack: admin PATCH correction works", await admin("PATCH", path, { notes: "admin correction" }), [200]);
   }
+
+  // PAT, Green and Swim dated subroutes beyond the representative records
+  // above. Each asserts the stored date wins over the body, that other path
+  // spellings Express would still route cannot skip the lock, the route's own
+  // authorization for current records, and that blocked attempts saved nothing.
+  const bypassMarker = `staff-bypass-${suffix}`;
+  const sqlRun = (statement) => execFileSync("psql",
+    [process.env.DATABASE_URL, "-X", "-v", "ON_ERROR_STOP=1", "-Atc", statement],
+    { encoding: "utf8" }).trim();
+  const backdateCreatedAt = (table, id, days) => {
+    if (!Number.isInteger(id)) return false;
+    return sqlRun(`UPDATE ${table} SET created_at = now() - interval '${days} days' WHERE id = ${id} RETURNING id`)
+      .split("\n")[0] === String(id);
+  };
+  const pathVariants = (path) => {
+    const [, prefix, rest] = path.match(/^(\/[^/]+)(\/.*)$/);
+    const id = path.match(/(\d+)$/)[1];
+    return [
+      ["trailing slash", `${path}/`],
+      ["upper-case track", `${prefix.toUpperCase()}${rest}`],
+      ["percent-encoded id", path.replace(/\d+$/, [...id].map((digit) => `%3${digit}`).join(""))],
+      ["doubled slash", `${prefix}/${rest}`],
+      // Routes parse ids with Number() or a Postgres integer cast; both accept these.
+      ["signed id", path.replace(/\d+$/, `+${id}`)],
+      ["space-padded id", path.replace(/\d+$/, `%20${id}`)],
+      ["hex id", path.replace(/\d+$/, `0x${Number(id).toString(16)}`)],
+    ];
+  };
+  const isLocked = (r) => r.status === 423 && r.data?.code === "TRACK_RECORD_LOCKED";
+  const lockedSubroute = async ({
+    label, path, listPath = path, createOld, createCurrent,
+    staffEdit, forgedEdit, adminEdit, currentEdit, backdateEdit,
+    staffCurrentPut, staffCurrentDelete, adminDelete,
+  }) => {
+    const oldRecord = await createOld();
+    const currentRecord = await createCurrent();
+    expect(`${label}: seed old record`, oldRecord, [201]);
+    expect(`${label}: seed current record`, currentRecord, [201]);
+    const oldId = oldRecord.data?.id, currentId = currentRecord.data?.id;
+    check(`${label}: seeded ids available`, Number.isInteger(oldId) && Number.isInteger(currentId),
+      `${JSON.stringify(oldRecord.data)} ${JSON.stringify(currentRecord.data)}`);
+    if (!Number.isInteger(oldId) || !Number.isInteger(currentId)) return;
+    const oldPath = `${path}/${oldId}`, currentPath = `${path}/${currentId}`;
+
+    const lockedPut = await staff("PUT", oldPath, staffEdit);
+    check(`${label}: old PUT is locked`, isLocked(lockedPut), `${lockedPut.status} ${JSON.stringify(lockedPut.data)}`);
+    const forgedPut = await staff("PUT", oldPath, forgedEdit);
+    check(`${label}: forged fresh date stays locked`, isLocked(forgedPut), `${forgedPut.status} ${JSON.stringify(forgedPut.data)}`);
+    const lockedDelete = await staff("DELETE", oldPath);
+    check(`${label}: old DELETE is locked`, isLocked(lockedDelete), `${lockedDelete.status} ${JSON.stringify(lockedDelete.data)}`);
+    for (const [variant, variantPath] of pathVariants(oldPath)) {
+      for (const [method, body] of [["PUT", forgedEdit], ["DELETE", undefined]]) {
+        const attempt = await staff(method, variantPath, body);
+        check(`${label}: old ${method} via ${variant} is not accepted`,
+          attempt.status < 200 || attempt.status >= 300, `${attempt.status} ${JSON.stringify(attempt.data)}`);
+      }
+    }
+    const afterAttempts = await admin("GET", listPath);
+    const storedOld = afterAttempts.data?.find?.((row) => row.id === oldId);
+    check(`${label}: blocked staff attempts kept the old record`, Boolean(storedOld), JSON.stringify(afterAttempts.data));
+    check(`${label}: blocked staff attempts saved nothing`,
+      Boolean(storedOld) && !JSON.stringify(storedOld).includes(bypassMarker), JSON.stringify(storedOld));
+
+    expect(`${label}: admin correction works`, await admin("PUT", oldPath, adminEdit), [200]);
+    expect(`${label}: staff PUT of current record`, await staff("PUT", currentPath, currentEdit), [staffCurrentPut]);
+    if (backdateEdit) {
+      const backdated = await staff("PUT", currentPath, backdateEdit);
+      check(`${label}: staff cannot backdate a current record`, isLocked(backdated),
+        `${backdated.status} ${JSON.stringify(backdated.data)}`);
+    }
+    expect(`${label}: staff DELETE of current record`, await staff("DELETE", currentPath), [staffCurrentDelete]);
+    expect(`${label}: admin DELETE of old record`, await admin("DELETE", oldPath), [adminDelete]);
+    return { oldId, currentId };
+  };
+
+  // PAT: certificates, replacements and failures are retained evidence. Their
+  // DELETE handlers refuse every role (405); staff hit the lock first on old rows.
+  const patSite = await admin("POST", "/sites", { name: `Lock PAT Site ${suffix}`, seedStarterChecks: false });
+  expect("PAT subroutes: seed site", patSite, [200, 201]);
+  const patRoom = await admin("POST", "/pat-track/rooms", { siteId: patSite.data?.id, name: `Lock PAT room ${suffix}` });
+  expect("PAT subroutes: seed room", patRoom, [201]);
+  if (patRoom.status === 201) {
+    const siteId = patSite.data.id, roomId = patRoom.data.id;
+    // Rooms are site metadata: an old room stays editable for staff.
+    check("PAT room: backdate created_at", backdateCreatedAt("pat_rooms", roomId, 400));
+    expect("PAT room metadata remains editable for staff",
+      await staff("PUT", `/pat-track/rooms/${roomId}`, { siteId, name: `Lock PAT room edited ${suffix}` }), [200]);
+
+    const certificate = (visitDate, extra = {}) => ({
+      siteId, visitDate, certificateRef: `LOCK-CERT-${suffix}`, roomIds: [roomId], ...extra,
+    });
+    const certificates = await lockedSubroute({
+      label: "PAT certificate", path: "/pat-track/certificates",
+      createOld: () => admin("POST", "/pat-track/certificates", certificate(old)),
+      createCurrent: () => admin("POST", "/pat-track/certificates", certificate(today)),
+      staffEdit: certificate(old, { notes: bypassMarker }),
+      forgedEdit: certificate(today, { notes: bypassMarker }),
+      adminEdit: certificate(old, { notes: "admin correction" }),
+      currentEdit: certificate(today, { notes: "staff edit" }),
+      backdateEdit: certificate(old, { notes: "backdated" }),
+      staffCurrentPut: 200, staffCurrentDelete: 405, adminDelete: 405,
+    });
+
+    const replacement = (replacedOn, extra = {}) => ({
+      roomId, applianceName: "Lock kettle", replacedOn, ...extra,
+    });
+    await lockedSubroute({
+      label: "PAT replacement", path: "/pat-track/replacements",
+      createOld: () => admin("POST", "/pat-track/replacements", replacement(old)),
+      createCurrent: () => admin("POST", "/pat-track/replacements", replacement(today)),
+      staffEdit: replacement(old, { notes: bypassMarker }),
+      forgedEdit: replacement(today, { notes: bypassMarker }),
+      adminEdit: replacement(old, { notes: "admin correction" }),
+      currentEdit: replacement(today, { notes: "staff edit" }),
+      backdateEdit: replacement(old, { notes: "backdated" }),
+      staffCurrentPut: 200, staffCurrentDelete: 405, adminDelete: 405,
+    });
+
+    // A failure is dated by when it was recorded (created_at), which no body
+    // can set, so the old fixture is backdated in the database.
+    if (certificates) {
+      const failure = (extra = {}) => ({
+        certificateId: certificates.oldId, roomId, applianceName: "Lock toaster", ...extra,
+      });
+      await lockedSubroute({
+        label: "PAT failure", path: "/pat-track/failures",
+        createOld: async () => {
+          const created = await admin("POST", "/pat-track/failures", failure());
+          if (created.status === 201) check("PAT failure: backdate created_at", backdateCreatedAt("pat_failures", created.data?.id, 3));
+          return created;
+        },
+        createCurrent: () => admin("POST", "/pat-track/failures", failure()),
+        staffEdit: failure({ actionTaken: bypassMarker }),
+        forgedEdit: failure({ actionTaken: bypassMarker, resolvedDate: today, createdAt: today }),
+        adminEdit: failure({ actionTaken: "admin correction", resolution: "Replaced", resolvedDate: today }),
+        currentEdit: failure({ actionTaken: "staff edit" }),
+        staffCurrentPut: 200, staffCurrentDelete: 405, adminDelete: 405,
+      });
+      const failures = await admin("GET", "/pat-track/failures");
+      const oldFailure = failures.data?.find?.((row) => row.action_taken === "admin correction");
+      if (oldFailure) {
+        // The reasoned location correction is the manager-only route for old
+        // failures; it appends history instead of editing the failure.
+        const correctionPath = `/pat-track/failures/${oldFailure.id}/location-corrections`;
+        const correction = { correctedLocationText: "Lock corrected location", reason: "Lock fixture correction" };
+        check("PAT failure location correction stays manager-only",
+          (await staff("POST", correctionPath, correction)).status === 403);
+        expect("PAT failure location correction works for admin on an old failure",
+          await admin("POST", correctionPath, correction), [201]);
+      } else {
+        check("PAT failure: corrected old failure listed", false, JSON.stringify(failures.data));
+      }
+    }
+  }
+
+  // Green: defects and fuel logs are staff records with manager-only DELETE;
+  // PUWER inspections are manager-only for every write. The machine register
+  // stays manager-editable however old the machine is.
+  const greenMachine = await admin("POST", "/green-track/machines", {
+    name: `Lock subroute mower ${suffix}`, type: "walk_behind",
+  });
+  expect("Green subroutes: seed machine", greenMachine, [201]);
+  if (greenMachine.status === 201) {
+    const machineId = greenMachine.data.id;
+    check("Green machine: backdate created_at", backdateCreatedAt("green_machines", machineId, 400));
+    const machineBody = { name: `Lock subroute mower edited ${suffix}`, type: "walk_behind" };
+    expect("Green machine register stays manager-only",
+      await staff("PUT", `/green-track/machines/${machineId}`, machineBody), [403]);
+    expect("Green old machine remains editable for admin",
+      await admin("PUT", `/green-track/machines/${machineId}`, machineBody), [200]);
+
+    const defect = (reportDate, extra = {}) => ({
+      machineId, reportDate, description: "Lock fixture defect", severity: "minor", ...extra,
+    });
+    await lockedSubroute({
+      label: "Green defect", path: "/green-track/defects",
+      createOld: () => admin("POST", "/green-track/defects", defect(old)),
+      createCurrent: () => admin("POST", "/green-track/defects", defect(today)),
+      staffEdit: { notes: bypassMarker, status: "resolved" },
+      forgedEdit: { reportDate: today, notes: bypassMarker },
+      adminEdit: { status: "resolved", resolution: "Admin resolved", resolvedDate: today, notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { reportDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
+    const fuel = (logDate, extra = {}) => ({ machineId, logDate, fuelType: "diesel", quantityLitres: 5, ...extra });
+    await lockedSubroute({
+      label: "Green fuel log", path: "/green-track/fuel-logs",
+      createOld: () => admin("POST", "/green-track/fuel-logs", fuel(old)),
+      createCurrent: () => admin("POST", "/green-track/fuel-logs", fuel(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { logDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { logDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
+    const puwer = (inspectionDate, extra = {}) => ({
+      machineId, inspectionDate, nextInspectionDate: iso(300), inspectorName: "Lock Fixture", ...extra,
+    });
+    await lockedSubroute({
+      label: "Green PUWER inspection", path: "/green-track/puwer-inspections",
+      createOld: () => admin("POST", "/green-track/puwer-inspections", puwer(old)),
+      createCurrent: () => admin("POST", "/green-track/puwer-inspections", puwer(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { inspectionDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { inspectionDate: old, notes: "backdated" },
+      staffCurrentPut: 403, staffCurrentDelete: 403, adminDelete: 200,
+    });
+  }
+
+  // Swim: surveillance, first-aid and incident records are staff evidence
+  // with manager-only DELETE. Surveillance and incident PUTs replace the row,
+  // so their edits send the full record.
+  const surveillance = (checkDate, observations = "Lock Fixture") => ({
+    checkDate, checkTime: "10:00", batherCount: 12, scanCompleted: true, observations,
+  });
+  await lockedSubroute({
+    label: "Swim surveillance", path: "/swim-track/surveillance",
+    createOld: () => admin("POST", "/swim-track/surveillance", surveillance(old)),
+    createCurrent: () => admin("POST", "/swim-track/surveillance", surveillance(today)),
+    staffEdit: surveillance(old, bypassMarker),
+    forgedEdit: surveillance(today, bypassMarker),
+    adminEdit: surveillance(old, "admin correction"),
+    currentEdit: surveillance(today, "staff edit"),
+    backdateEdit: surveillance(old, "backdated"),
+    staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+  });
+
+  const firstAid = (checkDate, extra = {}) => ({ checkDate, aedOk: true, firstAidKitOk: true, ...extra });
+  await lockedSubroute({
+    label: "Swim first-aid", path: "/swim-track/first-aid",
+    createOld: () => admin("POST", "/swim-track/first-aid", firstAid(old)),
+    createCurrent: () => admin("POST", "/swim-track/first-aid", firstAid(today)),
+    staffEdit: { notes: bypassMarker },
+    forgedEdit: { checkDate: today, notes: bypassMarker, aedOk: false },
+    adminEdit: { notes: "admin correction" },
+    currentEdit: { notes: "staff edit" },
+    backdateEdit: { checkDate: old, notes: "backdated" },
+    staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+  });
+
+  const swimIncident = (incidentDate, notes = "Lock Fixture") => ({
+    incidentDate, incidentTime: "11:00", incidentType: "near_miss", severity: "low",
+    description: "Lock fixture incident", notes,
+  });
+  await lockedSubroute({
+    label: "Swim incident", path: "/swim-track/incidents",
+    createOld: () => admin("POST", "/swim-track/incidents", swimIncident(old)),
+    createCurrent: () => admin("POST", "/swim-track/incidents", swimIncident(today)),
+    staffEdit: swimIncident(old, bypassMarker),
+    forgedEdit: swimIncident(today, bypassMarker),
+    adminEdit: swimIncident(old, "admin correction"),
+    currentEdit: swimIncident(today, "staff edit"),
+    backdateEdit: swimIncident(old, "backdated"),
+    staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+  });
 
   // A different tenant must not be able to reach a mapped record. Use a real
   // foreign staff session so this also exercises the staff lock path's
