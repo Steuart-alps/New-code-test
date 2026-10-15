@@ -1,6 +1,8 @@
 // Integration coverage for the date lock's authoritative, server-side lookup.
 // This deliberately uses separate admin and staff cookies: a request body must
 // not be able to make an old stored record look current.
+import { execFileSync } from "node:child_process";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 let passed = 0;
 const failures = [];
@@ -833,6 +835,645 @@ async function main() {
     expect("TrainTrack: admin PATCH correction works", await admin("PATCH", path, { notes: "admin correction" }), [200]);
   }
 
+  // PAT, Green and Swim dated subroutes beyond the representative records
+  // above. Each asserts the stored date wins over the body, that other path
+  // spellings Express would still route cannot skip the lock, the route's own
+  // authorization for current records, and that blocked attempts saved nothing.
+  const bypassMarker = `staff-bypass-${suffix}`;
+  const sqlRun = (statement) => execFileSync("psql",
+    [process.env.DATABASE_URL, "-X", "-v", "ON_ERROR_STOP=1", "-Atc", statement],
+    { encoding: "utf8" }).trim();
+  const backdateCreatedAt = (table, id, days) => {
+    if (!Number.isInteger(id)) return false;
+    return sqlRun(`UPDATE ${table} SET created_at = now() - interval '${days} days' WHERE id = ${id} RETURNING id`)
+      .split("\n")[0] === String(id);
+  };
+  const pathVariants = (path) => {
+    const [, prefix, rest] = path.match(/^(\/[^/]+)(\/.*)$/);
+    const id = path.match(/(\d+)$/)[1];
+    return [
+      ["trailing slash", `${path}/`],
+      ["upper-case track", `${prefix.toUpperCase()}${rest}`],
+      ["percent-encoded id", path.replace(/\d+$/, [...id].map((digit) => `%3${digit}`).join(""))],
+      ["doubled slash", `${prefix}/${rest}`],
+      // Routes parse ids with Number() or a Postgres integer cast; both accept these.
+      ["signed id", path.replace(/\d+$/, `+${id}`)],
+      ["space-padded id", path.replace(/\d+$/, `%20${id}`)],
+      ["hex id", path.replace(/\d+$/, `0x${Number(id).toString(16)}`)],
+    ];
+  };
+  const isLocked = (r) => r.status === 423 && r.data?.code === "TRACK_RECORD_LOCKED";
+  const lockedSubroute = async ({
+    label, path, listPath = path, createOld, createCurrent,
+    staffEdit, forgedEdit, adminEdit, currentEdit, backdateEdit,
+    staffCurrentPut, staffCurrentDelete, adminDelete,
+  }) => {
+    const oldRecord = await createOld();
+    const currentRecord = await createCurrent();
+    expect(`${label}: seed old record`, oldRecord, [201]);
+    expect(`${label}: seed current record`, currentRecord, [201]);
+    const oldId = oldRecord.data?.id, currentId = currentRecord.data?.id;
+    check(`${label}: seeded ids available`, Number.isInteger(oldId) && Number.isInteger(currentId),
+      `${JSON.stringify(oldRecord.data)} ${JSON.stringify(currentRecord.data)}`);
+    if (!Number.isInteger(oldId) || !Number.isInteger(currentId)) return;
+    const oldPath = `${path}/${oldId}`, currentPath = `${path}/${currentId}`;
+
+    const lockedPut = await staff("PUT", oldPath, staffEdit);
+    check(`${label}: old PUT is locked`, isLocked(lockedPut), `${lockedPut.status} ${JSON.stringify(lockedPut.data)}`);
+    const forgedPut = await staff("PUT", oldPath, forgedEdit);
+    check(`${label}: forged fresh date stays locked`, isLocked(forgedPut), `${forgedPut.status} ${JSON.stringify(forgedPut.data)}`);
+    const lockedDelete = await staff("DELETE", oldPath);
+    check(`${label}: old DELETE is locked`, isLocked(lockedDelete), `${lockedDelete.status} ${JSON.stringify(lockedDelete.data)}`);
+    for (const [variant, variantPath] of pathVariants(oldPath)) {
+      for (const [method, body] of [["PUT", forgedEdit], ["DELETE", undefined]]) {
+        const attempt = await staff(method, variantPath, body);
+        check(`${label}: old ${method} via ${variant} is not accepted`,
+          attempt.status < 200 || attempt.status >= 300, `${attempt.status} ${JSON.stringify(attempt.data)}`);
+      }
+    }
+    const afterAttempts = await admin("GET", listPath);
+    const storedOld = afterAttempts.data?.find?.((row) => row.id === oldId);
+    check(`${label}: blocked staff attempts kept the old record`, Boolean(storedOld), JSON.stringify(afterAttempts.data));
+    check(`${label}: blocked staff attempts saved nothing`,
+      Boolean(storedOld) && !JSON.stringify(storedOld).includes(bypassMarker), JSON.stringify(storedOld));
+
+    expect(`${label}: admin correction works`, await admin("PUT", oldPath, adminEdit), [200]);
+    expect(`${label}: staff PUT of current record`, await staff("PUT", currentPath, currentEdit), [staffCurrentPut]);
+    if (backdateEdit) {
+      const backdated = await staff("PUT", currentPath, backdateEdit);
+      check(`${label}: staff cannot backdate a current record`, isLocked(backdated),
+        `${backdated.status} ${JSON.stringify(backdated.data)}`);
+    }
+    expect(`${label}: staff DELETE of current record`, await staff("DELETE", currentPath), [staffCurrentDelete]);
+    expect(`${label}: admin DELETE of old record`, await admin("DELETE", oldPath), [adminDelete]);
+    return { oldId, currentId };
+  };
+
+  // PAT: certificates, replacements and failures are retained evidence. Their
+  // DELETE handlers refuse every role (405); staff hit the lock first on old rows.
+  const patSite = await admin("POST", "/sites", { name: `Lock PAT Site ${suffix}`, seedStarterChecks: false });
+  expect("PAT subroutes: seed site", patSite, [200, 201]);
+  const patRoom = await admin("POST", "/pat-track/rooms", { siteId: patSite.data?.id, name: `Lock PAT room ${suffix}` });
+  expect("PAT subroutes: seed room", patRoom, [201]);
+  if (patRoom.status === 201) {
+    const siteId = patSite.data.id, roomId = patRoom.data.id;
+    // Rooms are site metadata: an old room stays editable for staff.
+    check("PAT room: backdate created_at", backdateCreatedAt("pat_rooms", roomId, 400));
+    expect("PAT room metadata remains editable for staff",
+      await staff("PUT", `/pat-track/rooms/${roomId}`, { siteId, name: `Lock PAT room edited ${suffix}` }), [200]);
+
+    const certificate = (visitDate, extra = {}) => ({
+      siteId, visitDate, certificateRef: `LOCK-CERT-${suffix}`, roomIds: [roomId], ...extra,
+    });
+    const certificates = await lockedSubroute({
+      label: "PAT certificate", path: "/pat-track/certificates",
+      createOld: () => admin("POST", "/pat-track/certificates", certificate(old)),
+      createCurrent: () => admin("POST", "/pat-track/certificates", certificate(today)),
+      staffEdit: certificate(old, { notes: bypassMarker }),
+      forgedEdit: certificate(today, { notes: bypassMarker }),
+      adminEdit: certificate(old, { notes: "admin correction" }),
+      currentEdit: certificate(today, { notes: "staff edit" }),
+      backdateEdit: certificate(old, { notes: "backdated" }),
+      staffCurrentPut: 200, staffCurrentDelete: 405, adminDelete: 405,
+    });
+
+    const replacement = (replacedOn, extra = {}) => ({
+      roomId, applianceName: "Lock kettle", replacedOn, ...extra,
+    });
+    await lockedSubroute({
+      label: "PAT replacement", path: "/pat-track/replacements",
+      createOld: () => admin("POST", "/pat-track/replacements", replacement(old)),
+      createCurrent: () => admin("POST", "/pat-track/replacements", replacement(today)),
+      staffEdit: replacement(old, { notes: bypassMarker }),
+      forgedEdit: replacement(today, { notes: bypassMarker }),
+      adminEdit: replacement(old, { notes: "admin correction" }),
+      currentEdit: replacement(today, { notes: "staff edit" }),
+      backdateEdit: replacement(old, { notes: "backdated" }),
+      staffCurrentPut: 200, staffCurrentDelete: 405, adminDelete: 405,
+    });
+
+    // A failure is dated by when it was recorded (created_at), which no body
+    // can set, so the old fixture is backdated in the database.
+    if (certificates) {
+      const failure = (extra = {}) => ({
+        certificateId: certificates.oldId, roomId, applianceName: "Lock toaster", ...extra,
+      });
+      await lockedSubroute({
+        label: "PAT failure", path: "/pat-track/failures",
+        createOld: async () => {
+          const created = await admin("POST", "/pat-track/failures", failure());
+          if (created.status === 201) check("PAT failure: backdate created_at", backdateCreatedAt("pat_failures", created.data?.id, 3));
+          return created;
+        },
+        createCurrent: () => admin("POST", "/pat-track/failures", failure()),
+        staffEdit: failure({ actionTaken: bypassMarker }),
+        forgedEdit: failure({ actionTaken: bypassMarker, resolvedDate: today, createdAt: today }),
+        adminEdit: failure({ actionTaken: "admin correction", resolution: "Replaced", resolvedDate: today }),
+        currentEdit: failure({ actionTaken: "staff edit" }),
+        staffCurrentPut: 200, staffCurrentDelete: 405, adminDelete: 405,
+      });
+      const failures = await admin("GET", "/pat-track/failures");
+      const oldFailure = failures.data?.find?.((row) => row.action_taken === "admin correction");
+      if (oldFailure) {
+        // The reasoned location correction is the manager-only route for old
+        // failures; it appends history instead of editing the failure.
+        const correctionPath = `/pat-track/failures/${oldFailure.id}/location-corrections`;
+        const correction = { correctedLocationText: "Lock corrected location", reason: "Lock fixture correction" };
+        check("PAT failure location correction stays manager-only",
+          (await staff("POST", correctionPath, correction)).status === 403);
+        expect("PAT failure location correction works for admin on an old failure",
+          await admin("POST", correctionPath, correction), [201]);
+      } else {
+        check("PAT failure: corrected old failure listed", false, JSON.stringify(failures.data));
+      }
+    }
+  }
+
+  // Green: defects and fuel logs are staff records with manager-only DELETE;
+  // PUWER inspections are manager-only for every write. The machine register
+  // stays manager-editable however old the machine is.
+  const greenMachine = await admin("POST", "/green-track/machines", {
+    name: `Lock subroute mower ${suffix}`, type: "walk_behind",
+  });
+  expect("Green subroutes: seed machine", greenMachine, [201]);
+  if (greenMachine.status === 201) {
+    const machineId = greenMachine.data.id;
+    check("Green machine: backdate created_at", backdateCreatedAt("green_machines", machineId, 400));
+    const machineBody = { name: `Lock subroute mower edited ${suffix}`, type: "walk_behind" };
+    expect("Green machine register stays manager-only",
+      await staff("PUT", `/green-track/machines/${machineId}`, machineBody), [403]);
+    expect("Green old machine remains editable for admin",
+      await admin("PUT", `/green-track/machines/${machineId}`, machineBody), [200]);
+
+    const defect = (reportDate, extra = {}) => ({
+      machineId, reportDate, description: "Lock fixture defect", severity: "minor", ...extra,
+    });
+    await lockedSubroute({
+      label: "Green defect", path: "/green-track/defects",
+      createOld: () => admin("POST", "/green-track/defects", defect(old)),
+      createCurrent: () => admin("POST", "/green-track/defects", defect(today)),
+      staffEdit: { notes: bypassMarker, status: "resolved" },
+      forgedEdit: { reportDate: today, notes: bypassMarker },
+      adminEdit: { status: "resolved", resolution: "Admin resolved", resolvedDate: today, notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { reportDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
+    const fuel = (logDate, extra = {}) => ({ machineId, logDate, fuelType: "diesel", quantityLitres: 5, ...extra });
+    await lockedSubroute({
+      label: "Green fuel log", path: "/green-track/fuel-logs",
+      createOld: () => admin("POST", "/green-track/fuel-logs", fuel(old)),
+      createCurrent: () => admin("POST", "/green-track/fuel-logs", fuel(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { logDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { logDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
+    const puwer = (inspectionDate, extra = {}) => ({
+      machineId, inspectionDate, nextInspectionDate: iso(300), inspectorName: "Lock Fixture", ...extra,
+    });
+    await lockedSubroute({
+      label: "Green PUWER inspection", path: "/green-track/puwer-inspections",
+      createOld: () => admin("POST", "/green-track/puwer-inspections", puwer(old)),
+      createCurrent: () => admin("POST", "/green-track/puwer-inspections", puwer(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { inspectionDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { inspectionDate: old, notes: "backdated" },
+      staffCurrentPut: 403, staffCurrentDelete: 403, adminDelete: 200,
+    });
+  }
+
+  // Swim: surveillance, first-aid and incident records are staff evidence
+  // with manager-only DELETE. Surveillance and incident PUTs replace the row,
+  // so their edits send the full record.
+  const surveillance = (checkDate, observations = "Lock Fixture") => ({
+    checkDate, checkTime: "10:00", batherCount: 12, scanCompleted: true, observations,
+  });
+  await lockedSubroute({
+    label: "Swim surveillance", path: "/swim-track/surveillance",
+    createOld: () => admin("POST", "/swim-track/surveillance", surveillance(old)),
+    createCurrent: () => admin("POST", "/swim-track/surveillance", surveillance(today)),
+    staffEdit: surveillance(old, bypassMarker),
+    forgedEdit: surveillance(today, bypassMarker),
+    adminEdit: surveillance(old, "admin correction"),
+    currentEdit: surveillance(today, "staff edit"),
+    backdateEdit: surveillance(old, "backdated"),
+    staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+  });
+
+  const firstAid = (checkDate, extra = {}) => ({ checkDate, aedOk: true, firstAidKitOk: true, ...extra });
+  await lockedSubroute({
+    label: "Swim first-aid", path: "/swim-track/first-aid",
+    createOld: () => admin("POST", "/swim-track/first-aid", firstAid(old)),
+    createCurrent: () => admin("POST", "/swim-track/first-aid", firstAid(today)),
+    staffEdit: { notes: bypassMarker },
+    forgedEdit: { checkDate: today, notes: bypassMarker, aedOk: false },
+    adminEdit: { notes: "admin correction" },
+    currentEdit: { notes: "staff edit" },
+    backdateEdit: { checkDate: old, notes: "backdated" },
+    staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+  });
+
+  const swimIncident = (incidentDate, notes = "Lock Fixture") => ({
+    incidentDate, incidentTime: "11:00", incidentType: "near_miss", severity: "low",
+    description: "Lock fixture incident", notes,
+  });
+  await lockedSubroute({
+    label: "Swim incident", path: "/swim-track/incidents",
+    createOld: () => admin("POST", "/swim-track/incidents", swimIncident(old)),
+    createCurrent: () => admin("POST", "/swim-track/incidents", swimIncident(today)),
+    staffEdit: swimIncident(old, bypassMarker),
+    forgedEdit: swimIncident(today, bypassMarker),
+    adminEdit: swimIncident(old, "admin correction"),
+    currentEdit: swimIncident(today, "staff edit"),
+    backdateEdit: swimIncident(old, "backdated"),
+    staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+  });
+
+  // Staff DELETE across departments: the department boundary answers before
+  // the date lock, so an out-of-scope old record gives a plain 403 that says
+  // nothing about its date, while an in-scope one is locked as usual.
+  const lockLeakFields = ["TRACK_RECORD_LOCKED", "cutoffDate", "lockAfterHours", "correction window"];
+  const departmentDelete = async ({ label, createPath, path = createPath, body, adminDelete, prepare = () => true }) => {
+    if (![200, 201].includes(alphaSite.status) || ![200, 201].includes(betaSite.status)) return;
+    const alphaOld = await admin("POST", createPath, body(alphaSite.data.id));
+    const betaOld = await admin("POST", createPath, body(betaSite.data.id));
+    expect(`${label}: seed in-department old record`, alphaOld, [201]);
+    expect(`${label}: seed other-department old record`, betaOld, [201]);
+    const alphaId = alphaOld.data?.id, betaId = betaOld.data?.id;
+    if (!Number.isInteger(alphaId) || !Number.isInteger(betaId)) {
+      check(`${label}: seeded ids available`, false, `${JSON.stringify(alphaOld.data)} ${JSON.stringify(betaOld.data)}`);
+      return;
+    }
+    check(`${label}: prepare old fixtures`, prepare(alphaId) && prepare(betaId));
+    const inScope = await scopedStaff("DELETE", `${path}/${alphaId}`);
+    check(`${label}: in-department old DELETE is locked`, isLocked(inScope), `${inScope.status} ${JSON.stringify(inScope.data)}`);
+    const outOfScope = await scopedStaff("DELETE", `${path}/${betaId}`);
+    check(`${label}: other-department old DELETE is forbidden`, outOfScope.status === 403,
+      `${outOfScope.status} ${JSON.stringify(outOfScope.data)}`);
+    check(`${label}: other-department DELETE does not reveal the lock`,
+      !lockLeakFields.some((field) => JSON.stringify(outOfScope.data ?? "").includes(field)),
+      JSON.stringify(outOfScope.data));
+    const outOfScopePut = await scopedStaff("PUT", `${path}/${betaId}`, { notes: bypassMarker });
+    check(`${label}: other-department old PUT is forbidden`, outOfScopePut.status === 403,
+      `${outOfScopePut.status} ${JSON.stringify(outOfScopePut.data)}`);
+    expect(`${label}: admin DELETE of other-department record unchanged`,
+      await admin("DELETE", `${path}/${betaId}`), adminDelete);
+  };
+  const withSite = (fields) => (siteId) => ({ ...fields, siteId });
+  await departmentDelete({
+    label: "Dept Fire check", createPath: "/fire-safety", adminDelete: [200, 204],
+    body: withSite({ checkType: "alarm", checkDate: old, result: "pass", performedBy: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    label: "Dept Legionella check", createPath: "/legionella", adminDelete: [200, 204],
+    body: withSite({ checkType: "calorifier_temp", checkDate: old, result: "pass", temperature: 60, performedBy: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    // 409 is HotTub's own rule: a check with a linked safety action is kept.
+    label: "Dept HotTub check", createPath: "/hot-tub", adminDelete: [200, 204, 409],
+    body: withSite({ checkType: "water_chemistry", checkDate: old, result: "pass", phValue: 7.4, sanitiserLevel: 2, performedBy: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    label: "Dept Tree inspection", createPath: "/tree-track", adminDelete: [200, 204],
+    body: withSite({ checkType: "visual_assessment", checkDate: old, result: "pass", treeRef: "LOCK-DEPT", inspector: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    label: "Dept PestTrack visit", createPath: "/pest-track/visits", adminDelete: [200, 204],
+    body: withSite({ visitDate: old, contractorName: "Lock Pest Control", findings: "none" }),
+  });
+  await departmentDelete({
+    label: "Dept PestTrack activity", createPath: "/pest-track/activity", adminDelete: [200, 204],
+    body: withSite({ recordedDate: old, pestType: "rodent", evidenceType: "droppings" }),
+  });
+  await departmentDelete({
+    // Incidents keep their RIDDOR trail, so even an admin DELETE is refused.
+    label: "Dept Incident", createPath: "/incidents", adminDelete: [409],
+    body: withSite({ incidentDate: old, location: "Lock room", description: "Lock fixture incident", involvedName: "Lock Fixture", reportedBy: "Lock Fixture", riddorRationale: "Lock fixture: not reportable" }),
+  });
+  await departmentDelete({
+    label: "Dept Premises inspection", createPath: "/premises-track", adminDelete: [200, 204],
+    body: withSite({ inspectionDate: old, nextInspectionDate: iso(30), inspectionType: "routine", area: "Lock area", findings: "None", status: "closed", inspectedBy: "Lock Fixture" }),
+  });
+  await departmentDelete({
+    label: "Dept TrainTrack record", createPath: "/train-track/records", adminDelete: [200, 204],
+    body: withSite({ recordType: "internal", staffName: "Lock Fixture", trainingType: "Safety", trainer: "Admin", completedDate: old }),
+  });
+  for (const [label, collection, fields] of [
+    ["Dept Swim session", "/swim-track/sessions", { sessionDate: old, sessionType: "public_swim", preSessionResult: "pass", poolClosed: false }],
+    ["Dept Swim surveillance", "/swim-track/surveillance", { checkDate: old, checkTime: "10:00", scanCompleted: true }],
+    ["Dept Swim first-aid", "/swim-track/first-aid", { checkDate: old, aedOk: true }],
+    ["Dept Swim incident", "/swim-track/incidents", { incidentDate: old, description: "Lock fixture incident" }],
+  ]) {
+    await departmentDelete({ label, createPath: collection, body: withSite(fields), adminDelete: [200] });
+  }
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    // PAT evidence is never deleted (405 for everyone), but staff in another
+    // department must still get the boundary response rather than the lock.
+    const roomFor = async (siteId) => (await admin("POST", "/pat-track/rooms", { siteId, name: `Dept lock room ${siteId} ${suffix}` })).data?.id;
+    const roomIds = { [alphaSite.data.id]: await roomFor(alphaSite.data.id), [betaSite.data.id]: await roomFor(betaSite.data.id) };
+    const certificateIds = {};
+    await departmentDelete({
+      label: "Dept PAT certificate", createPath: "/pat-track/certificates", adminDelete: [405],
+      body: (siteId) => ({ siteId, visitDate: old, certificateRef: `DEPT-LOCK-${siteId}`, roomIds: [roomIds[siteId]] }),
+    });
+    for (const siteId of [alphaSite.data.id, betaSite.data.id]) {
+      certificateIds[siteId] = (await admin("POST", "/pat-track/certificates", {
+        siteId, visitDate: old, certificateRef: `DEPT-LOCK-FAIL-${siteId}`, roomIds: [roomIds[siteId]],
+      })).data?.id;
+    }
+    await departmentDelete({
+      label: "Dept PAT replacement", createPath: "/pat-track/replacements", adminDelete: [405],
+      body: (siteId) => ({ roomId: roomIds[siteId], applianceName: "Lock kettle", replacedOn: old }),
+    });
+    await departmentDelete({
+      label: "Dept PAT failure", createPath: "/pat-track/failures", adminDelete: [405],
+      body: (siteId) => ({ certificateId: certificateIds[siteId], roomId: roomIds[siteId], applianceName: "Lock toaster" }),
+      prepare: (id) => backdateCreatedAt("pat_failures", id, 3),
+    });
+  }
+
+  // Another department's record id must answer exactly like an id that does
+  // not exist, so department-scoped staff cannot probe for records. Nothing
+  // foreign changes, and client admins still reach every record.
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    const missingId = 2_000_000_000;
+    const sameAsMissing = async (label, method, path, body, readBack) => {
+      const foreign = await scopedStaff(method, path(readBack.id), body);
+      const missing = await scopedStaff(method, path(missingId), body);
+      check(`${label}: other-department id is refused`, [403, 404].includes(foreign.status),
+        `${foreign.status} ${JSON.stringify(foreign.data)}`);
+      check(`${label}: other-department id answers like a missing id`,
+        foreign.status === missing.status && JSON.stringify(foreign.data) === JSON.stringify(missing.data),
+        `foreign ${foreign.status} ${JSON.stringify(foreign.data)} / missing ${missing.status} ${JSON.stringify(missing.data)}`);
+      const stored = await readBack.read();
+      check(`${label}: other-department record unchanged`,
+        Boolean(stored) && !JSON.stringify(stored).includes(bypassMarker), JSON.stringify(stored));
+    };
+
+    const betaTrain = await admin("POST", "/train-track/records", {
+      recordType: "internal", staffName: "Lock Fixture", trainingType: "Safety", trainer: "Admin",
+      completedDate: today, siteId: betaSite.data.id,
+    });
+    expect("Foreign TrainTrack: seed current record", betaTrain, [201]);
+    if (betaTrain.status === 201) {
+      const readTrain = async () => (await admin("GET", "/train-track/records")).data?.find?.((row) => row.id === betaTrain.data.id);
+      const trainPath = (id) => `/train-track/records/${id}`;
+      await sameAsMissing("Foreign TrainTrack PATCH", "PATCH", trainPath, { notes: bypassMarker },
+        { id: betaTrain.data.id, read: readTrain });
+      await sameAsMissing("Foreign TrainTrack DELETE", "DELETE", trainPath, undefined,
+        { id: betaTrain.data.id, read: readTrain });
+      expect("Foreign TrainTrack: admin PATCH still works",
+        await admin("PATCH", trainPath(betaTrain.data.id), { notes: "admin edit" }), [200]);
+    }
+
+    const betaAction = await admin("POST", "/track-actions", {
+      module: "fire", title: `Foreign action ${suffix}`, severity: "monitor", siteId: betaSite.data.id,
+    });
+    expect("Foreign TrackAction: seed action", betaAction, [201]);
+    if (betaAction.status === 201) {
+      const readAction = async () => (await admin("GET", "/track-actions?module=fire")).data?.find?.((row) => row.id === betaAction.data.id);
+      await sameAsMissing("Foreign TrackAction PATCH", "PATCH", (id) => `/track-actions/${id}`,
+        { ownerName: bypassMarker }, { id: betaAction.data.id, read: readAction });
+      await sameAsMissing("Foreign TrackAction FixTrack decision", "POST", (id) => `/track-actions/${id}/fix-track`,
+        { create: false }, { id: betaAction.data.id, read: readAction });
+      const afterDecision = await readAction();
+      check("Foreign TrackAction: FixTrack decision not recorded",
+        (afterDecision?.fixTrackDisposition ?? afterDecision?.fix_track_disposition) !== "not_needed",
+        JSON.stringify(afterDecision));
+      expect("Foreign TrackAction: admin PATCH still works",
+        await admin("PATCH", `/track-actions/${betaAction.data.id}`, { ownerName: "Admin owner" }), [200]);
+    }
+
+    // DocTrack uploads need object storage, so the document row is seeded
+    // directly; every request below still goes through the API.
+    const betaDocId = Number(sqlRun(`INSERT INTO doc_track_documents (client_id, site_id, title, category)
+      VALUES (${Number(clientId)}, ${Number(betaSite.data.id)}, 'Foreign lock document', 'policy') RETURNING id`).split("\n")[0]);
+    check("Foreign DocTrack: seed document", Number.isInteger(betaDocId) && betaDocId > 0);
+    if (Number.isInteger(betaDocId) && betaDocId > 0) {
+      const readDoc = async () => (await admin("GET", "/doc-track/documents")).data?.find?.((row) => row.id === betaDocId);
+      const docPath = (id) => `/doc-track/documents/${id}`;
+      await sameAsMissing("Foreign DocTrack PATCH", "PATCH", docPath, { description: bypassMarker },
+        { id: betaDocId, read: readDoc });
+      await sameAsMissing("Foreign DocTrack DELETE", "DELETE", docPath, undefined, { id: betaDocId, read: readDoc });
+      expect("Foreign DocTrack: admin PATCH still works",
+        await admin("PATCH", docPath(betaDocId), { description: "admin edit" }), [200]);
+    }
+  }
+
+  // Site moves: department-scoped staff may edit a record in their own
+  // department but cannot move it to another department's site, and the
+  // rejected move leaves the site unchanged. tests/site-move-route-inventory.mjs
+  // requires every site-accepting route to name one of these "site move:" checks
+  // (or an earlier move check above), so new routes cannot skip this coverage.
+  const rowsOf = (data) => (Array.isArray(data) ? data : data?.items ?? data?.rows ?? data?.data ?? data?.tasks ?? []);
+  const siteOf = (row) => row?.siteId ?? row?.site_id ?? row?.task?.siteId;
+  const idOf = (row) => row?.id ?? row?.task?.id;
+  const siteMove = async ({ label, createPath, path = createPath, create, move, list = createPath, method = "PUT", idFrom = (data) => data?.id }) => {
+    if (![200, 201].includes(alphaSite.status) || ![200, 201].includes(betaSite.status)) return;
+    const seeded = await admin("POST", createPath, create(alphaSite.data.id));
+    let id = idFrom(seeded.data);
+    if (!Number.isInteger(id) && [200, 201].includes(seeded.status)) {
+      // Some legacy create routes return no body; find the newest row.
+      id = Math.max(...rowsOf((await admin("GET", list)).data).map(idOf).filter(Number.isInteger));
+    }
+    check(`site move: ${label} seeded`, [200, 201].includes(seeded.status) && Number.isInteger(id),
+      `${seeded.status} ${JSON.stringify(seeded.data)}`);
+    if (!Number.isInteger(id)) return;
+    const attempt = await scopedStaff(method, `${path}/${id}`, move(betaSite.data.id));
+    check(`site move: ${label} is refused for department staff`, [400, 403, 404].includes(attempt.status),
+      `${attempt.status} ${JSON.stringify(attempt.data)}`);
+    const stored = rowsOf((await admin("GET", list)).data).find((row) => idOf(row) === id);
+    check(`site move: ${label} keeps its site`, siteOf(stored) === alphaSite.data.id, JSON.stringify(stored));
+  };
+  const fireMove = (siteId) => ({ checkType: "alarm", checkDate: today, result: "pass", performedBy: "Lock Fixture", siteId });
+  await siteMove({ label: "Fire check", createPath: "/fire-safety", create: fireMove, move: fireMove });
+  const treeMove = (siteId) => ({ checkType: "visual_assessment", checkDate: today, result: "pass", treeRef: "LOCK-MOVE", inspector: "Lock Fixture", siteId });
+  await siteMove({ label: "Tree inspection", createPath: "/tree-track", create: treeMove, move: treeMove });
+  const poolMove = (siteId) => ({ checkDate: today, checkType: "routine", result: "pass", performedBy: "Lock Fixture", phLevel: 7.4, notes: `pool-move-${suffix}`, siteId });
+  await siteMove({ label: "Pool check", createPath: "/pool-track", create: poolMove, move: poolMove });
+  const incidentMove = (siteId) => ({
+    incidentDate: today, location: "Lock room", description: "Lock move incident", involvedName: "Lock Fixture",
+    reportedBy: "Lock Fixture", riddorRationale: "Lock fixture: not reportable", siteId,
+  });
+  await siteMove({ label: "Incident", createPath: "/incidents", create: incidentMove, move: incidentMove });
+  const probeMove = (siteId) => ({
+    checkDate: today, probes: [{ name: "Probe A", iceTemp: "0.2", accurateIce: true }],
+    overallResult: "pass", checkedBy: "Lock Fixture", siteId,
+  });
+  await siteMove({ label: "KitchenWeekly probe", createPath: "/kitchen-weekly/probe", create: probeMove, move: probeMove,
+    list: `/kitchen-weekly/probe?siteId=${alphaSite.data?.id}` });
+  await siteMove({ label: "KitchenCleaning task", createPath: "/kitchen-cleaning/tasks",
+    create: (siteId) => ({ area: "Lock area", task: "Wipe down", frequency: "daily", siteId }),
+    move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "Legionella outlet", createPath: "/legionella/outlets",
+    create: (siteId) => ({ name: `Lock outlet ${suffix}`, type: "hot", siteId }), move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "PAT appliance", createPath: "/pat-track/appliances",
+    create: (siteId) => ({ name: `Lock move appliance ${suffix}`, applianceType: "Kettle", siteId }),
+    move: (siteId) => ({ name: `Lock move appliance ${suffix}`, applianceType: "Kettle", siteId }) });
+  await siteMove({ label: "PAT equipment template", createPath: "/pat-track/equipment-templates",
+    create: (siteId) => ({ name: `Lock move template ${suffix}`, siteId }),
+    move: (siteId) => ({ name: `Lock move template ${suffix}`, siteId }) });
+  await siteMove({ label: "PAT room", createPath: "/pat-track/rooms",
+    create: (siteId) => ({ name: `Lock move room ${suffix}`, siteId }),
+    move: (siteId) => ({ name: `Lock move room ${suffix}`, siteId }) });
+  await siteMove({ label: "PAT certificate", createPath: "/pat-track/certificates",
+    create: (siteId) => ({ siteId, visitDate: today, certificateRef: `MOVE-${suffix}`, roomIds: [] }),
+    move: (siteId) => ({ siteId, visitDate: today, certificateRef: `MOVE-${suffix}`, roomIds: [] }) });
+  for (const [label, collection, fields] of [
+    ["Swim session", "/swim-track/sessions", { sessionDate: today, sessionType: "public_swim", preSessionResult: "pass", poolClosed: false }],
+    ["Swim surveillance", "/swim-track/surveillance", { checkDate: today, checkTime: "10:00", scanCompleted: true }],
+    ["Swim first-aid", "/swim-track/first-aid", { checkDate: today, aedOk: true }],
+    ["Swim incident", "/swim-track/incidents", { incidentDate: today, description: "Lock move incident" }],
+  ]) {
+    const body = (siteId) => ({ ...fields, siteId });
+    await siteMove({ label, createPath: collection, create: body, move: body });
+  }
+  await siteMove({ label: "SafeTrack training record", createPath: "/safe-track/training-records",
+    create: (siteId) => ({ staffName: "Lock Fixture", trainingType: "Manual handling", completedAt: today, siteId }),
+    move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "Allergen register item", createPath: "/registers/allergens",
+    create: (siteId) => ({ siteId, name: `Lock dish ${suffix}`, allergens: [] }),
+    move: (siteId) => ({ siteId, name: `Lock dish ${suffix}`, allergens: [] }) });
+  await siteMove({ label: "COSHH register item", createPath: "/registers/coshh",
+    create: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }),
+    move: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }) });
+  await siteMove({ label: "Asbestos register item", createPath: "/registers/asbestos",
+    create: (siteId) => ({ siteId, builtBefore2000: "unknown" }),
+    move: (siteId) => ({ siteId, builtBefore2000: "unknown" }) });
+  await siteMove({ label: "Staff task", createPath: "/tasks", method: "PATCH", list: "/tasks?scope=all",
+    create: (siteId) => ({ title: `Lock task ${suffix}`, recurrence: "once", startsOn: today, assigneeRole: "client_staff", siteId }),
+    move: (siteId) => ({ siteId }) });
+  // DailyTrack drafts take siteId through their update schema rather than by
+  // name, which the inventory now follows.
+  const alphaQuery = `?siteId=${alphaSite.data?.id}`;
+  await siteMove({ label: "DailyTrack AM checklist", createPath: "/daily-track-am", list: `/daily-track-am${alphaQuery}`,
+    create: (siteId) => ({ checklistType: "kitchen_opening", checkDate: today, items: [], siteId }),
+    move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "DailyTrack PM checklist", createPath: "/daily-track-pm", list: `/daily-track-pm${alphaQuery}`,
+    create: (siteId) => ({ checklistType: "kitchen_closing", checkDate: today, items: [], siteId }),
+    move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "DailyTrack PM sign-off", createPath: "/daily-track-pm/signoffs",
+    list: `/daily-track-pm/signoffs${alphaQuery}`,
+    create: (siteId) => ({ signoffDate: today, managerName: "Lock Fixture", siteId }),
+    move: (siteId) => ({ siteId }) });
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    expect("DailyTrack: department staff cannot start a checklist on another department's site",
+      await scopedStaff("POST", "/daily-track-am", { checklistType: "premises_opening", checkDate: today, items: [], siteId: betaSite.data.id }),
+      [403]);
+    // A replacement's site follows its room, so moving it to another
+    // department's room is the site move to refuse.
+    const moveRoom = async (siteId) => (await admin("POST", "/pat-track/rooms", { siteId, name: `Lock move room B ${siteId} ${suffix}` })).data?.id;
+    const alphaRoom = await moveRoom(alphaSite.data.id), betaRoom = await moveRoom(betaSite.data.id);
+    const moveReplacement = (roomId) => ({ roomId, applianceName: "Lock move kettle", replacedOn: today });
+    const seededReplacement = await admin("POST", "/pat-track/replacements", moveReplacement(alphaRoom));
+    expect("PAT replacement move: seed", seededReplacement, [201]);
+    if (seededReplacement.status === 201) {
+      const replacementId = Number(seededReplacement.data.id);
+      expect("scoped staff cannot move PAT replacement to another department's room",
+        await scopedStaff("PUT", `/pat-track/replacements/${replacementId}`, moveReplacement(betaRoom)), [403]);
+      check("PAT replacement move: keeps its room",
+        Number(sqlRun(`SELECT room_id FROM pat_replacements WHERE id=${replacementId}`).split("\n")[0]) === alphaRoom);
+    }
+  }
+  // PestTrack is department-scoped like the other tracks: lists, the status
+  // card and writes (the phone app uses the same routes).
+  const pestVisit = (siteId) => ({ visitDate: today, contractorName: "Lock Pest Control", findings: "none", siteId });
+  const pestActivity = (siteId) => ({ recordedDate: today, pestType: "rodent", evidenceType: "droppings", siteId });
+  await siteMove({ label: "PestTrack visit", createPath: "/pest-track/visits", create: pestVisit, move: pestVisit });
+  await siteMove({ label: "PestTrack activity", createPath: "/pest-track/activity", create: pestActivity, move: pestActivity });
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    for (const [label, path, body] of [["visit", "/pest-track/visits", pestVisit], ["activity", "/pest-track/activity", pestActivity]]) {
+      const alphaRecord = await admin("POST", path, body(alphaSite.data.id));
+      const betaRecord = await admin("POST", path, body(betaSite.data.id));
+      const neutralRecord = await admin("POST", path, body(null));
+      expect(`PestTrack ${label}: seed department and site-neutral records`,
+        { status: Math.max(alphaRecord.status, betaRecord.status, neutralRecord.status) }, [201]);
+      const listed = await scopedStaff("GET", path);
+      expect(`PestTrack ${label}: department staff can list`, listed, [200]);
+      const ids = new Set(rowsOf(listed.data).map(idOf));
+      check(`PestTrack ${label}: list shows own department and site-neutral records only`,
+        ids.has(alphaRecord.data?.id) && ids.has(neutralRecord.data?.id) && !ids.has(betaRecord.data?.id),
+        JSON.stringify([...ids]));
+      expect(`PestTrack ${label}: department staff cannot record at another department's site`,
+        await scopedStaff("POST", path, body(betaSite.data.id)), [403]);
+      expect(`PestTrack ${label}: department staff can record at their own site`,
+        await scopedStaff("POST", path, body(alphaSite.data.id)), [201]);
+      expect(`PestTrack ${label}: admin still sees other departments`,
+        { status: rowsOf((await admin("GET", path)).data).some((row) => idOf(row) === betaRecord.data?.id) ? 200 : 0 }, [200]);
+    }
+  }
+  // BikeTrack is department-scoped the same way. A hire belongs to its own
+  // site, else its bike's; services follow their bike.
+  if ([200, 201].includes(alphaSite.status) && [200, 201].includes(betaSite.status)) {
+    let bikeCount = 0;
+    const bikeAt = async (siteId) => (await admin("POST", "/bike-track/bikes", {
+      ref: `DEPT-BIKE-${++bikeCount}-${suffix}`, type: "hybrid", siteId,
+    })).data?.id;
+    await siteMove({ label: "BikeTrack bike", createPath: "/bike-track/bikes",
+      create: (siteId) => ({ ref: `MOVE-BIKE-${suffix}`, type: "hybrid", siteId }), move: (siteId) => ({ siteId }) });
+    const moveHireBike = await bikeAt(alphaSite.data.id);
+    await siteMove({ label: "BikeTrack hire", createPath: "/bike-track/hires", idFrom: (data) => data?.hire?.id,
+      create: (siteId) => ({ bikeId: moveHireBike, guestName: "Lock Fixture Guest", hireDate: today, siteId }),
+      move: (siteId) => ({ siteId }) });
+
+    const [alphaBike, betaBike, neutralBike] = [await bikeAt(alphaSite.data.id), await bikeAt(betaSite.data.id), await bikeAt(null)];
+    check("BikeTrack: seed department and site-neutral bikes", [alphaBike, betaBike, neutralBike].every(Number.isInteger));
+    const staffBikes = new Set(rowsOf((await scopedStaff("GET", "/bike-track/bikes")).data).map(idOf));
+    check("BikeTrack: bike list shows own department and site-neutral bikes only",
+      staffBikes.has(alphaBike) && staffBikes.has(neutralBike) && !staffBikes.has(betaBike), JSON.stringify([...staffBikes]));
+    expect("BikeTrack: department staff cannot edit another department's bike",
+      await scopedStaff("PUT", `/bike-track/bikes/${betaBike}`, { notes: bypassMarker }), [403]);
+    expect("BikeTrack: department staff cannot add a bike at another department's site",
+      await scopedStaff("POST", "/bike-track/bikes", { ref: `FOREIGN-BIKE-${suffix}`, type: "hybrid", siteId: betaSite.data.id }), [403]);
+    expect("BikeTrack: department staff cannot hire out another department's bike",
+      await scopedStaff("POST", "/bike-track/hires", { bikeId: betaBike, guestName: "Lock Fixture Guest", hireDate: today }), [403]);
+    expect("BikeTrack: department staff cannot service another department's bike",
+      await scopedStaff("POST", "/bike-track/services", { bikeId: betaBike, serviceDate: today, serviceType: "adhoc" }), [403]);
+    expect("BikeTrack: department staff can hire out their own bike",
+      await scopedStaff("POST", "/bike-track/hires", { bikeId: alphaBike, guestName: "Lock Fixture Guest", hireDate: today }), [201]);
+
+    // Old records: in-department staff get the lock; another department's
+    // record answers 403 with no lock fields, before any date is compared.
+    for (const [label, path, body, idFrom] of [
+      ["hire", "/bike-track/hires", (bikeId) => ({ bikeId, guestName: "Lock Fixture Guest", hireDate: old }), (data) => data?.hire?.id],
+      ["service", "/bike-track/services", (bikeId) => ({ bikeId, serviceDate: old, serviceType: "annual" }), (data) => data?.id],
+    ]) {
+      const alphaOld = idFrom((await admin("POST", path, body(await bikeAt(alphaSite.data.id)))).data);
+      const betaOld = idFrom((await admin("POST", path, body(await bikeAt(betaSite.data.id)))).data);
+      check(`Dept BikeTrack ${label}: seed old records`, Number.isInteger(alphaOld) && Number.isInteger(betaOld));
+      check(`Dept BikeTrack ${label}: in-department old DELETE is locked`, isLocked(await scopedStaff("DELETE", `${path}/${alphaOld}`)));
+      const foreign = await scopedStaff("DELETE", `${path}/${betaOld}`);
+      check(`Dept BikeTrack ${label}: other-department DELETE is forbidden without the lock`,
+        foreign.status === 403 && !lockLeakFields.some((field) => JSON.stringify(foreign.data ?? "").includes(field)),
+        `${foreign.status} ${JSON.stringify(foreign.data)}`);
+      expect(`Dept BikeTrack ${label}: other-department PUT is forbidden`,
+        await scopedStaff("PUT", `${path}/${betaOld}`, { notes: bypassMarker }), [403]);
+      const staffList = new Set(rowsOf((await scopedStaff("GET", path)).data).map(idOf));
+      check(`Dept BikeTrack ${label}: list hides another department's records`,
+        staffList.has(alphaOld) && !staffList.has(betaOld), JSON.stringify([...staffList]));
+      const adminList = new Set(rowsOf((await admin("GET", path)).data).map(idOf));
+      check(`Dept BikeTrack ${label}: admin still sees both`, adminList.has(alphaOld) && adminList.has(betaOld));
+    }
+    const staffSummary = await scopedStaff("GET", "/bike-track/summary");
+    const adminSummary = await admin("GET", "/bike-track/summary");
+    check("BikeTrack: summary counts only the department's bikes",
+      Number(staffSummary.data?.bikes?.total) < Number(adminSummary.data?.bikes?.total),
+      `${JSON.stringify(staffSummary.data?.bikes)} vs ${JSON.stringify(adminSummary.data?.bikes)}`);
+  }
+  await siteMove({ label: "FixTrack issue", createPath: "/fix-track/issues",
+    create: (siteId) => ({
+      title: `Lock move issue ${suffix}`, issueType: "general", location: "Plant room", description: "Lock move",
+      priority: "medium", reportedBy: "Facilities", reportedDate: today, siteId,
+    }),
+    move: (siteId) => ({ siteId }) });
+
   // A different tenant must not be able to reach a mapped record. Use a real
   // foreign staff session so this also exercises the staff lock path's
   // client-scoped lookup rather than relying only on an admin 404.
@@ -861,8 +1502,17 @@ async function main() {
     const foreignAttempt = await foreignStaff("PUT", `/pat-track/tests/${tenantProbeId}`, {
       applianceId: 1, testDate: today, result: "pass",
     });
+    // Staff get one answer for any record they cannot reach (403 on
+    // department-scoped tracks), so another tenant's id looks like a missing one.
+    const missingAttempt = await foreignStaff("PUT", "/pat-track/tests/2000000000", {
+      applianceId: 1, testDate: today, result: "pass",
+    });
     check("foreign tenant cannot mutate mapped record",
-      foreignAttempt.status === 404, `${foreignAttempt.status} ${JSON.stringify(foreignAttempt.data)}`);
+      [403, 404].includes(foreignAttempt.status), `${foreignAttempt.status} ${JSON.stringify(foreignAttempt.data)}`);
+    check("foreign tenant id answers like a missing id",
+      foreignAttempt.status === missingAttempt.status
+        && JSON.stringify(foreignAttempt.data) === JSON.stringify(missingAttempt.data),
+      `${foreignAttempt.status} ${JSON.stringify(foreignAttempt.data)} / ${missingAttempt.status} ${JSON.stringify(missingAttempt.data)}`);
   }
 
   console.log(`stored-track-lock: ${passed} passed, ${failures.length} failed`);

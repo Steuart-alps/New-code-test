@@ -192,6 +192,12 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   if (!existing) return res.status(404).json({ error: "Not found" });
 
   const body = updateSchema.parse(req.body);
+  if (body.siteId !== undefined) {
+    const siteAccess = await checkSiteAccess(body.siteId, clientId, getActiveDepartmentId(req));
+    if (siteAccess === "required") return res.status(400).json({ error: "siteId is required" });
+    if (siteAccess === "invalid") return res.status(400).json({ error: "Invalid site" });
+    if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const performer = await resolveStaffPerformerUpdate(clientId, body.staffRosterId, body.performedBy,
     existing.staff_roster_id ?? null, existing.performed_by ?? null);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });

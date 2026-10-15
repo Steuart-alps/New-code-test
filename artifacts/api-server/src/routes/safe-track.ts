@@ -40,6 +40,22 @@ async function verifySite(siteId: number | null | undefined, clientId: number) {
   return !!row;
 }
 
+/** True when a department-scoped caller may use this site (or no site). */
+async function siteInDepartment(siteId: number | null | undefined, clientId: number, deptId: number | null) {
+  if (siteId == null || deptId === null) return true;
+  const [row] = await db.select({ id: sitesTable.id }).from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId),
+      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)))).limit(1);
+  return !!row;
+}
+
+/** Another department's record answers exactly like a missing one. */
+async function recordInDepartment(table: any, id: number, clientId: number, deptId: number | null) {
+  const [existing] = await db.select({ siteId: table.siteId }).from(table)
+    .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
+  return !!existing && await siteInDepartment(existing.siteId, clientId, deptId);
+}
+
 async function verifyDepartment(departmentId: number | null | undefined, clientId: number) {
   if (departmentId == null) return true;
   const result = await db.execute(sql`SELECT id FROM departments WHERE id = ${departmentId} AND client_id = ${clientId} LIMIT 1`);
@@ -91,6 +107,7 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
     const data = parsed.data as any;
     if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+    if (!(await siteInDepartment(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
     if (!(await verifyDepartment(data.departmentId, clientId))) return res.status(400).json({ error: "Invalid department" });
     if (data.objectPath) {
       try {
@@ -116,7 +133,9 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     const parsed = updateSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
     const data = parsed.data as any;
+    if (!(await recordInDepartment(table, id, clientId, getActiveDepartmentId(req)))) return res.status(404).json({ error: "Not found" });
     if ("siteId" in data && !(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+    if ("siteId" in data && !(await siteInDepartment(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
     if ("departmentId" in data && !(await verifyDepartment(data.departmentId, clientId))) return res.status(400).json({ error: "Invalid department" });
     if (data.objectPath) {
       try {
@@ -140,9 +159,7 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     if (!clientId) return res.status(400).json({ error: "No client context" });
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-    const [existing] = await db.select({ id: table.id }).from(table)
-      .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
-    if (!existing) return res.status(404).json({ error: "Not found" });
+    if (!(await recordInDepartment(table, id, clientId, getActiveDepartmentId(req)))) return res.status(404).json({ error: "Not found" });
     await db.delete(table).where(and(eq(table.id, id), eq(table.clientId, clientId)));
     res.status(204).end();
   });

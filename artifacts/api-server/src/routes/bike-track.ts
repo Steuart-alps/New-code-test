@@ -5,11 +5,14 @@ import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable } f
 import { eq, and, desc, sql, inArray, or, isNull } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { bikeDepartmentWrites, departmentScope } from "../lib/bikeTrackDepartment";
 import { createBikeHireRegisterPdf, type BikeHireRegisterRow } from "../lib/bikeHireRegisterPdf";
 import { resolveStaffPerformer } from "../lib/staffPerformer";
 import { parseBikeOverdueRepeatInterval } from "../lib/bikeOverdueReminders";
 
 const router = Router();
+
+router.use(bikeDepartmentWrites);
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -103,7 +106,7 @@ router.get("/bikes", requireAuth, async (req, res) => {
   const rows = await db
     .select()
     .from(bikesTable)
-    .where(eq(bikesTable.clientId, clientId))
+    .where(and(eq(bikesTable.clientId, clientId), sql`TRUE ${departmentScope(req, clientId, sql`${bikesTable.siteId}`)}`))
     .orderBy(bikesTable.ref);
   res.json(rows);
 });
@@ -270,6 +273,7 @@ router.get("/hires", requireAuth, async (req, res) => {
     LEFT JOIN bike_checks pre  ON pre.hire_record_id  = h.id AND pre.check_type  = 'pre_hire'
     LEFT JOIN bike_checks post ON post.hire_record_id = h.id AND post.check_type = 'post_return'
     WHERE h.client_id = ${clientId}
+    ${departmentScope(req, clientId, sql`COALESCE(h.site_id, b.site_id)`)}
     ${status ? sql`AND h.status = ${status}` : sql``}
     ORDER BY h.hire_date DESC, h.id DESC
   `);
@@ -454,6 +458,7 @@ router.get("/checks", requireAuth, async (req, res) => {
     FROM bike_checks c
     JOIN bikes b ON b.id = c.bike_id
     WHERE c.client_id = ${clientId}
+    ${departmentScope(req, clientId, sql`b.site_id`)}
     ${bikeId ? sql`AND c.bike_id = ${parseInt(bikeId)}` : sql``}
     ${checkType ? sql`AND c.check_type = ${checkType}` : sql``}
     ORDER BY c.check_date DESC, c.id DESC
@@ -484,6 +489,7 @@ router.get("/services", requireAuth, async (req, res) => {
     FROM bike_services s
     JOIN bikes b ON b.id = s.bike_id
     WHERE s.client_id = ${clientId}
+    ${departmentScope(req, clientId, sql`b.site_id`)}
     ${bikeId && !isNaN(parseInt(bikeId)) ? sql`AND s.bike_id = ${parseInt(bikeId)}` : sql``}
     ORDER BY s.service_date DESC, s.id DESC
     LIMIT 500
@@ -501,6 +507,7 @@ router.get("/services/latest", requireAuth, async (req, res) => {
       bike_id, service_date, service_type, serviced_by, next_service_date
     FROM bike_services
     WHERE client_id = ${clientId}
+      AND bike_id IN (SELECT id FROM bikes WHERE client_id = ${clientId} ${departmentScope(req, clientId, sql`site_id`)})
     ORDER BY bike_id, service_date DESC, id DESC
   `);
   res.json(rows.rows ?? rows);
@@ -586,16 +593,17 @@ router.get("/summary", requireAuth, async (req, res) => {
       COUNT(*) FILTER (WHERE status = 'retired')      AS retired,
       COUNT(*)                                         AS total
     FROM bikes
-    WHERE client_id = ${clientId} AND active = true
+    WHERE client_id = ${clientId} AND active = true ${departmentScope(req, clientId, sql`site_id`)}
   `);
   const counts = ((countsResult as any).rows ?? [])[0];
 
   const hireCountsResult = await db.execute(sql`
     SELECT
-      COUNT(*) FILTER (WHERE status = 'active')  AS active_hires,
-      COUNT(*) FILTER (WHERE status = 'active' AND return_date_expected < ${today}) AS overdue
-    FROM bike_hire_records
-    WHERE client_id = ${clientId}
+      COUNT(*) FILTER (WHERE h.status = 'active')  AS active_hires,
+      COUNT(*) FILTER (WHERE h.status = 'active' AND h.return_date_expected < ${today}) AS overdue
+    FROM bike_hire_records h
+    JOIN bikes b ON b.id = h.bike_id
+    WHERE h.client_id = ${clientId} ${departmentScope(req, clientId, sql`COALESCE(h.site_id, b.site_id)`)}
   `);
   const hireCounts = ((hireCountsResult as any).rows ?? [])[0];
 
@@ -611,6 +619,7 @@ router.get("/summary", requireAuth, async (req, res) => {
     ) s ON true
     WHERE b.client_id = ${clientId}
       AND b.active = true
+      ${departmentScope(req, clientId, sql`b.site_id`)}
       AND s.next_service_date IS NOT NULL
       AND s.next_service_date < ${today}
   `);

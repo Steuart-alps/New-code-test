@@ -163,12 +163,14 @@ router.post("/tasks", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { area, task, frequency, method, product, responsible, sortOrder, siteId } = parsed.data;
+  const scope = await resolveAccessibleSite(req, res, clientId, siteId);
+  if (!scope.ok) return;
 
   const result = await db.execute(sql`
     INSERT INTO kitchen_cleaning_tasks
       (client_id, site_id, area, task, frequency, method, product, responsible, sort_order)
     VALUES
-      (${clientId}, ${siteId ?? null}, ${area}, ${task}, ${frequency},
+      (${clientId}, ${scope.siteId}, ${area}, ${task}, ${frequency},
        ${method ?? null}, ${product ?? null}, ${responsible ?? null}, ${sortOrder ?? 0})
     RETURNING *
   `);
@@ -192,6 +194,10 @@ router.put("/tasks/:id", requireAuth, denyViewers, async (req, res) => {
 
   const row = existing.rows[0] as any;
   const { area, task, frequency, method, product, responsible, sortOrder, siteId } = parsed.data;
+  if (siteId !== undefined) {
+    const scope = await resolveAccessibleSite(req, res, clientId, siteId);
+    if (!scope.ok) return;
+  }
 
   const result = await db.execute(sql`
     UPDATE kitchen_cleaning_tasks SET
