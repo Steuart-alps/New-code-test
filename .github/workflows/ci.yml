@@ -98,6 +98,9 @@ jobs:
       - name: Enforced CSRF tests
         run: pnpm --filter @workspace/api-server run test:csrf-enforced:ci
 
+      - name: Settings and dropdown option tests
+        run: pnpm --filter @workspace/api-server run test:config:ci
+
       - name: Staff invitation tests
         run: pnpm --filter @workspace/api-server run test:staff-invitations
 
