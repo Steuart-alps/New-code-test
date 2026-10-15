@@ -91,6 +91,29 @@ async function main() {
   const clientId = me.data?.user?.clientId;
   check("admin has client context", Number.isInteger(clientId), JSON.stringify(me.data));
 
+  // The runner rejects the first invitation email, so this one bounces. The
+  // account stays, the admin is told, the undelivered link is cancelled, and
+  // a resend from User Management recovers it without a second account.
+  const bouncedEmail = `staff-invite-bounced-${ts}@test.local`;
+  const bounced = await admin("POST", "/users", { email: bouncedEmail, name: "Bounced Staff", role: "client_staff", clientId });
+  check("account is created when the invitation email fails", bounced.status === 201, `got ${bounced.status}`);
+  check("create response reports the failed invitation email", bounced.data?.inviteEmail === "failed", JSON.stringify(bounced.data));
+  const bouncedId = bounced.data?.id;
+  check("no invitation email was captured for the bounced address", !capturedEmails().some((email) => email.to === bouncedEmail));
+  check("the undelivered setup link is cancelled", tokenRows(bouncedId).length === 1 && !tokenRows(bouncedId)[0].unused, JSON.stringify(tokenRows(bouncedId)));
+  const bouncedState = await invitationOf(admin, bouncedId);
+  check("User Management shows the invitation as undelivered", bouncedState.row?.invitation?.status === "undelivered", JSON.stringify(bouncedState.row));
+  const duplicate = await admin("POST", "/users", { email: bouncedEmail.toUpperCase(), name: "Bounced Again", role: "client_staff", clientId });
+  check("re-adding the same address is refused", duplicate.status === 409, `got ${duplicate.status}`);
+  check("the refusal points to resend", /resend/i.test(duplicate.data?.error ?? ""), JSON.stringify(duplicate.data));
+  const sameAddress = (await admin("GET", "/users")).data?.filter?.((u) => u.email.toLowerCase() === bouncedEmail) ?? [];
+  check("no duplicate account was created", sameAddress.length === 1, JSON.stringify(sameAddress));
+  const retry = await admin("POST", `/users/${bouncedId}/resend-invite`);
+  check("resend recovers the bounced invitation", retry.status === 200, `got ${retry.status}`);
+  check("the retried invitation email is captured", capturedEmails().some((email) => email.to === bouncedEmail));
+  check("the retried invitation is pending", (await invitationOf(admin, bouncedId)).row?.invitation?.status === "pending");
+  check("exactly one setup link is live after the retry", tokenRows(bouncedId).filter((row) => row.unused).length === 1, JSON.stringify(tokenRows(bouncedId)));
+
   const invitedEmail = `staff-invite-target-${ts}@test.local`;
   const created = await admin("POST", "/users", {
     email: invitedEmail,
@@ -99,6 +122,7 @@ async function main() {
     clientId,
   });
   check("create staff without password", created.status === 201, `got ${created.status}`);
+  check("create response reports the invitation email as sent", created.data?.inviteEmail === "sent", JSON.stringify(created.data));
   const invitedId = created.data?.id;
   const tokens = tokenRows(invitedId);
   check("invitation creates one token", tokens.length === 1, JSON.stringify(tokens));
@@ -146,6 +170,9 @@ async function main() {
   const outsiderReg = await outsider("POST", "/auth/register", { email: outsiderEmail, password: "outsider-password-123", name: "Outsider Admin" });
   await outsider("GET", `/auth/verify-email?token=${encodeURIComponent(outsiderReg.data?.verificationToken ?? "")}`);
   await outsider("POST", "/auth/login", { email: outsiderEmail, password: "outsider-password-123" });
+  const outsiderDuplicate = await outsider("POST", "/users", { email: invitedEmail, name: "Copycat", role: "client_staff" });
+  check("another business can't reuse the address", outsiderDuplicate.status === 409, `got ${outsiderDuplicate.status}`);
+  check("the refusal doesn't reveal the other business's account", !/already has an account here/.test(outsiderDuplicate.data?.error ?? ""), JSON.stringify(outsiderDuplicate.data));
   const outsiderList = await outsider("GET", `/users?clientId=${clientId}`);
   check("outsider's user list loads", outsiderList.status === 200 || outsiderList.status === 403, `got ${outsiderList.status}`);
   const outsiderRaw = JSON.stringify(outsiderList.data ?? null);
@@ -235,6 +262,7 @@ async function main() {
     password: "explicit-password-456",
   });
   check("create staff with explicit password", explicit.status === 201, `got ${explicit.status}`);
+  check("password-created staff have no invitation email", explicit.data?.inviteEmail === null, JSON.stringify(explicit.data));
   const afterExplicit = capturedEmails().filter((email) => email.to === explicitEmail).length;
   check("explicit password creation sends no invitation", afterExplicit === beforeExplicit);
   const explicitLogin = makeSession();

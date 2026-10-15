@@ -26,12 +26,14 @@ interface User {
   isDepartmentManager: boolean;
   /** Latest password setup link; null when none was ever sent. */
   invitation?: {
-    status: "pending" | "expired" | "completed" | "revoked";
+    status: "pending" | "expired" | "completed" | "revoked" | "undelivered";
     sentAt: string;
     expiresAt: string;
     revokedAt: string | null;
   } | null;
 }
+
+type ActionMessage = { kind: "success" | "error"; text: string };
 
 interface Department {
   id: number;
@@ -65,6 +67,14 @@ function InvitationState({ invitation }: { invitation: User["invitation"] }) {
       </span>
     );
   }
+  if (invitation.status === "undelivered") {
+    return (
+      <span className="block text-xs text-destructive">
+        <span className="block font-medium">Setup email not delivered</span>
+        <span className="block">Check the address, then resend</span>
+      </span>
+    );
+  }
   if (invitation.status === "revoked" && invitation.revokedAt) {
     const revokedAt = new Date(invitation.revokedAt);
     return (
@@ -95,7 +105,7 @@ function UserDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (notice?: ActionMessage) => void;
   user: User | null;
   departments: Department[];
   clientId: number | null;
@@ -157,7 +167,19 @@ function UserDialog({
         const d = await res.json().catch(() => null);
         throw new Error(d?.error ?? `Failed to save user (${res.status})`);
       }
-      onSaved();
+      // A new account without a password is invited by email. The account is
+      // created even if that email fails, so say which happened.
+      const saved = user ? null : await res.json().catch(() => null);
+      if (saved?.inviteEmail === "failed") {
+        onSaved({
+          kind: "error",
+          text: `${form.name}'s account was created, but the password setup email to ${form.email} could not be delivered. Check the address, then use the resend button next to their name to try again.`,
+        });
+      } else if (saved?.inviteEmail === "sent") {
+        onSaved({ kind: "success", text: `${form.name}'s account was created and a password setup link was emailed to ${form.email}.` });
+      } else {
+        onSaved();
+      }
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to save");
@@ -297,7 +319,7 @@ export default function UsersPage() {
   const [reassigning, setReassigning] = useState<number | null>(null);
   const [resendingInvite, setResendingInvite] = useState<number | null>(null);
   const [revokingInvite, setRevokingInvite] = useState<number | null>(null);
-  const [actionMessage, setActionMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [actionMessage, setActionMessage] = useState<ActionMessage | null>(null);
 
   async function load() {
     setLoading(true);
@@ -362,6 +384,8 @@ export default function UsersPage() {
         kind: "error",
         text: err instanceof Error ? err.message : "Failed to resend password setup link",
       });
+      // A failed delivery cancels the new link; show that state in the list.
+      await load();
     } finally {
       setResendingInvite(null);
     }
@@ -570,7 +594,10 @@ export default function UsersPage() {
       <UserDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        onSaved={load}
+        onSaved={(notice) => {
+          setActionMessage(notice ?? null);
+          load();
+        }}
         user={editingUser}
         departments={departments}
         clientId={activeClientId}

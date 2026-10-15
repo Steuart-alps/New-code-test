@@ -735,6 +735,7 @@ async function runRuntimeMigrationsOnce() {
         "created_at" timestamp NOT NULL DEFAULT now(),
         "purpose"    text NOT NULL DEFAULT 'reset',
         "revoked_at" timestamp,
+        "email_failed_at" timestamp,
         CONSTRAINT "password_reset_tokens_token_unique" UNIQUE ("token")
       )
     `);
@@ -747,6 +748,7 @@ async function runRuntimeMigrationsOnce() {
     // Reset rows always stay at 1 hour, so re-running this changes nothing.
     await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "purpose" text NOT NULL DEFAULT 'reset'`);
     await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "revoked_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "email_failed_at" timestamp`);
     await db.execute(sql`
       UPDATE "password_reset_tokens" SET "purpose" = 'invite'
       WHERE "purpose" = 'reset' AND "expires_at" - "created_at" > interval '2 hours'

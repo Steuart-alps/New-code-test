@@ -4,7 +4,7 @@ import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/db/schema";
 import { eq, and, inArray, isNull, desc, gt } from "drizzle-orm";
-import { hashPassword } from "../lib/auth";
+import { hashPassword, getUserWithClientByEmail } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
 import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
 import { resetTwoFactorWithAlert, deliverTwoFactorResetAlert } from "../lib/twoFactorResetAlerts";
@@ -32,6 +32,7 @@ async function sendInviteEmail(
   user: { id: number; email: string; name: string },
   log?: { error: (o: unknown, m?: string) => void },
 ): Promise<boolean> {
+  let tokenId: number | null = null;
   try {
     const token = randomBytes(32).toString("hex");
     // Invitation links live a little longer than a routine reset (24 hours)
@@ -43,7 +44,7 @@ async function sendInviteEmail(
     // prevents an older reset link from remaining a second valid credential.
     // Both steps share a transaction so a failed insert can't leave the user
     // with no live link and their old one already cancelled.
-    await db.transaction(async (tx) => {
+    tokenId = await db.transaction(async (tx) => {
       await tx.update(passwordResetTokensTable)
         .set({ usedAt: new Date() })
         .where(and(
@@ -51,12 +52,13 @@ async function sendInviteEmail(
           isNull(passwordResetTokensTable.usedAt),
         ));
       // Only a digest is stored; the emailed link is the credential.
-      await tx.insert(passwordResetTokensTable).values({
+      const [inserted] = await tx.insert(passwordResetTokensTable).values({
         userId: user.id,
         token: hashStoredCredential(token),
         expiresAt,
         purpose: "invite",
-      });
+      }).returning({ id: passwordResetTokensTable.id });
+      return inserted.id;
     });
 
     const appUrl = getPublicAppUrl();
@@ -84,12 +86,25 @@ async function sendInviteEmail(
     });
   } catch (err) {
     log?.error({ err }, "Failed to send invite email");
+    // Nobody received this link, so cancel it rather than leave a live
+    // credential behind, and mark it so User Management can say the email
+    // wasn't delivered. The admin retries with resend-invite.
+    if (tokenId !== null) {
+      try {
+        const now = new Date();
+        await db.update(passwordResetTokensTable)
+          .set({ usedAt: now, emailFailedAt: now })
+          .where(eq(passwordResetTokensTable.id, tokenId));
+      } catch (markErr) {
+        log?.error({ err: markErr }, "Failed to cancel an undelivered invite link");
+      }
+    }
     return false;
   }
   return true;
 }
 
-type InvitationStatus = "pending" | "expired" | "completed" | "revoked";
+type InvitationStatus = "pending" | "expired" | "completed" | "revoked" | "undelivered";
 
 /**
  * Password setup state for each listed user, from their most recent setup
@@ -117,6 +132,7 @@ async function invitationsFor(userIds: number[]): Promise<Map<number, Invitation
       expiresAt: passwordResetTokensTable.expiresAt,
       usedAt: passwordResetTokensTable.usedAt,
       revokedAt: passwordResetTokensTable.revokedAt,
+      emailFailedAt: passwordResetTokensTable.emailFailedAt,
     })
     .from(passwordResetTokensTable)
     .where(and(
@@ -128,9 +144,11 @@ async function invitationsFor(userIds: number[]): Promise<Map<number, Invitation
   for (const row of rows) {
     const status: InvitationStatus = row.revokedAt
       ? "revoked"
-      : row.usedAt
-        ? "completed"
-        : row.expiresAt.getTime() > now ? "pending" : "expired";
+      : row.emailFailedAt
+        ? "undelivered"
+        : row.usedAt
+          ? "completed"
+          : row.expiresAt.getTime() > now ? "pending" : "expired";
     result.set(row.userId, {
       status,
       sentAt: row.createdAt.toISOString(),
@@ -231,6 +249,20 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
   // account with an unusable random password and email them a link to set
   // their own via the existing reset-password token machinery.
   const invite = !body.password;
+
+  // One account per address (sign-in matches case-insensitively). Retrying a
+  // failed invitation uses resend-invite on the existing account instead.
+  const existing = await getUserWithClientByEmail(body.email);
+  if (existing) {
+    const sameBusiness = existing.user.clientId != null && canAccessClient(req, existing.user.clientId);
+    res.status(409).json({
+      error: sameBusiness
+        ? `${existing.user.email} already has an account here. To send their password setup link again, use the resend button in User Management.`
+        : "An account with this email already exists.",
+    });
+    return;
+  }
+
   const passwordHash = await hashPassword(body.password ?? randomBytes(32).toString("hex"));
   const rows = await db
     .insert(usersTable)
@@ -245,11 +277,13 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
     })
     .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
 
-  if (invite) {
-    await sendInviteEmail(rows[0], req.log);
-  }
+  // The account stands either way; when the invitation can't be delivered the
+  // admin is told and can resend it from User Management.
+  const inviteEmail = invite
+    ? (await sendInviteEmail(rows[0], req.log) ? "sent" : "failed")
+    : null;
 
-  res.status(201).json(rows[0]);
+  res.status(201).json({ ...rows[0], inviteEmail });
 });
 
 /**

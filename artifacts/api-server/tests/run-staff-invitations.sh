@@ -49,7 +49,10 @@ if healthy; then
 fi
 
 pnpm run build
+# The first invitation email this API sends is rejected, so the suite can
+# check what an admin sees when a new staff member's invitation bounces.
 NODE_ENV=test TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" PORT="$TEST_PORT" \
+  TEST_EMAIL_REJECT_SUBJECT="You've been invited to ComplyTrack" TEST_EMAIL_REJECT_SUBJECT_OCCURRENCE=1 \
   node --enable-source-maps ./dist/index.mjs >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
