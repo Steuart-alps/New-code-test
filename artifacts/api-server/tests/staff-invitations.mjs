@@ -170,8 +170,36 @@ async function main() {
   const staleSetup = await admin("POST", "/auth/reset-password", { token: emailedToken, password: "stale-password-456" });
   check("first setup link stops working after a resend", staleSetup.status === 400, `got ${staleSetup.status}`);
 
+  // Revoking cancels the live link without emailing a replacement.
+  const outsiderRevoke = await outsider("POST", `/users/${invitedId}/revoke-invite`);
+  check("another business can't revoke the setup link", outsiderRevoke.status === 403, `got ${outsiderRevoke.status}`);
+  check("refused revoke leaves the link pending", (await invitationOf(admin, invitedId)).row?.invitation?.status === "pending");
+  const emailsBeforeRevoke = capturedEmails().filter((email) => email.to === invitedEmail).length;
+  const revoke = await admin("POST", `/users/${invitedId}/revoke-invite`);
+  check("admin revokes the setup link", revoke.status === 200 && revoke.data?.revoked === 1, `got ${revoke.status} ${JSON.stringify(revoke.data)}`);
+  check("revoking sends no email", capturedEmails().filter((email) => email.to === invitedEmail).length === emailsBeforeRevoke);
+  const revokedState = await invitationOf(admin, invitedId);
+  check("revoked invitation shows as revoked", revokedState.row?.invitation?.status === "revoked" && !!revokedState.row?.invitation?.revokedAt, JSON.stringify(revokedState.row));
+  const revokedUse = await admin("POST", "/auth/reset-password", { token: resentToken, password: "revoked-password-456" });
+  check("revoked setup link fails through reset-password", revokedUse.status === 400, `got ${revokedUse.status}`);
+  check("revoked link row is kept, not deleted", tokenRows(invitedId).length === 2, JSON.stringify(tokenRows(invitedId)));
+  const auditRow = execFileSync("psql", [process.env.DATABASE_URL, "-X", "-At", "-c",
+    `SELECT actor_id, client_id FROM audit_events WHERE entity_type = 'user' AND entity_id = ${Number(invitedId)} AND action = 'setup_link_revoked'`,
+  ], { encoding: "utf8" }).trim();
+  check("revocation is recorded with who did it", auditRow === `${me.data?.user?.id}|${clientId}`, auditRow);
+  const revokeAgain = await admin("POST", `/users/${invitedId}/revoke-invite`);
+  check("nothing left to revoke is reported", revokeAgain.status === 409, `got ${revokeAgain.status}`);
+  const revokeOwner = await admin("POST", `/users/${me.data?.user?.id}/revoke-invite`);
+  check("revoke is limited to staff accounts", revokeOwner.status === 400, `got ${revokeOwner.status}`);
+
+  const reinvite = await admin("POST", `/users/${invitedId}/resend-invite`);
+  check("a new link can be sent after revoking", reinvite.status === 200, `got ${reinvite.status}`);
+  check("re-sent invitation is pending", (await invitationOf(admin, invitedId)).row?.invitation?.status === "pending");
+  const finalToken = capturedEmails().filter((email) => email.to === invitedEmail).at(-1)?.html?.match(/reset-password\?token=([0-9a-f]{64})/)?.[1] ?? "";
+  check("re-sent invitation has a fresh link", finalToken.length === 64 && finalToken !== resentToken);
+
   const reset = await admin("POST", "/auth/reset-password", {
-    token: resentToken,
+    token: finalToken,
     password: "staff-password-456",
   });
   check("invitation token sets the password", reset.status === 200, `got ${reset.status}`);
@@ -182,7 +210,7 @@ async function main() {
   });
   check("invited staff can log in with the new password", staffLogin.status === 200, `got ${staffLogin.status}`);
   const reuse = await admin("POST", "/auth/reset-password", {
-    token: resentToken,
+    token: finalToken,
     password: "another-password-789",
   });
   check("invitation token cannot be reused", reuse.status === 400, `got ${reuse.status}`);

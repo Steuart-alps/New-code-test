@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff, Mail, UsersRound } from "lucide-react";
+import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff, Mail, MailX, UsersRound } from "lucide-react";
 
 const NO_DEPT_VALUE = "__none__";
 
@@ -26,9 +26,10 @@ interface User {
   isDepartmentManager: boolean;
   /** Latest password setup link; null when none was ever sent. */
   invitation?: {
-    status: "pending" | "expired" | "completed";
+    status: "pending" | "expired" | "completed" | "revoked";
     sentAt: string;
     expiresAt: string;
+    revokedAt: string | null;
   } | null;
 }
 
@@ -61,6 +62,14 @@ function InvitationState({ invitation }: { invitation: User["invitation"] }) {
     return (
       <span className="block text-xs text-destructive" title={`Setup link expired ${exact}`}>
         Setup link expired {formatDistanceToNow(expiresAt, { addSuffix: true })}
+      </span>
+    );
+  }
+  if (invitation.status === "revoked" && invitation.revokedAt) {
+    const revokedAt = new Date(invitation.revokedAt);
+    return (
+      <span className="block text-xs text-muted-foreground" title={`Setup link revoked ${format(revokedAt, "d MMM yyyy, HH:mm")}`}>
+        Setup link revoked {formatDistanceToNow(revokedAt, { addSuffix: true })}
       </span>
     );
   }
@@ -287,6 +296,7 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [reassigning, setReassigning] = useState<number | null>(null);
   const [resendingInvite, setResendingInvite] = useState<number | null>(null);
+  const [revokingInvite, setRevokingInvite] = useState<number | null>(null);
   const [actionMessage, setActionMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   async function load() {
@@ -354,6 +364,28 @@ export default function UsersPage() {
       });
     } finally {
       setResendingInvite(null);
+    }
+  }
+
+  async function revokeInvite(user: User) {
+    if (!confirm(`Revoke the password setup link sent to ${user.name} at ${user.email}? The link stops working straight away and no new email is sent.`)) return;
+    setRevokingInvite(user.id);
+    setActionMessage(null);
+    try {
+      const res = await apiFetch(`/users/${user.id}/revoke-invite`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error ?? "Failed to revoke the password setup link");
+      }
+      setActionMessage({ kind: "success", text: `The password setup link for ${user.email} was revoked and no longer works.` });
+      await load();
+    } catch (err: unknown) {
+      setActionMessage({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Failed to revoke the password setup link",
+      });
+    } finally {
+      setRevokingInvite(null);
     }
   }
 
@@ -493,6 +525,19 @@ export default function UsersPage() {
                               aria-label={`Resend password setup link to ${u.name}`}
                             >
                               <Mail className={`w-4 h-4 ${resendingInvite === u.id ? "animate-pulse text-primary" : "text-muted-foreground"}`} />
+                            </Button>
+                          )}
+                          {canAdmin && u.role === "client_staff" && u.invitation?.status === "pending" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => revokeInvite(u)}
+                              disabled={revokingInvite === u.id}
+                              title="Revoke password setup link"
+                              aria-label={`Revoke password setup link for ${u.name}`}
+                            >
+                              <MailX className={`w-4 h-4 ${revokingInvite === u.id ? "animate-pulse text-destructive" : "text-destructive"}`} />
                             </Button>
                           )}
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(u)} title={u.active ? "Deactivate" : "Activate"}>

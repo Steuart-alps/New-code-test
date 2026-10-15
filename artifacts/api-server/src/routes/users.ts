@@ -1,14 +1,15 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/db/schema";
-import { eq, and, inArray, isNull, desc } from "drizzle-orm";
+import { eq, and, inArray, isNull, desc, gt } from "drizzle-orm";
 import { hashPassword } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
 import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
 import { resetTwoFactorWithAlert, deliverTwoFactorResetAlert } from "../lib/twoFactorResetAlerts";
 import { hashStoredCredential, revokeUserSessions } from "../lib/sessionRevocation";
+import { appendAuditEvent } from "../lib/audit";
 
 const router = Router();
 
@@ -88,23 +89,26 @@ async function sendInviteEmail(
   return true;
 }
 
-type InvitationStatus = "pending" | "expired" | "completed";
+type InvitationStatus = "pending" | "expired" | "completed" | "revoked";
 
 /**
  * Password setup state for each listed user, from their most recent setup
  * (invite) link. Only users the caller is already allowed to list are looked
  * up, and only status and times are returned, never the link itself.
  *
- * A latest invite with used_at set means the password was set: reset-password
- * marks every outstanding link used when any link is consumed, and a resend
- * only cancels links older than the one it creates.
+ * A latest invite with used_at set (and not revoked) means the password was
+ * set: reset-password marks every outstanding link used when any link is
+ * consumed, and a resend only cancels links older than the one it creates.
  */
-async function invitationsFor(userIds: number[]): Promise<Map<number, {
+type Invitation = {
   status: InvitationStatus;
   sentAt: string;
   expiresAt: string;
-}>> {
-  const result = new Map<number, { status: InvitationStatus; sentAt: string; expiresAt: string }>();
+  revokedAt: string | null;
+};
+
+async function invitationsFor(userIds: number[]): Promise<Map<number, Invitation>> {
+  const result = new Map<number, Invitation>();
   if (userIds.length === 0) return result;
   const rows = await db
     .selectDistinctOn([passwordResetTokensTable.userId], {
@@ -112,6 +116,7 @@ async function invitationsFor(userIds: number[]): Promise<Map<number, {
       createdAt: passwordResetTokensTable.createdAt,
       expiresAt: passwordResetTokensTable.expiresAt,
       usedAt: passwordResetTokensTable.usedAt,
+      revokedAt: passwordResetTokensTable.revokedAt,
     })
     .from(passwordResetTokensTable)
     .where(and(
@@ -121,13 +126,16 @@ async function invitationsFor(userIds: number[]): Promise<Map<number, {
     .orderBy(passwordResetTokensTable.userId, desc(passwordResetTokensTable.id));
   const now = Date.now();
   for (const row of rows) {
-    const status: InvitationStatus = row.usedAt
-      ? "completed"
-      : row.expiresAt.getTime() > now ? "pending" : "expired";
+    const status: InvitationStatus = row.revokedAt
+      ? "revoked"
+      : row.usedAt
+        ? "completed"
+        : row.expiresAt.getTime() > now ? "pending" : "expired";
     result.set(row.userId, {
       status,
       sentAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt.toISOString(),
+      revokedAt: row.revokedAt ? row.revokedAt.toISOString() : null,
     });
   }
   return result;
@@ -244,23 +252,34 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
-router.post("/users/:id/resend-invite", requireAuth, requireClientAdmin, async (req, res) => {
+/**
+ * The staff account a setup-link action targets, after the tenant and role
+ * checks shared by resend-invite and revoke-invite. Sends the error response
+ * and returns null when the caller may not act on it.
+ */
+async function setupLinkTarget(req: Request, res: Response, verb: string) {
   const actor = req.currentUser!;
   const id = Number(req.params.id);
 
   const [target] = await db.select().from(usersTable).where(eq(usersTable.id, id));
   if (!target) {
     res.status(404).json({ error: "User not found" });
-    return;
+    return null;
   }
   if (target.id !== actor.id && !canAccessClient(req, target.clientId)) {
     res.status(403).json({ error: "Forbidden" });
-    return;
+    return null;
   }
   if (target.role !== "client_staff") {
-    res.status(400).json({ error: "Password setup links can only be resent to staff accounts" });
-    return;
+    res.status(400).json({ error: `Password setup links can only be ${verb} for staff accounts` });
+    return null;
   }
+  return target;
+}
+
+router.post("/users/:id/resend-invite", requireAuth, requireClientAdmin, async (req, res) => {
+  const target = await setupLinkTarget(req, res, "resent");
+  if (!target) return;
 
   const sent = await sendInviteEmail(target, req.log);
   if (!sent) {
@@ -268,6 +287,39 @@ router.post("/users/:id/resend-invite", requireAuth, requireClientAdmin, async (
     return;
   }
   res.json({ ok: true });
+});
+
+// Cancels every live setup or reset link for a staff member without sending
+// a new one, e.g. when an invitation went to the wrong address. The rows are
+// kept (marked used and revoked) and the action is recorded in audit_events.
+router.post("/users/:id/revoke-invite", requireAuth, requireClientAdmin, async (req, res) => {
+  const target = await setupLinkTarget(req, res, "revoked");
+  if (!target) return;
+
+  const now = new Date();
+  const revoked = await db.update(passwordResetTokensTable)
+    .set({ usedAt: now, revokedAt: now })
+    .where(and(
+      eq(passwordResetTokensTable.userId, target.id),
+      isNull(passwordResetTokensTable.usedAt),
+      gt(passwordResetTokensTable.expiresAt, now),
+    ))
+    .returning({ id: passwordResetTokensTable.id, purpose: passwordResetTokensTable.purpose });
+  if (revoked.length === 0) {
+    res.status(409).json({ error: "There is no unused password setup link to revoke for this user." });
+    return;
+  }
+
+  if (target.clientId != null) {
+    await appendAuditEvent(req, {
+      clientId: target.clientId,
+      entityType: "user",
+      entityId: target.id,
+      action: "setup_link_revoked",
+      metadata: { linksRevoked: revoked.length, purposes: revoked.map((row) => row.purpose) },
+    });
+  }
+  res.json({ ok: true, revoked: revoked.length });
 });
 
 router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
