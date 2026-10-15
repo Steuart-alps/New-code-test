@@ -253,6 +253,34 @@ export const forgotPasswordRateLimit = makeLoginRateLimit({
 });
 
 /** Three password-reset emails per requested address in each shared hour. */
+/**
+ * Verification-email resends: five per source IP and three per requested
+ * address each hour, kept apart from the registration quota so retries never
+ * use up sign-ups from a shared office connection. The per-address cap stops
+ * the endpoint being used to flood one inbox.
+ */
+export const resendVerificationRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  namespace: "resend-verification",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
+export const resendVerificationEmailRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  namespace: "resend-verification-email",
+  key: (req) => {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    return email ? `email:${email}` : `ip:${clientIp(req)}`;
+  },
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
 export const forgotPasswordEmailRateLimit = makeLoginRateLimit({
   windowMs: 60 * 60 * 1000,
   max: 3,

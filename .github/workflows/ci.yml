@@ -95,11 +95,17 @@ jobs:
       - name: Department isolation tests
         run: pnpm --filter @workspace/api-server run test:dept-isolation:ci
 
+      - name: Welcome email and verification resend tests
+        run: pnpm --filter @workspace/api-server run test:welcome-email
+
       - name: Enforced CSRF tests
         run: pnpm --filter @workspace/api-server run test:csrf-enforced:ci
 
       - name: Settings and dropdown option tests
         run: pnpm --filter @workspace/api-server run test:config:ci
+
+      - name: Staff invitation tests
+        run: pnpm --filter @workspace/api-server run test:staff-invitations
 
       # The schema-shape suites start their own private cluster with initdb and
       # pg_ctl, which ubuntu-latest ships (PostgreSQL 16, service disabled) but

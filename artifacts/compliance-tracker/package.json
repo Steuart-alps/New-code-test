@@ -27,6 +27,7 @@
     "test:feedback-inbox-browser": "node tests/feedback-inbox-browser.test.mjs",
     "test:required-track-photos-browser": "node tests/required-track-photos-browser.test.mjs",
     "test:recovery-code-browser": "node tests/recovery-code-browser.test.mjs",
+    "test:verify-email-browser": "node tests/verify-email-browser.test.mjs",
     "test:billing-addon-settings-browser": "node tests/billing-addon-settings-browser.test.mjs",
     "test:hot-tub-pdf": "node tests/hot-tub-pdf-browser.test.mjs",
     "test:incident-export-browser": "node tests/incident-export-browser.test.mjs",
