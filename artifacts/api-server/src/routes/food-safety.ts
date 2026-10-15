@@ -517,6 +517,14 @@ router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, 
       validated.values.food_jurisdiction,
     );
   }
+  // Clearing a jurisdiction likewise clears the limit it selected, so the
+  // scope goes back to the inherited jurisdiction's target.
+  if (
+    validated.clears.includes("food_jurisdiction")
+    && !Object.prototype.hasOwnProperty.call(rawUpdates, "food_reheating_limit")
+  ) {
+    validated.clears.push("food_reheating_limit");
+  }
 
   const storageKeyOf = (baseKey: string) =>
     site.siteId !== null ? siteKeyFor(site.siteId, baseKey) : baseKey;
@@ -591,8 +599,10 @@ router.delete("/config", requireAuth, requireClientAdmin, denyViewers, async (re
   res.json({ ...DEFAULT_CONFIG });
 });
 
-/** Resolve the configured jurisdiction for a diary scope. Site-level settings
- * take precedence over the client-level setting, matching GET /config. */
+/** Resolve the reheating limit a new diary record in this scope is stamped
+ * with, in the same order GET /config uses: a site's own limit, else the
+ * standard limit of the site's jurisdiction, else the client's saved limit,
+ * else the standard limit of the client's (or default) jurisdiction. */
 async function resolveReheatingLimit(
   clientId: number,
   siteId: number | null,
@@ -604,11 +614,15 @@ async function resolveReheatingLimit(
     .select({ key: appSettingsTable.key, value: appSettingsTable.value })
     .from(appSettingsTable)
     .where(eq(appSettingsTable.clientId, clientId));
-  const clientJurisdiction = rows.find((row) => row.key === "food_jurisdiction")?.value;
-  const siteJurisdiction = siteId === null
-    ? undefined
-    : rows.find((row) => row.key === siteKeyFor(siteId, "food_jurisdiction"))?.value;
-  return reheatingLimitForJurisdiction(siteJurisdiction ?? clientJurisdiction ?? await defaultFoodJurisdiction(clientId));
+  const stored = (key: string) => rows.find((row) => row.key === key)?.value ?? undefined;
+  if (siteId !== null) {
+    const siteLimit = stored(siteKeyFor(siteId, "food_reheating_limit"));
+    if (siteLimit !== undefined) return siteLimit;
+    const siteJurisdiction = stored(siteKeyFor(siteId, "food_jurisdiction"));
+    if (siteJurisdiction !== undefined) return reheatingLimitForJurisdiction(siteJurisdiction);
+  }
+  return stored("food_reheating_limit")
+    ?? reheatingLimitForJurisdiction(stored("food_jurisdiction") ?? await defaultFoodJurisdiction(clientId));
 }
 
 // Drizzle condition selecting the right diary scope: a specific site when
@@ -958,42 +972,26 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   };
   const rowJson = JSON.stringify(storedRow);
   const userId = (req.session as any).userId ?? null;
-  const reheatingLimit = section === "reheating"
-    ? await resolveReheatingLimit(clientId, siteId)
-    : undefined;
+  // Stamp the scope's reheating limit whichever section opens the day, so a
+  // diary started with a delivery does not fall back to the column default.
+  const reheatingLimit = await resolveReheatingLimit(clientId, siteId);
 
   const outcome = await db.transaction(async tx => {
   // Ensure the day's record exists for this diary scope (ignore the race where
   // another writer creates it first), then append in a single UPDATE. The
   // ON CONFLICT target uses the matching partial unique index for the scope.
   if (siteId === null) {
-    if (reheatingLimit !== undefined) {
-      await tx.execute(sql`
-        INSERT INTO food_safety_records (client_id, record_date, reheating_limit, created_by)
-        VALUES (${clientId}, ${recordDate}, ${reheatingLimit}, ${userId})
-        ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
-      `);
-    } else {
-      await tx.execute(sql`
-        INSERT INTO food_safety_records (client_id, record_date, created_by)
-        VALUES (${clientId}, ${recordDate}, ${userId})
-        ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
-      `);
-    }
+    await tx.execute(sql`
+      INSERT INTO food_safety_records (client_id, record_date, reheating_limit, created_by)
+      VALUES (${clientId}, ${recordDate}, ${reheatingLimit}, ${userId})
+      ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
+    `);
   } else {
-    if (reheatingLimit !== undefined) {
-      await tx.execute(sql`
-        INSERT INTO food_safety_records (client_id, site_id, record_date, reheating_limit, created_by)
-        VALUES (${clientId}, ${siteId}, ${recordDate}, ${reheatingLimit}, ${userId})
-        ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
-      `);
-    } else {
-      await tx.execute(sql`
-        INSERT INTO food_safety_records (client_id, site_id, record_date, created_by)
-        VALUES (${clientId}, ${siteId}, ${recordDate}, ${userId})
-        ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
-      `);
-    }
+    await tx.execute(sql`
+      INSERT INTO food_safety_records (client_id, site_id, record_date, reheating_limit, created_by)
+      VALUES (${clientId}, ${siteId}, ${recordDate}, ${reheatingLimit}, ${userId})
+      ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
+    `);
   }
 
   const scopeCond = siteId === null ? sql`site_id IS NULL` : sql`site_id = ${siteId}`;

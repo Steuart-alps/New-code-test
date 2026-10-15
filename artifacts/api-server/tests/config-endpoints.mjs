@@ -29,6 +29,9 @@
 //        - invalid section-toggle values (not "true"/"false") → 400
 //        - siteId belonging to another client → 400
 //        - per-site override layering (PUT ?siteId affects only that site's GET)
+//        - a site's jurisdiction stamps its reheating target (England/Wales 75°C,
+//          Scotland 82°C) through POST and append; other sites keep the
+//          inherited target; clearing the override restores the client's
 //   4. /api/mobile/push-token
 //        - requires auth (401 without a session)
 //        - POST stores a row for the session user (204)
@@ -1001,6 +1004,154 @@ async function testSiteDiaries(admin, ts) {
   await admin("DELETE", "/food-safety/config");
 }
 
+// A site's jurisdiction override selects its reheating target for every way a
+// diary day can be created (POST, and append whichever section opens the day),
+// while sites without an override keep the client-level target.
+async function testSiteJurisdictionReheating(admin, ts) {
+  console.log("\n── food-safety: site jurisdiction reheating targets ──");
+  const ENGLAND_WALES = "Above 75°C";
+  const SCOTLAND = "Above 82°C";
+
+  const siteA = await admin("POST", "/sites", { name: `Reheat Site A ${ts}` });
+  const siteB = await admin("POST", "/sites", { name: `Reheat Site B ${ts}` });
+  expectOk("site-reheat: create site A", siteA.status, [200, 201]);
+  expectOk("site-reheat: create site B", siteB.status, [200, 201]);
+  const a = siteA.data?.id;
+  const b = siteB.data?.id;
+  check("site-reheat: site ids", Number.isInteger(a) && Number.isInteger(b), `a=${a} b=${b}`);
+
+  await admin("DELETE", "/food-safety/config");
+  // Each diary scope gets fresh dates far from any other test's records.
+  let dayOfMonth = 0;
+  const nextDay = () => `2097-03-${String(++dayOfMonth).padStart(2, "0")}`;
+  const scope = (siteId) => (siteId == null ? "" : `?siteId=${siteId}`);
+  const configOf = async (siteId) => (await admin("GET", `/food-safety/config${scope(siteId)}`)).data ?? {};
+  // POST without reheatingLimit, as the mobile app does: the server stamps it.
+  const postLimit = async (siteId) => {
+    const res = await admin("POST", `/food-safety${scope(siteId)}`, { recordDate: nextDay() });
+    return res.status === 201 ? res.data?.reheatingLimit : `HTTP ${res.status}`;
+  };
+  const appendLimit = async (siteId, section) => {
+    const recordDate = nextDay();
+    const res = await admin("POST", `/food-safety/append${scope(siteId)}`, {
+      recordDate,
+      section,
+      row: { item: "Soup", coreTemp: "90" },
+      entryId: randomUUID(),
+    });
+    if (res.status !== 201) return `HTTP ${res.status}`;
+    const sep = siteId == null ? "" : `?siteId=${siteId}`;
+    return (await admin("GET", `/food-safety/by-date/${recordDate}${sep}`)).data?.reheatingLimit;
+  };
+  const expectStamps = async (label, siteId, expected) => {
+    const posted = await postLimit(siteId);
+    check(`site-reheat: ${label} POST stamps ${expected}`, posted === expected, `got ${posted}`);
+    const reheatAppend = await appendLimit(siteId, "reheating");
+    check(`site-reheat: ${label} reheating append stamps ${expected}`, reheatAppend === expected, `got ${reheatAppend}`);
+    // A day opened by another section must still carry the scope's target.
+    const deliveryAppend = await appendLimit(siteId, "deliveries");
+    check(`site-reheat: ${label} delivery-first append stamps ${expected}`, deliveryAppend === expected, `got ${deliveryAppend}`);
+  };
+
+  // ── Client on Scotland; site A overrides to England/Wales ──
+  expectOk(
+    "site-reheat: client jurisdiction Scotland",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "scotland" })).status,
+  );
+  expectOk(
+    "site-reheat: site A override England/Wales",
+    (await admin("PUT", `/food-safety/config?siteId=${a}`, { food_jurisdiction: "england_wales" })).status,
+  );
+  const aCfg = await configOf(a);
+  check(
+    "site-reheat: site A config is England/Wales at 75°C",
+    aCfg.food_jurisdiction === "england_wales" && aCfg.food_reheating_limit === ENGLAND_WALES,
+    `jurisdiction=${aCfg.food_jurisdiction}, limit=${aCfg.food_reheating_limit}`,
+  );
+  check(
+    "site-reheat: site A temperature rules reheat at 75°C",
+    JSON.parse(aCfg.food_temperature_rules ?? "{}")?.reheating?.min === 75,
+    `got ${aCfg.food_temperature_rules}`,
+  );
+  const bCfg = await configOf(b);
+  check(
+    "site-reheat: site B keeps inherited Scotland 82°C",
+    bCfg.food_jurisdiction === "scotland" && bCfg.food_reheating_limit === SCOTLAND
+      && !(bCfg._siteOverrides ?? []).includes("food_jurisdiction"),
+    `jurisdiction=${bCfg.food_jurisdiction}, limit=${bCfg.food_reheating_limit}`,
+  );
+  const clientCfg = await configOf(null);
+  check(
+    "site-reheat: client-level stays Scotland 82°C",
+    clientCfg.food_jurisdiction === "scotland" && clientCfg.food_reheating_limit === SCOTLAND,
+    `jurisdiction=${clientCfg.food_jurisdiction}, limit=${clientCfg.food_reheating_limit}`,
+  );
+  await expectStamps("site A (England/Wales)", a, ENGLAND_WALES);
+  await expectStamps("site B (inherits Scotland)", b, SCOTLAND);
+  await expectStamps("whole-org (Scotland)", null, SCOTLAND);
+
+  // ── Clearing site A's override restores the client-level jurisdiction ──
+  expectOk(
+    "site-reheat: clear site A jurisdiction (null)",
+    (await admin("PUT", `/food-safety/config?siteId=${a}`, { food_jurisdiction: null })).status,
+  );
+  const aCleared = await configOf(a);
+  check(
+    "site-reheat: cleared site A is back on Scotland 82°C",
+    aCleared.food_jurisdiction === "scotland" && aCleared.food_reheating_limit === SCOTLAND,
+    `jurisdiction=${aCleared.food_jurisdiction}, limit=${aCleared.food_reheating_limit}`,
+  );
+  check(
+    "site-reheat: cleared site A has no jurisdiction or reheating override",
+    Array.isArray(aCleared._siteOverrides)
+      && !aCleared._siteOverrides.includes("food_jurisdiction")
+      && !aCleared._siteOverrides.includes("food_reheating_limit"),
+    `got ${JSON.stringify(aCleared._siteOverrides)}`,
+  );
+  await expectStamps("cleared site A", a, SCOTLAND);
+
+  // ── Reverse: client on England/Wales; site B overrides to Scotland ──
+  expectOk(
+    "site-reheat: client jurisdiction England/Wales",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "england_wales" })).status,
+  );
+  expectOk(
+    "site-reheat: site B override Scotland",
+    (await admin("PUT", `/food-safety/config?siteId=${b}`, { food_jurisdiction: "scotland" })).status,
+  );
+  const bScot = await configOf(b);
+  check(
+    "site-reheat: site B config is Scotland at 82°C",
+    bScot.food_jurisdiction === "scotland" && bScot.food_reheating_limit === SCOTLAND,
+    `jurisdiction=${bScot.food_jurisdiction}, limit=${bScot.food_reheating_limit}`,
+  );
+  await expectStamps("site B (Scotland)", b, SCOTLAND);
+  await expectStamps("site A (inherits England/Wales)", a, ENGLAND_WALES);
+
+  // A site's own documented limit wins over its jurisdiction's standard one,
+  // matching what the template shows.
+  const custom = `Above 80°C ${ts}`.slice(0, 40);
+  expectOk(
+    "site-reheat: site B custom reheating limit",
+    (await admin("PUT", `/food-safety/config?siteId=${b}`, { food_reheating_limit: custom })).status,
+  );
+  check("site-reheat: site B config shows custom limit", (await configOf(b)).food_reheating_limit === custom);
+  await expectStamps("site B (custom limit)", b, custom);
+
+  // Resetting the site removes every override, back to the client's target.
+  await admin("DELETE", `/food-safety/config?siteId=${b}`);
+  const bReset = await configOf(b);
+  check(
+    "site-reheat: reset site B is back on England/Wales 75°C",
+    bReset.food_jurisdiction === "england_wales" && bReset.food_reheating_limit === ENGLAND_WALES,
+    `jurisdiction=${bReset.food_jurisdiction}, limit=${bReset.food_reheating_limit}`,
+  );
+  await expectStamps("reset site B", b, ENGLAND_WALES);
+
+  await admin("DELETE", `/food-safety/config?siteId=${a}`);
+  await admin("DELETE", "/food-safety/config");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. /api/mobile/push-token
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1235,6 +1386,7 @@ async function runSuite() {
   await testCustomTradeAndInspectionValidation(a.session, a.clientId, clientBId, ts);
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
+  await testSiteJurisdictionReheating(a.session, ts);
   await testPushToken(a.session, other, ts);
   await testStorageUsage(a.session, viewer, staff, a.clientId, clientBId);
 }

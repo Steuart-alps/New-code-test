@@ -92,6 +92,10 @@ jobs:
       - name: Module route tests
         run: pnpm --filter @workspace/api-server run test:modules:ci
 
+      # Includes the KitchenTrack site jurisdiction reheating targets.
+      - name: Config endpoint tests
+        run: pnpm --filter @workspace/api-server run test:config:ci
+
       - name: Department isolation tests
         run: pnpm --filter @workspace/api-server run test:dept-isolation:ci
 
