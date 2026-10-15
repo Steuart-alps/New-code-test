@@ -20,6 +20,7 @@ import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
 import { objectPathTenantMismatch, patPhotoObjectAccess } from "../lib/patLegacyHistoryScope";
+import { canReadHealthData, riddorReceiptObjectAccess } from "../lib/riddorReceipts";
 import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
 import { findLiveSubscription } from "../lib/billing";
 import { readStorageRateConfig } from "../lib/storagePricing";
@@ -269,9 +270,12 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
     const clientId = getClientId(req);
     // The tenant ACL below is per client. A retained PAT test photo is also
     // limited to the department/site recorded with its test, so another
-    // department cannot fetch it by path. Checked before touching storage.
+    // department cannot fetch it by path. An HSE receipt bound to a RIDDOR
+    // submission keeps its incident's department and manager-only rule too.
+    // Checked before touching storage.
     if (!clientId || objectPathTenantMismatch(objectPath, clientId)
-      || !await patPhotoObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req))) {
+      || !await patPhotoObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req))
+      || !await riddorReceiptObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req), canReadHealthData(req))) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }

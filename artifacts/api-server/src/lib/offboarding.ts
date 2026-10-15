@@ -761,14 +761,22 @@ type TxExecutor = Pick<typeof db, "execute">;
 /** Deletes a client's stored files inside the deletion transaction (see clientStorageErasure.ts). */
 export type ClientStorageEraser = (clientId: number, executor: TxExecutor) => Promise<{ objectsDeleted: number }>;
 
-/** How many stored files a client still has (ledger rows plus attachment references). */
+/**
+ * How many stored files a client still has to erase (ledger rows plus
+ * attachment references). HSE receipts stay with the retained RIDDOR events
+ * (see RETAINED_CLIENT_TABLES), so they are not counted.
+ */
 export async function countClientStoredObjects(clientId: number, executor: TxExecutor = db): Promise<number> {
   const result = await executor.execute(sql`
-    SELECT (SELECT COUNT(*) FROM storage_usage_objects WHERE client_id = ${clientId} AND present)::int AS ledger
+    SELECT (SELECT COUNT(*) FROM storage_usage_objects WHERE client_id = ${clientId} AND present
+      AND object_path NOT IN (SELECT receipt_object_path FROM incident_riddor_events
+        WHERE client_id = ${clientId} AND receipt_object_path IS NOT NULL))::int AS ledger
   `);
   const ledger = Number((result.rows[0] as { ledger?: number } | undefined)?.ledger ?? 0);
   const { listTenantAttachmentObjectPaths } = await import("./attachmentReferences");
-  return ledger + (await listTenantAttachmentObjectPaths(executor, clientId)).length;
+  const { listRetainedRiddorReceiptPaths } = await import("./riddorReceipts");
+  const retained = new Set(await listRetainedRiddorReceiptPaths(executor, clientId));
+  return ledger + (await listTenantAttachmentObjectPaths(executor, clientId)).filter((path) => !retained.has(path)).length;
 }
 
 /**
@@ -928,7 +936,7 @@ export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): P
  * - incident_riddor_events: append-only RIDDOR decision/submission history
  *   (RIDDOR reg. 12 requires records for at least 3 years). The incidents it
  *   references are kept with it (RESTRICT foreign key); every other incident
- *   is deleted.
+ *   is deleted. HSE receipt files bound to its events are kept too.
  * - client_data_deletion_requests: the record that this erasure was requested,
  *   reviewed and completed.
  * - users: anonymised in place below (audit rows reference them).

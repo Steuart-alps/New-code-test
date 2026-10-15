@@ -4299,6 +4299,11 @@ async function migrateIncidents() {
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "decision_at" timestamp`);
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "submitted_at" timestamp`);
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "submission_evidence" text`);
+  // HSE receipt bound to a submission event; set only on insert.
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_object_path" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_file_name" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_content_type" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_source" text`);
   await db.execute(sql`
     UPDATE "incident_riddor_events" e
     SET "decision_at" = e."created_at"
@@ -4343,6 +4348,9 @@ async function migrateIncidents() {
         WHERE "id" = NEW."incident_id" AND "client_id" = NEW."client_id"
       ) THEN
         RAISE EXCEPTION 'RIDDOR event tenant must match its incident';
+      END IF;
+      IF NEW."receipt_object_path" IS NOT NULL AND NEW."event_type" <> 'submission' THEN
+        RAISE EXCEPTION 'An HSE receipt can only be bound to a submission event';
       END IF;
       RETURN NEW;
     END;
