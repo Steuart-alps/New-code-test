@@ -20,9 +20,11 @@ export const EXTENDED_AUDITED_TABLES = [
   "allergen_items", "asbestos_records", "asbestos_register_entries",
   "bike_checks", "bike_hire_records", "bike_services", "bikes",
   "categories", "check_photos", "checklist_templates", "client_documents",
-  "compliance_actions", "compliance_items", "contractor_certificates", "contractors",
+  "compliance_actions", "compliance_items", "contractor_certificates",
+  "contractor_email_queue", "contractors",
   "coshh_substances", "daily_checklist_submissions", "daily_checklists",
   "daily_manager_signoffs", "departments", "doc_acknowledgements",
+  "fix_track_email_dispatches", "fix_track_issue_activity", "fix_track_quote_submissions",
   "green_defects", "green_fuel_logs", "green_machines", "green_pre_use_checks",
   "green_puwer_inspections", "green_service_records",
   "hot_tub_checks", "hot_tubs",
@@ -90,8 +92,13 @@ export async function migrateAuditLog() {
         ELSIF jsonb_typeof(value) = 'array' THEN
           SELECT coalesce(jsonb_agg(audit_log_redact(e)), '[]'::jsonb) INTO result FROM jsonb_array_elements(value) e;
           RETURN result;
-        ELSIF jsonb_typeof(value) = 'string' AND value::text ~* '(bearer[[:space:]]|https?://|[?&](token|key|signature)=)' THEN
-          RETURN '"[REDACTED]"'::jsonb;
+        ELSIF jsonb_typeof(value) = 'string' AND value::text ~* '(bearer[[:space:]]|https?://|[?&;](token|key|signature)=)' THEN
+          -- Strip only the links and credentials, so the rest of a note or a
+          -- stored email body stays in the history.
+          RETURN to_jsonb(regexp_replace(regexp_replace(regexp_replace(value #>> '{}',
+            'https?://[^[:space:]"''<>]+', '[link removed]', 'gi'),
+            'bearer[[:space:]]+[^[:space:]"''<>]+', 'Bearer [REDACTED]', 'gi'),
+            '([?&;](token|key|signature)=)[^&[:space:]"''<>]+', '\\1[REDACTED]', 'gi'));
         END IF;
         RETURN value;
       END;
