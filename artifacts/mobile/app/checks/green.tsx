@@ -6,7 +6,7 @@
  * short, practical prompts that remain available even when the machine API
  * only returns the site's equipment register.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -32,6 +32,8 @@ import { UnsentSubmissions } from '@/components/UnsentSubmissions';
 import { isRetryableFailure, type UnsentSubmission } from '@/components/unsent-submission-logic';
 import { useStagedPhotoEvidence } from '@/hooks/useStagedPhotoEvidence';
 import { useUnsentSubmissions } from '@/hooks/useUnsentSubmissions';
+import { attemptFromSavedBody, nextEntryAttempt, type EntryAttempt } from '@/components/client-entry-logic';
+import { newCheckEntryId } from '@/lib/checkOutbox';
 
 const MODULE_COLOR = '#6f8750';
 const MODULE_LIGHT = '#e6efdc';
@@ -107,6 +109,7 @@ interface GreenCheckPayload {
   defectNoted: boolean;
   result: 'pass' | 'fail';
   photoUploadIds?: string[];
+  clientEntryId?: string;
 }
 
 const MACHINE_LABELS: Record<MachineType, string> = {
@@ -394,6 +397,9 @@ export default function GreenTrackScreen() {
   // reopened in the form, because photo receipts do not outlive the screen.
   const unsent = useUnsentSubmissions('green-pre-use-check');
   const [restoredDraftId, setRestoredDraftId] = useState<string | null>(null);
+  // Signing off again with unchanged answers reuses the device entry ID, so a
+  // resend after a lost response never records the check twice.
+  const entryAttempt = useRef<EntryAttempt | null>(null);
   const withoutPhotos = (payload: GreenCheckPayload & { photoUploadIds?: string[] }) => {
     const { photoUploadIds: _photos, ...rest } = payload;
     return rest as unknown as Record<string, unknown>;
@@ -412,6 +418,7 @@ export default function GreenTrackScreen() {
     setFuelLevel(typeof values.fuelLevel === 'string' ? values.fuelLevel : null);
     setNotes(typeof values.notes === 'string' ? values.notes : '');
     setRestoredDraftId(draft.id);
+    entryAttempt.current = attemptFromSavedBody(draft.body);
     Alert.alert('Check reopened', 'Review the answers, add any required photos again, then sign off.');
   }
 
@@ -422,6 +429,7 @@ export default function GreenTrackScreen() {
         body: JSON.stringify(payload),
       }),
     onSuccess: async (_response, payload) => {
+      entryAttempt.current = null;
       void unsent.resolve(withoutPhotos(payload));
       if (restoredDraftId) void unsent.discard(restoredDraftId);
       setRestoredDraftId(null);
@@ -530,7 +538,11 @@ export default function GreenTrackScreen() {
       defectNoted: failedCount > 0,
       result: failedCount > 0 ? 'fail' as const : 'pass' as const,
     });
-    if (payload) submitMutation.mutate(payload);
+    if (!payload) return;
+    const attempt = nextEntryAttempt(entryAttempt.current, payload as unknown as Record<string, unknown>,
+      () => newCheckEntryId('green'));
+    entryAttempt.current = attempt;
+    submitMutation.mutate({ ...payload, clientEntryId: attempt.id });
   }
 
   async function onRefresh() {

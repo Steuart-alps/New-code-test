@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Response } from "express";
 import { z } from "zod";
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
 
 /**
  * Replay recognition for mobile outbox submissions (fire, legionella, hot tub,
- * PAT and incident records). The device sends a stable `clientEntryId` with
+ * PAT, incident and pool records, GreenTrack pre-use checks and swim sessions). The device sends a stable `clientEntryId` with
  * every attempt; the row stores it with a fingerprint of the validated
  * payload under a partial unique index on (client_id, client_entry_id).
  *
@@ -63,4 +65,41 @@ export function isUniqueViolation(error: unknown): boolean {
     if (current.code === "23505") return true;
   }
   return false;
+}
+
+/** Runtime-only tables (raw SQL, snake_case rows) that store device entry IDs. */
+export type RawClientEntryTable = "pool_checks" | "green_pre_use_checks" | "swim_sessions";
+
+/** The raw row already stored for this client's device entry, if any. */
+export async function findRawStoredEntry(
+  table: RawClientEntryTable, clientId: number, entry: ClientEntry | null,
+): Promise<Record<string, any> | undefined> {
+  if (!entry) return undefined;
+  const result = await db.execute(sql`
+    SELECT * FROM ${sql.identifier(table)}
+    WHERE client_id = ${clientId} AND client_entry_id = ${entry.id}
+    LIMIT 1
+  `);
+  return result.rows[0] as Record<string, any> | undefined;
+}
+
+/** respondToStoredEntry for a snake_case row from a runtime-only table. */
+export function respondToRawStoredEntry(res: Response, row: Record<string, any>, userId: number, entry: ClientEntry) {
+  return respondToStoredEntry(res, {
+    createdBy: row.created_by == null ? null : Number(row.created_by),
+    clientEntryHash: row.client_entry_hash ?? null,
+  }, userId, entry, () => row);
+}
+
+/**
+ * Device entry for a phone submission with staged photos. Photo receipts are
+ * single-use and expire, so a resend may carry newly staged photos: they are
+ * left out of the fingerprint and the stored record (with its original
+ * photos) is returned. Null for web submissions; "invalid" for a malformed ID.
+ */
+export function stagedPhotoEntry(body: Record<string, unknown>): ClientEntry | null | "invalid" {
+  if (body.clientEntryId === undefined) return null;
+  if (!clientEntryIdSchema.safeParse(body.clientEntryId).success) return "invalid";
+  const { photoUploadIds: _photos, ...payload } = body;
+  return clientEntryFrom(payload as Record<string, unknown> & { clientEntryId: string });
 }

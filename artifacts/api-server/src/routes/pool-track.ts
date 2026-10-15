@@ -7,6 +7,9 @@ import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "..
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 import { getAccountTimezone, zonedDateTimeToUtc } from "../lib/accountClock";
+import {
+  clientEntryFrom, clientEntryIdSchema, findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry,
+} from "../lib/clientEntryReplay";
 
 const router = Router();
 
@@ -112,12 +115,16 @@ router.get("/", requireAuth, async (req, res) => {
   res.json((rows as any).rows);
 });
 
+// The phone sends a stable device entry ID so a resend after a lost
+// response returns the stored check instead of a duplicate.
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
+
 // POST /pool-track — create check
 router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const body = createSchema.parse(req.body);
+  const body = postSchema.parse(req.body);
   const siteAccess = await checkSiteAccess(body.siteId, clientId, getActiveDepartmentId(req));
   if (siteAccess === "required") return res.status(400).json({ error: "siteId is required" });
   if (siteAccess === "invalid") return res.status(400).json({ error: "Invalid site" });
@@ -126,33 +133,48 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const performer = await resolveStaffPerformer(clientId, body.staffRosterId, body.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-  const result = await db.execute(sql`
-    INSERT INTO pool_checks (
-       client_id, site_id, check_date, check_time, check_type, staff_roster_id,
-      ph_level, free_chlorine, combined_chlorine,
-      water_temp_c, air_temp_c, turbidity,
-      pool_open, performed_by, actions_taken, result, notes, created_by
-    ) VALUES (
-      ${clientId},
-      ${body.siteId ?? null},
-      ${body.checkDate},
-      ${body.checkTime ?? null},
-       ${body.checkType}, ${performer.staffRosterId},
-      ${body.phLevel ?? null},
-      ${body.freeChlorine ?? null},
-      ${body.combinedChlorine ?? null},
-      ${body.waterTempC ?? null},
-      ${body.airTempC ?? null},
-      ${body.turbidity ?? null},
-      ${body.poolOpen},
-       ${performer.performedBy},
-      ${body.actionsTaken ?? null},
-      ${body.result},
-      ${body.notes ?? null},
-      ${req.currentUser!.id}
-    )
-    RETURNING *
-  `);
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(body);
+  const prior = await findRawStoredEntry("pool_checks", clientId, entry);
+  if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
+
+  let result;
+  try {
+    result = await db.execute(sql`
+      INSERT INTO pool_checks (
+         client_id, site_id, check_date, check_time, check_type, staff_roster_id,
+        ph_level, free_chlorine, combined_chlorine,
+        water_temp_c, air_temp_c, turbidity,
+        pool_open, performed_by, actions_taken, result, notes, created_by,
+        client_entry_id, client_entry_hash
+      ) VALUES (
+        ${clientId},
+        ${body.siteId ?? null},
+        ${body.checkDate},
+        ${body.checkTime ?? null},
+         ${body.checkType}, ${performer.staffRosterId},
+        ${body.phLevel ?? null},
+        ${body.freeChlorine ?? null},
+        ${body.combinedChlorine ?? null},
+        ${body.waterTempC ?? null},
+        ${body.airTempC ?? null},
+        ${body.turbidity ?? null},
+        ${body.poolOpen},
+         ${performer.performedBy},
+        ${body.actionsTaken ?? null},
+        ${body.result},
+        ${body.notes ?? null},
+        ${userId},
+        ${entry?.id ?? null}, ${entry?.hash ?? null}
+      )
+      RETURNING *
+    `);
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await findRawStoredEntry("pool_checks", clientId, entry) : undefined;
+    if (entry && raced) return respondToRawStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
 
   res.status(201).json(result.rows[0]);
 });

@@ -30,6 +30,7 @@
     "test:kitchen-temperature-flow": "node tests/kitchen-temperature-form-flow.mjs",
     "test:kitchen-outbox": "node tests/kitchen-outbox.mjs",
     "test:check-outbox": "node tests/check-outbox.mjs",
+    "test:client-entry-logic": "node tests/client-entry-logic.mjs",
     "test:offline-resilience": "node tests/offline-resilience-logic.mjs",
     "test:auth-offline": "node tests/auth-offline.mjs",
     "test:store-compliance": "node tests/store-compliance.mjs",

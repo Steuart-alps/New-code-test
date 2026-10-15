@@ -24,7 +24,7 @@ What's already in the repository:
 
 Run these on your own computer from `artifacts/mobile`. You need Node 24 and the repository up to date on `main`.
 
-1. **Deploy the API first.** Mobile builds from this branch send a `clientEntryId` with each fire, legionella, hot tub, PAT and incident record, so a resend after a lost response doesn't create a duplicate. An older API ignores the field, which would bring the duplicates back. Merge this branch and let Render deploy before you build.
+1. **Deploy the API first.** Mobile builds from this branch send a `clientEntryId` with each fire, legionella, hot tub, PAT, incident and pool record, GreenTrack pre-use check and swim session, so a resend after a lost response doesn't create a duplicate. An older API ignores the field, which would bring the duplicates back. Merge this branch and let Render deploy before you build.
 2. **Apple Developer Program**, £79 a year: <https://developer.apple.com/programs/enroll/>.
    - Enrol as the legal entity, ALPS Consulting Ltd (it trades as ALPS Consultancy; "ALPS Consultancy Ltd" is a different company), so the store shows the company as the seller. That needs a D-U-N-S number, which Apple can look up or request for free.
    - Enrolling as an individual shows your personal name instead.
@@ -126,7 +126,7 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > • Risk assessments, certificates and training records for your sites
 >
 > WORKS ON PATCHY SIGNAL
-> Checks you record without a connection are saved on the device and sent automatically when you are back online, without creating duplicates.
+> Fire, water, hot tub, pool, PAT, incident, daily and kitchen temperature checks you record without a connection are saved on the device and sent automatically when you are back online, without creating duplicates.
 >
 > SECURE BY DESIGN
 > Each business only sees its own data. Two-factor sign-in protects accounts, and viewer accounts are read-only.
@@ -188,7 +188,7 @@ What the app sends to the ComplyTrack API (`EXPO_PUBLIC_DOMAIN`, HTTPS):
   - **Device or other IDs:** Device or other IDs (the push token).
 - **Not collected:** location, financial info, messages, audio, contacts, calendar, web browsing, app info and performance (no crash logs or diagnostics).
 
-> **Needs a decision:** the public privacy policy (`/privacy` on the web app) doesn't yet mention the mobile app, push-notification tokens, evidence photos or the incident health data listed above. Apple and Google both check that the policy matches these answers. Update it before submitting.
+> **Check before submitting:** the public privacy policy (`/privacy` on the web app) now covers the mobile app, push-notification tokens, evidence photos and the incident health data listed above (section 9 of the policy). Apple and Google both check that the policy matches these answers, so re-read it if any of them change.
 
 ## 5. Account deletion (App Review 5.1.1(v), Google account-deletion policy)
 
