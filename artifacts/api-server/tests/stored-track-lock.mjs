@@ -1259,6 +1259,96 @@ async function main() {
     }
   }
 
+  // Site moves: department-scoped staff may edit a record in their own
+  // department but cannot move it to another department's site, and the
+  // rejected move leaves the site unchanged. tests/site-move-route-inventory.mjs
+  // requires every site-accepting route to name one of these "site move:" checks
+  // (or an earlier move check above), so new routes cannot skip this coverage.
+  const rowsOf = (data) => (Array.isArray(data) ? data : data?.items ?? data?.rows ?? data?.data ?? data?.tasks ?? []);
+  const siteOf = (row) => row?.siteId ?? row?.site_id ?? row?.task?.siteId;
+  const idOf = (row) => row?.id ?? row?.task?.id;
+  const siteMove = async ({ label, createPath, path = createPath, create, move, list = createPath, method = "PUT", idFrom = (data) => data?.id }) => {
+    if (![200, 201].includes(alphaSite.status) || ![200, 201].includes(betaSite.status)) return;
+    const seeded = await admin("POST", createPath, create(alphaSite.data.id));
+    let id = idFrom(seeded.data);
+    if (!Number.isInteger(id) && [200, 201].includes(seeded.status)) {
+      // Some legacy create routes return no body; find the newest row.
+      id = Math.max(...rowsOf((await admin("GET", list)).data).map(idOf).filter(Number.isInteger));
+    }
+    check(`site move: ${label} seeded`, [200, 201].includes(seeded.status) && Number.isInteger(id),
+      `${seeded.status} ${JSON.stringify(seeded.data)}`);
+    if (!Number.isInteger(id)) return;
+    const attempt = await scopedStaff(method, `${path}/${id}`, move(betaSite.data.id));
+    check(`site move: ${label} is refused for department staff`, [400, 403, 404].includes(attempt.status),
+      `${attempt.status} ${JSON.stringify(attempt.data)}`);
+    const stored = rowsOf((await admin("GET", list)).data).find((row) => idOf(row) === id);
+    check(`site move: ${label} keeps its site`, siteOf(stored) === alphaSite.data.id, JSON.stringify(stored));
+  };
+  const fireMove = (siteId) => ({ checkType: "alarm", checkDate: today, result: "pass", performedBy: "Lock Fixture", siteId });
+  await siteMove({ label: "Fire check", createPath: "/fire-safety", create: fireMove, move: fireMove });
+  const treeMove = (siteId) => ({ checkType: "visual_assessment", checkDate: today, result: "pass", treeRef: "LOCK-MOVE", inspector: "Lock Fixture", siteId });
+  await siteMove({ label: "Tree inspection", createPath: "/tree-track", create: treeMove, move: treeMove });
+  const poolMove = (siteId) => ({ checkDate: today, checkType: "routine", result: "pass", performedBy: "Lock Fixture", phLevel: 7.4, notes: `pool-move-${suffix}`, siteId });
+  await siteMove({ label: "Pool check", createPath: "/pool-track", create: poolMove, move: poolMove });
+  const incidentMove = (siteId) => ({
+    incidentDate: today, location: "Lock room", description: "Lock move incident", involvedName: "Lock Fixture",
+    reportedBy: "Lock Fixture", riddorRationale: "Lock fixture: not reportable", siteId,
+  });
+  await siteMove({ label: "Incident", createPath: "/incidents", create: incidentMove, move: incidentMove });
+  const probeMove = (siteId) => ({
+    checkDate: today, probes: [{ name: "Probe A", iceTemp: "0.2", accurateIce: true }],
+    overallResult: "pass", checkedBy: "Lock Fixture", siteId,
+  });
+  await siteMove({ label: "KitchenWeekly probe", createPath: "/kitchen-weekly/probe", create: probeMove, move: probeMove,
+    list: `/kitchen-weekly/probe?siteId=${alphaSite.data?.id}` });
+  await siteMove({ label: "KitchenCleaning task", createPath: "/kitchen-cleaning/tasks",
+    create: (siteId) => ({ area: "Lock area", task: "Wipe down", frequency: "daily", siteId }),
+    move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "Legionella outlet", createPath: "/legionella/outlets",
+    create: (siteId) => ({ name: `Lock outlet ${suffix}`, type: "hot", siteId }), move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "PAT appliance", createPath: "/pat-track/appliances",
+    create: (siteId) => ({ name: `Lock move appliance ${suffix}`, applianceType: "Kettle", siteId }),
+    move: (siteId) => ({ name: `Lock move appliance ${suffix}`, applianceType: "Kettle", siteId }) });
+  await siteMove({ label: "PAT equipment template", createPath: "/pat-track/equipment-templates",
+    create: (siteId) => ({ name: `Lock move template ${suffix}`, siteId }),
+    move: (siteId) => ({ name: `Lock move template ${suffix}`, siteId }) });
+  await siteMove({ label: "PAT room", createPath: "/pat-track/rooms",
+    create: (siteId) => ({ name: `Lock move room ${suffix}`, siteId }),
+    move: (siteId) => ({ name: `Lock move room ${suffix}`, siteId }) });
+  await siteMove({ label: "PAT certificate", createPath: "/pat-track/certificates",
+    create: (siteId) => ({ siteId, visitDate: today, certificateRef: `MOVE-${suffix}`, roomIds: [] }),
+    move: (siteId) => ({ siteId, visitDate: today, certificateRef: `MOVE-${suffix}`, roomIds: [] }) });
+  for (const [label, collection, fields] of [
+    ["Swim session", "/swim-track/sessions", { sessionDate: today, sessionType: "public_swim", preSessionResult: "pass", poolClosed: false }],
+    ["Swim surveillance", "/swim-track/surveillance", { checkDate: today, checkTime: "10:00", scanCompleted: true }],
+    ["Swim first-aid", "/swim-track/first-aid", { checkDate: today, aedOk: true }],
+    ["Swim incident", "/swim-track/incidents", { incidentDate: today, description: "Lock move incident" }],
+  ]) {
+    const body = (siteId) => ({ ...fields, siteId });
+    await siteMove({ label, createPath: collection, create: body, move: body });
+  }
+  await siteMove({ label: "SafeTrack training record", createPath: "/safe-track/training-records",
+    create: (siteId) => ({ staffName: "Lock Fixture", trainingType: "Manual handling", completedAt: today, siteId }),
+    move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "Allergen register item", createPath: "/registers/allergens",
+    create: (siteId) => ({ siteId, name: `Lock dish ${suffix}`, allergens: [] }),
+    move: (siteId) => ({ siteId, name: `Lock dish ${suffix}`, allergens: [] }) });
+  await siteMove({ label: "COSHH register item", createPath: "/registers/coshh",
+    create: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }),
+    move: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }) });
+  await siteMove({ label: "Asbestos register item", createPath: "/registers/asbestos",
+    create: (siteId) => ({ siteId, builtBefore2000: "unknown" }),
+    move: (siteId) => ({ siteId, builtBefore2000: "unknown" }) });
+  await siteMove({ label: "Staff task", createPath: "/tasks", method: "PATCH", list: "/tasks?scope=all",
+    create: (siteId) => ({ title: `Lock task ${suffix}`, recurrence: "once", startsOn: today, assigneeRole: "client_staff", siteId }),
+    move: (siteId) => ({ siteId }) });
+  await siteMove({ label: "FixTrack issue", createPath: "/fix-track/issues",
+    create: (siteId) => ({
+      title: `Lock move issue ${suffix}`, issueType: "general", location: "Plant room", description: "Lock move",
+      priority: "medium", reportedBy: "Facilities", reportedDate: today, siteId,
+    }),
+    move: (siteId) => ({ siteId }) });
+
   // A different tenant must not be able to reach a mapped record. Use a real
   // foreign staff session so this also exercises the staff lock path's
   // client-scoped lookup rather than relying only on an admin 404.

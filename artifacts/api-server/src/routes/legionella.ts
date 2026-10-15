@@ -474,6 +474,9 @@ router.post("/outlets", requireAuth, denyViewers, async (req, res) => {
   const parsed = outletCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
+  const siteAccess = await checkSiteAccess(d.siteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   const rows = await db.execute(sql`
     INSERT INTO legionella_sentinel_outlets (client_id, site_id, name, type, location, sort_order)
     VALUES (${clientId}, ${d.siteId ?? null}, ${d.name}, ${d.type}, ${d.location ?? null}, ${d.sortOrder ?? 0})
@@ -500,6 +503,11 @@ router.put("/outlets/:id", requireAuth, denyViewers, async (req, res) => {
   const type     = d.type     ?? cur.type;
   const location = d.location !== undefined ? d.location : cur.location;
   const siteId   = d.siteId   !== undefined ? d.siteId   : cur.site_id;
+  if (d.siteId !== undefined) {
+    const siteAccess = await checkSiteAccess(d.siteId, clientId, getActiveDepartmentId(req));
+    if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const sortOrd  = d.sortOrder ?? cur.sort_order;
   const rows = await db.execute(sql`
     UPDATE legionella_sentinel_outlets
