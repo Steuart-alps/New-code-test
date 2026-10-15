@@ -188,6 +188,20 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="manage/actions"
+        options={{
+          title: 'Actions',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/action"
+        options={{
+          title: 'Action',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="manage/tasks"
         options={{
           title: 'Tasks',

@@ -83,6 +83,21 @@ async function main() {
   check("resolution snapshots authenticated resolver name", resolvedAction.data?.resolvedByName === "Template Admin", `got ${resolvedAction.data?.resolvedByName}`);
   check("resolution stores drawn signature", resolvedAction.data?.resolverSignature === SIGNATURE);
 
+  // Cross-module list (the phone's action list): no module filter, optional status.
+  const betaAction = await admin("POST", "/track-actions", { module: "pest", title: "beta pest action", severity: "urgent", siteId: betaSite.data?.id });
+  status("create beta-site action", betaAction, [201]);
+  const everyModule = await admin("GET", "/track-actions"); status("list actions without module", everyModule, [200]);
+  const everyIds = (everyModule.data || []).map(x => x.id);
+  check("module-less list spans modules", [greenAction.data?.id, oneOff.data?.id, betaAction.data?.id].every(id => everyIds.includes(id)), everyIds.join(", "));
+  const unresolvedList = await admin("GET", "/track-actions?status=unresolved"); status("list unresolved actions", unresolvedList, [200]);
+  const unresolvedIds = (unresolvedList.data || []).map(x => x.id);
+  check("unresolved list keeps open actions", unresolvedIds.includes(greenAction.data?.id) && unresolvedIds.includes(betaAction.data?.id));
+  check("unresolved list leaves out resolved actions", !unresolvedIds.includes(oneOff.data?.id) && (unresolvedList.data || []).every(x => x.status !== "resolved"));
+  const resolvedFire = await admin("GET", "/track-actions?module=fire&status=resolved");
+  check("status and module filters combine", (resolvedFire.data || []).length > 0 && (resolvedFire.data || []).every(x => x.status === "resolved" && x.module === "fire"));
+  status("list rejects unknown status", await admin("GET", "/track-actions?status=closed"), [400]);
+  status("list rejects unknown module", await admin("GET", "/track-actions?module=nope"), [400]);
+
   const staffEmail = `action-staff-${Date.now()}@test.local`; const viewerEmail = `action-viewer-${Date.now()}@test.local`;
   status("create alpha staff", await admin("POST", "/users", { name: "Action staff", email: staffEmail, password: "password-123", role: "client_staff", clientId, departmentId: alpha.data?.id }), [200, 201]);
   status("create alpha viewer", await admin("POST", "/users", { name: "Action viewer", email: viewerEmail, password: "password-123", role: "client_viewer", clientId, departmentId: alpha.data?.id }), [200, 201]);
@@ -90,6 +105,11 @@ async function main() {
   status("staff login", await staff("POST", "/auth/login", { email: staffEmail, password: "password-123" }), [200, 201]);
   status("viewer login", await viewer("POST", "/auth/login", { email: viewerEmail, password: "password-123" }), [200, 201]);
   const staffMatch = await staff("GET", `/track-actions/templates/matching?module=fire&siteId=${alphaSite.data?.id}`); status("staff reads own department templates", staffMatch, [200]); check("staff sees alpha template", (staffMatch.data || []).some(x => x.id === combined.data?.id));
+  const staffEvery = await staff("GET", "/track-actions?status=unresolved"); status("staff lists actions without module", staffEvery, [200]);
+  const staffIds = (staffEvery.data || []).map(x => x.id);
+  check("staff module-less list keeps own department", staffIds.includes(greenAction.data?.id), staffIds.join(", "));
+  check("staff module-less list hides other department sites", !staffIds.includes(betaAction.data?.id), staffIds.join(", "));
+  status("staff cannot filter to beta site", await staff("GET", `/track-actions?siteId=${betaSite.data?.id}`), [403]);
   status("staff cannot read beta site templates", await staff("GET", `/track-actions/templates/matching?module=fire&siteId=${betaSite.data?.id}`), [403]);
   status("staff cannot create beta-site action", await staff("POST", "/track-actions", { module: "fire", title: "wrong department", severity: "monitor", siteId: betaSite.data?.id }), [403]);
   status("viewer cannot create action", await viewer("POST", "/track-actions", { module: "fire", title: "denied", severity: "monitor" }), [403]);

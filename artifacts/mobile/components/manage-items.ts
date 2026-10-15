@@ -20,6 +20,16 @@ export interface ManageItem {
 
 export const MANAGE_ITEMS: ManageItem[] = [
   {
+    // Staff update and resolve actions on the website too; viewers read only.
+    id: 'actions',
+    label: 'Actions',
+    subtitle: 'Open module and Compliance Hub actions: update, close or send to FixTrack',
+    icon: 'alert-circle',
+    iconColor: '#d97706',
+    route: '/manage/actions',
+    audience: 'everyone',
+  },
+  {
     id: 'tasks',
     label: 'Tasks',
     subtitle: 'Set, assign and review routine jobs for your team',

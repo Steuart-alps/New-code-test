@@ -66,7 +66,8 @@ async function load(relative, env = {}) {
   const { resolveNotificationRoute, HOME_ROUTE } = await load('../lib/notificationRoutes.ts');
   // Hints sent by server reminders today.
   assert.equal(resolveNotificationRoute('/train-track'), '/(tabs)/docs?tab=training');
-  assert.equal(resolveNotificationRoute('/track-actions'), HOME_ROUTE);
+  assert.equal(resolveNotificationRoute('/track-actions'), '/manage/actions');
+  assert.equal(resolveNotificationRoute('/compliance-hub'), '/manage/actions?tab=hub');
   assert.equal(resolveNotificationRoute('/contractors'), HOME_ROUTE);
   assert.equal(resolveNotificationRoute('/(tabs)/docs'), '/(tabs)/docs');
   assert.equal(resolveNotificationRoute('/(tabs)/issues'), '/(tabs)/issues');
