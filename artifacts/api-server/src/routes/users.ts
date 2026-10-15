@@ -3,7 +3,7 @@ import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/db/schema";
-import { eq, and, inArray, isNull } from "drizzle-orm";
+import { eq, and, inArray, isNull, desc } from "drizzle-orm";
 import { hashPassword } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
 import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
@@ -40,17 +40,22 @@ async function sendInviteEmail(
     // A resend must make every older unused link invalid. The token table is
     // shared with forgot-password, so superseding all unused tokens also
     // prevents an older reset link from remaining a second valid credential.
-    await db.update(passwordResetTokensTable)
-      .set({ usedAt: new Date() })
-      .where(and(
-        eq(passwordResetTokensTable.userId, user.id),
-        isNull(passwordResetTokensTable.usedAt),
-      ));
-    // Only a digest is stored; the emailed link is the credential.
-    await db.insert(passwordResetTokensTable).values({
-      userId: user.id,
-      token: hashStoredCredential(token),
-      expiresAt,
+    // Both steps share a transaction so a failed insert can't leave the user
+    // with no live link and their old one already cancelled.
+    await db.transaction(async (tx) => {
+      await tx.update(passwordResetTokensTable)
+        .set({ usedAt: new Date() })
+        .where(and(
+          eq(passwordResetTokensTable.userId, user.id),
+          isNull(passwordResetTokensTable.usedAt),
+        ));
+      // Only a digest is stored; the emailed link is the credential.
+      await tx.insert(passwordResetTokensTable).values({
+        userId: user.id,
+        token: hashStoredCredential(token),
+        expiresAt,
+        purpose: "invite",
+      });
     });
 
     const appUrl = getPublicAppUrl();
@@ -81,6 +86,51 @@ async function sendInviteEmail(
     return false;
   }
   return true;
+}
+
+type InvitationStatus = "pending" | "expired" | "completed";
+
+/**
+ * Password setup state for each listed user, from their most recent setup
+ * (invite) link. Only users the caller is already allowed to list are looked
+ * up, and only status and times are returned, never the link itself.
+ *
+ * A latest invite with used_at set means the password was set: reset-password
+ * marks every outstanding link used when any link is consumed, and a resend
+ * only cancels links older than the one it creates.
+ */
+async function invitationsFor(userIds: number[]): Promise<Map<number, {
+  status: InvitationStatus;
+  sentAt: string;
+  expiresAt: string;
+}>> {
+  const result = new Map<number, { status: InvitationStatus; sentAt: string; expiresAt: string }>();
+  if (userIds.length === 0) return result;
+  const rows = await db
+    .selectDistinctOn([passwordResetTokensTable.userId], {
+      userId: passwordResetTokensTable.userId,
+      createdAt: passwordResetTokensTable.createdAt,
+      expiresAt: passwordResetTokensTable.expiresAt,
+      usedAt: passwordResetTokensTable.usedAt,
+    })
+    .from(passwordResetTokensTable)
+    .where(and(
+      inArray(passwordResetTokensTable.userId, userIds),
+      eq(passwordResetTokensTable.purpose, "invite"),
+    ))
+    .orderBy(passwordResetTokensTable.userId, desc(passwordResetTokensTable.id));
+  const now = Date.now();
+  for (const row of rows) {
+    const status: InvitationStatus = row.usedAt
+      ? "completed"
+      : row.expiresAt.getTime() > now ? "pending" : "expired";
+    result.set(row.userId, {
+      status,
+      sentAt: row.createdAt.toISOString(),
+      expiresAt: row.expiresAt.toISOString(),
+    });
+  }
+  return result;
 }
 
 const UpdateUserBody = z.object({
@@ -148,8 +198,9 @@ router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
       .from(usersTable)
       .where(eq(usersTable.clientId, user.clientId!));
   }
-  
-  res.json(rows);
+
+  const invitations = await invitationsFor(rows.map((row) => row.id));
+  res.json(rows.map((row) => ({ ...row, invitation: invitations.get(row.id) ?? null })));
 });
 
 router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {

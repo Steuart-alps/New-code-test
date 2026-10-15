@@ -52,6 +52,16 @@ function tokenRows(userId) {
   });
 }
 
+function psql(statement) {
+  execFileSync("psql", [process.env.DATABASE_URL, "-X", "-At", "-v", "ON_ERROR_STOP=1", "-c", statement], { encoding: "utf8" });
+}
+
+async function invitationOf(session, userId) {
+  const list = await session("GET", "/users");
+  const row = Array.isArray(list.data) ? list.data.find((u) => u.id === userId) : undefined;
+  return { status: list.status, row, raw: JSON.stringify(list.data ?? null) };
+}
+
 function capturedEmails() {
   if (!existsSync(CAPTURE_PATH)) return [];
   const raw = readFileSync(CAPTURE_PATH, "utf8").trim();
@@ -118,8 +128,50 @@ async function main() {
     invitationUrl?.toString(),
   );
 
+  // User Management shows the setup link as pending with its expiry, and
+  // never the link or its digest.
+  const pending = await invitationOf(admin, invitedId);
+  check("user list loads", pending.status === 200, `got ${pending.status}`);
+  check("new invitation is pending", pending.row?.invitation?.status === "pending", JSON.stringify(pending.row));
+  check(
+    "pending invitation expiry matches the stored link",
+    tokens.length === 1 && Math.abs(Date.parse(pending.row?.invitation?.expiresAt ?? "") - tokens[0].expiresAt) < 1000,
+    JSON.stringify(pending.row?.invitation),
+  );
+  check("user list never carries the setup link", !pending.raw.includes(emailedToken) && !pending.raw.includes(tokens[0]?.token ?? "sha256:"));
+
+  // Another business's admin can't see this staff member or their invitation.
+  const outsider = makeSession();
+  const outsiderEmail = `staff-invite-outsider-${ts}@test.local`;
+  const outsiderReg = await outsider("POST", "/auth/register", { email: outsiderEmail, password: "outsider-password-123", name: "Outsider Admin" });
+  await outsider("GET", `/auth/verify-email?token=${encodeURIComponent(outsiderReg.data?.verificationToken ?? "")}`);
+  await outsider("POST", "/auth/login", { email: outsiderEmail, password: "outsider-password-123" });
+  const outsiderList = await outsider("GET", `/users?clientId=${clientId}`);
+  check("outsider's user list loads", outsiderList.status === 200 || outsiderList.status === 403, `got ${outsiderList.status}`);
+  const outsiderRaw = JSON.stringify(outsiderList.data ?? null);
+  check("outsider sees neither the invited staff member nor their invitation", !outsiderRaw.includes(invitedEmail) && !outsiderRaw.includes(`"id":${invitedId},`), outsiderRaw);
+
+  // An unused link past its expiry shows as expired; a resend makes it pending again.
+  psql(`UPDATE password_reset_tokens SET expires_at = now() - interval '2 hours' WHERE user_id = ${Number(invitedId)} AND used_at IS NULL`);
+  const expired = await invitationOf(admin, invitedId);
+  check("lapsed invitation shows as expired", expired.row?.invitation?.status === "expired", JSON.stringify(expired.row));
+  const resent = await admin("POST", `/users/${invitedId}/resend-invite`);
+  check("resend setup link", resent.status === 200, `got ${resent.status}`);
+  const afterResend = await invitationOf(admin, invitedId);
+  check("resent invitation is pending again", afterResend.row?.invitation?.status === "pending", JSON.stringify(afterResend.row));
+  check(
+    "resent invitation expires about 24 hours from now",
+    Date.parse(afterResend.row?.invitation?.expiresAt ?? "") > Date.now() + 23 * 60 * 60 * 1000,
+    JSON.stringify(afterResend.row?.invitation),
+  );
+  const resentEmail = capturedEmails().filter((email) => email.to === invitedEmail).at(-1);
+  const resentToken = resentEmail?.html?.match(/reset-password\?token=([0-9a-f]{64})/)?.[1] ?? "";
+  check("resend emails a new setup link", resentToken.length === 64 && resentToken !== emailedToken);
+  const staleSetup = await admin("POST", "/auth/reset-password", { token: emailedToken, password: "stale-password-456" });
+  check("first setup link stops working after a resend", staleSetup.status === 400, `got ${staleSetup.status}`);
+
   const reset = await admin("POST", "/auth/reset-password", {
-    token: emailedToken,
+    token: resentToken,
     password: "staff-password-456",
   });
   check("invitation token sets the password", reset.status === 200, `got ${reset.status}`);
@@ -130,11 +182,20 @@ async function main() {
   });
   check("invited staff can log in with the new password", staffLogin.status === 200, `got ${staffLogin.status}`);
   const reuse = await admin("POST", "/auth/reset-password", {
-    token: emailedToken,
+    token: resentToken,
     password: "another-password-789",
   });
   check("invitation token cannot be reused", reuse.status === 400, `got ${reuse.status}`);
-  check("used invitation token is recorded as used", tokenRows(invitedId)[0]?.unused === false);
+  check("used invitation token is recorded as used", tokenRows(invitedId).every((row) => !row.unused));
+  const completed = await invitationOf(admin, invitedId);
+  check("used invitation shows as completed", completed.row?.invitation?.status === "completed", JSON.stringify(completed.row));
+
+  // A later forgot-password link is not a setup invitation.
+  const forgot = await admin("POST", "/auth/forgot-password", { email: invitedEmail });
+  check("forgot-password accepted", forgot.status === 200, `got ${forgot.status}`);
+  check("forgot-password created a live reset link", tokenRows(invitedId).some((row) => row.unused));
+  const afterForgot = await invitationOf(admin, invitedId);
+  check("a reset link doesn't reopen a completed invitation", afterForgot.row?.invitation?.status === "completed", JSON.stringify(afterForgot.row));
 
   const explicitEmail = `staff-invite-explicit-${ts}@test.local`;
   const beforeExplicit = capturedEmails().filter((email) => email.to === explicitEmail).length;
@@ -154,6 +215,8 @@ async function main() {
     password: "explicit-password-456",
   });
   check("explicit password staff can log in", explicitLoginResult.status === 200, `got ${explicitLoginResult.status}`);
+  const explicitRow = await invitationOf(admin, explicit.data?.id);
+  check("staff created with a password have no invitation", explicitRow.row !== undefined && explicitRow.row.invitation === null, JSON.stringify(explicitRow.row));
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length) {

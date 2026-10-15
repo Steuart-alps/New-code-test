@@ -7,5 +7,8 @@ export const passwordResetTokensTable = pgTable("password_reset_tokens", {
   token: text("token").notNull().unique(),
   expiresAt: timestamp("expires_at").notNull(),
   usedAt: timestamp("used_at"),
+  // "invite" for admin-sent password setup links, "reset" for forgot-password
+  // links. User Management shows setup state from the latest "invite" row.
+  purpose: text("purpose").$type<"invite" | "reset">().notNull().default("reset"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

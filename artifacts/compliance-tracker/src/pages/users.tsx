@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { format, formatDistanceToNow } from "date-fns";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth, useIsConsultant, useCanAdmin } from "@/context/auth-context";
@@ -23,6 +24,12 @@ interface User {
   totpEnabled?: boolean;
   isMaintenanceManager: boolean;
   isDepartmentManager: boolean;
+  /** Latest password setup link; null when none was ever sent. */
+  invitation?: {
+    status: "pending" | "expired" | "completed";
+    sentAt: string;
+    expiresAt: string;
+  } | null;
 }
 
 interface Department {
@@ -37,6 +44,28 @@ const ROLE_LABELS: Record<string, string> = {
   client_staff: "Staff",
   client_viewer: "Viewer",
 };
+
+function InvitationState({ invitation }: { invitation: User["invitation"] }) {
+  if (!invitation) return null;
+  const expiresAt = new Date(invitation.expiresAt);
+  const exact = format(expiresAt, "d MMM yyyy, HH:mm");
+  if (invitation.status === "pending") {
+    return (
+      <span className="block text-xs text-amber-700" title={`Setup link expires ${exact}`}>
+        <span className="block font-medium">Setup pending</span>
+        <span className="block">Link expires in {formatDistanceToNow(expiresAt)} · {format(expiresAt, "d MMM, HH:mm")}</span>
+      </span>
+    );
+  }
+  if (invitation.status === "expired") {
+    return (
+      <span className="block text-xs text-destructive" title={`Setup link expired ${exact}`}>
+        Setup link expired {formatDistanceToNow(expiresAt, { addSuffix: true })}
+      </span>
+    );
+  }
+  return <span className="block text-xs text-muted-foreground">Password set up</span>;
+}
 
 const ROLE_COLORS: Record<string, string> = {
   consultant: "bg-violet-100 text-violet-800",
@@ -317,6 +346,7 @@ export default function UsersPage() {
         throw new Error(data?.error ?? "Failed to resend password setup link");
       }
       setActionMessage({ kind: "success", text: `A fresh password setup link was sent to ${user.email}.` });
+      await load();
     } catch (err: unknown) {
       setActionMessage({
         kind: "error",
@@ -423,6 +453,7 @@ export default function UsersPage() {
                           {u.active ? <UserCheck className="w-3 h-3" /> : <UserX className="w-3 h-3" />}
                           {u.active ? "Active" : "Inactive"}
                         </span>
+                        <InvitationState invitation={u.invitation} />
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
