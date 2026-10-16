@@ -4,6 +4,7 @@ import { logger } from "./logger";
 import { ensureRuntimeBaseline } from "./runtimeBaseline";
 import { migrateAuditLog, migrateExtendedAuditLog } from "./auditLogMigration";
 import { migrateLegacyPatHistory } from "./patLegacyHistoryMigration";
+import { migrateSubmitterDepartments } from "./submitterDepartmentMigration";
 import { migratePatRoomHistory } from "./patRoomHistoryMigration";
 import { migratePatFailureHistory } from "./patFailureHistoryMigration";
 import { migratePatReplacementHistory } from "./patReplacementHistoryMigration";
@@ -2133,6 +2134,10 @@ async function runRuntimeMigrationsOnce() {
     // ---- Track owners and in-app notifications (Oct 2026) ----
     await migrateTrackOwnersAndNotifications();
     await migrateCertificateOutcomes();
+
+    // ---- Department recorded with each submission (Oct 2026) ----
+    // After every reported table exists; see submitterDepartmentMigration.ts.
+    await migrateSubmitterDepartments();
 
     // Last: every audited table must exist by now (see auditLogMigration.ts).
     await migrateExtendedAuditLog();
