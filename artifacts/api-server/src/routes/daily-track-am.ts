@@ -223,6 +223,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   }
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  if (!(await verifySite(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
   const data = parsed.data as any;
   if (data.items) data.items = normaliseChecklistItems(data.items);
   if (data.submittedAt) {

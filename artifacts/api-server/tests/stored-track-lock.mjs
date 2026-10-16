@@ -766,20 +766,38 @@ async function main() {
 
   await datedFamily({
     label: "KitchenWeekly weekly", createPath: "/kitchen-weekly/weekly",
-    // A weekly review stays open to staff until the day after its week ends,
-    // so the locked fixture is a week that ended days ago.
+    // Weekly records lock a day after the week ends (week commencing + 6).
     createBody: {
       weekCommencing: iso(-10), checks: { temperatureControl: "yes" },
       submittedAt: `${iso(-10)}T12:00:00.000Z`, managerSignature: "Lock Fixture",
     },
     deleteBody: {
-      weekCommencing: iso(-10), checks: { temperatureControl: "yes" },
-      submittedAt: `${iso(-10)}T12:00:00.000Z`, managerSignature: "Lock Fixture",
+      weekCommencing: iso(-17), checks: { temperatureControl: "yes" },
+      submittedAt: `${iso(-17)}T12:00:00.000Z`, managerSignature: "Lock Fixture",
     },
     forgedBody: { weekCommencing: today, checks: { temperatureControl: "no" } },
     updateBody: { checks: { temperatureControl: "no" }, notes: "admin correction" },
     expectDelete: false,
   });
+  // Staff can still work on the current period's weekly review and weekly or
+  // monthly cleaning log: those are dated by the period's first day.
+  const currentWeek = await admin("POST", "/kitchen-weekly/weekly", {
+    weekCommencing: iso(-5), checks: { temperatureControl: "yes" },
+  });
+  expect("KitchenWeekly: seed current-week review", currentWeek, [201]);
+  if (currentWeek.status === 201) {
+    expect("KitchenWeekly: staff can edit the current week's review",
+      await staff("PUT", `/kitchen-weekly/weekly/${currentWeek.data?.id}`, { checks: { temperatureControl: "no" } }), [200]);
+  }
+  const monthStart = `${today.slice(0, 8)}01`;
+  for (const [label, logDate, frequency, statuses] of [
+    ["current weekly cleaning log", iso(-5), "weekly", [200, 201]],
+    ["current monthly cleaning log", monthStart, "monthly", [200, 201]],
+    ["ended weekly cleaning log", iso(-9), "weekly", [423]],
+  ]) {
+    expect(`KitchenCleaning: staff ${label}`,
+      await staff("POST", "/kitchen-cleaning/logs", { logDate, frequency, completions: [] }), statuses);
+  }
   await datedFamily({
     label: "KitchenWeekly probe", createPath: "/kitchen-weekly/probe",
     createBody: {

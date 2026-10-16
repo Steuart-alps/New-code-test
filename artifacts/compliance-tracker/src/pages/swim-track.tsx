@@ -26,6 +26,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
+import { camelCaseRows } from "@/lib/camel-case-rows";
 
 function useSwimTrackApi() {
   const request = useActiveClientApi();
@@ -785,22 +786,22 @@ export default function SwimTrackPage() {
   });
   const { data: sessions = [], isLoading: sessionsLoading } = useQuery({
     queryKey: ["swim-sessions", user?.id, activeClientId],
-    queryFn: () => apiFetch<SwimSession[]>("/swim-track/sessions"),
+    queryFn: () => apiFetch("/swim-track/sessions").then(camelCaseRows<SwimSession>),
     enabled: activeTab === "sessions",
   });
   const { data: surveillance = [], isLoading: surveillanceLoading } = useQuery({
     queryKey: ["swim-surveillance", user?.id, activeClientId],
-    queryFn: () => apiFetch<SurveillanceCheck[]>("/swim-track/surveillance"),
+    queryFn: () => apiFetch("/swim-track/surveillance").then(camelCaseRows<SurveillanceCheck>),
     enabled: activeTab === "surveillance",
   });
   const { data: firstAidChecks = [], isLoading: firstAidLoading } = useQuery({
     queryKey: ["swim-first-aid", user?.id, activeClientId],
-    queryFn: () => apiFetch<FirstAidCheck[]>("/swim-track/first-aid"),
+    queryFn: () => apiFetch("/swim-track/first-aid").then(camelCaseRows<FirstAidCheck>),
     enabled: activeTab === "first-aid",
   });
   const { data: incidents = [], isLoading: incidentsLoading } = useQuery({
     queryKey: ["swim-incidents", user?.id, activeClientId],
-    queryFn: () => apiFetch<Incident[]>("/swim-track/incidents"),
+    queryFn: () => apiFetch("/swim-track/incidents").then(camelCaseRows<Incident>),
     enabled: activeTab === "incidents",
   });
 

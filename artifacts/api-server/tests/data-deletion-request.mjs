@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 const base = process.env.API_BASE;
 const emails = process.env.TEST_EMAIL_CAPTURE_PATH;
 if (!base || !emails) throw new Error("Test API and email capture path required");
-const tag = `erasure-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+const runId = resolveRunId();
+const tag = `erasure-${runId}`;
 const accounts = [];
 
 function session() {
@@ -141,11 +143,19 @@ try {
   assert.equal(notRecorded.rows.length, 0, "request must not be accepted during completed deletion");
   console.log("Data deletion request checks passed.");
 } finally {
-  for (const account of accounts) {
-    await db.execute(sql`DELETE FROM privacy_retention_schedules WHERE client_id = ${account.clientId}`);
-    await db.execute(sql`DELETE FROM client_data_deletion_requests WHERE client_id = ${account.clientId}`);
-    await db.execute(sql`DELETE FROM consultant_clients WHERE client_id = ${account.clientId}`);
-    await db.execute(sql`DELETE FROM users WHERE id = ${account.userId}`);
-    await db.execute(sql`DELETE FROM clients WHERE id = ${account.clientId}`);
+  // Remove only this run's tenants, including the audit_log rows their
+  // records produced, which would block a plain DELETE FROM clients
+  // (tests/fixture-ownership.mjs).
+  const cleanupConnection = await pool.connect();
+  try {
+    await cleanupConnection.query(buildOwnedFixturePurgeSql({
+      runId, clientIds: accounts.map((account) => account.clientId),
+    }));
+  } catch (err) {
+    await cleanupConnection.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    cleanupConnection.release();
+    await pool.end().catch(() => {});
   }
 }

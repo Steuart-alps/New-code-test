@@ -143,7 +143,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { title, category, description, fileName, fileSize, mimeType, objectPath, siteId, uploadedBy, requiresAcknowledgement, annualAcknowledgement, department } = parsed.data;
-  const createdBy = (req.session as any).userId ?? null;
+  const createdBy = req.currentUser?.id ?? null;
   if (!await canAccessSite(clientId, siteId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Site not accessible" });
 
   // Tag the uploaded object with a tenant-scoped ACL so the private object
@@ -752,10 +752,10 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
       : sql`NULL::date`;
     const trainResult = await db.execute(sql`
       INSERT INTO train_track_records
-        (client_id, site_id, record_type, staff_name, training_type, document_title,
+        (client_id, site_id, record_type, staff_name, staff_roster_id, training_type, document_title,
          document_type, completed_date, expiry_date, notes, signature)
       VALUES
-        (${clientId}, ${doc.site_id ?? null}, 'signoff', ${ack.staffName},
+        (${clientId}, ${doc.site_id ?? null}, 'signoff', ${ack.staffName}, ${ack.staffRosterId},
          ${doc.title},
          ${doc.title}, ${doc.category}, ${today}::date,
          ${expiryDate},

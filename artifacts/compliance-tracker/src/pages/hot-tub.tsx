@@ -75,6 +75,7 @@ interface HotTubCheck {
   temperature: string | null;
   location: string | null;
   performedBy: string | null;
+  staffRosterId?: number | null;
   notes: string | null;
   createdAt: string;
 }
@@ -383,6 +384,7 @@ export default function HotTubPage() {
   function openAdd() {
     setEditItem(null);
     setForm({ ...emptyForm(), performedBy: user?.name ?? "" });
+    setStaffRosterId(null);
     setShowDialog(true);
   }
 
@@ -402,6 +404,7 @@ export default function HotTubPage() {
       performedBy: r.performedBy ?? "",
       notes: r.notes ?? "",
     });
+    setStaffRosterId(r.staffRosterId ?? null);
     setShowDialog(true);
   }
 

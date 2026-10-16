@@ -59,6 +59,7 @@ interface StaffMember {
   name: string;
   job_title: string | null;
   department: string | null;
+  site_id: number | null;
   active: boolean;
 }
 
@@ -179,12 +180,18 @@ function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; o
       apiFetch("/staff-roster").then(r => r.ok ? r.json() : []),
       apiFetch(`/doc-track/documents/${doc.id}/acknowledgements`).then(r => r.ok ? r.json() : []),
     ]).then(([s, a]) => {
-      setStaff(s);
+      // Only staff the API will accept for this document (same rule as
+      // findEligibleRosterMember: active, and in its department and site when set).
+      setStaff((s as StaffMember[]).filter(m =>
+        m.active
+        && (!doc.department || m.department === doc.department)
+        && (doc.site_id == null || m.site_id === doc.site_id),
+      ));
       setAcks(a);
       setChecked({});
       setSigs({});
     }).finally(() => setLoading(false));
-  }, [open, doc.id]);
+  }, [open, doc.id, doc.department, doc.site_id]);
 
   // Pick up signatures staff record on their own devices while this is open.
   useLiveAcknowledgements(open && !loading ? `/doc-track/documents/${doc.id}/acknowledgements` : null, acks, setAcks);
@@ -257,8 +264,8 @@ function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; o
         ) : staff.length === 0 ? (
           <div className="py-8 text-center text-muted-foreground">
             <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">No staff in roster</p>
-            <p className="text-sm mt-1">Add staff members in <strong>Staff Roster</strong> before recording acknowledgements.</p>
+            <p className="font-medium">No eligible staff in roster</p>
+            <p className="text-sm mt-1">Add active staff in this document's department and site in <strong>Staff Roster</strong> before recording acknowledgements.</p>
           </div>
         ) : (
           <>
