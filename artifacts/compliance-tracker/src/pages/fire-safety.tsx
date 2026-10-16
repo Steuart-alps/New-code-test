@@ -54,6 +54,7 @@ import { LoadError } from "@/components/load-error";
 const ALL_CHECK_TYPES = [
   "alarm", "emergency_lights", "extinguishers",
   "fire_doors", "fire_drill", "fire_walk", "alarm_panel",
+  "emergency_lights_annual",
 ] as const;
 type AnyCheckType = typeof ALL_CHECK_TYPES[number];
 
@@ -65,6 +66,7 @@ const CHECK_TYPE_LABELS: Record<AnyCheckType, string> = {
   fire_drill:       "Fire drill (6-monthly, with night staff)",
   fire_walk:        "Fire walk — escape route sign-off",
   alarm_panel:      "Alarm panel check",
+  emergency_lights_annual: "Annual 3-hour emergency lighting discharge test",
 };
 
 const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
@@ -75,6 +77,10 @@ const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
   {
     label: "Walkthroughs & drills",
     types: ["fire_walk", "fire_drill"],
+  },
+  {
+    label: "Annual tests",
+    types: ["emergency_lights_annual"],
   },
 ];
 
@@ -140,6 +146,19 @@ function FlickTestGuide() {
       <p>
         <span className="font-medium text-foreground">Monthly 5 minute flick test.</span> Switch the emergency lighting
         to test for 5 minutes and check every fitting lights. Record Fail and note which fittings if any do not.
+      </p>
+    </div>
+  );
+}
+
+function DischargeTestGuide() {
+  return (
+    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground" data-testid="discharge-test-guide">
+      <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+      <p>
+        <span className="font-medium text-foreground">Annual 3-hour discharge test.</span> Usually done by your
+        emergency lighting contractor, who certifies it. A pass here also completes the "Emergency Light Maintenance"
+        task in ComplyTrack, and completing that task records the test here.
       </p>
     </div>
   );
@@ -505,7 +524,7 @@ function parseJsonRecord(raw: string | undefined | null, fallback: Record<string
 
 const DEFAULT_FIRE_FREQUENCIES: Record<string, number> = {
   alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90,
-  fire_drill: 180, fire_walk: 7, alarm_panel: 7,
+  fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365,
 };
 
 type FireProfileState = {
@@ -970,6 +989,7 @@ function RecordCheckDialog({
           )}
 
           {checkType === "emergency_lights" && <FlickTestGuide />}
+          {checkType === "emergency_lights_annual" && <DischargeTestGuide />}
 
           {checkType === "fire_drill" && <NightStaffPicker value={nightStaff} onChange={setNightStaff} />}
 

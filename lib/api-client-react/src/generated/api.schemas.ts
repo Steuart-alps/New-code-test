@@ -1077,6 +1077,7 @@ export const FireCheckType = {
   fire_drill: 'fire_drill',
   fire_walk: 'fire_walk',
   alarm_panel: 'alarm_panel',
+  emergency_lights_annual: 'emergency_lights_annual',
 } as const;
 
 export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof FireSafetyCheckResult];

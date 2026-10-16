@@ -10,6 +10,7 @@ import { chromium } from "@playwright/test";
 //   - a weekly alarm test suggests the call point tested longest ago (never
 //     tested first), sends it, and cannot be saved without a call point;
 //   - the emergency lighting test explains the 5 minute flick test;
+//   - the annual discharge test says it is kept in step with the ComplyTrack task;
 //   - a drill cannot be saved until it says whether night staff took part;
 //   - history shows the call point and night staff answers;
 //   - managers add call points under Template, Call points.
@@ -61,7 +62,7 @@ const SITE = { id: 1, name: "Harbour Hotel" };
 
 // ─── Stateful /api/fire-safety fixture ───────────────────────────────────────
 
-const FREQUENCIES = { alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7 };
+const FREQUENCIES = { alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365 };
 const callPoints = [
   { id: 11, siteId: 1, name: "CP1 – Reception", archivedAt: null, lastTestedDate: localDate(-7) },
   { id: 12, siteId: 1, name: "CP2 – Kitchen", archivedAt: null, lastTestedDate: null },
@@ -219,6 +220,14 @@ try {
   await shot(page, "3-emergency-lighting");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   console.log("ok - the emergency lighting test explains the 5 minute flick test");
+
+  // ── Annual 3-hour discharge test, kept in step with ComplyTrack ──────────
+  dialog = await openRecordDialog(page, "Annual 3-hour emergency lighting discharge test");
+  await dialog.getByTestId("discharge-test-guide").waitFor();
+  assert.match(await dialog.getByTestId("discharge-test-guide").innerText(), /Emergency Light Maintenance/);
+  await shot(page, "6-discharge-test");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  console.log("ok - the annual discharge test says it is kept in step with the ComplyTrack task");
 
   // ── Drill: night staff answer required ───────────────────────────────────
   dialog = await openRecordDialog(page, "Fire drill (6-monthly, with night staff)");
