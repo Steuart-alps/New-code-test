@@ -986,6 +986,73 @@ export interface PrivacyGovernanceResponse {
   breaches: PrivacyBreach[];
 }
 
+export interface TrackSummaryPreviewPerson {
+  /** @nullable */
+  userId: number | null;
+  /** @nullable */
+  name: string | null;
+  email: string;
+  /** @nullable */
+  departmentName: string | null;
+}
+
+export type TrackSummaryPreviewRecipientViaItem = typeof TrackSummaryPreviewRecipientViaItem[keyof typeof TrackSummaryPreviewRecipientViaItem];
+
+
+export const TrackSummaryPreviewRecipientViaItem = {
+  senior: 'senior',
+  named: 'named',
+  department: 'department',
+} as const;
+
+export type TrackSummaryPreviewRecipient = TrackSummaryPreviewPerson & {
+  via: TrackSummaryPreviewRecipientViaItem[];
+};
+
+export type TrackSummaryPreviewTrackMode = typeof TrackSummaryPreviewTrackMode[keyof typeof TrackSummaryPreviewTrackMode];
+
+
+export const TrackSummaryPreviewTrackMode = {
+  automatic: 'automatic',
+  custom: 'custom',
+} as const;
+
+export type TrackSummaryPreviewTrackDepartmentsItem = {
+  id: number;
+  name: string;
+  managers: TrackSummaryPreviewPerson[];
+};
+
+export interface TrackSummaryPreviewTrack {
+  module: string;
+  label: string;
+  enabled: boolean;
+  mode: TrackSummaryPreviewTrackMode;
+  departments: TrackSummaryPreviewTrackDepartmentsItem[];
+  namedManagers: TrackSummaryPreviewPerson[];
+  unavailableNamedCount: number;
+  seniorOnly: boolean;
+  recipients: TrackSummaryPreviewRecipient[];
+}
+
+export type TrackSummaryPreviewSeniorSource = typeof TrackSummaryPreviewSeniorSource[keyof typeof TrackSummaryPreviewSeniorSource];
+
+
+export const TrackSummaryPreviewSeniorSource = {
+  notification_email: 'notification_email',
+  users: 'users',
+} as const;
+
+export type TrackSummaryPreviewSenior = {
+  source: TrackSummaryPreviewSeniorSource;
+  recipients: TrackSummaryPreviewPerson[];
+};
+
+export interface TrackSummaryPreview {
+  senior: TrackSummaryPreviewSenior;
+  tracks: TrackSummaryPreviewTrack[];
+}
+
 export interface AppSettings {
   smtpHost?: string | null;
   smtpPort?: string | null;
@@ -2164,6 +2231,14 @@ export const ListComplianceItemsPriority = {
   high: 'high',
   critical: 'critical',
 } as const;
+
+export type GetTrackSummaryRecipientsParams = {
+clientId?: number;
+/**
+ * Track summary routing JSON, as saved in trackSummaryRouting.
+ */
+routing?: string;
+};
 
 export type GetPrivacyGovernanceParams = {
 clientId?: number;

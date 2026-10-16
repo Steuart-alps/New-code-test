@@ -135,6 +135,7 @@ const freshSchema = new Set([
   "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
   "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster
+  "test:track-summary-recipients", "test:track-summary-recipients:pushed", // in-process app + daily summary job (capturing sender) on the private cluster
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources

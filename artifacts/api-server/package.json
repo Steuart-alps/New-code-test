@@ -31,6 +31,8 @@
     "test:analytics": "bash tests/run-fresh-schema.sh tests/analytics.mjs",
     "test:track-notifications": "bash tests/run-fresh-schema.sh tests/track-notifications.mjs",
     "test:track-notifications:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-notifications.mjs",
+    "test:track-summary-recipients": "bash tests/run-fresh-schema.sh tests/track-summary-recipients.mjs",
+    "test:track-summary-recipients:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-summary-recipients.mjs",
     "test:client-data-deletion-feedback": "bash tests/run-fresh-schema.sh tests/client-data-deletion-feedback.mjs",
     "test:retention-clock": "bash tests/run-fresh-schema.sh tests/retention-clock.mjs",
     "test:password-reset-fresh-schema": "bash tests/run-fresh-schema.sh tests/password-reset-fresh-schema.mjs",

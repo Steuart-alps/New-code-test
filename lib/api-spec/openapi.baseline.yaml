@@ -977,6 +977,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppSettings"
 
+  /settings/track-summary-recipients:
+    get:
+      operationId: getTrackSummaryRecipients
+      tags: [settings]
+      summary: Preview who receives each track's daily summary
+      description: >
+        Resolved with the same routing code the daily summary job sends with.
+        Pass the unsaved choices as `routing` to preview them; otherwise the
+        saved choices are used. Account admins and consultants only.
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: routing
+          in: query
+          required: false
+          description: Track summary routing JSON, as saved in trackSummaryRouting.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Recipients for every track
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackSummaryPreview"
+        "400":
+          description: routing is not a JSON object
+
   /privacy-governance:
     get:
       operationId: getPrivacyGovernance
@@ -3899,6 +3930,87 @@ components:
             $ref: "#/components/schemas/PrivacyBreach"
       required: [program, activities, rightsRequests, retentionSchedules, retentionVerifications, processors, breaches]
 
+    TrackSummaryPreviewPerson:
+      type: object
+      required: [userId, name, email, departmentName]
+      properties:
+        userId:
+          type: [integer, "null"]
+        name:
+          type: [string, "null"]
+        email:
+          type: string
+        departmentName:
+          type: [string, "null"]
+    TrackSummaryPreviewRecipient:
+      allOf:
+        - $ref: "#/components/schemas/TrackSummaryPreviewPerson"
+        - type: object
+          required: [via]
+          properties:
+            via:
+              type: array
+              items:
+                type: string
+                enum: [senior, named, department]
+    TrackSummaryPreviewTrack:
+      type: object
+      required: [module, label, enabled, mode, departments, namedManagers, unavailableNamedCount, seniorOnly, recipients]
+      properties:
+        module:
+          type: string
+        label:
+          type: string
+        enabled:
+          type: boolean
+        mode:
+          type: string
+          enum: [automatic, custom]
+        departments:
+          type: array
+          items:
+            type: object
+            required: [id, name, managers]
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              managers:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TrackSummaryPreviewPerson"
+        namedManagers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrackSummaryPreviewPerson"
+        unavailableNamedCount:
+          type: integer
+        seniorOnly:
+          type: boolean
+        recipients:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrackSummaryPreviewRecipient"
+    TrackSummaryPreview:
+      type: object
+      required: [senior, tracks]
+      properties:
+        senior:
+          type: object
+          required: [source, recipients]
+          properties:
+            source:
+              type: string
+              enum: [notification_email, users]
+            recipients:
+              type: array
+              items:
+                $ref: "#/components/schemas/TrackSummaryPreviewPerson"
+        tracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrackSummaryPreviewTrack"
     AppSettings:
       type: object
       properties:
