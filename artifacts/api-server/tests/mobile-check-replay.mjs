@@ -393,11 +393,13 @@ try {
     assert.equal(both[0].data.id, both[1].data.id);
     assert.equal(await count(table, owner.clientId), before + 2);
 
-    // Web submissions without an entry ID behave as before.
+    // Web submissions without an entry ID behave as before. These dates are
+    // past the correction window, so the owner gives a reason (PR #92's rule).
     const webDate = isoDay(-5);
-    assert.equal((await owner.request('POST', path, body(webDate))).status, 201);
-    assert.equal((await owner.request('POST', path, body(webDate))).status, 409, `${name}: web keeps one record per date`);
-    assert.equal((await owner.request('POST', path, { ...body(isoDay(-6)), clientEntryId: 'short' })).status, 400, `${name}: entry IDs are validated`);
+    const lateReason = { 'x-override-reason': encodeURIComponent('Replay fixture: backfilling an older record') };
+    assert.equal((await owner.request('POST', path, body(webDate), 'json', lateReason)).status, 201);
+    assert.equal((await owner.request('POST', path, body(webDate), 'json', lateReason)).status, 409, `${name}: web keeps one record per date`);
+    assert.equal((await owner.request('POST', path, { ...body(isoDay(-6)), clientEntryId: 'short' }, 'json', lateReason)).status, 400, `${name}: entry IDs are validated`);
     assert.equal(await count(table, owner.clientId), before + 3);
 
     // Updates never accept or overwrite the device entry ID.
