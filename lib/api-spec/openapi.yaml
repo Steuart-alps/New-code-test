@@ -573,7 +573,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCertificateRequest"
+              $ref: "#/components/schemas/CreateItemCertificateRequest"
       responses:
         "201":
           description: Created certificate
@@ -603,7 +603,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCertificateRequest"
+              $ref: "#/components/schemas/UpdateItemCertificateRequest"
       responses:
         "200":
           description: Updated certificate
@@ -622,6 +622,100 @@ paths:
           schema:
             type: integer
         - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /items/{itemId}/certificates/{id}/defects:
+    post:
+      operationId: createCertificateDefect
+      tags: [certificates]
+      summary: Add a defect to a compliance item's certificate (opens a FixTrack job when FixTrack is enabled)
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateDefectRequest"
+      responses:
+        "201":
+          description: Created defect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateDefect"
+
+  /items/{itemId}/certificates/{id}/defects/{defectId}:
+    patch:
+      operationId: updateCertificateDefect
+      tags: [certificates]
+      summary: Mark a defect without a FixTrack job remedied (or not)
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: defectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCertificateDefectRequest"
+      responses:
+        "200":
+          description: Updated defect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateDefect"
+        "409":
+          description: The defect has a FixTrack job; close it in FixTrack
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteCertificateDefect
+      tags: [certificates]
+      summary: Remove a defect recorded in error (its FixTrack job stays)
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: defectId
           in: path
           required: true
           schema:
@@ -2703,6 +2797,13 @@ components:
         notes:
           type: string
           nullable: true
+        outcome:
+          $ref: "#/components/schemas/CertificateOutcome"
+        defects:
+          type: array
+          description: Defects listed on an item certificate (absent for contractor certificates).
+          items:
+            $ref: "#/components/schemas/CertificateDefect"
         createdAt:
           type: string
           format: date-time
@@ -2710,6 +2811,144 @@ components:
         - id
         - name
         - createdAt
+
+    CertificateOutcome:
+      type: string
+      enum: [satisfactory, unsatisfactory, not_stated]
+      description: Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check's due date.
+
+    CertificateDefectCode:
+      type: string
+      enum: [C1, C2, C3, FI, ID, AR, other]
+      description: EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.
+
+    CertificateDefect:
+      type: object
+      properties:
+        id:
+          type: integer
+        certificateId:
+          type: integer
+        code:
+          $ref: "#/components/schemas/CertificateDefectCode"
+        label:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+          nullable: true
+        fixTrackIssueId:
+          type: integer
+          nullable: true
+        fixTrackStatus:
+          type: string
+          nullable: true
+        fixTrackPriority:
+          type: string
+          nullable: true
+        fixTrackTargetDate:
+          type: string
+          nullable: true
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        blocking:
+          type: boolean
+          description: C1/C2/FI/ID/AR defects keep the check needing action while open.
+        open:
+          type: boolean
+          description: The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - certificateId
+        - code
+        - label
+        - description
+        - blocking
+        - open
+        - createdAt
+
+    CreateCertificateDefectRequest:
+      type: object
+      properties:
+        code:
+          $ref: "#/components/schemas/CertificateDefectCode"
+        description:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        location:
+          type: string
+          nullable: true
+          maxLength: 300
+      required:
+        - code
+        - description
+
+    UpdateCertificateDefectRequest:
+      type: object
+      properties:
+        resolved:
+          type: boolean
+      required:
+        - resolved
+
+    CreateItemCertificateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        fileUrl:
+          type: string
+          nullable: true
+        issueDate:
+          type: string
+          format: date-time
+          nullable: true
+        expiryDate:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        outcome:
+          $ref: "#/components/schemas/CertificateOutcome"
+        defects:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/CreateCertificateDefectRequest"
+      required:
+        - name
+
+    UpdateItemCertificateRequest:
+      type: object
+      description: Defects are added through the certificate's defects endpoint.
+      properties:
+        name:
+          type: string
+        fileUrl:
+          type: string
+          nullable: true
+        issueDate:
+          type: string
+          format: date-time
+          nullable: true
+        expiryDate:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        outcome:
+          $ref: "#/components/schemas/CertificateOutcome"
 
     CreateCertificateRequest:
       type: object
@@ -2800,6 +3039,16 @@ components:
         notes:
           type: string
           nullable: true
+        needsAction:
+          type: boolean
+          description: The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date.
+        needsActionReason:
+          type: string
+          nullable: true
+          enum: [unsatisfactory, open_defects]
+        openDefectCount:
+          type: integer
+          description: Open C1/C2/FI/ID/AR defects on the newest certificate.
         createdAt:
           type: string
           format: date-time
@@ -2910,6 +3159,11 @@ components:
         status:
           type: string
           enum: [pending, in_progress, completed, overdue]
+        completedAt:
+          type: string
+          nullable: true
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Date the check was done (YYYY-MM-DD), only with status completed. Not in the future in the account's timezone; defaults to today. The next due date is counted from it.
       required:
         - status
 
@@ -2936,6 +3190,9 @@ components:
           type: integer
         certificatesExpiringSoon:
           type: integer
+        actionRequired:
+          type: integer
+          description: Checks whose newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects (counted as out of compliance).
       required:
         - total
         - pending

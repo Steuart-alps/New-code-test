@@ -7,6 +7,7 @@ on:
     paths:
       - "artifacts/compliance-tracker/src/pages/landing.tsx"
       - "artifacts/compliance-tracker/src/lib/signup-plan.ts"
+      - "artifacts/compliance-tracker/src/lib/addon-catalog.ts"
       - "artifacts/compliance-tracker/tests/landing-modules-*"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
@@ -17,6 +18,7 @@ on:
     paths:
       - "artifacts/compliance-tracker/src/pages/landing.tsx"
       - "artifacts/compliance-tracker/src/lib/signup-plan.ts"
+      - "artifacts/compliance-tracker/src/lib/addon-catalog.ts"
       - "artifacts/compliance-tracker/tests/landing-modules-*"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"

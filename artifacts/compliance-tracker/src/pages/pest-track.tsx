@@ -32,7 +32,7 @@ import { format, parseISO, isValid, differenceInDays } from "date-fns";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ const SEVERITY_LABELS: Record<string, string> = {
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const mutationSucceeded = beginApiMutation(opts?.method, `/pest-track${path}`);
-  const res = await fetch(withActiveClient(`${baseUrl}/api/pest-track${path}`, opts?.body), await withCsrfToken({
+  const res = await fetchWithOverrideReason(withActiveClient(`${baseUrl}/api/pest-track${path}`, opts?.body), await withCsrfToken({
     ...opts,
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     credentials: "include",

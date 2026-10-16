@@ -16,7 +16,14 @@ export {
   setPaymentRequiredHandler,
   setMutationObserver,
   setCsrfTokenProvider,
+  setOverrideReasonHandler,
+  isReplayableBody,
+  overrideReasonMessage,
+  OVERRIDE_REASON_HEADER,
+  OVERRIDE_REASON_REQUIRED_CODE,
   callerChoseClientId,
   appendClientId,
 } from "./custom-fetch";
-export type { AuthTokenGetter, ApiMutationObserver, CsrfTokenProvider } from "./custom-fetch";
+export type {
+  AuthTokenGetter, ApiMutationObserver, CsrfTokenProvider, OverrideReasonHandler, OverrideReasonRequest,
+} from "./custom-fetch";

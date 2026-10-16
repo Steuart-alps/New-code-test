@@ -215,6 +215,53 @@ export interface CreateContractorRequest {
   dbsCheckDate?: string | null;
 }
 
+/**
+ * Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check's due date.
+ */
+export type CertificateOutcome = typeof CertificateOutcome[keyof typeof CertificateOutcome];
+
+
+export const CertificateOutcome = {
+  satisfactory: 'satisfactory',
+  unsatisfactory: 'unsatisfactory',
+  not_stated: 'not_stated',
+} as const;
+
+/**
+ * EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.
+ */
+export type CertificateDefectCode = typeof CertificateDefectCode[keyof typeof CertificateDefectCode];
+
+
+export const CertificateDefectCode = {
+  C1: 'C1',
+  C2: 'C2',
+  C3: 'C3',
+  FI: 'FI',
+  ID: 'ID',
+  AR: 'AR',
+  other: 'other',
+} as const;
+
+export interface CertificateDefect {
+  id: number;
+  certificateId: number;
+  code: CertificateDefectCode;
+  label: string;
+  description: string;
+  location?: string | null;
+  fixTrackIssueId?: number | null;
+  fixTrackStatus?: string | null;
+  fixTrackPriority?: string | null;
+  fixTrackTargetDate?: string | null;
+  resolvedAt?: string | null;
+  /** C1/C2/FI/ID/AR defects keep the check needing action while open. */
+  blocking: boolean;
+  /** The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied). */
+  open: boolean;
+  createdAt: string;
+}
+
 export interface Certificate {
   id: number;
   contractorId?: number | null;
@@ -224,7 +271,48 @@ export interface Certificate {
   issueDate?: string | null;
   expiryDate?: string | null;
   notes?: string | null;
+  outcome?: CertificateOutcome;
+  /** Defects listed on an item certificate (absent for contractor certificates). */
+  defects?: CertificateDefect[];
   createdAt: string;
+}
+
+export interface CreateCertificateDefectRequest {
+  code: CertificateDefectCode;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  description: string;
+  /** @maxLength 300 */
+  location?: string | null;
+}
+
+export interface UpdateCertificateDefectRequest {
+  resolved: boolean;
+}
+
+export interface CreateItemCertificateRequest {
+  name: string;
+  fileUrl?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  notes?: string | null;
+  outcome?: CertificateOutcome;
+  /** @maxItems 100 */
+  defects?: CreateCertificateDefectRequest[];
+}
+
+/**
+ * Defects are added through the certificate's defects endpoint.
+ */
+export interface UpdateItemCertificateRequest {
+  name?: string;
+  fileUrl?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  notes?: string | null;
+  outcome?: CertificateOutcome;
 }
 
 export interface CreateCertificateRequest {
@@ -255,6 +343,14 @@ export const ComplianceItemPriority = {
   critical: 'critical',
 } as const;
 
+export type ComplianceItemNeedsActionReason = typeof ComplianceItemNeedsActionReason[keyof typeof ComplianceItemNeedsActionReason] | null;
+
+
+export const ComplianceItemNeedsActionReason = {
+  unsatisfactory: 'unsatisfactory',
+  open_defects: 'open_defects',
+} as const;
+
 export interface ComplianceItem {
   id: number;
   title: string;
@@ -281,6 +377,11 @@ export interface ComplianceItem {
   notificationSentAt?: string | null;
   completedAt?: string | null;
   notes?: string | null;
+  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date. */
+  needsAction?: boolean;
+  needsActionReason?: ComplianceItemNeedsActionReason;
+  /** Open C1/C2/FI/ID/AR defects on the newest certificate. */
+  openDefectCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -377,6 +478,11 @@ export const UpdateStatusRequestStatus = {
 
 export interface UpdateStatusRequest {
   status: UpdateStatusRequestStatus;
+  /**
+     * Date the check was done (YYYY-MM-DD), only with status completed. Not in the future in the account's timezone; defaults to today. The next due date is counted from it.
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  completedAt?: string | null;
 }
 
 export interface DashboardStats {
@@ -390,6 +496,8 @@ export interface DashboardStats {
   completionRate: number;
   contractorsCount: number;
   certificatesExpiringSoon: number;
+  /** Checks whose newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects (counted as out of compliance). */
+  actionRequired?: number;
 }
 
 export type PrivacyProgramInputCustomerRole = typeof PrivacyProgramInputCustomerRole[keyof typeof PrivacyProgramInputCustomerRole];

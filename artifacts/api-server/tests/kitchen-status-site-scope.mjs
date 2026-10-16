@@ -17,16 +17,28 @@ try {
   await pool.query('INSERT INTO food_safety_records (client_id, site_id, record_date, submitted_at) VALUES ($1, NULL, $2, now())', [c, lastWeek]);
   // A draft diary (never submitted) is not a completed day.
   await pool.query('INSERT INTO food_safety_records (client_id, site_id, record_date) VALUES ($1, $2, $3)', [c, siteB.id, today]);
-  await pool.query('INSERT INTO kitchen_weekly_records (client_id, site_id, week_commencing) VALUES ($1, NULL, $2)', [c, lastWeek]);
-  await pool.query('INSERT INTO kitchen_weekly_records (client_id, site_id, week_commencing) VALUES ($1, $2, $3)', [c, siteA.id, today]);
+  await pool.query('INSERT INTO kitchen_weekly_records (client_id, site_id, week_commencing, submitted_at) VALUES ($1, NULL, $2, now())', [c, lastWeek]);
+  await pool.query('INSERT INTO kitchen_weekly_records (client_id, site_id, week_commencing, submitted_at) VALUES ($1, $2, $3, now())', [c, siteA.id, today]);
+  // A draft weekly review does not count.
+  await pool.query('INSERT INTO kitchen_weekly_records (client_id, site_id, week_commencing) VALUES ($1, $2, $3)', [c, siteB.id, today]);
+  // A probe check that failed, or was never submitted, leaves the probe check due.
+  await pool.query(`INSERT INTO kitchen_probe_checks (client_id, site_id, check_date, overall_result, submitted_at) VALUES ($1, $2, $3, 'fail', now())`, [c, siteA.id, today]);
+  await pool.query(`INSERT INTO kitchen_probe_checks (client_id, site_id, check_date, overall_result) VALUES ($1, $2, $3, 'pass')`, [c, siteB.id, today]);
   await pool.query(
     `INSERT INTO kitchen_cleaning_tasks (client_id, site_id, area, task, frequency)
      VALUES ($1, $2, 'Hob', 'Degrease', 'daily'), ($1, NULL, 'Walk-in', 'Deep clean', 'monthly')`,
     [c, siteA.id],
   );
   await pool.query(
-    `INSERT INTO kitchen_cleaning_logs (client_id, site_id, log_date, frequency) VALUES ($1, $2, $3, 'daily')`,
+    `INSERT INTO kitchen_cleaning_logs (client_id, site_id, log_date, frequency, completions, submitted_at)
+     VALUES ($1, $2, $3, 'daily', '[{"taskName":"Degrease","done":true}]', now())`,
     [c, siteA.id, today],
+  );
+  // A part-done or unsubmitted cleaning log does not count.
+  await pool.query(
+    `INSERT INTO kitchen_cleaning_logs (client_id, site_id, log_date, frequency, completions, submitted_at)
+     VALUES ($1, NULL, $2, 'monthly', '[{"taskName":"Deep clean","done":false}]', now())`,
+    [c, today],
   );
 
   const status = async (session, query = '') => {

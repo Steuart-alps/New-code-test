@@ -17,12 +17,12 @@ function extractPdfText(pdf) {
   return text;
 }
 
-function session() {
+function session(defaultHeaders = {}) {
   let cookie = "";
   return async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -37,7 +37,8 @@ function session() {
 }
 
 async function createManager() {
-  const request = session();
+  // The manager deliberately records past visits, which an owner may do with a reason.
+  const request = session({ "X-Override-Reason": encodeURIComponent("Pest register fixture: past visit") });
   const stamp = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   const email = `pest-register-${stamp}@test.local`;
   const registration = await request("POST", "/auth/register", {
