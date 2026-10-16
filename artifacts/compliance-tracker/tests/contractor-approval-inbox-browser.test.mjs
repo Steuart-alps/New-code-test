@@ -19,7 +19,7 @@ import { chromium } from "@playwright/test";
 import { createServer as createViteServer } from "vite";
 import {
   base as apiBase, db, sql, pool, runReminderJob, createTenant, createUser,
-  readOutbox, clearOutbox, isoDay,
+  readOutbox, clearOutbox, isoDay, requestSession, currentTotp,
 } from "../../api-server/tests/approval-workflow-fixtures.mjs";
 
 if (process.env.FRESH_SCHEMA_BROWSER_POLICY !== "1") {
@@ -425,6 +425,78 @@ test("staff and foreign-department managers cannot see or act on the pending dra
   assert.equal(await contractorEmailCount(), before, "denied requests send nothing");
 });
 
+test("a rejected approval or dismissal keeps the pending row, shows the error toast and re-enables its actions", async () => {
+  const draftId = fixtures.assignmentQueueId;
+  const before = await contractorEmailCount();
+  const page = fixtures.managerPage;
+  await withDiagnostics(page, "rejected approval and dismissal", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const card = queueCard(page, fixtures.acceptIssue.title);
+    await card.getByText("Assigning Job").waitFor();
+    const approve = card.getByRole("button", { name: "Approve & Send" });
+    const dismiss = card.getByRole("button", { name: "Cancel", exact: true });
+    const edit = card.getByRole("button", { name: "Edit" });
+
+    // The server's rejection is held until the row's submitting state has been
+    // observed, then answered with a failed response. The request never
+    // reaches the API, so the draft stays pending for the later tests.
+    async function rejectOnce(action, status, trigger) {
+      let release;
+      const held = new Promise(resolve => { release = resolve; });
+      let arrived;
+      const intercepted = new Promise(resolve => { arrived = resolve; });
+      let fulfilled;
+      const answered = new Promise(resolve => { fulfilled = resolve; });
+      let requests = 0;
+      // The page may append ?clientId=…, so match on the path alone.
+      const actionPath = `/api/fix-track/contractor-email-queue/${draftId}/${action}`;
+      const pattern = url => url.origin === appOrigin && url.pathname === actionPath;
+      const handler = async route => {
+        requests++;
+        arrived();
+        await held;
+        await route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error: "Rejected by server" }) });
+        fulfilled();
+      };
+      await page.route(pattern, handler);
+      try {
+        await trigger();
+        await intercepted;
+        // While the request is in flight the row's actions are disabled.
+        for (const button of [approve, dismiss, edit]) await button.and(page.locator(":disabled")).waitFor();
+        release();
+        // Unrouting before the handler answers would hand the request on to
+        // the real API, so wait for the rejection to be sent first.
+        await answered;
+        return requests;
+      } finally {
+        release();
+        await page.unroute(pattern, handler);
+      }
+    }
+
+    assert.equal(await rejectOnce("approve-and-send", 502, () => approve.click()), 1);
+    // The page's only toast slot holds the destructive error toast.
+    await page.locator("li.destructive").filter({ hasText: "Failed to approve email" }).waitFor();
+    await card.waitFor();
+    for (const button of [approve, dismiss, edit]) await button.and(page.locator(":enabled")).waitFor();
+
+    page.once("dialog", dialog => dialog.accept());
+    assert.equal(await rejectOnce("cancel", 409, () => dismiss.click()), 1);
+    await page.locator("li.destructive").filter({ hasText: "Failed to cancel email" }).waitFor();
+    await card.waitFor();
+    for (const button of [approve, dismiss, edit]) await button.and(page.locator(":enabled")).waitFor();
+
+    assert.equal(await queueCard(page, fixtures.acceptIssue.title).count(), 1, "the pending row is still listed once");
+    await page.reload();
+    await queueCard(page, fixtures.acceptIssue.title).getByText("Assigning Job").waitFor();
+  });
+  const row = await queueRow(draftId);
+  assert.equal(row.status, "pending", "the draft is still pending after both rejections");
+  assert.equal(row.approved_by, null);
+  assert.equal(await contractorEmailCount(), before, "rejected actions send nothing");
+});
+
 test("reminder Edit & Send keeps the reviewed draft through a failed send and dispatches it exactly on retry", async () => {
   const contractor = await db.execute(sql`
     INSERT INTO contractors (client_id, name, email)
@@ -515,5 +587,1014 @@ test("reminder Edit & Send keeps the reviewed draft through a failed send and di
       { subject: edited.subject, bodyText: edited.text });
     assert.equal(repeat.status, 409);
     assert.equal(await contractorEmailCount(), 1);
+  });
+});
+
+// A sent, dated assignment whose calendar cancellation now awaits review.
+async function queuedCalendarCancellation(label, targetDate, siteId = fixtures.siteId, clientId = null) {
+  // A consultant owner reaches another of their businesses with ?clientId=.
+  const inClient = clientId === null ? "" : `?clientId=${clientId}`;
+  const owner = { request: (method, apiPath, body) => fixtures.owner.request(method, `${apiPath}${inClient}`, body) };
+  const contractor = await owner.request("POST", "/contractors", {
+    name: `${label} contractor ${suffix}`, email: `inbox-${label}-${suffix}@test.local`,
+  });
+  assert.equal(contractor.status, 201, JSON.stringify(contractor.data));
+  const title = `Inbox ${label} ${suffix}`;
+  const issue = await owner.request("POST", "/fix-track/issues", {
+    title, issueType: "general", location: "Plant room", reportedBy: "Facilities",
+    reportedDate: isoDay(0), siteId, contractorId: contractor.data.id, targetDate,
+  });
+  assert.equal(issue.status, 201, JSON.stringify(issue.data));
+  const id = issue.data.id;
+  for (const [step, expected] of [["request-send", 200], ["approve-send", 200], ["send-to-contractor", 200]]) {
+    const result = await owner.request("POST", `/fix-track/issues/${id}/${step}`, step === "request-send" ? { mode: "assign" } : undefined);
+    assert.equal(result.status, expected, `${step}: ${JSON.stringify(result.data)}`);
+  }
+  const requested = await owner.request("POST", `/fix-track/issues/${id}/request-cancellation`);
+  assert.equal(requested.status, 202, JSON.stringify(requested.data));
+  const [row] = await queueRowsForIssue(id, "cancellation");
+  assert.equal(row?.status, "pending");
+  return { id, title, queueId: row.id };
+}
+
+// Every queue action the page sends, by path, so a test can show a dialog
+// dismissal sent nothing and a confirmation sent exactly one request.
+function recordQueueActions(page) {
+  const actions = [];
+  page.on("request", request => {
+    const { pathname } = new URL(request.url());
+    if (request.method() === "POST" && /^\/api\/fix-track\/contractor-email-queue\/\d+\//.test(pathname)) {
+      actions.push(pathname.replace(/^\/api/, ""));
+    }
+  });
+  return actions;
+}
+
+async function focusedElement(page) {
+  return page.evaluate(() => {
+    const element = document.activeElement;
+    return {
+      text: element?.textContent?.trim() ?? "",
+      inDialog: !!element?.closest('[role="alertdialog"]'),
+    };
+  });
+}
+
+// The dialog is announced as an alert dialog named by its title and described
+// by its consequence, and it takes focus on its safe "Keep reviewing" action.
+async function expectAccessibleDialog(page, name, description) {
+  const dialog = page.getByRole("alertdialog", { name });
+  await dialog.waitFor();
+  const described = await dialog.evaluate(element => element.getAttribute("aria-describedby")
+    ?.split(/\s+/).map(id => document.getElementById(id)?.textContent?.trim()).join(" "));
+  assert.equal(described, description, `${name} is described by its consequence`);
+  assert.deepEqual(await focusedElement(page), { text: "Keep reviewing", inDialog: true },
+    `${name} opens with focus on Keep reviewing`);
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("Tab");
+    assert.equal((await focusedElement(page)).inDialog, true, `${name} keeps keyboard focus inside the dialog`);
+  }
+  return dialog;
+}
+
+test("calendar cancellation approval dialog works by keyboard and is announced to screen readers", async () => {
+  const cancellation = await queuedCalendarCancellation("approve-dialog", isoDay(30));
+  await clearOutbox();
+  const page = fixtures.managerPage;
+  const actions = recordQueueActions(page);
+  await withDiagnostics(page, "cancellation approval dialog", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const card = queueCard(page, cancellation.title);
+    await card.getByText("Calendar Cancellation", { exact: true }).waitFor();
+    const approve = card.getByRole("button", { name: "Approve Cancellation" });
+    const name = "Approve calendar cancellation?";
+    const description = "This will send the contractor a cancellation notice and remove the previously sent calendar event.";
+
+    // Opened from the keyboard, Escape closes it and returns focus to the row.
+    await approve.focus();
+    await page.keyboard.press("Enter");
+    await expectAccessibleDialog(page, name, description);
+    await page.keyboard.press("Escape");
+    await page.getByRole("alertdialog").waitFor({ state: "detached" });
+    assert.deepEqual(await focusedElement(page), { text: "Approve Cancellation", inDialog: false },
+      "closing the dialog returns focus to Approve Cancellation");
+
+    // Keep reviewing, chosen with the keyboard, also closes it without sending.
+    await page.keyboard.press("Enter");
+    await expectAccessibleDialog(page, name, description);
+    await page.getByRole("button", { name: "Keep reviewing" }).focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("alertdialog").waitFor({ state: "detached" });
+    assert.deepEqual(actions, [], "dismissing the dialog sends nothing");
+    assert.equal((await queueRow(cancellation.queueId)).status, "pending");
+    await card.waitFor();
+
+    // Confirming sends exactly one approval of this cancellation.
+    await approve.click();
+    const dialog = await expectAccessibleDialog(page, name, description);
+    await dialog.getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.getByText("Calendar cancellation approved and sent").first().waitFor();
+    await dialog.waitFor({ state: "detached" });
+    await card.waitFor({ state: "detached" });
+    assert.deepEqual(actions, [`/fix-track/contractor-email-queue/${cancellation.queueId}/approve-and-send`]);
+  });
+  const row = await queueRow(cancellation.queueId);
+  assert.equal(row.status, "sent");
+  assert.equal(row.approved_by, fixtures.manager.userId);
+  const outbox = await readOutbox();
+  assert.equal(outbox.length, 1, "one cancellation is sent");
+  assert.match(outbox[0].icsAttachment ?? "", /METHOD:CANCEL/);
+});
+
+test("dismissing a calendar cancellation keeps the event and calls the cancel endpoint only after confirmation", async () => {
+  const cancellation = await queuedCalendarCancellation("dismiss-dialog", isoDay(31));
+  await clearOutbox();
+  const page = fixtures.managerPage;
+  const actions = recordQueueActions(page);
+  await withDiagnostics(page, "cancellation dismissal dialog", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const card = queueCard(page, cancellation.title);
+    await card.getByText("Calendar Cancellation", { exact: true }).waitFor();
+    const dismiss = card.getByRole("button", { name: "Dismiss", exact: true });
+    const name = "Dismiss calendar cancellation?";
+    const description = "Nothing will be sent and the existing calendar event will remain in place.";
+
+    await dismiss.focus();
+    await page.keyboard.press("Enter");
+    await expectAccessibleDialog(page, name, description);
+    await page.keyboard.press("Escape");
+    await page.getByRole("alertdialog").waitFor({ state: "detached" });
+    assert.deepEqual(await focusedElement(page), { text: "Dismiss", inDialog: false },
+      "closing the dialog returns focus to Dismiss");
+
+    await dismiss.click();
+    const keep = await expectAccessibleDialog(page, name, description);
+    await keep.getByRole("button", { name: "Keep reviewing" }).click();
+    await page.getByRole("alertdialog").waitFor({ state: "detached" });
+    assert.deepEqual(actions, [], "keeping the request sends nothing");
+    assert.equal((await queueRow(cancellation.queueId)).status, "pending");
+
+    await dismiss.click();
+    const dialog = await expectAccessibleDialog(page, name, description);
+    await dialog.getByRole("button", { name: "Dismiss" }).click();
+    await page.getByText("Calendar cancellation dismissed").first().waitFor();
+    await dialog.waitFor({ state: "detached" });
+    await card.waitFor({ state: "detached" });
+    assert.deepEqual(actions, [`/fix-track/contractor-email-queue/${cancellation.queueId}/cancel`]);
+  });
+  assert.equal((await queueRow(cancellation.queueId)).status, "cancelled");
+  assert.equal(await contractorEmailCount(), 0, "dismissal sends nothing, so the calendar event stays");
+  const [issue] = (await db.execute(sql`
+    SELECT email_request_status FROM fix_track_issues WHERE id=${cancellation.id}
+  `)).rows;
+  assert.equal(issue.email_request_status, "rejected");
+});
+
+test("managers see sent and failed calendar cancellations on the approvals page and the contractor's page", async () => {
+  const cancellation = await queuedCalendarCancellation("history", isoDay(32));
+  const [{ contractor_id: contractorId }] = (await db.execute(sql`
+    SELECT contractor_id FROM contractor_email_queue WHERE id=${cancellation.queueId}
+  `)).rows;
+  await clearOutbox();
+  const page = fixtures.managerPage;
+  const historyEntry = () => page.getByRole("region", { name: "Calendar cancellations" })
+    .getByRole("listitem").filter({ hasText: cancellation.title });
+  await withDiagnostics(page, "calendar cancellation history", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const card = queueCard(page, cancellation.title);
+    await card.getByText("Calendar Cancellation", { exact: true }).waitFor();
+    assert.equal(await historyEntry().count(), 0, "a cancellation awaiting first approval is not history yet");
+
+    // The provider boundary fails: the outbox path becomes a directory.
+    await rm(outboxPath, { force: true });
+    await mkdir(outboxPath);
+    try {
+      await card.getByRole("button", { name: "Approve Cancellation" }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: "Approve Cancellation" }).click();
+      await page.getByText("Failed to approve email").first().waitFor();
+    } finally {
+      await rm(outboxPath, { recursive: true, force: true });
+      await writeFile(outboxPath, "");
+    }
+    await page.getByRole("button", { name: "Keep reviewing" }).click();
+    const failed = historyEntry();
+    await failed.getByText("Send failed").waitFor();
+    assert.match(await failed.innerText(), /Not sent, awaiting a retry/);
+    assert.equal(await failed.getByText("Sent", { exact: true }).count(), 0, "a failed send is not shown as sent");
+
+    await page.reload();
+    await card.getByText("Last send failed").waitFor();
+    await card.getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.getByText("Calendar cancellation approved and sent").first().waitFor();
+    await card.waitFor({ state: "detached" });
+    const sent = historyEntry();
+    await sent.getByText("Sent", { exact: true }).waitFor();
+    const sentText = await sent.innerText();
+    assert.match(sentText, /by Approval fixture user/, "the record names the manager who sent it");
+    assert.match(sentText, /After 1 failed attempt/);
+    assert.match(sentText, new RegExp(`inbox-history-${suffix}@test\\.local`), "the record names the contractor's address");
+    assert.equal(await sent.getByText("Send failed").count(), 0);
+
+    await page.goto(`${appOrigin}/contractors/${contractorId}`);
+    const onContractor = historyEntry();
+    await onContractor.getByText("Sent", { exact: true }).waitFor();
+    assert.match(await onContractor.innerText(), /by Approval fixture user/);
+  });
+  const row = await queueRow(cancellation.queueId);
+  assert.equal(row.status, "sent");
+  assert.equal((await readOutbox()).length, 1, "the retry sends the cancellation once");
+});
+
+test("an open approvals page drops requests reviewed elsewhere without disturbing the manager's own review", async () => {
+  const approvedElsewhere = await queuedCalendarCancellation("fresh-approved", isoDay(33));
+  const editing = await queuedCalendarCancellation("fresh-editing", isoDay(34));
+  const confirming = await queuedCalendarCancellation("fresh-confirming", isoDay(35));
+  const { page } = await browserContext(fixtures.manager);
+  // The page's minute timer runs on a controlled clock.
+  await page.clock.install();
+  const siteHeader = () => page.getByRole("button", { name: new RegExp(`Inbox Alpha site ${suffix}`) });
+  const siteCount = async () => Number((await siteHeader().locator("span.tabular-nums").textContent())?.trim());
+  const anotherManager = (path) => fixtures.owner.request("POST", `/fix-track/contractor-email-queue/${path}`, {});
+  await withDiagnostics(page, "approvals freshness", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, approvedElsewhere.title).waitFor();
+    const search = page.getByPlaceholder(/search/i);
+    await search.fill(`fresh-`);
+    await queueCard(page, confirming.title).waitFor();
+    assert.equal(await siteCount(), 3);
+
+    // Collapsed site and search survive a timed refresh that drops a request
+    // another manager approved.
+    await siteHeader().click();
+    assert.equal(await queueCard(page, approvedElsewhere.title).count(), 0, "the site is collapsed");
+    assert.equal((await anotherManager(`${approvedElsewhere.queueId}/approve-and-send`)).status, 200);
+    await page.clock.fastForward(61_000);
+    for (let waited = 0; (await siteCount()) !== 2 && waited < 10_000; waited += 100) await page.waitForTimeout(100);
+    assert.equal(await siteCount(), 2, "the request approved elsewhere is gone");
+    assert.equal(await search.inputValue(), "fresh-", "the search is kept");
+    assert.equal(await queueCard(page, editing.title).count(), 0, "the site stays collapsed");
+    await siteHeader().click();
+    await queueCard(page, editing.title).waitFor();
+    assert.equal(await queueCard(page, approvedElsewhere.title).count(), 0);
+
+    // An open editor is not replaced, even when its request is dismissed elsewhere.
+    const editingCard = queueCard(page, editing.title);
+    await editingCard.getByRole("button", { name: "Edit" }).click();
+    const subject = editingCard.getByRole("textbox").first();
+    await subject.fill("Manager's unsaved subject");
+    assert.equal((await anotherManager(`${editing.queueId}/cancel`)).status, 200);
+    await page.clock.fastForward(61_000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForTimeout(500);
+    assert.equal(await subject.inputValue(), "Manager's unsaved subject", "the editor keeps its text");
+    await editingCard.getByRole("button", { name: "Cancel Edit" }).click();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await editingCard.waitFor({ state: "detached" });
+
+    // An open cancellation dialog is not closed or emptied by a refresh.
+    const confirmingCard = queueCard(page, confirming.title);
+    await confirmingCard.getByRole("button", { name: "Approve Cancellation" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Approve calendar cancellation?" });
+    await dialog.waitFor();
+    assert.equal((await anotherManager(`${confirming.queueId}/cancel`)).status, 200);
+    await page.clock.fastForward(61_000);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForTimeout(500);
+    assert.equal(await dialog.isVisible(), true, "the dialog stays open");
+    assert.equal(await confirmingCard.count(), 1, "the row under the dialog stays");
+    await dialog.getByRole("button", { name: "Keep reviewing" }).click();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await confirmingCard.waitFor({ state: "detached" });
+    assert.equal(await search.inputValue(), "fresh-");
+  });
+  assert.equal((await queueRow(editing.queueId)).status, "cancelled");
+  assert.equal((await queueRow(confirming.queueId)).status, "cancelled");
+});
+
+// Fails every queue load until restored; counts the loads either way.
+async function failQueueLoads(page) {
+  const state = { failing: true, loads: 0 };
+  await page.route(
+    url => url.origin === appOrigin && url.pathname === "/api/fix-track/contractor-email-queue",
+    async route => {
+      state.loads++;
+      if (state.failing) {
+        await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
+      } else {
+        await route.fallback();
+      }
+    },
+  );
+  return state;
+}
+
+test("a failed approvals load shows the error state, not an empty queue, and Try again recovers", async () => {
+  for (const [label, session, restored] of [
+    ["pending", fixtures.manager, "pending"],
+    ["empty", fixtures.otherManager, "empty"],
+  ]) {
+    const { page } = await browserContext(session);
+    const queueLoads = await failQueueLoads(page);
+    await withDiagnostics(page, `failed approvals load (${label})`, async () => {
+      await page.goto(`${appOrigin}/contractor-approvals`);
+      await page.getByText("Unable to load approvals").waitFor();
+      await page.getByText("We couldn't load pending contractor emails. Please try again.", { exact: true }).waitFor();
+      assert.equal(await page.getByText("Approvals may be out of date").count(), 0,
+        `${label}: with nothing loaded there is no stale list to warn about`);
+      assert.equal(await page.getByRole("button", { name: "Try again" }).count(), 1, `${label}: one retry control`);
+      assert.equal(await page.getByText("No pending emails").count(), 0,
+        `${label}: a failed load is not shown as an empty queue`);
+      assert.equal(await page.getByRole("button", { name: /^(Approve & Send|Approve Cancellation)$/ }).count(), 0,
+        `${label}: no approval rows are shown`);
+
+      queueLoads.failing = false;
+      const loadsBeforeRetry = queueLoads.loads;
+      await page.getByRole("button", { name: "Try again" }).click();
+      if (restored === "pending") {
+        await queueCard(page, fixtures.acceptIssue.title).waitFor();
+        assert.equal(await page.getByText("No pending emails").count(), 0);
+      } else {
+        await page.getByText("No pending emails").waitFor();
+      }
+      assert.ok(queueLoads.loads > loadsBeforeRetry, `${label}: Try again requests the queue again`);
+      assert.equal(await page.getByText("Unable to load approvals").count(), 0, `${label}: the error state clears`);
+
+      const lastUpdated = page.getByTestId("approvals-last-updated").locator("time");
+      await lastUpdated.waitFor();
+      const recoveredAt = await lastUpdated.getAttribute("datetime");
+      assert.ok(Date.parse(recoveredAt) > 0, `${label}: the successful retry shows when the list was updated`);
+
+      if (restored === "pending") {
+        // A later failed refresh keeps the last list and its time, and says
+        // the list may be stale and how old it is.
+        await page.waitForTimeout(1100);
+        queueLoads.failing = true;
+        await page.getByRole("button", { name: "Refresh approvals" }).click();
+        const warning = page.getByText("Approvals may be out of date").locator("..");
+        await warning.waitFor();
+        await queueCard(page, fixtures.acceptIssue.title).waitFor();
+        assert.equal(await page.getByText("Unable to load approvals").count(), 0);
+        assert.equal(await lastUpdated.getAttribute("datetime"), recoveredAt,
+          "a failed refresh does not move the last-updated time");
+        assert.equal(await warning.locator("time").getAttribute("datetime"), recoveredAt,
+          "the stale-list warning shows when the list was last updated");
+        assert.match(await warning.innerText(), /It was last updated at \d{2}:\d{2}:\d{2}\./);
+
+        queueLoads.failing = false;
+        await page.getByRole("button", { name: "Refresh approvals" }).click();
+        await page.getByText("Refreshing approvals…").waitFor({ state: "detached" });
+        let refreshedAt = await lastUpdated.getAttribute("datetime");
+        for (let waited = 0; refreshedAt === recoveredAt && waited < 10_000; waited += 100) {
+          await page.waitForTimeout(100);
+          refreshedAt = await lastUpdated.getAttribute("datetime");
+        }
+        assert.ok(Date.parse(refreshedAt) > Date.parse(recoveredAt),
+          "a successful refresh moves the last-updated time forward");
+        assert.equal(await page.getByText("Approvals may be out of date").count(), 0,
+          "a successful refresh removes the stale-list warning");
+      }
+    });
+  }
+});
+
+test("Refresh approvals makes one request and keeps the search, site sections and rows until the new list arrives", async () => {
+  const existing = await queuedCalendarCancellation("refresh-existing", isoDay(36));
+  const { page } = await browserContext(fixtures.manager);
+  const queuePath = "/api/fix-track/contractor-email-queue";
+  let queueRequests = 0;
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === queuePath) queueRequests++;
+  });
+  const siteHeader = () => page.getByRole("button", { name: new RegExp(`Inbox Alpha site ${suffix}`) });
+  const refreshButton = () => page.getByRole("button", { name: /^(Refresh approvals|Refreshing…)$/ });
+
+  // Holds the next queue response until released, so the pending state can be checked.
+  async function holdNextQueueLoad() {
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    let arrived;
+    const intercepted = new Promise(resolve => { arrived = resolve; });
+    let answered;
+    const done = new Promise(resolve => { answered = resolve; });
+    const matcher = url => url.origin === appOrigin && url.pathname === queuePath;
+    const handler = async route => {
+      arrived();
+      await held;
+      // Forwarded to the private API as browserContext does, once released.
+      const original = new URL(route.request().url());
+      const headers = { ...route.request().headers() };
+      if (headers.origin === appOrigin) headers.origin = apiOrigin;
+      const response = await route.fetch({ url: `${apiOrigin}${original.pathname}${original.search}`, headers });
+      await route.fulfill({ response });
+      answered();
+    };
+    await page.route(matcher, handler, { times: 1 });
+    return { intercepted, release: async () => { release(); await done; } };
+  }
+
+  await withDiagnostics(page, "manual refresh", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const search = page.getByPlaceholder("Search emails...");
+    await search.fill("refresh-");
+    const existingCard = queueCard(page, existing.title);
+    await existingCard.waitFor();
+
+    // Expanded site: rows stay visible while the refresh is pending.
+    const firstHold = await holdNextQueueLoad();
+    let added;
+    const before = queueRequests;
+    await refreshButton().click();
+    await firstHold.intercepted;
+    await page.getByRole("button", { name: "Refreshing…" }).and(page.locator(":disabled")).waitFor();
+    await page.getByText("Refreshing approvals…").waitFor();
+    assert.equal(await existingCard.isVisible(), true, "existing rows stay visible during the refresh");
+    assert.equal(await search.inputValue(), "refresh-");
+    // A request queued meanwhile shows that the response, not the old list, is what replaces the rows.
+    added = await queuedCalendarCancellation("refresh-added", isoDay(37));
+    assert.equal(await queueCard(page, added.title).count(), 0, "the new request is not shown before the response");
+    await firstHold.release();
+    await queueCard(page, added.title).waitFor();
+    await page.getByRole("button", { name: "Refresh approvals" }).and(page.locator(":enabled")).waitFor();
+    assert.equal(queueRequests - before, 1, "one refresh makes one queue request");
+    assert.equal(await page.getByText("Refreshing approvals…").count(), 0);
+    assert.equal(await search.inputValue(), "refresh-", "the search is kept after the refresh");
+    assert.equal(await existingCard.isVisible(), true);
+
+    // Collapsed site: it stays collapsed through a refresh.
+    await siteHeader().click();
+    await existingCard.waitFor({ state: "detached" });
+    const secondHold = await holdNextQueueLoad();
+    const beforeSecond = queueRequests;
+    await refreshButton().click();
+    await secondHold.intercepted;
+    await page.getByText("Refreshing approvals…").waitFor();
+    assert.equal(await existingCard.count(), 0, "the collapsed site stays collapsed while refreshing");
+    await secondHold.release();
+    await page.getByRole("button", { name: "Refresh approvals" }).and(page.locator(":enabled")).waitFor();
+    assert.equal(queueRequests - beforeSecond, 1);
+    assert.equal(await existingCard.count(), 0, "the collapsed site stays collapsed after refreshing");
+    assert.equal(Number((await siteHeader().locator("span.tabular-nums").textContent())?.trim()), 2,
+      "the collapsed site's count reflects the refreshed list");
+    assert.equal(await search.inputValue(), "refresh-");
+    await siteHeader().click();
+    await queueCard(page, added.title).waitFor();
+  });
+});
+
+test("the new-request notice stays quiet on first load, counts new requests, and clears when reviewed", async () => {
+  // A fresh browser context has no saved baseline, as on a manager's first visit.
+  const { page } = await browserContext(fixtures.manager);
+  const notice = () => page.getByText(/^\d+ new approval requests? found$/);
+  const newBadge = (title) => queueCard(page, title).getByLabel("New approval request");
+  async function refreshTo(title) {
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await queueCard(page, title).waitFor();
+  }
+  await withDiagnostics(page, "new-request notice", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, fixtures.acceptIssue.title).waitFor();
+    await page.getByTestId("approvals-last-updated").waitFor();
+    assert.equal(await notice().count(), 0, "the first load does not call existing requests new");
+    assert.equal(await page.getByLabel("New approval request").count(), 0);
+
+    const first = await queuedCalendarCancellation("notice-first", isoDay(38));
+    await refreshTo(first.title);
+    await page.getByText("1 new approval request found", { exact: true }).waitFor();
+    await newBadge(first.title).waitFor();
+    assert.equal(await newBadge(fixtures.acceptIssue.title).count(), 0, "requests already listed are not marked new");
+
+    await page.getByRole("button", { name: "Mark as reviewed" }).click();
+    await notice().waitFor({ state: "detached" });
+    assert.equal(await page.getByLabel("New approval request").count(), 0, "Mark as reviewed clears every New marker");
+
+    const second = await queuedCalendarCancellation("notice-second", isoDay(39));
+    const third = await queuedCalendarCancellation("notice-third", isoDay(40));
+    await refreshTo(third.title);
+    await page.getByText("2 new approval requests found", { exact: true }).waitFor();
+    await newBadge(second.title).waitFor();
+    await newBadge(third.title).waitFor();
+    assert.equal(await newBadge(first.title).count(), 0, "a reviewed request does not become new again");
+
+    // The notice survives a reload, and an unchanged refresh adds nothing.
+    await page.reload();
+    await page.getByText("2 new approval requests found", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await page.getByRole("button", { name: "Refresh approvals" }).and(page.locator(":enabled")).waitFor();
+    assert.equal(await page.getByText("2 new approval requests found", { exact: true }).count(), 1);
+    await page.getByRole("button", { name: "Mark as reviewed" }).click();
+    await notice().waitFor({ state: "detached" });
+  });
+});
+
+test("the New view lists only newly found requests, by site and search, until each is reviewed", async () => {
+  const secondSite = await fixtures.owner.request("POST", "/sites", {
+    name: `Inbox Gamma site ${suffix}`, departmentId: fixtures.departmentId, seedStarterChecks: false,
+  });
+  assert.equal(secondSite.status, 201, JSON.stringify(secondSite.data));
+  const { page } = await browserContext(fixtures.manager);
+  const viewButton = (name) => page.getByRole("group", { name: "Which approvals to show" }).getByRole("button", { name });
+  const siteHeader = (name) => page.getByRole("button", { name: new RegExp(`${name} ${suffix}`) });
+  await withDiagnostics(page, "new approvals view", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, fixtures.acceptIssue.title).waitFor();
+    assert.equal(await viewButton(/^All pending/).getAttribute("aria-pressed"), "true");
+    await viewButton(/^New \(0\)$/).waitFor();
+
+    const alpha = await queuedCalendarCancellation("newview-alpha", isoDay(41));
+    const gamma = await queuedCalendarCancellation("newview-gamma", isoDay(42), secondSite.data.id);
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await queueCard(page, gamma.title).waitFor();
+
+    await viewButton(/^New \(2\)$/).click();
+    assert.equal(await viewButton(/^New/).getAttribute("aria-pressed"), "true");
+    await queueCard(page, alpha.title).waitFor();
+    await queueCard(page, gamma.title).waitFor();
+    assert.equal(await queueCard(page, fixtures.acceptIssue.title).count(), 0, "requests already listed are hidden");
+    assert.equal(Number(await siteHeader("Inbox Alpha site").locator("span.tabular-nums").textContent()), 1,
+      "the New view keeps site grouping");
+    assert.equal(Number(await siteHeader("Inbox Gamma site").locator("span.tabular-nums").textContent()), 1);
+
+    const search = page.getByPlaceholder("Search emails...");
+    await search.fill("newview-gamma");
+    await queueCard(page, alpha.title).waitFor({ state: "detached" });
+    await queueCard(page, gamma.title).waitFor();
+    await search.fill("");
+
+    // Marking one reviewed takes it out of the New view only.
+    await queueCard(page, alpha.title).getByRole("button", { name: `Mark ${alpha.title} as reviewed` }).click();
+    await queueCard(page, alpha.title).waitFor({ state: "detached" });
+    await viewButton(/^New \(1\)$/).waitFor();
+    await queueCard(page, gamma.title).waitFor();
+
+    // A request opened for editing stays listed until the edit is closed.
+    const gammaCard = queueCard(page, gamma.title);
+    await gammaCard.getByRole("button", { name: "Edit" }).click();
+    await page.waitForTimeout(300);
+    assert.equal(await gammaCard.getByRole("textbox").first().isVisible(), true, "the editor stays open in the New view");
+    await gammaCard.getByRole("button", { name: "Cancel Edit" }).click();
+    await gammaCard.waitFor({ state: "detached" });
+    await page.getByText("No new approval requests", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Show all pending" }).click();
+
+    // Both are still pending with their approval actions in the full list.
+    assert.equal(await viewButton(/^All pending/).getAttribute("aria-pressed"), "true");
+    for (const request of [alpha, gamma]) {
+      const card = queueCard(page, request.title);
+      await card.getByRole("button", { name: "Approve Cancellation" }).and(page.locator(":enabled")).waitFor();
+      assert.equal(await card.getByLabel("New approval request").count(), 0);
+      assert.equal((await queueRow(request.queueId)).status, "pending");
+    }
+  });
+});
+
+test("signing out forgets only that manager's new-approval state, and signing back in starts fresh", async () => {
+  const email = `inbox-signout-${suffix}@test.local`;
+  const password = `inbox-signout-${suffix}`;
+  const created = await fixtures.owner.request("POST", "/users", {
+    name: "Sign-out manager", email, password, clientId: fixtures.owner.clientId,
+    role: "client_staff", departmentId: fixtures.departmentId,
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  const flagged = await fixtures.owner.request("PUT", `/users/${created.data.id}`, { isMaintenanceManager: true });
+  assert.equal(flagged.status, 200, JSON.stringify(flagged.data));
+  const session = requestSession({ browserPolicy: true });
+  const login = await session("POST", "/auth/login", { email, password });
+  assert.equal(login.data?.requires2faSetup, true, JSON.stringify(login.data));
+  const setup = await session("GET", "/auth/2fa/setup");
+  assert.equal((await session("POST", "/auth/2fa/enable", { code: currentTotp(setup.data.secret) })).status, 200);
+
+  const ownKey = `complytrack:contractor-approvals:${created.data.id}:${fixtures.owner.clientId}`;
+  // Another manager's state, and a user id that shares this one's leading digits.
+  const otherKeys = [
+    `complytrack:contractor-approvals:${fixtures.manager.userId}:${fixtures.owner.clientId}`,
+    `complytrack:contractor-approvals:${created.data.id}1:${fixtures.owner.clientId}`,
+  ];
+  const otherState = JSON.stringify({ knownQueueIds: [1, 2], newRequestIds: [2] });
+  const storedState = (page, key) => page.evaluate(storageKey => window.localStorage.getItem(storageKey), key);
+  const newBadge = (title) => queueCard(page, title).getByLabel("New approval request");
+
+  const { page } = await browserContext({ request: session });
+  await withDiagnostics(page, "sign-out clears approval state", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, fixtures.acceptIssue.title).waitFor();
+    const before = await queuedCalendarCancellation("signout-before", isoDay(43));
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(before.title).waitFor();
+    assert.ok(JSON.parse(await storedState(page, ownKey)).newRequestIds.includes(before.queueId));
+    await page.evaluate(({ keys, value }) => keys.forEach(key => window.localStorage.setItem(key, value)),
+      { keys: otherKeys, value: otherState });
+
+    await page.getByTestId("button-sign-out").click();
+    await page.waitForFunction(key => window.localStorage.getItem(key) === null, ownKey);
+    for (const key of otherKeys) assert.equal(await storedState(page, key), otherState, `${key} is left alone`);
+
+    await page.goto(`${appOrigin}/login`);
+    await page.getByLabel("Email address").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByLabel("Authentication code").fill(currentTotp(setup.data.secret));
+    await page.getByRole("button", { name: "Verify" }).click();
+    await page.getByTestId("button-sign-out").waitFor();
+
+    // A fresh baseline: the request acknowledged as new before signing out is
+    // listed but no longer marked, and nothing else is either.
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, before.title).waitFor();
+    await page.getByRole("group", { name: "Which approvals to show" }).getByRole("button", { name: "New (0)" }).waitFor();
+    assert.equal(await newBadge(before.title).count(), 0);
+    assert.deepEqual(JSON.parse(await storedState(page, ownKey)).newRequestIds, []);
+
+    // Requests the server gains after signing in are still flagged.
+    const after = await queuedCalendarCancellation("signout-after", isoDay(44));
+    await page.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(after.title).waitFor();
+    assert.equal(await newBadge(before.title).count(), 0);
+    for (const key of otherKeys) assert.equal(await storedState(page, key), otherState);
+  });
+});
+
+test("acting on a request another manager already handled says so, refreshes the list and keeps the manager's edits", async () => {
+  const edited = await queuedCalendarCancellation("stale-edited", isoDay(45));
+  const dismissed = await queuedCalendarCancellation("stale-dismissed", isoDay(46));
+  const approved = await queuedCalendarCancellation("stale-approved", isoDay(47));
+  const untouched = await queuedCalendarCancellation("stale-untouched", isoDay(48));
+  const anotherManager = (path) => fixtures.owner.request("POST", `/fix-track/contractor-email-queue/${path}`, {});
+  const { page } = await browserContext(fixtures.manager);
+  const actions = recordQueueActions(page);
+  const unsent = page.getByRole("region", { name: "Your edits were not sent" });
+  const alreadyHandled = page.locator("li").filter({ hasText: "Already handled" });
+  await withDiagnostics(page, "already handled elsewhere", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(page, untouched.title).waitFor();
+
+    // Edited, then approved elsewhere before the manager sends.
+    const editedCard = queueCard(page, edited.title);
+    await editedCard.getByRole("button", { name: "Edit" }).click();
+    await editedCard.getByRole("textbox").nth(1).fill("Manager's reworded cancellation body");
+    assert.equal((await anotherManager(`${edited.queueId}/approve-and-send`)).status, 200);
+    const outboxBefore = (await readOutbox()).length;
+    await editedCard.getByRole("button", { name: "Save & Send Cancellation" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Approve calendar cancellation?" });
+    await dialog.getByRole("button", { name: "Approve Cancellation" }).click();
+    await alreadyHandled.waitFor();
+    assert.match(await alreadyHandled.innerText(), /already handled, so nothing was sent[\s\S]*list has been refreshed/);
+    await dialog.waitFor({ state: "detached" });
+    await editedCard.waitFor({ state: "detached" });
+    await unsent.waitFor();
+    assert.equal(await unsent.getByLabel("Body").inputValue(), "Manager's reworded cancellation body");
+    assert.equal(await unsent.getByLabel("Body").getAttribute("readonly"), "");
+    assert.match(await unsent.innerText(), new RegExp(`${edited.title} was already approved or dismissed`));
+    await page.waitForFunction(() => document.activeElement?.id === "unsent-draft-heading");
+    assert.equal((await readOutbox()).length, outboxBefore, "the stale edit sends nothing");
+    const sent = await queueRow(edited.queueId);
+    assert.equal(sent.status, "sent");
+    assert.equal(sent.sent_by, fixtures.owner.userId, "the other manager's send stands");
+    assert.notEqual(sent.body_text, "Manager's reworded cancellation body", "the stale edit is not saved");
+    await unsent.getByRole("button", { name: "Close" }).click();
+    await unsent.waitFor({ state: "detached" });
+
+    // Dismissed elsewhere before the manager dismisses.
+    const dismissedCard = queueCard(page, dismissed.title);
+    assert.equal((await anotherManager(`${dismissed.queueId}/cancel`)).status, 200);
+    await dismissedCard.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Dismiss", exact: true }).click();
+    await page.locator("li").filter({ hasText: "so nothing was dismissed" }).waitFor();
+    await dismissedCard.waitFor({ state: "detached" });
+    assert.equal(await unsent.count(), 0, "no draft to keep when nothing was edited");
+
+    // Approved elsewhere before the manager approves, unedited.
+    const approvedCard = queueCard(page, approved.title);
+    assert.equal((await anotherManager(`${approved.queueId}/approve-and-send`)).status, 200);
+    const outboxBeforeApprove = (await readOutbox()).length;
+    await approvedCard.getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Approve Cancellation" }).click();
+    await page.locator("li").filter({ hasText: "so nothing was sent" }).waitFor();
+    await approvedCard.waitFor({ state: "detached" });
+    assert.equal(await unsent.count(), 0);
+    assert.equal((await readOutbox()).length, outboxBeforeApprove);
+
+    // The rest of the list was reloaded and still works.
+    const untouchedCard = queueCard(page, untouched.title);
+    await untouchedCard.getByRole("button", { name: "Approve Cancellation" }).and(page.locator(":enabled")).waitFor();
+    assert.equal(await page.locator("li.destructive").count(), 0, "no generic error toast");
+  });
+  assert.equal((await queueRow(dismissed.queueId)).status, "cancelled");
+  assert.equal((await queueRow(approved.queueId)).status, "sent");
+  assert.equal((await queueRow(untouched.queueId)).status, "pending");
+  assert.deepEqual(actions, [
+    `/fix-track/contractor-email-queue/${edited.queueId}/edit-and-send`,
+    `/fix-track/contractor-email-queue/${dismissed.queueId}/cancel`,
+    `/fix-track/contractor-email-queue/${approved.queueId}/approve-and-send`,
+  ], "each stale action is tried once and never retried");
+});
+
+test("two real tabs on one business share new-request acknowledgments; a tab on another business is untouched", async () => {
+  const owner = fixtures.owner;
+  const secondClient = await owner.request("POST", "/clients", {
+    name: `Inbox second business ${suffix}`, slug: `inbox-second-${suffix}`,
+  });
+  assert.equal(secondClient.status, 201, JSON.stringify(secondClient.data));
+  const secondClientId = secondClient.data.id;
+  const secondSite = await owner.request("POST", `/sites?clientId=${secondClientId}`, {
+    name: `Inbox second-business site ${suffix}`, seedStarterChecks: false,
+  });
+  assert.equal(secondSite.status, 201, JSON.stringify(secondSite.data));
+  const otherBusinessRequest = await queuedCalendarCancellation("tabs-other-business", isoDay(50), secondSite.data.id, secondClientId);
+
+  // One browser profile (shared localStorage and cookies), three tabs.
+  const { context, page: firstTab } = await browserContext(owner);
+  const secondTab = await context.newPage();
+  const otherBusinessTab = await context.newPage();
+  await otherBusinessTab.addInitScript(({ userId, clientId }) => {
+    window.sessionStorage.setItem("complytrack:activeClient", JSON.stringify({ userId, clientId }));
+  }, { userId: owner.userId, clientId: secondClientId });
+  const ownKey = `complytrack:contractor-approvals:${owner.userId}:${owner.clientId}`;
+  const otherBusinessKey = `complytrack:contractor-approvals:${owner.userId}:${secondClientId}`;
+  const stored = (page, key) => page.evaluate(storageKey => window.localStorage.getItem(storageKey), key);
+  const newBadge = (page, title) => queueCard(page, title).getByLabel("New approval request");
+  const notice = page => page.getByText(/new approval requests? found/);
+  const queueLoads = new Map();
+  for (const page of [firstTab, secondTab, otherBusinessTab]) {
+    queueLoads.set(page, 0);
+    page.on("request", request => {
+      if (new URL(request.url()).pathname === "/api/fix-track/contractor-email-queue") {
+        queueLoads.set(page, queueLoads.get(page) + 1);
+      }
+    });
+  }
+
+  await withDiagnostics(firstTab, "two real tabs", async () => {
+    for (const page of [firstTab, secondTab, otherBusinessTab]) await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(firstTab, fixtures.acceptIssue.title).waitFor();
+    await queueCard(secondTab, fixtures.acceptIssue.title).waitFor();
+    await queueCard(otherBusinessTab, otherBusinessRequest.title).waitFor();
+    assert.equal(await queueCard(otherBusinessTab, fixtures.acceptIssue.title).count(), 0, "the third tab is on the other business");
+
+    // A request found by one tab's refresh is New in both tabs on this business.
+    const arrived = await queuedCalendarCancellation("tabs-arrived", isoDay(51));
+    await firstTab.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(firstTab, arrived.title).waitFor();
+    await secondTab.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(secondTab, arrived.title).waitFor();
+    // The other business has a New request of its own.
+    const otherBusinessArrived = await queuedCalendarCancellation("tabs-other-arrived", isoDay(52), secondSite.data.id, secondClientId);
+    await otherBusinessTab.getByRole("button", { name: "Refresh approvals" }).click();
+    await newBadge(otherBusinessTab, otherBusinessArrived.title).waitFor();
+    const otherBusinessBefore = await stored(otherBusinessTab, otherBusinessKey);
+    assert.ok(otherBusinessBefore, "the other business has its own stored baseline");
+
+    // The second tab has a draft open when the first tab acknowledges.
+    const draftCard = queueCard(secondTab, fixtures.acceptIssue.title);
+    await draftCard.getByRole("button", { name: "Edit" }).click();
+    const draftBody = draftCard.getByRole("textbox").nth(1);
+    await draftBody.fill("Second tab's unsent wording");
+    const rowsBefore = await secondTab.getByRole("button", { name: /^(Approve & Send|Approve Cancellation)$/ }).count();
+    await secondTab.evaluate(key => {
+      window.__approvalStorageEvents = [];
+      window.addEventListener("storage", event => {
+        if (event.key === key) window.__approvalStorageEvents.push(event.newValue);
+      });
+    }, ownKey);
+    const loadsBefore = { second: queueLoads.get(secondTab), other: queueLoads.get(otherBusinessTab) };
+
+    await queueCard(firstTab, arrived.title).getByRole("button", { name: `Mark ${arrived.title} as reviewed` }).click();
+    await newBadge(firstTab, arrived.title).waitFor({ state: "detached" });
+
+    // The browser delivers a native storage event, and the second tab drops the
+    // marker without reloading or touching its rows or draft.
+    await secondTab.waitForFunction(() => window.__approvalStorageEvents.length > 0);
+    await newBadge(secondTab, arrived.title).waitFor({ state: "detached" });
+    assert.equal(await notice(secondTab).count(), 0);
+    assert.equal(await draftBody.inputValue(), "Second tab's unsent wording");
+    assert.equal(await draftCard.getByRole("button", { name: /^Save & Send/ }).isVisible(), true, "the editor stays open");
+    assert.equal(await secondTab.getByRole("button", { name: /^(Approve & Send|Approve Cancellation)$/ }).count(), rowsBefore);
+    await queueCard(secondTab, arrived.title).waitFor();
+    assert.equal(queueLoads.get(secondTab), loadsBefore.second, "the acknowledgment arrives without a list reload");
+    assert.deepEqual(JSON.parse(await stored(secondTab, ownKey)).newRequestIds, []);
+
+    // The tab on the other business is unchanged.
+    assert.equal(await stored(otherBusinessTab, otherBusinessKey), otherBusinessBefore);
+    assert.equal(queueLoads.get(otherBusinessTab), loadsBefore.other);
+    await queueCard(otherBusinessTab, otherBusinessRequest.title).waitFor();
+    assert.equal(await queueCard(otherBusinessTab, arrived.title).count(), 0);
+    assert.equal(await newBadge(otherBusinessTab, otherBusinessArrived.title).count(), 1, "its own New marker stays");
+    assert.equal(await notice(otherBusinessTab).textContent(), "1 new approval request found");
+    await draftCard.getByRole("button", { name: "Cancel Edit" }).click();
+  });
+});
+
+test("with browser storage and tab messaging blocked, each tab still finds new requests on its timed refresh, scoped to its business, and stops when it leaves", async () => {
+  const owner = fixtures.owner;
+  const secondClient = await owner.request("POST", "/clients", {
+    name: `Inbox blocked-storage business ${suffix}`, slug: `inbox-blocked-${suffix}`,
+  });
+  assert.equal(secondClient.status, 201, JSON.stringify(secondClient.data));
+  const secondClientId = secondClient.data.id;
+  const secondSite = await owner.request("POST", `/sites?clientId=${secondClientId}`, {
+    name: `Inbox blocked-storage site ${suffix}`, seedStarterChecks: false,
+  });
+  assert.equal(secondSite.status, 201, JSON.stringify(secondSite.data));
+  const otherBusinessRequest = await queuedCalendarCancellation("blocked-other-business", isoDay(53), secondSite.data.id, secondClientId);
+
+  const { context, page: firstTab } = await browserContext(owner);
+  // A privacy-restricted browser: no localStorage and no BroadcastChannel.
+  await context.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() { throw new DOMException("The operation is insecure.", "SecurityError"); },
+    });
+    Object.defineProperty(window, "BroadcastChannel", { configurable: true, value: undefined });
+  });
+  await context.clock.install();
+  const secondTab = await context.newPage();
+  const queueLoads = new Map([[firstTab, []], [secondTab, []]]);
+  for (const [page, loads] of queueLoads) {
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/fix-track/contractor-email-queue") loads.push(url.searchParams.get("clientId"));
+    });
+  }
+  const newBadge = (page, title) => queueCard(page, title).getByLabel("New approval request");
+
+  await withDiagnostics(firstTab, "blocked storage fallback", async () => {
+    for (const page of [firstTab, secondTab]) {
+      await page.goto(`${appOrigin}/contractor-approvals`);
+      await queueCard(page, fixtures.acceptIssue.title).waitFor();
+      assert.deepEqual(await page.evaluate(() => {
+        let storageBlocked = false;
+        try { window.localStorage; } catch { storageBlocked = true; }
+        return { storageBlocked, broadcastChannel: typeof window.BroadcastChannel };
+      }), { storageBlocked: true, broadcastChannel: "undefined" });
+    }
+
+    // A request created elsewhere reaches both tabs on their next timed
+    // refresh, with no reload and no manual refresh.
+    const arrived = await queuedCalendarCancellation("blocked-arrived", isoDay(54));
+    const loadsBefore = queueLoads.get(firstTab).length;
+    await context.clock.fastForward(61_000);
+    await newBadge(firstTab, arrived.title).waitFor();
+    await newBadge(secondTab, arrived.title).waitFor();
+    assert.equal(queueLoads.get(firstTab).length, loadsBefore + 1, "one request per tab per minute");
+    for (const loads of queueLoads.values()) {
+      assert.ok(loads.length > 0 && loads.every(clientId => clientId === String(owner.clientId)),
+        `every refresh is scoped to the selected business: ${loads}`);
+    }
+    assert.equal(await queueCard(firstTab, otherBusinessRequest.title).count(), 0);
+
+    // Leaving the page stops its refresh.
+    await firstTab.locator('a[href="/dashboard"]').first().click();
+    await firstTab.waitForURL(/\/dashboard$/);
+    // The dashboard reads the queue once for its own count; let that settle.
+    await firstTab.waitForLoadState("networkidle");
+    await firstTab.waitForTimeout(500);
+    const afterLeaving = queueLoads.get(firstTab).length;
+    await context.clock.fastForward(181_000);
+    await firstTab.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await secondTab.waitForTimeout(500);
+    assert.equal(queueLoads.get(firstTab).length, afterLeaving, "no refresh after the page unmounts");
+
+    // Choosing the other business: refreshes are scoped to it alone.
+    await firstTab.goto(`${appOrigin}/clients`);
+    const businessCard = firstTab.locator("div").filter({ hasText: `Inbox blocked-storage business ${suffix}` })
+      .filter({ has: firstTab.getByRole("button", { name: "View" }) }).last();
+    await businessCard.getByRole("button", { name: "View" }).click();
+    await firstTab.waitForURL(/\/dashboard$/);
+    await firstTab.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(firstTab, otherBusinessRequest.title).waitFor();
+    const switchedFrom = queueLoads.get(firstTab).length;
+    await queuedCalendarCancellation("blocked-arrived-later", isoDay(55));
+    await context.clock.fastForward(61_000);
+    for (let waited = 0; queueLoads.get(firstTab).length === switchedFrom && waited < 10_000; waited += 100) {
+      await firstTab.waitForTimeout(100);
+    }
+    const switchedLoads = queueLoads.get(firstTab).slice(switchedFrom - 1);
+    assert.ok(switchedLoads.length >= 2 && switchedLoads.every(clientId => clientId === String(secondClientId)),
+      `the other business's refreshes ask only for it: ${switchedLoads}`);
+    assert.equal(await queueCard(firstTab, fixtures.acceptIssue.title).count(), 0);
+    assert.equal(await queueCard(firstTab, arrived.title).count(), 0, "no request from the first business leaks in");
+    assert.equal(await newBadge(firstTab, otherBusinessRequest.title).count(), 0, "a fresh baseline for this business");
+  });
+});
+
+test("a frozen, hidden or back-cached approvals tab catches up on its own business's indicators when it returns", async () => {
+  const owner = fixtures.owner;
+  const secondClient = await owner.request("POST", "/clients", {
+    name: `Inbox lifecycle business ${suffix}`, slug: `inbox-lifecycle-${suffix}`,
+  });
+  assert.equal(secondClient.status, 201, JSON.stringify(secondClient.data));
+  const secondClientId = secondClient.data.id;
+  const secondSite = await owner.request("POST", `/sites?clientId=${secondClientId}`, {
+    name: `Inbox lifecycle site ${suffix}`, seedStarterChecks: false,
+  });
+  assert.equal(secondSite.status, 201, JSON.stringify(secondSite.data));
+  const otherBusinessBefore = await queuedCalendarCancellation("life-other-before", isoDay(56), secondSite.data.id, secondClientId);
+
+  const { context, page: resumingTab } = await browserContext(owner);
+  // No timed refresh fires during the test: only the return to the tab can
+  // bring it up to date.
+  await context.clock.install();
+  const actingTab = await context.newPage();
+  const otherBusinessTab = await context.newPage();
+  await otherBusinessTab.addInitScript(({ userId, clientId }) => {
+    window.sessionStorage.setItem("complytrack:activeClient", JSON.stringify({ userId, clientId }));
+  }, { userId: owner.userId, clientId: secondClientId });
+  // Headless Chromium never hides or freezes a tab (CDP's freeze is ignored
+  // for a visible page), so the lifecycle is simulated: a "frozen" tab misses
+  // storage and BroadcastChannel deliveries, reports hidden and gets the
+  // lifecycle events a browser sends.
+  for (const page of [resumingTab, otherBusinessTab]) {
+    await page.addInitScript(() => {
+      window.__frozen = false;
+      window.addEventListener("storage", event => {
+        if (window.__frozen) event.stopImmediatePropagation();
+      }, true);
+      const addListener = BroadcastChannel.prototype.addEventListener;
+      BroadcastChannel.prototype.addEventListener = function (type, listener, options) {
+        return addListener.call(this, type, function (event) {
+          if (!window.__frozen) return listener.call(this, event);
+        }, options);
+      };
+    });
+  }
+  const setState = (page, { frozen, visibility, events }) => page.evaluate(({ frozen, visibility, events }) => {
+    window.__frozen = frozen;
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+    for (const event of events) {
+      if (event === "pageshow") window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      else document.dispatchEvent(new Event(event));
+    }
+  }, { frozen, visibility, events });
+  const freeze = page => setState(page, { frozen: true, visibility: "hidden", events: ["visibilitychange", "freeze"] });
+  const queueClients = new Map([[resumingTab, []], [otherBusinessTab, []]]);
+  for (const [page, clients] of queueClients) {
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/fix-track/contractor-email-queue") clients.push(url.searchParams.get("clientId"));
+    });
+  }
+  const newBadge = (page, title) => queueCard(page, title).getByLabel("New approval request");
+  const reviewInActingTab = async title => {
+    await actingTab.getByRole("button", { name: "Refresh approvals" }).click();
+    await queueCard(actingTab, title).getByRole("button", { name: `Mark ${title} as reviewed` }).click();
+    await newBadge(actingTab, title).waitFor({ state: "detached" });
+  };
+
+  await withDiagnostics(resumingTab, "approvals tab lifecycle", async () => {
+    for (const page of [resumingTab, actingTab, otherBusinessTab]) await page.goto(`${appOrigin}/contractor-approvals`);
+    await queueCard(resumingTab, fixtures.acceptIssue.title).waitFor();
+    await queueCard(actingTab, fixtures.acceptIssue.title).waitFor();
+    await queueCard(otherBusinessTab, otherBusinessBefore.title).waitFor();
+
+    // While two tabs are frozen: a request arrives and another tab finds and
+    // reviews it; a second arrives unseen; the other business gains one too.
+    await freeze(resumingTab);
+    await freeze(otherBusinessTab);
+    const reviewedElsewhere = await queuedCalendarCancellation("life-reviewed", isoDay(57));
+    await reviewInActingTab(reviewedElsewhere.title);
+    const unseen = await queuedCalendarCancellation("life-unseen", isoDay(58));
+    const otherBusinessArrived = await queuedCalendarCancellation("life-other-arrived", isoDay(59), secondSite.data.id, secondClientId);
+    await resumingTab.waitForTimeout(300);
+    assert.equal(await queueCard(resumingTab, reviewedElsewhere.title).count(), 0, "a frozen tab requests nothing");
+    const resumingLoads = queueClients.get(resumingTab).length;
+    const otherLoads = queueClients.get(otherBusinessTab).length;
+
+    // Resumed while still in the background: nothing yet. Shown: catch up.
+    for (const page of [resumingTab, otherBusinessTab]) {
+      await setState(page, { frozen: false, visibility: "hidden", events: ["resume"] });
+    }
+    await resumingTab.waitForTimeout(300);
+    assert.equal(queueClients.get(resumingTab).length, resumingLoads, "a background tab waits until it is shown");
+    for (const page of [resumingTab, otherBusinessTab]) {
+      await setState(page, { frozen: false, visibility: "visible", events: ["visibilitychange"] });
+    }
+    await newBadge(resumingTab, unseen.title).waitFor();
+    await queueCard(resumingTab, reviewedElsewhere.title).waitFor();
+    assert.equal(await newBadge(resumingTab, reviewedElsewhere.title).count(), 0,
+      "a request reviewed in another tab while this one was frozen is not New");
+    assert.equal(await queueCard(resumingTab, otherBusinessArrived.title).count(), 0);
+    await newBadge(otherBusinessTab, otherBusinessArrived.title).waitFor();
+    assert.equal(await queueCard(otherBusinessTab, unseen.title).count(), 0, "no rows from the other business");
+    assert.equal(await queueCard(otherBusinessTab, reviewedElsewhere.title).count(), 0);
+    assert.deepEqual(queueClients.get(resumingTab).slice(resumingLoads), [String(owner.clientId)]);
+    assert.deepEqual(queueClients.get(otherBusinessTab).slice(otherLoads), [String(secondClientId)]);
+    // The acknowledgment is not undone for the tab that made it.
+    await actingTab.waitForTimeout(300);
+    assert.equal(await newBadge(actingTab, reviewedElsewhere.title).count(), 0);
+
+    // Restored from the back/forward cache with an open draft: indicators
+    // catch up, the draft stays and the rows are not reloaded under it.
+    const draftCard = queueCard(resumingTab, fixtures.acceptIssue.title);
+    await draftCard.getByRole("button", { name: "Edit" }).click();
+    await draftCard.getByRole("textbox").nth(1).fill("Draft kept across the back/forward cache");
+    await setState(resumingTab, { frozen: true, visibility: "hidden", events: ["visibilitychange"] });
+    await reviewInActingTab(unseen.title);
+    const beforeRestore = queueClients.get(resumingTab).length;
+    await setState(resumingTab, { frozen: false, visibility: "visible", events: ["pageshow"] });
+    await newBadge(resumingTab, unseen.title).waitFor({ state: "detached" });
+    assert.equal(await draftCard.getByRole("textbox").nth(1).inputValue(), "Draft kept across the back/forward cache");
+    assert.equal(queueClients.get(resumingTab).length, beforeRestore, "no reload while a draft is open");
+    await draftCard.getByRole("button", { name: "Cancel Edit" }).click();
   });
 });
