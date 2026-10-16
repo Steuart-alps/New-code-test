@@ -1087,6 +1087,18 @@ export const FireSafetyCheckResult = {
   fail: 'fail',
 } as const;
 
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type FireSafetyCheckNightStaff = typeof FireSafetyCheckNightStaff[keyof typeof FireSafetyCheckNightStaff] | null;
+
+
+export const FireSafetyCheckNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
 export interface FireSafetyCheck {
   id: number;
   clientId: number;
@@ -1097,6 +1109,12 @@ export interface FireSafetyCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: FireSafetyCheckNightStaff;
   createdAt: string;
   updatedAt: string;
 }
@@ -1109,6 +1127,18 @@ export const CreateFireSafetyCheckRequestResult = {
   fail: 'fail',
 } as const;
 
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type CreateFireSafetyCheckRequestNightStaff = typeof CreateFireSafetyCheckRequestNightStaff[keyof typeof CreateFireSafetyCheckRequestNightStaff] | null;
+
+
+export const CreateFireSafetyCheckRequestNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
 export interface CreateFireSafetyCheckRequest {
   checkType: FireCheckType;
   checkDate: string;
@@ -1117,6 +1147,12 @@ export interface CreateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: CreateFireSafetyCheckRequestNightStaff;
 }
 
 export type UpdateFireSafetyCheckRequestResult = typeof UpdateFireSafetyCheckRequestResult[keyof typeof UpdateFireSafetyCheckRequestResult];
@@ -1127,6 +1163,18 @@ export const UpdateFireSafetyCheckRequestResult = {
   fail: 'fail',
 } as const;
 
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type UpdateFireSafetyCheckRequestNightStaff = typeof UpdateFireSafetyCheckRequestNightStaff[keyof typeof UpdateFireSafetyCheckRequestNightStaff] | null;
+
+
+export const UpdateFireSafetyCheckRequestNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
 export interface UpdateFireSafetyCheckRequest {
   checkDate?: string;
   result?: UpdateFireSafetyCheckRequestResult;
@@ -1134,6 +1182,31 @@ export interface UpdateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
+}
+
+export interface FireCallPoint {
+  id: number;
+  siteId: number | null;
+  name: string;
+  archivedAt: string | null;
+  /** Date of the latest alarm test that used this call point. */
+  lastTestedDate: string | null;
+}
+
+export interface CreateFireCallPointRequest {
+  siteId: number | null;
+  name: string;
+}
+
+export interface UpdateFireCallPointRequest {
+  name?: string;
+  archived?: boolean;
 }
 
 export type FireSafetyStatusLastResult = typeof FireSafetyStatusLastResult[keyof typeof FireSafetyStatusLastResult] | null;
@@ -2128,6 +2201,22 @@ export type GetFireSafetyStatusParams = {
  */
 siteId?: number;
 };
+
+export type ListFireCallPointsParams = {
+/**
+ * A site id, or "none" for call points not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
+includeArchived?: ListFireCallPointsIncludeArchived;
+};
+
+export type ListFireCallPointsIncludeArchived = typeof ListFireCallPointsIncludeArchived[keyof typeof ListFireCallPointsIncludeArchived];
+
+
+export const ListFireCallPointsIncludeArchived = {
+  true: 'true',
+  false: 'false',
+} as const;
 
 export type GetFoodSafetyConfigParams = {
 /**

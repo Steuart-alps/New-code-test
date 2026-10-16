@@ -56,7 +56,7 @@ async function send(method, path, { cookie, headers = {}, body } = {}) {
 
 function fireCheck(notes) {
   return {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
     result: "pass",
     notes,
