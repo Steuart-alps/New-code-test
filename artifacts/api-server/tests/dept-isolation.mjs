@@ -246,7 +246,7 @@ async function main() {
     checkType: "hot_sentinel_temp",
     checkDate: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15)).toISOString().slice(0, 10),
     result: "pass", temperature: 53, performedBy: "Dept Test Admin", siteId: siteAlphaId, outletId: outletAlphaId,
-  });
+  }, { "X-Override-Reason": encodeURIComponent("Dept isolation fixture: prior-month reading") });
   expectOk("admin: last month's alpha sentinel reading", lastMonthAlphaReading.status, [201]);
   const alphaHistory = (await admin("GET", "/legionella/outlet-status")).data?.find?.(row => row.id === outletAlphaId);
   const historyIds = new Set((alphaHistory?.thisMonthChecks ?? []).map(reading => reading.id));
