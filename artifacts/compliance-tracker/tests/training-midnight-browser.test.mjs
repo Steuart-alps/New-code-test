@@ -74,6 +74,7 @@ async function routeApi(route) {
       case "/api/train-track/records": return json(route, records);
       case "/api/sites": return json(route, []);
       case "/api/staff-roster": return json(route, []);
+      case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
     }
   }
   if (method === "POST" && url.pathname === "/api/analytics/events") return route.fulfill({ status: 204 });
