@@ -181,7 +181,11 @@ export function parseStoredOptionState(
   const state = input as { active?: unknown; disabled?: unknown };
   const active = validateOptionList(state.active);
   if (!active.ok) return active;
-  const disabled = validateDisabledList(state.disabled ?? []);
+  // Lists saved before the disabled history was capped can hold more than
+  // the limit; keep the most recent entries rather than rejecting the list.
+  const disabled = validateDisabledList(
+    Array.isArray(state.disabled) ? state.disabled.slice(-MAX_OPTIONS) : state.disabled ?? [],
+  );
   if (!disabled.ok) return disabled;
 
   const activeKeys = new Set(active.value.map((item) => item.toLowerCase()));
@@ -196,10 +200,10 @@ export function serialiseOptionState(state: StoredOptionState): string {
 }
 
 /**
- * Load the effective list for one option key for a client: the saved custom
- * list if present and valid, otherwise the hardcoded default.
+ * Load the active and disabled options for one key for a client: the saved
+ * custom list if present and valid, otherwise the hardcoded default.
  */
-export async function getEffectiveOptionList(clientId: number, key: FormOptionKey): Promise<string[]> {
+export async function getEffectiveOptionState(clientId: number, key: FormOptionKey): Promise<StoredOptionState> {
   const rows = await db.select({ value: appSettingsTable.value })
     .from(appSettingsTable)
     .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, settingKey(key))))
@@ -208,8 +212,13 @@ export async function getEffectiveOptionList(clientId: number, key: FormOptionKe
   if (raw) {
     try {
       const check = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key]);
-      if (check.ok) return check.value.active;
+      if (check.ok) return check.value;
     } catch { /* fall through to default */ }
   }
-  return [...FORM_OPTION_DEFAULTS[key]];
+  return { active: [...FORM_OPTION_DEFAULTS[key]], disabled: [] };
+}
+
+/** The active options only: what a new record may use. */
+export async function getEffectiveOptionList(clientId: number, key: FormOptionKey): Promise<string[]> {
+  return (await getEffectiveOptionState(clientId, key)).active;
 }

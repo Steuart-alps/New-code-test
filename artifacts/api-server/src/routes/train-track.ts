@@ -3,13 +3,17 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
-import { getEffectiveOptionList } from "../lib/formOptions";
+import { getEffectiveOptionState, type StoredOptionState } from "../lib/formOptions";
 
 const router = Router();
 
-function trainingTypeIsAllowed(value: string, activeOptions: string[]): boolean {
-  return activeOptions.includes(value)
-    || (activeOptions.includes("Other") && value.trim().length > 0);
+// "Other" lets staff type any training name, but not one the business has
+// disabled: that would bring a retired option back through the free-text box.
+function trainingTypeIsAllowed(value: string, options: StoredOptionState): boolean {
+  if (options.active.includes(value)) return true;
+  const typed = value.trim().toLowerCase();
+  return options.active.includes("Other") && typed.length > 0
+    && !options.disabled.some((item) => item.toLowerCase() === typed);
 }
 
 async function canAccessSite(clientId: number, siteId: number | null | undefined, departmentId: number | null) {
@@ -185,7 +189,7 @@ router.post("/records", requireAuth, denyViewers, async (req, res) => {
 
   const d = parsed.data;
   if ("trainingType" in d) {
-    const allowedTypes = await getEffectiveOptionList(clientId, "traintrack_types");
+    const allowedTypes = await getEffectiveOptionState(clientId, "traintrack_types");
     if (!trainingTypeIsAllowed(d.trainingType, allowedTypes)) {
       return res.status(400).json({ error: "Invalid training type" });
     }
@@ -259,7 +263,7 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
       if (parsed.data.trainingType === null) {
         return res.status(400).json({ error: "Training type is required" });
       }
-      const allowedTypes = await getEffectiveOptionList(clientId, "traintrack_types");
+      const allowedTypes = await getEffectiveOptionState(clientId, "traintrack_types");
       if (!trainingTypeIsAllowed(parsed.data.trainingType, allowedTypes)) {
         return res.status(400).json({ error: "Invalid training type" });
       }
