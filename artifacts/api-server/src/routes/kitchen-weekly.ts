@@ -8,14 +8,15 @@ import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdat
 import {
   clientEntryFrom, clientEntryIdSchema, findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry,
 } from "../lib/clientEntryReplay";
+import { kitchenWeeklyResult } from "@workspace/api-zod/kitchen-weekly";
 
 const router = Router();
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function computedWeeklyResult(checks: Record<string, "yes" | "no" | "na">): "pass" | "fail" {
-  return Object.values(checks).some((value) => value === "no") ? "fail" : "pass";
-}
+// Not every "no" is a failure ("Have any complaints been received?"): the
+// shared rule says which answer needs attention for each question.
+const computedWeeklyResult = kitchenWeeklyResult;
 
 const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(
   (value) => new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value,

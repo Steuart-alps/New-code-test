@@ -5,10 +5,12 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./kitchen-temperature": "./src/kitchen-temperature.ts"
+    "./kitchen-temperature": "./src/kitchen-temperature.ts",
+    "./kitchen-weekly": "./src/kitchen-weekly.ts"
   },
   "scripts": {
-    "test:kitchen-temperature": "node tests/kitchen-temperature.mjs"
+    "test:kitchen-temperature": "node tests/kitchen-temperature.mjs",
+    "test:kitchen-weekly": "node tests/kitchen-weekly.mjs"
   },
   "dependencies": {
     "zod": "catalog:"

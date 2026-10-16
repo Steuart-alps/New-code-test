@@ -1125,10 +1125,10 @@ ${rows.map(r => `<tr>
                 {sites.length > 0 && (
                   <div>
                     <Label>Site</Label>
-                    <Select value={certForm.siteId} onValueChange={v => setCertForm(f => ({ ...f, siteId: v }))}>
+                    <Select value={certForm.siteId || "none"} onValueChange={v => setCertForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No site</SelectItem>
+                        <SelectItem value="none">No site</SelectItem>
                         {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
@@ -1181,10 +1181,10 @@ ${rows.map(r => `<tr>
                 </div>
                 <div>
                   <Label>Document Type</Label>
-                  <Select value={signoffForm.documentType} onValueChange={v => setSignoffForm(f => ({ ...f, documentType: v }))}>
+                  <Select value={signoffForm.documentType || "none"} onValueChange={v => setSignoffForm(f => ({ ...f, documentType: v === "none" ? "" : v }))}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select type (optional)" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Not specified</SelectItem>
+                      <SelectItem value="none">Not specified</SelectItem>
                       {Object.entries(DOCUMENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -1192,10 +1192,10 @@ ${rows.map(r => `<tr>
                 {sites.length > 0 && (
                   <div>
                     <Label>Site</Label>
-                    <Select value={signoffForm.siteId} onValueChange={v => setSignoffForm(f => ({ ...f, siteId: v }))}>
+                    <Select value={signoffForm.siteId || "none"} onValueChange={v => setSignoffForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No site</SelectItem>
+                        <SelectItem value="none">No site</SelectItem>
                         {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
@@ -1251,10 +1251,10 @@ ${rows.map(r => `<tr>
                 {sites.length > 0 && (
                   <div>
                     <Label>Site</Label>
-                    <Select value={internalForm.siteId} onValueChange={v => setInternalForm(f => ({ ...f, siteId: v }))}>
+                    <Select value={internalForm.siteId || "none"} onValueChange={v => setInternalForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No site</SelectItem>
+                        <SelectItem value="none">No site</SelectItem>
                         {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
