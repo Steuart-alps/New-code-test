@@ -42,6 +42,7 @@
     "test:service-action-analytics": "node tests/service-action-analytics.test.mjs",
     "test:module-work-analytics": "node tests/module-work-analytics.test.mjs",
     "test:training-expiry": "node tests/training-expiry.test.mjs",
+    "test:training-midnight-browser": "node tests/training-midnight-browser.test.mjs",
     "test:induction-print": "node tests/induction-print.test.mjs",
     "test:daily-track-month-status": "node tests/daily-track-month-status.test.mjs",
     "test:daily-checklist-card-browser": "node tests/daily-checklist-card-browser.test.mjs",
