@@ -91,11 +91,16 @@ assert.match(
   /<AlertDialogAction[\s\S]*disabled=\{/,
   "the dialog confirm action must be disabled while the request is pending",
 );
+assert.match(
+  source.match(/async function submitApproval\([\s\S]*?\n  \}\n/)?.[0] ?? "",
+  /if \(e instanceof ApprovalPortalLinkChangedError\) \{\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(mountedRef\.current\) \{\s*toast\(\{ title: "Not sent", description: e\.message \}\);\s*setEditingId\(null\);\s*void loadQueue\(false\);/,
+  "an approval refused because the portal link changed says nothing was sent and reloads the queue",
+);
 for (const handler of ["submitApproval", "submitDismissal"]) {
   const body = source.match(new RegExp(`async function ${handler}\\([\\s\\S]*?\\n  \\}\\n`))?.[0] ?? "";
   assert.match(
     body,
-    /return true;\s*\} catch \(e: any\) \{\s*if \(e instanceof ApprovalAlreadyHandledError\) \{\s*if \(mountedRef\.current\) handleAlreadyHandled\(item, e(?:, modifiedPreview)?\);\s*return false;\s*\}\s*if \(mountedRef\.current\) \{\s*toast\(\{ title: "Error", description: e\.message, variant: "destructive" \}\);\s*\}\s*return false;\s*\} finally \{\s*if \(mountedRef\.current\) setSubmittingId\(null\);/,
+    /return true;\s*\} catch \(e: any\) \{\s*if \(e instanceof ApprovalAlreadyHandledError\) \{\s*if \(mountedRef\.current\) handleAlreadyHandled\(item, e(?:, modifiedPreview)?\);\s*return false;\s*\}\s*(?:if \(e instanceof ApprovalPortalLinkChangedError\) \{[\s\S]*?return false;\s*\}\s*)?if \(mountedRef\.current\) \{\s*toast\(\{ title: "Error", description: e\.message, variant: "destructive" \}\);\s*\}\s*return false;\s*\} finally \{\s*if \(mountedRef\.current\) setSubmittingId\(null\);/,
     `${handler} must report an already-handled request, show the destructive error toast on other failures and always reset the submitting state`,
   );
   assert.ok(
@@ -106,7 +111,7 @@ for (const handler of ["submitApproval", "submitDismissal"]) {
 }
 assert.match(
   source,
-  /window\.setInterval\(refresh, BACKGROUND_REFRESH_MS\);[\s\S]{0,300}return \(\) => \{\s*window\.clearInterval\(timer\);[\s\S]{0,250}\};\s*\}, \[activeClientId, approvalRefreshStorageKey\]\);/,
+  /window\.setInterval\(refresh, BACKGROUND_REFRESH_MS\);[\s\S]{0,600}return \(\) => \{\s*window\.clearInterval\(timer\);[\s\S]{0,600}\};\s*\}, \[activeClientId, approvalRefreshStorageKey\]\);/,
   "the timed refresh (the only update path when storage and BroadcastChannel are blocked) must stop on unmount and restart when the business changes",
 );
 assert.match(
@@ -366,6 +371,7 @@ try {
     CANCELLATION_APPROVAL_CONFIRMATION,
     CANCELLATION_DISMISS_CONFIRMATION,
     ApprovalAlreadyHandledError,
+    ApprovalPortalLinkChangedError,
   } = await import(`${pathToFileURL(helperBundle).href}?t=${Date.now()}`);
 
   const requests = [];
@@ -506,6 +512,18 @@ try {
       respondWith(409, { code: "draft_credentials_damaged", error: "Damaged" })),
     error => !(error instanceof ApprovalAlreadyHandledError) && error.message === "Failed to approve email",
   );
+  // A portal reminder whose link a manager reissued or revoked after approval
+  // was not sent; the page shows the server's explanation.
+  for (const code of ["portal_link_reissued", "portal_link_revoked", "portal_link_invalid"]) {
+    const requestCount = requests.length;
+    await assert.rejects(
+      () => approveContractorEmail({ id: 57, emailType: "reminder" },
+        respondWith(409, { code, error: `Nothing was sent (${code}).` })),
+      error => error instanceof ApprovalPortalLinkChangedError && error.code === code
+        && error.message === `Nothing was sent (${code}).`,
+    );
+    assert.equal(requests.length, requestCount + 1, "a changed portal link is requested exactly once");
+  }
   await assert.rejects(
     () => dismissContractorEmail({ id: 56, emailType: "assignment" }, respondWith(404, { error: "Queue entry not found" })),
     error => !(error instanceof ApprovalAlreadyHandledError) && error.message === "Failed to cancel email",
