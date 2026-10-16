@@ -62,9 +62,14 @@ export const STARTER: StarterCategory[] = [
       { title: "Electrical Appliance Testing (PAT)", description: "Portable appliance testing of in-scope electrical equipment, at intervals based on the type of equipment and how it is used.", priority: "medium", leadTimeDays: 21 },
       {
         title: "Electrical Installation Condition Report (EICR)",
-        description: "Periodic inspection of the fixed wiring with an Electrical Installation Condition Report (BS 7671). Set the interval from IET Guidance Note 3 for your premises type and the last report's recommendation — for example 5 years for hotels, offices and care homes, and 1 year for caravan parks and swimming pools.",
+        description: "Periodic inspection of the fixed wiring with an Electrical Installation Condition Report (BS 7671). Set the interval from IET Guidance Note 3 for your premises type and the last report's recommendation — for example 5 years for hotels, pubs, offices, shops and care homes, and every year for swimming pools, leisure centres and caravan or holiday parks. If the last report gave a shorter interval, use that.",
         priority: "high",
         leadTimeDays: 30,
+        // IET Guidance Note 3: annual for swimming pools / leisure centres and
+        // caravan parks, five-yearly for other commercial premises. Without a
+        // business type the premises (it could be a pool) is unknown, so the
+        // interval is left to the business. Only new starter checks use this;
+        // existing checks are never rewritten.
         frequencyMonthsByBusinessType: {
           hotel_accommodation: 60,
           care_home_healthcare: 60,
@@ -72,6 +77,8 @@ export const STARTER: StarterCategory[] = [
           retail: 60,
           restaurant_cafe_pub: 60,
           nursery_school: 60,
+          pest_control: 60,
+          other: 60,
           holiday_park_campsite: 12,
           leisure_sports_centre: 12,
         },

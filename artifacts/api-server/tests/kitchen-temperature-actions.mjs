@@ -49,7 +49,10 @@ try {
   assert.equal((await other.request('PATCH', `/track-actions/${action.id}`, { ownerName: 'Chef' })).status, 404);
   assert.equal((await owner.request('PATCH', `/track-actions/${action.id}`, { ownerName: 'Kitchen manager', status: 'in_progress' })).status, 200);
   assert.equal((await owner.request('PATCH', `/track-actions/${action.id}`, { instruction: 'Hide the failure' })).status, 409);
-  assert.equal((await owner.request('POST', `/track-actions/${action.id}/fix-track`, { create: true })).status, 409);
+  // A repair job can be raised, but the manager still verifies the action here.
+  const repair = await owner.request('POST', `/track-actions/${action.id}/fix-track`, { create: true });
+  assert.equal(repair.status, 201, JSON.stringify(repair));
+  assert.equal(repair.data.fixTrackDisposition, 'parallel');
   const resolution = { status: 'resolved', remedialAction: 'Food transferred and fridge repaired', evidenceReference: 'Recheck record attached', resolutionNotes: 'Checked the corrective work and confirmed the control is restored', resolverSignature: 'data:image/png;base64,AAAA' };
   assert.equal((await owner.request('PATCH', `/track-actions/${action.id}`, resolution)).status, 400);
   const requirements = await owner.request('GET', `/track-evidence/requirements?module=kitchen&actionId=${action.id}`);
@@ -65,6 +68,8 @@ try {
   assert.ok(resolved.data.resolvedBy);
   assert.ok(resolved.data.resolvedByName);
   assert.ok(resolved.data.resolvedAt);
+  const repairIssue = await owner.request('GET', `/fix-track/issues/${repair.data.fixTrackIssueId}`);
+  assert.equal(repairIssue.data.status, 'resolved', 'manager sign-off also resolves the repair job');
   assert.equal((await owner.request('POST', `/track-evidence/${evidence.data.id}/review`, { status: 'rejected', reviewNotes: 'Changed after completion' })).status, 409);
   assert.equal((await owner.request('PATCH', `/track-actions/${action.id}`, { status: 'open' })).status, 409);
   assert.equal((await read()).coldFood[0].tempAm, '6', 'manager sign-off never rewrites the failed reading');

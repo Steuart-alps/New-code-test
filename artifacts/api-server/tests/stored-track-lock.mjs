@@ -15,10 +15,10 @@ const iso = (offset) => {
 };
 function session() {
   let cookie = "";
-  return async (method, path, body) => {
+  return async (method, path, body, extraHeaders = {}) => {
     const r = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}), ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = r.headers.get("set-cookie");
@@ -31,7 +31,11 @@ function session() {
 const expect = (name, result, statuses) => check(name, statuses.includes(result.status), `got ${result.status}`);
 
 async function main() {
-  const admin = session();
+  // The admin deliberately seeds and corrects historical records, which an
+  // owner may do only with a reason (owner-late-edit-reason covers the rule).
+  const adminSession = session();
+  const overrideReason = { "x-override-reason": encodeURIComponent("Stored-lock fixture: deliberate historical record") };
+  const admin = (method, path, body, headers = overrideReason) => adminSession(method, path, body, headers);
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   const email = `stored-lock-admin-${suffix}@test.local`;
   const registered = await admin("POST", "/auth/register", {
@@ -134,6 +138,10 @@ async function main() {
       JSON.stringify(adminLegionellaMove.data));
     check("out-of-scope old Legionella PUT is hidden",
       (await scopedStaff("PUT", betaOldPath, { notes: "foreign department edit" })).status === 403);
+    const adminWithoutReason = await admin("PUT", betaOldPath, { notes: "admin correction" }, {});
+    check("admin correction of an old record needs a reason",
+      adminWithoutReason.status === 423 && adminWithoutReason.data?.code === "OVERRIDE_REASON_REQUIRED",
+      `${adminWithoutReason.status} ${JSON.stringify(adminWithoutReason.data)}`);
     expect("admin can correct beta Legionella record",
       await admin("PUT", betaOldPath, { notes: "admin correction" }), [200]);
 
@@ -758,9 +766,11 @@ async function main() {
 
   await datedFamily({
     label: "KitchenWeekly weekly", createPath: "/kitchen-weekly/weekly",
+    // A weekly review stays open to staff until the day after its week ends,
+    // so the locked fixture is a week that ended days ago.
     createBody: {
-      weekCommencing: old, checks: { temperatureControl: "yes" },
-      submittedAt: `${old}T12:00:00.000Z`, managerSignature: "Lock Fixture",
+      weekCommencing: iso(-10), checks: { temperatureControl: "yes" },
+      submittedAt: `${iso(-10)}T12:00:00.000Z`, managerSignature: "Lock Fixture",
     },
     deleteBody: {
       weekCommencing: iso(-10), checks: { temperatureControl: "yes" },

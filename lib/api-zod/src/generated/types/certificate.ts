@@ -5,6 +5,8 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { CertificateDefect } from './certificateDefect';
+import type { CertificateOutcome } from './certificateOutcome';
 
 export interface Certificate {
   id: number;
@@ -15,5 +17,8 @@ export interface Certificate {
   issueDate?: Date | null;
   expiryDate?: Date | null;
   notes?: string | null;
+  outcome?: CertificateOutcome;
+  /** Defects listed on an item certificate (absent for contractor certificates). */
+  defects?: CertificateDefect[];
   createdAt: Date;
 }
