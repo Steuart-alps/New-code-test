@@ -17,12 +17,12 @@ assert.ok(BASE, "Run through test:daily-checklist-reports to start a test-mode A
 const runId = resolveRunId();
 const fixtures = createFixtureOwnership({ runId, suite: "daily-checklist-reports" });
 
-function session() {
+function session(defaultHeaders = {}) {
   let cookie = "";
   return async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -62,7 +62,8 @@ function previousUkMonth() {
 }
 
 async function main() {
-  const owner = session();
+  // The owner deliberately backfills past months, which needs a reason.
+  const owner = session({ "X-Override-Reason": encodeURIComponent("Daily reports fixture: past-month record") });
   const email = `daily-reports-${runId}@test.local`;
   const registered = ok(await owner("POST", "/auth/register", {
     name: "Daily Reports Admin", email, password: "password-123",

@@ -60,6 +60,8 @@ import auditEventsRouter from "./audit-events";
 import auditLogRouter from "./audit-log";
 import analyticsRouter from "./analytics";
 import registersRouter from "./registers";
+import trackOwnersRouter from "./track-owners";
+import userNotificationsRouter from "./user-notifications";
 
 import csvImportsRouter from "./csv-imports";
 import consultantPortfolioRouter from "./consultant-portfolio";
@@ -106,6 +108,9 @@ router.use(certificatesRouter);
 router.use(settingsRouter);
 router.use(privacyGovernanceRouter);
 router.use(notificationsRouter);
+// In-app notifications (header bell) and track owners; per-route requireAuth.
+router.use(userNotificationsRouter);
+router.use(trackOwnersRouter);
 router.use(storageRouter);
 router.use("/food-safety", requireAuth, requireService("kitchentrack"), foodSafetyRouter);
 router.use(dailyChecklistsRouter);

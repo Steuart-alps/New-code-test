@@ -42,12 +42,13 @@ function expectOk(name, status, allowed = [200, 201]) {
 
 function makeSession() {
   let cookie = "";
-  return async function request(method, path, body) {
+  return async function request(method, path, body, extraHeaders = {}) {
     const res = await fetch(`${BASE}${path}`, {
       method,
       headers: {
         "Content-Type": "application/json",
         ...(cookie ? { cookie } : {}),
+        ...extraHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -218,12 +219,13 @@ async function main() {
   // return its count without leaking the record to another department.
   const lastMonthDate = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15))
     .toISOString().slice(0, 10);
+  // Backfilling a past record needs an owner's reason.
   const priorMonthCheck = await admin("POST", "/fire-safety", {
     checkType: "alarm",
     checkDate: lastMonthDate,
     result: "pass",
     siteId: siteAlphaId,
-  });
+  }, { "X-Override-Reason": encodeURIComponent("Dept isolation fixture: prior-month record") });
   expectOk("admin: create prior-month module record", priorMonthCheck.status, [200, 201]);
 
   // ── 4. Create staff user assigned to Dept Alpha ──────────────────────────────
@@ -292,14 +294,14 @@ async function main() {
     ["/daily-track-pm", "kitchen_closing"],
   ]) {
     const prior = await admin("POST", path, {
-      siteId: siteBetaId, checklistType, checkDate: yesterday, items: [],
+      siteId: siteBetaId, checklistType, checkDate: yesterday, items: [{ label: "Checked", checked: true, result: "pass" }],
       submittedAt: new Date().toISOString(),
     });
     expectOk("prior-day checklist does not count today", prior.status, [201]);
   }
   assertDashboardChecklists("before submissions", await admin("GET", "/dashboard/summary"), 2, 0, 0);
   const submitChecklist = (siteId, path, checklistType) => admin("POST", path, {
-    siteId, checklistType, checkDate: today, items: [], submittedAt: new Date().toISOString(),
+    siteId, checklistType, checkDate: today, items: [{ label: "Checked", checked: true, result: "pass" }], submittedAt: new Date().toISOString(),
   });
   const alphaAm = await submitChecklist(siteAlphaId, "/daily-track-am", "kitchen_opening");
   const alphaPm = await submitChecklist(siteAlphaId, "/daily-track-pm", "kitchen_closing");
@@ -422,7 +424,7 @@ async function main() {
     replayed.data?.id === firstSend.data?.id && replayed.data?.submittedById === firstSend.data?.submittedById,
     `first=${firstSend.data?.id} replay=${replayed.data?.id}`);
   expectOk("staff: reused device entry with different answers is rejected", (await staff("POST", replayPath, {
-    ...replayBody, answers: [{ question: "Closing check", checked: false }],
+    ...replayBody, answers: [{ question: "Closing check", checked: false, result: "fail", notes: "Doors open" }],
   })).status, [409]);
   expectOk("staff: another device entry for a submitted checklist is rejected", (await staff("POST", replayPath, {
     ...replayBody, clientEntryId: `daily-${Date.now().toString(36)}-other-entry`,
@@ -433,7 +435,7 @@ async function main() {
     siteId: siteAlphaId,
     checklistType: "kitchen_opening",
     checkDate: uniqueDate(1),
-    items: [],
+    items: [{ label: "Checked", checked: true, result: "pass" }],
     submittedAt: new Date().toISOString(),
   });
   expectOk("staff: submit legacy AM checklist", staffLegacyDaily.status, [201]);
