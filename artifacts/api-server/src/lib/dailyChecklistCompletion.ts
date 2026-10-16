@@ -21,7 +21,9 @@ END`);
  * A subquery (use as `FROM ${submittedDailyChecklists(...)} alias`) listing
  * every submitted daily checklist of one tenant in an inclusive date range,
  * from both stores. Columns: site_id (nullable), check_date ('YYYY-MM-DD'
- * text), period ('am' | 'pm'), author_id (nullable user id), submitted_at.
+ * text), period ('am' | 'pm'), author_id (nullable user id), submitted_at,
+ * submitter_department_id and submitter_department_source (the author's
+ * department when the row was created; see submitterDepartmentMigration.ts).
  * Only client_id is applied here; callers join sites and apply their own
  * site/department scope.
  */
@@ -29,14 +31,16 @@ export function submittedDailyChecklists(clientId: number, from: string, to: str
   return sql`(
     SELECT site_id, check_date::text AS check_date,
            ${DAILY_CHECKLIST_PERIOD_SQL} AS period,
-           created_by AS author_id, submitted_at
+           created_by AS author_id, submitted_at,
+           submitter_department_id, submitter_department_source
     FROM daily_checklists
     WHERE client_id = ${clientId}
       AND check_date BETWEEN ${from} AND ${to}
       AND submitted_at IS NOT NULL
       AND checklist_type IN ('kitchen_opening', 'premises_opening', 'kitchen_closing', 'premises_closing', 'am', 'pm')
     UNION ALL
-    SELECT site_id, checklist_date AS check_date, type AS period, submitted_by_id AS author_id, submitted_at
+    SELECT site_id, checklist_date AS check_date, type AS period, submitted_by_id AS author_id, submitted_at,
+           submitter_department_id, submitter_department_source
     FROM daily_checklist_submissions
     WHERE client_id = ${clientId}
       AND checklist_date BETWEEN ${from} AND ${to}

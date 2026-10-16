@@ -68,12 +68,20 @@ interface DailyRow {
   submitted: number; expected: number; missed: number; pct: number;
 }
 interface ModuleRow { module: string; siteId: number; siteName: string; departmentName?: string; count: number; }
+/** Older records whose submitter's department wasn't captured (department reports only). */
+interface DepartmentNotRecorded {
+  label: string;
+  dailyChecklists: Array<{ siteId: number; siteName: string; type: "am" | "pm"; submitted: number }>;
+  moduleActivity: Array<{ module: string; siteId: number; siteName: string; count: number }>;
+  records: number;
+}
 interface ReportData {
   from: string; to: string; totalDays: number;
   departmentName?: string;
   sites: Site[];
   dailyChecklists: DailyRow[];
   moduleActivity: ModuleRow[];
+  departmentNotRecorded?: DepartmentNotRecorded;
 }
 
 interface TrendPoint {
@@ -154,6 +162,18 @@ function exportComplianceCsv(data: ReportData) {
   for (const site of data.sites) {
     const vals = modules.map(m => lookup.get(`${site.id}::${m}`) ?? 0);
     lines.push(`${csv(data.departmentName ?? "")},${csv(site.name)},${vals.join(",")}`);
+  }
+  const notRecorded = data.departmentNotRecorded;
+  if (notRecorded && notRecorded.records > 0) {
+    lines.push("");
+    lines.push(`${notRecorded.label.toUpperCase()} (older records, not counted for any department)`);
+    lines.push("Section,Site,Type or module,Records");
+    for (const r of notRecorded.dailyChecklists) {
+      lines.push(`Daily checklist days,${csv(r.siteName)},${r.type.toUpperCase()},${r.submitted}`);
+    }
+    for (const r of notRecorded.moduleActivity) {
+      lines.push(`Module records,${csv(r.siteName)},${csv(r.module)},${r.count}`);
+    }
   }
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
@@ -403,9 +423,10 @@ function ComplianceTab({
           </p>
           {data.departmentName && (
             <p className="mb-4 text-xs text-muted-foreground">
-              Counts use the submitting account’s current department assignment. Records without
-              an identifiable submitting account are excluded; sites with no attributed records
-              are omitted unless a site is selected.
+              Counts use the department each submitting account belonged to when the record was
+              created, so moving someone to another team doesn’t change past totals. Older records
+              from before departments were recorded are listed separately under “Department not
+              recorded”; sites with no attributed records are omitted unless a site is selected.
             </p>
           )}
 
@@ -523,6 +544,48 @@ function ComplianceTab({
               )}
             </CardContent>
           </Card>
+
+          {data.departmentNotRecorded && data.departmentNotRecorded.records > 0 && (
+            <Card className="mt-6" data-testid="department-not-recorded">
+              <CardHeader>
+                <CardTitle className="text-base">{data.departmentNotRecorded.label}</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  These records were entered before ComplyTrack recorded the submitter’s department.
+                  They aren’t counted in the totals above or for any other department, and they aren’t
+                  assigned to anyone’s current team.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="pb-2 pr-4 font-medium">Site</th>
+                        <th className="pb-2 pr-4 font-medium">Record</th>
+                        <th className="pb-2 font-medium text-right">Count</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.departmentNotRecorded.dailyChecklists.map(r => (
+                        <tr key={`daily-${r.siteId}-${r.type}`} className="border-b last:border-0">
+                          <td className="py-2 pr-4 font-medium">{r.siteName}</td>
+                          <td className="py-2 pr-4">{r.type.toUpperCase()} checklist days</td>
+                          <td className="py-2 text-right tabular-nums">{r.submitted}</td>
+                        </tr>
+                      ))}
+                      {data.departmentNotRecorded.moduleActivity.map(r => (
+                        <tr key={`module-${r.siteId}-${r.module}`} className="border-b last:border-0">
+                          <td className="py-2 pr-4 font-medium">{r.siteName}</td>
+                          <td className="py-2 pr-4">{r.module}</td>
+                          <td className="py-2 text-right tabular-nums">{r.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
     </>
