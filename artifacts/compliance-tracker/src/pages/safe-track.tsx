@@ -26,6 +26,7 @@ import { useLiveAcknowledgements } from "@/hooks/use-live-acknowledgements";
 import { cn } from "@/lib/utils";
 import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry";
 import { INDUCTION_SECTIONS, parseChecklist, renderInductionHtml, type InductionChecklist, type SectionKey, type ChecklistItem } from "@/lib/induction-print";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -318,6 +319,7 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
   async function handleFile(file: File) {
     setUploading(true);
     try {
+      assertWithinUploadLimit(file);
       const urlRes = await apiFetch("/safe-track/request-upload", { method: "POST" });
       if (!urlRes.ok) {
         throw new Error(await getApiErrorMessage(urlRes, "Could not get upload URL"));

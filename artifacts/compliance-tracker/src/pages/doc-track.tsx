@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MyDocumentsView } from "@/components/my-documents-view";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -583,6 +584,7 @@ function UploadDialog({
     setUploading(true);
 
     try {
+      assertWithinUploadLimit(file);
       // 1. Request presigned PUT URL
       setProgress("requesting");
       const urlRes = await apiFetch("/doc-track/documents/request-upload", {
