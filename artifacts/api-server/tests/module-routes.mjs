@@ -43,7 +43,7 @@ function expectOk(name, status, allowed = [200, 201]) {
   check(name, allowed.includes(status), `expected ${allowed.join("/")}, got ${status}`);
 }
 
-function makeSession() {
+function makeSession(defaultHeaders = {}) {
   let cookie = "";
   return async function request(method, path, body) {
     const res = await fetch(`${BASE}${path}`, {
@@ -51,6 +51,7 @@ function makeSession() {
       headers: {
         "Content-Type": "application/json",
         ...(cookie ? { cookie } : {}),
+        ...defaultHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -662,6 +663,37 @@ async function testSiteFiltering(req, siteId) {
   });
   check("site-filter: duplicate weekly site/date is rejected", duplicateWeekly.status === 409, `got ${duplicateWeekly.status}`);
 
+  // "No" is the good answer to some review questions; only answers that need
+  // attention fail a submitted week.
+  // Today's week, so the edit below stays inside the correction window.
+  const goodNoWeekly = await req("POST", "/kitchen-weekly/weekly", {
+    weekCommencing: isoDate(0),
+    siteId,
+    checks: {
+      temperatureControl: "yes", complaintsReceived: "no", cleaningScheduleNeedsUpdate: "no",
+      staffRefresherRequired: "no", additionalChecksRequired: "no", methodsOrEquipmentChanged: "no",
+    },
+    submittedAt: new Date().toISOString(),
+  });
+  expectOk("weekly result: create submitted review with good \"No\" answers", goodNoWeekly.status, [201]);
+  check("weekly result: \"No\" to complaints, schedule update and refresher training passes",
+    goodNoWeekly.data?.overall_result === "pass", `got ${goodNoWeekly.data?.overall_result}`);
+  const failingWeekly = await req("POST", "/kitchen-weekly/weekly", {
+    weekCommencing: isoDate(-28),
+    siteId,
+    checks: { temperatureControl: "no", complaintsReceived: "no" },
+    submittedAt: new Date().toISOString(),
+  });
+  expectOk("weekly result: create submitted review with a failed rule", failingWeekly.status, [201]);
+  check("weekly result: \"No\" to a house rule still fails", failingWeekly.data?.overall_result === "fail",
+    `got ${failingWeekly.data?.overall_result}`);
+  const refresherEdit = await req("PUT", `/kitchen-weekly/weekly/${goodNoWeekly.data?.id}`, {
+    checks: { ...goodNoWeekly.data?.checks, staffRefresherRequired: "yes" },
+  });
+  expectOk("weekly result: edit submitted review", refresherEdit.status);
+  check("weekly result: \"Yes\" to refresher training needed fails on edit", refresherEdit.data?.overall_result === "fail",
+    `got ${refresherEdit.data?.overall_result}`);
+
   const probeDate = isoDate(-13);
   const orgProbe = await req("POST", "/kitchen-weekly/probe", {
     checkDate: probeDate,
@@ -791,7 +823,9 @@ async function testCleaningSiteFiltering(req, siteId, otherSiteId) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function runSuite() {
-  const req = makeSession();
+  // The owner deliberately writes past-dated records (one day per module so
+  // runs never collide), which owners may do with a reason.
+  const req = makeSession({ "X-Override-Reason": encodeURIComponent("Module routes fixture: past-dated record") });
 
   // Register a fresh account. Track it before anything can fail so the
   // finally block in main() always knows what this run owns.

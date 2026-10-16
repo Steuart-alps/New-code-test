@@ -47,6 +47,7 @@ import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
 import { runTrackActionReminderJob } from "./lib/trackActionReminders";
+import { runTrackReminderJob } from "./lib/trackReminders";
 import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
 import { cleanupStagedPhotoUploads } from "./lib/stagedPhotoCleanup";
@@ -413,6 +414,15 @@ function startScheduler() {
   // changes prices, products, subscriptions or charges.
   schedule(SERVICE_PRICE_AUDIT_CRON, "service-price-audit", () => runScheduledServicePriceAudit());
   logger.info("Stripe service-price audit scheduler started (hourly at :25)");
+
+  // In-app reminders (bell + mobile push, never email) to each track's owner
+  // for unsubmitted AM/PM checklists and kitchen diaries and overdue checks.
+  // Hourly; each business is evaluated at its own local 09:00/11:00/21:00.
+  schedule("5 * * * *", "track-reminders", logged(
+    "Track reminder job complete", () => runTrackReminderJob(),
+    (result) => result.notificationsCreated === 0 && result.errors === 0,
+  ), { daily: true });
+  logger.info("Track owner reminder scheduler started (hourly at :05)");
 }
 async function runTrialReminders() {
   logger.info("Running trial ending reminder job...");

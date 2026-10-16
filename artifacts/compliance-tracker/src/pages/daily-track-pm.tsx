@@ -3,6 +3,7 @@ import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { ChecklistItemRow } from "@/components/checklist-item-row";
+import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
 import { fetchMobileChecklistSubmission, MobileChecklistSubmissionCard, type MobileChecklistSubmission } from "@/components/mobile-checklist-submission-card";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
@@ -20,7 +21,7 @@ import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface ChecklistItem { label: string; checked: boolean; notes?: string; section?: string; }
+interface ChecklistItem { label: string; checked: boolean; notes?: string; section?: string; result?: ChecklistResult; }
 
 interface Checklist {
   id: number; checklistType: string; checkDate: string;
@@ -205,7 +206,8 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
     setManagerNote(existing?.managerNote ?? "");
   }, [existing, type, templateItems]);
 
-  const toggle = (i: number) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, checked: !item.checked } : item)); };
+  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
+  const passRemaining = () => { if (submitted) return; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
   const setNote = (i: number, note: string) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
 
   async function save(submit: boolean) {
@@ -231,7 +233,8 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
     } finally { setSaving(false); }
   }
 
-  const checkedCount = items.filter(i => i.checked).length;
+  const progress = checklistProgress(items);
+  const hint = submitHint(progress);
   const Icon = type === "kitchen_closing" ? UtensilsCrossed : Building2;
 
   return (
@@ -248,10 +251,10 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
                 <Settings2 className="w-3.5 h-3.5" />
               </Button>
             )}
-            <span className="text-xs text-muted-foreground">{checkedCount}/{items.length}</span>
+            <span className="text-xs text-muted-foreground">{progress.answered}/{items.length}{progress.failed > 0 && <span className="text-red-600 font-medium"> · {progress.failed} failed</span>}</span>
             {submitted
               ? <Badge className="bg-emerald-100 text-emerald-800 text-xs"><Lock className="w-3 h-3 mr-1" />Submitted</Badge>
-              : checkedCount === items.length && items.length > 0
+              : progress.ready
               ? <Badge className="bg-blue-100 text-blue-800 text-xs">Ready to submit</Badge>
               : <Badge variant="secondary" className="text-xs">In progress</Badge>}
           </div>
@@ -270,7 +273,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
                     {item.section}
                   </p>
                 )}
-                <ChecklistItemRow item={item} submitted={submitted} onToggle={() => toggle(i)} onNote={note => setNote(i, note)} />
+                <ChecklistItemRow item={item} submitted={submitted} onResult={result => setResult(i, result)} onNote={note => setNote(i, note)} />
               </div>
             ))}
           </div>
@@ -282,9 +285,13 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
               <StaffPerformerSelect label="Completed by" value={completedBy} onChange={setCompletedBy} onRosterIdChange={setStaffRosterId} />
               {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
             </div>
+            {progress.remaining > 0 && progress.answered > 0 && (
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={passRemaining}>Mark the {progress.remaining} remaining as Pass</Button>
+            )}
+            {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}</Button>
-              <Button size="sm" onClick={() => save(true)} disabled={saving || checkedCount === 0} className="flex-1">Submit checklist</Button>
+              <Button size="sm" onClick={() => save(true)} disabled={saving || !progress.ready} className="flex-1">Submit checklist</Button>
             </div>
           </div>
         )}

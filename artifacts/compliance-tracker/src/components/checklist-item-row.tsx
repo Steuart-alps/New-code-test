@@ -1,54 +1,68 @@
-import type { KeyboardEvent } from "react";
-import { CheckSquare, Square } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { itemResult, type ChecklistResult, type ResultItem } from "@/lib/checklist-results";
 
-export interface ChecklistRowItem { label: string; checked: boolean; notes?: string }
+export type ChecklistRowItem = ResultItem;
+
+const OPTIONS: { value: ChecklistResult; label: string; active: string }[] = [
+  { value: "pass", label: "Pass", active: "border-emerald-600 bg-emerald-600 text-white" },
+  { value: "fail", label: "Fail", active: "border-red-600 bg-red-600 text-white" },
+  { value: "na", label: "N/A", active: "border-slate-500 bg-slate-500 text-white" },
+];
+
+const ROW_STYLE: Record<ChecklistResult, string> = {
+  pass: "border-emerald-200 bg-emerald-50/50",
+  fail: "border-red-200 bg-red-50/60",
+  na: "border-slate-200 bg-slate-50",
+};
 
 /**
- * One tickable line of a daily checklist. The tick target is a real
- * keyboard-operable checkbox (Tab to focus, Space or Enter to toggle).
+ * One line of a daily checklist, answered Pass, Fail or N/A. A failed item
+ * needs a note saying what is wrong; it becomes an action and a FixTrack job
+ * when the checklist is submitted.
  */
-export function ChecklistItemRow({ item, submitted, onToggle, onNote }: {
+export function ChecklistItemRow({ item, submitted, onResult, onNote }: {
   item: ChecklistRowItem;
   submitted: boolean;
-  onToggle: () => void;
+  onResult: (result: ChecklistResult) => void;
   onNote: (note: string) => void;
 }) {
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      onToggle();
-    }
-  };
+  const result = itemResult(item);
   return (
-    <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
-      <div
-        role="checkbox"
-        aria-checked={item.checked}
-        aria-disabled={submitted || undefined}
-        tabIndex={submitted ? -1 : 0}
-        className="flex items-start gap-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        onClick={onToggle}
-        onKeyDown={onKeyDown}
-      >
-        {item.checked
-          ? <CheckSquare aria-hidden="true" className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
-          : <Square aria-hidden="true" className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
-        <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
+    <div className={`rounded-lg border p-3 transition-colors ${submitted ? "opacity-90" : ""} ${result ? ROW_STYLE[result] : "border-border"}`}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <span className="text-sm">{item.label}</span>
+        <div role="radiogroup" aria-label={item.label} className="flex shrink-0 gap-1">
+          {OPTIONS.map(option => {
+            const selected = result === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={submitted}
+                onClick={() => onResult(option.value)}
+                className={`min-w-[3.25rem] rounded-md border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default ${selected ? option.active : "border-border bg-white text-muted-foreground hover:bg-muted"} ${submitted && !selected ? "hidden" : ""}`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
-      {!submitted && item.checked && (
-        <div className="mt-2 ml-7">
+      {!submitted && result && (
+        <div className="mt-2">
           <Input
             value={item.notes ?? ""}
             onChange={e => onNote(e.target.value)}
-            placeholder="Optional note…"
+            placeholder={result === "fail" ? "What is wrong? (required)" : "Optional note…"}
             aria-label={`Note for ${item.label}`}
-            className="h-7 text-xs bg-white"
-            onClick={e => e.stopPropagation()}
+            aria-invalid={result === "fail" && !item.notes?.trim() ? true : undefined}
+            className={`h-8 text-xs bg-white ${result === "fail" && !item.notes?.trim() ? "border-red-400" : ""}`}
           />
         </div>
       )}
-      {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
+      {submitted && item.notes && <p className="mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
     </div>
   );
 }

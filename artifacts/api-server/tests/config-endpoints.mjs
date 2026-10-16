@@ -82,10 +82,10 @@ function expectStatus(name, status, expected) {
 
 // A cookie-carrying session. `bearer` mode drops the cookie and instead sends
 // an Authorization header (used for the push-token auth checks).
-function makeSession() {
+function makeSession(defaultHeaders = {}) {
   let cookie = "";
   async function request(method, path, body, opts = {}) {
-    const headers = { "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json", ...defaultHeaders };
     if (cookie && !opts.noCookie) headers.cookie = cookie;
     if (opts.bearer) headers.authorization = `Bearer ${opts.bearer}`;
     const res = await fetch(`${BASE}${path}`, {
@@ -114,7 +114,8 @@ function isoDate(daysOffset = 0) {
 // Register a fresh self-service account (role "consultant" linked to a single
 // auto-provisioned client). Returns { session, clientId, email }.
 async function registerAccount(label, ts) {
-  const session = makeSession();
+  // Account owners deliberately write past-dated records here, which needs a reason.
+  const session = makeSession({ "X-Override-Reason": encodeURIComponent("Config fixture: past-dated record") });
   const email = `${label}-${runId}-${randomUUID()}@test.local`;
   const reg = await session("POST", "/auth/register", {
     name: `${label} account`,
