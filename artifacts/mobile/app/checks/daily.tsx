@@ -10,7 +10,16 @@ import { checkOutbox, newCheckEntryId, useCheckOutbox } from '@/lib/checkOutbox'
 import { localIsoDate } from '@/components/date-stepper-logic';
 
 interface Site { id: number; name: string; }
-interface Answer { question: string; checked: boolean; notes?: string; }
+type AnswerResult = 'pass' | 'fail' | 'na';
+interface Answer { question: string; checked: boolean; notes?: string; result?: AnswerResult; }
+
+const RESULT_OPTIONS: { value: AnswerResult; label: string; color: string }[] = [
+  { value: 'pass', label: 'Pass', color: '#059669' },
+  { value: 'fail', label: 'Fail', color: '#dc2626' },
+  { value: 'na', label: 'N/A', color: '#64748b' },
+];
+// Older submissions only stored a tick: a ticked item counts as a pass.
+const answerResult = (answer: Answer): AnswerResult | undefined => answer.result ?? (answer.checked ? 'pass' : undefined);
 interface Submission { submittedAt: string | null; answers: Answer[]; }
 interface ChecklistResponse { submission: Submission | null; defaultQuestions: Answer[]; }
 
@@ -99,6 +108,12 @@ export default function DailyChecklistScreen() {
   const updateAnswer = (index: number, changes: Partial<Answer>) =>
     setAnswers((current) => current.map((answer, i) => i === index ? { ...answer, ...changes } : answer));
 
+  // Every item needs Pass, Fail or N/A, and a failed item needs a note; the server applies the same rule.
+  const unanswered = answers.filter((answer) => !answerResult(answer)).length;
+  const missingNotes = answers.filter((answer) => answerResult(answer) === 'fail' && !answer.notes?.trim()).length;
+  const submitHint = unanswered > 0 ? `Answer every item to submit (${unanswered} left).`
+    : missingNotes > 0 ? `Say what is wrong for each failed item (${missingNotes} left).` : null;
+
   const showError = (problem: unknown) =>
     Alert.alert('Could not update saved checklist', problem instanceof Error ? problem.message : 'Try again.');
 
@@ -158,14 +173,24 @@ export default function DailyChecklistScreen() {
             </View>
           )}
           {shownAnswers.map((answer, index) => <View key={answer.question} style={[styles.answerCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <TouchableOpacity testID={`daily-checklist-answer-${index}`} disabled={locked} onPress={() => updateAnswer(index, { checked: !answer.checked })} style={styles.answerRow}>
-              <Feather name={answer.checked ? 'check-square' : 'square'} size={22} color={answer.checked ? colors.primary : colors.mutedForeground} />
+            <View style={styles.answerRow}>
               <Text style={[styles.question, { color: colors.foreground }]}>{answer.question}</Text>
-            </TouchableOpacity>
-            {!locked && <TextInput testID={`daily-checklist-note-${index}`} value={answer.notes ?? ''} onChangeText={(notes) => updateAnswer(index, { notes })} placeholder="Note (optional)" placeholderTextColor={colors.mutedForeground} style={[styles.note, { color: colors.foreground, borderTopColor: colors.border }]} />}
+            </View>
+            <View style={styles.resultRow}>
+              {RESULT_OPTIONS.filter((option) => !locked || answerResult(answer) === option.value).map((option) => {
+                const active = answerResult(answer) === option.value;
+                return <TouchableOpacity key={option.value} testID={`daily-checklist-answer-${index}-${option.value}`} accessibilityRole="radio" accessibilityState={{ selected: active }} disabled={locked}
+                  onPress={() => updateAnswer(index, { result: option.value, checked: option.value !== 'fail' })}
+                  style={[styles.resultButton, { borderColor: active ? option.color : colors.border, backgroundColor: active ? option.color : colors.card }]}>
+                  <Text style={{ color: active ? '#fff' : colors.foreground, fontFamily: 'Inter_600SemiBold', fontSize: 13 }}>{option.label}</Text>
+                </TouchableOpacity>;
+              })}
+            </View>
+            {!locked && <TextInput testID={`daily-checklist-note-${index}`} value={answer.notes ?? ''} onChangeText={(notes) => updateAnswer(index, { notes })} placeholder={answerResult(answer) === 'fail' ? 'What is wrong? (required)' : 'Note (optional)'} placeholderTextColor={answerResult(answer) === 'fail' && !answer.notes?.trim() ? colors.destructive : colors.mutedForeground} style={[styles.note, { color: colors.foreground, borderTopColor: colors.border }]} />}
             {locked && !!answer.notes && <Text style={[styles.lockedNote, { color: colors.mutedForeground, borderTopColor: colors.border }]}>{answer.notes}</Text>}
           </View>)}
-          {!locked && <TouchableOpacity testID="daily-checklist-submit" disabled={submit.isPending || answers.length === 0} onPress={() => submit.mutate()} style={[styles.submit, { backgroundColor: colors.navy }, submit.isPending && { opacity: 0.6 }]}>{submit.isPending ? <ActivityIndicator color="#fff" /> : <><Feather name="send" color="#fff" size={18} /><Text style={styles.submitText}>Submit {type.toUpperCase()} checklist</Text></>}</TouchableOpacity>}
+          {!locked && !!submitHint && <Text testID="daily-checklist-hint" style={{ color: colors.mutedForeground, fontFamily: 'Inter_400Regular', fontSize: 13 }}>{submitHint}</Text>}
+          {!locked && <TouchableOpacity testID="daily-checklist-submit" disabled={submit.isPending || answers.length === 0 || !!submitHint} onPress={() => submit.mutate()} style={[styles.submit, { backgroundColor: colors.navy }, (submit.isPending || !!submitHint) && { opacity: 0.6 }]}>{submit.isPending ? <ActivityIndicator color="#fff" /> : <><Feather name="send" color="#fff" size={18} /><Text style={styles.submitText}>Submit {type.toUpperCase()} checklist</Text></>}</TouchableOpacity>}
         </View>
       ))}
     </ScrollView>
@@ -189,7 +214,9 @@ const styles = StyleSheet.create({
   deviceRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   deviceActions: { flexDirection: 'row', gap: 18, paddingTop: 4 },
   answerCard: { borderWidth: 1, borderRadius: 8, overflow: 'hidden' },
-  answerRow: { flexDirection: 'row', padding: 14, gap: 12, alignItems: 'flex-start' },
+  answerRow: { flexDirection: 'row', paddingHorizontal: 14, paddingTop: 14, paddingBottom: 8, gap: 12, alignItems: 'flex-start' },
+  resultRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 12 },
+  resultButton: { flex: 1, minHeight: 40, borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   question: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14, lineHeight: 20 },
   note: { borderTopWidth: 1, paddingHorizontal: 14, minHeight: 42, fontFamily: 'Inter_400Regular', fontSize: 13 },
   lockedNote: { borderTopWidth: 1, paddingHorizontal: 14, paddingVertical: 10, fontFamily: 'Inter_400Regular', fontSize: 13 },

@@ -7,6 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { buildSignupPath } from "@/lib/signup-plan";
+import { SELECTED_MODULE_CARD, SELECTED_MODULE_CHECKBOX, SELECTED_MODULE_TICK } from "@/lib/addon-catalog";
 import alpsLogo from "@/assets/alps-logo.png";
 
 // ─── Module definitions ────────────────────────────────────────────────────────
@@ -20,8 +21,6 @@ const MODULES = [
     color: "text-[#162D42]",
     bg: "bg-[#162D42]/5",
     border: "border-[#162D42]/20",
-    activeBorder: "border-[#162D42]",
-    activeBg: "bg-[#162D42]/5",
     required: true,
     description: "The foundation — compliance item tracking, contractor & certificate management, and audit trails.",
     features: [
@@ -41,8 +40,6 @@ const MODULES = [
     color: "text-orange-700",
     bg: "bg-orange-50",
     border: "border-orange-200",
-    activeBorder: "border-orange-500",
-    activeBg: "bg-orange-50",
     required: false,
     legislation: "Regulatory Reform (Fire Safety) Order 2005",
     description: "Digital fire safety logbook — record and track every check required under the Regulatory Reform (Fire Safety) Order.",
@@ -62,8 +59,6 @@ const MODULES = [
     color: "text-amber-700",
     bg: "bg-amber-50",
     border: "border-amber-200",
-    activeBorder: "border-amber-500",
-    activeBg: "bg-amber-50",
     required: false,
     legislation: "Food Safety Act 1990 + HACCP Regulation (EC) 852/2004",
     description: "Digital food safety diary — daily temperature logs, delivery checks, and HACCP records for food businesses.",
@@ -84,8 +79,6 @@ const MODULES = [
     color: "text-sky-700",
     bg: "bg-sky-50",
     border: "border-sky-200",
-    activeBorder: "border-sky-500",
-    activeBg: "bg-sky-50",
     required: false,
     legislation: "HSG274 / L8 ACOP — Legionella bacteria control",
     description: "Water safety logbook to support site-specific Legionella risk-management records, written schemes and actions.",
@@ -105,8 +98,6 @@ const MODULES = [
     color: "text-orange-700",
     bg: "bg-orange-50",
     border: "border-orange-200",
-    activeBorder: "border-orange-500",
-    activeBg: "bg-orange-50",
     required: false,
     description: "Staff maintenance issue reporting — log faults, assign responsibility, attach photos, and track resolution to close.",
     features: [
@@ -126,14 +117,12 @@ const MODULES = [
     color: "text-blue-700",
     bg: "bg-blue-50",
     border: "border-blue-200",
-    activeBorder: "border-blue-500",
-    activeBg: "bg-blue-50",
     required: false,
-    description: "Workplace safety management — record risk assessments, incidents, toolbox talks, and corrective actions in one place.",
+    description: "Workplace safety management — record risk assessments, incidents, staff sign-off of policies, and corrective actions in one place.",
     features: [
       "Risk assessment records and review dates",
       "Incident and near-miss reporting",
-      "Toolbox talk attendance records",
+      "Staff sign-off of policies and procedures",
       "Corrective action tracking",
       "Timestamped safety audit history",
     ],
@@ -146,8 +135,6 @@ const MODULES = [
     color: "text-violet-700",
     bg: "bg-violet-50",
     border: "border-violet-200",
-    activeBorder: "border-violet-500",
-    activeBg: "bg-violet-50",
     required: false,
     legislation: "Workplace (Health, Safety and Welfare) Regulations 1992",
     description: "Digital premises safety logbook — routine workplace inspections, fault reporting, and housekeeping records.",
@@ -167,8 +154,6 @@ const MODULES = [
     color: "text-emerald-700",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
-    activeBorder: "border-emerald-500",
-    activeBg: "bg-emerald-50",
     required: false,
     description: "Staff training records and certificate expiry tracking — know who is trained, in what, and when it expires.",
     features: [
@@ -188,8 +173,6 @@ const MODULES = [
     color: "text-cyan-700",
     bg: "bg-cyan-50",
     border: "border-cyan-200",
-    activeBorder: "border-cyan-500",
-    activeBg: "bg-cyan-50",
     required: false,
     description: "Hot tub & spa pool maintenance logbook — daily water chemistry, temperature checks and records based on HSG282 and PWTAG guidance.",
     features: [
@@ -209,8 +192,6 @@ const MODULES = [
     color: "text-green-700",
     bg: "bg-green-50",
     border: "border-green-200",
-    activeBorder: "border-green-500",
-    activeBg: "bg-green-50",
     required: false,
     description: "Tree inspection logbook — record visual assessments, detailed surveys, post-storm checks and remedial works in line with BS 3998:2010 and NTSG guidance.",
     features: [
@@ -230,8 +211,6 @@ const MODULES = [
     color: "text-yellow-700",
     bg: "bg-yellow-50",
     border: "border-yellow-200",
-    activeBorder: "border-yellow-500",
-    activeBg: "bg-yellow-50",
     required: false,
     description: "In-house PAT testing register — maintain a full appliance inventory, log pass/fail results, and track next test due dates across your sites.",
     features: [
@@ -251,8 +230,6 @@ const MODULES = [
     color: "text-emerald-700",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
-    activeBorder: "border-emerald-500",
-    activeBg: "bg-emerald-50",
     required: false,
     description: "Pest control compliance log — record contractor visits, findings, treatments, and any pest activity spotted between visits.",
     features: [
@@ -269,15 +246,10 @@ const MODULES = [
 const FEATURES = [
   { icon: Users, title: "Multi-Site Ready", desc: "Manage compliance across one site or many. Each location's records, contractors, and tasks kept neatly separate." },
   { icon: Bell, title: "Automated Reminders", desc: "Contractors and staff get email reminders as deadlines approach — so nothing slips through the cracks." },
-  { icon: FileText, title: "Full Audit Trail", desc: "Every action is timestamped and logged — your digital paper trail for inspections and audits." },
+  { icon: FileText, title: "Audit Trail", desc: "Key safety records keep a timestamped history of who changed what — your digital paper trail for inspections and audits." },
   { icon: BarChart3, title: "Live Status Dashboard", desc: "See your compliance status at a glance and spot issues long before they become problems." },
   { icon: Lock, title: "Role-Based Access", desc: "Invite your team — and your H&S consultant — with exactly the right level of access." },
-  { icon: Zap, title: "Calendar Invites Built In", desc: "Every reminder includes a calendar attachment so contractors and staff can book the work straight in." },
-];
-
-const TESTIMONIALS = [
-  { quote: "We used to chase contractors over email and spreadsheets. ComplyTrack does it all for us automatically — our certificates are always up to date.", author: "Sarah M.", role: "Operations Manager, Leeds" },
-  { quote: "We manage compliance across four sites. Having everything in one place — and giving our consultant view-only access when needed — has been a game-changer.", author: "James K.", role: "Facilities Director, London" },
+  { icon: Zap, title: "Calendar Invites Built In", desc: "Contractor reminders and FixTrack jobs include a calendar attachment, so the work can be booked straight in." },
 ];
 
 // ─── Pricing builder (interactive) ────────────────────────────────────────────
@@ -341,9 +313,11 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
               transition={{ delay: i * 0.08, duration: 0.5, ease: "easeOut" }}
               viewport={{ once: true, margin: "-40px" }}
               onClick={() => !mod.required && toggle(mod.key)}
+              data-testid={`plan-module-${mod.key}`}
+              data-selected={active}
               className={`relative border-2 p-6 transition-all duration-200 ${
                 mod.required ? "cursor-default" : "cursor-pointer"
-              } ${active ? `${mod.activeBorder} ${mod.activeBg}` : `border-border bg-white hover:border-${mod.border}`}`}
+              } ${active ? SELECTED_MODULE_CARD : `border-border bg-white hover:border-${mod.border}`}`}
             >
               {mod.required && (
                 <span className="absolute top-4 right-4 text-xs uppercase tracking-widest font-medium text-muted-foreground bg-muted px-2 py-0.5">
@@ -352,8 +326,8 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
               )}
               {!mod.required && (
                 <div className={`absolute top-4 right-4 w-5 h-5 border-2 flex items-center justify-center transition-all ${
-                  active ? "border-current bg-current" : "border-border bg-white"
-                } ${mod.color}`}>
+                  active ? SELECTED_MODULE_CHECKBOX : "border-border bg-white"
+                }`}>
                   {active && <CheckCircle2 className="w-3 h-3 text-white" />}
                 </div>
               )}
@@ -375,7 +349,7 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
               <ul className="space-y-1.5">
                 {mod.features.map(f => (
                   <li key={f} className="flex items-start gap-2 text-sm text-[#1A1A1A]/80">
-                    <CheckCircle2 className={`w-4 h-4 flex-shrink-0 mt-0.5 ${active ? mod.color : "text-muted-foreground"}`} />
+                    <CheckCircle2 className={`w-4 h-4 flex-shrink-0 mt-0.5 ${active ? SELECTED_MODULE_TICK : "text-muted-foreground"}`} />
                     <span>{f}</span>
                   </li>
                 ))}
@@ -469,7 +443,7 @@ export default function LandingPage() {
             </div>
             <div className="hidden sm:flex items-center gap-3 pl-4 border-l border-white/20">
               <span className="text-sm text-white/60 font-display italic">by</span>
-              <img src={alpsLogo} alt="ALPS Consulting" className="h-6 opacity-80 brightness-0 invert" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 opacity-80 brightness-0 invert" />
             </div>
           </div>
           <div className="flex items-center gap-4 sm:gap-6">
@@ -492,7 +466,7 @@ export default function LandingPage() {
               <span className="text-primary italic">Done Right.</span>
             </h1>
             <p className="text-xl text-white/70 mb-12 max-w-2xl mx-auto leading-relaxed font-light">
-              A modular compliance platform from ALPS Consulting. Choose the modules your business needs — fire safety, food hygiene, water safety — and pay only for what you use.
+              A modular compliance platform from ALPS Consultancy. Choose the modules your business needs — fire safety, food hygiene, water safety — and pay only for what you use.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-5">
               <Button size="lg" className="px-10 py-7 text-lg bg-primary hover:bg-primary/90 text-primary-foreground rounded-[2px] w-full sm:w-auto" onClick={() => navigate("/signup")}>
@@ -607,27 +581,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Testimonials */}
-      <section className="bg-[#162D42] py-32 px-6">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-4xl sm:text-5xl font-display text-center mb-20 text-white">Understated confidence</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-10">
-            {TESTIMONIALS.map((t) => (
-              <div key={t.author} className="bg-white/5 border border-white/10 p-10">
-                <div className="flex gap-1 mb-6">
-                  {Array.from({ length: 5 }).map((_, i) => <Star key={i} className="w-4 h-4 fill-primary text-primary" />)}
-                </div>
-                <p className="text-white/80 mb-8 text-xl font-display italic leading-relaxed">"{t.quote}"</p>
-                <div>
-                  <p className="font-semibold text-sm tracking-wide uppercase text-white">{t.author}</p>
-                  <p className="text-sm text-white/50 mt-1 font-light">{t.role}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Final CTA */}
       <section className="py-32 px-6 bg-[#F7F2E4] text-center">
         <div className="max-w-2xl mx-auto">
@@ -652,7 +605,7 @@ export default function LandingPage() {
             <div className="hidden sm:block w-px h-6 bg-white/20" />
             <div className="flex items-center gap-3">
               <span className="text-sm font-display italic text-white/60">by</span>
-              <img src={alpsLogo} alt="ALPS Consulting" className="h-6 opacity-70 brightness-0 invert" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 opacity-70 brightness-0 invert" />
             </div>
           </div>
           <p className="text-sm font-light">© {new Date().getFullYear()} ALPS Consulting Ltd. All rights reserved.</p>

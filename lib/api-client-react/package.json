@@ -7,7 +7,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test:custom-fetch-csrf": "node tests/custom-fetch-csrf.test.mjs"
+    "test:custom-fetch-csrf": "node tests/custom-fetch-csrf.test.mjs",
+    "test:custom-fetch-override-reason": "node tests/custom-fetch-override-reason.test.mjs"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

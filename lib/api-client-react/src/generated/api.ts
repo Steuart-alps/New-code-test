@@ -26,9 +26,11 @@ import type {
   BikeTrackConfig,
   Category,
   Certificate,
+  CertificateDefect,
   ComplianceItem,
   Contractor,
   CreateCategoryRequest,
+  CreateCertificateDefectRequest,
   CreateCertificateRequest,
   CreateComplianceItemRequest,
   CreateContractorRequest,
@@ -36,6 +38,8 @@ import type {
   CreateFoodSafetyRecordParams,
   CreateFoodSafetyRecordRequest,
   CreateHotTubCheckRequest,
+  CreateItemCertificateRequest,
+  CreateKitchenClosedDaysParams,
   CreateLegionellaCheckRequest,
   CreatePATApplianceRequest,
   CreatePATTestRequest,
@@ -76,6 +80,9 @@ import type {
   HotTubConfig,
   HotTubConfigUpdate,
   IncidentConfig,
+  KitchenClosedDaysCreated,
+  KitchenClosedDaysInput,
+  KitchenClosedDaysList,
   LegionellaCheck,
   LegionellaConfig,
   LegionellaStatus,
@@ -86,6 +93,7 @@ import type {
   ListFireSafetyChecksParams,
   ListFoodSafetyRecordsParams,
   ListHotTubChecksParams,
+  ListKitchenClosedDaysParams,
   ListLegionellaChecksParams,
   ListPATTestsParams,
   ListPremisesInspectionsParams,
@@ -115,6 +123,7 @@ import type {
   TestEmailRequest,
   TestEmailResponse,
   UpdateCategoryRequest,
+  UpdateCertificateDefectRequest,
   UpdateComplianceItemRequest,
   UpdateFeedbackReportParams,
   UpdateFireSafetyCheckRequest,
@@ -125,6 +134,7 @@ import type {
   UpdateHotTubCheckRequest,
   UpdateHotTubConfigParams,
   UpdateHotTubMonitoringPlanParams,
+  UpdateItemCertificateRequest,
   UpdateLegionellaCheckRequest,
   UpdateLegionellaConfigParams,
   UpdateLegionellaMonitoringPlanParams,
@@ -2068,14 +2078,14 @@ export const getCreateItemCertificateUrl = (itemId: number,) => {
  * @summary Add a certificate to a compliance item
  */
 export const createItemCertificate = async (itemId: number,
-    createCertificateRequest: CreateCertificateRequest, options?: RequestInit): Promise<Certificate> => {
+    createItemCertificateRequest: CreateItemCertificateRequest, options?: RequestInit): Promise<Certificate> => {
 
   return customFetch<Certificate>(getCreateItemCertificateUrl(itemId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(createCertificateRequest)
+    body: JSON.stringify(createItemCertificateRequest)
   }
 );}
 
@@ -2084,8 +2094,8 @@ export const createItemCertificate = async (itemId: number,
 
 
 export const getCreateItemCertificateMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createItemCertificate>>, TError,{itemId: number;data: BodyType<CreateCertificateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof createItemCertificate>>, TError,{itemId: number;data: BodyType<CreateCertificateRequest>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createItemCertificate>>, TError,{itemId: number;data: BodyType<CreateItemCertificateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createItemCertificate>>, TError,{itemId: number;data: BodyType<CreateItemCertificateRequest>}, TContext> => {
 
 const mutationKey = ['createItemCertificate'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -2097,7 +2107,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createItemCertificate>>, {itemId: number;data: BodyType<CreateCertificateRequest>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createItemCertificate>>, {itemId: number;data: BodyType<CreateItemCertificateRequest>}> = (props) => {
           const {itemId,data} = props ?? {};
 
           return  createItemCertificate(itemId,data,requestOptions)
@@ -2111,18 +2121,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type CreateItemCertificateMutationResult = NonNullable<Awaited<ReturnType<typeof createItemCertificate>>>
-    export type CreateItemCertificateMutationBody = BodyType<CreateCertificateRequest>
+    export type CreateItemCertificateMutationBody = BodyType<CreateItemCertificateRequest>
     export type CreateItemCertificateMutationError = ErrorType<unknown>
 
     /**
  * @summary Add a certificate to a compliance item
  */
 export const useCreateItemCertificate = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createItemCertificate>>, TError,{itemId: number;data: BodyType<CreateCertificateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createItemCertificate>>, TError,{itemId: number;data: BodyType<CreateItemCertificateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof createItemCertificate>>,
         TError,
-        {itemId: number;data: BodyType<CreateCertificateRequest>},
+        {itemId: number;data: BodyType<CreateItemCertificateRequest>},
         TContext
       > => {
       return useMutation(getCreateItemCertificateMutationOptions(options));
@@ -2142,14 +2152,14 @@ export const getUpdateItemCertificateUrl = (itemId: number,
  */
 export const updateItemCertificate = async (itemId: number,
     id: number,
-    createCertificateRequest: CreateCertificateRequest, options?: RequestInit): Promise<Certificate> => {
+    updateItemCertificateRequest: UpdateItemCertificateRequest, options?: RequestInit): Promise<Certificate> => {
 
   return customFetch<Certificate>(getUpdateItemCertificateUrl(itemId,id),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(createCertificateRequest)
+    body: JSON.stringify(updateItemCertificateRequest)
   }
 );}
 
@@ -2158,8 +2168,8 @@ export const updateItemCertificate = async (itemId: number,
 
 
 export const getUpdateItemCertificateMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateItemCertificate>>, TError,{itemId: number;id: number;data: BodyType<CreateCertificateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateItemCertificate>>, TError,{itemId: number;id: number;data: BodyType<CreateCertificateRequest>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateItemCertificate>>, TError,{itemId: number;id: number;data: BodyType<UpdateItemCertificateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateItemCertificate>>, TError,{itemId: number;id: number;data: BodyType<UpdateItemCertificateRequest>}, TContext> => {
 
 const mutationKey = ['updateItemCertificate'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -2171,7 +2181,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateItemCertificate>>, {itemId: number;id: number;data: BodyType<CreateCertificateRequest>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateItemCertificate>>, {itemId: number;id: number;data: BodyType<UpdateItemCertificateRequest>}> = (props) => {
           const {itemId,id,data} = props ?? {};
 
           return  updateItemCertificate(itemId,id,data,requestOptions)
@@ -2185,18 +2195,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type UpdateItemCertificateMutationResult = NonNullable<Awaited<ReturnType<typeof updateItemCertificate>>>
-    export type UpdateItemCertificateMutationBody = BodyType<CreateCertificateRequest>
+    export type UpdateItemCertificateMutationBody = BodyType<UpdateItemCertificateRequest>
     export type UpdateItemCertificateMutationError = ErrorType<unknown>
 
     /**
  * @summary Update a compliance item's certificate
  */
 export const useUpdateItemCertificate = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateItemCertificate>>, TError,{itemId: number;id: number;data: BodyType<CreateCertificateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateItemCertificate>>, TError,{itemId: number;id: number;data: BodyType<UpdateItemCertificateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateItemCertificate>>,
         TError,
-        {itemId: number;id: number;data: BodyType<CreateCertificateRequest>},
+        {itemId: number;id: number;data: BodyType<UpdateItemCertificateRequest>},
         TContext
       > => {
       return useMutation(getUpdateItemCertificateMutationOptions(options));
@@ -2273,6 +2283,231 @@ export const useDeleteItemCertificate = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteItemCertificateMutationOptions(options));
+    }
+
+export const getCreateCertificateDefectUrl = (itemId: number,
+    id: number,) => {
+
+
+
+
+  return `/api/items/${itemId}/certificates/${id}/defects`
+}
+
+/**
+ * @summary Add a defect to a compliance item's certificate (opens a FixTrack job when FixTrack is enabled)
+ */
+export const createCertificateDefect = async (itemId: number,
+    id: number,
+    createCertificateDefectRequest: CreateCertificateDefectRequest, options?: RequestInit): Promise<CertificateDefect> => {
+
+  return customFetch<CertificateDefect>(getCreateCertificateDefectUrl(itemId,id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createCertificateDefectRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateCertificateDefectMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCertificateDefect>>, TError,{itemId: number;id: number;data: BodyType<CreateCertificateDefectRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCertificateDefect>>, TError,{itemId: number;id: number;data: BodyType<CreateCertificateDefectRequest>}, TContext> => {
+
+const mutationKey = ['createCertificateDefect'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCertificateDefect>>, {itemId: number;id: number;data: BodyType<CreateCertificateDefectRequest>}> = (props) => {
+          const {itemId,id,data} = props ?? {};
+
+          return  createCertificateDefect(itemId,id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCertificateDefectMutationResult = NonNullable<Awaited<ReturnType<typeof createCertificateDefect>>>
+    export type CreateCertificateDefectMutationBody = BodyType<CreateCertificateDefectRequest>
+    export type CreateCertificateDefectMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Add a defect to a compliance item's certificate (opens a FixTrack job when FixTrack is enabled)
+ */
+export const useCreateCertificateDefect = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCertificateDefect>>, TError,{itemId: number;id: number;data: BodyType<CreateCertificateDefectRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createCertificateDefect>>,
+        TError,
+        {itemId: number;id: number;data: BodyType<CreateCertificateDefectRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateCertificateDefectMutationOptions(options));
+    }
+
+export const getUpdateCertificateDefectUrl = (itemId: number,
+    id: number,
+    defectId: number,) => {
+
+
+
+
+  return `/api/items/${itemId}/certificates/${id}/defects/${defectId}`
+}
+
+/**
+ * @summary Mark a defect without a FixTrack job remedied (or not)
+ */
+export const updateCertificateDefect = async (itemId: number,
+    id: number,
+    defectId: number,
+    updateCertificateDefectRequest: UpdateCertificateDefectRequest, options?: RequestInit): Promise<CertificateDefect> => {
+
+  return customFetch<CertificateDefect>(getUpdateCertificateDefectUrl(itemId,id,defectId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateCertificateDefectRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateCertificateDefectMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCertificateDefect>>, TError,{itemId: number;id: number;defectId: number;data: BodyType<UpdateCertificateDefectRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCertificateDefect>>, TError,{itemId: number;id: number;defectId: number;data: BodyType<UpdateCertificateDefectRequest>}, TContext> => {
+
+const mutationKey = ['updateCertificateDefect'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCertificateDefect>>, {itemId: number;id: number;defectId: number;data: BodyType<UpdateCertificateDefectRequest>}> = (props) => {
+          const {itemId,id,defectId,data} = props ?? {};
+
+          return  updateCertificateDefect(itemId,id,defectId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCertificateDefectMutationResult = NonNullable<Awaited<ReturnType<typeof updateCertificateDefect>>>
+    export type UpdateCertificateDefectMutationBody = BodyType<UpdateCertificateDefectRequest>
+    export type UpdateCertificateDefectMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Mark a defect without a FixTrack job remedied (or not)
+ */
+export const useUpdateCertificateDefect = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCertificateDefect>>, TError,{itemId: number;id: number;defectId: number;data: BodyType<UpdateCertificateDefectRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCertificateDefect>>,
+        TError,
+        {itemId: number;id: number;defectId: number;data: BodyType<UpdateCertificateDefectRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateCertificateDefectMutationOptions(options));
+    }
+
+export const getDeleteCertificateDefectUrl = (itemId: number,
+    id: number,
+    defectId: number,) => {
+
+
+
+
+  return `/api/items/${itemId}/certificates/${id}/defects/${defectId}`
+}
+
+/**
+ * @summary Remove a defect recorded in error (its FixTrack job stays)
+ */
+export const deleteCertificateDefect = async (itemId: number,
+    id: number,
+    defectId: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteCertificateDefectUrl(itemId,id,defectId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteCertificateDefectMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCertificateDefect>>, TError,{itemId: number;id: number;defectId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteCertificateDefect>>, TError,{itemId: number;id: number;defectId: number}, TContext> => {
+
+const mutationKey = ['deleteCertificateDefect'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCertificateDefect>>, {itemId: number;id: number;defectId: number}> = (props) => {
+          const {itemId,id,defectId} = props ?? {};
+
+          return  deleteCertificateDefect(itemId,id,defectId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteCertificateDefectMutationResult = NonNullable<Awaited<ReturnType<typeof deleteCertificateDefect>>>
+
+    export type DeleteCertificateDefectMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove a defect recorded in error (its FixTrack job stays)
+ */
+export const useDeleteCertificateDefect = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCertificateDefect>>, TError,{itemId: number;id: number;defectId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteCertificateDefect>>,
+        TError,
+        {itemId: number;id: number;defectId: number},
+        TContext
+      > => {
+      return useMutation(getDeleteCertificateDefectMutationOptions(options));
     }
 
 export const getListComplianceItemsUrl = (params?: ListComplianceItemsParams,) => {
@@ -7474,6 +7709,240 @@ export function useGetFoodSafetyMissingDates<TData = Awaited<ReturnType<typeof g
 
 
 
+
+export const getListKitchenClosedDaysUrl = (params: ListKitchenClosedDaysParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/food-safety/closed-days?${stringifiedParams}` : `/api/food-safety/closed-days`
+}
+
+/**
+ * @summary List days marked closed (non-operating) for a diary scope
+ */
+export const listKitchenClosedDays = async (params: ListKitchenClosedDaysParams, options?: RequestInit): Promise<KitchenClosedDaysList> => {
+
+  return customFetch<KitchenClosedDaysList>(getListKitchenClosedDaysUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListKitchenClosedDaysQueryKey = (params?: ListKitchenClosedDaysParams,) => {
+    return [
+    `/api/food-safety/closed-days`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListKitchenClosedDaysQueryOptions = <TData = Awaited<ReturnType<typeof listKitchenClosedDays>>, TError = ErrorType<unknown>>(params: ListKitchenClosedDaysParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listKitchenClosedDays>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListKitchenClosedDaysQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listKitchenClosedDays>>> = ({ signal }) => listKitchenClosedDays(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listKitchenClosedDays>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListKitchenClosedDaysQueryResult = NonNullable<Awaited<ReturnType<typeof listKitchenClosedDays>>>
+export type ListKitchenClosedDaysQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List days marked closed (non-operating) for a diary scope
+ */
+
+export function useListKitchenClosedDays<TData = Awaited<ReturnType<typeof listKitchenClosedDays>>, TError = ErrorType<unknown>>(
+ params: ListKitchenClosedDaysParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listKitchenClosedDays>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListKitchenClosedDaysQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateKitchenClosedDaysUrl = (params?: CreateKitchenClosedDaysParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/food-safety/closed-days?${stringifiedParams}` : `/api/food-safety/closed-days`
+}
+
+/**
+ * @summary Mark a range of days closed (non-operating) for a diary scope (admins)
+ */
+export const createKitchenClosedDays = async (kitchenClosedDaysInput: KitchenClosedDaysInput,
+    params?: CreateKitchenClosedDaysParams, options?: RequestInit): Promise<KitchenClosedDaysCreated> => {
+
+  return customFetch<KitchenClosedDaysCreated>(getCreateKitchenClosedDaysUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(kitchenClosedDaysInput)
+  }
+);}
+
+
+
+
+
+export const getCreateKitchenClosedDaysMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKitchenClosedDays>>, TError,{data: BodyType<KitchenClosedDaysInput>;params?: CreateKitchenClosedDaysParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createKitchenClosedDays>>, TError,{data: BodyType<KitchenClosedDaysInput>;params?: CreateKitchenClosedDaysParams}, TContext> => {
+
+const mutationKey = ['createKitchenClosedDays'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createKitchenClosedDays>>, {data: BodyType<KitchenClosedDaysInput>;params?: CreateKitchenClosedDaysParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  createKitchenClosedDays(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateKitchenClosedDaysMutationResult = NonNullable<Awaited<ReturnType<typeof createKitchenClosedDays>>>
+    export type CreateKitchenClosedDaysMutationBody = BodyType<KitchenClosedDaysInput>
+    export type CreateKitchenClosedDaysMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Mark a range of days closed (non-operating) for a diary scope (admins)
+ */
+export const useCreateKitchenClosedDays = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKitchenClosedDays>>, TError,{data: BodyType<KitchenClosedDaysInput>;params?: CreateKitchenClosedDaysParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createKitchenClosedDays>>,
+        TError,
+        {data: BodyType<KitchenClosedDaysInput>;params?: CreateKitchenClosedDaysParams},
+        TContext
+      > => {
+      return useMutation(getCreateKitchenClosedDaysMutationOptions(options));
+    }
+
+export const getRemoveKitchenClosedDayUrl = (id: number,) => {
+
+
+
+
+  return `/api/food-safety/closed-days/${id}`
+}
+
+/**
+ * @summary Remove a closure (admins); it stays in the history
+ */
+export const removeKitchenClosedDay = async (id: number, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getRemoveKitchenClosedDayUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getRemoveKitchenClosedDayMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeKitchenClosedDay>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeKitchenClosedDay>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['removeKitchenClosedDay'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeKitchenClosedDay>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  removeKitchenClosedDay(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveKitchenClosedDayMutationResult = NonNullable<Awaited<ReturnType<typeof removeKitchenClosedDay>>>
+
+    export type RemoveKitchenClosedDayMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Remove a closure (admins); it stays in the history
+ */
+export const useRemoveKitchenClosedDay = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeKitchenClosedDay>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof removeKitchenClosedDay>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getRemoveKitchenClosedDayMutationOptions(options));
+    }
 
 export const getUpdateFoodSafetyRecordUrl = (id: number,) => {
 

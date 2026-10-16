@@ -111,3 +111,29 @@ export function DbsReviewBadge({ dbsCheckDate, className }: { dbsCheckDate: stri
     </Badge>
   );
 }
+
+/** Label for a check whose newest certificate needs remedial action. */
+export function needsActionLabel(item: { needsActionReason?: string | null; openDefectCount?: number }): string {
+  const count = item.openDefectCount ?? 0;
+  if (item.needsActionReason === "unsatisfactory") {
+    return count > 0 ? "Unsatisfactory — remedial work open" : "Unsatisfactory — new certificate needed";
+  }
+  return `Remedial work open (${count} defect${count === 1 ? "" : "s"})`;
+}
+
+/**
+ * Shown when a check's newest certificate is unsatisfactory or has open
+ * C1/C2/FI/ID/AR defects: the check needs action whatever its due date.
+ */
+export function NeedsActionBadge({ item, className }: {
+  item: { needsAction?: boolean; needsActionReason?: string | null; openDefectCount?: number };
+  className?: string;
+}) {
+  if (!item.needsAction) return null;
+  return (
+    <Badge variant="outline" className={cn("font-medium py-1 px-2.5 shadow-sm gap-1.5 bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-900/30 dark:text-rose-300", className)}>
+      <ShieldAlert className="w-3.5 h-3.5" />
+      {needsActionLabel(item)}
+    </Badge>
+  );
+}

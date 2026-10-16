@@ -247,6 +247,7 @@ kitchen/
   mobile-daily-checklists.csv    — AM/PM checklists submitted from the mobile app
   cleaning-tasks.csv             — cleaning schedule tasks
   cleaning-logs.csv              — cleaning schedule completions
+  closed-days.csv                — days marked closed (not operating), with who, when and any removal
 fix-track/
   issues.csv                     — maintenance issues
 doc-track/
@@ -571,6 +572,9 @@ router.get(
       await out.csv("kitchen/cleaning-tasks.csv", async () => (await db.execute(sql`SELECT * FROM kitchen_cleaning_tasks WHERE client_id = ${cid} ORDER BY id`)).rows);
 
       await out.csv("kitchen/cleaning-logs.csv", async () => (await db.execute(sql`SELECT * FROM kitchen_cleaning_logs WHERE client_id = ${cid} ORDER BY log_date DESC, id`)).rows);
+
+      // Removed closures stay in the file (removed_at/removed_by) as evidence.
+      await out.csv("kitchen/closed-days.csv", async () => (await db.execute(sql`SELECT * FROM kitchen_closed_days WHERE client_id = ${cid} ORDER BY closed_date DESC, id`)).rows);
 
       // ── FixTrack ──────────────────────────────────────────────────────────
       await out.csv("fix-track/issues.csv", () => db.select().from(fixTrackIssuesTable).where(eq(fixTrackIssuesTable.clientId, cid)));

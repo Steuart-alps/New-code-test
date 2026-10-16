@@ -303,10 +303,21 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             ${siteId ? sql`AND site_id = ${siteId}` : sql``}
         `);
         const submittedIds = new Set(rows(fsRows).map((r: any) => r.site_id));
-        const missing = allSites.filter((s) => !submittedIds.has(s.id));
+        // A site marked closed today (KitchenTrack closed days) is not missing.
+        const closedRows = await db.execute(sql`
+          SELECT site_id
+          FROM kitchen_closed_days
+          WHERE client_id = ${clientId}
+            AND closed_date = ${today}
+            AND site_id IS NOT NULL
+            AND removed_at IS NULL
+            ${siteId ? sql`AND site_id = ${siteId}` : sql``}
+        `);
+        const closedIds = new Set(rows(closedRows).map((r: any) => r.site_id));
+        const missing = allSites.filter((s) => !submittedIds.has(s.id) && !closedIds.has(s.id));
         if (missing.length === 0) {
           status = "ok";
-          badge = "All submitted";
+          badge = closedIds.size > 0 && submittedIds.size === 0 ? "Closed today" : "All submitted";
         } else if (!(await loadStarted()).kitchen) {
           status = "no_data";
           badge = "Not started";

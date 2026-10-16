@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
-function session() {
+function session(defaultHeaders = {}) {
   let cookie = "";
   return async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
@@ -10,6 +10,7 @@ function session() {
       headers: {
         "Content-Type": "application/json",
         ...(cookie ? { cookie } : {}),
+        ...defaultHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -25,7 +26,8 @@ function session() {
 }
 
 async function createTenant(label) {
-  const request = session();
+  // The manager deliberately records past hires, which an owner may do with a reason.
+  const request = session({ "X-Override-Reason": encodeURIComponent("Bike export fixture: past hire") });
   const email = `bike-export-${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`;
   const registration = await request("POST", "/auth/register", {
     name: `Bike Export ${label}`,
