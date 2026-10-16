@@ -11,6 +11,23 @@ import { listRetainedRiddorReceiptPaths } from "./riddorReceipts";
 import { ClientStorageErasureError, countClientStoredObjects, type ClientStorageEraser } from "./offboarding";
 
 /**
+ * Object paths the client's rows refer to (attachment columns plus the usage
+ * ledger), once each. Ownership is decided later from each object's ACL.
+ */
+export async function listClientStorageReferences(
+  clientId: number,
+  executor: Parameters<ClientStorageEraser>[1],
+): Promise<string[]> {
+  const ledger = await executor.execute(
+    sql`SELECT object_path FROM storage_usage_objects WHERE client_id = ${clientId} AND present`,
+  );
+  return [...new Set([
+    ...await listTenantAttachmentObjectPaths(executor, clientId),
+    ...(ledger.rows as Array<{ object_path: string }>).map((row) => row.object_path),
+  ])];
+}
+
+/**
  * Lists the tenant's private objects (its provider prefixes plus legacy
  * references, filtered by the ACL owner) and deletes each one. Throws — so the
  * caller's deletion transaction rolls back and retries tomorrow — when storage
@@ -27,15 +44,8 @@ export const eraseClientStorageObjects: ClientStorageEraser = async (clientId, e
     if (await countClientStoredObjects(clientId, executor) === 0) return { objectsDeleted: 0 };
     throw new Error("Object storage is not configured, so this client's stored files cannot be deleted");
   }
-  const ledger = await executor.execute(
-    sql`SELECT object_path FROM storage_usage_objects WHERE client_id = ${clientId} AND present`,
-  );
-  const referenced = [
-    ...await listTenantAttachmentObjectPaths(executor, clientId),
-    ...(ledger.rows as Array<{ object_path: string }>).map((row) => row.object_path),
-  ];
+  const candidates = await listClientStorageReferences(clientId, executor);
   const retained = new Set(await listRetainedRiddorReceiptPaths(executor, clientId));
-  const candidates = [...new Set(referenced)];
   // Ownership comes from each object's ACL, never from the reference: an
   // unmarked object, or one another tenant owns, is left in place and counted.
   const owned = (await storage.listTenantStorageObjects(clientId, candidates))

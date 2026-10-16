@@ -63,6 +63,7 @@
 - [Browser engine runtime](browser-engine-runtime.md) — Playwright WebKit needs exact native sonames that may be unavailable even after its browser archive is installed.
 - [Browser test API proxy](browser-test-api-proxy.md) — real-browser tests against a private API must enrol mandatory 2FA and strip the Vite origin from upstream requests; with enforced CSRF, rewrite it to the API origin (FRESH_SCHEMA_BROWSER_POLICY).
 - [API codegen launcher drift](api-codegen-launcher-drift.md) — a stale Orval workspace launcher can point at a missing peer variant and produce misleading generated-client diffs.
+- [Cancelled business storage class](cancelled-storage-class.md) — files move to ARCHIVE 30 days after cancellation and back on resubscription; export stays open while locked.
 - [Account erasure review](account-erasure-review.md) — independent approval, 30-day minimum and legal holds must survive every deletion entry point and request race.
 - [Drizzle transaction startup](drizzle-transaction-startup.md) — actor-context setup failures occur before Drizzle cleanup; the pool adapter must own rollback and release.
 - [Shell runtime stalls](shell-runtime-loader-hangs.md) — Historical (Replit-only): distinguish injected-loader stalls from memory pressure caused by parallel validation jobs.

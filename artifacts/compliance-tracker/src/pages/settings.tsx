@@ -2699,9 +2699,11 @@ export default function SettingsPage() {
     await triggerTestEmail.mutateAsync({ data: { to: testEmail } });
   };
 
+  // Locked (trial ended or cancelled): the full export stays available for the
+  // 12 months the records are kept, next to the deletion request.
   if (billingLocked) return (
     <AppLayout title="Settings">
-      <div className="max-w-4xl"><DataDeletionRequestCard /></div>
+      <div className="max-w-4xl space-y-6"><DataExportCard /><DataDeletionRequestCard /></div>
     </AppLayout>
   );
   if (isLoading) return <AppLayout title="Settings"><div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mt-10" /></AppLayout>;

@@ -33,6 +33,7 @@
     "test:track-notifications:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-notifications.mjs",
     "test:client-data-deletion-feedback": "bash tests/run-fresh-schema.sh tests/client-data-deletion-feedback.mjs",
     "test:retention-clock": "bash tests/run-fresh-schema.sh tests/retention-clock.mjs",
+    "test:cancelled-storage-class": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/cancelled-storage-class.mjs",
     "test:approved-account-deletion": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/approved-account-deletion.mjs",
     "test:password-reset-fresh-schema": "bash tests/run-fresh-schema.sh tests/password-reset-fresh-schema.mjs",
     "test:security-hardening": "bash tests/run-fresh-schema.sh tests/security-hardening.mjs",

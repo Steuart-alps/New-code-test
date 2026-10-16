@@ -11,8 +11,10 @@ const ALLOWED_PREFIXES = ["/auth", "/billing", "/healthz", "/data-deletion", "/a
 // Exact read-only requests that stay reachable while locked. A consultant's
 // portfolio lists the businesses they manage; it must keep working when only
 // the consultant's own business trial has ended (each business it lists has
-// its own lock, enforced when the consultant switches into it).
-const ALLOWED_READS = new Set(["/portfolio"]);
+// its own lock, enforced when the consultant switches into it). The full data
+// export stays downloadable for the 12 months a cancelled business's records
+// are kept (the route itself allows only consultants and client admins).
+const ALLOWED_READS = new Set(["/portfolio", "/export"]);
 
 /**
  * Global guard mounted on the API router: once a client's free trial has

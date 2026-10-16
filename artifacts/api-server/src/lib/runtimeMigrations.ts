@@ -5100,7 +5100,8 @@ async function migrateOffboardingColumns() {
       ADD COLUMN IF NOT EXISTS "cancellation_warning_sent_at" timestamptz,
       ADD COLUMN IF NOT EXISTS "offboarding_email_sent_at"  timestamptz,
       ADD COLUMN IF NOT EXISTS "data_deletion_scheduled_at" timestamptz,
-      ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz
+      ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz,
+      ADD COLUMN IF NOT EXISTS "files_archived_at"          timestamptz
   `);
   // Per-recipient delivery state permits failed addresses to retry without
   // re-emailing successful recipients, unlike a single client-level marker.
