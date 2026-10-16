@@ -1,4 +1,4 @@
-name: Training certificates across midnight
+name: Training pages browser checks
 
 on:
   pull_request:
@@ -8,6 +8,9 @@ on:
       - "artifacts/compliance-tracker/src/lib/training-expiry.ts"
       - "artifacts/compliance-tracker/src/lib/training-matrix.ts"
       - "artifacts/compliance-tracker/tests/training-midnight-*"
+      - "artifacts/compliance-tracker/src/pages/safe-track.tsx"
+      - "artifacts/compliance-tracker/src/lib/induction-print.ts"
+      - "artifacts/compliance-tracker/tests/induction-form-*"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -20,6 +23,9 @@ on:
       - "artifacts/compliance-tracker/src/lib/training-expiry.ts"
       - "artifacts/compliance-tracker/src/lib/training-matrix.ts"
       - "artifacts/compliance-tracker/tests/training-midnight-*"
+      - "artifacts/compliance-tracker/src/pages/safe-track.tsx"
+      - "artifacts/compliance-tracker/src/lib/induction-print.ts"
+      - "artifacts/compliance-tracker/tests/induction-form-*"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -28,7 +34,7 @@ on:
 
 jobs:
   training-midnight:
-    name: TrainTrack expiry rolls over at local midnight
+    name: Training expiry at midnight and induction form edits
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -53,3 +59,6 @@ jobs:
 
       - name: Run training midnight checks
         run: pnpm --filter @workspace/compliance-tracker run test:training-midnight-browser
+
+      - name: Run induction form checks
+        run: pnpm --filter @workspace/compliance-tracker run test:induction-form-browser
