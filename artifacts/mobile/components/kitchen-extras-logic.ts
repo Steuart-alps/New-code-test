@@ -202,9 +202,23 @@ export interface WeeklyReviewDraft {
   managerSignature: string;
 }
 
-/** Questions answered "No" (the website asks for a deviation row for these). */
-export function weeklyNoAnswers(checks: Record<string, Answer | undefined>): string[] {
-  return [...HOUSE_RULES, ...REVIEW_QUESTIONS].filter((q) => checks[q.key] === 'no').map((q) => q.label);
+// Which answer needs attention, as in lib/api-zod/src/kitchen-weekly.ts (the
+// API's stored result and the website use that file; tests/kitchen-extras-logic
+// checks these lists match it). Most questions: "no". These: "yes".
+const YES_NEEDS_ATTENTION = ['cleaningScheduleNeedsUpdate', 'staffRefresherRequired'];
+// Either answer is fine; the follow-up question carries the result.
+const NEUTRAL = ['methodsOrEquipmentChanged', 'additionalChecksRequired', 'complaintsReceived'];
+
+export function weeklyAttentionAnswer(key: string): 'yes' | 'no' | null {
+  if (NEUTRAL.includes(key)) return null;
+  return YES_NEEDS_ATTENTION.includes(key) ? 'yes' : 'no';
+}
+
+/** Questions whose answer needs attention (the website asks for a deviation row for these). */
+export function weeklyAttentionAnswers(checks: Record<string, Answer | undefined>): string[] {
+  return [...HOUSE_RULES, ...REVIEW_QUESTIONS]
+    .filter((q) => { const attention = weeklyAttentionAnswer(q.key); return attention !== null && checks[q.key] === attention; })
+    .map((q) => q.label);
 }
 
 export function weeklyAnsweredCount(checks: Record<string, Answer | undefined>): number {

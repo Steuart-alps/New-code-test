@@ -15,8 +15,14 @@ const {
   HOUSE_RULES, REVIEW_QUESTIONS, WEEKLY_QUESTION_COUNT,
   addDays, buildProbeCheckPayload, buildWeeklyReviewPayload, defaultProbeRows, displayDate, emptyProbeRow,
   isCalendarDate, pendingEntryFor, probeNamesFromConfig, probeOverallResult, readingWithinTolerance,
-  weekCommencing, weeklyAnsweredCount, weeklyNoAnswers,
+  weekCommencing, weeklyAnsweredCount, weeklyAttentionAnswer, weeklyAttentionAnswers,
 } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
+
+// The shared rule the API stores the result with and the website flags by.
+const sharedSource = await readFile(new URL('../../../lib/api-zod/src/kitchen-weekly.ts', import.meta.url), 'utf8');
+const shared = await import(`data:text/javascript,${encodeURIComponent(ts.transpileModule(sharedSource, {
+  compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
+}).outputText)}`);
 
 const today = '2026-10-15';
 const at = '2026-10-15T09:30:00.000Z';
@@ -121,7 +127,15 @@ assert.deepEqual(buildWeeklyReviewPayload({ ...weeklyDraft, issuesThreeTimes: nu
   { actionTaken: 'Retrained' });
 assert.equal(buildWeeklyReviewPayload({ ...weeklyDraft, managerSignature: '' }, today, at).ok, false, 'manager signature required');
 assert.equal(buildWeeklyReviewPayload({ ...weeklyDraft, weekCommencing: '2026-10-19' }, today, at).ok, false, 'no future week');
-assert.deepEqual(weeklyNoAnswers(weeklyDraft.checks), ['Cleaning']);
+assert.deepEqual(weeklyAttentionAnswers(weeklyDraft.checks), ['Cleaning']);
+// Every question flags the same answer as the API and website.
+for (const q of [...HOUSE_RULES, ...REVIEW_QUESTIONS]) {
+  assert.equal(weeklyAttentionAnswer(q.key), shared.kitchenWeeklyAttentionAnswer(q.key), `${q.key}: same answer needs attention`);
+}
+// "No" is the good answer to these, and "Yes" to a complaint is followed up by the next question.
+assert.deepEqual(weeklyAttentionAnswers({ cleaningScheduleNeedsUpdate: 'no', staffRefresherRequired: 'no', complaintsReceived: 'yes' }), []);
+assert.deepEqual(weeklyAttentionAnswers({ staffRefresherRequired: 'yes', complaintsInvestigated: 'no' }),
+  ['Do any staff require refresher training?', 'Have complaints been investigated and, where necessary, changes made?']);
 assert.equal(weeklyAnsweredCount(weeklyDraft.checks), 3);
 
 // One record per date: an unsent device copy for the date blocks a second;

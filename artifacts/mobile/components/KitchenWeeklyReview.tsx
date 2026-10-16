@@ -27,7 +27,7 @@ import {
   pendingEntryFor,
   weekCommencing,
   weeklyAnsweredCount,
-  weeklyNoAnswers,
+  weeklyAttentionAnswers,
   type Answer,
   type WeeklyReviewSummary,
 } from './kitchen-extras-logic';
@@ -110,7 +110,7 @@ export function KitchenWeeklyReview() {
   const existing = existingQuery.data;
   const waiting = pendingEntryFor(outbox.entries, 'weekCommencing', week);
   const blocked = !!existing || !!waiting;
-  const noAnswers = weeklyNoAnswers(checks);
+  const attentionAnswers = weeklyAttentionAnswers(checks);
   const hasDeviation = deviations.some((row) => row.rule.trim() || row.action.trim());
 
   function submit() {
@@ -200,9 +200,9 @@ export function KitchenWeeklyReview() {
           <Text style={[kx.sectionHint, { color: colors.mutedForeground }]}>
             If any answer is “No”, record the deviation and the corrective action taken.
           </Text>
-          {noAnswers.length > 0 && !hasDeviation ? (
+          {attentionAnswers.length > 0 && !hasDeviation ? (
             <KitchenNotice icon="alert-triangle" tone="warning" testID="kitchen-weekly-deviation-warning">
-              {noAnswers.join(', ')} answered “No” — please record the deviation and action taken below.
+              {attentionAnswers.join(', ')} need attention: please record the deviation and action taken below.
             </KitchenNotice>
           ) : null}
           {deviations.map((row, index) => (
