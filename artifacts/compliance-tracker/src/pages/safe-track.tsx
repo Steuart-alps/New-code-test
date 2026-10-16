@@ -412,12 +412,12 @@ function ListTable({ headers, rows, photoEntityType, onEdit, onDelete, onDownloa
                     </Button>
                   )}
                   {canAdmin && onEdit && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(r.id)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Edit" title="Edit" onClick={() => onEdit(r.id)}>
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
                   )}
                   {canAdmin && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => onDelete(r.id)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" aria-label="Delete" title="Delete" onClick={() => onDelete(r.id)}>
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   )}
@@ -532,13 +532,19 @@ export default function SafeTrackPage() {
     delete payload.id; delete payload.clientId; delete payload.createdBy;
     delete payload.createdAt; delete payload.updatedAt;
     try {
-      if (editing) {
-        await apiFetch(`${base}/${sub}/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) });
-      } else {
-        await apiFetch(`${base}/${sub}`, { method: "POST", body: JSON.stringify(payload) });
+      const res = editing
+        ? await apiFetch(`${base}/${sub}/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(`${base}/${sub}`, { method: "POST", body: JSON.stringify(payload) });
+      // A rejected save keeps the dialog open: closing it would discard the
+      // entries with no sign anything went wrong.
+      if (!res.ok) {
+        toast({ title: "Could not save", description: await getApiErrorMessage(res, `Error ${res.status}`), variant: "destructive" });
+        return;
       }
       setDialogOpen(false);
       load();
+    } catch (err: any) {
+      toast({ title: "Could not save", description: err?.message ?? "Network error", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
