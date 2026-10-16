@@ -277,7 +277,9 @@ async function downloadPdf(label, readOptions, { analytics = true } = {}) {
   await page.getByRole("button", { name: "Download PDF", exact: true }).click();
   const download = await downloadPromise;
   const filename = download.suggestedFilename();
-  assert.match(filename, /^[^/\\]+\.pdf$/i, `${label} download should have a .pdf filename`);
+  // Every engine must keep the app's dated name, not a blob id or "download".
+  assert.match(filename, /^hot-tub-maintenance-log-\d{4}-\d{2}-\d{2}\.pdf$/,
+    `${label} download should keep its dated .pdf filename (got ${filename})`);
   const filePath = join(temporaryDirectory, `${label}.pdf`);
   await download.saveAs(filePath);
   const pdf = { filename, ...await readPdf(filePath, readOptions) };
@@ -588,6 +590,16 @@ try {
   const longNoteTailPage = populatedPdf.pages.findIndex(text => text.includes("LONGNOTE_EXPLICIT_TAIL_MARKER_153"));
   assert.ok(longNoteHeadPage >= 0, "PDF should retain the beginning of the long note");
   assert.ok(longNoteTailPage > longNoteHeadPage, "PDF should retain the tail of a note that spans pages");
+  // Every word of the multi-page note survives, not just its two ends. Page
+  // breaks put the footer and repeated table heading inside the note's text.
+  const pageBreak = /\s*Hot Tub & Spa Maintenance Log\s+Page \d+ of \d+\s+Date\s+Session\s+Site\s+Tub\s+Check\s+Result\s+pH\s+Sanitiser \(ppm\)\s+Temp \(°C\)\s+Location\s+Performed by\s+Notes\s*/g;
+  const continuousText = populatedText.replace(pageBreak, " ");
+  const longNoteBody = continuousText.slice(
+    continuousText.indexOf("LONGNOTE_HEAD_MARKER") + "LONGNOTE_HEAD_MARKER".length,
+    continuousText.indexOf("LONGNOTE_EXPLICIT_TAIL_MARKER_153"),
+  );
+  assert.equal(compact(longNoteBody), compact("long maintenance detail ".repeat(600)),
+    "PDF should retain the complete long note across its pages");
   for (const row of excludedRows) {
     assert.ok(!populatedText.includes(row.notes), `PDF should exclude ${row.notes}`);
   }

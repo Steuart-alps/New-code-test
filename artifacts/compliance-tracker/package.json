@@ -31,6 +31,8 @@
     "test:verify-email-browser": "node tests/verify-email-browser.test.mjs",
     "test:billing-addon-settings-browser": "node tests/billing-addon-settings-browser.test.mjs",
     "test:hot-tub-pdf": "node tests/hot-tub-pdf-browser.test.mjs",
+    "test:hot-tub-pdf-firefox": "HOT_TUB_BROWSER=firefox node tests/hot-tub-pdf-browser.test.mjs",
+    "test:hot-tub-pdf-webkit": "HOT_TUB_BROWSER=webkit node tests/hot-tub-pdf-browser.test.mjs",
     "test:incident-export-browser": "node tests/incident-export-browser.test.mjs",
     "test:form-options-editor-browser": "node tests/form-options-editor-browser.test.mjs",
     "test:custom-option-forms-browser": "node tests/custom-option-forms-browser.test.mjs",
