@@ -32,7 +32,7 @@ import { format, parseISO, isValid, differenceInDays } from "date-fns";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ const SEVERITY_LABELS: Record<string, string> = {
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const mutationSucceeded = beginApiMutation(opts?.method, `/pest-track${path}`);
-  const res = await fetch(withActiveClient(`${baseUrl}/api/pest-track${path}`, opts?.body), await withCsrfToken({
+  const res = await fetchWithOverrideReason(withActiveClient(`${baseUrl}/api/pest-track${path}`, opts?.body), await withCsrfToken({
     ...opts,
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     credentials: "include",
@@ -245,10 +245,10 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site</Label>
-              <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+              <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All sites</SelectItem>
+                  <SelectItem value="none">All sites</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -402,10 +402,10 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site</Label>
-              <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+              <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All sites</SelectItem>
+                  <SelectItem value="none">All sites</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>

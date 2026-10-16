@@ -108,7 +108,7 @@ export default function DeleteAccountScreen() {
               Your ComplyTrack login was created by your employer and belongs to their business account. To delete it, ask your manager (a ComplyTrack admin for your business) to remove you. Your check records stay with the business as part of its compliance history.
             </Text>
             <Text style={[styles.body, { color: colors.mutedForeground }]}>
-              If you cannot reach your manager, or you want to exercise another data protection right, contact ALPS Consulting.
+              If you cannot reach your manager, or you want to exercise another data protection right, contact ALPS Consultancy.
             </Text>
             <TouchableOpacity
               testID="delete-account-contact"
@@ -116,7 +116,7 @@ export default function DeleteAccountScreen() {
               onPress={() => open(CONTACT_URL)}
               accessibilityRole="link"
             >
-              <Text style={styles.buttonText}>Contact ALPS Consulting</Text>
+              <Text style={styles.buttonText}>Contact ALPS Consultancy</Text>
             </TouchableOpacity>
           </>
         ) : status.isLoading ? (
@@ -130,7 +130,7 @@ export default function DeleteAccountScreen() {
               <Text style={styles.buttonText}>Try again</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.linkButton} onPress={() => open(CONTACT_URL)} accessibilityRole="link">
-              <Text style={[styles.link, { color: colors.primary }]}>Contact ALPS Consulting</Text>
+              <Text style={[styles.link, { color: colors.primary }]}>Contact ALPS Consultancy</Text>
             </TouchableOpacity>
           </>
         ) : request ? (
@@ -146,7 +146,7 @@ export default function DeleteAccountScreen() {
             </Text>
             {request.notification_state !== 'sent' && (
               <Text style={[styles.body, { color: colors.mutedForeground, marginBottom: 0, marginTop: 8 }]}>
-                The administrator has not been notified yet. Contact ALPS Consulting if this does not resolve.
+                The administrator has not been notified yet. Contact ALPS Consultancy if this does not resolve.
               </Text>
             )}
           </View>
@@ -174,13 +174,13 @@ export default function DeleteAccountScreen() {
               Your business has an active subscription. Deleting the account removes the records of everyone in your business, so deletion can be requested once the subscription is cancelled.
             </Text>
             <Text style={[styles.body, { color: colors.mutedForeground }]}>
-              Cancel the subscription in Settings on the ComplyTrack website, then come back here (or use Settings → Data deletion on the website). Contact ALPS Consulting if you need help.
+              Cancel the subscription in Settings on the ComplyTrack website, then come back here (or use Settings → Data deletion on the website). Contact ALPS Consultancy if you need help.
             </Text>
             <TouchableOpacity style={[styles.button, { backgroundColor: colors.navy }]} onPress={() => open(webSettingsUrl())} accessibilityRole="link">
               <Text style={styles.buttonText}>Open web settings</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.linkButton} onPress={() => open(CONTACT_URL)} accessibilityRole="link">
-              <Text style={[styles.link, { color: colors.primary }]}>Contact ALPS Consulting</Text>
+              <Text style={[styles.link, { color: colors.primary }]}>Contact ALPS Consultancy</Text>
             </TouchableOpacity>
           </>
         )}

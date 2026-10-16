@@ -37,6 +37,7 @@ async function markComplianceNotified(q: any, clientId: number): Promise<void> {
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
 
 const router = Router();
+
 const storage = new ObjectStorageService();
 /** Throws TokenPayloadError for a damaged or undecryptable draft; callers
  *  must not preview or dispatch it. */
@@ -733,15 +734,22 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         createdBy: req.currentUser?.id ?? null,
       });
     }
-    if (data.status === "resolved" && isStatusChange) {
+    // The linked module action completes with the repair. A job a contractor
+    // finished from the email link is resolved without a signed-in user, so
+    // its action completes when a manager closes the job. A failed-temperature
+    // action ("parallel") is verified and resolved in KitchenTrack instead.
+    const finishing = isStatusChange && (data.status === "resolved" || data.status === "closed");
+    const syncsAction = finishing && linkedAction && linkedAction.status !== "resolved"
+      && linkedAction.fixTrackDisposition !== "parallel";
+    if (syncsAction) {
       await tx.update(trackActionsTable).set({
         status: "resolved",
         remedialAction: updated[0].solutionNotes?.trim() || `Repair completed through FixTrack issue #${id}`,
         evidenceReference: `FixTrack issue #${id}${updated[0].mediaUrls?.length ? " with attached media evidence" : ""}`,
         resolutionNotes: `Resolved automatically when linked FixTrack issue #${id} was signed off.`,
         resolvedBy: req.currentUser!.id,
-        resolvedByName: updateData.resolvedByName,
-        resolverSignature: data.resolverSignature,
+        resolvedByName: updateData.resolvedByName ?? (current.resolvedByName?.trim() || req.currentUser!.name?.trim() || "FixTrack"),
+        resolverSignature: data.resolverSignature ?? current.resolverSignature,
         resolvedAt: new Date(),
         updatedAt: new Date(),
       }).where(and(

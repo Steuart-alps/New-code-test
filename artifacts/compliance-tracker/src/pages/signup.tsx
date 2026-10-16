@@ -107,7 +107,7 @@ export default function SignupPage() {
           <div className="text-center mb-10">
             <div className="flex justify-center items-center gap-2 mb-6 opacity-70">
               <span className="text-xs font-display italic text-[#162D42]">by</span>
-              <img src={alpsLogo} alt="ALPS Consulting" className="h-4 grayscale mix-blend-multiply" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-4 grayscale mix-blend-multiply" />
             </div>
             <h1 className="text-4xl font-display text-[#162D42] mb-3">Start your free trial</h1>
             <p className="text-muted-foreground text-sm font-light">

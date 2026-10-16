@@ -13,7 +13,7 @@ export function LegalLayout({ title, updated, children }: { title: string; updat
             <ShieldCheck className="w-5 h-5 text-primary" />
             <span className="font-medium font-display text-lg tracking-wide">ComplyTrack</span>
           </button>
-          <img src={alpsLogo} alt="Alps Consultancy" className="h-6 opacity-70 brightness-0 invert" />
+          <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 opacity-70 brightness-0 invert" />
         </div>
       </header>
       <main className="max-w-3xl mx-auto px-6 py-12">

@@ -16,8 +16,8 @@ export const privacyPolicyUrl = () => `${siteUrl()}/privacy`;
 export const termsUrl = () => `${siteUrl()}/terms`;
 /** Web settings, where owners manage billing and the business account. */
 export const webSettingsUrl = () => `${siteUrl()}/settings`;
-/** ALPS Consulting contact page (the address the privacy policy gives). */
-export const CONTACT_URL = 'https://alpsconsultancy.co.uk';
+/** ALPS Consultancy's website (the contact address the privacy policy gives). */
+export const CONTACT_URL = 'https://www.alpsconsultancy.co.uk';
 
 /** Roles that own the business account and may request its erasure. */
 export function canRequestBusinessDeletion(role: string | null | undefined): boolean {

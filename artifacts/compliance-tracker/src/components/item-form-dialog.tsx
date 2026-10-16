@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { localToday } from "@/lib/onboarding";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -59,6 +60,9 @@ export function ItemFormDialog({
   const { data: sites = [] } = useListSites();
   const { data: contractors = [] } = useListContractors();
 
+  // Completing an existing check through this form asks for the date done,
+  // like the "Mark done" dialog; the next due date is counted from it.
+  const [completedDay, setCompletedDay] = useState(localToday());
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -92,13 +96,21 @@ export function ItemFormDialog({
         dueDate: "", leadTimeDays: 7, frequencyMonths: null, notes: "",
       });
     }
+    setCompletedDay(localToday());
   }, [item, isOpen, form, defaultCategoryId, defaultSiteId]);
+
+  const watchedStatus = form.watch("status");
+  const completing = !!item && watchedStatus === "completed" && item.status !== "completed";
+  const completedDayError = !completing ? null
+    : !/^\d{4}-\d{2}-\d{2}$/.test(completedDay) ? "Enter the date the check was done"
+    : completedDay > localToday() ? "The date done cannot be in the future" : null;
 
   const rawFrequency = form.watch("frequencyMonths") as unknown;
   const watchedFrequency = rawFrequency === "" || rawFrequency == null || !Number.isInteger(Number(rawFrequency)) || Number(rawFrequency) < 1
     ? null : Number(rawFrequency);
 
   const onSubmit = async (data: FormValues) => {
+    if (completedDayError) return;
     try {
       const isAllSites = data.siteId === ALL_SITES;
       const numericSiteId =
@@ -120,7 +132,11 @@ export function ItemFormDialog({
         // was selected. This avoids duplicating the current site's check.
         await updateItem.mutateAsync({
           id: item.id,
-          data: { ...basePayload, siteId: numericSiteId ?? item.siteId ?? null } as any,
+          data: {
+            ...basePayload,
+            siteId: numericSiteId ?? item.siteId ?? null,
+            ...(completing ? { completedAt: completedDay } : {}),
+          } as any,
         });
 
         if (isAllSites) {
@@ -233,6 +249,14 @@ export function ItemFormDialog({
                   <SelectItem value="overdue">Overdue</SelectItem>
                 </SelectContent>
               </Select>
+              {completing && (
+                <div className="pt-1 space-y-1">
+                  <Label htmlFor="completedDay" className="text-xs font-medium">Date done</Label>
+                  <Input id="completedDay" type="date" className="h-9" value={completedDay} max={localToday()}
+                    onChange={(e) => setCompletedDay(e.target.value)} />
+                  {completedDayError && <p className="text-xs text-destructive">{completedDayError}</p>}
+                </div>
+              )}
             </div>
 
             <div className="space-y-1">

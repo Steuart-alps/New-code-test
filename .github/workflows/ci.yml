@@ -69,14 +69,29 @@ jobs:
       - name: Build API
         run: pnpm --filter @workspace/api-server run build
 
+      - name: Web dropdown option values test
+        run: pnpm --filter @workspace/compliance-tracker run test:select-item-values
+
+      - name: Weekly kitchen review result rule test
+        run: pnpm --filter @workspace/api-zod run test:kitchen-weekly
+
       - name: Build web app
         env:
           PORT: "5173"
           BASE_PATH: /
         run: pnpm --filter @workspace/compliance-tracker run build
 
+      - name: Public page SEO test
+        run: pnpm --filter @workspace/compliance-tracker run test:seo-pages
+
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
+
+      - name: Web client override-reason retry test
+        run: pnpm --filter @workspace/api-client-react run test:custom-fetch-override-reason
+
+      - name: Track record lock decision tests
+        run: pnpm --filter @workspace/api-server run test:track-record-lock
 
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
@@ -94,6 +109,9 @@ jobs:
 
       - name: Enforced CSRF tests
         run: pnpm --filter @workspace/api-server run test:csrf-enforced:ci
+
+      - name: Settings and dropdown option tests
+        run: pnpm --filter @workspace/api-server run test:config:ci
 
       # The schema-shape suites start their own private cluster with initdb and
       # pg_ctl, which ubuntu-latest ships (PostgreSQL 16, service disabled) but
@@ -116,3 +134,9 @@ jobs:
 
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
+
+      - name: Checklist results and FixTrack job tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:checklist-results-fixtrack
+
+      - name: Owner late-edit reason tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:owner-late-edit-reason

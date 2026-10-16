@@ -9,8 +9,10 @@
     "generate-seo": "node scripts/generate-seo.mjs",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "test:signup-plan": "node tests/signup-plan.test.mjs",
+    "test:seo-pages": "node tests/seo-pages.test.mjs",
     "test:signup-pesttrack-browser": "node tests/signup-pesttrack-browser.test.mjs",
     "test:nav-groups": "node tests/nav-groups.test.mjs",
+    "test:select-item-values": "node tests/select-item-values.test.mjs",
     "test:client-scope": "node tests/client-scope.test.mjs",
     "test:pat-legacy-register-browser": "node tests/pat-legacy-register-browser.test.mjs",
     "test:pat-failure-location": "node tests/pat-failure-location.test.mjs",
@@ -29,6 +31,7 @@
     "test:billing-addon-settings-browser": "node tests/billing-addon-settings-browser.test.mjs",
     "test:hot-tub-pdf": "node tests/hot-tub-pdf-browser.test.mjs",
     "test:incident-export-browser": "node tests/incident-export-browser.test.mjs",
+    "test:form-options-editor-browser": "node tests/form-options-editor-browser.test.mjs",
     "test:viewer-department-browser": "bash tests/run-viewer-department-browser.sh",
     "test:hot-tub-browser-firefox": "HOT_TUB_BROWSER=firefox node tests/hot-tub-browser.test.mjs",
     "test:hot-tub-browser-webkit": "HOT_TUB_BROWSER=webkit node tests/hot-tub-browser.test.mjs",
@@ -46,7 +49,8 @@
     "test:staff-kiosk-token": "node tests/staff-kiosk-token.test.mjs",
     "test:passkey-auth-endpoint": "node tests/passkey-auth-endpoint.test.mjs",
     "test:fix-track-priority": "TZ=Europe/London node tests/run-fix-track-priority.mjs",
-    "typecheck": "flock -s /tmp/complytrack-api-codegen.lock sh -c 'pnpm exec tsc --build ../../lib/api-client-react && tsc -p tsconfig.json --noEmit'"
+    "typecheck": "flock -s /tmp/complytrack-api-codegen.lock sh -c 'pnpm exec tsc --build ../../lib/api-client-react && tsc -p tsconfig.json --noEmit'",
+    "test:landing-modules-browser": "node tests/landing-modules-browser.test.mjs"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

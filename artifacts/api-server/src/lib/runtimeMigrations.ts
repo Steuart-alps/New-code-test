@@ -2093,6 +2093,10 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_survey_history_record_idx" ON "asbestos_survey_history" ("client_id", "record_id")`);
 
+    // ---- Track owners and in-app notifications (Oct 2026) ----
+    await migrateTrackOwnersAndNotifications();
+    await migrateCertificateOutcomes();
+
     // Last: every audited table must exist by now (see auditLogMigration.ts).
     await migrateExtendedAuditLog();
 
@@ -2488,6 +2492,87 @@ async function migrateTrackActions() {
         END IF;
       END LOOP;
     END $$
+  `);
+  await migrateTrackActionsForFindings();
+}
+
+
+// Findings that are not a pass/fail result still need an action on their
+// track: a premises inspection that records action required, and any pest
+// sighting not already resolved. Keyed by source row, so an update never
+// adds a second action. Whether the work goes to FixTrack is the user's call.
+async function migrateTrackActionsForFindings() {
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION raise_track_action_for_finding()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      action_module text;
+      action_title text;
+      action_instruction text;
+      action_severity text := 'action_required';
+      action_site_id integer := NEW.site_id;
+    BEGIN
+      IF TG_TABLE_NAME = 'premises_inspections' THEN
+        IF nullif(trim(coalesce(NEW.action_required, '')), '') IS NULL OR NEW.status = 'closed' THEN
+          RETURN NEW;
+        END IF;
+        action_module := 'premises';
+        action_title := 'Premises inspection: ' || coalesce(nullif(trim(NEW.area), ''), initcap(replace(NEW.inspection_type, '_', ' ')));
+        action_instruction := concat_ws(E'\n',
+          'Inspection on ' || NEW.inspection_date::text || coalesce(' by ' || nullif(trim(NEW.inspected_by), ''), '') || '.',
+          'Action required: ' || trim(NEW.action_required),
+          'Hazard: ' || nullif(trim(NEW.hazard_details), ''),
+          'Findings: ' || nullif(trim(NEW.findings), ''));
+      ELSIF TG_TABLE_NAME = 'pest_activity' THEN
+        IF NEW.resolved THEN
+          RETURN NEW;
+        END IF;
+        action_module := 'pest';
+        action_title := 'Pest activity: ' || initcap(replace(NEW.pest_type, '_', ' '))
+          || coalesce(' at ' || nullif(trim(NEW.location), ''), '');
+        action_instruction := concat_ws(E'\n',
+          'Recorded on ' || NEW.recorded_date::text || coalesce(' by ' || nullif(trim(NEW.recorded_by), ''), '') || ': '
+            || replace(NEW.evidence_type, '_', ' ') || ', severity ' || NEW.severity || '.',
+          'Action taken so far: ' || nullif(trim(NEW.action_taken), ''),
+          'Notes: ' || nullif(trim(NEW.notes), ''));
+        IF lower(NEW.severity) IN ('high', 'critical', 'severe') THEN
+          action_severity := 'urgent';
+        END IF;
+      ELSE
+        RETURN NEW;
+      END IF;
+      IF action_site_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM sites WHERE id = action_site_id AND client_id = NEW.client_id
+      ) THEN
+        action_site_id := NULL;
+      END IF;
+      INSERT INTO track_actions (
+        client_id, site_id, module, source_kind, source_record_id, title, instruction,
+        provenance, severity, status, created_by
+      ) VALUES (
+        NEW.client_id, action_site_id, action_module, TG_TABLE_NAME, NEW.id, action_title, action_instruction,
+        'product_default', action_severity, 'open', NEW.created_by
+      )
+      ON CONFLICT ("client_id", "module", "source_kind", "source_record_id")
+        WHERE "source_kind" IS NOT NULL AND "source_record_id" IS NOT NULL
+      DO NOTHING;
+      RETURN NEW;
+    END;
+    $$
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_track_action_for_finding ON "premises_inspections"`);
+  await db.execute(sql`
+    CREATE TRIGGER raise_track_action_for_finding
+    AFTER INSERT OR UPDATE OF action_required, status ON "premises_inspections"
+    FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_track_action_for_finding ON "pest_activity"`);
+  await db.execute(sql`
+    CREATE TRIGGER raise_track_action_for_finding
+    AFTER INSERT ON "pest_activity"
+    FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
   `);
 }
 
@@ -3311,6 +3396,20 @@ async function migrateDocDepartment() {
   `);
 }
 
+// Mobile replay keys (lib/clientEntryReplay.ts) for a runtime-only table: a
+// stable device entry ID plus a payload fingerprint, unique per client when
+// present, so a phone resending after a lost response gets the stored row
+// back instead of creating a duplicate. Web submissions leave both null.
+async function addClientEntryReplayColumns(table: string) {
+  await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_id" text`));
+  await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_hash" text`));
+  await db.execute(sql.raw(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_${table}_client_entry_id"
+    ON "${table}" ("client_id", "client_entry_id")
+    WHERE "client_entry_id" IS NOT NULL
+  `));
+}
+
 // ---- Pool Track ----
 async function migratePoolTrack() {
   await db.execute(sql`
@@ -3342,6 +3441,7 @@ async function migratePoolTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_pool_checks_client_date"
     ON "pool_checks" ("client_id", "check_date")
   `);
+  await addClientEntryReplayColumns("pool_checks");
 }
 
 // ---- Green Track ----
@@ -3406,6 +3506,10 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_pre_use_client_date"
     ON "green_pre_use_checks" ("client_id", "check_date")
   `);
+  // Who submitted the check (the operator may be someone else); needed to
+  // recognise a phone's own resend.
+  await db.execute(sql`ALTER TABLE "green_pre_use_checks" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+  await addClientEntryReplayColumns("green_pre_use_checks");
 
   // Scheduled service records
   await db.execute(sql`
@@ -3533,6 +3637,7 @@ async function migrateSwimTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_swim_sessions_client_date"
     ON "swim_sessions" ("client_id", "session_date")
   `);
+  await addClientEntryReplayColumns("swim_sessions");
 
   // Periodic lifeguard surveillance checks (every 15-20 min during session)
   await db.execute(sql`
@@ -4575,6 +4680,8 @@ async function migrateComplianceHub() {
       CONSTRAINT "CK_compliance_action_severity" CHECK ("severity" IN ('low', 'medium', 'high', 'critical'))
     )
   `);
+  // Set when the action raised a FixTrack job (every track except GreenTrack).
+  await db.execute(sql`ALTER TABLE "compliance_actions" ADD COLUMN IF NOT EXISTS "fix_track_issue_id" integer REFERENCES "fix_track_issues"("id") ON DELETE SET NULL`);
   // Older generic action forms accepted free-form incident references. Preserve
   // ambiguous/orphaned values for admin review; normalize only references that
   // unambiguously identify an incident belonging to the same tenant.
@@ -5273,4 +5380,79 @@ export async function migrateComplianceScheduleTokens(): Promise<number> {
     WHERE "schedule_token" IS NOT NULL
     RETURNING id`);
   return migrated.rows.length;
+}
+
+/**
+ * Track owners (who receives a module's reminders) and in-app notifications
+ * (header bell / mobile push). Mirrors lib/db/src/schema/track-notifications.ts
+ * column for column, so pushed and runtime-only databases match.
+ */
+async function migrateTrackOwnersAndNotifications() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "track_owners" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "module" text NOT NULL,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_owners_client_module_site"
+    ON "track_owners" ("client_id", "module", "site_id") WHERE "site_id" IS NOT NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_owners_client_module_all_sites"
+    ON "track_owners" ("client_id", "module") WHERE "site_id" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "user_notifications" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "module" text,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "kind" text NOT NULL,
+      "title" text NOT NULL,
+      "body" text,
+      "link_path" text,
+      "dedupe_key" text NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "read_at" timestamp
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_user_notifications_user_dedupe"
+    ON "user_notifications" ("user_id", "dedupe_key")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_user_notifications_user_client_created"
+    ON "user_notifications" ("user_id", "client_id", "created_at")
+  `);
+}
+
+// ---- Certificate outcomes and defects (Oct 2026) ----
+// An item certificate records its overall outcome; existing rows are
+// "not_stated" and keep behaving as satisfactory. Defects listed on a
+// certificate open FixTrack jobs and keep the check needing action until they
+// are closed. Mirrors lib/db/src/schema/certificates.ts.
+async function migrateCertificateOutcomes() {
+  await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "outcome" text NOT NULL DEFAULT 'not_stated'`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_defects" (
+      "id" serial PRIMARY KEY,
+      "certificate_id" integer NOT NULL REFERENCES "certificates"("id") ON DELETE CASCADE,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "code" text NOT NULL,
+      "description" text NOT NULL,
+      "location" text,
+      "fix_track_issue_id" integer REFERENCES "fix_track_issues"("id") ON DELETE SET NULL,
+      "resolved_at" timestamp,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_certificate" ON "certificate_defects" ("client_id", "certificate_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_fix_track_issue" ON "certificate_defects" ("fix_track_issue_id")`);
 }

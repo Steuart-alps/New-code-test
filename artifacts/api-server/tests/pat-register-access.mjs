@@ -14,11 +14,11 @@ function check(name, condition, detail = "") {
   else { failures.push(`${name}: ${detail}`); console.error(`FAIL: ${name}: ${detail}`); }
 }
 const expectStatus = (name, response, expected) => check(name, expected.includes(response.status), `expected ${expected.join("/")}, got ${response.status} ${JSON.stringify(response.data ?? response.text?.slice(0, 200))}`);
-function session() {
+function session(defaultHeaders = {}) {
   let cookie = "";
   const request = async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
-      method, headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      method, headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -69,7 +69,8 @@ async function download(user, query = "") {
 }
 
 async function registerTenant(label, stamp) {
-  const user = session(), email = `pat-register-${label}-${stamp}@test.local`;
+  // The owner deliberately records historic tests, which needs a reason.
+  const user = session({ "X-Override-Reason": encodeURIComponent("PAT register fixture: historic test") }), email = `pat-register-${label}-${stamp}@test.local`;
   const registered = await user("POST", "/auth/register", { name: `PAT register ${label}`, email, password: "password-123" });
   expectStatus(`register ${label}`, registered, [200, 201]);
   if (typeof registered.data?.verificationToken !== "string") throw new Error("Verification token unavailable; run via the test runner");

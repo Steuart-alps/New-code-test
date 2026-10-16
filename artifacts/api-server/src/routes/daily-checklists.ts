@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { checklistIncompleteReason, createFailedItemActions } from "../lib/dailyChecklistItems";
 import { db } from "@workspace/db";
 import { dailyChecklistSubmissionsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, gte, lte, desc } from "drizzle-orm";
@@ -394,6 +395,7 @@ const AnswerSchema = z.object({
   question: z.string().min(1),
   checked: z.boolean(),
   notes: z.string().optional(),
+  result: z.enum(["pass", "fail", "na"]).optional(),
 });
 
 const SubmitBody = z.object({
@@ -410,6 +412,7 @@ function sameAnswers(stored: SubmittedAnswer[], sent: SubmittedAnswer[]): boolea
   return stored.length === sent.length && stored.every((answer, index) =>
     answer.question === sent[index].question
     && answer.checked === sent[index].checked
+    && (answer.result ?? null) === (sent[index].result ?? null)
     && (answer.notes ?? null) === (sent[index].notes ?? null));
 }
 
@@ -451,6 +454,13 @@ router.post("/daily-checklists/:siteId/:date/:type", requireAuth, denyViewers, a
   const parsed = SubmitBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid submission data" });
+    return;
+  }
+
+  parsed.data.answers = parsed.data.answers.map((answer) => answer.result ? { ...answer, checked: answer.result !== "fail" } : answer);
+  const incomplete = checklistIncompleteReason(parsed.data.answers.map((answer) => ({ ...answer, label: answer.question })));
+  if (incomplete) {
+    res.status(400).json({ error: incomplete, code: "CHECKLIST_INCOMPLETE" });
     return;
   }
 
@@ -545,6 +555,16 @@ router.post("/daily-checklists/:siteId/:date/:type", requireAuth, denyViewers, a
       return;
     }
   }
+
+  // Failed items become open actions (and FixTrack jobs). Keyed per item, so
+  // a replay or retry never duplicates them.
+  await db.transaction((tx) => createFailedItemActions(tx, {
+    clientId, siteId, module: type === "am" ? "daily_am" : "daily_pm",
+    sourceKindPrefix: "mobile_checklist_item", sourceRecordId: result.id,
+    checklistName: type === "am" ? "Morning checklist" : "Evening checklist",
+    checkDate: date, completedBy: user.name,
+    items: result.answers.map((answer) => ({ ...answer, label: answer.question })),
+  }, user.id));
 
   res.status(201).json(result);
 });

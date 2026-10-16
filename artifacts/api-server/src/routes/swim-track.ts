@@ -5,6 +5,9 @@ import { sitesTable } from "@workspace/db/schema";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/stagedPhotoReceipts";
+import {
+  findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, stagedPhotoEntry,
+} from "../lib/clientEntryReplay";
 
 const router = Router();
 
@@ -107,6 +110,8 @@ router.post("/sessions", denyViewers, async (req, res) => {
        poolClosed, closureReason, notes, photoUploadIds,
     } = req.body;
     if (!sessionDate) return res.status(400).json({ error: "sessionDate is required" });
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
     const rawSiteId = req.body.siteId;
     const siteId = rawSiteId == null ? null : Number(rawSiteId);
     if (rawSiteId != null && (
@@ -123,6 +128,9 @@ router.post("/sessions", denyViewers, async (req, res) => {
 
     const performer = await resolveStaffRoster(clientId, lifeguardRosterId, lifeguardName);
     if (lifeguardRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    const userId = req.currentUser!.id;
+    const prior = await findRawStoredEntry("swim_sessions", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
     const canonicalPreSessionResult = preSessionResult === "fail" ? "fail" : "pass";
     const canonicalResult = poolClosed === true ? "fail" : canonicalPreSessionResult;
     const created = await createWithStagedPhotoReceipts({
@@ -136,7 +144,8 @@ router.post("/sessions", denyViewers, async (req, res) => {
         INSERT INTO swim_sessions (
           client_id, site_id, session_date, session_type, lifeguard_name, lifeguard_roster_id,
           open_time, close_time, max_bathers, bather_count_peak,
-          pre_session_result, pre_session_notes, pool_closed, closure_reason, notes, result, created_by
+          pre_session_result, pre_session_notes, pool_closed, closure_reason, notes, result, created_by,
+          client_entry_id, client_entry_hash
         ) VALUES (
           ${clientId}, ${siteId ?? null}, ${sessionDate},
            ${sessionType ?? "public_swim"}, ${performer?.performedBy ?? lifeguardName?.trim() ?? null}, ${performer?.staffRosterId ?? null},
@@ -144,7 +153,8 @@ router.post("/sessions", denyViewers, async (req, res) => {
           ${maxBathers ?? null}, ${batherCountPeak ?? null},
           ${canonicalPreSessionResult}, ${preSessionNotes?.trim() ?? null},
           ${poolClosed ?? false}, ${closureReason?.trim() ?? null},
-          ${notes?.trim() ?? null}, ${canonicalResult}, ${req.currentUser!.id}
+          ${notes?.trim() ?? null}, ${canonicalResult}, ${userId},
+          ${entry?.id ?? null}, ${entry?.hash ?? null}
         )
         RETURNING *
       `);
@@ -153,6 +163,12 @@ router.post("/sessions", denyViewers, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
+    // A concurrent resend of the same device entry won the insert.
+    const entry = stagedPhotoEntry(req.body);
+    if (entry && entry !== "invalid" && isUniqueViolation(err)) {
+      const raced = await findRawStoredEntry("swim_sessions", getClientId(req)!, entry);
+      if (raced) return respondToRawStoredEntry(res, raced, req.currentUser!.id, entry);
+    }
     res.status(500).json({ error: "Failed to create session" });
   }
 });

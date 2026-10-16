@@ -6,7 +6,7 @@ export default function TermsPage() {
       <section>
         <h2>1. Who we are</h2>
         <p>
-          ComplyTrack is a health &amp; safety compliance tracking service operated by ALPS Consulting Ltd
+          ComplyTrack is a health &amp; safety compliance tracking service operated by ALPS Consulting Ltd, trading as ALPS Consultancy
           (&ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;), a company registered in England and Wales. By creating
           an account or using ComplyTrack you agree to these Terms of Service.
         </p>
@@ -93,7 +93,7 @@ export default function TermsPage() {
         <h2>11. Contact</h2>
         <p>
           Questions about these terms? Contact ALPS Consulting Ltd via{" "}
-          <a href="https://alpsconsultancy.co.uk" className="text-primary underline underline-offset-2" target="_blank" rel="noopener noreferrer">
+          <a href="https://www.alpsconsultancy.co.uk" className="text-primary underline underline-offset-2" target="_blank" rel="noopener noreferrer">
             alpsconsultancy.co.uk
           </a>
           .

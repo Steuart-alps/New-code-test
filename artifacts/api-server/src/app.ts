@@ -120,8 +120,21 @@ if (fs.existsSync(webIndexHtml)) {
   const isServerPath = (p: string) =>
     p === "/api" || p.startsWith("/api/") || p === "/healthz" || p === "/readyz";
 
+  // Public pages the web build prerendered as <path>/index.html (see
+  // compliance-tracker scripts/seo-pages.mjs). Every other client route gets
+  // the home page's HTML, so it is marked noindex: otherwise search engines
+  // would index app, token and unknown URLs as copies of the home page.
+  const publicPageFiles = new Map<string, string>();
+  for (const entry of fs.readdirSync(webDistDir, { withFileTypes: true })) {
+    const pageFile = path.join(webDistDir, entry.name, "index.html");
+    if (entry.isDirectory() && fs.existsSync(pageFile)) publicPageFiles.set(`/${entry.name}`, pageFile);
+  }
+
   const serveWebFiles = express.static(webDistDir, {
     index: false,
+    // A prerendered page lives in a directory; without this /signup would
+    // redirect to /signup/ instead of falling through to the handler below.
+    redirect: false,
     setHeaders(res, filePath) {
       // Vite fingerprints everything under assets/, so it can be cached forever.
       if (filePath.startsWith(path.join(webDistDir, "assets") + path.sep)) {
@@ -130,11 +143,33 @@ if (fs.existsSync(webIndexHtml)) {
     },
   });
 
+  // Once the site has its own domain (PUBLIC_SITE_URL), send web page
+  // requests that arrive on Render's onrender.com address there, so people
+  // and search engines see one copy of the site. API paths are left alone:
+  // the mobile app and webhooks may still call the onrender.com address.
+  const canonicalOrigin = process.env.PUBLIC_SITE_URL
+    ? new URL(process.env.PUBLIC_SITE_URL).origin
+    : null;
+  const renderHost = process.env.RENDER_EXTERNAL_URL
+    ? new URL(process.env.RENDER_EXTERNAL_URL).host.toLowerCase()
+    : null;
+  if (canonicalOrigin && renderHost && new URL(canonicalOrigin).host !== renderHost) {
+    app.use((req, res, next) => {
+      if ((req.method !== "GET" && req.method !== "HEAD") || isServerPath(req.path)) return next();
+      if (req.headers.host?.toLowerCase() !== renderHost) return next();
+      res.redirect(301, canonicalOrigin + req.originalUrl);
+    });
+  }
+
   app.use((req, res, next) => (isServerPath(req.path) ? next() : serveWebFiles(req, res, next)));
 
   app.use((req, res, next) => {
     if ((req.method !== "GET" && req.method !== "HEAD") || isServerPath(req.path)) return next();
     res.setHeader("Cache-Control", "no-cache");
+    const pagePath = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
+    const pageFile = publicPageFiles.get(pagePath);
+    if (pageFile) return void res.sendFile(pageFile);
+    if (pagePath !== "/") res.setHeader("X-Robots-Tag", "noindex");
     res.sendFile(webIndexHtml);
   });
 }
