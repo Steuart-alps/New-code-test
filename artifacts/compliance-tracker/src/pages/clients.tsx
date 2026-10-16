@@ -7,6 +7,7 @@ import { Link, useLocation } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ErrorReportsCheck } from "@/components/error-reports-check";
 import { Plus, Pencil, Building2, ToggleLeft, ToggleRight, TicketPercent, Copy, Check } from "lucide-react";
 
 interface Client {
@@ -403,6 +404,7 @@ export default function ClientsPage() {
     <AppLayout title="Clients">
       <div className="space-y-6">
         <PendingDeletionRequests />
+        {user?.platformOperator && <ErrorReportsCheck />}
         <div className="flex items-center justify-between">
           <p className="text-muted-foreground text-sm">Manage client organisations · <Link href="/portfolio" className="font-medium text-primary underline-offset-2 hover:underline">See the portfolio overview</Link></p>
           <Button onClick={() => { setEditingClient(null); setDialogOpen(true); }}>

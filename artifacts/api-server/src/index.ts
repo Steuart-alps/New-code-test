@@ -26,7 +26,7 @@ import {
   waitForInFlightJobs,
 } from "./lib/jobMonitor";
 import { setReadinessNote } from "./lib/readinessDetails";
-import { Sentry } from "./lib/sentry";
+import { Sentry, isErrorReportingEnabled } from "./lib/sentry";
 import {
   ensureServicePrices,
   getServicePricePreflight,
@@ -509,7 +509,8 @@ async function notifyAdminOfBillingDrift(corrections: QuantityCorrection[]) {
 // These are a last-resort safety net for errors that escape every try/catch
 // (e.g. bugs in async cron jobs that aren't individually guarded).
 // Sentry.init() has already been called by bootstrap.ts, so these are also
-// captured there if SENTRY_DSN is configured.
+// captured there if SENTRY_DSN is configured; the fatal handler waits for
+// that report to be sent before exiting.
 
 process.on("unhandledRejection", async (reason: unknown) => {
   const message = reason instanceof Error ? reason.message : String(reason);
@@ -549,6 +550,7 @@ process.on("uncaughtException", async (err: Error) => {
       // best-effort
     }
   }
+  if (isErrorReportingEnabled()) await Sentry.flush(2_000).catch(() => false);
   // Give the event loop a moment so pino can flush, then exit.
   setTimeout(() => process.exit(1), 500);
 });
@@ -568,6 +570,11 @@ async function startApplication() {
   if (process.env.NODE_ENV === "production" && !process.env.ADMIN_EMAIL?.trim()) {
     logger.warn("ADMIN_EMAIL not configured — internal billing and data-deletion notices cannot be delivered");
   }
+  // Informational only: production without SENTRY_DSN still starts, and
+  // /readyz says error reports are off rather than implying alerts work.
+  if (process.env.NODE_ENV === "production" && !isErrorReportingEnabled()) {
+    setReadinessNote("errorReports", { configured: false, missing: ["SENTRY_DSN"] });
+  }
   const emailIssues = describeEmailConfigurationIssues();
   if (emailIssues.length > 0) {
     logger.warn({ issues: emailIssues }, "Email delivery is not fully configured");
@@ -582,7 +589,7 @@ async function startApplication() {
   } catch (err) {
     logger.fatal({ err }, "Runtime migrations failed — exiting so this deploy is not promoted");
     captureJobFailure("runtime-migrations", err);
-    if (process.env.SENTRY_DSN) await Sentry.flush(2_000).catch(() => false);
+    if (isErrorReportingEnabled()) await Sentry.flush(2_000).catch(() => false);
     process.exit(1);
   }
   const contractorTokenProblem = getContractorTokenProblem();

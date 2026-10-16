@@ -48,7 +48,7 @@
     "test:staff-kiosk-token": "node tests/staff-kiosk-token.test.mjs",
     "test:passkey-auth-endpoint": "node tests/passkey-auth-endpoint.test.mjs",
     "test:fix-track-priority": "TZ=Europe/London node tests/run-fix-track-priority.mjs",
-    "typecheck": "flock -s /tmp/complytrack-api-codegen.lock sh -c 'pnpm exec tsc --build ../../lib/api-client-react && tsc -p tsconfig.json --noEmit'"
+    "typecheck": "flock -s /tmp/complytrack-api-codegen.lock sh -c 'pnpm exec tsc --build ../../lib/api-client-react ../../lib/api-zod && tsc -p tsconfig.json --noEmit'"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -87,6 +87,7 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "@workspace/api-client-react": "workspace:*",
+    "@workspace/api-zod": "workspace:*",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "^1.1.1",

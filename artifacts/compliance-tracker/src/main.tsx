@@ -1,51 +1,13 @@
-import * as Sentry from "@sentry/react";
 import { createRoot } from "react-dom/client";
 import React from "react";
 import App from "./App";
 import "./index.css";
+import { errorReportsEnabled, initErrorReports, reportError } from "./lib/error-reports";
 
 // Initialise Sentry before the React tree mounts so all component errors and
-// navigation events are captured from the first render.
-// VITE_SENTRY_DSN is forwarded from the server-side SENTRY_DSN secret via
-// vite.config.ts define — no separate secret needed.
-if (import.meta.env.VITE_SENTRY_DSN) {
-  Sentry.init({
-    dsn: import.meta.env.VITE_SENTRY_DSN as string,
-    environment: import.meta.env.MODE,
-    sendDefaultPii: false,
-    integrations: [Sentry.browserTracingIntegration()],
-    beforeSend(event) {
-      // Links and API calls may include short-lived bearer tokens in their
-      // path or query string. Do not send them to an external error service.
-      const redactUrl = (value: string) => {
-        try {
-          const url = new URL(value, window.location.origin);
-          return `${url.origin}${url.pathname}`.replace(
-            /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public)\/)[^/]+/g,
-            "$1[redacted]",
-          );
-        } catch {
-          return "[redacted]";
-        }
-      };
-      if (event.request) {
-        delete event.request.data;
-        delete event.request.cookies;
-        delete event.request.headers;
-        delete event.request.query_string;
-        if (event.request.url) event.request.url = redactUrl(event.request.url);
-      }
-      event.breadcrumbs?.forEach(breadcrumb => {
-        if (typeof breadcrumb.data?.url === "string") {
-          breadcrumb.data.url = redactUrl(breadcrumb.data.url);
-        }
-      });
-      return event;
-    },
-    // Capture 10 % of page-load / navigation transactions for performance.
-    tracesSampleRate: 0.1,
-  });
-}
+// navigation events are captured from the first render. SENTRY_DSN is read at
+// build time (vite.config.ts); without it nothing is sent.
+initErrorReports();
 
 // ── Global React error boundary ────────────────────────────────────────────
 // Catches unhandled rendering errors anywhere in the tree and shows a friendly
@@ -72,10 +34,7 @@ class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: unknown, info: React.ErrorInfo) {
-    // Forward to Sentry if it's been initialised
-    if (import.meta.env.VITE_SENTRY_DSN) {
-      Sentry.captureException(error, { extra: { componentStack: info.componentStack } });
-    }
+    reportError(error, { componentStack: info.componentStack });
     console.error("[ErrorBoundary]", error, info);
   }
 
@@ -112,8 +71,9 @@ class ErrorBoundary extends React.Component<
               Something went wrong
             </h1>
             <p style={{ fontSize: 14, color: "#64748b", marginBottom: 24 }}>
-              An unexpected error occurred. Our team has been notified. Please
-              try reloading the page — if the problem persists, contact support.
+              An unexpected error occurred.{" "}
+              {errorReportsEnabled() ? "Our team has been notified. " : ""}
+              Please try reloading the page — if the problem persists, contact support.
             </p>
             {this.state.message && (
               <p
