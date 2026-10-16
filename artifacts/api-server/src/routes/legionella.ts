@@ -9,6 +9,7 @@ import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStore
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 import { unreadLegionellaOutletUnits } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
+import { completeLinkedTasksFromCheck, linkedTaskCompletions } from "../lib/trackTaskLink";
 
 const router = Router();
 
@@ -280,6 +281,16 @@ router.get("/status", requireAuth, async (req, res) => {
       ? "fail" : row.lastResult;
     lastByType.set(row.checkType, { lastDate, lastResult });
   }
+  // A completed ComplyTrack task that mirrors a water check (cleaning the cold
+  // water tanks) counts as a passed check on its date.
+  for (const [key, completedOn] of await linkedTaskCompletions(clientId, "legionella")) {
+    const [site, checkType] = key.split(":");
+    if (Number(site) !== selectedSiteId) continue;
+    const recorded = lastByType.get(checkType);
+    if (!recorded || String(recorded.lastDate).slice(0, 10) < completedOn) {
+      lastByType.set(checkType, { lastDate: completedOn, lastResult: "pass" });
+    }
+  }
   // A registered outlet that has never been tested keeps its check type at
   // "never" until it is, whatever the other outlets' readings say.
   const unreadOutlets = await unreadLegionellaOutletUnits(clientId, [selectedSiteId]);
@@ -367,6 +378,9 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
     throw err;
   }
+
+  // A passed tank clean also completes its ComplyTrack task.
+  if (inserted) await completeLinkedTasksFromCheck(req, "legionella", inserted);
 
   res.status(201).json(inserted);
 });
@@ -662,6 +676,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   });
 
   if (!updated) return res.status(404).json({ error: "Not found" });
+  await completeLinkedTasksFromCheck(req, "legionella", updated);
   res.json(updated);
 });
 

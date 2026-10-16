@@ -54,7 +54,7 @@ import { LoadError } from "@/components/load-error";
 const ALL_CHECK_TYPES = [
   "alarm", "emergency_lights", "extinguishers",
   "fire_doors", "fire_drill", "fire_walk", "alarm_panel",
-  "emergency_lights_annual",
+  "emergency_lights_annual", "alarm_service", "extinguisher_service",
 ] as const;
 type AnyCheckType = typeof ALL_CHECK_TYPES[number];
 
@@ -67,6 +67,8 @@ const CHECK_TYPE_LABELS: Record<AnyCheckType, string> = {
   fire_walk:        "Fire walk — escape route sign-off",
   alarm_panel:      "Alarm panel check",
   emergency_lights_annual: "Annual 3-hour emergency lighting discharge test",
+  alarm_service:    "6-monthly fire alarm service",
+  extinguisher_service: "Annual fire extinguisher service",
 };
 
 const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
@@ -79,8 +81,8 @@ const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
     types: ["fire_walk", "fire_drill"],
   },
   {
-    label: "Annual tests",
-    types: ["emergency_lights_annual"],
+    label: "Contractor services & annual tests",
+    types: ["alarm_service", "extinguisher_service", "emergency_lights_annual"],
   },
 ];
 
@@ -151,14 +153,31 @@ function FlickTestGuide() {
   );
 }
 
-function DischargeTestGuide() {
+/** Contractor jobs that are also ComplyTrack tasks, and the task each one completes. */
+const LINKED_TASK_GUIDES: Partial<Record<AnyCheckType, { testId: string; heading: string; who: string; task: string }>> = {
+  emergency_lights_annual: {
+    testId: "discharge-test-guide", heading: "Annual 3-hour discharge test.",
+    who: "emergency lighting contractor, who certifies it", task: "Emergency Light Maintenance",
+  },
+  alarm_service: {
+    testId: "alarm-service-guide", heading: "6-monthly fire alarm service.",
+    who: "fire alarm contractor (BS 5839)", task: "Fire Alarm Maintenance",
+  },
+  extinguisher_service: {
+    testId: "extinguisher-service-guide", heading: "Annual fire extinguisher service.",
+    who: "extinguisher contractor (BS 5306-3)", task: "Fire Extinguishers Maintenance",
+  },
+};
+
+function LinkedTaskGuide({ checkType }: { checkType: AnyCheckType }) {
+  const guide = LINKED_TASK_GUIDES[checkType];
+  if (!guide) return null;
   return (
-    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground" data-testid="discharge-test-guide">
+    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground" data-testid={guide.testId}>
       <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
       <p>
-        <span className="font-medium text-foreground">Annual 3-hour discharge test.</span> Usually done by your
-        emergency lighting contractor, who certifies it. A pass here also completes the "Emergency Light Maintenance"
-        task in ComplyTrack, and completing that task records the test here.
+        <span className="font-medium text-foreground">{guide.heading}</span> Usually done by your {guide.who}.
+        A pass here also completes the "{guide.task}" task in ComplyTrack, and completing that task records it here.
       </p>
     </div>
   );
@@ -525,6 +544,7 @@ function parseJsonRecord(raw: string | undefined | null, fallback: Record<string
 const DEFAULT_FIRE_FREQUENCIES: Record<string, number> = {
   alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90,
   fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365,
+  alarm_service: 180, extinguisher_service: 365,
 };
 
 type FireProfileState = {
@@ -989,7 +1009,7 @@ function RecordCheckDialog({
           )}
 
           {checkType === "emergency_lights" && <FlickTestGuide />}
-          {checkType === "emergency_lights_annual" && <DischargeTestGuide />}
+          <LinkedTaskGuide checkType={checkType} />
 
           {checkType === "fire_drill" && <NightStaffPicker value={nightStaff} onChange={setNightStaff} />}
 

@@ -30,7 +30,7 @@ try {
   const taskA = await task(owner, siteA.id);
   const taskB = await task(owner, siteB.id, ' emergency light maintenance ');
   const otherTask = await task(other, null);
-  const unrelated = await task(owner, siteA.id, 'Fire Alarm Maintenance');
+  const unrelated = await task(owner, siteA.id, 'Chimney Sweep');
   const getTask = async (id, who = owner) => (await who.request('GET', `/compliance-items/${id}`)).data;
   const status = async (siteId) => (await owner.request('GET', `/fire-safety/status?siteId=${siteId}`)).data
     .find(row => row.checkType === TYPE);

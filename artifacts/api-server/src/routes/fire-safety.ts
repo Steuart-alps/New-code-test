@@ -6,7 +6,7 @@ import type { FireSafetyCheck } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { appendAuditEvent } from "../lib/audit";
-import { completeLinkedTasksFromFireCheck } from "../lib/fireTaskLink";
+import { completeLinkedTasksFromCheck } from "../lib/trackTaskLink";
 import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
@@ -262,8 +262,9 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   }
 
   await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: inserted });
-  // A passed annual discharge test also completes its ComplyTrack task.
-  await completeLinkedTasksFromFireCheck(req, inserted);
+  // A passed annual discharge test or alarm/extinguisher service also
+  // completes its ComplyTrack task.
+  await completeLinkedTasksFromCheck(req, "fire", inserted);
   res.status(201).json(inserted);
 });
 
@@ -315,7 +316,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
 
   if (!updated) return res.status(404).json({ error: "Not found" });
   await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: id, action: "updated", before: existing, after: updated });
-  await completeLinkedTasksFromFireCheck(req, updated);
+  await completeLinkedTasksFromCheck(req, "fire", updated);
   res.json(updated);
 });
 
