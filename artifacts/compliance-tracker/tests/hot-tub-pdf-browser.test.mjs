@@ -206,6 +206,13 @@ let temporaryDirectory;
 const consoleDiagnostics = [];
 const pageErrors = [];
 
+// Radix Select can leave an option outside Firefox's viewport while the list
+// settles, so a pointer click times out. Choosing with the keyboard does not
+// depend on where the option is drawn.
+async function chooseOption(page, name) {
+  await page.getByRole("option", { name, exact: true }).press("Enter");
+}
+
 async function waitForServer(timeoutMs = 20000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -509,18 +516,18 @@ try {
   const filterPanel = page.getByPlaceholder("Search tubs, checks, staff…").locator("xpath=../..");
   const filterComboboxes = filterPanel.getByRole("combobox");
   await filterComboboxes.nth(0).click();
-  await page.getByRole("option", { name: "Main site", exact: true }).click();
+  await chooseOption(page, "Main site");
   const datesAndSitePdf = await assertExportMembership("dates-and-site", [...inRangeIds, 129, 130, 131]);
   assert.deepEqual(datesAndSitePdf.analytics,
     { module: "hottubtrack", site_scope: "selected_site", record_scope: "has_records" });
 
   await filterComboboxes.nth(0).click();
-  await page.getByRole("option", { name: "All sites", exact: true }).click();
+  await chooseOption(page, "All sites");
   await filterComboboxes.nth(1).click();
-  await page.getByRole("option", { name: "Water chemistry test (pH & sanitiser)", exact: true }).click();
+  await chooseOption(page, "Water chemistry test (pH & sanitiser)");
   await assertExportMembership("dates-and-check-type", [...inRangeIds, 128, 129, 131]);
   await filterComboboxes.nth(0).click();
-  await page.getByRole("option", { name: "Main site", exact: true }).click();
+  await chooseOption(page, "Main site");
   await assertExportMembership("dates-site-and-check-type", [...inRangeIds, 129, 131]);
 
   await page.getByRole("button", { name: activeTub.name, exact: true }).click();
@@ -647,7 +654,7 @@ try {
 
   // The remaining scope combination: all sites, nothing matching.
   await filterComboboxes.nth(0).click();
-  await page.getByRole("option", { name: "All sites", exact: true }).click();
+  await chooseOption(page, "All sites");
   await page.getByText("No records match the current filter.", { exact: true }).waitFor({ state: "visible" });
   const emptyAllSitesPdf = await downloadPdf("empty-all-sites-log");
   assert.ok(emptyAllSitesPdf.text.includes("Records: 0"));
@@ -691,13 +698,9 @@ try {
     await page.locator("#hot-tub-filter-from").fill(filters.from);
     await page.locator("#hot-tub-filter-to").fill(filters.to);
     await filterComboboxes.nth(0).click();
-    await page.getByRole("option", { name: filters.site === "all" ? "All sites" : siteNames[filters.site], exact: true })
-      .click();
+    await chooseOption(page, filters.site === "all" ? "All sites" : siteNames[filters.site]);
     await filterComboboxes.nth(1).click();
-    await page.getByRole("option", {
-      name: filters.type === "all" ? "All check types" : "Water chemistry test (pH & sanitiser)",
-      exact: true,
-    }).click();
+    await chooseOption(page, filters.type === "all" ? "All check types" : "Water chemistry test (pH & sanitiser)");
     await page.getByRole("button", { name: "All tubs", exact: true }).click();
     if (filters.tub !== "all") {
       await page.getByRole("button", { name: tubNames[filters.tub], exact: true }).click();
@@ -857,7 +860,7 @@ try {
   await page.locator("#hot-tub-filter-from").fill("2024-07-01");
   await page.locator("#hot-tub-filter-to").fill("2024-07-31");
   await filterComboboxes.nth(0).click();
-  await page.getByRole("option", { name: multilingualSites[0].name, exact: true }).click();
+  await chooseOption(page, multilingualSites[0].name);
   await page.getByRole("button", { name: multilingualTub.name, exact: true }).click();
   await searchBox.fill(multilingualSearch);
   await page.getByText(`Showing ${multilingualRows.length} of ${multilingualChecks.length} records`, { exact: true })
