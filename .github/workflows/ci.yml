@@ -84,8 +84,14 @@ jobs:
       - name: Public page SEO test
         run: pnpm --filter @workspace/compliance-tracker run test:seo-pages
 
+      - name: Training matrix and CSV formula safety test
+        run: pnpm --filter @workspace/compliance-tracker run test:training-matrix
+
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
+
+      - name: SafeTrack reminder schedule test
+        run: pnpm --filter @workspace/api-zod run test:safe-track-reminder-schedule
 
       - name: Track record lock decision tests
         run: pnpm --filter @workspace/api-server run test:track-record-lock
@@ -128,6 +134,9 @@ jobs:
       # with the same columns (production is built the push way).
       - name: Schema parity test
         run: pnpm --filter @workspace/api-server run test:schema:parity
+
+      - name: SafeTrack reminder job tests (fresh schema)
+        run: pnpm --filter @workspace/api-server run test:safe-track-ack-reminders:fresh
 
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
