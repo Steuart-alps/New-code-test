@@ -852,6 +852,26 @@ async function runRuntimeMigrationsOnce() {
         "updated_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
+    // Paid extra storage reduced at the next renewal (routes/billing.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_capacity_reductions" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "request_id" text NOT NULL,
+        "subscription_id" text NOT NULL,
+        "subscription_item_id" text NOT NULL,
+        "from_gib" integer NOT NULL,
+        "to_gib" integer NOT NULL,
+        "minimum_gib" integer NOT NULL,
+        "used_bytes" bigint NOT NULL,
+        "effective_at" timestamptz NOT NULL,
+        "requested_by" integer,
+        "requested_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "storage_capacity_reductions_lower" CHECK ("to_gib" >= 0 AND "to_gib" < "from_gib" AND "to_gib" >= "minimum_gib")
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_capacity_reductions_request" ON "storage_capacity_reductions" ("request_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_capacity_reductions_tenant" ON "storage_capacity_reductions" ("client_id", "subscription_id", "effective_at")`);
     // Bound the immutable response ledger and remove spent opaque credentials.
     await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
     await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);
