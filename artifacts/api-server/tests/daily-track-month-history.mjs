@@ -80,20 +80,30 @@ await first.request("POST", "/daily-track-am", checklist(betaSite.id, "2025-04-1
 await first.request("POST", "/daily-track-am", checklist(null, "2025-04-10", "premises_opening"));
 await first.request("POST", "/daily-track-am", checklist(alphaSite.id, "2025-04-09", "premises_opening"));
 await first.request("POST", "/daily-track-am", checklist(alphaSite.id, "2025-04-12", "premises_opening"));
+await first.request("POST", "/daily-track-pm", checklist(alphaSite.id, "2025-04-10", "kitchen_closing", true));
+await first.request("POST", "/daily-track-pm", checklist(betaSite.id, "2025-04-11", "premises_closing"));
 await first.request("POST", "/daily-track-pm/signoffs", signoff(alphaSite.id, "2025-04-10", true));
 await first.request("POST", "/daily-track-pm/signoffs", signoff(betaSite.id, "2025-04-11"));
 await first.request("POST", "/daily-track-pm/signoffs", signoff(betaSite.id, "2025-04-12", true));
 await second.request("POST", "/daily-track-am", checklist(otherSite.id, "2025-04-10", "kitchen_opening", true));
 await second.request("POST", "/daily-track-pm/signoffs", signoff(otherSite.id, "2025-04-10", true));
 
-const range = "/daily-track-am/history?from=2025-04-10&to=2025-04-11";
+const range = "/daily-track-status/history?from=2025-04-10&to=2025-04-11";
 const adminHistory = await first.request("GET", range);
+assert.deepEqual(adminHistory.requirements,
+  ["kitchen_opening", "premises_opening", "kitchen_closing", "premises_closing", "signoff"],
+  "a trial (every service) expects all five daily checks");
 assert.deepEqual(
-  adminHistory.checklists.map(row => [row.siteId, row.checkDate, !!row.submittedAt])
+  adminHistory.checklists.map(row => [row.siteId, row.checkDate, row.checklistType, !!row.submittedAt])
     .sort((a, b) => String(a).localeCompare(String(b))),
-  [[alphaSite.id, "2025-04-10", false], [betaSite.id, "2025-04-11", true], [null, "2025-04-10", false]]
-    .sort((a, b) => String(a).localeCompare(String(b))),
-  "admin history must include drafts, submitted records, and unassigned rows only within the range",
+  [
+    [alphaSite.id, "2025-04-10", "kitchen_opening", false],
+    [alphaSite.id, "2025-04-10", "kitchen_closing", true],
+    [betaSite.id, "2025-04-11", "premises_opening", true],
+    [betaSite.id, "2025-04-11", "premises_closing", false],
+    [null, "2025-04-10", "premises_opening", false],
+  ].sort((a, b) => String(a).localeCompare(String(b))),
+  "admin history must include AM and PM drafts, submitted records, and unassigned rows only within the range",
 );
 assert.deepEqual(adminHistory.signoffs.map(row => [row.siteId, !!row.submittedAt])
   .sort((a, b) => a[0] - b[0]), [[alphaSite.id, true], [betaSite.id, false]]);
@@ -107,7 +117,7 @@ const staff = session();
 await staff("POST", "/auth/login", { email: staffEmail, password: "password-456" });
 await enrol(staff);
 const staffHistory = await staff("GET", range);
-assert.deepEqual(staffHistory.checklists.map(row => row.siteId).sort(), [alphaSite.id, null].sort(),
+assert.deepEqual(staffHistory.checklists.map(row => row.siteId).sort(), [alphaSite.id, alphaSite.id, null].sort(),
   "department history must include Alpha and shared rows, not Beta");
 assert.deepEqual(staffHistory.signoffs.map(row => row.siteId), [alphaSite.id],
   "department history must exclude Beta sign-offs");
