@@ -77,7 +77,7 @@ const directLocked = new Set([
   "test:discounts", "test:compliance-hub", "test:guidance-register",
   "test:daily-checklist-entitlements", "test:export-attachment-acl",
   "test:photo-attachments",
-  "test:fix-track-overdue-alerts", "test:track-summary-delivery",
+  "test:fix-track-overdue-alerts", "test:track-summary-delivery", "test:track-summary-job",
   "test:contractor-upload-signatures", "test:contractor-compliance-reminders",
   "test:track-controls-mobile", "test:export-module-isolation",
 ]);
@@ -135,6 +135,8 @@ const freshSchema = new Set([
   "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
   "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster
+  "test:track-summary-job:pushed", // real daily job scoped to its own fixtures on the private cluster
+  "test:track-summary-recipients", "test:track-summary-recipients:pushed", // in-process app + daily summary job (capturing sender) on the private cluster
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources

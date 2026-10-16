@@ -191,6 +191,12 @@ jobs:
       - name: Hot tub registry search tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:hot-tub-registry:pushed
 
+      - name: Track summary recipient preview tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:track-summary-recipients:pushed
+
+      - name: Daily track summary job tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:track-summary-job:pushed
+
       - name: Account-level cleaning records test (production schema base)
         env:
           FRESH_SCHEMA_BASE: push
