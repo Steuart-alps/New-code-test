@@ -141,6 +141,26 @@ jobs:
       - name: Owner late-edit reason tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:owner-late-edit-reason
 
+      - name: FireTrack call point and night staff tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:fire-call-points
+
+      - name: FireTrack discharge test and ComplyTrack task link tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:fire-discharge-task-link
+
+      - name: FireTrack and Water Safety contractor jobs kept in step with ComplyTrack tasks (production schema base)
+        run: pnpm --filter @workspace/api-server run test:track-task-links
+
+      # KitchenTrack numeric controls: the shared rule model and country
+      # presets, then hold-time boundaries, retries and the corrective-action
+      # follow-up, each on its own fresh database.
+      - name: KitchenTrack hold-time and temperature-action tests
+        run: |
+          pnpm --filter @workspace/api-zod run test:kitchen-temperature
+          pnpm --filter @workspace/api-zod run test:kitchen-temperature-guidance
+          pnpm --filter @workspace/api-server run test:kitchen-hold-controls
+          pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
+          pnpm --filter @workspace/api-server run test:kitchen-mobile-replay
+
       # Warning job and banner against synced Stripe rows in the current API shape.
       - name: Cancellation warning tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:cancellation-warnings:fresh

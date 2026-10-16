@@ -2159,7 +2159,7 @@ export const RequestUploadUrlResponse = zod.object({
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']).optional(),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']).optional(),
   "siteId": zod.coerce.number().optional()
 })
 
@@ -2167,12 +2167,15 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2183,25 +2186,31 @@ export const ListFireSafetyChecksResponse = zod.array(ListFireSafetyChecksRespon
  * @summary Record a fire safety check
  */
 export const CreateFireSafetyCheckBody = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
 })
 
 export const CreateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2215,7 +2224,7 @@ export const GetFireSafetyStatusQueryParams = zod.object({
 })
 
 export const GetFireSafetyStatusResponseItem = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
   "frequencyDays": zod.number(),
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
@@ -2227,6 +2236,62 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   "sitesAffected": zod.number().optional().describe('How many of those sites are overdue or have never recorded the check.')
 })
 export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponseItem)
+
+
+/**
+ * @summary List manual call points with when each was last tested
+ */
+export const ListFireCallPointsQueryParams = zod.object({
+  "siteId": zod.coerce.string().optional().describe('A site id, or \"none\" for call points not tied to a site. Omit for every visible site.'),
+  "includeArchived": zod.enum(['true', 'false']).optional()
+})
+
+export const ListFireCallPointsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+})
+export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseItem)
+
+
+/**
+ * @summary Add a manual call point (managers)
+ */
+export const CreateFireCallPointBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "name": zod.string()
+})
+
+export const CreateFireCallPointResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+})
+
+
+/**
+ * @summary Rename, archive or restore a call point (managers)
+ */
+export const UpdateFireCallPointParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateFireCallPointBody = zod.object({
+  "name": zod.string().optional(),
+  "archived": zod.boolean().optional()
+})
+
+export const UpdateFireCallPointResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+})
 
 
 /**
@@ -2242,19 +2307,25 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
 })
 
 export const UpdateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2293,7 +2364,7 @@ export const GetFoodSafetyConfigResponse = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
-  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland', 'ireland', 'australia', 'new_zealand', 'canada', 'united_states', 'other']).nullish().describe('Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -2326,7 +2397,7 @@ export const UpdateFoodSafetyConfigBody = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
-  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland', 'ireland', 'australia', 'new_zealand', 'canada', 'united_states', 'other']).nullish().describe('Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -2362,7 +2433,7 @@ export const ResetFoodSafetyConfigResponse = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
-  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland', 'ireland', 'australia', 'new_zealand', 'canada', 'united_states', 'other']).nullish().describe('Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -3465,7 +3536,16 @@ export const GetFoodSafetySummaryResponse = zod.object({
   "days": zod.array(zod.object({
   "date": zod.date(),
   "hasRecord": zod.boolean().describe('Whether a diary record exists for this date.'),
-  "submitted": zod.boolean().describe('Whether the diary record has been submitted.')
+  "submitted": zod.boolean().describe('Whether the diary record has been submitted.'),
+  "nonOperating": zod.boolean().describe('The diary scope was marked closed and has no record for this date, so it is not a missing day.'),
+  "closure": zod.object({
+  "id": zod.number(),
+  "date": zod.date(),
+  "reason": zod.string(),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "addedAfterDay": zod.boolean().describe('The closure was recorded after the day itself.')
+}).nullable()
 }))
 })
 
@@ -3484,7 +3564,67 @@ export const GetFoodSafetyMissingDatesResponse = zod.object({
   "to": zod.date(),
   "siteId": zod.number().nullable(),
   "missingDates": zod.array(zod.date()).describe('Dates with no food safety diary record.'),
-  "draftDates": zod.array(zod.date()).describe('Dates with a diary record that has not been submitted.')
+  "draftDates": zod.array(zod.date()).describe('Dates with a diary record that has not been submitted.'),
+  "nonOperatingDates": zod.array(zod.date()).optional().describe('Dates marked closed (non-operating) with no diary record. Not counted as missing.')
+})
+
+
+/**
+ * @summary List days marked closed (non-operating) for a diary scope
+ */
+export const ListKitchenClosedDaysQueryParams = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const ListKitchenClosedDaysResponse = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "siteId": zod.number().nullable(),
+  "closedDays": zod.array(zod.object({
+  "id": zod.number(),
+  "date": zod.date(),
+  "reason": zod.string(),
+  "createdAt": zod.date(),
+  "createdByName": zod.string().nullable(),
+  "addedAfterDay": zod.boolean().describe('The closure was recorded after the day itself.')
+}))
+})
+
+
+/**
+ * @summary Mark a range of days closed (non-operating) for a diary scope (admins)
+ */
+export const CreateKitchenClosedDaysQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const createKitchenClosedDaysBodyReasonMax = 200;
+
+
+
+export const CreateKitchenClosedDaysBody = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "reason": zod.string().min(1).max(createKitchenClosedDaysBodyReasonMax)
+})
+
+export const CreateKitchenClosedDaysResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "created": zod.array(zod.date())
+})
+
+
+/**
+ * @summary Remove a closure (admins); it stays in the history
+ */
+export const RemoveKitchenClosedDayParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RemoveKitchenClosedDayResponse = zod.object({
+  "ok": zod.boolean()
 })
 
 
@@ -3529,6 +3669,7 @@ export const UpdateFoodSafetyRecordBody = zod.object({
   "hotTemperature": zod.record(zod.string(), zod.unknown()).optional(),
   "cooling": zod.record(zod.string(), zod.unknown()).optional(),
   "reheating": zod.record(zod.string(), zod.unknown()).optional(),
+  "sousVide": zod.record(zod.string(), zod.unknown()).optional().describe('One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).'),
   "correctives": zod.string().optional(),
   "expectedCorrectives": zod.string().nullable()
 }).optional(),

@@ -4,6 +4,10 @@ export {
   type KitchenTemperatureRules, type KitchenTemperatureFailure,
 } from '@workspace/api-zod/kitchen-temperature';
 export {
+  FOOD_JURISDICTIONS, KITCHEN_TEMPERATURE_GUIDANCE, isFoodJurisdiction, kitchenTemperatureGuidance,
+  kitchenTemperatureGuidanceRules, type FoodJurisdiction, type KitchenTemperatureGuidance,
+} from '@workspace/api-zod/kitchen-temperature';
+export {
   kitchenWeeklyAttentionAnswer, kitchenWeeklyNeedsAttention, kitchenWeeklyResult,
 } from '@workspace/api-zod/kitchen-weekly';
 export * from './generated/api';

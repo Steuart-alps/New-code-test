@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { CreateFireSafetyCheckRequestNightStaff } from './createFireSafetyCheckRequestNightStaff';
 import type { CreateFireSafetyCheckRequestResult } from './createFireSafetyCheckRequestResult';
 import type { FireCheckType } from './fireCheckType';
 
@@ -16,4 +17,10 @@ export interface CreateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: CreateFireSafetyCheckRequestNightStaff;
 }

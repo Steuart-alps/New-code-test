@@ -1202,6 +1202,76 @@ paths:
         "403":
           description: The site belongs to a department the caller cannot see
 
+  /fire-safety/call-points:
+    get:
+      operationId: listFireCallPoints
+      tags: [fire-safety]
+      summary: List manual call points with when each was last tested
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for call points not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+        - in: query
+          name: includeArchived
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Call points
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireCallPoint"
+    post:
+      operationId: createFireCallPoint
+      tags: [fire-safety]
+      summary: Add a manual call point (managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFireCallPointRequest"
+      responses:
+        "201":
+          description: Created call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
+        "409":
+          description: The site already has a call point with that name
+
+  /fire-safety/call-points/{id}:
+    put:
+      operationId: updateFireCallPoint
+      tags: [fire-safety]
+      summary: Rename, archive or restore a call point (managers)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFireCallPointRequest"
+      responses:
+        "200":
+          description: Updated call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
+
   /fire-safety/{id}:
     put:
       operationId: updateFireSafetyCheck
@@ -2146,6 +2216,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FoodSafetyMissingDatesResponse"
+
+  /food-safety/closed-days:
+    get:
+      operationId: listKitchenClosedDays
+      tags: [food-safety]
+      summary: List days marked closed (non-operating) for a diary scope
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Active closures in the range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitchenClosedDaysList"
+    post:
+      operationId: createKitchenClosedDays
+      tags: [food-safety]
+      summary: Mark a range of days closed (non-operating) for a diary scope (admins)
+      parameters:
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KitchenClosedDaysInput"
+      responses:
+        "201":
+          description: Days newly marked closed (days already closed are left as they are)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitchenClosedDaysCreated"
+        "409":
+          description: Some days already have a diary record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /food-safety/closed-days/{id}:
+    delete:
+      operationId: removeKitchenClosedDay
+      tags: [food-safety]
+      summary: Remove a closure (admins); it stays in the history
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /food-safety/{id}:
     put:
@@ -3918,7 +4073,7 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service]
 
     FireSafetyCheck:
       type: object
@@ -3946,6 +4101,19 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
         createdAt:
           type: string
           format: date-time
@@ -3983,6 +4151,19 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
       required:
         - checkType
         - checkDate
@@ -4008,6 +4189,64 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
+
+    FireCallPoint:
+      type: object
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastTestedDate:
+          type: string
+          nullable: true
+          description: Date of the latest alarm test that used this call point.
+      required:
+        - id
+        - siteId
+        - name
+        - archivedAt
+        - lastTestedDate
+
+    CreateFireCallPointRequest:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+      required:
+        - siteId
+        - name
+
+    UpdateFireCallPointRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        archived:
+          type: boolean
 
     FireSafetyStatus:
       type: object
@@ -4696,12 +4935,18 @@ components:
           type: string
           nullable: true
         food_jurisdiction:
-          description: Food-safety jurisdiction used to choose the standard reheating limit.
+          description: Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
           type: string
           enum:
             - scotland
             - england_wales
             - northern_ireland
+            - ireland
+            - australia
+            - new_zealand
+            - canada
+            - united_states
+            - other
           nullable: true
         food_cooking_limit:
           type: string
@@ -4768,6 +5013,12 @@ components:
           items:
             type: string
             format: date
+        nonOperatingDates:
+          type: array
+          description: Dates marked closed (non-operating) with no diary record. Not counted as missing.
+          items:
+            type: string
+            format: date
 
     FoodSafetyMonthlySummaryDay:
       type: object
@@ -4775,6 +5026,8 @@ components:
         - date
         - hasRecord
         - submitted
+        - nonOperating
+        - closure
       properties:
         date:
           type: string
@@ -4785,6 +5038,81 @@ components:
         submitted:
           type: boolean
           description: Whether the diary record has been submitted.
+        nonOperating:
+          type: boolean
+          description: The diary scope was marked closed and has no record for this date, so it is not a missing day.
+        closure:
+          allOf:
+            - $ref: "#/components/schemas/KitchenClosedDay"
+          nullable: true
+
+    KitchenClosedDay:
+      type: object
+      required: [id, date, reason, createdAt, createdByName, addedAfterDay]
+      properties:
+        id:
+          type: integer
+        date:
+          type: string
+          format: date
+        reason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        createdByName:
+          type: string
+          nullable: true
+        addedAfterDay:
+          type: boolean
+          description: The closure was recorded after the day itself.
+
+    KitchenClosedDaysList:
+      type: object
+      required: [from, to, siteId, closedDays]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        closedDays:
+          type: array
+          items:
+            $ref: "#/components/schemas/KitchenClosedDay"
+
+    KitchenClosedDaysInput:
+      type: object
+      required: [from, to, reason]
+      additionalProperties: false
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    KitchenClosedDaysCreated:
+      type: object
+      required: [siteId, created]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        created:
+          type: array
+          items:
+            type: string
+            format: date
 
     FoodSafetyMonthlySummary:
       type: object
@@ -5029,6 +5357,10 @@ components:
         reheating:
           type: object
           additionalProperties: true
+        sousVide:
+          type: object
+          additionalProperties: true
+          description: One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).
         correctives:
           type: string
         expectedCorrectives:
