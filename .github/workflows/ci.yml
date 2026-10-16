@@ -131,3 +131,11 @@ jobs:
 
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
+
+      # KitchenTrack numeric controls: hold-time boundaries, retries and the
+      # corrective-action follow-up, each on its own fresh database.
+      - name: KitchenTrack hold-time and temperature-action tests
+        run: |
+          pnpm --filter @workspace/api-server run test:kitchen-hold-controls
+          pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
+          pnpm --filter @workspace/api-server run test:kitchen-mobile-replay

@@ -1713,6 +1713,11 @@ export type MobileTemperatureLogCooling = { [key: string]: unknown };
 
 export type MobileTemperatureLogReheating = { [key: string]: unknown };
 
+/**
+ * One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).
+ */
+export type MobileTemperatureLogSousVide = { [key: string]: unknown };
+
 export interface MobileTemperatureLog {
   coldFood: unknown[];
   expectedColdFood: unknown[];
@@ -1721,6 +1726,8 @@ export interface MobileTemperatureLog {
   hotTemperature?: MobileTemperatureLogHotTemperature;
   cooling?: MobileTemperatureLogCooling;
   reheating?: MobileTemperatureLogReheating;
+  /** One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes). */
+  sousVide?: MobileTemperatureLogSousVide;
   correctives?: string;
   expectedCorrectives: string | null;
 }

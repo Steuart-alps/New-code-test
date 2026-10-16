@@ -4940,6 +4940,10 @@ components:
         reheating:
           type: object
           additionalProperties: true
+        sousVide:
+          type: object
+          additionalProperties: true
+          description: One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).
         correctives:
           type: string
         expectedCorrectives:

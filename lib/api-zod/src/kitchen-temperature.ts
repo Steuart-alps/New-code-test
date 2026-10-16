@@ -71,6 +71,9 @@ export interface KitchenTemperatureFailure {
 export function kitchenFailureValue(failure: Pick<KitchenTemperatureFailure, 'value' | 'unit'>) {
   return failure.unit === '°C' ? `${failure.value}°C` : `${failure.value} ${failure.unit}`;
 }
+/** The longest hold a diary row can record: 24 hours in seconds for cooking,
+ *  72 hours in minutes for sous vide. Anything longer is a typing slip. */
+export const KITCHEN_HOLD_ENTRY_MAX = { seconds: 86_400, minutes: 4_320 } as const;
 /** The minimum hold time that applies to an item in a section, if any. An
  *  item rule replaces the section value, including with "no control". */
 export function kitchenHoldRequirement(
@@ -139,17 +142,25 @@ export function assessKitchenTemperatures(
           failures.push({ section, rowIndex: index, field, label, value, limit: { ...rule }, unit: '°C', actionTaken: actionTaken?.trim() ?? '' });
         }
       }
+      // Hold times are recorded numbers only: a duration is never read from
+      // a label or note. A recorded time is checked even without a control.
+      const holdField = section === 'hotTemperature' ? 'holdSeconds' : section === 'sousVide' ? 'holdMinutes' : null;
       const hold = kitchenHoldRequirement(rules, section, row.item);
-      if (hold) {
-        const raw = String(row[hold.field] ?? '').trim();
-        if (raw && changed(hold.field)) {
-          if (!/^\d+$/.test(raw)) throw new Error(`${label}: enter the hold time as a whole number of ${hold.unit}.`);
+      if (holdField) {
+        const unit = holdField === 'holdSeconds' ? 'seconds' : 'minutes';
+        const raw = String(row[holdField] ?? '').trim();
+        if (raw && changed(holdField)) {
+          if (!/^\d+$/.test(raw)) throw new Error(`${label}: enter the hold time as a whole number of ${unit}.`);
           const value = Number(raw);
-          if (value < hold.limit) failures.push({
+          if (value > KITCHEN_HOLD_ENTRY_MAX[unit]) {
+            throw new Error(`${label}: a hold time of ${value} ${unit} is too long — check the entry (at most ${KITCHEN_HOLD_ENTRY_MAX[unit]} ${unit}).`);
+          }
+          if (hold && value < hold.limit) failures.push({
             section, rowIndex: index, field: hold.field, label, value,
             limit: { min: hold.limit, max: null }, unit: hold.unit, actionTaken: actionTaken?.trim() ?? '',
           });
-        } else if (!raw && String(row.coreTemp ?? '').trim() && changed('coreTemp')) {
+        } else if (hold && !raw && String(row.coreTemp ?? '').trim() && (changed('coreTemp') || changed(holdField))) {
+          // Also when a recorded hold time is cleared: the evidence must stay.
           throw new Error(`${label}: record how long the core temperature was held — at least ${hold.limit} ${hold.unit} is required.`);
         }
       }

@@ -3380,6 +3380,7 @@ export const UpdateFoodSafetyRecordBody = zod.object({
   "hotTemperature": zod.record(zod.string(), zod.unknown()).optional(),
   "cooling": zod.record(zod.string(), zod.unknown()).optional(),
   "reheating": zod.record(zod.string(), zod.unknown()).optional(),
+  "sousVide": zod.record(zod.string(), zod.unknown()).optional().describe('One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).'),
   "correctives": zod.string().optional(),
   "expectedCorrectives": zod.string().nullable()
 }).optional(),

@@ -138,6 +138,7 @@ export * from './mobileTemperatureLogDelivery';
 export * from './mobileTemperatureLogHotHolding';
 export * from './mobileTemperatureLogHotTemperature';
 export * from './mobileTemperatureLogReheating';
+export * from './mobileTemperatureLogSousVide';
 export * from './okResponse';
 export * from './pATAppliance';
 export * from './pATPresetItem';
