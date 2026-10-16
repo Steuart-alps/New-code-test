@@ -1,7 +1,12 @@
 /**
  * Device outbox for check submissions other than KitchenTrack temperatures:
  * the AM/PM daily checklist and the fire, legionella, hot tub, PAT, incident
- * and pool check forms. Same contract as kitchenOutboxCore: the submission and a
+ * and pool check forms, TreeTrack inspections and GreenTrack machine records
+ * (defects, fuel logs, service records, PUWER inspections), KitchenTrack cleaning
+ * schedule saves, tasks a manager creates on site, plus the staff actions
+ * that work offline (FixTrack issue
+ * reports and notes, "Mark done" on today's tasks, SafeTrack and DocTrack
+ * acknowledgements). Same contract as kitchenOutboxCore: the submission and a
  * stable entry ID are written to device storage before the first HTTP
  * attempt, replays send the identical body, and the server recognises a
  * replay of an entry it already applied (clientEntryId), so automatic and
@@ -14,17 +19,60 @@
  */
 export interface CheckOwner { clientId: number; userId: number }
 export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
-export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident' | 'pool-check';
+export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident' | 'pool-check'
+  | 'premises-inspection' | 'tree-inspection' | 'room-check' | 'pest-activity' | 'pest-visit'
+  | 'swim-surveillance' | 'swim-first-aid' | 'swim-incident' | 'green-defect' | 'green-fuel' | 'green-service' | 'green-puwer'
+  | 'kitchen-probe' | 'kitchen-weekly' | 'cleaning-log'
+  | 'bike-hire' | 'bike-service'
+  | 'fix-issue' | 'task-create' | OfflineActionKind;
+/** Actions on an existing server record (path carries its ID): one unsent entry per target. */
+export type OfflineActionKind = 'fix-note' | 'task-completion' | 'safe-ack' | 'doc-ack';
+export type DeliveryRejection = 'conflict' | 'rejected';
 
 /** Kinds whose entries are independent records (each gets its own scope). */
-export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident', 'pool-check'];
-export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string> = {
+export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident', 'pool-check',
+  'premises-inspection', 'tree-inspection', 'room-check', 'pest-activity', 'pest-visit',
+  'swim-surveillance', 'swim-first-aid', 'swim-incident', 'green-defect', 'green-fuel', 'green-service', 'green-puwer',
+  'kitchen-probe', 'kitchen-weekly', 'cleaning-log',
+  'bike-hire', 'bike-service', 'fix-issue', 'task-create'];
+export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist' | OfflineActionKind>, string> = {
   'fire-check': '/api/fire-safety',
   'legionella-check': '/api/legionella',
   'hot-tub-check': '/api/hot-tub',
   'pat-test': '/api/pat-track/tests',
   incident: '/api/incidents',
   'pool-check': '/api/pool-track',
+  'premises-inspection': '/api/premises-track',
+  'tree-inspection': '/api/tree-track',
+  'room-check': '/api/room-track/checks',
+  'pest-activity': '/api/pest-track/activity',
+  'pest-visit': '/api/pest-track/visits',
+  'swim-surveillance': '/api/swim-track/surveillance',
+  'swim-first-aid': '/api/swim-track/first-aid',
+  'swim-incident': '/api/swim-track/incidents',
+  'green-defect': '/api/green-track/defects',
+  'green-fuel': '/api/green-track/fuel-logs',
+  'green-service': '/api/green-track/service-records',
+  'green-puwer': '/api/green-track/puwer-inspections',
+  'kitchen-probe': '/api/kitchen-weekly/probe',
+  'kitchen-weekly': '/api/kitchen-weekly/weekly',
+  // Upserts the schedule for its kitchen, frequency and period; entries are
+  // delivered oldest first, so a later save never lands before an earlier one.
+  'cleaning-log': '/api/kitchen-cleaning/logs',
+  'bike-hire': '/api/bike-track/hires',
+  'bike-service': '/api/bike-track/services',
+  'fix-issue': '/api/fix-track/issues',
+  // A new task a manager sets on site; edits and archiving need a connection.
+  'task-create': '/api/tasks',
+};
+export type SafeTrackDocument = 'risk-assessments' | 'sops' | 'handbook';
+/** Path and scope of each offline action: one unsent entry per target, or per entry when perEntry. */
+export const ACTION_TARGETS = {
+  // Several notes may wait for one issue: each note is its own scope.
+  fixNote: (issueId: number) => ({ path: `/api/fix-track/issues/${issueId}/notes`, scopeKey: `fix-note:${issueId}`, perEntry: true }),
+  taskCompletion: (taskId: number, date: string) => ({ path: `/api/tasks/${taskId}/complete`, scopeKey: `task-completion:${taskId}:${date}` }),
+  safeAck: (sub: SafeTrackDocument, id: number) => ({ path: `/api/safe-track/${sub}/${id}/self-acknowledge`, scopeKey: `safe-ack:${sub}:${id}` }),
+  docAck: (documentId: number) => ({ path: `/api/doc-track/documents/${documentId}/acknowledge`, scopeKey: `doc-ack:${documentId}` }),
 };
 
 /** Query keys to refresh once an entry of this kind has been delivered. */
@@ -37,6 +85,29 @@ export function deliveredQueryKeys(kind: CheckKind): string[][] {
     case 'pat-test': return [['pat-tests'], ['pat-appliances'], ['dashboard-summary']];
     case 'incident': return [['incidents'], ['dashboard-summary']];
     case 'pool-check': return [['pool-checks'], ['track-controls'], ['dashboard-summary']];
+    case 'premises-inspection': return [['premises-inspections'], ['dashboard-summary']];
+    case 'tree-inspection': return [['tree-inspections'], ['tree-status'], ['dashboard-summary']];
+    case 'room-check': return [['room-track-checks'], ['dashboard-summary']];
+    case 'pest-activity': return [['pest-activity'], ['dashboard-summary']];
+    case 'pest-visit': return [['pest-visits'], ['dashboard-summary']];
+    case 'swim-surveillance': return [['swim-surveillance'], ['track-controls'], ['dashboard-summary']];
+    case 'swim-first-aid': return [['swim-first-aid'], ['track-controls'], ['dashboard-summary']];
+    case 'swim-incident': return [['swim-incidents'], ['dashboard-summary']];
+    case 'green-defect': return [['green-records', 'defect'], ['dashboard-summary']];
+    case 'green-fuel': return [['green-records', 'fuel'], ['dashboard-summary']];
+    case 'green-service': return [['green-records', 'service'], ['dashboard-summary']];
+    case 'green-puwer': return [['green-records', 'puwer'], ['dashboard-summary']];
+    case 'kitchen-probe': return [['kitchen-probe-checks'], ['dashboard-summary']];
+    case 'kitchen-weekly': return [['kitchen-weekly-reviews'], ['dashboard-summary']];
+    case 'cleaning-log': return [['kitchen-cleaning-log'], ['kitchen-cleaning-history'], ['dashboard-summary']];
+    case 'bike-hire': return [['bike-hires'], ['bike-fleet'], ['dashboard-summary']];
+    case 'bike-service': return [['bike-services'], ['bike-services-latest'], ['dashboard-summary']];
+    case 'fix-issue': return [['fix-track-issues'], ['fix-track-issues-all'], ['dashboard-summary']];
+    case 'fix-note': return [['fix-track-issue'], ['fix-track-issues'], ['fix-track-issues-all']];
+    case 'task-completion': return [['tasks']];
+    case 'task-create': return [['tasks']];
+    case 'safe-ack': return [['safetrack-acks']];
+    case 'doc-ack': return [['doc-track-my-acknowledgements'], ['doctrack-documents'], ['traintrack-records']];
   }
 }
 export interface CheckEntry {
@@ -52,6 +123,10 @@ export interface CheckEntry {
   state: CheckDeliveryState;
   createdAt: string;
   error?: string;
+  /** Why a 'failed' entry was not accepted: a 409 conflict or another rejection. */
+  rejection?: DeliveryRejection;
+  /** When the server confirmed a 'sent' entry. */
+  sentAt?: string;
 }
 export interface CheckOutboxSnapshot {
   owner: CheckOwner | null;
@@ -76,6 +151,29 @@ const PATHS: Record<CheckKind, RegExp> = {
   'pat-test': /^\/api\/pat-track\/tests$/,
   incident: /^\/api\/incidents$/,
   'pool-check': /^\/api\/pool-track$/,
+  'premises-inspection': /^\/api\/premises-track$/,
+  'tree-inspection': /^\/api\/tree-track$/,
+  'room-check': /^\/api\/room-track\/checks$/,
+  'pest-activity': /^\/api\/pest-track\/activity$/,
+  'pest-visit': /^\/api\/pest-track\/visits$/,
+  'swim-surveillance': /^\/api\/swim-track\/surveillance$/,
+  'swim-first-aid': /^\/api\/swim-track\/first-aid$/,
+  'swim-incident': /^\/api\/swim-track\/incidents$/,
+  'green-defect': /^\/api\/green-track\/defects$/,
+  'green-fuel': /^\/api\/green-track\/fuel-logs$/,
+  'green-service': /^\/api\/green-track\/service-records$/,
+  'green-puwer': /^\/api\/green-track\/puwer-inspections$/,
+  'kitchen-probe': /^\/api\/kitchen-weekly\/probe$/,
+  'kitchen-weekly': /^\/api\/kitchen-weekly\/weekly$/,
+  'cleaning-log': /^\/api\/kitchen-cleaning\/logs$/,
+  'bike-hire': /^\/api\/bike-track\/hires$/,
+  'bike-service': /^\/api\/bike-track\/services$/,
+  'fix-issue': /^\/api\/fix-track\/issues$/,
+  'task-create': /^\/api\/tasks$/,
+  'fix-note': /^\/api\/fix-track\/issues\/\d{1,9}\/notes$/,
+  'task-completion': /^\/api\/tasks\/\d{1,9}\/complete$/,
+  'safe-ack': /^\/api\/safe-track\/(risk-assessments|sops|handbook)\/\d{1,9}\/self-acknowledge$/,
+  'doc-ack': /^\/api\/doc-track\/documents\/\d{1,9}\/acknowledge$/,
 };
 const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
 const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';
@@ -208,7 +306,7 @@ export class CheckOutbox {
       const entries = await this.read(owner);
       await this.write(owner, entries.map(entry =>
         entry.entryId === entryId && entry.state === 'failed'
-          ? { ...entry, state: 'queued', error: undefined } : entry));
+          ? { ...entry, state: 'queued', error: undefined, rejection: undefined } : entry));
     });
     void this.replay();
   }
@@ -248,6 +346,7 @@ export class CheckOutbox {
       if (!entry || this.session?.generation !== session.generation) return;
       let state: CheckDeliveryState = 'sent';
       let message: string | undefined;
+      let rejection: DeliveryRejection | undefined;
       try {
         // Bind every attempt to the original validated session, never a later login.
         const response = await this.deps.send(entry, this.session.token);
@@ -257,6 +356,7 @@ export class CheckOutbox {
         const status = typeof error === 'object' && error !== null && 'status' in error
           ? Number(error.status) : 0;
         state = isRetryableStatus(status) ? 'queued' : 'failed';
+        if (state === 'failed') rejection = status === 409 ? 'conflict' : 'rejected';
         message = status === 401 ? 'Sign in again to send this saved check.'
           : error instanceof Error ? error.message.slice(0, 240) : 'Could not send this check.';
       }
@@ -266,7 +366,8 @@ export class CheckOutbox {
       await this.serial(async () => {
         const entries = await this.read(session.owner);
         await this.write(session.owner, entries.map(row =>
-          row.entryId === entry.entryId ? { ...row, state, error: message } : row));
+          row.entryId === entry.entryId
+            ? { ...row, state, error: message, rejection, sentAt: state === 'sent' ? new Date().toISOString() : undefined } : row));
       });
       if (state === 'queued') return;
     }

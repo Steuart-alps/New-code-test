@@ -48,9 +48,17 @@ export const bikeHireRecordsTable = pgTable("bike_hire_records", {
   overdueNotificationClaimedAt: timestamp("overdue_notification_claimed_at"),
   notes: text("notes"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Mobile outbox entry ID and payload fingerprint: a replay of an applied
+  // hire is recognised instead of creating a duplicate. Not a credential.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_bike_hire_records_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
+]);
 
 /**
  * Durable outbox for overdue-hire email digests. The rendered message and its

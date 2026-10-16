@@ -24,6 +24,8 @@ import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { pendingIssueUploadKey, RecoveryIdentity } from '@/lib/fixTrackRecovery';
+import { useRecordOutbox } from '@/hooks/useRecordOutbox';
+import { isConnectionError } from '@/components/outbox-status-logic';
 
 interface Site {
   id: number;
@@ -35,6 +37,8 @@ interface PendingAttachment {
   photo: ImagePicker.ImagePickerAsset;
   objectPath?: string;
 }
+
+type CreateResult = { queued: true } | { queued: false; created: { id: number } };
 
 interface PendingIssueUpload {
   userId: number;
@@ -210,7 +214,7 @@ export default function NewIssueScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       Alert.alert(
         'Issue saved — photos need attention',
-        `Issue #${variables.issueId} was saved, but its photos were not all attached. ${err.message} You can retry the photos for this same issue, or finish now without resubmitting it.`,
+        `Issue #${variables.issueId} was saved, but its photos were not all attached. ${isConnectionError(err) ? 'Photos need a connection; they are kept on this phone for this issue.' : err.message} You can retry the photos for this same issue, or finish now without resubmitting it.`,
         [
           { text: 'Finish', onPress: () => router.back() },
           { text: 'Retry photos', onPress: () => uploadAttachments(variables) },
@@ -219,15 +223,39 @@ export default function NewIssueScreen() {
     },
   });
 
+  // A report without photos goes through the device outbox: with no signal it
+  // is saved on this phone and sent automatically (same entry ID, so a resend
+  // never creates a second issue). Photos need a connection, so a report with
+  // photos is created online and its photos uploaded straight after.
+  const outbox = useRecordOutbox('fix-issue');
   const { mutate: createIssue, isPending: isCreatingIssue } = useMutation({
-    mutationFn: (body: Record<string, unknown>) => apiFetch<{ id: number }>('/api/fix-track/issues', {
+    mutationFn: async ({ body, withPhotos }: { body: Record<string, unknown>; withPhotos: boolean }): Promise<CreateResult> => {
+      if (!withPhotos) {
+        const result = await outbox.send(body, `Issue · ${String(body.title)} · ${String(body.location)}`);
+        if (result.state === 'rejected') throw new Error(result.error);
+        if (result.state === 'queued') return { queued: true };
+        return { queued: false, created: result.response as { id: number } };
+      }
+      const created = await apiFetch<{ id: number }>('/api/fix-track/issues', {
         method: 'POST',
         body: JSON.stringify(body),
-    }),
-    onSuccess: async (created) => {
+      });
+      return { queued: false, created };
+    },
+    onSuccess: async (result, { withPhotos }) => {
+      if (result.queued) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert(
+          'Saved on this phone',
+          'There is no connection, so this issue report is saved on this phone. It is sent automatically when you have signal; the Issues tab shows its status.',
+          [{ text: 'Done', onPress: () => router.back() }],
+        );
+        return;
+      }
+      const { created } = result;
       qc.invalidateQueries({ queryKey: ['fix-track-issues-all'] });
       qc.invalidateQueries({ queryKey: ['fix-track-issues'] });
-      if (attachments.length === 0) {
+      if (!withPhotos) {
         finishIssue(created.id, false);
         return;
       }
@@ -242,8 +270,25 @@ export default function NewIssueScreen() {
       }
       uploadAttachments({ issueId: created.id, pendingAttachments: attachments });
     },
-    onError: (err: Error) => {
+    onError: (err: Error, { body, withPhotos }) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      if (withPhotos && isConnectionError(err)) {
+        Alert.alert(
+          'Photos need a connection',
+          'Nothing was sent. Photos can only be attached with signal. Save the report on this phone without its photos (it sends automatically when you reconnect), or keep it here and try again when you have signal.',
+          [
+            { text: 'Keep editing', style: 'cancel' },
+            {
+              text: 'Save without photos',
+              onPress: () => {
+                setAttachments([]);
+                createIssue({ body, withPhotos: false });
+              },
+            },
+          ],
+        );
+        return;
+      }
       Alert.alert('Unable to save issue', err.message);
     },
   });
@@ -261,7 +306,7 @@ export default function NewIssueScreen() {
       Alert.alert('Details required', 'Please enter a brief title and the issue location.');
       return;
     }
-    createIssue({
+    const body = {
       title: title.trim(),
       description: description.trim() || undefined,
       issueType,
@@ -270,7 +315,8 @@ export default function NewIssueScreen() {
       reportedBy: user?.name ?? 'Mobile user',
       reportedDate: new Date().toISOString().slice(0, 10),
       ...(siteId ? { siteId } : {}),
-    });
+    };
+    createIssue({ body, withPhotos: attachments.length > 0 });
   }
 
   function discardPendingRecovery() {

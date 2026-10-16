@@ -3,8 +3,15 @@
  * Lets staff tick off cleaning tasks during a shift.
  * Shows progress indicator and recent history.
  * Gated behind hasService("kitchentrack").
+ *
+ * Unsaved ticks are kept on the device per user, kitchen, frequency and period
+ * (restored when the screen reopens), and draft saves and sign-offs go through
+ * the device check outbox: saved on the phone first, then sent, and resent
+ * automatically with the same entry ID after a lost connection, which the
+ * server recognises, so a resend never applies twice.
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Alert,
@@ -26,15 +33,27 @@ import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { ApiError, apiFetch } from '@/lib/api';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { useRecordOutbox } from '@/hooks/useRecordOutbox';
+import { useCheckOutbox } from '@/lib/checkOutbox';
 import {
   cleaningPeriodDate,
   type CleaningFrequency,
 } from '@/components/cleaning-schedule-logic';
 import {
   buildCleaningLogPayload,
+  cleaningDraftKey,
+  cleaningSyncStatus,
+  discardCleaningDraft,
   hydrateCleaningDraft,
+  loadCleaningDraft,
+  pendingCleaningEntry,
   requestCleaningFrequencyChange,
   requestCleaningSiteChange,
+  saveCleaningDraft,
+  type CleaningDraftCompletion,
+  type CleaningDraftLog,
+  type CleaningDraftScope,
 } from '@/components/cleaning-draft-logic';
 
 const MODULE_COLOR = '#14b8a6';
@@ -97,6 +116,29 @@ export default function CleaningScreen() {
   const [initials, setInitials] = useState<string>(user?.name ?? '');
   const [refreshing, setRefreshing] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // Storage key of the schedule whose device draft has been looked up (and
+  // restored if there was one); nothing is written to the device before that.
+  const [draftCheckedKey, setDraftCheckedKey] = useState<string | null>(null);
+  const [restoredDraft, setRestoredDraft] = useState(false);
+
+  const owner = useMemo(
+    () => (user?.clientId ? { clientId: user.clientId, userId: user.id } : null),
+    [user?.clientId, user?.id],
+  );
+  const scope = useMemo<CleaningDraftScope>(
+    () => ({ siteId, frequency, logDate: date }),
+    [siteId, frequency, date],
+  );
+  const draftKey = owner && siteId !== null ? cleaningDraftKey(owner, scope) : null;
+  const discardDeviceDraft = (target: CleaningDraftScope) => {
+    if (owner && target.siteId !== null) void discardCleaningDraft(AsyncStorage, owner, target).catch(() => {});
+  };
+
+  // Saves made on this device that the server has not confirmed yet.
+  const outbox = useRecordOutbox('cleaning-log');
+  const deviceEntries = useCheckOutbox().entries;
+  const pending = siteId === null ? null : pendingCleaningEntry(outbox.entries, scope);
+  const syncStatus = siteId === null ? { kind: 'none' as const } : cleaningSyncStatus(deviceEntries, scope);
 
   const {
     data: sites = [],
@@ -138,6 +180,7 @@ export default function CleaningScreen() {
 
   const {
     data: log,
+    status: logStatus,
     isLoading: logLoading,
     isFetching: logFetching,
     refetch: refetchLog,
@@ -166,17 +209,69 @@ export default function CleaningScreen() {
   const [checked, setChecked] = useState<Record<number, boolean>>({});
   const [doneBy, setDoneBy] = useState<Record<number, string>>({});
 
+  // A save waiting on the device is newer than the server copy, so the screen
+  // shows its ticks until it has been delivered.
+  const pendingId = pending?.entryId;
+  const savedSource = useMemo<CleaningDraftLog | null | undefined>(
+    () => (pending
+      ? { completions: pending.body.completions as CleaningDraftCompletion[], signed_by: pending.body.signedBy as string }
+      : log),
+    // The body of an entry never changes, so its ID identifies it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pendingId, log],
+  );
+
   useEffect(() => {
-    const hydrated = hydrateCleaningDraft(log, user?.name, dirty);
+    const hydrated = hydrateCleaningDraft(savedSource, user?.name, dirty);
     if (!hydrated) return;
     setChecked(hydrated.checked);
     setDoneBy(hydrated.doneBy);
     setInitials(hydrated.initials);
     setDirty(false);
-  }, [dirty, log, user?.name]);
+  }, [dirty, savedSource, user?.name]);
+
+  // Restore unsaved ticks kept on the device once the server copy has loaded
+  // (or failed to load, e.g. with no signal), so the draft is applied on top.
+  const logSettled = logStatus !== 'pending';
+  const serverSignedOff = !!log?.submitted_at;
+  useEffect(() => {
+    if (!owner || !draftKey || !logSettled || draftCheckedKey === draftKey) return;
+    let cancelled = false;
+    const target = scope;
+    loadCleaningDraft(AsyncStorage, owner, target).then((draft) => {
+      if (cancelled) return;
+      setDraftCheckedKey(draftKey);
+      setRestoredDraft(false);
+      if (!draft) return;
+      if (serverSignedOff) {
+        // Signed off elsewhere meanwhile: the schedule can no longer change.
+        discardDeviceDraft(target);
+        Alert.alert('Already signed off', 'This schedule was signed off before your unsaved changes on this device could be saved, so they were not applied.');
+        return;
+      }
+      setChecked(draft.checked);
+      setDoneBy(draft.doneBy);
+      setInitials(draft.initials);
+      setDirty(true);
+      setRestoredDraft(true);
+    }, () => {
+      if (!cancelled) setDraftCheckedKey(draftKey);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner, draftKey, logSettled, draftCheckedKey, serverSignedOff]);
+
+  // Keep unsaved ticks on the device as they are made.
+  useEffect(() => {
+    if (!owner || !draftKey || !dirty || draftCheckedKey !== draftKey) return;
+    void saveCleaningDraft(AsyncStorage, {
+      version: 1, owner, ...scope, checked, doneBy, initials, savedAt: new Date().toISOString(),
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner, draftKey, dirty, draftCheckedKey, checked, doneBy, initials]);
 
   const { mutate, isPending } = useMutation({
-    mutationFn: ({ submit }: { submit: boolean }) => {
+    mutationFn: async ({ submit }: { submit: boolean }) => {
       const staffName = initials.trim();
       if (!staffName) throw new Error('Enter your name before saving.');
       const payload = buildCleaningLogPayload({
@@ -189,17 +284,36 @@ export default function CleaningScreen() {
         staffName,
         submit,
       });
-      return apiFetch<CleaningLog>('/api/kitchen-cleaning/logs', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
+      const kitchen = sites.find((site) => site.id === siteId)?.name ?? 'Kitchen';
+      const label = `Cleaning ${submit ? 'sign-off' : 'draft'} · ${kitchen} · ${frequency} · ${formatDate(date)}`;
+      const outcome = await outbox.send({ ...payload }, label);
+      return { outcome, saved: scope };
     },
-    onSuccess: async (savedLog, vars) => {
+    onSuccess: async ({ outcome, saved }, vars) => {
+      if (outcome.state === 'rejected') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Not accepted', outcome.error);
+        return;
+      }
+      // Now held by the server or the device outbox.
+      discardDeviceDraft(saved);
+      setRestoredDraft(false);
+      if (outcome.state === 'queued') {
+        setDirty(false);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert(
+          'Saved on this device',
+          vars.submit
+            ? 'No connection right now. The sign-off is saved on this device and will be sent automatically when you are back online.'
+            : 'No connection right now. Your progress is saved on this device and will be sent automatically when you are back online.',
+        );
+        return;
+      }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      qc.setQueryData(['kitchen-cleaning-log', siteId, date, frequency], savedLog);
+      qc.setQueryData(['kitchen-cleaning-log', saved.siteId, saved.logDate, saved.frequency], outcome.response as CleaningLog);
       setDirty(false);
-      qc.invalidateQueries({ queryKey: ['kitchen-cleaning-log', siteId, date, frequency] });
-      qc.invalidateQueries({ queryKey: ['kitchen-cleaning-history', siteId] });
+      qc.invalidateQueries({ queryKey: ['kitchen-cleaning-log', saved.siteId, saved.logDate, saved.frequency] });
+      qc.invalidateQueries({ queryKey: ['kitchen-cleaning-history', saved.siteId] });
       Alert.alert(
         vars.submit ? 'Schedule signed off' : 'Draft saved',
         vars.submit
@@ -229,6 +343,8 @@ export default function CleaningScreen() {
     const decision = requestCleaningFrequencyChange(frequency, next, dirty, isPending);
     if (decision.kind === 'ignore') return;
     const switchFrequency = () => {
+      if (dirty) discardDeviceDraft(scope);
+      setRestoredDraft(false);
       setChecked({});
       setDoneBy({});
       setInitials(user?.name ?? '');
@@ -253,6 +369,8 @@ export default function CleaningScreen() {
     const decision = requestCleaningSiteChange(siteId, nextSiteId, dirty, isPending);
     if (decision.kind === 'ignore') return;
     const switchSite = () => {
+      if (dirty) discardDeviceDraft(scope);
+      setRestoredDraft(false);
       setChecked({});
       setDoneBy({});
       setInitials(user?.name ?? '');
@@ -273,6 +391,25 @@ export default function CleaningScreen() {
     switchSite();
   }
 
+  function discardChanges() {
+    Alert.alert(
+      'Discard unsaved changes?',
+      'The ticks you have not saved will be removed from this device.',
+      [
+        { text: 'Keep editing', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => {
+            discardDeviceDraft(scope);
+            setRestoredDraft(false);
+            setDirty(false);
+          },
+        },
+      ],
+    );
+  }
+
   async function onRefresh() {
     setRefreshing(true);
     await Promise.all([refetchSites(), refetchTasks(), refetchLog(), refetchHistory()]);
@@ -280,12 +417,15 @@ export default function CleaningScreen() {
   }
 
   const isLoading = tasksLoading || logLoading;
-  const isBusy = sitesLoading || isLoading || tasksFetching || logFetching || refreshing;
+  // Edits wait until any unsaved ticks kept on the device have been restored.
+  const draftLookup = !!draftKey && draftCheckedKey !== draftKey;
+  const isBusy = sitesLoading || isLoading || tasksFetching || logFetching || refreshing || draftLookup;
   const doneCount = visibleTasks.filter((t) => checked[t.id]).length;
   const total = visibleTasks.length;
   const progress = total > 0 ? doneCount / total : 0;
   const recentHistory = history.filter((h) => h.frequency === frequency).slice(0, 7);
-  const isSubmitted = !!log?.submitted_at;
+  // A sign-off waiting on the device locks the schedule just like a delivered one.
+  const isSubmitted = !!log?.submitted_at || !!pending?.body.submittedAt;
 
   if (!hasService('kitchentrack')) {
     return (
@@ -428,13 +568,48 @@ export default function CleaningScreen() {
           placeholderTextColor={colors.mutedForeground}
           style={[styles.nameInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
         />
-        {isSubmitted && (
+        {log?.submitted_at ? (
           <View style={[styles.signedNotice, { borderColor: colors.success, backgroundColor: `${colors.success}18` }]}>
             <Feather name="lock" size={16} color={colors.success} />
             <Text style={[styles.signedText, { color: colors.success }]}>Signed off by {log?.signed_by}</Text>
           </View>
-        )}
+        ) : null}
+        {syncStatus.kind !== 'none' ? (
+          <View
+            testID="cleaning-sync-status"
+            style={[styles.signedNotice, {
+              borderColor: syncStatus.kind === 'failed' ? colors.destructive : syncStatus.kind === 'sent' ? colors.success : colors.warning,
+            }]}
+          >
+            <Feather
+              name={syncStatus.kind === 'failed' ? 'alert-triangle' : syncStatus.kind === 'sent' ? 'check' : 'upload-cloud'}
+              size={16}
+              color={syncStatus.kind === 'failed' ? colors.destructive : syncStatus.kind === 'sent' ? colors.success : colors.warning}
+            />
+            <Text style={[styles.signedText, { color: colors.foreground }]}>
+              {syncStatus.kind === 'queued'
+                ? `${syncStatus.signOff ? 'Sign-off' : 'Draft'} saved on this device. It will be sent automatically when you have a connection.`
+                : syncStatus.kind === 'sending'
+                  ? `Sending ${syncStatus.signOff ? 'sign-off' : 'draft'}…`
+                  : syncStatus.kind === 'sent'
+                    ? `${syncStatus.signOff ? 'Sign-off' : 'Draft'} from this device received by the server.`
+                    : `${syncStatus.signOff ? 'Sign-off' : 'Draft'} not accepted: ${syncStatus.error ?? 'the server rejected it.'}`}
+            </Text>
+          </View>
+        ) : null}
+        {dirty && !isSubmitted ? (
+          <View testID="cleaning-unsaved" style={styles.unsavedRow}>
+            <Text style={[styles.unsavedText, { color: colors.mutedForeground }]}>
+              {restoredDraft ? 'Unsaved changes restored from this device.' : 'Unsaved changes are kept on this device until you save.'}
+            </Text>
+            <TouchableOpacity testID="cleaning-discard-draft" accessibilityRole="button" onPress={discardChanges}>
+              <Text style={[styles.unsavedText, { color: colors.destructive, fontFamily: 'Inter_600SemiBold' }]}>Discard</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </View>
+
+      <OutboxEntries entries={outbox.entries} readError={outbox.readError} />
 
       {/* Task list */}
       <View style={[styles.section, { gap: 8 }]}>
@@ -476,6 +651,9 @@ export default function CleaningScreen() {
                 onPress={() => toggle(t.id)}
                 disabled={isPending || isSubmitted || isBusy}
                 testID={`cleaning-task-${t.id}`}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: isDone, disabled: isPending || isSubmitted || isBusy }}
+                accessibilityLabel={`${t.task}, ${t.area}`}
               >
                 <View
                   style={[
@@ -651,6 +829,8 @@ const styles = StyleSheet.create({
   nameInput: { minHeight: 48, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, fontSize: 15, fontFamily: 'Inter_400Regular' },
   signedNotice: { borderWidth: 1, borderRadius: 7, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 8 },
   signedText: { flex: 1, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  unsavedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  unsavedText: { flexShrink: 1, fontSize: 12, fontFamily: 'Inter_400Regular' },
   progressBarBg: {
     height: 8,
     borderRadius: 4,

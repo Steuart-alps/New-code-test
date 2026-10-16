@@ -19,6 +19,7 @@ import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { CONTACT_URL, canRequestBusinessDeletion, webSettingsUrl } from '@/lib/links';
+import { onlineActionMessage } from '@/components/outbox-status-logic';
 
 interface DeletionStatus {
   eligible: boolean;
@@ -67,7 +68,11 @@ export default function DeleteAccountScreen() {
       await queryClient.invalidateQueries({ queryKey: ['data-deletion-request'] });
     },
     onError: async (err: Error) => {
-      setError(err.message || 'Could not submit the deletion request.');
+      setError(onlineActionMessage(
+        err,
+        'Could not submit the deletion request.',
+        'A deletion request needs an internet connection. Nothing was sent — try again when you have signal.',
+      ));
       // The request may have been saved even if the notification failed.
       await queryClient.invalidateQueries({ queryKey: ['data-deletion-request'] });
     },

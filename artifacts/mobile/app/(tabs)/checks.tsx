@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { aquaTrackAccess } from '@/components/aqua-track-logic';
+import { MANAGE_ITEMS, visibleManageItems } from '@/components/manage-items';
 
 interface CheckModule {
   id: string;
@@ -39,11 +40,11 @@ const MODULES: CheckModule[] = [
     icon: 'alert-triangle',
     iconColor: '#f97316',
     checks: [
-      'Alarm test',
-      'Emergency lights',
+      'Weekly alarm test',
+      'Monthly lighting flick test',
       'Extinguisher check',
       'Fire doors',
-      'Fire drill',
+      'Fire drill (with night staff)',
     ],
   },
   {
@@ -106,20 +107,60 @@ const MODULES: CheckModule[] = [
     checks: ['Pick appliance', 'Pass / fail', 'Test date', 'Notes'],
   },
   {
+    id: 'pest',
+    label: 'PestTrack',
+    subtitle: 'Pest activity & contractor visits',
+    icon: 'crosshair',
+    iconColor: '#b45309',
+    checks: ['Pick site', 'Log a sighting', 'Contractor visit', 'Recent activity'],
+  },
+  {
+    id: 'bike',
+    label: 'BikeTrack',
+    subtitle: 'Bike hire, safety checks & services',
+    icon: 'navigation',
+    iconColor: '#0d9488',
+    checks: ['Pick site', 'Fleet status', 'Hire with pre-ride check', 'Return', 'Log a service'],
+  },
+  {
     id: 'green',
     label: 'GreenTrack',
-    subtitle: 'Pre-use grounds equipment check',
+    subtitle: 'Pre-use checks, defects & fuel logs',
     icon: 'tool',
     iconColor: '#6f8750',
-    checks: ['Choose machine', 'Check safety points', 'Fuel / charge', 'Sign off'],
+    checks: ['Choose machine', 'Check safety points', 'Sign off', 'Report defects & log fuel'],
+  },
+  {
+    id: 'tree',
+    label: 'TreeTrack',
+    subtitle: 'Tree inspection logbook',
+    icon: 'feather',
+    iconColor: '#16a34a',
+    checks: ['Choose site', 'Record inspection', "What's due", 'Recent inspections'],
+  },
+  {
+    id: 'room',
+    label: 'RoomTrack',
+    subtitle: 'Daily room housekeeping checks',
+    icon: 'home',
+    iconColor: '#0284c7',
+    checks: ['Pick site', 'Clean / tidy / to standard', 'Notes', 'Recent checks'],
   },
   {
     id: 'aqua',
     label: 'AquaTrack',
-    subtitle: 'Pool checks & swim sessions',
+    subtitle: 'Pool checks, sessions, surveillance, first aid & incidents',
     icon: 'droplet',
     iconColor: '#0ea5e9',
-    checks: ['Pool water quality', 'pH & chlorine', 'Swim sessions', 'Bather records'],
+    checks: ['Pool water quality', 'Swim sessions', 'Lifeguard surveillance', 'First-aid kit', 'Incidents'],
+  },
+  {
+    id: 'premises',
+    label: 'PremisesTrack',
+    subtitle: 'Premises inspections',
+    icon: 'home',
+    iconColor: '#64748b',
+    checks: ['Pick site', 'Findings & hazards', 'Action required / taken', 'Next inspection due'],
   },
   {
     id: 'safe-track',
@@ -135,14 +176,20 @@ export default function ChecksScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { hasService } = useAuth();
+  const { user, hasService } = useAuth();
+  const manageCount = visibleManageItems(MANAGE_ITEMS, user?.role, hasService).length;
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const aquaAccess = aquaTrackAccess(hasService);
   const visibleModules = MODULES.filter(
     (mod) =>
       (mod.id !== 'incident' || hasService('incidenttrack')) &&
       (mod.id !== 'pat' || hasService('pattrack')) &&
+      (mod.id !== 'pest' || hasService('pesttrack')) &&
+      (mod.id !== 'bike' || hasService('biketrack')) &&
       (mod.id !== 'green' || hasService('greentrack')) &&
+      (mod.id !== 'premises' || hasService('premisestrack')) &&
+      (mod.id !== 'tree' || hasService('treetrack')) &&
+      (mod.id !== 'room' || hasService('roomtrack')) &&
       (mod.id !== 'aqua' || aquaAccess.any),
   );
 
@@ -165,6 +212,24 @@ export default function ChecksScreen() {
       </View>
 
       <View style={styles.content}>
+        {manageCount > 0 ? (
+          <TouchableOpacity
+            testID="checks-manage"
+            accessibilityRole="button"
+            style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'center' }]}
+            onPress={() => router.push('/manage' as any)}
+            activeOpacity={0.75}
+          >
+            <View style={[styles.iconWrap, { backgroundColor: colors.navy + '1a' }]}>
+              <Feather name="briefcase" size={24} color={colors.navy} />
+            </View>
+            <View style={styles.cardBody}>
+              <Text style={[styles.cardTitle, { color: colors.foreground }]}>Manage and look up</Text>
+              <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>Actions, certificates, tasks, registers and training</Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        ) : null}
         {visibleModules.map((mod) => (
           <TouchableOpacity
             key={mod.id}

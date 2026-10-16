@@ -19,6 +19,10 @@ import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
 import type { FixTrackIssue } from '@/components/IssueCard';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { isConnectionError, onlineActionMessage } from '@/components/outbox-status-logic';
+import { useOutboxAction } from '@/hooks/useRecordOutbox';
+import { ACTION_TARGETS } from '@/lib/checkOutboxCore';
 
 type IssueStatus = FixTrackIssue['status'];
 
@@ -85,26 +89,36 @@ export default function IssueDetailScreen() {
   });
 
   const [noteDraft, setNoteDraft] = React.useState('');
+  const issueId = Number(id);
+  const noteTarget = Number.isInteger(issueId) && issueId > 0 ? ACTION_TARGETS.fixNote(issueId) : null;
+  // Notes go through the device outbox: with no signal they are saved on this
+  // phone and sent automatically, never twice (entry ID replay on the API).
+  const noteOutbox = useOutboxAction('fix-note');
+  const queuedNotes = noteOutbox.entries.filter((entry) => entry.path === noteTarget?.path);
 
   const { mutate: addNote, isPending: noteSaving } = useMutation({
-    mutationFn: (note: string) =>
-      apiFetch(`/api/fix-track/issues/${id}/notes`, {
-        method: 'POST',
-        body: JSON.stringify({ note }),
-      }),
-    onSuccess: async () => {
+    mutationFn: async (note: string) => {
+      if (!noteTarget) throw new Error('This issue cannot take notes.');
+      const result = await noteOutbox.send(noteTarget, { note }, `Note on issue #${issueId} · ${note.slice(0, 60)}`);
+      if (result.state === 'rejected') throw new Error(result.error);
+      return result.state;
+    },
+    onSuccess: async (state) => {
       setNoteDraft('');
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (state === 'queued') return;
       qc.invalidateQueries({ queryKey: ['fix-track-issue', id] });
       qc.invalidateQueries({ queryKey: ['fix-track-issues-all'] });
       qc.invalidateQueries({ queryKey: ['fix-track-issues'] });
     },
     onError: (err: Error) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', err.message);
+      Alert.alert('Note not saved', err.message);
     },
   });
 
+  // Status changes edit the live issue (contractor and calendar workflows
+  // depend on its current state), so they need a connection.
   const { mutate: updateStatus, isPending } = useMutation({
     mutationFn: (status: IssueStatus) =>
       apiFetch(`/api/fix-track/issues/${id}`, {
@@ -119,7 +133,7 @@ export default function IssueDetailScreen() {
     },
     onError: (err: Error) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', err.message);
+      Alert.alert('Status not changed', onlineActionMessage(err));
     },
   });
 
@@ -146,7 +160,7 @@ export default function IssueDetailScreen() {
       >
         <Feather name="alert-circle" size={32} color={colors.destructive} />
         <Text style={[styles.errorText, { color: colors.foreground }]}>
-          Issue not found
+          {isConnectionError(error) ? 'Opening this issue needs a connection' : 'Issue not found'}
         </Text>
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={[{ color: colors.primary, marginTop: 8, fontFamily: 'Inter_500Medium', fontSize: 14 }]}>
@@ -282,6 +296,9 @@ export default function IssueDetailScreen() {
             </Text>
           </View>
         ))}
+        <View style={{ marginHorizontal: -16 }}>
+          <OutboxEntries entries={queuedNotes} readError={noteOutbox.readError} />
+        </View>
         <TextInput
           value={noteDraft}
           onChangeText={setNoteDraft}

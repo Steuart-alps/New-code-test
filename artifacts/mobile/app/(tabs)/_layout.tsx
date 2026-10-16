@@ -7,14 +7,19 @@ import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Tabs } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
+import { useUnsentSummary } from '@/components/OutboxStatus';
 
 // iOS 26+ liquid glass native tab bar
+// Today carries the count of records saved on this phone and not yet on the
+// server (including conflicts); its indicator lists them.
 function NativeTabLayout() {
+  const { badge } = useUnsentSummary().summary;
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Icon sf={{ default: 'house', selected: 'house.fill' }} />
         <NativeTabs.Trigger.Label>Today</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Badge hidden={!badge}>{badge}</NativeTabs.Trigger.Badge>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="checks">
         <NativeTabs.Trigger.Icon sf={{ default: 'checklist', selected: 'checklist' }} />
@@ -43,6 +48,7 @@ function ClassicTabLayout() {
   const isDark = colorScheme === 'dark';
   const isIOS = Platform.OS === 'ios';
   const isWeb = Platform.OS === 'web';
+  const { badge } = useUnsentSummary().summary;
 
   return (
     <Tabs
@@ -79,6 +85,7 @@ function ClassicTabLayout() {
         name="index"
         options={{
           title: 'Today',
+          tabBarBadge: badge,
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="house" tintColor={color} size={24} />

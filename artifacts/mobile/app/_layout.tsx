@@ -104,6 +104,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/kitchen-extras"
+        options={{
+          title: 'Probe & weekly checks',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/aqua"
         options={{
           title: 'AquaTrack',
@@ -125,9 +132,156 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/tree"
+        options={{
+          title: 'TreeTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/room"
+        options={{
+          title: 'RoomTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/pest"
+        options={{
+          title: 'PestTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/bike"
+        options={{
+          title: 'BikeTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/safe-track"
         options={{
           title: 'SafeTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/premises"
+        options={{
+          title: 'PremisesTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/green"
+        options={{
+          title: 'GreenTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/index"
+        options={{
+          title: 'Manage',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/actions"
+        options={{
+          title: 'Actions',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/action"
+        options={{
+          title: 'Action',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/tasks"
+        options={{
+          title: 'Tasks',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/allergens"
+        options={{
+          title: 'Allergen records',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/coshh"
+        options={{
+          title: 'COSHH register',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/asbestos"
+        options={{
+          title: 'Asbestos register',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/contractors"
+        options={{
+          title: 'Contractors',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/contractor/[id]"
+        options={{
+          title: 'Contractor',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/contractor-approvals"
+        options={{
+          title: 'Contractor approvals',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/calendar"
+        options={{
+          title: 'Calendar',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/training"
+        options={{
+          title: 'TrainTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/training-person"
+        options={{
+          title: 'Training records',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/staff-sign-off"
+        options={{
+          title: 'Staff sign-off',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/green-records"
+        options={{
+          title: 'Machine records',
           headerShown: false,
         }}
       />

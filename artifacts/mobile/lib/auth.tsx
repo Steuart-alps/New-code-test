@@ -24,6 +24,7 @@ import {
   clearPendingIssueUploadRecovery,
 } from './fixTrackRecovery';
 import { registerForPushNotifications, unregisterPushToken } from './push';
+import { clearRegisterCache } from './registerCache';
 
 const TOKEN_KEY = 'complytrack_mobile_token';
 const TOKEN_EXPIRY_KEY = 'complytrack_mobile_token_expiry';
@@ -308,6 +309,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await SecureStore.deleteItemAsync(TOKEN_EXPIRY_KEY).catch(() => {});
           await clearCachedSession();
           await clearPendingIssueUploadRecovery().catch(() => {});
+          await clearRegisterCache().catch(() => {});
           applyToken(null);
         } else if (activeToken.current) {
           // No signal at launch: open with the last validated account for
@@ -452,6 +454,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Clear recoverable local photo references before any best-effort network
     // work, so signing out is reliable even while offline.
     await clearPendingIssueUploadRecovery().catch(() => {});
+    await clearRegisterCache().catch(() => {});
     // Unregister the device's push token while we still have a valid bearer.
     await unregisterPushToken();
     try {

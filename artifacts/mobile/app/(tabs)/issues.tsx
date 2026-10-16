@@ -16,6 +16,8 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
 import { IssueCard, type FixTrackIssue } from '@/components/IssueCard';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { useRecordOutbox } from '@/hooks/useRecordOutbox';
 
 type Filter = 'all' | 'open' | 'in_progress' | 'urgent';
 
@@ -32,6 +34,8 @@ export default function IssuesScreen() {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>('all');
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  // Issue reports saved on this phone without signal (sent automatically).
+  const outbox = useRecordOutbox('fix-issue');
 
   const {
     data: issues = [],
@@ -121,6 +125,9 @@ export default function IssuesScreen() {
           />
         }
       >
+        <View style={styles.outbox}>
+          <OutboxEntries entries={outbox.entries} readError={outbox.readError} />
+        </View>
         {isLoading ? (
           <ActivityIndicator
             color={colors.primary}
@@ -192,6 +199,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   list: { padding: 16 },
+  outbox: { marginHorizontal: -16, marginTop: -12 },
   empty: {
     borderWidth: 1,
     borderRadius: 8,

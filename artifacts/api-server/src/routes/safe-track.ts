@@ -228,8 +228,10 @@ function ackListRoute(table: any, docType: string) {
           WHERE id = ${sinceId} AND client_id = ${clientId}
         ), '-infinity'::timestamp)`
       : sql``;
+    // acknowledged_by lets the phone show a document the signed-in user has
+    // already acknowledged (self-acknowledgements carry no roster row).
     const result = await db.execute(sql`
-      SELECT id, staff_roster_id, staff_name, signature, acknowledged_at
+      SELECT id, staff_roster_id, staff_name, signature, acknowledged_at, acknowledged_by
       FROM safe_track_acknowledgements
       WHERE document_id = ${id} AND document_type = ${docType} AND client_id = ${clientId}
       ${since}
@@ -276,6 +278,9 @@ function ackSaveRoute(table: any, docType: string) {
 // ── Self-acknowledge (mobile) ─────────────────────────────────────────────────
 // POST /safe-track/risk-assessments/:id/self-acknowledge  (and sops / handbook)
 // The mobile staff member acknowledges a document for themselves — no staffRosterId needed.
+// One acknowledgement per user and document: the phone's outbox may resend
+// after a lost response (its clientEntryId is ignored) and gets
+// alreadyAcknowledged back instead of a second row.
 
 function selfAckRoute(table: any, docType: string) {
   return async (req: any, res: any) => {
@@ -288,7 +293,9 @@ function selfAckRoute(table: any, docType: string) {
       .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
     if (!doc) return res.status(404).json({ error: "Not found" });
 
-    const userId: number | null = (req.session as any).userId ?? null;
+    // The signed-in user from the web session or the phone's bearer token (a
+    // bearer request has no session userId).
+    const userId: number | null = req.currentUser?.id ?? null;
     const userName: string = req.body?.staffName ?? "Unknown";
     const signature: string | null = req.body?.signature ?? null;
 

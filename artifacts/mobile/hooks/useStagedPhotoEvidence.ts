@@ -6,6 +6,7 @@ import { File } from 'expo-file-system';
 import { fetch as expoFetch } from 'expo/fetch';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { onlineActionMessage } from '@/components/outbox-status-logic';
 import {
   classifyStagedCreateError,
   evidenceReady,
@@ -153,7 +154,11 @@ export function useStagedPhotoEvidence(entityType: StagedPhotoEntityType, enable
       if (scopeRef.current === currentScope) {
         setUploadError({
           scope: currentScope,
-          message: error instanceof Error && error.message ? error.message : 'Photo upload failed. Please retry.',
+          message: onlineActionMessage(
+            error,
+            'Photo upload failed. Please retry.',
+            'Photos need an internet connection to upload. Your answers are kept; add the photo again when you have signal.',
+          ),
         });
       }
     } finally {

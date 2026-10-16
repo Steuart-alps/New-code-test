@@ -7,6 +7,8 @@ import { getEffectiveOptionList } from "../lib/formOptions";
 import { createPestControlRegisterPdf } from "../lib/pestControlRegisterPdf";
 import { z } from "zod";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
+import { resolveSiteAccessScope } from "../lib/siteAccessScope";
 
 const router = Router();
 
@@ -136,20 +138,28 @@ router.get("/register.pdf", requireAuth, requireClientAdmin, async (req, res) =>
 
 // ── Contractor visits ─────────────────────────────────────────────────────────
 
+// Calendar dates as the date inputs send them; anything else is a 400 rather
+// than a database error (which a phone outbox would keep retrying).
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((v) => !Number.isNaN(Date.parse(v)), "Invalid date");
+const optionalIsoDate = z.preprocess((v) => (v === "" ? null : v), isoDate.optional().nullable());
+
 const VisitBody = z.object({
-  visitDate:          z.string().min(1),
+  visitDate:          isoDate,
   contractorName:     z.string().optional().nullable(),
   contractorCompany:  z.string().optional().nullable(),
   areasInspected:     z.string().optional().nullable(),
   findings:           z.string().optional().nullable(),
   treatmentsApplied:  z.string().optional().nullable(),
   recommendations:    z.string().optional().nullable(),
-  nextVisitDate:      z.string().optional().nullable(),
+  nextVisitDate:      optionalIsoDate,
   signedOffBy:        z.string().optional().nullable(),
   signedOffByRosterId: z.number().int().positive().optional().nullable(),
   notes:              z.string().optional().nullable(),
   siteId:             z.number().int().optional().nullable(),
 });
+// Creation only: the phone's device entry ID (lib/clientEntryReplay.ts), so a
+// resend after a lost response returns the stored visit instead of a duplicate.
+const VisitCreateBody = VisitBody.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 router.get("/visits", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -165,12 +175,24 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const body = VisitBody.safeParse(req.body);
+  const body = VisitCreateBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
    const d = body.data;
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(d);
+  const storedEntry = async () => entry && (await db.select().from(pestVisitsTable)
+    .where(and(eq(pestVisitsTable.clientId, clientId), eq(pestVisitsTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  // Checked before the roster rule: a visit applied before its signer left
+  // the roster is still recognised as already recorded.
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+  if (d.siteId != null && !(await resolveSiteAccessScope(req, res, clientId, d.siteId))) return;
    const performer = await resolveStaffRoster(clientId, d.signedOffByRosterId, d.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  const [row] = await db.insert(pestVisitsTable).values({
+  let row;
+  try {
+  [row] = await db.insert(pestVisitsTable).values({
     clientId,
     siteId:            d.siteId ?? null,
     visitDate:         d.visitDate,
@@ -184,8 +206,16 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
      signedOffBy:       performer?.performedBy ?? null,
      signedOffByRosterId: performer?.staffRosterId ?? null,
     notes:             d.notes ?? null,
-    createdBy:         req.currentUser!.id,
+    createdBy:         userId,
+    clientEntryId:     entry?.id ?? null,
+    clientEntryHash:   entry?.hash ?? null,
   } as any).returning();
+  } catch (err) {
+    // A concurrent resend of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
   res.status(201).json(row);
 });
 
@@ -202,6 +232,7 @@ router.put("/visits/:id", requireAuth, denyViewers, async (req, res) => {
   const body = VisitBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
    const d = body.data;
+  if (d.siteId != null && !(await resolveSiteAccessScope(req, res, clientId, d.siteId))) return;
    const performer = await resolveStaffPerformerUpdate(clientId, d.signedOffByRosterId, d.signedOffBy, existingVisit.signedOffByRosterId, existingVisit.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   await db.update(pestVisitsTable).set({
@@ -240,7 +271,7 @@ router.delete("/visits/:id", requireAuth, denyViewers, async (req, res) => {
 // ── Pest activity log ─────────────────────────────────────────────────────────
 
 const ActivityBody = z.object({
-  recordedDate: z.string().min(1),
+  recordedDate: isoDate,
   pestType:     z.string().default("rodent"),
   evidenceType: z.string().default("live_sighting"),
   location:     z.string().optional().nullable(),
@@ -252,6 +283,8 @@ const ActivityBody = z.object({
   notes:        z.string().optional().nullable(),
   siteId:       z.number().int().optional().nullable(),
 });
+// Creation only: the phone's device entry ID (see VisitCreateBody).
+const ActivityCreateBody = ActivityBody.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 router.get("/activity", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -267,9 +300,19 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const body = ActivityBody.safeParse(req.body);
+  const body = ActivityCreateBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(d);
+  const storedEntry = async () => entry && (await db.select().from(pestActivityTable)
+    .where(and(eq(pestActivityTable.clientId, clientId), eq(pestActivityTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  // Checked before the roster and option-list rules: an entry applied before
+  // a roster member or option was retired is still recognised as recorded.
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+  if (d.siteId != null && !(await resolveSiteAccessScope(req, res, clientId, d.siteId))) return;
   const performer = await resolveStaffRoster(clientId, d.recordedByRosterId, d.recordedBy);
   if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -282,7 +325,9 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   if (!allowedPestTypes.includes(d.pestType)) return res.status(400).json({ error: "Invalid pest type" });
   if (!allowedEvidenceTypes.includes(d.evidenceType)) return res.status(400).json({ error: "Invalid evidence type" });
 
-  const [row] = await db.insert(pestActivityTable).values({
+  let row;
+  try {
+  [row] = await db.insert(pestActivityTable).values({
     clientId,
     siteId:       d.siteId ?? null,
     recordedDate: d.recordedDate,
@@ -295,8 +340,16 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
     recordedByRosterId: performer?.staffRosterId ?? null,
     resolved:     d.resolved ?? false,
     notes:        d.notes ?? null,
-    createdBy:    req.currentUser!.id,
+    createdBy:    userId,
+    clientEntryId:   entry?.id ?? null,
+    clientEntryHash: entry?.hash ?? null,
   } as any).returning();
+  } catch (err) {
+    // A concurrent resend of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
   res.status(201).json(row);
 });
 
@@ -319,6 +372,7 @@ router.put("/activity/:id", requireAuth, denyViewers, async (req, res) => {
     .where(and(eq(pestActivityTable.id, id), eq(pestActivityTable.clientId, clientId)))
     .limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (d.siteId != null && !(await resolveSiteAccessScope(req, res, clientId, d.siteId))) return;
   const performer = await resolveStaffPerformerUpdate(clientId, d.recordedByRosterId, d.recordedBy, existing.recordedByRosterId, existing.recordedBy);
   if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 

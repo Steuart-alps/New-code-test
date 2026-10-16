@@ -7,6 +7,7 @@ import { denyViewers, getActiveDepartmentId, getClientId, requireAuth } from "..
 import { ACCOUNT_TIMEZONE_SETTING, normalizeAccountTimezone } from "../middleware/dailyEntryCutoff";
 import { addDays, isCalendarDay, occursOn, todayIn } from "../lib/taskSchedule";
 import { submittedDailyChecklists } from "../lib/dailyChecklistCompletion";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 
 // Staff tasks: "My tasks today" for staff and task assignment for managers.
 // Managers (consultants, client admins, department managers for their own
@@ -43,11 +44,18 @@ const taskFields = {
   startsOn: day,
 };
 const createSchema = z.object(taskFields).strict();
+// clientEntryId: a task a manager created on the phone (possibly offline) and
+// resent after a lost response gets the stored task back instead of a copy.
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() }).strict();
 const patchSchema = z.object({
   ...Object.fromEntries(Object.entries(taskFields).map(([k, v]) => [k, (v as z.ZodTypeAny).optional()])),
   active: z.boolean().optional(),
 }).strict();
-const completeSchema = z.object({ date: day, note: z.string().trim().max(1000).nullable().optional() }).strict();
+// clientEntryId: the phone's outbox entry ID, so a "Mark done" resent after a
+// lost response gets the stored completion back instead of a 409.
+const completeSchema = z.object({
+  date: day, note: z.string().trim().max(1000).nullable().optional(), clientEntryId: clientEntryIdSchema.optional(),
+}).strict();
 const undoSchema = z.object({ date: day }).strict();
 
 type Viewer = NonNullable<Request["currentUser"]>;
@@ -272,14 +280,30 @@ router.post("/tasks", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   if (managerScope(user) === null) return res.status(403).json({ error: "Only managers can create tasks" });
   const { clientId: _ignored, ...body } = req.body ?? {};
-  const parsed = createSchema.safeParse(body);
+  const parsed = postSchema.safeParse(body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const value = { ...parsed.data, siteId: parsed.data.siteId ?? null, assigneeUserId: parsed.data.assigneeUserId ?? null, assigneeRole: parsed.data.assigneeRole ?? null };
+  const { clientEntryId: _entryId, ...fields } = parsed.data;
+  const entry = clientEntryFrom(parsed.data);
+  const storedEntry = async () => entry && (await db.select().from(tasksTable)
+    .where(and(eq(tasksTable.clientId, clientId), eq(tasksTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, user.id, entry);
+  const value = { ...fields, siteId: fields.siteId ?? null, assigneeUserId: fields.assigneeUserId ?? null, assigneeRole: fields.assigneeRole ?? null };
   const invalid = await validateScope(user, clientId, value);
   if (invalid) return res.status(400).json({ error: invalid });
-  const [created] = await db.insert(tasksTable).values({
-    ...value, clientId, instruction: value.instruction ?? null, module: value.module ?? null, createdBy: user.id,
-  }).returning();
+  let created;
+  try {
+    [created] = await db.insert(tasksTable).values({
+      ...value, clientId, instruction: value.instruction ?? null, module: value.module ?? null, createdBy: user.id,
+      clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
+    }).returning();
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, user.id, entry);
+    throw err;
+  }
   res.status(201).json(created);
 });
 
@@ -318,6 +342,14 @@ router.post("/tasks/:id/complete", requireAuth, denyViewers, async (req, res) =>
   const { clientId: _ignored, ...body } = req.body ?? {};
   const parsed = completeSchema.safeParse(body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const entry = clientEntryFrom({ ...parsed.data, taskId: id });
+  const storedEntry = async () => entry && (await db.select().from(taskCompletionsTable)
+    .where(and(eq(taskCompletionsTable.clientId, clientId), eq(taskCompletionsTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const respondToStored = (stored: typeof taskCompletionsTable.$inferSelect) =>
+    respondToStoredEntry(res, { ...stored, createdBy: stored.completedBy }, user.id, entry!, () => stored);
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStored(prior);
   const row = (await visibleTasks(clientId, req)).find((r) => r.task.id === id);
   if (!row) return res.status(404).json({ error: "Task not found" });
   const isManager = managerScope(user) !== null;
@@ -332,8 +364,14 @@ router.post("/tasks/:id/complete", requireAuth, denyViewers, async (req, res) =>
   }
   const [created] = await db.insert(taskCompletionsTable).values({
     clientId, taskId: id, occurrenceDate: date, completedBy: user.id, completedByName: user.name, note: parsed.data.note ?? null,
+    clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
   }).onConflictDoNothing().returning();
-  if (!created) return res.status(409).json({ error: "This task is already marked done" });
+  if (!created) {
+    // A concurrent replay of the same device entry may have won the insert.
+    const raced = await storedEntry();
+    if (entry && raced) return respondToStored(raced);
+    return res.status(409).json({ error: "This task is already marked done" });
+  }
   res.status(201).json(created);
 });
 
