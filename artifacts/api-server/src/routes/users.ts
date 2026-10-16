@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
-import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/db/schema";
+import { usersTable, userRoleEnum, passwordResetTokensTable, departmentsTable } from "@workspace/db/schema";
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import { hashPassword } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
@@ -18,7 +18,7 @@ const CreateUserBody = z.object({
   name: z.string().min(1),
   role: z.enum(userRoleEnum as unknown as [string, ...string[]]).default("client_viewer"),
   clientId: z.number().nullable().optional(),
-  departmentId: z.number().nullable().optional(),
+  departmentId: z.number().int().positive().nullable().optional(),
   active: z.boolean().default(true),
 });
 
@@ -88,11 +88,33 @@ const UpdateUserBody = z.object({
   password: z.string().min(8).optional(),
   name: z.string().min(1).optional(),
   role: z.enum(userRoleEnum as unknown as [string, ...string[]]).optional(),
-  departmentId: z.number().nullable().optional(),
+  departmentId: z.number().int().positive().nullable().optional(),
   active: z.boolean().optional(),
   isMaintenanceManager: z.boolean().optional(),
   isDepartmentManager: z.boolean().optional(),
 });
+
+/**
+ * A user's department sets their data scope, so it must belong to the user's
+ * own business. Consultants can reach several businesses, so checking that the
+ * actor can access the department is not enough. A foreign department answers
+ * exactly like a missing one, so the reply never confirms another business's
+ * department ids.
+ */
+async function rejectsForeignDepartment(
+  departmentId: number | null | undefined,
+  clientId: number | null,
+  res: { status: (code: number) => { json: (body: unknown) => void } },
+): Promise<boolean> {
+  if (departmentId == null) return false;
+  const [department] = clientId == null ? [] : await db
+    .select({ id: departmentsTable.id })
+    .from(departmentsTable)
+    .where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId)));
+  if (department) return false;
+  res.status(400).json({ error: "That department isn't part of this user's business. Refresh the page and choose another department." });
+  return true;
+}
 
 /**
  * Self-signup owners have the consultant role and belong to their business
@@ -167,6 +189,8 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     }
   }
+
+  if (await rejectsForeignDepartment(body.departmentId, body.clientId ?? null, res)) return;
 
   // When no password is supplied, the admin is inviting the user: create the
   // account with an unusable random password and email them a link to set
@@ -261,6 +285,8 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
     res.status(403).json({ error: "Cannot assign consultant role" });
     return;
   }
+
+  if (await rejectsForeignDepartment(body.departmentId, target.clientId, res)) return;
 
   const updates: Partial<typeof usersTable.$inferInsert> = {
     updatedAt: new Date(),
