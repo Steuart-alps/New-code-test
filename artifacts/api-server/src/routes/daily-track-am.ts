@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { dailyChecklistsTable, dailyManagerSignoffsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, or, isNull, inArray, desc, gte, lte } from "drizzle-orm";
+import { dailyChecklistsTable, sitesTable } from "@workspace/db/schema";
+import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEntitledServices, requireAnyEntitlement, SERVICES } from "../lib/services";
 import {
@@ -100,58 +100,6 @@ router.get("/", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(desc(dailyChecklistsTable.checkDate), desc(dailyChecklistsTable.id));
   res.json(rows);
-});
-
-// GET /api/daily-track-am/history?from=&to= — slim completion history across
-// ALL checklist types + manager sign-offs, for the month/pattern view.
-router.get("/history", requireAuth, async (req, res) => {
-  const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
-
-  const { from, to } = req.query as Record<string, string>;
-  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
-  if (!from || !to || !dateRe.test(from) || !dateRe.test(to)) {
-    return res.status(400).json({ error: "from and to (YYYY-MM-DD) are required" });
-  }
-  const allowedTypes = await accessibleTypes(clientId);
-  if (allowedTypes.length === 0) return res.status(403).json({ error: "No AM checklist service is enabled" });
-
-  const deptId = getActiveDepartmentId(req);
-  const deptFilter = (siteCol: any) =>
-    deptId !== null ? (or(isNull(siteCol), inArray(siteCol, allowedSites(clientId, deptId))) as any) : undefined;
-
-  const clConditions: any[] = [
-    eq(dailyChecklistsTable.clientId, clientId),
-    inArray(dailyChecklistsTable.checklistType, allowedTypes as [string, ...string[]]),
-    gte(dailyChecklistsTable.checkDate, from),
-    lte(dailyChecklistsTable.checkDate, to),
-  ];
-  const clDept = deptFilter(dailyChecklistsTable.siteId);
-  if (clDept) clConditions.push(clDept);
-
-  const soConditions: any[] = [
-    eq(dailyManagerSignoffsTable.clientId, clientId),
-    gte(dailyManagerSignoffsTable.signoffDate, from),
-    lte(dailyManagerSignoffsTable.signoffDate, to),
-  ];
-  const soDept = deptFilter(dailyManagerSignoffsTable.siteId);
-  if (soDept) soConditions.push(soDept);
-
-  const [checklists, signoffs] = await Promise.all([
-    db.select({
-      checkDate: dailyChecklistsTable.checkDate,
-      siteId: dailyChecklistsTable.siteId,
-      checklistType: dailyChecklistsTable.checklistType,
-      submittedAt: dailyChecklistsTable.submittedAt,
-    }).from(dailyChecklistsTable).where(and(...clConditions)),
-    db.select({
-      signoffDate: dailyManagerSignoffsTable.signoffDate,
-      siteId: dailyManagerSignoffsTable.siteId,
-      submittedAt: dailyManagerSignoffsTable.submittedAt,
-    }).from(dailyManagerSignoffsTable).where(and(...soConditions)),
-  ]);
-
-  res.json({ checklists, signoffs });
 });
 
 // GET /api/daily-track-am/:id
