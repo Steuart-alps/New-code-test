@@ -611,6 +611,43 @@ async function runRuntimeMigrationsOnce() {
       CREATE UNIQUE INDEX IF NOT EXISTS "UIDX_client_data_deletion_active"
         ON "client_data_deletion_requests" ("client_id") WHERE "status" IN ('pending','approved')
     `);
+    // Durable outcome of each executed account deletion (see runDataDeletionJob).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "client_data_deletion_outcomes" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE RESTRICT,
+        "request_id" integer REFERENCES "client_data_deletion_requests"("id") ON DELETE RESTRICT,
+        "reason" text NOT NULL,
+        "approved_by" integer,
+        "outcome" text NOT NULL,
+        "started_at" timestamptz NOT NULL,
+        "finished_at" timestamptz NOT NULL DEFAULT now(),
+        "rows_deleted" integer NOT NULL DEFAULT 0,
+        "objects_deleted" integer NOT NULL DEFAULT 0,
+        "objects_skipped" integer NOT NULL DEFAULT 0,
+        "error" text
+      )
+    `);
+    // Separate from CREATE TABLE so a drizzle-pushed table (production) gets them too.
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome_reason"`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome_reason" CHECK ("reason" IN ('approved_request','retention_schedule'))`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome"`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome" CHECK ("outcome" IN ('completed','failed'))`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_client_data_deletion_outcomes_client" ON "client_data_deletion_outcomes" ("client_id", "finished_at")`);
+    await db.execute(sql`
+      CREATE OR REPLACE FUNCTION "prevent_client_deletion_outcome_mutation"()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'Account deletion outcomes are append-only';
+      END;
+      $$
+    `);
+    await db.execute(sql`DROP TRIGGER IF EXISTS "client_data_deletion_outcomes_immutable" ON "client_data_deletion_outcomes"`);
+    await db.execute(sql`
+      CREATE TRIGGER "client_data_deletion_outcomes_immutable"
+      BEFORE UPDATE OR DELETE ON "client_data_deletion_outcomes"
+      FOR EACH ROW EXECUTE FUNCTION "prevent_client_deletion_outcome_mutation"()
+    `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "privacy_retention_schedules" (
         "id" serial PRIMARY KEY,

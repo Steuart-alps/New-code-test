@@ -208,3 +208,11 @@ jobs:
       # Warning job and banner against synced Stripe rows in the current API shape.
       - name: Cancellation warning tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:cancellation-warnings:fresh
+
+      # Reviewed account deletion: no purge before approval, the 30-day wait or
+      # with a legal hold; only the tenant's ACL-owned files; durable outcome.
+      - name: Approved account deletion tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:approved-account-deletion
+
+      - name: Client data deletion completeness tests (fresh schema)
+        run: pnpm --filter @workspace/api-server run test:client-data-deletion-feedback
