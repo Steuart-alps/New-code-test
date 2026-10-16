@@ -1157,7 +1157,7 @@ async function main() {
   const withSite = (fields) => (siteId) => ({ ...fields, siteId });
   await departmentDelete({
     label: "Dept Fire check", createPath: "/fire-safety", adminDelete: [200, 204],
-    body: withSite({ checkType: "alarm", checkDate: old, result: "pass", performedBy: "Lock Fixture" }),
+    body: withSite({ checkType: "alarm", callPoint: "CP1", checkDate: old, result: "pass", performedBy: "Lock Fixture" }),
   });
   await departmentDelete({
     label: "Dept Legionella check", createPath: "/legionella", adminDelete: [200, 204],
@@ -1320,7 +1320,7 @@ async function main() {
     const stored = rowsOf((await admin("GET", list)).data).find((row) => idOf(row) === id);
     check(`site move: ${label} keeps its site`, siteOf(stored) === alphaSite.data.id, JSON.stringify(stored));
   };
-  const fireMove = (siteId) => ({ checkType: "alarm", checkDate: today, result: "pass", performedBy: "Lock Fixture", siteId });
+  const fireMove = (siteId) => ({ checkType: "alarm", callPoint: "CP1", checkDate: today, result: "pass", performedBy: "Lock Fixture", siteId });
   await siteMove({ label: "Fire check", createPath: "/fire-safety", create: fireMove, move: fireMove });
   const treeMove = (siteId) => ({ checkType: "visual_assessment", checkDate: today, result: "pass", treeRef: "LOCK-MOVE", inspector: "Lock Fixture", siteId });
   await siteMove({ label: "Tree inspection", createPath: "/tree-track", create: treeMove, move: treeMove });

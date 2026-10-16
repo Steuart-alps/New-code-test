@@ -142,7 +142,7 @@ async function main() {
   const room = await admin("POST", "/room-track/rooms", { roomNumber: `VIEW-${suffix}`, name: "Viewer suite", floor: "1", siteId });
   const families = [
     { family: "FireTrack check", path: "/fire-safety",
-      body: { checkType: "alarm", checkDate: today, result: "pass", performedBy: "Viewer Fixture", siteId }, edit: { notes: "viewer edit" } },
+      body: { checkType: "alarm", callPoint: "CP1", checkDate: today, result: "pass", performedBy: "Viewer Fixture", siteId }, edit: { notes: "viewer edit" } },
     { family: "Legionella check", path: "/legionella",
       body: { checkType: "calorifier_temp", checkDate: today, result: "pass", temperature: 60, performedBy: "Viewer Fixture", siteId },
       edit: { notes: "viewer edit" } },
