@@ -50,6 +50,8 @@ export interface TrackActionReminderResult {
 export interface TrackActionReminderDependencies {
   send?: typeof sendEmail;
   sendPush?: typeof sendPushToUsers;
+  /** Optional internal batch scope; omitted by the production scheduler. */
+  clientIds?: readonly number[];
 }
 
 function formatDate(value: string | null): string {
@@ -549,7 +551,10 @@ export async function runTrackActionReminderJob(
   const send = deps.send ?? sendEmail;
   const sendPush = deps.sendPush ?? sendPushToUsers;
   const result: TrackActionReminderResult = { clientsChecked: 0, clientsEmailed: 0, emailsSent: 0, errors: 0 };
-  const clients = await db.execute(sql`SELECT id FROM clients WHERE active = true`);
+  if (deps.clientIds?.length === 0) return result;
+  const clients = await db.execute(deps.clientIds === undefined
+    ? sql`SELECT id FROM clients WHERE active = true`
+    : sql`SELECT id FROM clients WHERE active = true AND id IN (${sql.join(deps.clientIds.map((id) => sql`${id}`), sql`, `)})`);
 
   for (const client of ((clients as any).rows ?? []) as Array<{ id: number }>) {
     result.clientsChecked++;
