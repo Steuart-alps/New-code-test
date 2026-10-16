@@ -327,18 +327,36 @@ export default function UsersPage() {
     }
   }
 
-  async function reassignDept(userId: number, value: string) {
+  async function reassignDept(user: User, value: string) {
     const departmentId = value === NO_DEPT_VALUE ? null : Number(value);
-    setReassigning(userId);
+    const previousDepartmentId = user.departmentId;
+    const setRowDepartment = (id: number | null) =>
+      setUsers(rows => rows.map(row => (row.id === user.id ? { ...row, departmentId: id } : row)));
+    setReassigning(user.id);
+    setActionMessage(null);
+    // Show the choice while it saves; a rejected save puts the previous
+    // department back so the row never shows a scope the server refused.
+    setRowDepartment(departmentId);
     try {
-      await apiFetch(`/users/${userId}`, {
+      const res = await apiFetch(`/users/${user.id}`, {
         method: "PUT",
         body: JSON.stringify({ departmentId }),
       });
-      await load();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? `The server rejected the change (${res.status}).`);
+      }
+    } catch (err: unknown) {
+      setRowDepartment(previousDepartmentId);
+      setActionMessage({
+        kind: "error",
+        text: `${user.name}'s department wasn't changed. ${err instanceof Error ? err.message : "Please try again."}`,
+      });
+      return;
     } finally {
       setReassigning(null);
     }
+    await load();
   }
 
   return (
@@ -395,7 +413,7 @@ export default function UsersPage() {
                         {canAdmin ? (
                           <Select
                             value={u.departmentId?.toString() ?? NO_DEPT_VALUE}
-                            onValueChange={val => reassignDept(u.id, val)}
+                            onValueChange={val => reassignDept(u, val)}
                             disabled={reassigning === u.id}
                           >
                             <SelectTrigger className="h-7 text-xs w-44 border-transparent hover:border-input bg-transparent hover:bg-muted/40 transition-colors">
