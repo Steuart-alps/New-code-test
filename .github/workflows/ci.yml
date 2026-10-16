@@ -101,6 +101,11 @@ jobs:
       - name: Module route tests
         run: pnpm --filter @workspace/api-server run test:modules:ci
 
+      # Public staff sign-off link: anonymous access, expired/revoked links,
+      # one-time acknowledgements and tenant/department scope.
+      - name: Public sign-off link tests
+        run: pnpm --filter @workspace/api-server run test:sign-off-access
+
       - name: Department isolation tests
         run: pnpm --filter @workspace/api-server run test:dept-isolation:ci
 
