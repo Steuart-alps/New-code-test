@@ -24,7 +24,7 @@ export interface FoodSafetyConfig {
   food_show_sous_vide?: string | null;
   food_num_fridges?: string | null;
   food_num_freezers?: string | null;
-  /** Food-safety jurisdiction used to choose the standard reheating limit. */
+  /** Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels. */
   food_jurisdiction?: FoodSafetyConfigFoodJurisdiction;
   food_cooking_limit?: string | null;
   food_cooling_limit?: string | null;
