@@ -1388,6 +1388,106 @@ async function testSiteJurisdictionReheating(admin, ts) {
   await admin("DELETE", "/food-safety/config");
 }
 
+// Countries outside the UK: choosing one gives its starting labels and numeric
+// rules wherever nothing is saved, for GET /config and for every way a diary
+// day is created. Saved labels and rules still win.
+async function testCountryGuidance(admin, ts) {
+  console.log("\n── food-safety: country temperature guidance ──");
+  const IRELAND = {
+    cookingLimit: "75°C or above (core)",
+    coolingLimit: "In the fridge within 2 hours (below 10°C by 2½ hours at the latest)",
+    reheatingLimit: "70°C or above (core), reheat once only",
+    hotHoldingLimit: "Above 63°C",
+  };
+  const US = {
+    coolingLimit: "57°C (135°F) to 21°C (70°F) within 2 hours, then 5°C (41°F) within 6 hours in total",
+    reheatingLimit: "74°C (165°F) for 15 seconds, within 2 hours",
+    hotHoldingLimit: "57°C (135°F) or above",
+  };
+  const site = await admin("POST", "/sites", { name: `Country Site ${ts}` });
+  expectOk("country: create site", site.status, [200, 201]);
+  const siteId = site.data?.id;
+  await admin("DELETE", "/food-safety/config");
+
+  let dayOfMonth = 0;
+  const nextDay = () => `2097-04-${String(++dayOfMonth).padStart(2, "0")}`;
+  const scope = (id) => (id == null ? "" : `?siteId=${id}`);
+  const configOf = async (id) => (await admin("GET", `/food-safety/config${scope(id)}`)).data ?? {};
+  const labelsOf = (record) => ({
+    cookingLimit: record?.cookingLimit, coolingLimit: record?.coolingLimit,
+    reheatingLimit: record?.reheatingLimit, hotHoldingLimit: record?.hotHoldingLimit,
+  });
+  const configLabels = (config) => ({
+    cookingLimit: config.food_cooking_limit, coolingLimit: config.food_cooling_limit,
+    reheatingLimit: config.food_reheating_limit, hotHoldingLimit: config.food_hot_holding_limit,
+  });
+  // A day opened by POST without labels (as the phone app does) and one
+  // opened by a delivery append both carry the scope's labels.
+  const expectStamps = async (label, id, expected) => {
+    const posted = await admin("POST", `/food-safety${scope(id)}`, { recordDate: nextDay() });
+    check(`country: ${label} POST stamps labels`, posted.status === 201
+      && JSON.stringify(labelsOf(posted.data)) === JSON.stringify(expected), `${posted.status} ${JSON.stringify(labelsOf(posted.data))}`);
+    const recordDate = nextDay();
+    const appended = await admin("POST", `/food-safety/append${scope(id)}`, {
+      recordDate, section: "deliveries", row: { supplier: "Dairy", tempChilled: "3" }, entryId: randomUUID(),
+    });
+    const day = (await admin("GET", `/food-safety/by-date/${recordDate}${scope(id)}`)).data;
+    check(`country: ${label} delivery-first append stamps labels`, appended.status === 201
+      && JSON.stringify(labelsOf(day)) === JSON.stringify(expected), `${appended.status} ${JSON.stringify(labelsOf(day))}`);
+  };
+
+  const unknown = await admin("PUT", "/food-safety/config", { food_jurisdiction: "atlantis" });
+  check("country: unknown country → 400 naming the choices",
+    unknown.status === 400 && /ireland/.test(unknown.data?.error ?? "") && /united_states/.test(unknown.data?.error ?? ""),
+    `${unknown.status} ${JSON.stringify(unknown.data)}`);
+
+  // ── Organisation on Ireland ──
+  expectOk("country: organisation chooses Ireland",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "ireland" })).status);
+  const ireland = await configOf(null);
+  check("country: Ireland labels in config", ireland.food_jurisdiction === "ireland"
+    && JSON.stringify(configLabels(ireland)) === JSON.stringify(IRELAND), JSON.stringify(configLabels(ireland)));
+  const irelandRules = JSON.parse(ireland.food_temperature_rules ?? "{}");
+  check("country: Ireland numeric rules in config",
+    irelandRules.reheating?.min === 70 && irelandRules.cooling?.max === 10 && irelandRules.coolingMinutes === 150
+      && irelandRules.chilledDelivery?.max === 5, ireland.food_temperature_rules);
+  await expectStamps("Ireland", null, IRELAND);
+
+  // ── A saved label wins over the country's ──
+  const ownCooking = `Our HACCP: 80°C ${ts}`.slice(0, 60);
+  expectOk("country: organisation saves its own cooking label",
+    (await admin("PUT", "/food-safety/config", { food_cooking_limit: ownCooking })).status);
+  check("country: saved cooking label shown", (await configOf(null)).food_cooking_limit === ownCooking);
+
+  // ── Site on the United States inherits the saved label, not the rest ──
+  expectOk("country: site chooses the United States",
+    (await admin("PUT", `/food-safety/config?siteId=${siteId}`, { food_jurisdiction: "united_states" })).status);
+  const usLabels = { cookingLimit: ownCooking, ...US };
+  const usConfig = await configOf(siteId);
+  check("country: US site labels in config", usConfig.food_jurisdiction === "united_states"
+    && JSON.stringify(configLabels(usConfig)) === JSON.stringify(usLabels), JSON.stringify(configLabels(usConfig)));
+  check("country: US site numeric rules", JSON.parse(usConfig.food_temperature_rules ?? "{}").hotHolding?.min === 57, usConfig.food_temperature_rules);
+  await expectStamps("US site", siteId, usLabels);
+  check("country: organisation stays on Ireland", (await configOf(null)).food_jurisdiction === "ireland");
+
+  // ── Saved numeric rules win over the country preset ──
+  const ownRules = { ...irelandRules, hotHolding: { min: 65, max: null } };
+  expectOk("country: organisation saves its own rules",
+    (await admin("PUT", "/food-safety/config", { food_temperature_rules: JSON.stringify(ownRules) })).status);
+  check("country: US site inherits the saved rules",
+    JSON.parse((await configOf(siteId)).food_temperature_rules ?? "{}").hotHolding?.min === 65);
+
+  // ── Back to a UK nation: the UK labels return ──
+  await admin("DELETE", `/food-safety/config?siteId=${siteId}`);
+  await admin("DELETE", "/food-safety/config");
+  expectOk("country: organisation back on England/Wales",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "england_wales" })).status);
+  const uk = { cookingLimit: "75°C or above (core)", coolingLimit: "8°C within 90 minutes", reheatingLimit: "Above 75°C", hotHoldingLimit: "Above 63°C" };
+  check("country: England/Wales labels in config", JSON.stringify(configLabels(await configOf(null))) === JSON.stringify(uk));
+  await expectStamps("England/Wales", null, uk);
+  await admin("DELETE", "/food-safety/config");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 3c. KitchenTrack closed (non-operating) days
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1723,6 +1823,7 @@ async function runSuite() {
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
   await testSiteJurisdictionReheating(a.session, ts);
+  await testCountryGuidance(a.session, ts);
   await testKitchenClosedDays(a.session, viewer, staff, ts);
   await testPushToken(a.session, other, ts);
   await testStorageUsage(a.session, viewer, staff, a.clientId, clientBId);

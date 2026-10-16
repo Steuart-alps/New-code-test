@@ -4935,12 +4935,18 @@ components:
           type: string
           nullable: true
         food_jurisdiction:
-          description: Food-safety jurisdiction used to choose the standard reheating limit.
+          description: Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
           type: string
           enum:
             - scotland
             - england_wales
             - northern_ireland
+            - ireland
+            - australia
+            - new_zealand
+            - canada
+            - united_states
+            - other
           nullable: true
         food_cooking_limit:
           type: string
