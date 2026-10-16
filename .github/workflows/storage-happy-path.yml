@@ -19,6 +19,8 @@ on:
       - "artifacts/api-server/src/routes/certificates.ts"
       - "artifacts/api-server/src/routes/contractor-portal.ts"
       - "artifacts/api-server/src/routes/photos.ts"
+      - "artifacts/api-server/src/routes/fix-track.ts"
+      - "artifacts/api-server/src/lib/uploadValidation.ts"
       - "artifacts/api-server/src/workers/**"
       - "artifacts/api-server/build.mjs"
       - "artifacts/api-server/tests/run-storage-happy-path.sh"
@@ -28,6 +30,8 @@ on:
       - "artifacts/api-server/tests/generic-document-object-acl.mjs"
       - "artifacts/api-server/tests/pat-export-attachments.mjs"
       - "artifacts/api-server/tests/export-attachments-storage.mjs"
+      - "artifacts/api-server/tests/fix-track-media-storage.mjs"
+      - "artifacts/api-server/tests/fixtures/fix-track-media/**"
       - "artifacts/api-server/tests/doc-track-signoff-status.mjs"
       - "pnpm-lock.yaml"
       - ".github/workflows/storage-happy-path.yml"
@@ -44,6 +48,8 @@ on:
       - "artifacts/api-server/src/routes/certificates.ts"
       - "artifacts/api-server/src/routes/contractor-portal.ts"
       - "artifacts/api-server/src/routes/photos.ts"
+      - "artifacts/api-server/src/routes/fix-track.ts"
+      - "artifacts/api-server/src/lib/uploadValidation.ts"
       - "artifacts/api-server/src/workers/**"
       - "artifacts/api-server/build.mjs"
       - "artifacts/api-server/tests/run-storage-happy-path.sh"
@@ -53,6 +59,8 @@ on:
       - "artifacts/api-server/tests/generic-document-object-acl.mjs"
       - "artifacts/api-server/tests/pat-export-attachments.mjs"
       - "artifacts/api-server/tests/export-attachments-storage.mjs"
+      - "artifacts/api-server/tests/fix-track-media-storage.mjs"
+      - "artifacts/api-server/tests/fixtures/fix-track-media/**"
       - "artifacts/api-server/tests/doc-track-signoff-status.mjs"
       - "pnpm-lock.yaml"
       - ".github/workflows/storage-happy-path.yml"
@@ -116,6 +124,11 @@ jobs:
       - name: Install workspace dependencies
         if: env.STORAGE_TEST_CONFIGURED == 'true'
         run: pnpm install --frozen-lockfile
+
+      # The FixTrack media suite plays and seeks the stored videos in Chromium.
+      - name: Install Chromium
+        if: env.STORAGE_TEST_CONFIGURED == 'true'
+        run: pnpm exec playwright install --with-deps chromium
 
       # Same as Render's pre-deploy step; the API applies runtime migrations on boot.
       - name: Create base database schema

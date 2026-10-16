@@ -30,6 +30,11 @@ One after another, each against a freshly started test API:
   at the archived file. Another tenant's file and a missing file are left out with a reason in
   `attachment-manifest.csv`. With a small `EXPORT_ATTACHMENT_MAX_BYTES`, files over the cap are
   left out and the README carries a warning.
+- FixTrack issue media: an iPhone-style JPEG (with a rotation tag) and an AVIF become upright JPEGs
+  and show after a reload. A real HEIC photo, a cut-off JPEG, a GIF and text posing as MP4 are
+  refused with a message and never attached. MP4, MOV and WebM clips are stored unchanged, served
+  in byte ranges, readable by a viewer but not by another business, and play and seek in Chromium
+  after a reload. Viewers cannot upload or attach.
 - DocTrack sign-off status and registers.
 
 ## One-time setup (Google Cloud console)
@@ -77,4 +82,6 @@ pre-check passes, and the run's folder is emptied afterwards whether they pass o
 
 Any machine with `DATABASE_URL` (a test database), `SESSION_SECRET` and the variables above can
 run `pnpm --filter @workspace/api-server run test:storage-happy-path`. Keep the key in a file
-outside the repository and point `GCS_STORAGE_TEST_CREDENTIALS_FILE` at it.
+outside the repository and point `GCS_STORAGE_TEST_CREDENTIALS_FILE` at it. The FixTrack media suite also
+needs Playwright's Chromium (`pnpm exec playwright install chromium`, or `CHROMIUM_PATH` pointing
+at a Chromium binary).
