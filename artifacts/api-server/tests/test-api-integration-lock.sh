@@ -130,6 +130,7 @@ const freshSchema = new Set([
   "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
   "test:client-data-deletion-feedback",
   "test:retention-clock",
+  "test:cancellation-warnings:fresh",
   "test:train-track-roster-identity",
   "test:registers", // allergen, COSHH and asbestos registers on the private cluster
   "test:security-hardening",
