@@ -203,4 +203,68 @@ assert.equal(
   'fixed offsets are not accepted as account timezones',
 );
 
+// Weekly and monthly records stay open to staff until the day after their
+// period ends (Steuart, 2026-10-16). `now` is Wednesday 23 September 2026.
+const weekly = (weekCommencing, extra = {}, at = now) =>
+  getDailyEntryCutoffDecision(
+    { method: 'POST', path: '/kitchen-weekly/weekly', body: { weekCommencing }, ...extra },
+    staff,
+    at,
+  ).blocked;
+assert.equal(weekly('2026-09-21'), false, 'this week\'s review stays open to staff on Wednesday');
+// The week of Monday 14 September ends on Sunday 20th.
+assert.equal(
+  weekly('2026-09-14', {}, new Date('2026-09-21T12:00:00.000Z')),
+  false,
+  'last week\'s review is still open the day after the week ends',
+);
+assert.equal(
+  weekly('2026-09-14', {}, new Date('2026-09-22T12:00:00.000Z')),
+  true,
+  'a week locks once the day after it has passed',
+);
+assert.equal(weekly('2026-09-07'), true, 'older weekly reviews stay locked');
+assert.equal(
+  getDailyEntryCutoffDecision(
+    { method: 'PUT', path: '/kitchen-weekly/weekly/42', body: { recordDate: '2026-09-21' } },
+    staff,
+    now,
+  ).blocked,
+  false,
+  'the stored week-commencing date of an existing review uses the weekly window',
+);
+assert.equal(
+  getDailyEntryCutoffDecision(
+    { method: 'PUT', path: '/kitchen-weekly/probe/42', body: { recordDate: '2026-09-21' } },
+    staff,
+    now,
+  ).blocked,
+  true,
+  'probe checks are daily records and keep the 24-hour window',
+);
+const cleaning = (logDate, frequency, at = now) =>
+  getDailyEntryCutoffDecision(
+    { method: 'POST', path: '/kitchen-cleaning/logs', body: { logDate, frequency } },
+    staff,
+    at,
+  ).blocked;
+assert.equal(cleaning('2026-09-21', 'weekly'), false, 'this week\'s cleaning schedule stays open');
+assert.equal(cleaning('2026-09-07', 'weekly'), true, 'an older weekly cleaning schedule is locked');
+assert.equal(cleaning('2026-09-01', 'monthly'), false, 'this month\'s cleaning schedule stays open on the 23rd');
+assert.equal(cleaning('2026-08-01', 'monthly', new Date('2026-09-01T12:00:00.000Z')), false,
+  'last month\'s cleaning schedule is open on the 1st');
+assert.equal(cleaning('2026-08-01', 'monthly'), true, 'last month\'s cleaning schedule locks after the 1st');
+assert.equal(cleaning('2026-02-01', 'monthly', new Date('2026-03-01T12:00:00.000Z')), false,
+  'February ends on the 28th');
+assert.equal(cleaning('2026-09-21', 'daily'), true, 'daily cleaning logs keep the 24-hour window');
+assert.equal(
+  getDailyEntryCutoffDecision(
+    { method: 'PUT', path: '/kitchen-cleaning/tasks/42', body: { recordDate: '2026-09-07', frequency: 'monthly' } },
+    staff,
+    now,
+  ).blocked,
+  true,
+  'only the cleaning log route gets the longer window',
+);
+
 console.log('Track record 24-hour lock tests passed.');

@@ -171,7 +171,7 @@ function authFixture() {
       primaryColor: "#2F7C8C",
       active: true,
     },
-    services: ["greentrack", "swimtrack"],
+    services: ["greentrack", "swimtrack", "aquatrack"],
   };
 }
 
@@ -319,6 +319,9 @@ async function routeApi(route, url) {
       firstAidLast30d: 1, firstAidActionRequired: 0, lastFirstAidCheck: today, openIncidents: 1,
     });
   }
+  // AquaTrack opens on its water-quality tab.
+  if (pathname === "/api/pool-track" && method === "GET") return jsonResponse(route, []);
+  if (pathname === "/api/pool-track/config" && method === "GET") return jsonResponse(route, {});
   if (pathname === "/api/photos" && method === "POST") {
     unexpectedApiRequests.push({ method, url: url.toString(), body: request.postData() ?? null });
     return jsonResponse(route, { error: "Staged evidence must only be attached with a record create request" }, 501);
@@ -423,7 +426,7 @@ async function uploadRequiredPhoto(dialog, entityType, ordinal) {
   assert.equal(stagedReceiptBodies.at(-1).objectPath, requestUploadObjects.at(-1).objectPath);
 }
 
-async function completeRequiredCreate({ entityType, path, saveLabel, marker, prepare }) {
+async function completeRequiredCreate({ entityType, path, saveLabel, marker, prepare, savedRowPhotos = true }) {
   const dialog = page.getByRole("dialog");
   await dialog.waitFor({ state: "visible" });
   await prepare?.(dialog);
@@ -461,7 +464,7 @@ async function completeRequiredCreate({ entityType, path, saveLabel, marker, pre
   const createResponse = page.waitForResponse(response =>
     response.request().method() === "POST" && new URL(response.url()).pathname === path,
   );
-  const photoListResponse = page.waitForResponse(response => {
+  const photoListResponse = savedRowPhotos && page.waitForResponse(response => {
     const url = new URL(response.url());
     return response.request().method() === "GET"
       && url.pathname === "/api/photos"
@@ -483,6 +486,9 @@ async function completeRequiredCreate({ entityType, path, saveLabel, marker, pre
   assert.ok(created.body.photoUploadIds.every(id => !cancelledReceipts.includes(id)),
     `${entityType} receipts claimed by a successful create must not be cancelled`);
 
+  assert.ok((photosByEntity.get(photoKey(entityType, created.id)) ?? []).length === 2);
+  // AquaTrack shows photo thumbnails only on its session and incident rows.
+  if (!savedRowPhotos) return created;
   const savedRow = entityType === "green_defect"
     ? page.getByText(marker, { exact: true }).last().locator("xpath=..")
     : page.locator("tr").filter({ hasText: marker }).last();
@@ -703,6 +709,49 @@ try {
     marker: "Created incident evidence record",
   });
 
+  // AquaTrack (where /swim-track now redirects) has its own copies of the
+  // four SwimTrack dialogs; they must stage required photos too.
+  await navigateHarness("aqua");
+  await page.getByRole("heading", { name: "AquaTrack", exact: true }).waitFor({ state: "visible" });
+
+  await openSwimTab("Sessions", "Log session");
+  await page.getByRole("dialog").locator("input:not([type])").first().fill("Created aqua session evidence record");
+  await completeRequiredCreate({
+    entityType: "swim_session",
+    path: "/api/swim-track/sessions",
+    saveLabel: "Log session",
+    marker: "Created aqua session evidence record",
+  });
+
+  await openSwimTab("Surveillance", "Log check");
+  await page.getByRole("dialog").locator("textarea").fill("Created aqua surveillance evidence record");
+  await completeRequiredCreate({
+    entityType: "swim_surveillance_check",
+    path: "/api/swim-track/surveillance",
+    saveLabel: "Log check",
+    marker: "Created aqua surveillance evidence record",
+    savedRowPhotos: false,
+  });
+
+  await openSwimTab("First Aid", "Check equipment");
+  await page.getByRole("dialog").locator("textarea").first().fill("Created aqua first-aid evidence record");
+  await completeRequiredCreate({
+    entityType: "swim_first_aid_check",
+    path: "/api/swim-track/first-aid",
+    saveLabel: "Save check",
+    marker: "Created aqua first-aid evidence record",
+    savedRowPhotos: false,
+  });
+
+  await openSwimTab("Incidents", "Log incident");
+  await page.getByRole("dialog").getByPlaceholder("Describe what happened…").fill("Created aqua incident evidence record");
+  await completeRequiredCreate({
+    entityType: "swim_incident",
+    path: "/api/swim-track/incidents",
+    saveLabel: "Log incident",
+    marker: "Created aqua incident evidence record",
+  });
+
   // Omitted rows use the contract's optional default. The optional record is
   // still created in one step and carries no staged uploads.
   omittedRequirementTypes = new Set(["green_service"]);
@@ -731,12 +780,13 @@ try {
   const requiredEntityCreates = createRequests.filter(record =>
     ENTITY_TYPES.includes(record.entityType) && record.body.photoUploadIds?.length === 2,
   );
-  assert.equal(requiredEntityCreates.length, 7,
-    "all seven GreenTrack and SwimTrack required entity types should complete a two-photo record create");
+  const swimEntityTypes = ENTITY_TYPES.filter(type => type.startsWith("swim_"));
+  assert.equal(requiredEntityCreates.length, ENTITY_TYPES.length + swimEntityTypes.length,
+    "every required entity type should complete a two-photo create (SwimTrack types on both swim pages)");
   assert.deepEqual(
     requiredEntityCreates.map(record => record.entityType).sort(),
-    [...ENTITY_TYPES].sort(),
-    "each required GreenTrack and SwimTrack entity type should be created once with two verified photos",
+    [...ENTITY_TYPES, ...swimEntityTypes].sort(),
+    "each required GreenTrack type once and each SwimTrack type on both the SwimTrack and AquaTrack pages",
   );
   assert.ok(csrfTokenRequests > 0, "staged-photo and record POSTs should obtain a session CSRF token");
   assert.ok(photoMutationHeaders.length >= 16, "staged-photo and record mutation headers should be observed");
@@ -750,7 +800,7 @@ try {
   assert.ok(managedByRequests <= harnessNavigations, `managed-by read ${managedByRequests} times over ${harnessNavigations} page loads`);
   assert.deepEqual(pageErrors, [], `the actual track pages must not throw: ${pageErrors.join("; ")}`);
 
-  console.log("GreenTrack and SwimTrack required-photo regression checks passed.");
+  console.log("GreenTrack, SwimTrack and AquaTrack required-photo regression checks passed.");
 } catch (error) {
   console.error("Required track photos browser test failed:", error);
   if (unexpectedApiRequests.length) {
