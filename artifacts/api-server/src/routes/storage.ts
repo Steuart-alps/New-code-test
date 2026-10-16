@@ -5,7 +5,7 @@ import {
   RequestUploadUrlResponse,
   GetStorageUsageResponse,
 } from "@workspace/api-zod";
-import { ObjectStorageService, ObjectNotFoundError, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, UploadTooLargeError, maxUploadBytes, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
 import {
   readStorageUsageSnapshot,
   reconcileStorageUsage,
@@ -216,6 +216,11 @@ router.post("/storage/uploads/request-url", requireAuth, denyViewers, async (req
     const clientId = getClientId(req);
     if (!clientId) {
       res.status(400).json({ error: "No client context" });
+      return;
+    }
+    // Refuse early; finalisation checks the stored size as well.
+    if (size > maxUploadBytes()) {
+      res.status(400).json({ error: new UploadTooLargeError().message });
       return;
     }
 

@@ -135,6 +135,7 @@ const freshSchema = new Set([
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
 ]);
 const pure = new Set([
+  "test:upload-size-limit", // ObjectStorageService against an in-memory bucket
   "test:api-runner-lock", // validates this lock without application resources
   "test:staged-photo-creation", // real routes/helper with in-memory transaction/storage fakes
   "test:login-rate-limit", // isolated temp bundle and in-process Express fixture
@@ -258,7 +259,7 @@ const pureEntrypoints = new Set([
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",
   "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "upload-pixel-cap.mjs",
-  "trial-lock-allowlist.mjs",
+  "trial-lock-allowlist.mjs", "upload-size-limit.mjs",
 ]);
 const helperModules = new Set([
   "pdf-text.mjs",

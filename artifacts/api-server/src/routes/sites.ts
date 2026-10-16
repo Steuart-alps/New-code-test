@@ -13,7 +13,7 @@ import {
 import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/billing";
 import { filterName } from "../lib/contentFilter";
-import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { ObjectContentError, ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { departmentsTable } from "@workspace/db/schema";
 
@@ -267,6 +267,7 @@ router.post("/sites/:id/documents", requireAuth, requireClientAdmin, async (req,
   try {
     await storage.finalizeTenantUpload(objectPath, clientId);
   } catch (err) {
+    if (err instanceof ObjectContentError) return res.status(400).json({ error: err.message });
     const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
       : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
     return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
