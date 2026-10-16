@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { format, isToday } from "date-fns";
 import {
   ApprovalAlreadyHandledError,
+  ApprovalPortalLinkChangedError,
   approveContractorEmail,
   dismissContractorEmail,
 } from "@/lib/contractor-approval-actions";
@@ -369,6 +370,16 @@ export default function ContractorApprovalsPage() {
     } catch (e: any) {
       if (e instanceof ApprovalAlreadyHandledError) {
         if (mountedRef.current) handleAlreadyHandled(item, e, modifiedPreview);
+        return false;
+      }
+      if (e instanceof ApprovalPortalLinkChangedError) {
+        // A reissued link leaves the reminder waiting (with the new link); a
+        // revoked or expired one cancels it. Reload to show which.
+        if (mountedRef.current) {
+          toast({ title: "Not sent", description: e.message });
+          setEditingId(null);
+          void loadQueue(false);
+        }
         return false;
       }
       if (mountedRef.current) {

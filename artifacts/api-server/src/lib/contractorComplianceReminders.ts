@@ -29,6 +29,7 @@ import { getNotificationEmails } from "./getNotificationEmails";
 import { sendPushToUsers } from "./pushNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload } from "./bearerTokens";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
+import { PORTAL_REMINDER_LINK_DAYS } from "./contractorPortalDrafts";
 import { createHash } from "crypto";
 
 /** Insurance is flagged when it expires within this many days (or has expired). */
@@ -533,7 +534,7 @@ async function queuePortalReminders(clientId: number, clientName: string, now: D
           INSERT INTO contractor_portal_reminder_tokens
             (portal_token_id, issuance_hash, token_hash, expires_at)
           VALUES (${canonical.id},${canonical.token_hash},${digestBearerToken(token)},
-            ${new Date(now.getTime() + 90 * 86_400_000)})
+            ${new Date(now.getTime() + PORTAL_REMINDER_LINK_DAYS * 86_400_000)})
         `);
       } else {
         // A first scheduler issuance remains compatible with manager issuance.
@@ -542,7 +543,7 @@ async function queuePortalReminders(clientId: number, clientName: string, now: D
         await tx.execute(sql`
         INSERT INTO contractor_portal_tokens (client_id,contractor_id,token,token_hash,expires_at)
         VALUES (${clientId},${contractorId},NULL,${digestBearerToken(token)},
-          ${new Date(now.getTime() + 90 * 86_400_000)})
+          ${new Date(now.getTime() + PORTAL_REMINDER_LINK_DAYS * 86_400_000)})
       `);
       }
     });
