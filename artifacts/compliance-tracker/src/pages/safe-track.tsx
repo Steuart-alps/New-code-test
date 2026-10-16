@@ -25,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLiveAcknowledgements } from "@/hooks/use-live-acknowledgements";
 import { cn } from "@/lib/utils";
 import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry";
+import { useLocalToday } from "@/hooks/use-local-today";
 import { INDUCTION_SECTIONS, parseChecklist, renderInductionHtml, type InductionChecklist, type SectionKey, type ChecklistItem } from "@/lib/induction-print";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -449,6 +450,8 @@ function SiteSelect({ value, onChange }: { value: string; onChange: (v: string) 
 
 export default function SafeTrackPage() {
   const { activeClientId } = useAuth();
+  // Training expiry states roll over at local midnight while the page is open.
+  const now = useLocalToday();
   const canAdmin = useCanAdmin();
   const { data: sites = [] } = useListSites();
   const { toast } = useToast();
@@ -610,8 +613,6 @@ export default function SafeTrackPage() {
         <span className="text-muted-foreground">{siteName(h.siteId) ?? "All sites"}</span>,
       ],
     }));
-
-  const now = new Date();
 
   const expiringTrainingCount = training.filter(record => {
     return getTrainingExpiry(record.expiryDate, now).state === "expiring_soon";

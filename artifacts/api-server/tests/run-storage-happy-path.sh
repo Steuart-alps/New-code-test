@@ -87,6 +87,7 @@ for suite in \
   tests/generic-document-object-acl.mjs \
   tests/pat-export-attachments.mjs \
   tests/export-attachments-storage.mjs \
+  tests/fix-track-media-storage.mjs \
   tests/doc-track-signoff-status.mjs; do
   echo "== $suite"
   start_api

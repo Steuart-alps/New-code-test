@@ -7,6 +7,9 @@ export {
   parseSafeTrackReminderSettings, nextSafeTrackReminder, SAFE_TRACK_REMINDER_CHECK_MINUTES,
   type SafeTrackReminderSettings, type SafeTrackReminderPreview,
 } from '@workspace/api-zod/safe-track-reminder-schedule';
+export {
+  kitchenWeeklyAttentionAnswer, kitchenWeeklyNeedsAttention, kitchenWeeklyResult,
+} from '@workspace/api-zod/kitchen-weekly';
 export * from './generated/api';
 export * from './generated/api.schemas';
 export {

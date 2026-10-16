@@ -87,6 +87,12 @@ jobs:
       - name: Build API
         run: pnpm --filter @workspace/api-server run build
 
+      - name: Web dropdown option values test
+        run: pnpm --filter @workspace/compliance-tracker run test:select-item-values
+
+      - name: Weekly kitchen review result rule test
+        run: pnpm --filter @workspace/api-zod run test:kitchen-weekly
+
       - name: Build web app
         env:
           PORT: "5173"
@@ -130,6 +136,11 @@ jobs:
 
       - name: Module route tests
         run: pnpm --filter @workspace/api-server run test:modules:ci
+
+      # Public staff sign-off link: anonymous access, expired/revoked links,
+      # one-time acknowledgements and tenant/department scope.
+      - name: Public sign-off link tests
+        run: pnpm --filter @workspace/api-server run test:sign-off-access
 
       - name: Department isolation tests
         run: pnpm --filter @workspace/api-server run test:dept-isolation:ci
@@ -216,3 +227,11 @@ jobs:
 
       - name: Client data deletion completeness tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:client-data-deletion-feedback
+
+      # KitchenTrack numeric controls: hold-time boundaries, retries and the
+      # corrective-action follow-up, each on its own fresh database.
+      - name: KitchenTrack hold-time and temperature-action tests
+        run: |
+          pnpm --filter @workspace/api-server run test:kitchen-hold-controls
+          pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
+          pnpm --filter @workspace/api-server run test:kitchen-mobile-replay

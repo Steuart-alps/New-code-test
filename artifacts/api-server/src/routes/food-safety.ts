@@ -32,6 +32,7 @@ const mobileTemperatureLogSchema = z.object({
   hotTemperature: rowSchema.optional(),
   cooling: rowSchema.optional(),
   reheating: rowSchema.optional(),
+  sousVide: rowSchema.optional(),
   correctives: z.string().max(5000).optional(),
   expectedCorrectives: z.string().max(5000).nullable(),
 });
@@ -1275,6 +1276,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
           hotTemperature: append(current.hotTemperature, mobileLog.hotTemperature),
           cooling: append(current.cooling, mobileLog.cooling),
           reheating: append(current.reheating, mobileLog.reheating),
+          sousVide: append(current.sousVide, mobileLog.sousVide),
           ...(mobileLog.correctives !== undefined ? { correctives: mobileLog.correctives } : {}),
           ...(mobileEntryId ? {
             mobileSubmissionReceipts: current.mobileSubmissionReceipts.concat({

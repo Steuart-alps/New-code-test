@@ -328,6 +328,9 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (data.outletId != null && !(await isClientOutlet(clientId, data.outletId)))
     return res.status(400).json({ error: "Invalid outlet" });
 
+  const outletError = await outletLinkError(clientId, data.outletId, data.checkType, data.siteId);
+  if (outletError) return res.status(400).json({ error: outletError });
+
   const userId = req.currentUser!.id;
   const entry = clientEntryFrom(data);
   const storedEntry = async () => entry && (await db.select().from(legionellaChecksTable)
@@ -351,6 +354,10 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         createdBy: userId,
         clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
       }).returning();
+      // Link to sentinel outlet if provided (column added via runtime migration).
+      if (row && data.outletId) {
+        await tx.execute(sql`UPDATE legionella_checks SET outlet_id = ${data.outletId} WHERE id = ${row.id} AND client_id = ${clientId}`);
+      }
       if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, req.currentUser?.id ?? null, performer.performedBy);
       return row;
     });
@@ -359,14 +366,6 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
     if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
     throw err;
-  }
-
-  // Link to sentinel outlet if provided (column added via runtime migration).
-  if (inserted && data.outletId) {
-    await db.execute(sql`
-      UPDATE legionella_checks SET outlet_id = ${data.outletId}
-      WHERE id = ${inserted.id} AND client_id = ${clientId}
-    `);
   }
 
   res.status(201).json(inserted);
@@ -381,6 +380,32 @@ const OUTLET_CHECK_TYPE_MAP: Record<string, string> = {
   calorifier: "calorifier_temp",
   tmv:        "hot_sentinel_temp", // checked against TMV_OUTLET_MAX_C, not the hot minimum
 };
+
+/**
+ * Why a check cannot be linked to an outlet, or null when it can. The outlet
+ * must belong to this business, be at the check's own site (a site-neutral
+ * outlet takes site-neutral checks), and take this check type. New links also
+ * need an active outlet; an existing link survives the outlet's removal.
+ * Department access follows from the site, which callers have already checked.
+ */
+async function outletLinkError(
+  clientId: number,
+  outletId: number | null | undefined,
+  checkType: string,
+  siteId: number | null | undefined,
+  { requireActive = true } = {},
+): Promise<string | null> {
+  if (outletId == null) return null;
+  const result = await db.execute(sql`
+    SELECT type, site_id, active FROM legionella_sentinel_outlets
+    WHERE id = ${outletId} AND client_id = ${clientId} LIMIT 1
+  `);
+  const outlet = result.rows[0] as { type: string; site_id: number | null; active: boolean } | undefined;
+  if (!outlet || (requireActive && !outlet.active)) return "Outlet not found";
+  if (OUTLET_CHECK_TYPE_MAP[outlet.type] !== checkType) return "This check type cannot be recorded against that outlet";
+  if ((outlet.site_id == null ? null : Number(outlet.site_id)) !== (siteId ?? null)) return "The outlet belongs to a different site";
+  return null;
+}
 
 const outletCreateSchema = z.object({
   name:      z.string().min(1).max(500),
@@ -510,7 +535,15 @@ router.put("/outlets/:id", requireAuth, denyViewers, async (req, res) => {
   `);
   const cur = (existing.rows ?? [])[0] as any;
   if (!cur) return res.status(404).json({ error: "Not found" });
+  const deptId = getActiveDepartmentId(req);
+  if (await checkSiteAccess(cur.site_id, clientId, deptId) === "forbidden")
+    return res.status(403).json({ error: "Forbidden" });
   const d = parsed.data;
+  if (d.siteId !== undefined) {
+    const newAccess = await checkSiteAccess(d.siteId, clientId, deptId);
+    if (newAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (newAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const name     = d.name     ?? cur.name;
   const type     = d.type     ?? cur.type;
   const location = d.location !== undefined ? d.location : cur.location;
@@ -537,6 +570,13 @@ router.delete("/outlets/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const existing = await db.execute(sql`
+    SELECT site_id FROM legionella_sentinel_outlets WHERE id = ${id} AND client_id = ${clientId}
+  `);
+  const cur = (existing.rows ?? [])[0] as { site_id: number | null } | undefined;
+  if (!cur) return res.status(404).json({ error: "Not found" });
+  if (await checkSiteAccess(cur.site_id, clientId, getActiveDepartmentId(req)) === "forbidden")
+    return res.status(403).json({ error: "Forbidden" });
   const rows = await db.execute(sql`
     UPDATE legionella_sentinel_outlets SET active = false, updated_at = now()
     WHERE id = ${id} AND client_id = ${clientId}
@@ -584,7 +624,18 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
     existing.staffRosterId, existing.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-  const { temperature, ...rest } = parsed.data;
+  const linkedOutlet = await db.execute(sql`SELECT outlet_id FROM legionella_checks WHERE id = ${id} AND client_id = ${clientId}`);
+  const currentOutletId = (linkedOutlet.rows[0] as { outlet_id: number | null } | undefined)?.outlet_id ?? null;
+  const outletChanged = parsed.data.outletId !== undefined && parsed.data.outletId !== currentOutletId;
+  const nextOutletId = parsed.data.outletId !== undefined ? parsed.data.outletId : currentOutletId;
+  const nextSiteId = parsed.data.siteId !== undefined ? parsed.data.siteId : existing.siteId;
+  if (outletChanged || nextSiteId !== existing.siteId) {
+    const outletError = await outletLinkError(clientId, nextOutletId, existing.checkType, nextSiteId,
+      { requireActive: outletChanged });
+    if (outletError) return res.status(400).json({ error: outletError });
+  }
+
+  const { temperature, outletId: _outletId, ...rest } = parsed.data;
   const updateData: any = { ...rest, ...(performer ?? {}), updatedAt: new Date() };
   if (temperature !== undefined) {
     updateData.temperature = temperature != null ? String(temperature) : null;
@@ -594,16 +645,18 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const nextTemperature = temperature !== undefined ? temperature : (existing.temperature == null ? null : Number(existing.temperature));
   if (existing.checkType.endsWith("_temp") && nextTemperature == null)
     return res.status(400).json({ error: "Record a temperature before marking this check" });
-  const linkedOutlet = await db.execute(sql`SELECT outlet_id FROM legionella_checks WHERE id = ${id} AND client_id = ${clientId}`);
   const breach = legionellaBreach(existing.checkType, nextTemperature, profile, {
     healthcare: await isHealthcareClient(clientId),
     location: parsed.data.location !== undefined ? parsed.data.location : existing.location,
-    tmvOutlet: await isTmvOutlet(clientId, (linkedOutlet.rows[0] as { outlet_id: number | null } | undefined)?.outlet_id),
+    tmvOutlet: await isTmvOutlet(clientId, nextOutletId),
   });
   updateData.result = breach ? "fail" : (parsed.data.result !== undefined ? parsed.data.result : existing.result);
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(legionellaChecksTable).set(updateData)
       .where(and(eq(legionellaChecksTable.id, id), eq(legionellaChecksTable.clientId, clientId))).returning();
+    if (row && outletChanged) {
+      await tx.execute(sql`UPDATE legionella_checks SET outlet_id = ${nextOutletId} WHERE id = ${id} AND client_id = ${clientId}`);
+    }
     if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, id, breach, req.currentUser?.id ?? null, performer.performedBy);
     return row;
   });

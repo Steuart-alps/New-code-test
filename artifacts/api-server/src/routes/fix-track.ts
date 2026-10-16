@@ -20,6 +20,7 @@ import { getObjectAclPolicy } from "../lib/objectAcl";
 import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload, decryptTokenPayload, TokenPayloadError, isDamagedTokenPayload } from "../lib/bearerTokens";
 import { reminderDraftStillCurrent, SUPERSEDED_REMINDER_ERROR } from "../lib/reminderCycles";
+import { PortalLinkChangedError, sendPortalDraftWithCurrentLink } from "../lib/contractorPortalDrafts";
 
 /** Claim-transaction result for a reminder withdrawn as out of date. */
 const SUPERSEDED = Symbol("superseded");
@@ -1690,6 +1691,36 @@ router.post("/contractor-email-queue/:queueId/cancel", requireAuth, denyViewers,
   res.json({ ok: true });
 });
 
+/**
+ * Send a draft this request has just claimed (status 'sending') and mark it
+ * sent. A contractor portal reminder is sent only while its portal link is
+ * still current (see lib/contractorPortalDrafts.ts); it throws
+ * PortalLinkChangedError, with nothing sent, when a manager reissued or
+ * revoked the link after the claim.
+ */
+async function sendClaimedDraft(q: any, clientId: number) {
+  const dispatch = async (row: any) => {
+    const hydrated = hydrateQueuedContent(row);
+    await dispatchStoredContractorEmail({
+      to: row.to_email,
+      subject: hydrated.subject,
+      html: hydrated.html,
+      text: hydrated.text ?? undefined,
+      cc: Array.isArray(row.cc_json) && row.cc_json.length ? row.cc_json : undefined,
+      icsAttachment: row.ics_content ?? undefined,
+      icsFilename: row.ics_filename ?? undefined,
+      clientId,
+      idempotencyKey: row.idempotency_key,
+    });
+    return hydrated;
+  };
+  if (q.entity_type === "contractor_compliance") return sendPortalDraftWithCurrentLink(db, q, dispatch);
+  const hydrated = await dispatch(q);
+  await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now()
+    WHERE id=${q.id} AND client_id=${clientId} AND status='sending'`);
+  return hydrated;
+}
+
 // Approval is atomic and idempotent: only one manager can claim a draft. A
 // draft whose credentials cannot be decrypted and validated is refused before
 // it is claimed, so a damaged draft never consumes an approval.
@@ -1727,12 +1758,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
   if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
   if (!q) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
-    const hydrated = hydrateQueuedContent(q);
-    await dispatchStoredContractorEmail({ to: q.to_email, subject: hydrated.subject, html: hydrated.html, text: hydrated.text ?? undefined,
-      cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
-      icsAttachment: q.ics_content ?? undefined, icsFilename: q.ics_filename ?? undefined,
-      clientId, idempotencyKey: q.idempotency_key });
-    await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now() WHERE id=${qid} AND status='sending'`);
+    const hydrated = await sendClaimedDraft(q, clientId);
     if (q.entity_type === "fix_track" && q.entity_id) {
       await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
         email_sent_by=${req.currentUser?.id ?? null}, email_sent_at=now(), updated_at=now()
@@ -1743,6 +1769,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
     }
     res.json({ ok: true, queueId: qid, mode: q.mode, subject: hydrated.subject, bodyHtml: hydrated.html });
   } catch (err) {
+    if (err instanceof PortalLinkChangedError) return res.status(409).json({ code: err.code, error: err.message });
     // Put the draft back exactly as it was before this attempt: pending and
     // unapproved, so a failed send consumes no approval. The idempotency key
     // is unchanged, so a retry cannot deliver twice.
@@ -1808,20 +1835,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
   if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
   if (!q) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
-    const hydrated = hydrateQueuedContent(q);
-    await dispatchStoredContractorEmail({
-      to: q.to_email,
-      subject: hydrated.subject,
-      html: hydrated.html,
-      text: hydrated.text ?? undefined,
-      cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
-      icsAttachment: q.ics_content ?? undefined,
-      icsFilename: q.ics_filename ?? undefined,
-      clientId,
-      idempotencyKey: q.idempotency_key,
-    });
-    await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now()
-      WHERE id=${qid} AND client_id=${clientId} AND status='sending'`);
+    const hydrated = await sendClaimedDraft(q, clientId);
     if (q.issue_id) {
       await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
         email_sent_by=${req.currentUser?.id ?? null}, email_sent_at=now(), updated_at=now()
@@ -1832,6 +1846,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
     }
     res.json({ ok: true, queueId: qid, subject: hydrated.subject, bodyHtml: hydrated.html, bodyText: hydrated.text });
   } catch (err) {
+    if (err instanceof PortalLinkChangedError) return res.status(409).json({ code: err.code, error: err.message });
     // The manager's edits are kept; the approval taken by this attempt is
     // returned so the draft is pending exactly as before.
     await db.transaction(async (tx) => {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { Link, useLocation } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Users, Bell, FileText, ArrowRight, Star, Zap, Lock,
@@ -44,6 +44,7 @@ const MODULES = [
     activeBorder: "border-orange-500",
     activeBg: "bg-orange-50",
     required: false,
+    legislation: "Regulatory Reform (Fire Safety) Order 2005",
     description: "Digital fire safety logbook — record and track every check required under the Regulatory Reform (Fire Safety) Order.",
     features: [
       "Weekly alarm tests & emergency lights",
@@ -64,6 +65,7 @@ const MODULES = [
     activeBorder: "border-amber-500",
     activeBg: "bg-amber-50",
     required: false,
+    legislation: "Food Safety Act 1990 + HACCP Regulation (EC) 852/2004",
     description: "Digital food safety diary — daily temperature logs, delivery checks, and HACCP records for food businesses.",
     features: [
       "Kitchen open & close checks",
@@ -85,6 +87,7 @@ const MODULES = [
     activeBorder: "border-sky-500",
     activeBg: "bg-sky-50",
     required: false,
+    legislation: "HSG274 / L8 ACOP — Legionella bacteria control",
     description: "Water safety logbook to support site-specific Legionella risk-management records, written schemes and actions.",
     features: [
       "Cold & hot water temperature checks",
@@ -146,6 +149,7 @@ const MODULES = [
     activeBorder: "border-violet-500",
     activeBg: "bg-violet-50",
     required: false,
+    legislation: "Workplace (Health, Safety and Welfare) Regulations 1992",
     description: "Digital premises safety logbook — routine workplace inspections, fault reporting, and housekeeping records.",
     features: [
       "Routine premises inspection checklists",
@@ -273,10 +277,16 @@ const FEATURES = [
 
 // ─── Pricing builder (interactive) ────────────────────────────────────────────
 
-function PricingBuilder({ onStart }: { onStart: (selected: string[], bundle: boolean) => void }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set(["core"]));
-  const [bundleActive, setBundleActive] = useState(false);
+type PricingSelection = {
+  selected: Set<string>;
+  setSelected: Dispatch<SetStateAction<Set<string>>>;
+  bundleActive: boolean;
+  setBundleActive: Dispatch<SetStateAction<boolean>>;
+};
 
+function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundleActive }: PricingSelection & {
+  onStart: (selected: string[], bundle: boolean) => void;
+}) {
   const toggle = (key: string) => {
     if (key === "core") return; // required
     setSelected(prev => {
@@ -429,6 +439,14 @@ function PricingBuilder({ onStart }: { onStart: (selected: string[], bundle: boo
 
 export default function LandingPage() {
   const [, navigate] = useLocation();
+  // Held here so a module card can tick its module in the pricing builder.
+  const [selected, setSelected] = useState<Set<string>>(new Set(["core"]));
+  const [bundleActive, setBundleActive] = useState(false);
+
+  function chooseModule(key: string) {
+    if (bundleActive) return;
+    setSelected(prev => (prev.has(key) ? prev : new Set(prev).add(key)));
+  }
 
   function handleStart(selected: string[], bundle: boolean) {
     navigate(buildSignupPath(selected, bundle));
@@ -508,17 +526,20 @@ export default function LandingPage() {
           </div>
 
           {/* Module feature cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-20">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {MODULES.map((mod, i) => {
               const Icon = mod.icon;
               return (
-                <motion.div
+                <motion.a
                   key={mod.key}
+                  href="#pricing"
+                  onClick={() => chooseModule(mod.key)}
+                  data-testid={`module-card-${mod.key}`}
                   initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.1, duration: 0.5, ease: "easeOut" }}
                   viewport={{ once: true, margin: "-40px" }}
-                  className="bg-white border-none shadow-sm p-8 flex flex-col group hover:-translate-y-1 transition-transform duration-300"
+                  className="bg-white border-none shadow-sm p-8 flex flex-col group hover:-translate-y-1 transition-transform duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <div className={`w-12 h-12 ${mod.bg} flex items-center justify-center mb-5 group-hover:scale-110 transition-transform duration-300`}>
                     <Icon className={`w-6 h-6 ${mod.color}`} />
@@ -528,34 +549,29 @@ export default function LandingPage() {
                     {mod.required ? "Core — £10/site/mo" : "Add-on — £10/site/mo"}
                   </div>
                   <p className="text-sm text-muted-foreground leading-relaxed font-light flex-1">{mod.description}</p>
-                </motion.div>
+                  {mod.legislation && (
+                    <p className="text-xs text-muted-foreground font-light mt-4 pt-4 border-t border-border/40">{mod.legislation}</p>
+                  )}
+                  <span className={`text-sm font-medium mt-5 inline-flex items-center gap-1 ${mod.color}`}>
+                    {mod.required ? "See pricing" : "Add to your plan"}
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  </span>
+                </motion.a>
               );
             })}
-          </div>
-
-          {/* Legislation callout strip */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              { icon: Flame, label: "FireTrack", legislation: "Regulatory Reform (Fire Safety) Order 2005" },
-              { icon: UtensilsCrossed, label: "KitchenTrack", legislation: "Food Safety Act 1990 + HACCP Regulation (EC) 852/2004" },
-              { icon: Droplets, label: "LegionellaTrack", legislation: "HSG274 / L8 ACOP — Legionella bacteria control" },
-              { icon: Building2, label: "PremisesTrack", legislation: "Workplace (Health, Safety and Welfare) Regulations 1992" },
-            ].map(({ icon: Icon, label, legislation }) => (
-              <div key={label} className="bg-white/60 border border-border/40 p-5 flex items-start gap-4">
-                <Icon className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
-                <div>
-                  <div className="font-medium text-sm text-[#162D42]">{label}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5 font-light">{legislation}</div>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       </section>
 
       {/* Pricing builder */}
       <section className="py-32 px-6 bg-white" id="pricing">
-        <PricingBuilder onStart={handleStart} />
+        <PricingBuilder
+          onStart={handleStart}
+          selected={selected}
+          setSelected={setSelected}
+          bundleActive={bundleActive}
+          setBundleActive={setBundleActive}
+        />
       </section>
 
       {/* Platform features */}
