@@ -27,6 +27,7 @@ assert.equal(cadenceLabel(7), 'Weekly (every 7 days)');
 assert.equal(cadenceLabel(183), 'Six-monthly (every 183 days)');
 assert.equal(cadenceLabel(1), 'Daily (every 1 day)');
 assert.equal(cadenceLabel(45), 'Every 45 days');
+assert.equal(cadenceLabel(180), 'At least every 6 months', 'FireTrack drills read as the legal minimum');
 assert.equal(cadenceLabel(null), 'No approved frequency');
 assert.equal(cadenceLabel(0), 'No approved frequency');
 

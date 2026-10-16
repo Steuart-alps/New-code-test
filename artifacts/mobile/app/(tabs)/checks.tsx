@@ -40,11 +40,11 @@ const MODULES: CheckModule[] = [
     icon: 'alert-triangle',
     iconColor: '#f97316',
     checks: [
-      'Alarm test',
-      'Emergency lights',
+      'Weekly alarm test',
+      'Monthly lighting flick test',
       'Extinguisher check',
       'Fire doors',
-      'Fire drill',
+      'Fire drill (with night staff)',
     ],
   },
   {

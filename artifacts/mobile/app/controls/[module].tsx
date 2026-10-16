@@ -47,6 +47,7 @@ import {
   type MonitoringPlan,
   type TemperatureLimit,
 } from '@/components/track-controls-logic';
+import { fireHistoryDetails } from '@/components/fire-check-logic';
 
 interface Site {
   id: number;
@@ -329,6 +330,7 @@ export default function SiteControlsScreen() {
                   <Text style={[styles.historyMeta, { color: colors.mutedForeground }]}>No checks recorded at this site.</Text>
                 ) : recent.map((entry) => {
                   const temperature = temperatureText(entry.temperature);
+                  const fireDetails = module === 'fire' ? fireHistoryDetails(entry as unknown as Record<string, unknown>) : [];
                   return (
                     <View key={entry.id} style={[styles.historyRow, { borderTopColor: colors.border }]}>
                       <View style={{ flex: 1 }}>
@@ -338,6 +340,11 @@ export default function SiteControlsScreen() {
                         {(entry.performedBy || entry.location) && (
                           <Text style={[styles.historyMeta, { color: colors.mutedForeground }]}>
                             {[entry.performedBy, entry.location].filter(Boolean).join(' · ')}
+                          </Text>
+                        )}
+                        {fireDetails.length > 0 && (
+                          <Text style={[styles.historyMeta, { color: colors.mutedForeground }]} testID={`site-controls-fire-details-${entry.id}`}>
+                            {fireDetails.join(' · ')}
                           </Text>
                         )}
                       </View>
