@@ -120,6 +120,11 @@ try {
   put(staleForeign, owner(N));
   put(unrelatedMarked, owner(T));
   for (const objectPath of [owned[0], owned[2], unmarkedUpload, staleForeign]) await reference(T, objectPath);
+  // A COSHH safety data sheet outside the prefix, referenced only by its register row.
+  const registerFile = `/objects/legacy/target-sds.pdf`;
+  owned.push(registerFile);
+  put(registerFile, owner(T));
+  await db.execute(sql`INSERT INTO coshh_substances (client_id, product_name, sds_object_path) VALUES (${T}, 'Bleach', ${registerFile})`);
   // The neighbour's own files, under its prefix and referenced.
   const neighbourFiles = [`/objects/finalized/tenant-${N}/cert.pdf`, `/objects/uploads/tenant-${N}/receipt.jpg`];
   for (const objectPath of neighbourFiles) { put(objectPath, owner(N)); await reference(N, objectPath); }
@@ -185,7 +190,7 @@ try {
   assert.equal(done.reason, "approved_request");
   assert.equal(done.request_id, requestId);
   assert.equal(done.approved_by, reviewer.userId);
-  assert.equal(done.objects_deleted, 3);
+  assert.equal(done.objects_deleted, owned.length);
   assert.equal(done.objects_skipped, 2, "the unmarked upload and the stale foreign reference were left");
   assert.ok(done.rows_deleted > 0);
   assert.equal(done.error, null);
