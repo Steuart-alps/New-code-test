@@ -2,7 +2,7 @@ import { db, setSessionLockTimeout } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { ensureRuntimeBaseline } from "./runtimeBaseline";
-import { migrateAuditLog } from "./auditLogMigration";
+import { migrateAuditLog, migrateExtendedAuditLog } from "./auditLogMigration";
 import { migrateLegacyPatHistory } from "./patLegacyHistoryMigration";
 import { migratePatRoomHistory } from "./patRoomHistoryMigration";
 import { migratePatFailureHistory } from "./patFailureHistoryMigration";
@@ -733,11 +733,26 @@ async function runRuntimeMigrationsOnce() {
         "expires_at" timestamp NOT NULL,
         "used_at"    timestamp,
         "created_at" timestamp NOT NULL DEFAULT now(),
+        "purpose"    text NOT NULL DEFAULT 'reset',
+        "revoked_at" timestamp,
+        "email_failed_at" timestamp,
         CONSTRAINT "password_reset_tokens_token_unique" UNIQUE ("token")
       )
     `);
     await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "used_at" timestamp`);
     await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+    // Setup (invite) links are told apart from forgot-password links so User
+    // Management can show which staff are still waiting to set a password.
+    // Rows from before the column existed are classed by lifetime: invites
+    // last 24 hours and reset links 1 hour, so only an invite exceeds 2 hours.
+    // Reset rows always stay at 1 hour, so re-running this changes nothing.
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "purpose" text NOT NULL DEFAULT 'reset'`);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "revoked_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "email_failed_at" timestamp`);
+    await db.execute(sql`
+      UPDATE "password_reset_tokens" SET "purpose" = 'invite'
+      WHERE "purpose" = 'reset' AND "expires_at" - "created_at" > interval '2 hours'
+    `);
     // Reset and invitation links are stored as "sha256:<hex>"; hash legacy
     // plaintext rows in place so unexpired links keep working.
     await db.execute(sql`
@@ -852,6 +867,26 @@ async function runRuntimeMigrationsOnce() {
         "updated_at" timestamptz NOT NULL DEFAULT now()
       )
     `);
+    // Paid extra storage reduced at the next renewal (routes/billing.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_capacity_reductions" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "request_id" text NOT NULL,
+        "subscription_id" text NOT NULL,
+        "subscription_item_id" text NOT NULL,
+        "from_gib" integer NOT NULL,
+        "to_gib" integer NOT NULL,
+        "minimum_gib" integer NOT NULL,
+        "used_bytes" bigint NOT NULL,
+        "effective_at" timestamptz NOT NULL,
+        "requested_by" integer,
+        "requested_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "storage_capacity_reductions_lower" CHECK ("to_gib" >= 0 AND "to_gib" < "from_gib" AND "to_gib" >= "minimum_gib")
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_capacity_reductions_request" ON "storage_capacity_reductions" ("request_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_capacity_reductions_tenant" ON "storage_capacity_reductions" ("client_id", "subscription_id", "effective_at")`);
     // Bound the immutable response ledger and remove spent opaque credentials.
     await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
     await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);
@@ -2099,6 +2134,9 @@ async function runRuntimeMigrationsOnce() {
     await migrateTrackOwnersAndNotifications();
     await migrateCertificateOutcomes();
     await migrateFireCallPoints();
+
+    // Last: every audited table must exist by now (see auditLogMigration.ts).
+    await migrateExtendedAuditLog();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -3921,7 +3959,7 @@ async function migrateFixTrackV2() {
       CHECK ("event_type" IN (
         'status', 'note',
         'email_requested', 'email_approved', 'email_rejected',
-        'email_invalidated', 'email_sent'
+        'email_invalidated', 'email_sent', 'email_failed'
       ))
   `);
   await db.execute(sql`
@@ -4264,6 +4302,11 @@ async function migrateIncidents() {
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "decision_at" timestamp`);
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "submitted_at" timestamp`);
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "submission_evidence" text`);
+  // HSE receipt bound to a submission event; set only on insert.
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_object_path" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_file_name" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_content_type" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "receipt_source" text`);
   await db.execute(sql`
     UPDATE "incident_riddor_events" e
     SET "decision_at" = e."created_at"
@@ -4308,6 +4351,9 @@ async function migrateIncidents() {
         WHERE "id" = NEW."incident_id" AND "client_id" = NEW."client_id"
       ) THEN
         RAISE EXCEPTION 'RIDDOR event tenant must match its incident';
+      END IF;
+      IF NEW."receipt_object_path" IS NOT NULL AND NEW."event_type" <> 'submission' THEN
+        RAISE EXCEPTION 'An HSE receipt can only be bound to a submission event';
       END IF;
       RETURN NEW;
     END;
@@ -5084,6 +5130,21 @@ async function migrateLegionellaOutlets() {
     ALTER TABLE legionella_checks
     ADD COLUMN IF NOT EXISTS outlet_id integer
     REFERENCES legionella_sentinel_outlets(id) ON DELETE SET NULL
+  `);
+  // A database built by drizzle-kit push already has the plain column, so the
+  // ADD COLUMN above is skipped there; add the foreign key on its own.
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'legionella_checks_outlet_id_fkey'
+      ) THEN
+        UPDATE legionella_checks c SET outlet_id = NULL
+        WHERE outlet_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM legionella_sentinel_outlets o WHERE o.id = c.outlet_id);
+        ALTER TABLE legionella_checks ADD CONSTRAINT legionella_checks_outlet_id_fkey
+          FOREIGN KEY (outlet_id) REFERENCES legionella_sentinel_outlets(id) ON DELETE SET NULL;
+      END IF;
+    END $$
   `);
   // Migrate existing JSON from app_settings (idempotent — skips clients already migrated).
   const settings = await db.execute(sql`

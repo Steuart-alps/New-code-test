@@ -388,12 +388,13 @@ function RecordDialog({
     try {
       const payload = {
         checkType, checkDate, checkTime: checkTime || undefined,
-        siteId: selectedSite,
+        siteId: selectedSite ?? null,
         phLevel: parsedPh, freeChlorine: parsedFree, combinedChlorine: parsedComb,
         waterTempC: parsedWT, airTempC: airTemp ? parseFloat(airTemp) : null,
         turbidity: turbidity || null, poolOpen, performedBy: performedBy || null, staffRosterId: staffRosterId,
-        actionsTaken: actionsTaken || undefined, result: effectiveResult,
-        notes: notes || undefined,
+        // null (not undefined) so clearing a field on edit actually clears it
+        actionsTaken: actionsTaken || null, result: effectiveResult,
+        notes: notes || null,
       };
       if (isEdit) {
         await apiFetch(`/pool-track/${existing!.id}`, { method: "PUT", body: JSON.stringify(payload) });

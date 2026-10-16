@@ -24,6 +24,7 @@ import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { pendingIssueUploadKey, RecoveryIdentity } from '@/lib/fixTrackRecovery';
+import { localIsoDate } from '@/components/date-stepper-logic';
 
 interface Site {
   id: number;
@@ -268,7 +269,7 @@ export default function NewIssueScreen() {
       priority,
       location: location.trim(),
       reportedBy: user?.name ?? 'Mobile user',
-      reportedDate: new Date().toISOString().slice(0, 10),
+      reportedDate: localIsoDate(),
       ...(siteId ? { siteId } : {}),
     });
   }

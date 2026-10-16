@@ -40,7 +40,7 @@ const emptyAction = {
   sourceTrack: "FireTrack", sourceRecordId: "", title: "", severity: "medium" as const,
   ownerName: "", dueDate: "", interimControl: "", correctiveAction: "", evidenceReference: "",
 };
-const trackOptions = ["DailyTrack AM", "DailyTrack PM", "KitchenTrack", "FireTrack", "LegionellaTrack", "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack", "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack", "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack"];
+const trackOptions = ["DailyTrack AM", "DailyTrack PM", "KitchenTrack", "FireTrack", "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack", "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack", "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack"];
 
 export default function ComplianceHubPage() {
   const { activeClientId, user } = useAuth();
@@ -70,7 +70,12 @@ export default function ComplianceHubPage() {
       ...init,
     }));
     const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(data?.error || "Request failed");
+    if (!response.ok) {
+      // Validation failures carry zod's flattened errors rather than a string.
+      const error = data?.error;
+      const [field, messages] = Object.entries<string[]>(error?.fieldErrors ?? {})[0] ?? [];
+      throw new Error(typeof error === "string" ? error : field ? `${field}: ${messages?.[0] ?? "invalid"}` : "Request failed");
+    }
     return data as T;
   }
 

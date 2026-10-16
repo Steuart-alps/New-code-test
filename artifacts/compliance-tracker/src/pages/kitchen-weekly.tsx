@@ -273,7 +273,7 @@ export default function WeeklyReviewTab() {
                   key={q.key}
                   q={q}
                   value={checks[q.key] as Answer ?? ""}
-                  onChange={v => setChecks(prev => ({ ...prev, [q.key]: v }))}
+                  onChange={v => setChecks(prev => { const next = { ...prev, [q.key]: v }; if (!v) delete next[q.key]; return next; })}
                   disabled={isSubmitted}
                 />
               ))}
@@ -348,7 +348,7 @@ export default function WeeklyReviewTab() {
                   key={q.key}
                   q={q}
                   value={checks[q.key] as Answer ?? ""}
-                  onChange={v => setChecks(prev => ({ ...prev, [q.key]: v }))}
+                  onChange={v => setChecks(prev => { const next = { ...prev, [q.key]: v }; if (!v) delete next[q.key]; return next; })}
                   disabled={isSubmitted}
                 />
               ))}

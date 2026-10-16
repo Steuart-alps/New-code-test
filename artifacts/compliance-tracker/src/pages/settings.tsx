@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
-import { useGetSettings, useGetStorageUsage, type AppSettings } from "@workspace/api-client-react";
+import {
+  useGetSettings, useGetStorageUsage, type AppSettings,
+  nextSafeTrackReminder, parseSafeTrackReminderSettings, SAFE_TRACK_REMINDER_CHECK_MINUTES,
+} from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -17,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive, CalendarClock } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { clearModuleActivation, trackModuleActivation, trackServiceActionOutcome } from "@/lib/analytics";
@@ -102,6 +105,9 @@ function formatCheckedAge(seconds: number): string {
   return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
 }
 
+/** Storage add-on offer from /billing/config: per-GiB monthly price in minor units. */
+type StorageAddonOffer = { unitAmount: number; currency: string; minimumGib: number };
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -114,8 +120,191 @@ function formatBytes(bytes: number): string {
   return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[unit]}`;
 }
 
+type StorageCapacity =
+  | { subscribed: false }
+  | {
+    subscribed: true;
+    usedBytes: number;
+    planIncludedGib: number | null;
+    renewingGib: number;
+    paidGibThisPeriod: number;
+    minimumGib: number | null;
+    periodEndsAt: string | null;
+    unitAmount: number | null;
+    currency: string | null;
+    scheduled: Array<{ fromGib: number; toGib: number; effectiveAt: string; requestedAt: string }>;
+    canReduce: boolean;
+    reduceUnavailableReason: string | null;
+  };
+
+function formatUkDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/London" });
+}
+
+function formatMinorUnits(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency: currency.toUpperCase() }).format(amount / 100);
+  } catch {
+    return `${(amount / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
+const STORAGE_REDUCE_UNAVAILABLE: Record<string, string> = {
+  needed_by_files: "Your retained files need all of your extra storage, so it can't be reduced at the moment.",
+  usage_unchecked: "We're still checking how much storage your files use. Reducing will be available once that check finishes.",
+  pricing_unavailable: "Storage pricing is unavailable for this subscription, so it can't be reduced right now.",
+  needs_support: "Your subscription has more than one storage line. Please contact support to reduce it.",
+};
+
+/**
+ * Paid extra storage: what renews, what is still paid for this period, and a
+ * reduction that applies from the next renewal. Never deletes files.
+ */
+function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: number | null; onChanged: () => void }) {
+  const { toast } = useToast();
+  const capacityQuery = useQuery({
+    queryKey: ["/api/billing/storage", activeClientId],
+    enabled: activeClientId !== null,
+    retry: false,
+    queryFn: () => apiFetch<StorageCapacity>(withBillingClient("/billing/storage", activeClientId)),
+  });
+  const capacity = capacityQuery.data;
+  const [targetGib, setTargetGib] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const requestIdRef = useRef<string | null>(null);
+
+  const minimumGib = capacity?.subscribed ? capacity.minimumGib : null;
+  useEffect(() => {
+    if (minimumGib !== null) setTargetGib(String(minimumGib));
+  }, [minimumGib]);
+
+  if (!capacity?.subscribed) return null;
+  if (capacity.renewingGib === 0 && capacity.paidGibThisPeriod === 0) return null;
+
+  const price = (gib: number) =>
+    capacity.unitAmount !== null && capacity.currency ? formatMinorUnits(capacity.unitAmount * gib, capacity.currency) : null;
+  const target = Number(targetGib);
+  const targetValid = Number.isInteger(target)
+    && capacity.minimumGib !== null
+    && target >= capacity.minimumGib
+    && target < capacity.renewingGib;
+  const periodEnd = capacity.periodEndsAt ? formatUkDate(capacity.periodEndsAt) : "the end of this billing period";
+
+  const reduce = async () => {
+    // One id per dialog, so retrying a lost response can't apply it twice.
+    requestIdRef.current ??= crypto.randomUUID();
+    setBusy(true);
+    try {
+      const response = await authenticatedApiFetch(withBillingClient("/billing/storage/reduce", activeClientId), {
+        method: "POST",
+        body: JSON.stringify({ targetGib: target, requestId: requestIdRef.current }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);
+      requestIdRef.current = null;
+      setConfirmOpen(false);
+      toast({
+        title: "Storage reduction confirmed",
+        description: `Stripe has been updated. From ${formatUkDate(data.effectiveAt)} your subscription renews with ${data.toGib} GiB of extra storage. You keep ${data.paidGibThisPeriod} GiB until then.`,
+      });
+      await capacityQuery.refetch();
+      onChanged();
+    } catch (err: any) {
+      toast({ title: "Couldn't reduce storage", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-lg border p-4" data-testid="paid-storage">
+      <div>
+        <p className="text-sm text-muted-foreground">Extra storage you pay for</p>
+        <p className="mt-1 text-lg font-semibold">
+          {capacity.renewingGib} GiB each month{price(capacity.renewingGib) ? ` (${price(capacity.renewingGib)} / month)` : ""}
+        </p>
+        {capacity.planIncludedGib !== null && (
+          <p className="text-xs text-muted-foreground">On top of the {capacity.planIncludedGib} GiB included with your plan.</p>
+        )}
+      </div>
+
+      {capacity.scheduled.map((row) => (
+        <div key={`${row.requestedAt}-${row.toGib}`} className="flex gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Reduction confirmed on {formatUkDate(row.requestedAt)}: from {formatUkDate(row.effectiveAt)} your subscription renews with {row.toGib} GiB instead of {row.fromGib} GiB.
+          </span>
+        </div>
+      ))}
+      {capacity.paidGibThisPeriod > capacity.renewingGib && (
+        <p className="text-sm">You keep {capacity.paidGibThisPeriod} GiB of extra storage until {periodEnd}, because this month is already paid for.</p>
+      )}
+
+      {capacity.minimumGib !== null && capacity.planIncludedGib !== null && (
+        <p className="text-sm text-muted-foreground" data-testid="storage-minimum">
+          {capacity.minimumGib > 0
+            ? `Your retained files (${formatBytes(capacity.usedBytes)}) need at least ${capacity.minimumGib} GiB of extra storage, so you can't go below that.`
+            : `Your retained files (${formatBytes(capacity.usedBytes)}) fit in the ${capacity.planIncludedGib} GiB included with your plan, so you can remove all extra storage.`}
+        </p>
+      )}
+
+      {capacity.canReduce ? (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="storage-renew-gib">Renew with (GiB of extra storage)</Label>
+            <Input
+              id="storage-renew-gib"
+              type="number"
+              min={capacity.minimumGib ?? 0}
+              max={capacity.renewingGib - 1}
+              step="1"
+              value={targetGib}
+              onChange={(event) => setTargetGib(event.target.value)}
+            />
+          </div>
+          <Button type="button" variant="outline" disabled={!targetValid || busy} onClick={() => { requestIdRef.current = null; setConfirmOpen(true); }}>
+            Reduce from next renewal
+          </Button>
+        </div>
+      ) : capacity.renewingGib > 0 && capacity.reduceUnavailableReason && STORAGE_REDUCE_UNAVAILABLE[capacity.reduceUnavailableReason] ? (
+        <p className="text-sm text-muted-foreground">{STORAGE_REDUCE_UNAVAILABLE[capacity.reduceUnavailableReason]}</p>
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        Reductions start at your next renewal. Files are never deleted and access is never cut off; there's no refund for the current month.
+      </p>
+
+      <Dialog open={confirmOpen} onOpenChange={(open) => { if (!busy) setConfirmOpen(open); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reduce extra storage to {targetValid ? target : "…"} GiB?</DialogTitle>
+            <DialogDescription asChild>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm">
+                <li>
+                  From {periodEnd}, your subscription renews with {target} GiB instead of {capacity.renewingGib} GiB
+                  {price(capacity.renewingGib) && price(target) ? ` (${price(capacity.renewingGib)} → ${price(target)} a month)` : ""}.
+                </li>
+                <li>You keep {capacity.paidGibThisPeriod} GiB until then. Nothing is refunded for the current month.</li>
+                <li>No files are deleted and nobody loses access. If your files grow, you can buy storage again.</li>
+              </ul>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmOpen(false)}>Keep my storage</Button>
+            <Button type="button" disabled={!targetValid || busy} onClick={reduce}>
+              {busy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+              {busy ? "Updating Stripe…" : "Confirm reduction"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function StorageUsageCard() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { activeClientId } = useAuth();
   const [thresholdGb, setThresholdGb] = useState("5");
   const [saving, setSaving] = useState(false);
@@ -163,21 +352,29 @@ function StorageUsageCard() {
     }
   };
 
-  // Only offer to buy storage when the storage add-on is configured.
-  const [storageAddonAvailable, setStorageAddonAvailable] = useState(false);
+  // Only offer to buy storage when the storage add-on is configured and its
+  // Stripe price matches the provider rate plus margin (checked server-side).
+  const [storageAddon, setStorageAddon] = useState<StorageAddonOffer | null>(null);
   useEffect(() => {
     let cancelled = false;
-    apiFetch<{ storageAddonAvailable?: boolean; billingAvailable?: boolean }>(withBillingClient("/billing/config", activeClientId))
+    apiFetch<{ storageAddonAvailable?: boolean; billingAvailable?: boolean; storageAddon?: StorageAddonOffer | null }>(withBillingClient("/billing/config", activeClientId))
       .then((config) => {
-        if (!cancelled) setStorageAddonAvailable(config.storageAddonAvailable === true && config.billingAvailable !== false);
+        if (cancelled) return;
+        const offered = config.storageAddonAvailable === true && config.billingAvailable !== false;
+        setStorageAddon(offered && config.storageAddon ? config.storageAddon : null);
       })
-      .catch(() => { if (!cancelled) setStorageAddonAvailable(false); });
+      .catch(() => { if (!cancelled) setStorageAddon(null); });
     return () => { cancelled = true; };
   }, [activeClientId]);
 
+  const excessGib = Math.ceil((usage?.estimatedCost?.excessStorageBytes ?? 0) / (1024 ** 3));
+  const storagePurchaseGib = Math.max(1, storageAddon?.minimumGib ?? 1, excessGib);
+  const storagePurchaseLabel = storageAddon
+    ? `Buy ${storagePurchaseGib} GiB for ${formatMinorUnits(storageAddon.unitAmount * storagePurchaseGib, storageAddon.currency)} / month`
+    : "";
+
   const buyAdditionalStorage = async () => {
-    const excessBytes = usage?.estimatedCost?.excessStorageBytes ?? 0;
-    const gib = Math.max(1, Math.ceil(excessBytes / (1024 ** 3)));
+    const gib = storagePurchaseGib;
     setStoragePurchaseBusy(true);
     try {
       const response = await authenticatedApiFetch(withBillingClient("/billing/storage", activeClientId), {
@@ -191,6 +388,7 @@ function StorageUsageCard() {
         description: `${gib} GiB has been added to your monthly Stripe subscription.`,
       });
       await usageQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["/api/billing/storage", activeClientId] });
     } catch (err: any) {
       toast({ title: "Couldn't add storage", description: err.message, variant: "destructive" });
     } finally {
@@ -267,7 +465,8 @@ function StorageUsageCard() {
                     Downloads are measured separately and are not charged here.
                   </p>
                 )}
-                {storageAddonAvailable && (
+                {storageAddon && (
+                  <>
                   <Button
                     type="button"
                     size="sm"
@@ -277,11 +476,16 @@ function StorageUsageCard() {
                     disabled={storagePurchaseBusy}
                   >
                     {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
-                    {storagePurchaseBusy ? "Adding storage to Stripe…" : "Buy additional storage"}
+                    {storagePurchaseBusy ? "Adding storage to Stripe…" : storagePurchaseLabel}
                   </Button>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatMinorUnits(storageAddon.unitAmount, storageAddon.currency)} per GiB each month, before any VAT. The first month is charged now.
+                  </p>
+                  </>
                 )}
               </div>
             </div>
+            <PaidStorageSection activeClientId={activeClientId} onChanged={() => { void usageQuery.refetch(); }} />
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span>{percent}% of warning level</span>
@@ -1443,7 +1647,6 @@ function BillingCard() {
 
   useEffect(() => {
     fetchConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeClientId]);
 
   // Module picker for checkout, pre-selected with the modules chosen at signup.
@@ -2072,6 +2275,86 @@ const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
   { value: "UTC", label: "UTC" },
 ];
 
+function timezoneLabel(timeZone: string): string {
+  return TIMEZONE_OPTIONS.find((option) => option.value === timeZone)?.label ?? timeZone;
+}
+
+// ── SafeTrack reminder preview ───────────────────────────────────────────────
+// Runs the scheduler's own rules (shared with the API) on the form's current,
+// possibly unsaved, values. Informational only: the server decides each send.
+function SafeTrackReminderPreview({ frequency, time, timeZone, lastSentAt, unsaved }: {
+  frequency: string;
+  time: string;
+  timeZone: string;
+  lastSentAt: string | null;
+  unsaved: boolean;
+}) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const schedule = parseSafeTrackReminderSettings({
+    safeTrackReminderFrequency: frequency,
+    safeTrackReminderTime: time,
+    accountTimezone: timeZone,
+  });
+  const lastSent = lastSentAt && !Number.isNaN(Date.parse(lastSentAt)) ? new Date(lastSentAt) : null;
+  const next = useMemo(
+    () => nextSafeTrackReminder(now, schedule, lastSent),
+    [now, schedule.frequency, schedule.time, schedule.timeZone, lastSentAt],
+  );
+
+  const dayKey = (at: Date) => new Intl.DateTimeFormat("en-CA", {
+    timeZone: schedule.timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(at);
+  const describe = (at: Date) => {
+    const today = dayKey(now);
+    const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const day = dayKey(at) === today ? "Today"
+      : dayKey(at) === tomorrow ? "Tomorrow"
+      : new Intl.DateTimeFormat("en-GB", { timeZone: schedule.timeZone, weekday: "long", day: "numeric", month: "long" }).format(at);
+    const clock = new Intl.DateTimeFormat("en-GB", { timeZone: schedule.timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at);
+    return `${day} at ${clock}`;
+  };
+
+  return (
+    <div
+      className="rounded-md border border-primary/20 bg-background p-3 text-sm space-y-1.5"
+      role="status"
+      aria-live="polite"
+      data-testid="safetrack-reminder-preview"
+    >
+      <div className="flex items-start gap-2">
+        <CalendarClock className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+        <p>
+          <span className="font-medium">Next expected reminder: </span>
+          {next ? describe(next.at) : "Not scheduled"}
+          <span className="text-muted-foreground"> ({timezoneLabel(schedule.timeZone)})</span>
+        </p>
+      </div>
+      <div className="text-xs text-muted-foreground space-y-1 pl-6">
+        {next?.late && (
+          <p>
+            Today's delivery time has passed and no reminder has gone out yet, so it is due at the next check.
+          </p>
+        )}
+        {time !== schedule.time && <p>No valid time entered, so the default of {schedule.time} applies.</p>}
+        <p>
+          Times use the account timezone, set under General Preferences above.
+          {schedule.frequency === "weekly" ? " Weekly reminders go out on Mondays." : ""}
+        </p>
+        <p>
+          This is a guide, not a booking. A reminder is only sent if SafeTrack sign-offs are still outstanding then.
+          The server checks every {SAFE_TRACK_REMINDER_CHECK_MINUTES} minutes, so an email can arrive a few minutes after the time shown.
+        </p>
+        {lastSent && <p>Last reminder sent: {describe(lastSent)}.</p>}
+        {unsaved && <p className="text-amber-700 dark:text-amber-400">Previewing unsaved changes. Save settings to apply them.</p>}
+      </div>
+    </div>
+  );
+}
+
 // ── Photo requirement labels ─────────────────────────────────────────────────
 const PHOTO_ENTITY_LABELS: Record<string, string> = {
   fire_safety_check: "FireTrack — fire safety checks",
@@ -2460,7 +2743,7 @@ export default function SettingsPage() {
                 <div className="space-y-1.5 col-span-2">
                   <Label>Account Timezone</Label>
                   <p className="text-xs text-muted-foreground">
-                    Used for daily entry dates and the staff correction cutoff. Existing accounts default to UK time (Europe/London).
+                    Used for daily entry dates, the staff correction cutoff and SafeTrack reminder times. Existing accounts default to UK time (Europe/London).
                   </p>
                   <Select
                     value={formData.accountTimezone || "Europe/London"}
@@ -2530,6 +2813,17 @@ export default function SettingsPage() {
                     />
                   </div>
                 </div>
+                <SafeTrackReminderPreview
+                  frequency={formData.safeTrackReminderFrequency}
+                  time={formData.safeTrackReminderTime}
+                  timeZone={formData.accountTimezone || "Europe/London"}
+                  lastSentAt={(settings as any)?.safeTrackReminderLastSentAt ?? null}
+                  unsaved={
+                    formData.safeTrackReminderFrequency !== ((settings as any)?.safeTrackReminderFrequency || "daily")
+                    || formData.safeTrackReminderTime !== ((settings as any)?.safeTrackReminderTime || "08:50")
+                    || (formData.accountTimezone || "Europe/London") !== (settings?.accountTimezone || "Europe/London")
+                  }
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Admin / Owner Notification Email</Label>

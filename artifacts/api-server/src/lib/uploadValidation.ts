@@ -14,6 +14,8 @@ const MAX_IMAGE_DIMENSION = 12_000;
 // ~50 megapixels: well above any phone camera (48 MP), but a full decode stays
 // around 200 MB, which a 512 MB instance can afford one at a time.
 export const MAX_IMAGE_PIXELS = 50_000_000;
+export const HEVC_HEIC_UNSUPPORTED_MESSAGE =
+  "HEIC photos can't be read. Save the photo as JPEG and upload it again.";
 
 // One libvips worker thread, and at most one image decode / two PDF workers at
 // a time, so concurrent uploads queue instead of exhausting memory.
@@ -144,6 +146,11 @@ export async function validateUploadContent(
         sequentialRead: true,
       });
       const metadata = await image.metadata();
+      // The image library decodes AV1-coded HEIF/AVIF but has no HEVC decoder,
+      // which is what iPhone HEIC photos use. Say so instead of "invalid".
+      if (metadata.format === "heif" && metadata.compression === "hevc") {
+        throw new ObjectContentError(HEVC_HEIC_UNSUPPORTED_MESSAGE);
+      }
       const isHeifInput = type === "image/heic" || type === "image/heif" || type === "image/avif";
       const expectedFormat = isHeifInput
         ? "heif"

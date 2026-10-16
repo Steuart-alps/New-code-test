@@ -144,7 +144,7 @@ router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
   const existing = await fetchWeekly(clientId, weekCommencing, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this week", id: existing.id });
 
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
   const checksJson = JSON.stringify(checks ?? {});
   const deviationsJson = JSON.stringify(deviations ?? []);
   const additionalJson = JSON.stringify(additional ?? {});
@@ -289,7 +289,7 @@ router.post("/probe", requireAuth, denyViewers, async (req, res) => {
   if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const existing = await fetchProbe(clientId, checkDate, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
   const probesJson = JSON.stringify(probes ?? []);
 
   try {

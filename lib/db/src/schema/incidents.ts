@@ -90,5 +90,12 @@ export const incidentRiddorEventsTable = pgTable("incident_riddor_events", {
   hseReportDate: date("hse_report_date"),
   submittedAt: timestamp("submitted_at"),
   submissionEvidence: text("submission_evidence"),
+  // HSE receipt bound to this submission event. Written once with the event
+  // (the table is append-only), so the file can't be swapped or detached.
+  receiptObjectPath: text("receipt_object_path"),
+  receiptFileName: text("receipt_file_name"),
+  receiptContentType: text("receipt_content_type"),
+  /** upload | incident_attachment (picked from the incident's photos). */
+  receiptSource: text("receipt_source"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

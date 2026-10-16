@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { format } from "date-fns";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -347,7 +348,7 @@ export default function DailyTrackAmPage() {
   const canAdmin = useCanAdmin();
   const { data: sites = [] } = useListSites();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = format(new Date(), "yyyy-MM-dd");
   const _qs = new URLSearchParams(window.location.search);
   const [date, setDate] = useState(_qs.get("date") ?? today);
   const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
