@@ -66,7 +66,9 @@ services:
       # businesses without a trial. Unset means nobody.
       - key: PLATFORM_ADMIN_EMAILS
         sync: false
-      # Error reporting (Sentry free tier is enough): job failures, crashes.
+      # Error reporting (Sentry free tier is enough): job failures, crashes,
+      # website errors. The website reads it at build time, so save it with
+      # "Save, rebuild, and deploy". Unset = no reports (/readyz notes it).
       - key: SENTRY_DSN
         sync: false
       # File storage (Google Cloud Storage)
