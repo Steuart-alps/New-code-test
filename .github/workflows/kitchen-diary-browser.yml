@@ -6,6 +6,8 @@ on:
       - "artifacts/compliance-tracker/src/pages/kitchen.tsx"
       - "artifacts/compliance-tracker/src/pages/food-safety.tsx"
       - "artifacts/compliance-tracker/src/lib/kitchen-state.ts"
+      - "artifacts/compliance-tracker/src/components/kitchen-temperature-*"
+      - "lib/api-zod/src/kitchen-temperature.ts"
       - "artifacts/compliance-tracker/tests/kitchen-*"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
@@ -17,6 +19,8 @@ on:
       - "artifacts/compliance-tracker/src/pages/kitchen.tsx"
       - "artifacts/compliance-tracker/src/pages/food-safety.tsx"
       - "artifacts/compliance-tracker/src/lib/kitchen-state.ts"
+      - "artifacts/compliance-tracker/src/components/kitchen-temperature-*"
+      - "lib/api-zod/src/kitchen-temperature.ts"
       - "artifacts/compliance-tracker/tests/kitchen-*"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
@@ -54,3 +58,6 @@ jobs:
 
       - name: Unsaved diary edits survive date and site changes
         run: pnpm --filter @workspace/compliance-tracker run test:kitchen-diary-browser
+
+      - name: Country temperature guidance in the numeric controls
+        run: pnpm --filter @workspace/compliance-tracker run test:kitchen-country-guidance-browser
