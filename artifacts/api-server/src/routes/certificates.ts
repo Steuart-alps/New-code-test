@@ -11,6 +11,7 @@ import {
 } from "@workspace/api-zod";
 import { z } from "zod";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
+import { ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
@@ -31,6 +32,30 @@ async function assertItemAccess(req: Request, itemId: number) {
   if (!item) return null;
   if (!canAccessClient(req, item.clientId)) return null;
   return item;
+}
+
+/**
+ * A certificate file arrives through the generic presigned upload, which only
+ * reserves a tenant path. Registering it on the certificate is what grants the
+ * tenant ACL, so the file can be viewed and included in data exports, and a
+ * caller cannot attach another tenant's object. Sends the error response and
+ * returns false when the file cannot be secured.
+ */
+async function secureCertificateFile(req: Request, res: any, fileUrl: string, clientId: number): Promise<boolean> {
+  try {
+    await new ObjectStorageService().finalizeTenantUpload(fileUrl, clientId);
+    return true;
+  } catch (err) {
+    if (err instanceof ObjectOwnershipError) {
+      res.status(403).json({ error: "File does not belong to this client" });
+    } else if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Uploaded file not found" });
+    } else {
+      req.log.error({ err }, "Could not secure certificate file");
+      res.status(503).json({ error: "File storage is temporarily unavailable. Please try again later." });
+    }
+    return false;
+  }
 }
 
 // ----- Item-scoped certificates -----
@@ -76,6 +101,7 @@ router.post("/items/:itemId/certificates", requireAuth, requireClientAdmin, asyn
   const body = CreateCertificateBody.parse(req.body);
   const item = await assertItemAccess(req, itemId);
   if (!item) return void res.status(404).json({ error: "Compliance item not found" });
+  if (body.fileUrl && !await secureCertificateFile(req, res, body.fileUrl, item.clientId)) return;
   const [cert] = await db.insert(certificatesTable).values({ ...body, itemId, contractorId: null }).returning();
   await syncItemDueDateFromCertificates(itemId);
   res.status(201).json(cert);
@@ -88,6 +114,12 @@ router.put("/items/:itemId/certificates/:id", requireAuth, requireClientAdmin, a
   const body = UpdateCertificateBody.parse(req.body);
   const item = await assertItemAccess(req, itemId);
   if (!item) return void res.status(404).json({ error: "Compliance item not found" });
+  if (body.fileUrl) {
+    const [existing] = await db.select({ fileUrl: certificatesTable.fileUrl }).from(certificatesTable)
+      .where(and(eq(certificatesTable.id, id), eq(certificatesTable.itemId, itemId)));
+    if (!existing) return void res.status(404).json({ error: "Certificate not found" });
+    if (existing.fileUrl !== body.fileUrl && !await secureCertificateFile(req, res, body.fileUrl, item.clientId)) return;
+  }
   const [cert] = await db
     .update(certificatesTable)
     .set(body)
