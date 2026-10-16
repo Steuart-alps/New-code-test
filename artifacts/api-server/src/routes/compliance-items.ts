@@ -19,7 +19,7 @@ import { appendAuditEvent } from "../lib/audit";
 import { completionFields, completionDateFromDay } from "../lib/complianceCompletion";
 import { NO_ACTION, itemActionState, itemActionStates, type ItemActionState } from "../lib/certificateOutcomes";
 import { getAccountToday } from "../lib/accountClock";
-import { recordFireCheckFromTask } from "../lib/fireTaskLink";
+import { recordTrackCheckFromTask } from "../lib/trackTaskLink";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -405,9 +405,10 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     action: "updated", before: existing[0], after: joined!.item,
     ...(recurrence ? { metadata: { recurringCompletion: recurrence } } : {}),
   });
-  // Completing the annual emergency lighting task also records the test in FireTrack.
+  // Completing a task a track also keeps (emergency lighting, fire alarm and
+  // extinguisher servicing, cleaning the water tanks) records it in that track.
   if (recurrence || (body.status === "completed" && String(joined!.item.completedAt) !== String(existing[0].completedAt))) {
-    await recordFireCheckFromTask(req, joined!.item, joined!.item.completedAt);
+    await recordTrackCheckFromTask(req, joined!.item, joined!.item.completedAt);
   }
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
     await itemActionState(existing[0].clientId, id)));
@@ -514,7 +515,7 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
       ? { metadata: { recurringCompletion: { completedAt: completion.fields.completedAt, nextDueDate: completion.fields.dueDate } } }
       : {}),
   });
-  if (completion) await recordFireCheckFromTask(req, joined!.item, completion.fields.completedAt);
+  if (completion) await recordTrackCheckFromTask(req, joined!.item, completion.fields.completedAt);
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
     await itemActionState(existing[0].clientId, id)));
 });

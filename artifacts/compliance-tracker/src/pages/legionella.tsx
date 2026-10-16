@@ -79,7 +79,7 @@ const CHECK_TYPE_HINTS: Record<LegionellaCheckType, string> = {
   cold_sentinel_temp:    "HSG274 benchmark: sentinel cold-water monitoring — set outlets and frequency in the written scheme.",
   cold_nonsent_temp:     "HSG274 benchmark: representative cold-outlet monitoring — set sampling and frequency from the risk assessment.",
   cold_tank_inspection:  "HSG274 benchmark: inspect tank condition — use the risk-assessed written scheme.",
-  cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment.",
+  cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment. A pass here also completes the \"Clean & Disinfect Water Tanks\" task in ComplyTrack, and completing that task records it here.",
   calorifier_inspection: "HSG274 benchmark: inspect calorifier condition — set the scope and interval with a competent person.",
   calorifier_clean:      "HSG274 benchmark: clean and recommission a calorifier — arrange when justified by the risk assessment.",
   shower_clean:          "HSG274 benchmark: shower-head and hose cleaning — set method and frequency in the written scheme.",
