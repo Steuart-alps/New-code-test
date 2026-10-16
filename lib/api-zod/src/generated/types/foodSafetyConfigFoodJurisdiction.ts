@@ -7,7 +7,7 @@
  */
 
 /**
- * Food-safety jurisdiction used to choose the standard reheating limit.
+ * Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
  */
 export type FoodSafetyConfigFoodJurisdiction = typeof FoodSafetyConfigFoodJurisdiction[keyof typeof FoodSafetyConfigFoodJurisdiction] | null;
 
@@ -16,4 +16,10 @@ export const FoodSafetyConfigFoodJurisdiction = {
   scotland: 'scotland',
   england_wales: 'england_wales',
   northern_ireland: 'northern_ireland',
+  ireland: 'ireland',
+  australia: 'australia',
+  new_zealand: 'new_zealand',
+  canada: 'canada',
+  united_states: 'united_states',
+  other: 'other',
 } as const;

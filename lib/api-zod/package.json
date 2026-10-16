@@ -12,6 +12,7 @@
   "scripts": {
     "test:kitchen-temperature": "node tests/kitchen-temperature.mjs",
     "test:safe-track-reminder-schedule": "node tests/safe-track-reminder-schedule.mjs",
+    "test:kitchen-temperature-guidance": "node tests/kitchen-temperature-guidance.mjs",
     "test:kitchen-weekly": "node tests/kitchen-weekly.mjs"
   },
   "dependencies": {

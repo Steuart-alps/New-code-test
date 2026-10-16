@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { createHash } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
-import { kitchenTemperatureRulesSchema, DEFAULT_KITCHEN_TEMPERATURE_RULES, parseKitchenTemperatureRules } from "@workspace/api-zod/kitchen-temperature";
+import {
+  kitchenTemperatureRulesSchema, DEFAULT_KITCHEN_TEMPERATURE_RULES, parseKitchenTemperatureRules,
+  FOOD_JURISDICTIONS, isFoodJurisdiction, kitchenTemperatureGuidance,
+} from "@workspace/api-zod/kitchen-temperature";
 import { KitchenTemperatureError, recordKitchenTemperatureActions } from "../lib/kitchenTemperatureActions";
 import { z } from "zod";
 import { db } from "@workspace/db";
@@ -150,15 +153,13 @@ const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_show_sous_vide: "true",
 };
 
-// Northern Ireland follows FSA guidance: the same 75°C cook/reheat, 63°C hot
-// holding and 8°C cold holding limits as England/Wales.
-const FOOD_JURISDICTIONS = ["scotland", "england_wales", "northern_ireland"] as const;
-type FoodJurisdiction = (typeof FOOD_JURISDICTIONS)[number];
-const REHEATING_LIMIT_BY_JURISDICTION: Record<FoodJurisdiction, string> = {
-  scotland: "Above 82°C",
-  england_wales: "Above 75°C",
-  northern_ireland: "Above 75°C",
-};
+// Diary label keys a country's guidance supplies when the scope has not saved
+// its own. Reheating has its own, older precedence (see resolveDiaryLimits).
+const GUIDANCE_LABEL_KEYS = {
+  food_cooking_limit: "cooking",
+  food_cooling_limit: "cooling",
+  food_hot_holding_limit: "hotHolding",
+} as const;
 
 const DIARY_MERGE_FIELDS = [
   "deliveries",
@@ -262,10 +263,10 @@ function mergeStaleDiaryUpdate(
   return conflicts.length > 0 ? { ok: false, fields: conflicts } : { ok: true, updates };
 }
 
+/** The standard reheating label of a jurisdiction; unknown values read as
+ *  Scotland's, as they always have. */
 function reheatingLimitForJurisdiction(value: string | null | undefined): string {
-  return REHEATING_LIMIT_BY_JURISDICTION[
-    value as FoodJurisdiction
-  ] ?? REHEATING_LIMIT_BY_JURISDICTION.scotland;
+  return kitchenTemperatureGuidance(value).labels.reheating;
 }
 
 // ── Per-site override support ─────────────────────────────────────────────────
@@ -385,8 +386,8 @@ function validateConfigPatch(
         out[key] = JSON.stringify(result.data);
       } catch { return { error: "Temperature rules must be valid JSON" }; }
     } else if (key === "food_jurisdiction") {
-      if (!(FOOD_JURISDICTIONS as readonly string[]).includes(raw)) {
-        return { error: `${key} must be "scotland", "england_wales" or "northern_ireland"` };
+      if (!isFoodJurisdiction(raw)) {
+        return { error: `${key} must be one of: ${FOOD_JURISDICTIONS.join(", ")}` };
       }
       out[key] = raw;
     } else if (key === "food_cold_units") {
@@ -478,12 +479,14 @@ router.get("/config", requireAuth, async (req, res) => {
     if (siteJurisdictionOverride && !siteReheatingOverride) {
       config.food_reheating_limit = reheatingLimitForJurisdiction(config.food_jurisdiction);
     }
+    applyGuidanceLabels(config, clientStored, siteOverrides);
     if (!clientStored.has("food_temperature_rules") && !siteOverrides.includes("food_temperature_rules")) {
       config.food_temperature_rules = JSON.stringify(parseKitchenTemperatureRules(null, config.food_jurisdiction));
     }
     return res.json({ ...config, _siteOverrides: siteOverrides });
   }
 
+  applyGuidanceLabels(config, clientStored, []);
   if (!clientStored.has("food_temperature_rules")) {
     config.food_temperature_rules = JSON.stringify(parseKitchenTemperatureRules(null, config.food_jurisdiction));
   }
@@ -600,30 +603,54 @@ router.delete("/config", requireAuth, requireClientAdmin, denyViewers, async (re
   res.json({ ...DEFAULT_CONFIG });
 });
 
-/** Resolve the reheating limit a new diary record in this scope is stamped
- * with, in the same order GET /config uses: a site's own limit, else the
+/** Labels nobody saved follow the effective jurisdiction's guidance, the same
+ * way unsaved temperature rules do. The UK labels equal DEFAULT_CONFIG's. */
+function applyGuidanceLabels(config: Record<string, string>, clientStored: Set<string>, siteOverrides: string[]) {
+  const labels = kitchenTemperatureGuidance(config.food_jurisdiction).labels;
+  for (const [key, label] of Object.entries(GUIDANCE_LABEL_KEYS)) {
+    if (!clientStored.has(key) && !siteOverrides.includes(key)) config[key] = labels[label];
+  }
+}
+
+type DiaryLimits = { cookingLimit: string; coolingLimit: string; reheatingLimit: string; hotHoldingLimit: string };
+
+/** Resolve the limit labels a new diary record in this scope is stamped with,
+ * in the same order GET /config uses. Reheating: a site's own limit, else the
  * standard limit of the site's jurisdiction, else the client's saved limit,
- * else the standard limit of the client's (or default) jurisdiction. */
-async function resolveReheatingLimit(
+ * else the standard limit of the client's (or default) jurisdiction. Other
+ * labels: the site's, else the client's, else the effective jurisdiction's
+ * guidance. A label the caller supplies always wins. */
+async function resolveDiaryLimits(
   clientId: number,
   siteId: number | null,
-  requestedLimit?: string,
-): Promise<string> {
-  if (requestedLimit !== undefined) return requestedLimit;
-
+  requested: Partial<DiaryLimits> = {},
+): Promise<DiaryLimits> {
   const rows = await db
     .select({ key: appSettingsTable.key, value: appSettingsTable.value })
     .from(appSettingsTable)
     .where(eq(appSettingsTable.clientId, clientId));
   const stored = (key: string) => rows.find((row) => row.key === key)?.value ?? undefined;
-  if (siteId !== null) {
-    const siteLimit = stored(siteKeyFor(siteId, "food_reheating_limit"));
-    if (siteLimit !== undefined) return siteLimit;
-    const siteJurisdiction = stored(siteKeyFor(siteId, "food_jurisdiction"));
-    if (siteJurisdiction !== undefined) return reheatingLimitForJurisdiction(siteJurisdiction);
+  const siteStored = (key: string) => siteId === null ? undefined : stored(siteKeyFor(siteId, key));
+  const jurisdiction = siteStored("food_jurisdiction")
+    ?? stored("food_jurisdiction")
+    ?? await defaultFoodJurisdiction(clientId);
+  const labels = kitchenTemperatureGuidance(jurisdiction).labels;
+  const label = (key: keyof typeof GUIDANCE_LABEL_KEYS) =>
+    siteStored(key) ?? stored(key) ?? labels[GUIDANCE_LABEL_KEYS[key]];
+
+  let reheatingLimit = requested.reheatingLimit ?? siteStored("food_reheating_limit");
+  if (reheatingLimit === undefined) {
+    const siteJurisdiction = siteStored("food_jurisdiction");
+    reheatingLimit = siteJurisdiction !== undefined
+      ? reheatingLimitForJurisdiction(siteJurisdiction)
+      : stored("food_reheating_limit") ?? reheatingLimitForJurisdiction(jurisdiction);
   }
-  return stored("food_reheating_limit")
-    ?? reheatingLimitForJurisdiction(stored("food_jurisdiction") ?? await defaultFoodJurisdiction(clientId));
+  return {
+    cookingLimit: requested.cookingLimit ?? label("food_cooking_limit"),
+    coolingLimit: requested.coolingLimit ?? label("food_cooling_limit"),
+    reheatingLimit,
+    hotHoldingLimit: requested.hotHoldingLimit ?? label("food_hot_holding_limit"),
+  };
 }
 
 // Drizzle condition selecting the right diary scope: a specific site when
@@ -1010,7 +1037,10 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const fingerprint = submissionFingerprint({ siteId, data });
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  const reheatingLimit = await resolveReheatingLimit(clientId, siteId, data.reheatingLimit);
+  const limits = await resolveDiaryLimits(clientId, siteId, {
+    cookingLimit: data.cookingLimit, coolingLimit: data.coolingLimit,
+    reheatingLimit: data.reheatingLimit, hotHoldingLimit: data.hotHoldingLimit,
+  });
 
   // Check if record already exists for this date within the same diary scope.
   const [existing] = await db
@@ -1045,10 +1075,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       reheating: data.reheating ?? [],
       hotHolding: data.hotHolding ?? [],
       sousVide: data.sousVide ?? [],
-      cookingLimit: data.cookingLimit ?? "75°C or above (core)",
-      coolingLimit: data.coolingLimit ?? "8°C within 90 minutes",
-      reheatingLimit,
-      hotHoldingLimit: data.hotHoldingLimit ?? "Above 63°C",
+      ...limits,
       correctives: data.correctives,
       managerSignature: data.managerSignature,
       performedBy: performer.performedBy,
@@ -1125,9 +1152,9 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   };
   const rowJson = JSON.stringify(storedRow);
   const userId = req.currentUser?.id ?? null;
-  // Stamp the scope's reheating limit whichever section opens the day, so a
-  // diary started with a delivery does not fall back to the column default.
-  const reheatingLimit = await resolveReheatingLimit(clientId, siteId);
+  // Stamp the scope's limits whichever section opens the day, so a diary
+  // started with a delivery does not fall back to the column defaults.
+  const limits = await resolveDiaryLimits(clientId, siteId);
 
   const outcome = await db.transaction(async tx => {
   // Ensure the day's record exists for this diary scope (ignore the race where
@@ -1135,14 +1162,14 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   // ON CONFLICT target uses the matching partial unique index for the scope.
   if (siteId === null) {
     await tx.execute(sql`
-      INSERT INTO food_safety_records (client_id, record_date, reheating_limit, created_by)
-      VALUES (${clientId}, ${recordDate}, ${reheatingLimit}, ${userId})
+      INSERT INTO food_safety_records (client_id, record_date, cooking_limit, cooling_limit, reheating_limit, hot_holding_limit, created_by)
+      VALUES (${clientId}, ${recordDate}, ${limits.cookingLimit}, ${limits.coolingLimit}, ${limits.reheatingLimit}, ${limits.hotHoldingLimit}, ${userId})
       ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
     `);
   } else {
     await tx.execute(sql`
-      INSERT INTO food_safety_records (client_id, site_id, record_date, reheating_limit, created_by)
-      VALUES (${clientId}, ${siteId}, ${recordDate}, ${reheatingLimit}, ${userId})
+      INSERT INTO food_safety_records (client_id, site_id, record_date, cooking_limit, cooling_limit, reheating_limit, hot_holding_limit, created_by)
+      VALUES (${clientId}, ${siteId}, ${recordDate}, ${limits.cookingLimit}, ${limits.coolingLimit}, ${limits.reheatingLimit}, ${limits.hotHoldingLimit}, ${userId})
       ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
     `);
   }
