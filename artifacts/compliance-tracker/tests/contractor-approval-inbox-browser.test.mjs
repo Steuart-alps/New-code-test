@@ -179,6 +179,8 @@ test("setup: tenant, departments and two-factor enrolled users under the product
     name: `Inbox Alpha site ${suffix}`, departmentId: department.data.id, seedStarterChecks: false,
   });
   assert.equal(site.status, 201, JSON.stringify(site.data));
+  // The assignment email names the job's site in its subject (#95).
+  fixtures.siteName = site.data.name;
   const otherSite = await owner.request("POST", "/sites", {
     name: `Inbox Beta site ${suffix}`, departmentId: otherDepartment.data.id, seedStarterChecks: false,
   });
@@ -387,7 +389,7 @@ test("accepting the quote creates a pending assignment that still awaits inbox r
     const draftCard = queueCard(page, fixtures.acceptIssue.title);
     await draftCard.getByText("Assigning Job").waitFor();
     const preview = await displayedPreview(draftCard);
-    assert.equal(preview.subject, `Job Assigned: ${fixtures.acceptIssue.title}`);
+    assert.equal(preview.subject, `Job Assigned: ${fixtures.acceptIssue.title} — ${fixtures.siteName}`);
   });
 });
 
@@ -421,7 +423,7 @@ test("staff and foreign-department managers cannot see or act on the pending dra
 
   const row = await queueRow(draftId);
   assert.equal(row.status, "pending");
-  assert.equal(row.subject, `Job Assigned: ${fixtures.acceptIssue.title}`);
+  assert.equal(row.subject, `Job Assigned: ${fixtures.acceptIssue.title} — ${fixtures.siteName}`);
   assert.equal(await contractorEmailCount(), before, "denied requests send nothing");
 });
 
