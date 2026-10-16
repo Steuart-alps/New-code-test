@@ -78,6 +78,9 @@ jobs:
       - name: Public page SEO test
         run: pnpm --filter @workspace/compliance-tracker run test:seo-pages
 
+      - name: Training matrix and CSV formula safety test
+        run: pnpm --filter @workspace/compliance-tracker run test:training-matrix
+
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
 
