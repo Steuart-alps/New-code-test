@@ -49,7 +49,8 @@
     "test:staff-kiosk-token": "node tests/staff-kiosk-token.test.mjs",
     "test:passkey-auth-endpoint": "node tests/passkey-auth-endpoint.test.mjs",
     "test:fix-track-priority": "TZ=Europe/London node tests/run-fix-track-priority.mjs",
-    "typecheck": "flock -s /tmp/complytrack-api-codegen.lock sh -c 'pnpm exec tsc --build ../../lib/api-client-react && tsc -p tsconfig.json --noEmit'"
+    "typecheck": "flock -s /tmp/complytrack-api-codegen.lock sh -c 'pnpm exec tsc --build ../../lib/api-client-react && tsc -p tsconfig.json --noEmit'",
+    "test:landing-modules-browser": "node tests/landing-modules-browser.test.mjs"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
