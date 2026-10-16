@@ -47,6 +47,8 @@
     "test:pat-photo-boundary": "bash tests/run-fresh-schema.sh tests/pat-photo-boundary.mjs",
     "test:pat-register-access": "bash tests/run-fresh-schema.sh tests/pat-register-access.mjs",
     "test:dept-isolation:ci": "bash tests/run-dept-isolation.sh",
+    "test:water-dept-isolation": "bash tests/run-db-workflow.sh tests/water-safety-dept-isolation.mjs",
+    "test:water-dept-isolation:ci": "bash tests/run-dept-isolation.sh tests/water-safety-dept-isolation.mjs",
     "test:dailytrack-locks": "bash tests/run-db-workflow.sh tests/dailytrack-locks.mjs",
     "test:daily-track-month-history": "bash tests/run-daily-track-month-history.sh",
     "test:daily-checklist-reports": "bash tests/run-daily-checklist-reports.sh",
