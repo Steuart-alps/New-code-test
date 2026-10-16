@@ -4073,7 +4073,7 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual]
 
     FireSafetyCheck:
       type: object

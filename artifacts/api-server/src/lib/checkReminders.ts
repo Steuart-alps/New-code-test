@@ -9,6 +9,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { approvedFrequencies } from "./waterMonitoringPlan";
 import { getAccountTimezone, localDateIn, zonedDateTimeToUtc } from "./accountClock";
 import { logger } from "./logger";
+import { FIRE_LINKED_TASK_TITLES } from "./fireTaskLink";
 
 export interface CheckAlert {
   module: "fire" | "legionella" | "pool" | "hot_tub";
@@ -32,6 +33,7 @@ export interface CheckAlert {
 export const FIRE_CHECK_TYPES = [
   "alarm", "emergency_lights", "extinguishers",
   "fire_doors", "fire_drill", "fire_walk", "alarm_panel",
+  "emergency_lights_annual",
 ] as const;
 export type FireCheckType = (typeof FIRE_CHECK_TYPES)[number];
 
@@ -39,6 +41,7 @@ export type FireCheckType = (typeof FIRE_CHECK_TYPES)[number];
 export const FIRE_FREQUENCY_DAYS: Record<FireCheckType, number> = {
   alarm: 7, emergency_lights: 30, extinguishers: 7,
   fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7,
+  emergency_lights_annual: 365,
 };
 
 /**
@@ -69,6 +72,7 @@ const FIRE_LABELS: Record<string, string> = {
   fire_drill: "Fire drill",
   fire_walk: "Fire walk",
   alarm_panel: "Alarm panel check",
+  emergency_lights_annual: "Annual 3-hour emergency lighting discharge test",
 };
 
 function frequencyDaysLabel(days: number): string {
@@ -262,6 +266,25 @@ async function fireSiteStatusesFor(
   const latest = new Map<string, Latest>();
   for (const row of (latestRows.rows ?? []) as (Latest & { site_id: number | null; check_type: string })[]) {
     latest.set(`${row.site_id == null ? "none" : Number(row.site_id)}:${row.check_type}`, row);
+  }
+  // A completed ComplyTrack task that mirrors a FireTrack check (the annual
+  // emergency lighting discharge test) counts as a passed check on its date,
+  // so completions from before the two were linked still show.
+  for (const [checkType, title] of Object.entries(FIRE_LINKED_TASK_TITLES)) {
+    const taskRows = await db.execute(sql`
+      SELECT site_id, to_char(max(completed_at), 'YYYY-MM-DD') AS completed_on
+      FROM compliance_items
+      WHERE client_id = ${clientId} AND completed_at IS NOT NULL
+        AND lower(trim(title)) = ${title.trim().toLowerCase()}
+      GROUP BY site_id
+    `);
+    for (const row of (taskRows.rows ?? []) as { site_id: number | null; completed_on: string }[]) {
+      const key = `${row.site_id == null ? "none" : Number(row.site_id)}:${checkType}`;
+      const recorded = latest.get(key);
+      if (!recorded || String(recorded.check_date).slice(0, 10) < row.completed_on) {
+        latest.set(key, { id: 0, check_date: row.completed_on, result: "pass" });
+      }
+    }
   }
   const frequencySetting = ((settingRows.rows ?? [])[0] as { value?: unknown } | undefined)?.value;
   const profiles = new Map<number, unknown>(

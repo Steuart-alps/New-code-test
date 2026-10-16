@@ -129,6 +129,7 @@ const FIRE_TYPES: Record<string, { label: string; days: number }> = {
   fire_drill: { label: "Fire drill (6-monthly, with night staff)", days: 180 },
   fire_walk: { label: "Fire walk — escape route sign-off", days: 7 },
   alarm_panel: { label: "Alarm panel check", days: 7 },
+  emergency_lights_annual: { label: "Annual 3-hour emergency lighting discharge test", days: 365 },
 };
 
 const LEGIONELLA_TYPES: Record<string, string> = {
