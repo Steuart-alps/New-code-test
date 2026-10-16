@@ -36,6 +36,13 @@
 //        - invalid section-toggle values (not "true"/"false") → 400
 //        - siteId belonging to another client → 400
 //        - per-site override layering (PUT ?siteId affects only that site's GET)
+//        - a site's jurisdiction stamps its reheating target (England/Wales 75°C,
+//          Scotland 82°C) through POST and append; other sites keep the
+//          inherited target; clearing the override restores the client's
+//        - closed (non-operating) days: admin-only with a reason, never
+//          reported as missing, org and site scopes independent, a diary record
+//          always wins, removal brings the day back as missing, and the daily
+//          diary is not overdue across closed days
 //   4. /api/mobile/push-token
 //        - requires auth (401 without a session)
 //        - POST stores a row for the session user (204)
@@ -1233,6 +1240,253 @@ async function testSiteDiaries(admin, ts) {
   await admin("DELETE", "/food-safety/config");
 }
 
+// A site's jurisdiction override selects its reheating target for every way a
+// diary day can be created (POST, and append whichever section opens the day),
+// while sites without an override keep the client-level target.
+async function testSiteJurisdictionReheating(admin, ts) {
+  console.log("\n── food-safety: site jurisdiction reheating targets ──");
+  const ENGLAND_WALES = "Above 75°C";
+  const SCOTLAND = "Above 82°C";
+
+  const siteA = await admin("POST", "/sites", { name: `Reheat Site A ${ts}` });
+  const siteB = await admin("POST", "/sites", { name: `Reheat Site B ${ts}` });
+  expectOk("site-reheat: create site A", siteA.status, [200, 201]);
+  expectOk("site-reheat: create site B", siteB.status, [200, 201]);
+  const a = siteA.data?.id;
+  const b = siteB.data?.id;
+  check("site-reheat: site ids", Number.isInteger(a) && Number.isInteger(b), `a=${a} b=${b}`);
+
+  await admin("DELETE", "/food-safety/config");
+  // Each diary scope gets fresh dates far from any other test's records.
+  let dayOfMonth = 0;
+  const nextDay = () => `2097-03-${String(++dayOfMonth).padStart(2, "0")}`;
+  const scope = (siteId) => (siteId == null ? "" : `?siteId=${siteId}`);
+  const configOf = async (siteId) => (await admin("GET", `/food-safety/config${scope(siteId)}`)).data ?? {};
+  // POST without reheatingLimit, as the mobile app does: the server stamps it.
+  const postLimit = async (siteId) => {
+    const res = await admin("POST", `/food-safety${scope(siteId)}`, { recordDate: nextDay() });
+    return res.status === 201 ? res.data?.reheatingLimit : `HTTP ${res.status}`;
+  };
+  const appendLimit = async (siteId, section) => {
+    const recordDate = nextDay();
+    const res = await admin("POST", `/food-safety/append${scope(siteId)}`, {
+      recordDate,
+      section,
+      row: { item: "Soup", coreTemp: "90" },
+      entryId: randomUUID(),
+    });
+    if (res.status !== 201) return `HTTP ${res.status}`;
+    const sep = siteId == null ? "" : `?siteId=${siteId}`;
+    return (await admin("GET", `/food-safety/by-date/${recordDate}${sep}`)).data?.reheatingLimit;
+  };
+  const expectStamps = async (label, siteId, expected) => {
+    const posted = await postLimit(siteId);
+    check(`site-reheat: ${label} POST stamps ${expected}`, posted === expected, `got ${posted}`);
+    const reheatAppend = await appendLimit(siteId, "reheating");
+    check(`site-reheat: ${label} reheating append stamps ${expected}`, reheatAppend === expected, `got ${reheatAppend}`);
+    // A day opened by another section must still carry the scope's target.
+    const deliveryAppend = await appendLimit(siteId, "deliveries");
+    check(`site-reheat: ${label} delivery-first append stamps ${expected}`, deliveryAppend === expected, `got ${deliveryAppend}`);
+  };
+
+  // ── Client on Scotland; site A overrides to England/Wales ──
+  expectOk(
+    "site-reheat: client jurisdiction Scotland",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "scotland" })).status,
+  );
+  expectOk(
+    "site-reheat: site A override England/Wales",
+    (await admin("PUT", `/food-safety/config?siteId=${a}`, { food_jurisdiction: "england_wales" })).status,
+  );
+  const aCfg = await configOf(a);
+  check(
+    "site-reheat: site A config is England/Wales at 75°C",
+    aCfg.food_jurisdiction === "england_wales" && aCfg.food_reheating_limit === ENGLAND_WALES,
+    `jurisdiction=${aCfg.food_jurisdiction}, limit=${aCfg.food_reheating_limit}`,
+  );
+  check(
+    "site-reheat: site A temperature rules reheat at 75°C",
+    JSON.parse(aCfg.food_temperature_rules ?? "{}")?.reheating?.min === 75,
+    `got ${aCfg.food_temperature_rules}`,
+  );
+  const bCfg = await configOf(b);
+  check(
+    "site-reheat: site B keeps inherited Scotland 82°C",
+    bCfg.food_jurisdiction === "scotland" && bCfg.food_reheating_limit === SCOTLAND
+      && !(bCfg._siteOverrides ?? []).includes("food_jurisdiction"),
+    `jurisdiction=${bCfg.food_jurisdiction}, limit=${bCfg.food_reheating_limit}`,
+  );
+  const clientCfg = await configOf(null);
+  check(
+    "site-reheat: client-level stays Scotland 82°C",
+    clientCfg.food_jurisdiction === "scotland" && clientCfg.food_reheating_limit === SCOTLAND,
+    `jurisdiction=${clientCfg.food_jurisdiction}, limit=${clientCfg.food_reheating_limit}`,
+  );
+  await expectStamps("site A (England/Wales)", a, ENGLAND_WALES);
+  await expectStamps("site B (inherits Scotland)", b, SCOTLAND);
+  await expectStamps("whole-org (Scotland)", null, SCOTLAND);
+
+  // ── Clearing site A's override restores the client-level jurisdiction ──
+  expectOk(
+    "site-reheat: clear site A jurisdiction (null)",
+    (await admin("PUT", `/food-safety/config?siteId=${a}`, { food_jurisdiction: null })).status,
+  );
+  const aCleared = await configOf(a);
+  check(
+    "site-reheat: cleared site A is back on Scotland 82°C",
+    aCleared.food_jurisdiction === "scotland" && aCleared.food_reheating_limit === SCOTLAND,
+    `jurisdiction=${aCleared.food_jurisdiction}, limit=${aCleared.food_reheating_limit}`,
+  );
+  check(
+    "site-reheat: cleared site A has no jurisdiction or reheating override",
+    Array.isArray(aCleared._siteOverrides)
+      && !aCleared._siteOverrides.includes("food_jurisdiction")
+      && !aCleared._siteOverrides.includes("food_reheating_limit"),
+    `got ${JSON.stringify(aCleared._siteOverrides)}`,
+  );
+  await expectStamps("cleared site A", a, SCOTLAND);
+
+  // ── Reverse: client on England/Wales; site B overrides to Scotland ──
+  expectOk(
+    "site-reheat: client jurisdiction England/Wales",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "england_wales" })).status,
+  );
+  expectOk(
+    "site-reheat: site B override Scotland",
+    (await admin("PUT", `/food-safety/config?siteId=${b}`, { food_jurisdiction: "scotland" })).status,
+  );
+  const bScot = await configOf(b);
+  check(
+    "site-reheat: site B config is Scotland at 82°C",
+    bScot.food_jurisdiction === "scotland" && bScot.food_reheating_limit === SCOTLAND,
+    `jurisdiction=${bScot.food_jurisdiction}, limit=${bScot.food_reheating_limit}`,
+  );
+  await expectStamps("site B (Scotland)", b, SCOTLAND);
+  await expectStamps("site A (inherits England/Wales)", a, ENGLAND_WALES);
+
+  // A site's own documented limit wins over its jurisdiction's standard one,
+  // matching what the template shows.
+  const custom = `Above 80°C ${ts}`.slice(0, 40);
+  expectOk(
+    "site-reheat: site B custom reheating limit",
+    (await admin("PUT", `/food-safety/config?siteId=${b}`, { food_reheating_limit: custom })).status,
+  );
+  check("site-reheat: site B config shows custom limit", (await configOf(b)).food_reheating_limit === custom);
+  await expectStamps("site B (custom limit)", b, custom);
+
+  // Resetting the site removes every override, back to the client's target.
+  await admin("DELETE", `/food-safety/config?siteId=${b}`);
+  const bReset = await configOf(b);
+  check(
+    "site-reheat: reset site B is back on England/Wales 75°C",
+    bReset.food_jurisdiction === "england_wales" && bReset.food_reheating_limit === ENGLAND_WALES,
+    `jurisdiction=${bReset.food_jurisdiction}, limit=${bReset.food_reheating_limit}`,
+  );
+  await expectStamps("reset site B", b, ENGLAND_WALES);
+
+  await admin("DELETE", `/food-safety/config?siteId=${a}`);
+  await admin("DELETE", "/food-safety/config");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3c. KitchenTrack closed (non-operating) days
+// ─────────────────────────────────────────────────────────────────────────────
+async function testKitchenClosedDays(admin, viewer, staff, ts) {
+  console.log("\n── food-safety: closed days are not missing records ──");
+  const siteC = await admin("POST", "/sites", { name: `Closed Site C ${ts}` });
+  const siteD = await admin("POST", "/sites", { name: `Closed Site D ${ts}` });
+  expectOk("closed-days: create site C", siteC.status, [200, 201]);
+  expectOk("closed-days: create site D", siteD.status, [200, 201]);
+  const c = siteC.data?.id;
+  const d = siteD.data?.id;
+  const missingIn = async (scope, from, to) =>
+    (await admin("GET", `/food-safety/missing-dates?from=${from}&to=${to}${scope == null ? "" : `&siteId=${scope}`}`)).data ?? {};
+  const close = (session, scope, body) =>
+    session("POST", `/food-safety/closed-days${scope == null ? "" : `?siteId=${scope}`}`, body);
+
+  // Only admins mark closures, and a reason is required.
+  expectStatus("closed-days: viewer POST → 403", (await close(viewer, null, { from: "2097-05-02", to: "2097-05-02", reason: "x" })).status, 403);
+  expectStatus("closed-days: staff POST → 403", (await close(staff, null, { from: "2097-05-02", to: "2097-05-02", reason: "x" })).status, 403);
+  expectStatus("closed-days: blank reason → 400", (await close(admin, null, { from: "2097-05-02", to: "2097-05-02", reason: "  " })).status, 400);
+  expectStatus("closed-days: from after to → 400", (await close(admin, null, { from: "2097-05-03", to: "2097-05-02", reason: "x" })).status, 400);
+  expectStatus("closed-days: other client's site → 400", (await close(admin, 999999999, { from: "2097-05-02", to: "2097-05-02", reason: "x" })).status, 400);
+
+  // ── Whole-organisation closure: neither missing nor in the site's scope ──
+  const orgClose = await close(admin, null, { from: "2097-05-02", to: "2097-05-03", reason: "Bank holiday" });
+  expectStatus("closed-days: org POST → 201", orgClose.status, 201);
+  check("closed-days: org POST creates both days", JSON.stringify(orgClose.data?.created) === JSON.stringify(["2097-05-02", "2097-05-03"]), JSON.stringify(orgClose.data));
+  const again = await close(admin, null, { from: "2097-05-02", to: "2097-05-03", reason: "Bank holiday" });
+  check("closed-days: repeating a closure creates nothing new", again.status === 201 && again.data?.created?.length === 0, JSON.stringify(again.data));
+
+  const orgMissing = await missingIn(null, "2097-05-01", "2097-05-04");
+  check("closed-days: org closure is not a missing date", !orgMissing.missingDates?.includes("2097-05-02") && !orgMissing.missingDates?.includes("2097-05-03"), JSON.stringify(orgMissing.missingDates));
+  check("closed-days: org closure is a non-operating date", JSON.stringify(orgMissing.nonOperatingDates) === JSON.stringify(["2097-05-02", "2097-05-03"]), JSON.stringify(orgMissing.nonOperatingDates));
+  check("closed-days: open org days stay missing", orgMissing.missingDates?.includes("2097-05-01") && orgMissing.missingDates?.includes("2097-05-04"), JSON.stringify(orgMissing.missingDates));
+
+  const siteMissing = await missingIn(c, "2097-05-01", "2097-05-04");
+  check("closed-days: org closure does not close site C", siteMissing.missingDates?.includes("2097-05-02") && (siteMissing.nonOperatingDates ?? []).length === 0, JSON.stringify(siteMissing));
+
+  // ── Site closure: org scope unaffected ──
+  expectStatus("closed-days: site C POST → 201", (await close(admin, c, { from: "2097-05-04", to: "2097-05-04", reason: "Kitchen deep clean" })).status, 201);
+  check("closed-days: site C closure is non-operating there", (await missingIn(c, "2097-05-01", "2097-05-04")).nonOperatingDates?.includes("2097-05-04"));
+  check("closed-days: site C closure leaves org day missing", (await missingIn(null, "2097-05-01", "2097-05-04")).missingDates?.includes("2097-05-04"));
+  check("closed-days: site C closure leaves site D day missing", (await missingIn(d, "2097-05-01", "2097-05-04")).missingDates?.includes("2097-05-04"));
+
+  // ── Monthly summary labels the closure with who and why ──
+  const summary = await admin("GET", "/food-safety/summary?year=2097&month=5");
+  const day2 = summary.data?.days?.find((entry) => entry.date === "2097-05-02");
+  const day1 = summary.data?.days?.find((entry) => entry.date === "2097-05-01");
+  check("closed-days: summary marks closure non-operating", day2?.nonOperating === true && day2?.hasRecord === false, JSON.stringify(day2));
+  check("closed-days: summary closure carries reason and who", day2?.closure?.reason === "Bank holiday" && typeof day2?.closure?.createdByName === "string" && day2?.closure?.addedAfterDay === false, JSON.stringify(day2?.closure));
+  check("closed-days: summary open day is not non-operating", day1?.nonOperating === false && day1?.closure === null, JSON.stringify(day1));
+
+  // ── A diary record always wins over a closure ──
+  expectOk("closed-days: org diary on 2097-05-05", (await admin("POST", "/food-safety", { recordDate: "2097-05-05" })).status, [201]);
+  const blocked = await close(admin, null, { from: "2097-05-05", to: "2097-05-06", reason: "Closed" });
+  check("closed-days: a day with a record cannot be closed (409)", blocked.status === 409 && blocked.data?.code === "KITCHEN_DAY_HAS_RECORD" && JSON.stringify(blocked.data?.dates) === JSON.stringify(["2097-05-05"]), `${blocked.status} ${JSON.stringify(blocked.data)}`);
+  check("closed-days: refused range closes nothing", !(await missingIn(null, "2097-05-06", "2097-05-06")).nonOperatingDates?.includes("2097-05-06"));
+  expectStatus("closed-days: close 2097-05-07", (await close(admin, null, { from: "2097-05-07", to: "2097-05-07", reason: "Closed" })).status, 201);
+  expectOk("closed-days: diary still allowed on a closed day", (await admin("POST", "/food-safety", { recordDate: "2097-05-07" })).status, [201]);
+  const recordWins = await missingIn(null, "2097-05-07", "2097-05-07");
+  check("closed-days: recorded closed day counts as operating", recordWins.draftDates?.includes("2097-05-07") && (recordWins.nonOperatingDates ?? []).length === 0, JSON.stringify(recordWins));
+  const day7 = (await admin("GET", "/food-safety/summary?year=2097&month=5")).data?.days?.find((entry) => entry.date === "2097-05-07");
+  check("closed-days: summary record wins over closure", day7?.hasRecord === true && day7?.nonOperating === false, JSON.stringify(day7));
+
+  // ── Closures added after the day are flagged for inspectors ──
+  const pastDay = isoDate(-40);
+  expectStatus("closed-days: retroactive closure → 201", (await close(admin, c, { from: pastDay, to: pastDay, reason: "Power cut" })).status, 201);
+  const pastList = await viewer("GET", `/food-safety/closed-days?from=${pastDay}&to=${pastDay}&siteId=${c}`);
+  expectOk("closed-days: viewer can list closures", pastList.status);
+  check("closed-days: retroactive closure flagged added afterwards", pastList.data?.closedDays?.[0]?.addedAfterDay === true, JSON.stringify(pastList.data));
+
+  // ── Removing a closure brings the day back as missing ──
+  const orgList = await admin("GET", "/food-safety/closed-days?from=2097-05-01&to=2097-05-31");
+  const closure2 = orgList.data?.closedDays?.find((entry) => entry.date === "2097-05-02");
+  check("closed-days: org list holds only org closures", orgList.data?.closedDays?.every((entry) => entry.date !== "2097-05-04"), JSON.stringify(orgList.data));
+  expectStatus("closed-days: staff DELETE → 403", (await staff("DELETE", `/food-safety/closed-days/${closure2?.id}`)).status, 403);
+  expectStatus("closed-days: viewer DELETE → 403", (await viewer("DELETE", `/food-safety/closed-days/${closure2?.id}`)).status, 403);
+  expectOk("closed-days: admin DELETE", (await admin("DELETE", `/food-safety/closed-days/${closure2?.id}`)).status);
+  expectStatus("closed-days: DELETE twice → 404", (await admin("DELETE", `/food-safety/closed-days/${closure2?.id}`)).status, 404);
+  check("closed-days: removed closure is missing again", (await missingIn(null, "2097-05-02", "2097-05-02")).missingDates?.includes("2097-05-02"));
+  const remark = await close(admin, null, { from: "2097-05-02", to: "2097-05-02", reason: "Bank holiday" });
+  check("closed-days: a removed day can be closed again", remark.status === 201 && remark.data?.created?.[0] === "2097-05-02", JSON.stringify(remark.data));
+
+  // ── The daily diary is not overdue across closed days ──
+  const diaryStatus = async () => {
+    const res = await admin("GET", `/food-safety/status?siteId=${d}`);
+    return (res.data ?? []).find((entry) => entry.checkType === "daily_diary")?.status;
+  };
+  expectOk("closed-days: site D submitted diary 3 days ago", (await admin("POST", `/food-safety?siteId=${d}`, {
+    recordDate: isoDate(-3),
+    submittedAt: new Date().toISOString(),
+  })).status, [201]);
+  const before = await diaryStatus();
+  check("closed-days: diary overdue without closures", before === "overdue", `got ${before}`);
+  expectStatus("closed-days: close site D since", (await close(admin, d, { from: isoDate(-2), to: isoDate(0), reason: "Closed for refurbishment" })).status, 201);
+  const after = await diaryStatus();
+  check("closed-days: diary not overdue across closed days", after === "ok" || after === "due_soon", `got ${after}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. /api/mobile/push-token
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1468,6 +1722,8 @@ async function runSuite() {
   await testDisabledOptionsOnEveryRoute(a.session, ts);
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
+  await testSiteJurisdictionReheating(a.session, ts);
+  await testKitchenClosedDays(a.session, viewer, staff, ts);
   await testPushToken(a.session, other, ts);
   await testStorageUsage(a.session, viewer, staff, a.clientId, clientBId);
 }

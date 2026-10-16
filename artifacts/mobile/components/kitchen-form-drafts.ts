@@ -23,6 +23,8 @@ export interface KitchenFormValues {
   cooking: KitchenFormRow;
   cooling: KitchenFormRow;
   reheating: KitchenFormRow;
+  /** Drafts saved before the phone recorded sous vide have none. */
+  sousVide?: KitchenFormRow;
   correctives: string;
 }
 
@@ -76,6 +78,7 @@ function isDraft(value: unknown, owner: KitchenDraftOwner, siteId: number | null
     && typeof draft.savedAt === 'string'
     && !!draft.values && Array.isArray(draft.values.coldFood) && draft.values.coldFood.every(isRow)
     && ['delivery', 'hotHolding', 'cooking', 'cooling', 'reheating'].every(key => isRow((draft.values as unknown as Record<string, unknown>)[key]))
+    && (draft.values.sousVide === undefined || isRow(draft.values.sousVide))
     && typeof draft.values.correctives === 'string';
 }
 
@@ -172,6 +175,7 @@ export function formValuesFromEntryBody(body: Record<string, unknown>): KitchenF
     cooking: firstRow(log.hotTemperature),
     cooling: firstRow(log.cooling),
     reheating: firstRow(log.reheating),
+    sousVide: firstRow(log.sousVide),
     correctives: typeof log.correctives === 'string' ? log.correctives : '',
   };
 }

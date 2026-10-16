@@ -2147,6 +2147,91 @@ paths:
               schema:
                 $ref: "#/components/schemas/FoodSafetyMissingDatesResponse"
 
+  /food-safety/closed-days:
+    get:
+      operationId: listKitchenClosedDays
+      tags: [food-safety]
+      summary: List days marked closed (non-operating) for a diary scope
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Active closures in the range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitchenClosedDaysList"
+    post:
+      operationId: createKitchenClosedDays
+      tags: [food-safety]
+      summary: Mark a range of days closed (non-operating) for a diary scope (admins)
+      parameters:
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KitchenClosedDaysInput"
+      responses:
+        "201":
+          description: Days newly marked closed (days already closed are left as they are)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitchenClosedDaysCreated"
+        "409":
+          description: Some days already have a diary record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /food-safety/closed-days/{id}:
+    delete:
+      operationId: removeKitchenClosedDay
+      tags: [food-safety]
+      summary: Remove a closure (admins); it stays in the history
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /food-safety/{id}:
     put:
       operationId: updateFoodSafetyRecord
@@ -4768,6 +4853,12 @@ components:
           items:
             type: string
             format: date
+        nonOperatingDates:
+          type: array
+          description: Dates marked closed (non-operating) with no diary record. Not counted as missing.
+          items:
+            type: string
+            format: date
 
     FoodSafetyMonthlySummaryDay:
       type: object
@@ -4775,6 +4866,8 @@ components:
         - date
         - hasRecord
         - submitted
+        - nonOperating
+        - closure
       properties:
         date:
           type: string
@@ -4785,6 +4878,81 @@ components:
         submitted:
           type: boolean
           description: Whether the diary record has been submitted.
+        nonOperating:
+          type: boolean
+          description: The diary scope was marked closed and has no record for this date, so it is not a missing day.
+        closure:
+          allOf:
+            - $ref: "#/components/schemas/KitchenClosedDay"
+          nullable: true
+
+    KitchenClosedDay:
+      type: object
+      required: [id, date, reason, createdAt, createdByName, addedAfterDay]
+      properties:
+        id:
+          type: integer
+        date:
+          type: string
+          format: date
+        reason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        createdByName:
+          type: string
+          nullable: true
+        addedAfterDay:
+          type: boolean
+          description: The closure was recorded after the day itself.
+
+    KitchenClosedDaysList:
+      type: object
+      required: [from, to, siteId, closedDays]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        closedDays:
+          type: array
+          items:
+            $ref: "#/components/schemas/KitchenClosedDay"
+
+    KitchenClosedDaysInput:
+      type: object
+      required: [from, to, reason]
+      additionalProperties: false
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    KitchenClosedDaysCreated:
+      type: object
+      required: [siteId, created]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        created:
+          type: array
+          items:
+            type: string
+            format: date
 
     FoodSafetyMonthlySummary:
       type: object
@@ -5029,6 +5197,10 @@ components:
         reheating:
           type: object
           additionalProperties: true
+        sousVide:
+          type: object
+          additionalProperties: true
+          description: One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).
         correctives:
           type: string
         expectedCorrectives:
