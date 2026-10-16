@@ -5,7 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, denyViewers, getClientId } from "../middleware/requireAuth";
 import {
   FORM_OPTION_DEFAULTS, FORM_OPTION_KEYS, isFormOptionKey, settingKey,
-  parseStoredOptionState, serialiseOptionState, validateOptionList, type FormOptionKey, type StoredOptionState,
+  parseStoredOptionState, serialiseOptionState, validateOptionList, MAX_OPTIONS, type FormOptionKey, type StoredOptionState,
 } from "../lib/formOptions";
 
 const router = Router();
@@ -80,7 +80,9 @@ router.put("/:key", requireAuth, denyViewers, requireClientAdmin, async (req, re
   ].filter((item, index, all) =>
     !activeKeys.has(item.toLowerCase())
       && all.findIndex(candidate => candidate.toLowerCase() === item.toLowerCase()) === index,
-  );
+  // Keep the most recently replaced items: a stored list over the limit would
+  // fail to parse and silently revert to the defaults.
+  ).slice(-MAX_OPTIONS);
   await saveOption(clientId, key, { active: check.value, disabled });
   res.json({ ok: true, items: check.value });
 });
