@@ -2216,6 +2216,9 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2232,7 +2235,10 @@ export const CreateFireSafetyCheckBody = zod.object({
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
 })
 
 export const CreateFireSafetyCheckResponse = zod.object({
@@ -2245,6 +2251,9 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2273,6 +2282,62 @@ export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponse
 
 
 /**
+ * @summary List manual call points with when each was last tested
+ */
+export const ListFireCallPointsQueryParams = zod.object({
+  "siteId": zod.coerce.string().optional().describe('A site id, or \"none\" for call points not tied to a site. Omit for every visible site.'),
+  "includeArchived": zod.enum(['true', 'false']).optional()
+})
+
+export const ListFireCallPointsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+})
+export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseItem)
+
+
+/**
+ * @summary Add a manual call point (managers)
+ */
+export const CreateFireCallPointBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "name": zod.string()
+})
+
+export const CreateFireCallPointResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+})
+
+
+/**
+ * @summary Rename, archive or restore a call point (managers)
+ */
+export const UpdateFireCallPointParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateFireCallPointBody = zod.object({
+  "name": zod.string().optional(),
+  "archived": zod.boolean().optional()
+})
+
+export const UpdateFireCallPointResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+})
+
+
+/**
  * @summary Update a fire safety check entry
  */
 export const UpdateFireSafetyCheckParams = zod.object({
@@ -2285,7 +2350,10 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
 })
 
 export const UpdateFireSafetyCheckResponse = zod.object({
@@ -2298,6 +2366,9 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish(),
+  "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
+  "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })

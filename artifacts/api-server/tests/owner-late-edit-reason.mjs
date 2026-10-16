@@ -71,7 +71,7 @@ try {
   assert.equal(backdated.data.code, 'OVERRIDE_REASON_REQUIRED');
 
   // Backfilling a new record dated five days ago needs a reason.
-  const backfill = { checkType: 'fire_drill', checkDate: isoDay(-5), result: 'pass', siteId };
+  const backfill = { checkType: 'fire_drill', checkDate: isoDay(-5), result: 'pass', siteId, nightStaff: 'included' };
   const backfillRefused = await owner.request('POST', '/fire-safety', backfill);
   assert.equal(backfillRefused.status, 423, JSON.stringify(backfillRefused.data));
   assert.equal(backfillRefused.data.code, 'OVERRIDE_REASON_REQUIRED');

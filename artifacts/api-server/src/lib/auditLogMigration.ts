@@ -24,7 +24,7 @@ export const EXTENDED_AUDITED_TABLES = [
   "contractor_email_queue", "contractors",
   "coshh_substances", "daily_checklist_submissions", "daily_checklists",
   "daily_manager_signoffs", "departments", "doc_acknowledgements",
-  "fix_track_email_dispatches", "fix_track_issue_activity", "fix_track_quote_submissions",
+  "fire_call_points", "fix_track_email_dispatches", "fix_track_issue_activity", "fix_track_quote_submissions",
   "green_defects", "green_fuel_logs", "green_machines", "green_pre_use_checks",
   "green_puwer_inspections", "green_service_records",
   "hot_tub_checks", "hot_tubs",

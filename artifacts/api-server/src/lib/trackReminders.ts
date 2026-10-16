@@ -10,7 +10,8 @@
  * owner, kind, site and day.
  *   09:00  overdue checks: FireTrack, LegionellaTrack, AquaTrack and TubTrack
  *          checks (getCheckAlerts), overdue compliance checks, and open track
- *          actions past their due date.
+ *          actions past their due date. Also FireTrack checks due today or
+ *          tomorrow, so the owner hears the day before a test is due.
  *   11:00  today's AM (opening) checklist not submitted, per site.
  *   21:00  today's PM (closing) checklist and today's KitchenTrack diary not
  *          submitted, per site.
@@ -167,14 +168,14 @@ async function kitchenDiaryReminders(
 }
 
 async function overdueReminders(
-  batch: ReminderBatch, clientId: number, services: Entitlements, businessName: string, today: string,
+  batch: ReminderBatch, clientId: number, services: Entitlements, businessName: string, today: string, now: Date,
 ): Promise<void> {
   const where = (siteName: string | null) => siteName ?? businessName;
 
   // Periodic safety checks (fire, legionella, pool, hot tub), per site.
   let alerts: CheckAlert[] = [];
   try {
-    alerts = await getCheckAlerts(clientId);
+    alerts = await getCheckAlerts(clientId, {}, now);
   } catch (err) {
     logger.warn({ err, clientId }, "Track reminders: could not evaluate check alerts");
   }
@@ -195,6 +196,31 @@ async function overdueReminders(
       title: `${plural(group.length, `${module.label} check`)} overdue — ${where(siteName)}`,
       body: `Overdue: ${summarise(labels)}.`,
       linkPath: first.modulePath || module.path,
+    });
+  }
+
+  // FireTrack checks due today or tomorrow (weekly alarm test, monthly
+  // emergency lighting, 6-monthly drill and the rest), one per site.
+  const fireDue = new Map<string, CheckAlert[]>();
+  for (const alert of alerts) {
+    if (alert.module !== "fire" || alert.status !== "due_soon" || !entitledTo(services, "fire")) continue;
+    if (alert.daysUntilDue !== 0 && alert.daysUntilDue !== 1) continue;
+    const groupKey = String(alert.siteId ?? "");
+    fireDue.set(groupKey, [...(fireDue.get(groupKey) ?? []), alert]);
+  }
+  for (const group of fireDue.values()) {
+    const first = group[0]!;
+    const siteName = first.siteName ?? null;
+    const label = (alert: CheckAlert) =>
+      siteName && alert.checkLabel.startsWith(`${siteName}: `) ? alert.checkLabel.slice(siteName.length + 2) : alert.checkLabel;
+    const today = group.filter((alert) => alert.daysUntilDue === 0).map(label);
+    const tomorrow = group.filter((alert) => alert.daysUntilDue === 1).map(label);
+    batch.add({
+      module: "fire", siteId: first.siteId ?? null, kind: "due_fire",
+      title: `${plural(group.length, "FireTrack check")} due ${today.length ? "today" : "tomorrow"} — ${where(siteName)}`,
+      body: [today.length ? `Due today: ${summarise(today)}.` : "", tomorrow.length ? `Due tomorrow: ${summarise(tomorrow)}.` : ""]
+        .filter(Boolean).join(" "),
+      linkPath: first.modulePath || getTrackModule("fire")!.path,
     });
   }
 
@@ -271,7 +297,7 @@ export async function collectTrackReminders(clientId: number, now: Date): Promis
   const businessName = rowsOf<{ name: string }>(clientResult)[0]?.name ?? "your business";
   const batch = new ReminderBatch(ctx, today);
 
-  if (phases.overdue) await overdueReminders(batch, clientId, services, businessName, today);
+  if (phases.overdue) await overdueReminders(batch, clientId, services, businessName, today, now);
   if (phases.am && entitledTo(services, "daily_am")) {
     await dailyChecklistReminders(batch, ctx, clientId, sites, today, "am");
   }

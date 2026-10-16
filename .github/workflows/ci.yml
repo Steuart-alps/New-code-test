@@ -220,6 +220,9 @@ jobs:
       - name: Cancellation warning tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:cancellation-warnings:fresh
 
+      - name: FireTrack call point and night staff tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:fire-call-points
+
       # KitchenTrack numeric controls: the shared rule model and country
       # presets, then hold-time boundaries, retries and the corrective-action
       # follow-up, each on its own fresh database.

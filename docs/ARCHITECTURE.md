@@ -12,7 +12,7 @@ consultants managing portfolios of clients.
 
 - **External Compliance**: Contractor-managed visits, certificates, email reminders
 - **Internal Compliance**: Internal staff compliance checks
-- **FireTrack** (fire safety branch): Digital fire logbook — 5 check types (alarm & extinguisher visual weekly, emergency lights monthly, fire doors quarterly, fire drill 6-monthly) with due/overdue status
+- **FireTrack** (fire safety branch): Digital fire logbook — alarm & extinguisher visual weekly, emergency lighting monthly (5 minute flick test), fire doors quarterly, fire drill at least 6-monthly, plus fire walks and panel checks, with due/overdue status. Weekly alarm tests name the call point used (per-site list in `fire_call_points`, archived never deleted; the next one in turn is suggested); drills record whether night staff took part (`night_staff`). Track owners get a bell/phone reminder at 09:00 when a fire check is due today or tomorrow, besides the 08:45 admin safety-check email
 - **KitchenTrack** (kitchen branch): Daily food safety record — deliveries, fridge/freezer & hot food temps, corrective actions, manager sign-off; config-driven fridge counts and temperature limits
 
 ## Per-service billing (add-ons)

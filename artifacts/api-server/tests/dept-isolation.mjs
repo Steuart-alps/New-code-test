@@ -141,7 +141,7 @@ async function main() {
     .format(new Date(Date.now() - offset * 86400000));
 
   const fireAlpha = await admin("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(1),
     result: "pass",
     siteId: siteAlphaId,
@@ -150,7 +150,7 @@ async function main() {
   const fireAlphaId = fireAlpha.status === 201 ? fireAlpha.data?.id : null;
 
   const fireBeta = await admin("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(0),
     result: "pass",
     siteId: siteBetaId,
@@ -279,7 +279,7 @@ async function main() {
     .toISOString().slice(0, 10);
   // Backfilling a past record needs an owner's reason.
   const priorMonthCheck = await admin("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: lastMonthDate,
     result: "pass",
     siteId: siteAlphaId,
@@ -456,7 +456,7 @@ async function main() {
   })).status);
 
   const staffFire = await staff("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(0),
     result: "pass",
     siteId: siteAlphaId,
@@ -863,7 +863,7 @@ async function main() {
   expectForbidden(
     "viewer: POST /fire-safety rejected",
     (await viewer("POST", "/fire-safety", {
-      checkType: "alarm",
+      checkType: "alarm", callPoint: "CP1",
       checkDate: uniqueDate(0),
       result: "pass",
       siteId: siteAlphaId,

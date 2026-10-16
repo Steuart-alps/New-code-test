@@ -294,6 +294,37 @@ try {
     ok("overdue compliance checks and track actions go to the module owner (or admins), once a day");
   }
 
+  // ── FireTrack checks due today or tomorrow, at 09:00 local ──────────────
+  {
+    // Weekly alarm due tomorrow, monthly emergency lighting due today, the
+    // 6-monthly drill due tomorrow; the extinguisher check is not due yet.
+    await q(`INSERT INTO fire_safety_checks (client_id, site_id, check_type, check_date, result, call_point, night_staff) VALUES
+             ($1, $2, 'alarm', '2026-10-09', 'pass', 'CP1', NULL),
+             ($1, $2, 'emergency_lights', '2026-09-15', 'pass', NULL, NULL),
+             ($1, $2, 'fire_drill', '2026-04-19', 'pass', NULL, 'included'),
+             ($1, $2, 'extinguishers', '2026-10-14', 'pass', NULL, NULL)`, [A, site1.id]);
+    const dueFire = async (day) => q(`SELECT * FROM user_notifications WHERE client_id = $1 AND kind = 'due_fire'
+                                       AND dedupe_key LIKE $2`, [A, `%:${day}`]);
+    // The day before the emergency lighting test is due, only it is mentioned.
+    assert.equal((await runJob("2026-10-14T08:20:00Z")).errors, 0); // 09:20 London
+    const dayBefore = await dueFire("2026-10-14");
+    assert.deepEqual(sorted(dayBefore.map((r) => r.user_id)), fallbackA, "the fire owner (here the admins) is reminded");
+    assert.equal(dayBefore[0].title, "1 FireTrack check due tomorrow — The Red Lion");
+    assert.equal(dayBefore[0].body, "Due tomorrow: Emergency lighting flick test.");
+
+    const dueRun = await runJob("2026-10-15T08:20:00Z");
+    assert.equal(dueRun.errors, 0);
+    const due = await dueFire("2026-10-15");
+    assert.deepEqual(sorted(due.map((r) => r.user_id)), fallbackA);
+    assert.ok(due.every((r) => r.site_id === site1.id), "only the site with checks due");
+    assert.equal(due[0].title, "3 FireTrack checks due today — The Red Lion");
+    assert.equal(due[0].body, "Due today: Emergency lighting flick test. Due tomorrow: Alarm test, Fire drill.");
+    assert.equal(due[0].link_path, "/fire-safety");
+    assert.equal(due[0].dedupe_key, `due_fire:site:${site1.id}:2026-10-15`);
+    assert.equal((await runJob("2026-10-15T09:20:00Z")).notificationsCreated, 0, "once a day");
+    ok("FireTrack checks due today or tomorrow remind the owner the day before");
+  }
+
   // ── Notification API: scoped to the user and the active business ─────────
   {
     const staffList = await asStaff("GET", "/notifications");

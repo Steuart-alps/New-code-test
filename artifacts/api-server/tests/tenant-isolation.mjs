@@ -115,7 +115,7 @@ async function setupTenant(label) {
   // ── Fire-safety module ───────────────────────────────────────────────────────
   // Trial accounts have "all" entitlements so module routes are always open.
   const fireSafetyCheck = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(),
     result: "pass",
   });
@@ -264,7 +264,7 @@ async function attack(attacker, victim) {
   expectBlocked(
     `${tag}: POST /fire-safety body clientId`,
     (await req("POST", "/fire-safety", {
-      checkType: "alarm",
+      checkType: "alarm", callPoint: "CP1",
       checkDate: uniqueDate(2),
       result: "pass",
       clientId: victim.clientId,

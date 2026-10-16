@@ -63,7 +63,7 @@ export function effectiveFireFrequencies(raw: unknown, profile: unknown = null):
 
 const FIRE_LABELS: Record<string, string> = {
   alarm: "Alarm test",
-  emergency_lights: "Emergency lights test",
+  emergency_lights: "Emergency lighting flick test",
   extinguishers: "Fire extinguisher check",
   fire_doors: "Fire door inspection",
   fire_drill: "Fire drill",
@@ -336,10 +336,9 @@ export function worstFireStatusByType(statuses: FireSiteStatus[]) {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export async function getCheckAlerts(clientId: number, scope: CheckScope = {}): Promise<CheckAlert[]> {
+export async function getCheckAlerts(clientId: number, scope: CheckScope = {}, now = new Date()): Promise<CheckAlert[]> {
   const alerts: CheckAlert[] = [];
 
-  const now = new Date();
   const timeZone = await getAccountTimezone(clientId);
   const todayIso = localDateIn(timeZone, now);
   const todayDays = toUtcDays(todayIso);

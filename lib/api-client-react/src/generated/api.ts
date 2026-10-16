@@ -34,6 +34,7 @@ import type {
   CreateCertificateRequest,
   CreateComplianceItemRequest,
   CreateContractorRequest,
+  CreateFireCallPointRequest,
   CreateFireSafetyCheckRequest,
   CreateFoodSafetyRecordParams,
   CreateFoodSafetyRecordRequest,
@@ -52,6 +53,7 @@ import type {
   FeedbackReportConflict,
   FeedbackReportUpdate,
   FeedbackReviewEvent,
+  FireCallPoint,
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
@@ -90,6 +92,7 @@ import type {
   ListComplianceItemsParams,
   ListFeedbackReportHistoryParams,
   ListFeedbackReportsParams,
+  ListFireCallPointsParams,
   ListFireSafetyChecksParams,
   ListFoodSafetyRecordsParams,
   ListHotTubChecksParams,
@@ -128,6 +131,7 @@ import type {
   UpdateCertificateDefectRequest,
   UpdateComplianceItemRequest,
   UpdateFeedbackReportParams,
+  UpdateFireCallPointRequest,
   UpdateFireSafetyCheckRequest,
   UpdateFireSafetyConfigParams,
   UpdateFoodSafetyConfig200,
@@ -4274,6 +4278,233 @@ export function useGetFireSafetyStatus<TData = Awaited<ReturnType<typeof getFire
 
 
 
+
+export const getListFireCallPointsUrl = (params?: ListFireCallPointsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fire-safety/call-points?${stringifiedParams}` : `/api/fire-safety/call-points`
+}
+
+/**
+ * @summary List manual call points with when each was last tested
+ */
+export const listFireCallPoints = async (params?: ListFireCallPointsParams, options?: RequestInit): Promise<FireCallPoint[]> => {
+
+  return customFetch<FireCallPoint[]>(getListFireCallPointsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFireCallPointsQueryKey = (params?: ListFireCallPointsParams,) => {
+    return [
+    `/api/fire-safety/call-points`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListFireCallPointsQueryOptions = <TData = Awaited<ReturnType<typeof listFireCallPoints>>, TError = ErrorType<unknown>>(params?: ListFireCallPointsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFireCallPoints>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFireCallPointsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFireCallPoints>>> = ({ signal }) => listFireCallPoints(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFireCallPoints>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFireCallPointsQueryResult = NonNullable<Awaited<ReturnType<typeof listFireCallPoints>>>
+export type ListFireCallPointsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manual call points with when each was last tested
+ */
+
+export function useListFireCallPoints<TData = Awaited<ReturnType<typeof listFireCallPoints>>, TError = ErrorType<unknown>>(
+ params?: ListFireCallPointsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFireCallPoints>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFireCallPointsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateFireCallPointUrl = () => {
+
+
+
+
+  return `/api/fire-safety/call-points`
+}
+
+/**
+ * @summary Add a manual call point (managers)
+ */
+export const createFireCallPoint = async (createFireCallPointRequest: CreateFireCallPointRequest, options?: RequestInit): Promise<FireCallPoint> => {
+
+  return customFetch<FireCallPoint>(getCreateFireCallPointUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createFireCallPointRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateFireCallPointMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFireCallPoint>>, TError,{data: BodyType<CreateFireCallPointRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createFireCallPoint>>, TError,{data: BodyType<CreateFireCallPointRequest>}, TContext> => {
+
+const mutationKey = ['createFireCallPoint'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createFireCallPoint>>, {data: BodyType<CreateFireCallPointRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createFireCallPoint(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateFireCallPointMutationResult = NonNullable<Awaited<ReturnType<typeof createFireCallPoint>>>
+    export type CreateFireCallPointMutationBody = BodyType<CreateFireCallPointRequest>
+    export type CreateFireCallPointMutationError = ErrorType<void>
+
+    /**
+ * @summary Add a manual call point (managers)
+ */
+export const useCreateFireCallPoint = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFireCallPoint>>, TError,{data: BodyType<CreateFireCallPointRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createFireCallPoint>>,
+        TError,
+        {data: BodyType<CreateFireCallPointRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateFireCallPointMutationOptions(options));
+    }
+
+export const getUpdateFireCallPointUrl = (id: number,) => {
+
+
+
+
+  return `/api/fire-safety/call-points/${id}`
+}
+
+/**
+ * @summary Rename, archive or restore a call point (managers)
+ */
+export const updateFireCallPoint = async (id: number,
+    updateFireCallPointRequest: UpdateFireCallPointRequest, options?: RequestInit): Promise<FireCallPoint> => {
+
+  return customFetch<FireCallPoint>(getUpdateFireCallPointUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateFireCallPointRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateFireCallPointMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireCallPoint>>, TError,{id: number;data: BodyType<UpdateFireCallPointRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFireCallPoint>>, TError,{id: number;data: BodyType<UpdateFireCallPointRequest>}, TContext> => {
+
+const mutationKey = ['updateFireCallPoint'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFireCallPoint>>, {id: number;data: BodyType<UpdateFireCallPointRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateFireCallPoint(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFireCallPointMutationResult = NonNullable<Awaited<ReturnType<typeof updateFireCallPoint>>>
+    export type UpdateFireCallPointMutationBody = BodyType<UpdateFireCallPointRequest>
+    export type UpdateFireCallPointMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Rename, archive or restore a call point (managers)
+ */
+export const useUpdateFireCallPoint = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireCallPoint>>, TError,{id: number;data: BodyType<UpdateFireCallPointRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateFireCallPoint>>,
+        TError,
+        {id: number;data: BodyType<UpdateFireCallPointRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateFireCallPointMutationOptions(options));
+    }
 
 export const getUpdateFireSafetyCheckUrl = (id: number,) => {
 

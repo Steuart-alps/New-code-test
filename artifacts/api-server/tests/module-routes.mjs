@@ -90,6 +90,8 @@ async function testFireSafety(req, siteId) {
   for (const checkType of TYPES) {
     const res = await req("POST", "/fire-safety", {
       checkType,
+      callPoint: "CP1 – Reception",
+      nightStaff: "included",
       checkDate: isoDate(-1), // yesterday → always "ok" or "due_soon", never "overdue" for daily checks
       result: "pass",
       notes: `Test record for ${checkType}`,
@@ -593,7 +595,7 @@ async function testSiteFiltering(req, siteId) {
 
   // Create one fire-safety check pinned to the site
   const siteCheck = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: isoDate(-2),
     result: "pass",
     siteId,
@@ -726,7 +728,7 @@ async function testSiteFiltering(req, siteId) {
 
   // Invalid siteId (belongs to nobody) → 400
   const wrongSite = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: isoDate(),
     result: "pass",
     siteId: 999999999,

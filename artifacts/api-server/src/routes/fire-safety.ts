@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { fireSafetyChecksTable, sitesTable, appSettingsTable, trackControlProfilesTable } from "@workspace/db/schema";
+import { fireSafetyChecksTable, fireCallPointsTable, sitesTable, appSettingsTable, trackControlProfilesTable } from "@workspace/db/schema";
+import type { FireSafetyCheck } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
-import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { appendAuditEvent } from "../lib/audit";
 import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
@@ -31,6 +32,9 @@ const fireProfileSchema = z.object({
   frequencyDays: z.record(z.string(), z.number().int().min(1).max(3650)).optional(),
 }).strict();
 
+/** Whether night staff took part in a fire drill. */
+const NIGHT_STAFF_VALUES = ["included", "not_included", "no_night_staff"] as const;
+
 const createSchema = z.object({
   checkType: z.enum(CHECK_TYPES),
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -40,9 +44,60 @@ const createSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
   performedBy: z.string().max(200).nullable().optional(),
   staffRosterId: z.number().int().positive().nullable().optional(),
+  // Weekly alarm tests: a call point from the site's list, or its name typed
+  // in when the site has no list yet.
+  callPointId: z.number().int().positive().nullable().optional(),
+  callPoint: z.string().trim().max(200).nullable().optional(),
+  // Fire drills only.
+  nightStaff: z.enum(NIGHT_STAFF_VALUES).nullable().optional(),
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
+
+type FireDetails = Pick<FireSafetyCheck, "callPointId" | "callPoint" | "nightStaff">;
+type FireDetailInput = { callPointId?: number | null; callPoint?: string | null; nightStaff?: FireDetails["nightStaff"] };
+
+/**
+ * The call point and night-staff fields a check stores. A weekly alarm test
+ * must say which call point was used, and a drill whether night staff took
+ * part. Other check types store neither. On an edit, `existing` is the stored
+ * record: older records saved before these fields existed may stay blank, but
+ * a recorded answer cannot be removed.
+ */
+async function resolveFireDetails(
+  clientId: number, checkType: string, siteId: number | null, input: FireDetailInput,
+  existing?: FireSafetyCheck,
+): Promise<FireDetails | { error: string }> {
+  const details: FireDetails = { callPointId: null, callPoint: null, nightStaff: null };
+  if (checkType === "alarm") {
+    let callPointId = existing?.callPointId ?? null;
+    let callPoint = existing?.callPoint ?? null;
+    if (input.callPointId !== undefined || input.callPoint !== undefined) {
+      callPointId = input.callPointId ?? null;
+      callPoint = callPointId == null ? (input.callPoint?.trim() || null) : null;
+    }
+    if (callPointId != null) {
+      const [point] = await db.select().from(fireCallPointsTable)
+        .where(and(eq(fireCallPointsTable.id, callPointId), eq(fireCallPointsTable.clientId, clientId)))
+        .limit(1);
+      // An archived call point can stay on the test that already names it,
+      // but is not offered for new tests.
+      const kept = existing?.callPointId === callPointId;
+      if (!point || (point.archivedAt && !kept)) return { error: "Choose a call point from this site's list" };
+      if ((point.siteId ?? null) !== siteId) return { error: "That call point is at a different site" };
+      callPoint = kept && existing?.callPoint ? existing.callPoint : point.name;
+    }
+    if (!callPoint && (!existing || existing.callPoint)) return { error: "Say which call point was tested" };
+    details.callPointId = callPointId;
+    details.callPoint = callPoint;
+  }
+  if (checkType === "fire_drill") {
+    const nightStaff = input.nightStaff !== undefined ? input.nightStaff : existing?.nightStaff ?? null;
+    if (!nightStaff && (!existing || existing.nightStaff)) return { error: "Say whether night staff took part in the drill" };
+    details.nightStaff = nightStaff;
+  }
+  return details;
+}
 // Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
 const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
@@ -167,6 +222,9 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
+  const details = await resolveFireDetails(clientId, data.checkType, data.siteId ?? null, data);
+  if ("error" in details) return res.status(400).json({ error: details.error });
+
   const userId = req.currentUser!.id;
   const entry = clientEntryFrom(data);
   const storedEntry = async () => entry && (await db.select().from(fireSafetyChecksTable)
@@ -187,8 +245,9 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         siteId: data.siteId ?? null,
         location: data.location ?? null,
         notes: data.notes ?? null,
-         performedBy: performer.performedBy,
-         staffRosterId: performer.staffRosterId,
+        performedBy: performer.performedBy,
+        staffRosterId: performer.staffRosterId,
+        ...details,
         createdBy: userId,
         clientEntryId: entry?.id ?? null,
         clientEntryHash: entry?.hash ?? null,
@@ -240,10 +299,14 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const performer = await resolveStaffPerformerUpdate(clientId, parsed.data.staffRosterId, parsed.data.performedBy,
     existing.staffRosterId, existing.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
+  const { callPointId, callPoint, nightStaff, ...changes } = parsed.data;
+  const siteId = "siteId" in parsed.data ? parsed.data.siteId ?? null : existing.siteId;
+  const details = await resolveFireDetails(clientId, existing.checkType, siteId, { callPointId, callPoint, nightStaff }, existing);
+  if ("error" in details) return res.status(400).json({ error: details.error });
 
   const [updated] = await db
     .update(fireSafetyChecksTable)
-    .set({ ...parsed.data, ...(performer ?? {}), updatedAt: new Date() })
+    .set({ ...changes, ...(performer ?? {}), ...details, updatedAt: new Date() })
     .where(and(eq(fireSafetyChecksTable.id, id), eq(fireSafetyChecksTable.clientId, clientId)))
     .returning();
 
@@ -277,6 +340,128 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
 
   await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: id, action: "deleted", before: existing });
   res.status(204).end();
+});
+
+// ── Call points ───────────────────────────────────────────────────────────────
+// Managers list each site's manual call points once; weekly alarm tests pick
+// the one they used. Call points are archived rather than deleted so the
+// tests that name them keep their link (records are kept for five years).
+
+const callPointNameSchema = z.string().trim().min(1).max(200);
+const createCallPointSchema = z.object({
+  siteId: z.number().int().positive().nullable(),
+  name: callPointNameSchema,
+}).strict();
+const updateCallPointSchema = z.object({
+  name: callPointNameSchema.optional(),
+  archived: z.boolean().optional(),
+}).strict();
+
+/** Call points with when each was last used for an alarm test. */
+async function listCallPoints(clientId: number, conditions: ReturnType<typeof eq>[]) {
+  const lastTest = db.select({
+    callPointId: fireSafetyChecksTable.callPointId,
+    lastTestedDate: sql<string>`max(${fireSafetyChecksTable.checkDate})`.as("last_tested_date"),
+  }).from(fireSafetyChecksTable)
+    .where(and(eq(fireSafetyChecksTable.clientId, clientId), eq(fireSafetyChecksTable.checkType, "alarm")))
+    .groupBy(fireSafetyChecksTable.callPointId)
+    .as("last_test");
+  const rows = await db.select({
+    id: fireCallPointsTable.id,
+    siteId: fireCallPointsTable.siteId,
+    name: fireCallPointsTable.name,
+    archivedAt: fireCallPointsTable.archivedAt,
+    createdAt: fireCallPointsTable.createdAt,
+    lastTestedDate: lastTest.lastTestedDate,
+  }).from(fireCallPointsTable)
+    .leftJoin(lastTest, eq(lastTest.callPointId, fireCallPointsTable.id))
+    .where(and(eq(fireCallPointsTable.clientId, clientId), ...conditions))
+    .orderBy(fireCallPointsTable.name, fireCallPointsTable.id);
+  return rows.map(row => ({ ...row, lastTestedDate: row.lastTestedDate ? String(row.lastTestedDate).slice(0, 10) : null }));
+}
+
+async function duplicateCallPoint(clientId: number, siteId: number | null, name: string, exceptId?: number) {
+  const [row] = await db.select({ id: fireCallPointsTable.id }).from(fireCallPointsTable).where(and(
+    eq(fireCallPointsTable.clientId, clientId),
+    siteId == null ? isNull(fireCallPointsTable.siteId) : eq(fireCallPointsTable.siteId, siteId),
+    isNull(fireCallPointsTable.archivedAt),
+    sql`lower(${fireCallPointsTable.name}) = lower(${name})`,
+    ...(exceptId ? [sql`${fireCallPointsTable.id} <> ${exceptId}`] : []),
+  )).limit(1);
+  return Boolean(row);
+}
+
+// GET /api/fire-safety/call-points?siteId=&includeArchived=true
+router.get("/call-points", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const noSite = req.query.siteId === "none";
+  const siteId = noSite ? null : parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const deptId = getActiveDepartmentId(req);
+  const conditions = [];
+  if (siteId != null) {
+    const access = await checkSiteAccess(siteId, clientId, deptId);
+    if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+    conditions.push(eq(fireCallPointsTable.siteId, siteId));
+  } else if (noSite) {
+    conditions.push(isNull(fireCallPointsTable.siteId));
+  } else if (deptId !== null) {
+    conditions.push(or(isNull(fireCallPointsTable.siteId), inArray(fireCallPointsTable.siteId, allowedSitesSubquery(clientId, deptId))) as any);
+  }
+  if (req.query.includeArchived !== "true") conditions.push(isNull(fireCallPointsTable.archivedAt) as any);
+  res.json(await listCallPoints(clientId, conditions));
+});
+
+// POST /api/fire-safety/call-points
+router.post("/call-points", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = createCallPointSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Give the call point a name" });
+  const { siteId, name } = parsed.data;
+  const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  if (await duplicateCallPoint(clientId, siteId, name)) {
+    return res.status(409).json({ error: "This site already has a call point with that name" });
+  }
+  const [created] = await db.insert(fireCallPointsTable)
+    .values({ clientId, siteId, name, createdBy: req.currentUser!.id })
+    .returning();
+  await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: created.id, action: "created", after: created });
+  res.status(201).json({ ...created, lastTestedDate: null });
+});
+
+// PUT /api/fire-safety/call-points/:id — rename, archive or restore. The site
+// is fixed: a call point at another site is a different call point.
+router.put("/call-points/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(404).json({ error: "Not found" });
+  const parsed = updateCallPointSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const [existing] = await db.select().from(fireCallPointsTable)
+    .where(and(eq(fireCallPointsTable.id, id), eq(fireCallPointsTable.clientId, clientId))).limit(1);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (await checkSiteAccess(existing.siteId, clientId, getActiveDepartmentId(req)) === "forbidden") {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const name = parsed.data.name ?? existing.name;
+  const archivedAt = parsed.data.archived === undefined ? existing.archivedAt
+    : parsed.data.archived ? existing.archivedAt ?? new Date() : null;
+  if (!archivedAt && await duplicateCallPoint(clientId, existing.siteId, name, id)) {
+    return res.status(409).json({ error: "This site already has a call point with that name" });
+  }
+  const [updated] = await db.update(fireCallPointsTable)
+    .set({ name, archivedAt, updatedAt: new Date() })
+    .where(and(eq(fireCallPointsTable.id, id), eq(fireCallPointsTable.clientId, clientId)))
+    .returning();
+  await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: id, action: "updated", before: existing, after: updated });
+  const [withLast] = await listCallPoints(clientId, [eq(fireCallPointsTable.id, id)]);
+  res.json(withLast ?? { ...updated, lastTestedDate: null });
 });
 
 // ── Template config ───────────────────────────────────────────────────────────
