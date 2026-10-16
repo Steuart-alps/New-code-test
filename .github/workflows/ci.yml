@@ -160,3 +160,7 @@ jobs:
           pnpm --filter @workspace/api-server run test:kitchen-hold-controls
           pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
           pnpm --filter @workspace/api-server run test:kitchen-mobile-replay
+
+      # Warning job and banner against synced Stripe rows in the current API shape.
+      - name: Cancellation warning tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:cancellation-warnings:fresh
