@@ -2,6 +2,7 @@
 
 This covers how to ship `artifacts/mobile` (Expo SDK 57) as EAS standalone builds.
 Expo Go stays the development loop (`pnpm --filter @workspace/mobile run dev`). After an Expo CLI, Node or system package change, run `pnpm --filter @workspace/mobile run test:expo-start`: it starts the same dev server, checks Metro and the Expo Go manifest come up, and fails on fatal native-tool errors such as missing shared libraries (CI runs it too).
+CI also runs `pnpm --filter @workspace/mobile run validate:production` (the real iOS and Android production exports) whenever a change touches the phone app, `lib/api-client-react`, `patches/`, or an Expo, Metro, React Native, Babel or image-size line in the root `package.json`, `pnpm-workspace.yaml` or `pnpm-lock.yaml`; web-only and API-only changes skip it. A phone change is publish-ready only once that step has passed. If the publish build (`pnpm --filter @workspace/mobile run build`) fails while downloading a bundle, its log now shows Metro's own error (file, line and code frame) instead of a bare HTTP 500.
 Every native-only feature must stay optional when its module is missing, because
 Expo Go doesn't include it.
 

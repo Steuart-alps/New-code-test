@@ -20,6 +20,7 @@
     "test:cleaning-screen": "node tests/cleaning-screen.mjs",
     "test:expo-start": "node tests/expo-start-smoke.mjs",
     "test:build-metro-error": "node tests/build-metro-error.mjs",
+    "test:production-bundle-gate": "node tests/production-bundle-gate.mjs",
     "test:aqua-track": "node tests/aqua-track-logic.mjs",
     "test:mobile-login-error": "node tests/mobile-login-error.mjs",
     "test:auth-query-isolation": "node tests/auth-query-isolation.mjs",
