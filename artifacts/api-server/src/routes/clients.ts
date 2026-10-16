@@ -7,7 +7,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers, isPlatformOperator } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
-import { runDataDeletionJob } from "../lib/offboarding";
+import { APPROVED_ERASURE_REQUEST_READY, ERASURE_REQUEST_BLOCKING, runDataDeletionJob } from "../lib/offboarding";
 import { eraseClientStorageObjects } from "../lib/clientStorageErasure";
 
 const router = Router();
@@ -165,14 +165,11 @@ router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) =
     await tx.execute(sql`SELECT pg_advisory_xact_lock(106, ${id})`);
     const erasureReview = await tx.execute(sql`
       SELECT EXISTS (
-        SELECT 1 FROM client_data_deletion_requests
-        WHERE client_id = ${id}
-          AND status = 'approved' AND earliest_deletion_at <= now()
+        SELECT 1 FROM client_data_deletion_requests r
+        WHERE r.client_id = ${id} AND ${APPROVED_ERASURE_REQUEST_READY}
       ) AND NOT EXISTS (
-        SELECT 1 FROM client_data_deletion_requests
-        WHERE client_id = ${id}
-          AND (status = 'pending' OR
-               (status = 'approved' AND earliest_deletion_at > now()))
+        SELECT 1 FROM client_data_deletion_requests r
+        WHERE r.client_id = ${id} AND ${ERASURE_REQUEST_BLOCKING}
       ) AS ready
     `);
     if (!(erasureReview.rows[0] as { ready?: boolean } | undefined)?.ready) return "request";
