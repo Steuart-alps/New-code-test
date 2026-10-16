@@ -16,6 +16,7 @@
     "test:kitchen-status-site-scope": "bash tests/run-fresh-schema.sh tests/kitchen-status-site-scope.mjs",
     "test:dashboard-accuracy": "bash tests/run-fresh-schema.sh tests/dashboard-accuracy.mjs",
     "test:dashboard-accuracy:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/dashboard-accuracy.mjs",
+    "test:hot-tub-registry:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/hot-tub-registry-search.mjs",
     "test:cleaning-schedule-export": "bash tests/run-fresh-schema.sh tests/cleaning-schedule-export.mjs",
     "test:inspection-pack-calendar": "bash tests/run-fresh-schema.sh tests/inspection-pack-calendar.mjs",
     "test:kitchen-cleaning-export": "bash tests/run-fresh-schema.sh tests/kitchen-cleaning-export.mjs",
