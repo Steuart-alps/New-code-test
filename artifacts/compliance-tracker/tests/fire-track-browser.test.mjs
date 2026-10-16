@@ -10,7 +10,8 @@ import { chromium } from "@playwright/test";
 //   - a weekly alarm test suggests the call point tested longest ago (never
 //     tested first), sends it, and cannot be saved without a call point;
 //   - the emergency lighting test explains the 5 minute flick test;
-//   - the annual discharge test says it is kept in step with the ComplyTrack task;
+//   - the annual discharge test and the contractor services say they are kept
+//     in step with their ComplyTrack tasks;
 //   - a drill cannot be saved until it says whether night staff took part;
 //   - history shows the call point and night staff answers;
 //   - managers add call points under Template, Call points.
@@ -62,7 +63,7 @@ const SITE = { id: 1, name: "Harbour Hotel" };
 
 // ─── Stateful /api/fire-safety fixture ───────────────────────────────────────
 
-const FREQUENCIES = { alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365 };
+const FREQUENCIES = { alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365, alarm_service: 180, extinguisher_service: 365 };
 const callPoints = [
   { id: 11, siteId: 1, name: "CP1 – Reception", archivedAt: null, lastTestedDate: localDate(-7) },
   { id: 12, siteId: 1, name: "CP2 – Kitchen", archivedAt: null, lastTestedDate: null },
@@ -228,6 +229,19 @@ try {
   await shot(page, "6-discharge-test");
   await dialog.getByRole("button", { name: "Cancel" }).click();
   console.log("ok - the annual discharge test says it is kept in step with the ComplyTrack task");
+
+  // ── Contractor services, kept in step with ComplyTrack ───────────────────
+  for (const [label, testId, task] of [
+    ["6-monthly fire alarm service", "alarm-service-guide", /Fire Alarm Maintenance/],
+    ["Annual fire extinguisher service", "extinguisher-service-guide", /Fire Extinguishers Maintenance/],
+  ]) {
+    dialog = await openRecordDialog(page, label);
+    await dialog.getByTestId(testId).waitFor();
+    assert.match(await dialog.getByTestId(testId).innerText(), task);
+    if (testId === "alarm-service-guide") await shot(page, "7-alarm-service");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+  }
+  console.log("ok - the fire alarm and extinguisher services say they are kept in step with their ComplyTrack tasks");
 
   // ── Drill: night staff answer required ───────────────────────────────────
   dialog = await openRecordDialog(page, "Fire drill (6-monthly, with night staff)");
