@@ -70,6 +70,7 @@ import consultantPortfolioRouter from "./consultant-portfolio";
 import setupRouter from "./setup";
 import tasksRouter from "./tasks";
 import { requireAuth } from "../middleware/requireAuth";
+import { limitViewers } from "../middleware/viewerScope";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
 import { staffTrainingRouter } from "./staff-training";
@@ -83,6 +84,8 @@ router.use(healthRouter);
 router.use(authRouter);
 // First-party analytics ingest; does its own session check (before root-level auth routers).
 router.use(analyticsRouter);
+// Viewers reach only their own training records past this point.
+router.use(limitViewers);
 router.use("/billing", billingRouter);
 // Signed file download links (bearer tokens; opened without a session).
 router.use(storageDownloadRouter);

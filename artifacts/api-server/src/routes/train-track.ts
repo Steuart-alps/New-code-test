@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, requireRole, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionState, type StoredOptionState } from "../lib/formOptions";
 
 const router = Router();
@@ -176,6 +176,59 @@ router.get("/records", requireAuth, async (req, res) => {
   }
 
   res.json(rows);
+});
+
+// ── A Viewer's own records ────────────────────────────────────────────────────
+// A Viewer's account is linked to their staff roster entry; they see only the
+// records for that entry and can add their signature to any not yet signed.
+
+const OWN_RECORD_COLUMNS = sql`
+  r.id, r.record_type, r.staff_name, r.training_type, r.document_title, r.document_type,
+  r.provider, r.trainer, r.completed_date, r.expiry_date, r.notes,
+  r.signature IS NOT NULL AS signed, r.updated_at, s.name AS site_name
+`;
+
+router.get("/my-records", requireAuth, requireRole("client_viewer"), async (req, res) => {
+  const user = req.currentUser!;
+  if (user.clientId == null || user.staffRosterId == null) return res.json({ linked: false, records: [] });
+  const result = await db.execute(sql`
+    SELECT ${OWN_RECORD_COLUMNS}
+    FROM train_track_records r
+    LEFT JOIN sites s ON r.site_id = s.id
+    WHERE r.client_id = ${user.clientId} AND r.staff_roster_id = ${user.staffRosterId}
+    ORDER BY r.completed_date DESC, r.id DESC
+  `);
+  res.json({ linked: true, records: result.rows ?? [] });
+});
+
+router.post("/my-records/:id/sign", requireAuth, requireRole("client_viewer"), async (req, res) => {
+  const user = req.currentUser!;
+  const id = Number(req.params.id);
+  const parsed = z.object({ signature: z.string().min(1).max(500000) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A signature is required" });
+  if (!Number.isSafeInteger(id) || user.clientId == null || user.staffRosterId == null) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const result = await db.execute(sql`
+    SELECT id, signature IS NOT NULL AS signed FROM train_track_records
+    WHERE id = ${id} AND client_id = ${user.clientId} AND staff_roster_id = ${user.staffRosterId}
+    LIMIT 1
+  `);
+  const record = (result.rows ?? [])[0] as { id: number; signed: boolean } | undefined;
+  if (!record) return res.status(404).json({ error: "Not found" });
+  // A signature, once given, is the record of the sign-off and isn't replaced.
+  if (record.signed) return res.status(409).json({ error: "You have already signed this record" });
+  await db.execute(sql`
+    UPDATE train_track_records SET signature = ${parsed.data.signature}, updated_at = now()
+    WHERE id = ${id} AND client_id = ${user.clientId} AND signature IS NULL
+  `);
+  const updated = await db.execute(sql`
+    SELECT ${OWN_RECORD_COLUMNS}
+    FROM train_track_records r
+    LEFT JOIN sites s ON r.site_id = s.id
+    WHERE r.id = ${id} AND r.client_id = ${user.clientId}
+  `);
+  res.json((updated.rows ?? [])[0]);
 });
 
 // ── Create record ─────────────────────────────────────────────────────────────

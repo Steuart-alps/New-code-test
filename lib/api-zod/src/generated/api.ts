@@ -114,6 +114,72 @@ export const ListFeedbackReportHistoryResponse = zod.array(ListFeedbackReportHis
 
 
 /**
+ * @summary The signed-in Viewer's own training records (their linked staff roster entry)
+ */
+export const ListMyTrainingRecordsResponse = zod.object({
+  "linked": zod.boolean(),
+  "records": zod.array(zod.object({
+  "id": zod.number(),
+  "record_type": zod.enum(['certificate', 'signoff', 'internal']),
+  "staff_name": zod.string(),
+  "training_type": zod.string().nullish(),
+  "document_title": zod.string().nullish(),
+  "document_type": zod.string().nullish(),
+  "provider": zod.string().nullish(),
+  "trainer": zod.string().nullish(),
+  "completed_date": zod.string(),
+  "expiry_date": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "signed": zod.boolean(),
+  "updated_at": zod.string().optional(),
+  "site_name": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Add the signed-in Viewer's signature to one of their own unsigned training records
+ */
+export const SignMyTrainingRecordParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignMyTrainingRecordBody = zod.object({
+  "signature": zod.string().describe('Signature image as a data URL')
+})
+
+export const SignMyTrainingRecordResponse = zod.object({
+  "id": zod.number(),
+  "record_type": zod.enum(['certificate', 'signoff', 'internal']),
+  "staff_name": zod.string(),
+  "training_type": zod.string().nullish(),
+  "document_title": zod.string().nullish(),
+  "document_type": zod.string().nullish(),
+  "provider": zod.string().nullish(),
+  "trainer": zod.string().nullish(),
+  "completed_date": zod.string(),
+  "expiry_date": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "signed": zod.boolean(),
+  "updated_at": zod.string().optional(),
+  "site_name": zod.string().nullish()
+})
+
+
+/**
+ * @summary Choose which of their departments a Manager with several is working in (kept for the session)
+ */
+export const SetActiveDepartmentBody = zod.object({
+  "departmentId": zod.number()
+})
+
+export const SetActiveDepartmentResponse = zod.object({
+  "departmentId": zod.number(),
+  "departmentIds": zod.array(zod.number())
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({

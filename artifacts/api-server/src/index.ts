@@ -42,8 +42,9 @@ import { runTwoFactorResetAlertRecovery } from "./lib/twoFactorResetAlerts";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
 import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
-import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob } from "./lib/offboarding";
+import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob, runDeletionReminderJob } from "./lib/offboarding";
 import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
+import { runCancelledStorageClassJob } from "./lib/cancelledClientStorage";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
 import { runTrackActionReminderJob } from "./lib/trackActionReminders";
@@ -373,6 +374,13 @@ function startScheduler() {
   ), { daily: true });
   logger.info("Cancellation detection scheduler started (daily at 07:00)");
 
+  // One reminder, with the download link, 30 days before a cancelled
+  // business's 12-month deletion (daily at 07:15).
+  schedule("15 7 * * *", "deletion-reminders", logged(
+    "Deletion reminder job complete", () => runDeletionReminderJob(),
+  ), { daily: true });
+  logger.info("Deletion reminder scheduler started (daily at 07:15)");
+
   // Reconcile any cancellation/scheduled-cancellation webhook missed by Stripe
   // sync and warn account admins before their paid access cutoff.
   schedule("50 6 * * *", "cancellation-warnings", logged(
@@ -390,6 +398,16 @@ function startScheduler() {
     (result) => result.clientsDeleted === 0,
   ), { daily: true });
   logger.info("Data deletion scheduler started (daily at 03:00)");
+
+  // Cancelled businesses' files move to cold storage 30 days after
+  // cancellation and back again if they resubscribe (daily at 04:00, after
+  // the deletion job). Cuts what kept-but-unused files cost during the 12 months.
+  schedule("0 4 * * *", "cancelled-storage-class", logged(
+    "Cancelled storage class job complete",
+    () => runCancelledStorageClassJob(),
+    (result) => result.archived === 0 && result.restored === 0,
+  ), { daily: true });
+  logger.info("Cancelled storage class scheduler started (daily at 04:00)");
 
   // Check daily at 08:00 UK local time; the job creates new monthly mail
   // only on the 1st and resumes unfinished deliveries on subsequent days.

@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ActiveDepartmentRequest,
   AddPrivacyRetentionVerificationParams,
   AppSettings,
   AuditLogEntry,
@@ -98,10 +99,12 @@ import type {
   ListHotTubChecksParams,
   ListKitchenClosedDaysParams,
   ListLegionellaChecksParams,
+  ListMyTrainingRecords200,
   ListPATTestsParams,
   ListPremisesInspectionsParams,
   ListPublicLinkAccessParams,
   OkResponse,
+  OwnTrainingRecord,
   PATAppliance,
   PATTest,
   PATTrackConfig,
@@ -123,6 +126,8 @@ import type {
   SavePATPresetTemplateBody,
   SavePrivacyProgramParams,
   SendRemindersResponse,
+  SetActiveDepartment200,
+  SignTrainingRecordRequest,
   Site,
   StorageUsage,
   TestEmailRequest,
@@ -432,6 +437,226 @@ export function useListFeedbackReportHistory<TData = Awaited<ReturnType<typeof l
 
 
 
+
+export const getListMyTrainingRecordsUrl = () => {
+
+
+
+
+  return `/api/train-track/my-records`
+}
+
+/**
+ * @summary The signed-in Viewer's own training records (their linked staff roster entry)
+ */
+export const listMyTrainingRecords = async ( options?: RequestInit): Promise<ListMyTrainingRecords200> => {
+
+  return customFetch<ListMyTrainingRecords200>(getListMyTrainingRecordsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMyTrainingRecordsQueryKey = () => {
+    return [
+    `/api/train-track/my-records`
+    ] as const;
+    }
+
+
+export const getListMyTrainingRecordsQueryOptions = <TData = Awaited<ReturnType<typeof listMyTrainingRecords>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyTrainingRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMyTrainingRecordsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyTrainingRecords>>> = ({ signal }) => listMyTrainingRecords({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMyTrainingRecords>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMyTrainingRecordsQueryResult = NonNullable<Awaited<ReturnType<typeof listMyTrainingRecords>>>
+export type ListMyTrainingRecordsQueryError = ErrorType<void>
+
+
+/**
+ * @summary The signed-in Viewer's own training records (their linked staff roster entry)
+ */
+
+export function useListMyTrainingRecords<TData = Awaited<ReturnType<typeof listMyTrainingRecords>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyTrainingRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMyTrainingRecordsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSignMyTrainingRecordUrl = (id: number,) => {
+
+
+
+
+  return `/api/train-track/my-records/${id}/sign`
+}
+
+/**
+ * @summary Add the signed-in Viewer's signature to one of their own unsigned training records
+ */
+export const signMyTrainingRecord = async (id: number,
+    signTrainingRecordRequest: SignTrainingRecordRequest, options?: RequestInit): Promise<OwnTrainingRecord> => {
+
+  return customFetch<OwnTrainingRecord>(getSignMyTrainingRecordUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(signTrainingRecordRequest)
+  }
+);}
+
+
+
+
+
+export const getSignMyTrainingRecordMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyTrainingRecord>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signMyTrainingRecord>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext> => {
+
+const mutationKey = ['signMyTrainingRecord'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signMyTrainingRecord>>, {id: number;data: BodyType<SignTrainingRecordRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  signMyTrainingRecord(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignMyTrainingRecordMutationResult = NonNullable<Awaited<ReturnType<typeof signMyTrainingRecord>>>
+    export type SignMyTrainingRecordMutationBody = BodyType<SignTrainingRecordRequest>
+    export type SignMyTrainingRecordMutationError = ErrorType<void>
+
+    /**
+ * @summary Add the signed-in Viewer's signature to one of their own unsigned training records
+ */
+export const useSignMyTrainingRecord = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyTrainingRecord>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signMyTrainingRecord>>,
+        TError,
+        {id: number;data: BodyType<SignTrainingRecordRequest>},
+        TContext
+      > => {
+      return useMutation(getSignMyTrainingRecordMutationOptions(options));
+    }
+
+export const getSetActiveDepartmentUrl = () => {
+
+
+
+
+  return `/api/users/me/active-department`
+}
+
+/**
+ * @summary Choose which of their departments a Manager with several is working in (kept for the session)
+ */
+export const setActiveDepartment = async (activeDepartmentRequest: ActiveDepartmentRequest, options?: RequestInit): Promise<SetActiveDepartment200> => {
+
+  return customFetch<SetActiveDepartment200>(getSetActiveDepartmentUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(activeDepartmentRequest)
+  }
+);}
+
+
+
+
+
+export const getSetActiveDepartmentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setActiveDepartment>>, TError,{data: BodyType<ActiveDepartmentRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setActiveDepartment>>, TError,{data: BodyType<ActiveDepartmentRequest>}, TContext> => {
+
+const mutationKey = ['setActiveDepartment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setActiveDepartment>>, {data: BodyType<ActiveDepartmentRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setActiveDepartment(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetActiveDepartmentMutationResult = NonNullable<Awaited<ReturnType<typeof setActiveDepartment>>>
+    export type SetActiveDepartmentMutationBody = BodyType<ActiveDepartmentRequest>
+    export type SetActiveDepartmentMutationError = ErrorType<void>
+
+    /**
+ * @summary Choose which of their departments a Manager with several is working in (kept for the session)
+ */
+export const useSetActiveDepartment = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setActiveDepartment>>, TError,{data: BodyType<ActiveDepartmentRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setActiveDepartment>>,
+        TError,
+        {data: BodyType<ActiveDepartmentRequest>},
+        TContext
+      > => {
+      return useMutation(getSetActiveDepartmentMutationOptions(options));
+    }
 
 export const getHealthCheckUrl = () => {
 

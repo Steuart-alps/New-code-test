@@ -27,7 +27,8 @@ interface Site {
 
 const ROLE_LABELS: Record<string, string> = {
   consultant: 'Consultant',
-  client_admin: 'Admin',
+  client_admin: 'Owner',
+  client_manager: 'Manager',
   client_staff: 'Staff',
   client_viewer: 'Viewer',
 };

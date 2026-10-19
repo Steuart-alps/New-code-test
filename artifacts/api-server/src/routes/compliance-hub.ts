@@ -357,7 +357,7 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
     res.status(400).json({ error: "Evidence reference and verification notes are required before an action can be verified closed." });
     return;
   }
-  if (a.status === "verified" && (existing.status !== "awaiting_verification" || req.currentUser!.role === "client_staff" || existing.created_by === req.currentUser!.id)) {
+  if (a.status === "verified" && (existing.status !== "awaiting_verification" || req.currentUser!.role === "client_staff" || req.currentUser!.role === "client_manager" || existing.created_by === req.currentUser!.id)) {
     res.status(403).json({ error: "Only a different client admin or consultant may verify an action after it is awaiting verification." });
     return;
   }
