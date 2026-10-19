@@ -78,6 +78,7 @@ export const STARTER: StarterCategory[] = [
           restaurant_cafe_pub: 60,
           nursery_school: 60,
           pest_control: 60,
+          golf_club: 60,
           other: 60,
           holiday_park_campsite: 12,
           leisure_sports_centre: 12,

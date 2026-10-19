@@ -6,6 +6,7 @@ import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { localToday, onboardingRequest } from "@/lib/onboarding";
 import { TaskItem, useTaskClientId, type TaskList, type TaskRow } from "@/components/task-item";
+import { showQuickTutorialIfNew } from "@/components/quick-tutorial";
 
 type SetupSummary = { needsSetup: boolean; canManage: boolean; deferredAt?: string | null };
 
@@ -13,9 +14,16 @@ type SetupSummary = { needsSetup: boolean; canManage: boolean; deferredAt?: stri
  * Top-of-dashboard cards: the setup wizard banner for admins of a business
  * that has not finished setup (sending them to /setup once per session until
  * they choose "Finish later"), and "My tasks today" for staff and Managers.
+ * Everyone gets the quick tutorial on their first dashboard visit; Owners
+ * once the setup wizard is finished or put off, so it doesn't open just
+ * before the redirect.
  */
 export function DashboardStartCards() {
   const { user } = useAuth();
+  const isOwner = user?.role === "consultant" || user?.role === "client_admin";
+  useEffect(() => {
+    if (user && !isOwner) showQuickTutorialIfNew(user.id);
+  }, [user?.id, isOwner]);
   if (!user) return null;
   if (user.role === "consultant" || user.role === "client_admin") return <SetupBanner />;
   if (user.role === "client_staff" || user.role === "client_manager") return <MyTasksTodayCard />;
@@ -24,7 +32,7 @@ export function DashboardStartCards() {
 
 function SetupBanner() {
   const clientId = useTaskClientId();
-  const { activeClientId } = useAuth();
+  const { user, activeClientId } = useAuth();
   const [, navigate] = useLocation();
   const [state, setState] = useState<SetupSummary | null>(null);
 
@@ -34,7 +42,10 @@ function SetupBanner() {
       .then((data) => {
         if (cancelled) return;
         setState(data);
-        if (!data.needsSetup || data.deferredAt) return;
+        if (!data.needsSetup || data.deferredAt) {
+          if (user) showQuickTutorialIfNew(user.id);
+          return;
+        }
         const key = `complytrack:setup-redirected:${activeClientId ?? "own"}`;
         try {
           if (sessionStorage.getItem(key)) return;

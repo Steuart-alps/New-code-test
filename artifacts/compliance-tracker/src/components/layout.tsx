@@ -13,6 +13,7 @@ import {
   Menu,
   ChevronRight,
   MessageSquareWarning,
+  GraduationCap,
   X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,7 @@ import { FeedbackDialog } from "@/components/feedback-dialog";
 import { CancellationBanner } from "@/components/cancellation-banner";
 import { ManagedByBadge } from "@/components/managed-by-badge";
 import { NotificationBell } from "@/components/notification-bell";
+import { QuickTutorial, openQuickTutorial } from "@/components/quick-tutorial";
 
 const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/daily-track-am", moduleKey: "daily_am" },
@@ -237,13 +239,23 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         </nav>
 
         <div className="p-4 border-t border-sidebar-border bg-sidebar/50 flex flex-col gap-4">
-          <button
-            onClick={() => setShowFeedbackDialog(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-sm text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-          >
-            <MessageSquareWarning className="h-4 w-4" />
-            Submit feedback
-          </button>
+          <div className="flex flex-col gap-1">
+            <button
+              onClick={openQuickTutorial}
+              className="flex items-center gap-2 px-3 py-2 rounded-sm text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+              data-testid="button-quick-tutorial"
+            >
+              <GraduationCap className="h-4 w-4" />
+              Quick tutorial
+            </button>
+            <button
+              onClick={() => setShowFeedbackDialog(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-sm text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+            >
+              <MessageSquareWarning className="h-4 w-4" />
+              Submit feedback
+            </button>
+          </div>
           <div className="flex items-center justify-center gap-2 opacity-40">
             <span className="text-xs font-display italic">by</span>
             <img src={alpsLogo} alt="ALPS Consultancy" className="h-4 grayscale invert" />
@@ -340,6 +352,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         </DialogContent>
       </Dialog>
       <FeedbackDialog open={showFeedbackDialog} onOpenChange={setShowFeedbackDialog} />
+      <QuickTutorial />
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white">
@@ -387,6 +400,16 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                     ))}
                   </nav>
                   <div className="p-4 border-t border-sidebar-border">
+                    <button
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        openQuickTutorial();
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 rounded-sm text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+                    >
+                      <GraduationCap className="h-4 w-4" />
+                      Quick tutorial
+                    </button>
                     <button
                       onClick={() => {
                         setMobileMenuOpen(false);
