@@ -17,16 +17,17 @@ export const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  // Sessions expire after 2 hours of inactivity (30 minutes signed people
-  // out during a walk-round). `rolling: true` refreshes the expiry on every
-  // request, so active users stay signed in; after 2 idle hours the session
-  // is gone and the next API call returns 401, which
-  // the web client turns into an automatic redirect to the login page.
+  // Sessions expire after 30 minutes of inactivity (Steuart, 2026-10-19:
+  // more secure, and long enough to scan documents for upload). `rolling:
+  // true` refreshes the expiry on every request, so active users stay signed
+  // in, and the web app keeps the session alive while an upload is running;
+  // after 30 idle minutes the session is gone and the next API call returns
+  // 401, which the web client turns into an automatic redirect to the login page.
   rolling: true,
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    maxAge: 1000 * 60 * 60 * 2, // 2 hours of inactivity
+    maxAge: 1000 * 60 * 30, // 30 minutes of inactivity
     sameSite: "lax",
   },
 });
