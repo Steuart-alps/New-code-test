@@ -3984,7 +3984,8 @@ async function migrateFixTrackV2() {
     ON "fix_track_issue_activity" ("issue_id", "created_at")
   `);
   // Earlier installs constrained activity to status/note. The contractor mail
-  // workflow is also an audit trail, so replace that generated constraint
+  // workflow, and deleting a photo or video from a finished issue, are also
+  // part of the audit trail, so replace that generated constraint
   // explicitly rather than relying on CREATE TABLE IF NOT EXISTS.
   await db.execute(sql`
     ALTER TABLE "fix_track_issue_activity"
@@ -3996,7 +3997,8 @@ async function migrateFixTrackV2() {
       CHECK ("event_type" IN (
         'status', 'note',
         'email_requested', 'email_approved', 'email_rejected',
-        'email_invalidated', 'email_sent', 'email_failed'
+        'email_invalidated', 'email_sent', 'email_failed',
+        'media_deleted'
       ))
   `);
   await db.execute(sql`

@@ -2265,6 +2265,27 @@ export const RequestUploadUrlResponse = zod.object({
 
 
 /**
+ * Frees storage once an issue is finished. The issue, its notes and its history stay; the history records who deleted which file and when.
+ * @summary Delete a photo or video from a resolved or closed issue (owners and admins)
+ */
+export const DeleteFixTrackIssueMediaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const deleteFixTrackIssueMediaBodyObjectPathMax = 1000;
+
+
+
+export const DeleteFixTrackIssueMediaBody = zod.object({
+  "objectPath": zod.string().min(1).max(deleteFixTrackIssueMediaBodyObjectPathMax)
+})
+
+export const DeleteFixTrackIssueMediaResponse = zod.object({
+  "mediaUrls": zod.array(zod.string())
+})
+
+
+/**
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
