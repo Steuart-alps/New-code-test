@@ -1,5 +1,5 @@
 // Home page module cards: every card has the same layout and opens the pricing
-// builder with its module ticked. There used to be a fourth row of plainer,
+// builder with its module ticked, and every picked module shows in green. There used to be a fourth row of plainer,
 // unclickable legislation tiles under the cards.
 // Run: pnpm --filter @workspace/compliance-tracker run test:landing-modules-browser
 import assert from "node:assert/strict";
@@ -98,6 +98,35 @@ try {
 
   await page.getByTestId("module-card-firetrack").click();
   assert.match(await summary.textContent(), /^3 modules selected/);
+
+  // Every picked module shows the same green, whatever its own colour: a red
+  // or orange border on a chosen module reads as a fault.
+  await page.getByTestId("plan-module-pattrack").click();
+  await page.getByTestId("plan-module-kitchentrack").click();
+  await page.waitForTimeout(400); // the cards' 200ms colour transition
+  const planCards = await page.locator("[data-testid^=plan-module-]").evaluateAll(cards => cards.map(card => ({
+    key: card.dataset.testid.replace("plan-module-", ""),
+    selected: card.dataset.selected === "true",
+    border: getComputedStyle(card).borderTopColor,
+  })));
+  const picked = planCards.filter(card => card.selected);
+  assert.deepEqual(picked.map(card => card.key).sort(), ["core", "firetrack", "kitchentrack", "pattrack", "treetrack"]);
+  assert.equal(new Set(picked.map(card => card.border)).size, 1, `picked modules share one border colour: ${JSON.stringify(picked)}`);
+  const pickedBorder = picked[0].border;
+  const greenProbe = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.className = "border-2 border-green-600";
+    document.body.appendChild(probe);
+    const colour = getComputedStyle(probe).borderTopColor;
+    probe.remove();
+    return colour;
+  });
+  assert.equal(pickedBorder, greenProbe, "picked modules are outlined in green");
+  for (const card of planCards.filter(card => !card.selected)) {
+    assert.notEqual(card.border, pickedBorder, `${card.key} is not picked and is not green`);
+  }
+  await page.getByTestId("plan-module-pattrack").click();
+  await page.getByTestId("plan-module-kitchentrack").click();
 
   await page.locator("#pricing").getByRole("button", { name: /Start free trial/ }).click();
   await page.waitForFunction(() => window.location.pathname === "/signup");

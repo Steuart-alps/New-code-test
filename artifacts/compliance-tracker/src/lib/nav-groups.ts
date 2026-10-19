@@ -47,7 +47,7 @@ export function isNavItemAvailable(item: NavItem, hasService: (key: string) => b
   return !item.serviceKey || hasService(item.serviceKey);
 }
 
-export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean; canAdmin: boolean }): NavGroup[] {
+export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin }: { isConsultant: boolean; canAdmin: boolean; canManageUsers?: boolean }): NavGroup[] {
   const groups: NavGroup[] = [
     {
       id: "core",
@@ -142,6 +142,11 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
     if (adminGroup) {
       adminGroup.items.push({ href: "/sites", label: "Sites", icon: Building2 });
     }
+  }
+
+  if (canManageUsers && !canAdmin) {
+    // Managers look after the Staff and Viewers in their own department.
+    groups.find(g => g.id === "people-training")?.items.push({ href: "/users", label: "Users", icon: Users });
   }
 
   if (isConsultant) {

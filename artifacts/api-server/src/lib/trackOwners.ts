@@ -20,6 +20,9 @@ export interface OwnerCandidate {
   email: string;
   role: string;
   departmentId: number | null;
+  allDepartments?: boolean;
+  /** A Manager's extra departments (beyond departmentId). */
+  extraDepartmentIds?: number[];
 }
 
 export interface TrackOwnerRow {
@@ -43,41 +46,46 @@ export interface OwnerContext {
 const rowsOf = <T>(result: unknown): T[] => ((result as { rows?: T[] }).rows ?? []);
 
 /**
- * Active users who may own a track in this business: its client_admin and
- * client_staff users, and consultants who belong to or are linked to it.
+ * Active users who may own a track in this business: its client_admin,
+ * client_manager and client_staff users, and consultants who belong to or are linked to it.
  * Read-only viewers are never owners.
  */
 export async function loadEligibleOwners(clientId: number): Promise<OwnerCandidate[]> {
   const result = await db.execute(sql`
-    SELECT u.id, u.name, u.email, u.role, u.department_id
+    SELECT u.id, u.name, u.email, u.role, u.department_id, u.all_departments,
+      ARRAY(SELECT ud.department_id FROM user_departments ud WHERE ud.user_id = u.id) AS extra_department_ids
     FROM users u
     WHERE u.active = true
       AND (
-        (u.client_id = ${clientId} AND u.role IN ('client_admin', 'client_staff', 'consultant'))
+        (u.client_id = ${clientId} AND u.role IN ('client_admin', 'client_manager', 'client_staff', 'consultant'))
         OR (u.role = 'consultant' AND EXISTS (
           SELECT 1 FROM consultant_clients cc WHERE cc.user_id = u.id AND cc.client_id = ${clientId}
         ))
       )
     ORDER BY u.name, u.id
   `);
-  return rowsOf<{ id: number; name: string; email: string; role: string; department_id: number | null }>(result)
+  return rowsOf<{ id: number; name: string; email: string; role: string; department_id: number | null; all_departments: boolean | null; extra_department_ids: Array<number | string> | null }>(result)
     .map((row) => ({
       id: Number(row.id),
       name: row.name,
       email: row.email,
       role: row.role,
       departmentId: row.department_id == null ? null : Number(row.department_id),
+      allDepartments: row.all_departments === true,
+      extraDepartmentIds: row.role === "client_manager" ? (row.extra_department_ids ?? []).map(Number) : [],
     }));
 }
 
 /** Whether a user can see a site's records (department scoping, as in getActiveDepartmentId). */
 export function candidateCanSeeSite(
-  candidate: Pick<OwnerCandidate, "role" | "departmentId">,
+  candidate: Pick<OwnerCandidate, "role" | "departmentId" | "allDepartments" | "extraDepartmentIds">,
   siteDepartmentId: number | null | undefined,
 ): boolean {
   if (candidate.role === "client_admin" || candidate.role === "consultant") return true;
+  if (candidate.role === "client_manager" && candidate.allDepartments === true) return true;
   if (siteDepartmentId == null) return true;
-  return candidate.departmentId === siteDepartmentId;
+  return candidate.departmentId === siteDepartmentId
+    || (candidate.role === "client_manager" && (candidate.extraDepartmentIds ?? []).includes(siteDepartmentId));
 }
 
 export async function loadOwnerContext(clientId: number): Promise<OwnerContext> {

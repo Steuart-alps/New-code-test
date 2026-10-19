@@ -2,7 +2,7 @@ import { Router, type Request, type RequestHandler } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId, isDepartmentLead } from "../middleware/requireAuth";
 import { requireService } from "../lib/services";
 import { filterName } from "../lib/contentFilter";
 import { getEffectiveOptionList } from "../lib/formOptions";
@@ -44,8 +44,7 @@ const importBody = z.object({
 // registers, exactly as their single-record routes are.
 const requirePatImporter: RequestHandler = (req, res, next) => {
   const user = req.currentUser;
-  if (user && (user.role === "client_admin" || user.role === "consultant"
-    || (user.role === "client_staff" && user.isDepartmentManager === true))) return next();
+  if (user && (user.role === "client_admin" || user.role === "consultant" || isDepartmentLead(user))) return next();
   res.status(403).json({ error: "Manager access required" });
 };
 

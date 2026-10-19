@@ -7,6 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { buildSignupPath } from "@/lib/signup-plan";
+import { SELECTED_MODULE_CARD, SELECTED_MODULE_CHECKBOX, SELECTED_MODULE_TICK } from "@/lib/addon-catalog";
 import alpsLogo from "@/assets/alps-logo.png";
 
 // ─── Module definitions ────────────────────────────────────────────────────────
@@ -20,8 +21,6 @@ const MODULES = [
     color: "text-[#162D42]",
     bg: "bg-[#162D42]/5",
     border: "border-[#162D42]/20",
-    activeBorder: "border-[#162D42]",
-    activeBg: "bg-[#162D42]/5",
     required: true,
     description: "The foundation — compliance item tracking, contractor & certificate management, and audit trails.",
     features: [
@@ -41,16 +40,15 @@ const MODULES = [
     color: "text-orange-700",
     bg: "bg-orange-50",
     border: "border-orange-200",
-    activeBorder: "border-orange-500",
-    activeBg: "bg-orange-50",
     required: false,
     legislation: "Regulatory Reform (Fire Safety) Order 2005",
     description: "Digital fire safety logbook — record and track every check required under the Regulatory Reform (Fire Safety) Order.",
     features: [
-      "Weekly alarm tests & emergency lights",
-      "Monthly extinguisher & door checks",
-      "Annual fire drill logging",
-      "Overdue & due-soon status cards",
+      "Weekly alarm tests, recorded by call point",
+      "Monthly 5 minute emergency lighting flick tests",
+      "6-monthly fire drill logs, including night staff",
+      "Extinguisher & fire door checks",
+      "Reminders the day before each check is due",
       "Full timestamped audit history",
     ],
   },
@@ -62,8 +60,6 @@ const MODULES = [
     color: "text-amber-700",
     bg: "bg-amber-50",
     border: "border-amber-200",
-    activeBorder: "border-amber-500",
-    activeBg: "bg-amber-50",
     required: false,
     legislation: "Food Safety Act 1990 + HACCP Regulation (EC) 852/2004",
     description: "Digital food safety diary — daily temperature logs, delivery checks, and HACCP records for food businesses.",
@@ -84,8 +80,6 @@ const MODULES = [
     color: "text-sky-700",
     bg: "bg-sky-50",
     border: "border-sky-200",
-    activeBorder: "border-sky-500",
-    activeBg: "bg-sky-50",
     required: false,
     legislation: "HSG274 / L8 ACOP — Legionella bacteria control",
     description: "Water safety logbook to support site-specific Legionella risk-management records, written schemes and actions.",
@@ -105,8 +99,6 @@ const MODULES = [
     color: "text-orange-700",
     bg: "bg-orange-50",
     border: "border-orange-200",
-    activeBorder: "border-orange-500",
-    activeBg: "bg-orange-50",
     required: false,
     description: "Staff maintenance issue reporting — log faults, assign responsibility, attach photos, and track resolution to close.",
     features: [
@@ -126,8 +118,6 @@ const MODULES = [
     color: "text-blue-700",
     bg: "bg-blue-50",
     border: "border-blue-200",
-    activeBorder: "border-blue-500",
-    activeBg: "bg-blue-50",
     required: false,
     description: "Workplace safety management — record risk assessments, incidents, staff sign-off of policies, and corrective actions in one place.",
     features: [
@@ -146,8 +136,6 @@ const MODULES = [
     color: "text-violet-700",
     bg: "bg-violet-50",
     border: "border-violet-200",
-    activeBorder: "border-violet-500",
-    activeBg: "bg-violet-50",
     required: false,
     legislation: "Workplace (Health, Safety and Welfare) Regulations 1992",
     description: "Digital premises safety logbook — routine workplace inspections, fault reporting, and housekeeping records.",
@@ -167,8 +155,6 @@ const MODULES = [
     color: "text-emerald-700",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
-    activeBorder: "border-emerald-500",
-    activeBg: "bg-emerald-50",
     required: false,
     description: "Staff training records and certificate expiry tracking — know who is trained, in what, and when it expires.",
     features: [
@@ -188,8 +174,6 @@ const MODULES = [
     color: "text-cyan-700",
     bg: "bg-cyan-50",
     border: "border-cyan-200",
-    activeBorder: "border-cyan-500",
-    activeBg: "bg-cyan-50",
     required: false,
     description: "Hot tub & spa pool maintenance logbook — daily water chemistry, temperature checks and records based on HSG282 and PWTAG guidance.",
     features: [
@@ -209,8 +193,6 @@ const MODULES = [
     color: "text-green-700",
     bg: "bg-green-50",
     border: "border-green-200",
-    activeBorder: "border-green-500",
-    activeBg: "bg-green-50",
     required: false,
     description: "Tree inspection logbook — record visual assessments, detailed surveys, post-storm checks and remedial works in line with BS 3998:2010 and NTSG guidance.",
     features: [
@@ -230,8 +212,6 @@ const MODULES = [
     color: "text-yellow-700",
     bg: "bg-yellow-50",
     border: "border-yellow-200",
-    activeBorder: "border-yellow-500",
-    activeBg: "bg-yellow-50",
     required: false,
     description: "In-house PAT testing register — maintain a full appliance inventory, log pass/fail results, and track next test due dates across your sites.",
     features: [
@@ -251,8 +231,6 @@ const MODULES = [
     color: "text-emerald-700",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
-    activeBorder: "border-emerald-500",
-    activeBg: "bg-emerald-50",
     required: false,
     description: "Pest control compliance log — record contractor visits, findings, treatments, and any pest activity spotted between visits.",
     features: [
@@ -336,9 +314,11 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
               transition={{ delay: i * 0.08, duration: 0.5, ease: "easeOut" }}
               viewport={{ once: true, margin: "-40px" }}
               onClick={() => !mod.required && toggle(mod.key)}
+              data-testid={`plan-module-${mod.key}`}
+              data-selected={active}
               className={`relative border-2 p-6 transition-all duration-200 ${
                 mod.required ? "cursor-default" : "cursor-pointer"
-              } ${active ? `${mod.activeBorder} ${mod.activeBg}` : `border-border bg-white hover:border-${mod.border}`}`}
+              } ${active ? SELECTED_MODULE_CARD : `border-border bg-white hover:border-${mod.border}`}`}
             >
               {mod.required && (
                 <span className="absolute top-4 right-4 text-xs uppercase tracking-widest font-medium text-muted-foreground bg-muted px-2 py-0.5">
@@ -347,8 +327,8 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
               )}
               {!mod.required && (
                 <div className={`absolute top-4 right-4 w-5 h-5 border-2 flex items-center justify-center transition-all ${
-                  active ? "border-current bg-current" : "border-border bg-white"
-                } ${mod.color}`}>
+                  active ? SELECTED_MODULE_CHECKBOX : "border-border bg-white"
+                }`}>
                   {active && <CheckCircle2 className="w-3 h-3 text-white" />}
                 </div>
               )}
@@ -370,7 +350,7 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
               <ul className="space-y-1.5">
                 {mod.features.map(f => (
                   <li key={f} className="flex items-start gap-2 text-sm text-[#1A1A1A]/80">
-                    <CheckCircle2 className={`w-4 h-4 flex-shrink-0 mt-0.5 ${active ? mod.color : "text-muted-foreground"}`} />
+                    <CheckCircle2 className={`w-4 h-4 flex-shrink-0 mt-0.5 ${active ? SELECTED_MODULE_TICK : "text-muted-foreground"}`} />
                     <span>{f}</span>
                   </li>
                 ))}

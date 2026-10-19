@@ -1179,13 +1179,14 @@ router.get("/contractors/suggest", requireAuth, async (req, res) => {
 // ── Contractor email approval workflow ───────────────────────────────────────
 //
 // Contractor emails require manager approval: staff request a send
-// (mode "assign" or "quote"); a manager (client_admin/consultant or a
+// (mode "assign" or "quote"); a manager (owner/consultant, a Manager or a
 // maintenance manager) approves or dismisses it. A separate, manager-only
 // dispatch then crosses the outbound email boundary.
 
 function isManager(req: any): boolean {
   const u = req.currentUser;
-  return !!u && (u.role === "client_admin" || u.role === "consultant" || u.isMaintenanceManager === true);
+  return !!u && (u.role === "client_admin" || u.role === "consultant" || u.role === "client_manager"
+    || u.isMaintenanceManager === true);
 }
 
 function queueDepartmentScope(req: any) {

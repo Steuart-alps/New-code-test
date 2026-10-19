@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
@@ -50,6 +51,8 @@ async function createManager() {
   assert.ok(registration.data.verificationToken);
   assert.equal((await request("GET", `/auth/verify-email?token=${encodeURIComponent(registration.data.verificationToken)}`)).status, 200);
   assert.equal((await request("POST", "/auth/login", { email, password: "password-123" })).status, 200);
+  // A consultant, so the suite can add a second business and select it.
+  promoteToConsultant(email);
   return { request, stamp };
 }
 

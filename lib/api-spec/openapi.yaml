@@ -130,6 +130,84 @@ paths:
           description: Not an administrator or not authorised for this client
         "404":
           description: Report not found in the selected client
+  /train-track/my-records:
+    get:
+      operationId: listMyTrainingRecords
+      tags: [train-track]
+      summary: The signed-in Viewer's own training records (their linked staff roster entry)
+      responses:
+        "200":
+          description: Whether the account is linked to the roster, and that person's records, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [linked, records]
+                properties:
+                  linked: { type: boolean }
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-records/{id}/sign:
+    post:
+      operationId: signMyTrainingRecord
+      tags: [train-track]
+      summary: Add the signed-in Viewer's signature to one of their own unsigned training records
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The signed record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not one of this Viewer's records
+        "409":
+          description: Already signed
+  /users/me/active-department:
+    put:
+      operationId: setActiveDepartment
+      tags: [users]
+      summary: Choose which of their departments a Manager with several is working in (kept for the session)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActiveDepartmentRequest" }
+      responses:
+        "200":
+          description: The chosen department and all of the Manager's departments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [departmentId, departmentIds]
+                properties:
+                  departmentId: { type: integer }
+                  departmentIds:
+                    type: array
+                    items: { type: integer }
+        "400":
+          description: No department given
+        "403":
+          description: Not a Manager
+        "404":
+          description: Not one of the Manager's departments
   /healthz:
     get:
       operationId: healthCheck
@@ -1262,6 +1340,76 @@ paths:
           description: The site is not one of this client's sites
         "403":
           description: The site belongs to a department the caller cannot see
+
+  /fire-safety/call-points:
+    get:
+      operationId: listFireCallPoints
+      tags: [fire-safety]
+      summary: List manual call points with when each was last tested
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for call points not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+        - in: query
+          name: includeArchived
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Call points
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireCallPoint"
+    post:
+      operationId: createFireCallPoint
+      tags: [fire-safety]
+      summary: Add a manual call point (managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFireCallPointRequest"
+      responses:
+        "201":
+          description: Created call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
+        "409":
+          description: The site already has a call point with that name
+
+  /fire-safety/call-points/{id}:
+    put:
+      operationId: updateFireCallPoint
+      tags: [fire-safety]
+      summary: Rename, archive or restore a call point (managers)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFireCallPointRequest"
+      responses:
+        "200":
+          description: Updated call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
 
   /fire-safety/{id}:
     put:
@@ -2545,6 +2693,34 @@ paths:
 
 components:
   schemas:
+    SignTrainingRecordRequest:
+      type: object
+      required: [signature]
+      properties:
+        signature: { type: string, description: Signature image as a data URL }
+    ActiveDepartmentRequest:
+      type: object
+      required: [departmentId]
+      properties:
+        departmentId: { type: integer }
+    OwnTrainingRecord:
+      type: object
+      required: [id, record_type, staff_name, completed_date, signed]
+      properties:
+        id: { type: integer }
+        record_type: { type: string, enum: [certificate, signoff, internal] }
+        staff_name: { type: string }
+        training_type: { type: string, nullable: true }
+        document_title: { type: string, nullable: true }
+        document_type: { type: string, nullable: true }
+        provider: { type: string, nullable: true }
+        trainer: { type: string, nullable: true }
+        completed_date: { type: string }
+        expiry_date: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        signed: { type: boolean }
+        updated_at: { type: string }
+        site_name: { type: string, nullable: true }
     FeedbackReport:
       type: object
       required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, updatedByName, revision, submitterName]
@@ -4098,7 +4274,7 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service]
 
     FireSafetyCheck:
       type: object
@@ -4126,6 +4302,19 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
         createdAt:
           type: string
           format: date-time
@@ -4163,6 +4352,19 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
       required:
         - checkType
         - checkDate
@@ -4188,6 +4390,64 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
+
+    FireCallPoint:
+      type: object
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastTestedDate:
+          type: string
+          nullable: true
+          description: Date of the latest alarm test that used this call point.
+      required:
+        - id
+        - siteId
+        - name
+        - archivedAt
+        - lastTestedDate
+
+    CreateFireCallPointRequest:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+      required:
+        - siteId
+        - name
+
+    UpdateFireCallPointRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        archived:
+          type: boolean
 
     FireSafetyStatus:
       type: object
@@ -4876,12 +5136,18 @@ components:
           type: string
           nullable: true
         food_jurisdiction:
-          description: Food-safety jurisdiction used to choose the standard reheating limit.
+          description: Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
           type: string
           enum:
             - scotland
             - england_wales
             - northern_ireland
+            - ireland
+            - australia
+            - new_zealand
+            - canada
+            - united_states
+            - other
           nullable: true
         food_cooking_limit:
           type: string

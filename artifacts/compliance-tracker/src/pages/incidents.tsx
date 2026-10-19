@@ -411,7 +411,7 @@ export default function IncidentsPage() {
   const canAdmin = useCanAdmin();
   const clientApi = useActiveClientApi();
   // Managers read injury details, so they attach and download HSE receipts.
-  const isManager = user?.role === "client_admin" || user?.role === "consultant"
+  const isManager = user?.role === "client_admin" || user?.role === "consultant" || user?.role === "client_manager"
     || (user?.role === "client_staff" && user.isDepartmentManager === true);
   const qc = useQueryClient();
   const apiFetch = useIncidentsApi();

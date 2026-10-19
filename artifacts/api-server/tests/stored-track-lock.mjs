@@ -468,15 +468,15 @@ async function main() {
   check("food config unaffected by record lock", JSON.stringify(configAfter.data) === JSON.stringify(configBefore.data), "config changed");
 
   // Representative check-based family (fire safety).
-  const fireOld = await admin("POST", "/fire-safety", { checkType: "alarm", checkDate: old, result: "pass", performedBy: "Admin" });
+  const fireOld = await admin("POST", "/fire-safety", { checkType: "alarm", callPoint: "CP1", checkDate: old, result: "pass", performedBy: "Admin" });
   expect("seed old fire record", fireOld, [201]);
   const fireId = fireOld.data?.id;
   check("fire old PUT is locked", (await staff("PUT", `/fire-safety/${fireId}`, { notes: "staff edit" })).status === 423);
   check("fire forged date remains locked", (await staff("PUT", `/fire-safety/${fireId}`, { checkDate: today, notes: "forged" })).status === 423);
   expect("fire admin correction works", await admin("PUT", `/fire-safety/${fireId}`, { notes: "admin correction" }), [200]);
-  const fireDeleteSeed = await admin("POST", "/fire-safety", { checkType: "alarm", checkDate: iso(-4), result: "pass" });
+  const fireDeleteSeed = await admin("POST", "/fire-safety", { checkType: "alarm", callPoint: "CP1", checkDate: iso(-4), result: "pass" });
   check("fire old DELETE is locked", (await staff("DELETE", `/fire-safety/${fireDeleteSeed.data?.id}`)).status === 423);
-  const fireDraft = await staff("POST", "/fire-safety", { checkType: "alarm", checkDate: today, result: "pass" });
+  const fireDraft = await staff("POST", "/fire-safety", { checkType: "alarm", callPoint: "CP1", checkDate: today, result: "pass" });
   expect("fire today draft create", fireDraft, [201]);
   expect("fire today draft update", await staff("PUT", `/fire-safety/${fireDraft.data?.id}`, { notes: "draft staff edit" }), [200]);
 
@@ -1157,7 +1157,7 @@ async function main() {
   const withSite = (fields) => (siteId) => ({ ...fields, siteId });
   await departmentDelete({
     label: "Dept Fire check", createPath: "/fire-safety", adminDelete: [200, 204],
-    body: withSite({ checkType: "alarm", checkDate: old, result: "pass", performedBy: "Lock Fixture" }),
+    body: withSite({ checkType: "alarm", callPoint: "CP1", checkDate: old, result: "pass", performedBy: "Lock Fixture" }),
   });
   await departmentDelete({
     label: "Dept Legionella check", createPath: "/legionella", adminDelete: [200, 204],
@@ -1320,7 +1320,7 @@ async function main() {
     const stored = rowsOf((await admin("GET", list)).data).find((row) => idOf(row) === id);
     check(`site move: ${label} keeps its site`, siteOf(stored) === alphaSite.data.id, JSON.stringify(stored));
   };
-  const fireMove = (siteId) => ({ checkType: "alarm", checkDate: today, result: "pass", performedBy: "Lock Fixture", siteId });
+  const fireMove = (siteId) => ({ checkType: "alarm", callPoint: "CP1", checkDate: today, result: "pass", performedBy: "Lock Fixture", siteId });
   await siteMove({ label: "Fire check", createPath: "/fire-safety", create: fireMove, move: fireMove });
   const treeMove = (siteId) => ({ checkType: "visual_assessment", checkDate: today, result: "pass", treeRef: "LOCK-MOVE", inspector: "Lock Fixture", siteId });
   await siteMove({ label: "Tree inspection", createPath: "/tree-track", create: treeMove, move: treeMove });
