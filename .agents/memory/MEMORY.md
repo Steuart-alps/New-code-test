@@ -69,7 +69,7 @@
 - [Staged validation runner](validation-runner.md) — validation checks run through scripts/validate.mjs: shared flock slots, memory waits, codegen lock, restart reaping, 8080 guard.
 - [Browser fault fixtures](browser-fault-fixtures.md) — hold read outages until explicit retry; test legacy pages without changing production routing.
 - [Orphaned workflow children](workflow-orphaned-children.md) — Historical (Replit-only): surviving Vite children can force restarted workflows off the registered preview port.
-- [Track release gates](track-release-gates.md) — GreenTrack's public Coming soon gate remains until an explicit activation request.
+- [Track release gates](track-release-gates.md) — GreenTrack launched 2026-10-19; how to gate a future module as "Coming soon".
 - [Required photo creation](required-photo-creation.md) — stage verified evidence before atomically creating records; creation rules do not retroactively invalidate history.
 - [Mobile staged photo evidence](mobile-staged-photo-evidence.md) — mobile mirrors the web staged-receipt flow; storage PUT never carries the bearer; receipts scoped to user+client+type.
 - [Staged photo cleanup](staged-photo-cleanup.md) — cancelled/expired receipts delete their object first, then the row, under the receipt lock with ACL and reference checks; never prune receipt rows directly.
