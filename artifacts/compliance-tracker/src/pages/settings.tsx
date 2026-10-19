@@ -771,7 +771,8 @@ function DepartmentsCard() {
                     )}
 
                     <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      {members.length} {members.length === 1 ? "member" : "members"} · {deptSites.length} {deptSites.length === 1 ? "site" : "sites"}
+                      {members.length} {members.length === 1 ? "member" : "members"}
+                      {dept.siteId == null && <> · {deptSites.length} {deptSites.length === 1 ? "site" : "sites"}</>}
                     </span>
 
                     {canAdmin && !isEditing && (

@@ -645,7 +645,7 @@ export default function UsersPage() {
                             onValueChange={val => reassignDept(u.id, val)}
                             disabled={reassigning === u.id}
                           >
-                            <SelectTrigger className="h-7 text-xs w-44 border-transparent hover:border-input bg-transparent hover:bg-muted/40 transition-colors">
+                            <SelectTrigger className="h-7 text-xs w-56 border-transparent hover:border-input bg-transparent hover:bg-muted/40 transition-colors">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
