@@ -3043,7 +3043,7 @@ function TwoFactorPolicyCard() {
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
-        if (!cancelled) setRequired(data?.requireTwoFactor !== "false");
+        if (!cancelled) setRequired(data?.requireTwoFactor === "true");
       })
       .catch((err: Error) => {
         if (!cancelled) toast({ title: "Couldn't load the two-factor setting", description: err.message, variant: "destructive" });
@@ -3060,7 +3060,7 @@ function TwoFactorPolicyCard() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
-      setRequired(data?.requireTwoFactor !== "false");
+      setRequired(data?.requireTwoFactor === "true");
       toast({
         title: next ? "Two-factor authentication is now required" : "Two-factor authentication is now optional",
         description: next

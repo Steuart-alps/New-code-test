@@ -281,7 +281,7 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     }
     req.log.info(
-      { clientId, actorId: req.currentUser!.id, required: rawRequired !== "false" },
+      { clientId, actorId: req.currentUser!.id, required: rawRequired === "true" },
       "Two-factor requirement changed",
     );
   }

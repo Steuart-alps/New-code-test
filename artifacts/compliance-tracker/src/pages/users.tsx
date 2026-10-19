@@ -391,6 +391,11 @@ function UserDialog({
                   ))}
                 </SelectContent>
               </Select>
+              {departments.length === 0 && (
+                <p className="text-xs text-muted-foreground" data-testid="text-no-departments">
+                  No departments yet. Add them under Settings → Departments, then come back to choose one.
+                </p>
+              )}
             </div>
           )}
           </>
