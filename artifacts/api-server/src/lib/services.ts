@@ -368,7 +368,9 @@ export async function ensureServicePrices(): Promise<EnsurePricesResult> {
     // reads from, so getServicePrice() resolves them immediately.
     try {
       const sync = await getStripeSync();
-      await sync.syncBackfill();
+      // syncBackfill() with no arguments copies nothing; name each object.
+      await sync.syncBackfill({ object: "product" });
+      await sync.syncBackfill({ object: "price" });
     } catch (err) {
       logger.error({ err }, "Stripe backfill after price creation failed; webhook will sync eventually");
     }

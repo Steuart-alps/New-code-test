@@ -95,7 +95,10 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
   logger.info("Stripe webhook configured");
 
   onStage("backfill sync");
-  await stripeSync.syncBackfill();
+  // The sync library's default (no arguments) copies nothing, so name the
+  // scope: products and prices feed the service-price catalogue check below,
+  // customers and subscriptions feed billing state.
+  await stripeSync.syncBackfill({ object: "all" });
   logger.info("Stripe data synced");
   onStage("service-price catalogue");
 
