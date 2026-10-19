@@ -105,6 +105,9 @@ jobs:
       - name: Storage test-bucket safety checks
         run: pnpm --filter @workspace/api-server run test:storage-happy-path-config
 
+      - name: Email design test
+        run: pnpm --filter @workspace/api-server run test:email-layout
+
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
 

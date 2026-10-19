@@ -13,7 +13,7 @@ import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, or, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendEmail, getPublicAppUrl } from "./email";
+import { sendEmail, getPublicAppUrl, renderEmailLayout } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "./fixTrackAlertSettings";
 
@@ -127,33 +127,21 @@ export function buildFixTrackAlertEmail(issues: OverdueIssue[], appUrl: string):
     return `<h3 style="margin:24px 0 8px;color:#0f172a;">${esc(trade.split("_").map(w => w[0]?.toUpperCase() + w.slice(1)).join(" "))}</h3><table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;"><tbody>${rows}</tbody></table>`;
   }).join("");
 
-  const html = `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">FixTrack — issue${issues.length !== 1 ? "s" : ""} needing attention</div>
-    </div>
-    <div style="padding:32px 40px;">
+  const html = renderEmailLayout({
+    subtitle: `FixTrack — issue${issues.length !== 1 ? "s" : ""} needing attention`,
+    footerNote: `You are receiving this as an account administrator.`,
+    bodyHtml: `
       <p style="font-size:15px;color:#334155;margin:0 0 20px;">
         ${issues.length} maintenance issue${issues.length !== 1 ? "s are" : " is"} overdue or have been left unactioned. Please review and take action in FixTrack.
       </p>
       ${sections}
       <div style="margin-top:28px;text-align:center;">
-        <a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        <a href="${appUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
           Open ComplyTrack →
         </a>
       </div>
-    </div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consultancy · You are receiving this as an account administrator.
-    </div>
-  </div>
-</body>
-</html>`;
+`,
+  });
   const text = [...groups.entries()].flatMap(([trade, tradeIssues]) => [
     trade.split("_").map(w => w[0]?.toUpperCase() + w.slice(1)).join(" "),
     ...tradeIssues.map(i => `- ${i.title} — ${i.site_name ?? "No site"} — ${i.contractor_name ?? "Unassigned"} — ${i.days_open} days open — ${appUrl}/fix-track/${i.id}`),

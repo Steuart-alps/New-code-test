@@ -547,7 +547,7 @@ export async function sendPaymentFailedEmail(opts: {
           <p>A payment${amount ? ` of <strong>${escapeHtml(amount)}</strong>` : ""} for the ComplyTrack subscription for
              <strong>${escapeHtml(client.name)}</strong> failed. Stripe will retry it automatically, but if it keeps failing
              the subscription will be cancelled and access will end.</p>
-          <p><a href="${escapeHtml(payLink)}" style="display:inline-block;background:#4f46e5;color:white;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Update payment details</a></p>
+          <p><a href="${escapeHtml(payLink)}" style="display:inline-block;background:#2563eb;color:white;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Update payment details</a></p>
           <p style="color:#64748b;font-size:13px;">You can also manage your payment method from Settings → Billing: ${escapeHtml(billingUrl)}</p>
           <p>Best regards,<br><strong>ComplyTrack</strong></p>
         </div>`;
