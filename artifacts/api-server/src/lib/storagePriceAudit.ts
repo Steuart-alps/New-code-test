@@ -56,20 +56,19 @@ function asHtml(title: string, text: string): string {
 }
 
 export function formatStoragePriceAlert(check: StoragePriceCheck, openedAt: Date): StoragePriceAuditMessage {
-  const fx = check.currency === "usd" ? "" : ` × ${check.usdExchangeRate ?? "?"} ${check.currency.toUpperCase()}/USD`;
+  const fx = `${check.usdExchangeRate ?? "?"} GBP/USD${check.exchangeRateAssumed ? " (STORAGE_USD_EXCHANGE_RATE unset, cautious fallback)" : ""}`;
   const text = [
     check.message,
     "",
-    `Stripe price: ${check.priceId} (${check.currency.toUpperCase()}), configured ${check.configuredUnitAmount ?? "?"} minor units per GiB-month.`,
-    `Calculation: ${check.providerUsdPerGibMonth ?? "?"} USD provider rate × (1 + ${check.markupPercent ?? "?"}% margin)${fx} = ${check.exactUnitAmount ?? "?"}, rounded up to ${check.expectedUnitAmount ?? "?"}.`,
-    `Tolerance: ${check.tolerancePercent ?? "?"}%. Stripe minimum charge: ${check.stripeMinimumChargeMinorUnits ?? "?"} minor units.`,
+    `Stripe price: ${check.priceId} (${check.currency.toUpperCase()}), configured ${check.configuredUnitAmount ?? "?"} pence per GiB-month; the app sells at ${check.expectedUnitAmount} pence (£1 per 10 GiB).`,
+    `Cost: ${check.providerUsdPerGibMonth ?? "?"} USD provider rate × (1 + ${check.markupPercent ?? "?"}% margin) × ${fx} = ${check.exactUnitAmount ?? "?"}, rounded up to ${check.costUnitAmount ?? "?"} pence.`,
     "",
     "New storage purchases are paused until this is fixed. Existing storage subscriptions are unchanged.",
-    "Fix: create a new monthly per-GiB Stripe price at the expected amount and set STORAGE_ADDON_PRICE_ID to it, or correct STORAGE_PROVIDER_USD_PER_GIB_MONTH, STORAGE_ALPS_MARKUP_PERCENT or STORAGE_USD_EXCHANGE_RATE. Customers already on the old price keep it until moved in Stripe.",
+    "Fix: if costs have risen, raise STORAGE_PACK_PRICE_PENCE in the code (a new Stripe price is then created) or correct STORAGE_PROVIDER_USD_PER_GIB_MONTH, STORAGE_ALPS_MARKUP_PERCENT or STORAGE_USD_EXCHANGE_RATE. If STORAGE_ADDON_PRICE_ID is set, point it at a monthly GBP price of the sale amount or unset it. Customers already on an old price keep it until moved in Stripe.",
     "Check any time: GET /api/admin/storage-price-check (platform operators).",
   ].join("\n");
   const subject = check.status === "drift"
-    ? "[ComplyTrack] Storage add-on price out of line: purchases paused"
+    ? "[ComplyTrack] Storage add-on price no longer covers costs: purchases paused"
     : "[ComplyTrack] Storage add-on price check misconfigured: purchases paused";
   return {
     subject,

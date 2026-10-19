@@ -250,6 +250,10 @@ jobs:
       - name: Deletion reminder email tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:deletion-reminder
 
+      # One email to owners and admins per crossing of the storage warning level.
+      - name: Storage warning email tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:storage-warning-emails
+
       # Large exports come as numbered parts; every file is in exactly one.
       - name: Export in parts tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:export-parts
