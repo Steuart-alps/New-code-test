@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireRole, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionState, type StoredOptionState } from "../lib/formOptions";
+import { siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -19,10 +20,10 @@ function trainingTypeIsAllowed(value: string, options: StoredOptionState): boole
 async function canAccessSite(clientId: number, siteId: number | null | undefined, departmentId: number | null) {
   if (siteId == null) return true;
   const result = await db.execute(sql`
-    SELECT department_id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1
+    SELECT id, department_id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1
   `);
   const site = (result.rows ?? [])[0] as any;
-  return !!site && (departmentId === null || site.department_id === null || site.department_id === departmentId);
+  return !!site && await siteVisibleToDepartment({ id: Number(site.id), departmentId: site.department_id }, departmentId);
 }
 
 // A roster link is accepted only for a roster member of this tenant whose
@@ -143,6 +144,7 @@ router.get("/records", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const { recordType, siteId, q } = req.query as any;
+  const departmentId = getActiveDepartmentId(req);
 
   const result = await db.execute(sql`
     SELECT r.id, r.client_id, r.site_id, r.record_type,
@@ -154,8 +156,8 @@ router.get("/records", requireAuth, async (req, res) => {
     FROM train_track_records r
     LEFT JOIN sites s ON r.site_id = s.id
     WHERE r.client_id = ${clientId}
-      ${getActiveDepartmentId(req) !== null ? sql`
-        AND (r.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
+      ${departmentId !== null ? sql`
+        AND (r.site_id IS NULL OR ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)})
       ` : sql``}
     ORDER BY r.expiry_date ASC NULLS LAST, r.completed_date DESC, r.staff_name ASC
   `);

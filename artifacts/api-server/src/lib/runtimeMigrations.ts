@@ -924,6 +924,20 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_capacity_reductions_request" ON "storage_capacity_reductions" ("request_id")`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_capacity_reductions_tenant" ON "storage_capacity_reductions" ("client_id", "subscription_id", "effective_at")`);
+    // Storage warning level emails to managers (lib/storageWarningEmails.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_warning_notices" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "threshold_bytes" bigint NOT NULL,
+        "used_bytes" bigint NOT NULL,
+        "recipient_count" integer NOT NULL,
+        "sent_at" timestamptz NOT NULL DEFAULT now(),
+        "cleared_at" timestamptz
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_warning_notices_open" ON "storage_warning_notices" ("client_id") WHERE "cleared_at" IS NULL`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_warning_notices_tenant" ON "storage_warning_notices" ("client_id", "sent_at")`);
     // Bound the immutable response ledger and remove spent opaque credentials.
     await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
     await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);
@@ -4949,6 +4963,12 @@ async function migrateMaintenanceManager() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_user_departments_department" ON "user_departments" ("department_id")`);
+  // Departments sit under a site; existing ones keep spanning every site.
+  await db.execute(sql`
+    ALTER TABLE "departments"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_departments_site" ON "departments" ("site_id")`);
 }
 
 async function migrateMobileSessions() {

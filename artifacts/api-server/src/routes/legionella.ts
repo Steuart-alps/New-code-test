@@ -9,6 +9,7 @@ import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStore
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 import { unreadLegionellaOutletUnits } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
+import { siteVisibleSql, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 import { completeLinkedTasksFromCheck, linkedTaskCompletions } from "../lib/trackTaskLink";
 
 const router = Router();
@@ -189,7 +190,7 @@ async function checkSiteAccess(
   if (siteId == null) return null;
   const site = await fetchClientSite(siteId, clientId);
   if (!site) return "not_found";
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return "forbidden";
+  if (!(await siteVisibleToDepartment(site, deptId))) return "forbidden";
   return "ok";
 }
 
@@ -200,7 +201,7 @@ function allowedSitesSubquery(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
@@ -440,11 +441,11 @@ router.get("/outlets", requireAuth, async (req, res) => {
     SELECT id, client_id, site_id, name, type, location, sort_order, active, created_at, updated_at
     FROM legionella_sentinel_outlets o
     WHERE o.client_id = ${clientId} AND o.active = true
-      AND (${deptId}::integer IS NULL OR o.site_id IS NULL OR EXISTS (
+      ${deptId !== null ? sql`AND (o.site_id IS NULL OR EXISTS (
         SELECT 1 FROM sites s
         WHERE s.id = o.site_id AND s.client_id = o.client_id
-          AND (s.department_id IS NULL OR s.department_id = ${deptId})
-      ))
+          AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId)}
+      ))` : sql``}
     ORDER BY sort_order ASC, id ASC
   `);
   res.json(rows.rows ?? []);
@@ -476,17 +477,17 @@ router.get("/outlet-status", requireAuth, async (req, res) => {
       AND c.client_id = ${clientId}
       AND c.check_date >= ${monthStart}
       AND c.check_date <  ${monthEnd}
-      AND (${deptId}::integer IS NULL OR c.site_id IS NULL OR EXISTS (
+      ${deptId !== null ? sql`AND (c.site_id IS NULL OR EXISTS (
         SELECT 1 FROM sites cs
         WHERE cs.id = c.site_id AND cs.client_id = c.client_id
-          AND (cs.department_id IS NULL OR cs.department_id = ${deptId})
-      ))
+          AND ${siteVisibleSql(sql`cs.id`, sql`cs.department_id`, deptId)}
+      ))` : sql``}
     WHERE o.client_id = ${clientId} AND o.active = true
-      AND (${deptId}::integer IS NULL OR o.site_id IS NULL OR EXISTS (
+      ${deptId !== null ? sql`AND (o.site_id IS NULL OR EXISTS (
         SELECT 1 FROM sites s
         WHERE s.id = o.site_id AND s.client_id = o.client_id
-          AND (s.department_id IS NULL OR s.department_id = ${deptId})
-      ))
+          AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId)}
+      ))` : sql``}
     ORDER BY o.sort_order ASC, o.id ASC, c.check_date DESC
   `);
 

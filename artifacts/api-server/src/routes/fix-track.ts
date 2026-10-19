@@ -21,6 +21,7 @@ import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssi
 import { digestBearerToken, newBearerToken, encryptTokenPayload, decryptTokenPayload, TokenPayloadError, isDamagedTokenPayload } from "../lib/bearerTokens";
 import { reminderDraftStillCurrent, SUPERSEDED_REMINDER_ERROR } from "../lib/reminderCycles";
 import { PortalLinkChangedError, sendPortalDraftWithCurrentLink } from "../lib/contractorPortalDrafts";
+import { recordSiteVisibleSql, siteVisibleSql, siteVisibleToDepartment, sitesTableVisibleTo, visibleSiteIdsSql } from "../lib/departmentSites";
 
 /** Claim-transaction result for a reminder withdrawn as out of date. */
 const SUPERSEDED = Symbol("superseded");
@@ -190,7 +191,7 @@ async function finalizeIssueMedia(paths: string[] | undefined, clientId: number)
     return null;
   } catch (err) {
     if (err instanceof ObjectNotFoundError) return "Uploaded media object not found";
-    if (err instanceof ObjectOwnershipError) return err.message;
+    if (err instanceof ObjectOwnershipError || err instanceof ObjectContentError) return err.message;
     return "Could not secure uploaded media";
   }
 }
@@ -203,15 +204,15 @@ function allowedSites(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
 async function canAccessSite(siteId: number | null | undefined, clientId: number, deptId: number | null) {
   if (siteId == null) return true;
-  const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable)
+  const [site] = await db.select({ id: sitesTable.id, departmentId: sitesTable.departmentId }).from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
-  return !!site && (deptId === null || site.departmentId === null || site.departmentId === deptId);
+  return !!site && await siteVisibleToDepartment(site, deptId);
 }
 
 async function verifyContractor(contractorId: number | null | undefined, clientId: number) {
@@ -907,7 +908,7 @@ router.post("/issues/:id/notes", requireAuth, denyViewers, async (req, res) => {
 
   const deptId = getActiveDepartmentId(req);
   const deptClause = deptId !== null
-    ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))`
+    ? sql` AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))`
     : sql``;
 
   const stamp = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -1189,9 +1190,19 @@ function isManager(req: any): boolean {
     || u.isMaintenanceManager === true);
 }
 
+/** The site of a queued email's item (NULL for contractor-level emails). */
+function queueSiteSql(queue: string) {
+  const q = sql.raw(queue);
+  return sql`(CASE ${q}.entity_type
+    WHEN 'fix_track' THEN (SELECT qsi.site_id FROM fix_track_issues qsi WHERE qsi.id = COALESCE(${q}.entity_id, ${q}.issue_id) AND qsi.client_id = ${q}.client_id)
+    WHEN 'compliance' THEN (SELECT qsc.site_id FROM compliance_items qsc WHERE qsc.id = ${q}.entity_id AND qsc.client_id = ${q}.client_id)
+  END)`;
+}
+
 function queueDepartmentScope(req: any) {
   const dept = getActiveDepartmentId(req);
-  return dept === null ? sql`` : sql` AND (department_id IS NULL OR department_id=${dept})`;
+  return dept === null ? sql`` : sql` AND (department_id IS NULL OR department_id=${dept})
+    AND ${recordSiteVisibleSql(queueSiteSql("contractor_email_queue"), dept)}`;
 }
 
 /** Delivery outcomes of an approved FixTrack contractor email, kept in the
@@ -1549,7 +1560,8 @@ router.get("/contractor-email-queue", requireAuth, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const dept = getActiveDepartmentId(req);
-  const extra = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})`;
+  const extra = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})
+    AND ${recordSiteVisibleSql(queueSiteSql("q"), dept)}`;
   const result = await db.execute(sql`SELECT q.*, COALESCE(i.title, ci.title) AS item_title,
     s.name AS site_name, c.name AS contractor_name,
     (SELECT json_build_object('id',qs.id,'pricePence',qs.price_pence,'status',COALESCE(qs.status,'submitted')) FROM fix_track_quote_submissions qs WHERE qs.queue_id=q.id LIMIT 1) AS quote
@@ -1597,7 +1609,8 @@ router.get("/calendar-cancellations", requireAuth, async (req, res) => {
   const contractorId = rawContractorId === undefined ? null : Number(rawContractorId);
   if (contractorId !== null && !Number.isInteger(contractorId)) return res.status(400).json({ error: "Invalid contractor" });
   const dept = getActiveDepartmentId(req);
-  const deptScope = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})`;
+  const deptScope = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})
+    AND ${recordSiteVisibleSql(sql`i.site_id`, dept)}`;
   const contractorScope = contractorId === null ? sql`` : sql` AND q.contractor_id = ${contractorId}`;
   const result = await db.execute(sql`SELECT q.id, q.entity_id, q.contractor_id, q.to_email, q.status, q.ics_content,
       q.sent_at, q.updated_at, q.last_error, i.title AS job_title, c.name AS contractor_name,
@@ -1878,7 +1891,7 @@ router.post("/quotes/:quoteId/decline", requireAuth, denyViewers, async (req, re
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const id = Number(req.params.quoteId);
   const deptId = getActiveDepartmentId(req);
-  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR s.department_id=${deptId})`;
+  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR (s.department_id=${deptId} AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId)}))`;
   const r = await db.execute(sql`UPDATE fix_track_quote_submissions qs SET status='declined'
     FROM contractor_email_queue q
     JOIN fix_track_issues i ON i.id=q.issue_id AND i.client_id=q.client_id
@@ -1895,7 +1908,7 @@ router.post("/quotes/:quoteId/accept", requireAuth, denyViewers, async (req, res
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const id = Number(req.params.quoteId);
   const deptId = getActiveDepartmentId(req);
-  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR s.department_id=${deptId})`;
+  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR (s.department_id=${deptId} AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId)}))`;
   const out = await db.transaction(async (tx) => {
     const r = await tx.execute(sql`SELECT qs.*,q.*,i.title,i.description,i.location,i.issue_type,i.priority,
       i.site_id,i.target_date,s.name AS site_name,c.name AS contractor_name,q.to_email AS contractor_email,
@@ -1952,7 +1965,7 @@ router.post("/issues/:id/approve-send", requireAuth, denyViewers, async (req, re
 
   const deptId = getActiveDepartmentId(req);
   const deptClause = deptId !== null
-    ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))`
+    ? sql` AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))`
     : sql``;
   const result = await db.execute(sql`
     UPDATE fix_track_issues
@@ -2037,10 +2050,10 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
 
   const sendDeptId = getActiveDepartmentId(req);
   const sendDeptClause = sendDeptId !== null
-    ? sql` AND (fi.site_id IS NULL OR fi.site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${sendDeptId})))`
+    ? sql` AND (fi.site_id IS NULL OR fi.site_id IN (${visibleSiteIdsSql(clientId, sendDeptId)}))`
     : sql``;
   const sendUpdateDeptClause = sendDeptId !== null
-    ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${sendDeptId})))`
+    ? sql` AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, sendDeptId)}))`
     : sql``;
 
   const result = await db.execute(sql`

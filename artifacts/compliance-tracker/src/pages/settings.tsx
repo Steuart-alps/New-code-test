@@ -11,6 +11,7 @@ import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin, useIsConsultant } from "@/context/auth-context";
 import { roleLabel } from "@/lib/roles";
+import { departmentLabel } from "@/lib/departments";
 import { apiFetch as authenticatedApiFetch, withActiveClient, withCsrfToken } from "@/lib/api";
 import { BusinessTypeCard } from "@/components/business-type-card";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
@@ -107,7 +108,9 @@ function formatCheckedAge(seconds: number): string {
 }
 
 /** Storage add-on offer from /billing/config: per-GiB monthly price in minor units. */
-type StorageAddonOffer = { unitAmount: number; currency: string; minimumGib: number };
+type StorageAddonOffer = { unitAmount: number; currency: string; minimumGib: number; packGib?: number };
+/** Extra storage is sold in steps of this many GB (£1 per 10 GB). */
+const STORAGE_PACK_GIB = 10;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -187,6 +190,7 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
     capacity.unitAmount !== null && capacity.currency ? formatMinorUnits(capacity.unitAmount * gib, capacity.currency) : null;
   const target = Number(targetGib);
   const targetValid = Number.isInteger(target)
+    && target % STORAGE_PACK_GIB === 0
     && capacity.minimumGib !== null
     && target >= capacity.minimumGib
     && target < capacity.renewingGib;
@@ -207,7 +211,7 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
       setConfirmOpen(false);
       toast({
         title: "Storage reduction confirmed",
-        description: `Stripe has been updated. From ${formatUkDate(data.effectiveAt)} your subscription renews with ${data.toGib} GiB of extra storage. You keep ${data.paidGibThisPeriod} GiB until then.`,
+        description: `Stripe has been updated. From ${formatUkDate(data.effectiveAt)} your subscription renews with ${data.toGib} GB of extra storage. You keep ${data.paidGibThisPeriod} GB until then.`,
       });
       await capacityQuery.refetch();
       onChanged();
@@ -223,10 +227,10 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
       <div>
         <p className="text-sm text-muted-foreground">Extra storage you pay for</p>
         <p className="mt-1 text-lg font-semibold">
-          {capacity.renewingGib} GiB each month{price(capacity.renewingGib) ? ` (${price(capacity.renewingGib)} / month)` : ""}
+          {capacity.renewingGib} GB each month{price(capacity.renewingGib) ? ` (${price(capacity.renewingGib)} / month)` : ""}
         </p>
         {capacity.planIncludedGib !== null && (
-          <p className="text-xs text-muted-foreground">On top of the {capacity.planIncludedGib} GiB included with your plan.</p>
+          <p className="text-xs text-muted-foreground">On top of the {capacity.planIncludedGib} GB included with your plan.</p>
         )}
       </div>
 
@@ -234,32 +238,32 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
         <div key={`${row.requestedAt}-${row.toGib}`} className="flex gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            Reduction confirmed on {formatUkDate(row.requestedAt)}: from {formatUkDate(row.effectiveAt)} your subscription renews with {row.toGib} GiB instead of {row.fromGib} GiB.
+            Reduction confirmed on {formatUkDate(row.requestedAt)}: from {formatUkDate(row.effectiveAt)} your subscription renews with {row.toGib} GB instead of {row.fromGib} GB.
           </span>
         </div>
       ))}
       {capacity.paidGibThisPeriod > capacity.renewingGib && (
-        <p className="text-sm">You keep {capacity.paidGibThisPeriod} GiB of extra storage until {periodEnd}, because this month is already paid for.</p>
+        <p className="text-sm">You keep {capacity.paidGibThisPeriod} GB of extra storage until {periodEnd}, because this month is already paid for.</p>
       )}
 
       {capacity.minimumGib !== null && capacity.planIncludedGib !== null && (
         <p className="text-sm text-muted-foreground" data-testid="storage-minimum">
           {capacity.minimumGib > 0
-            ? `Your retained files (${formatBytes(capacity.usedBytes)}) need at least ${capacity.minimumGib} GiB of extra storage, so you can't go below that.`
-            : `Your retained files (${formatBytes(capacity.usedBytes)}) fit in the ${capacity.planIncludedGib} GiB included with your plan, so you can remove all extra storage.`}
+            ? `Your retained files (${formatBytes(capacity.usedBytes)}) need at least ${capacity.minimumGib} GB of extra storage, so you can't go below that.`
+            : `Your retained files (${formatBytes(capacity.usedBytes)}) fit in the ${capacity.planIncludedGib} GB included with your plan, so you can remove all extra storage.`}
         </p>
       )}
 
       {capacity.canReduce ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex-1 space-y-1.5">
-            <Label htmlFor="storage-renew-gib">Renew with (GiB of extra storage)</Label>
+            <Label htmlFor="storage-renew-gib">Renew with (GB of extra storage, in steps of {STORAGE_PACK_GIB})</Label>
             <Input
               id="storage-renew-gib"
               type="number"
               min={capacity.minimumGib ?? 0}
-              max={capacity.renewingGib - 1}
-              step="1"
+              max={capacity.renewingGib - STORAGE_PACK_GIB}
+              step={STORAGE_PACK_GIB}
               value={targetGib}
               onChange={(event) => setTargetGib(event.target.value)}
             />
@@ -278,14 +282,14 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
       <Dialog open={confirmOpen} onOpenChange={(open) => { if (!busy) setConfirmOpen(open); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Reduce extra storage to {targetValid ? target : "…"} GiB?</DialogTitle>
+            <DialogTitle>Reduce extra storage to {targetValid ? target : "…"} GB?</DialogTitle>
             <DialogDescription asChild>
               <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm">
                 <li>
-                  From {periodEnd}, your subscription renews with {target} GiB instead of {capacity.renewingGib} GiB
+                  From {periodEnd}, your subscription renews with {target} GB instead of {capacity.renewingGib} GB
                   {price(capacity.renewingGib) && price(target) ? ` (${price(capacity.renewingGib)} → ${price(target)} a month)` : ""}.
                 </li>
-                <li>You keep {capacity.paidGibThisPeriod} GiB until then. Nothing is refunded for the current month.</li>
+                <li>You keep {capacity.paidGibThisPeriod} GB until then. Nothing is refunded for the current month.</li>
                 <li>No files are deleted and nobody loses access. If your files grow, you can buy storage again.</li>
               </ul>
             </DialogDescription>
@@ -321,6 +325,15 @@ function StorageUsageCard() {
   });
   const usage = usageQuery.data;
 
+  // The storage warning email links to /settings#storage.
+  useEffect(() => {
+    if (window.location.hash !== "#storage" || usageQuery.isLoading) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("storage")?.scrollIntoView({ block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [usageQuery.isLoading]);
+
   useEffect(() => {
     if (usage) {
       setThresholdGb(String(Number((usage.warningThresholdBytes / (1024 ** 3)).toFixed(3))));
@@ -354,7 +367,7 @@ function StorageUsageCard() {
   };
 
   // Only offer to buy storage when the storage add-on is configured and its
-  // Stripe price matches the provider rate plus margin (checked server-side).
+  // Stripe price is the £1 per 10 GB storage price (checked server-side).
   const [storageAddon, setStorageAddon] = useState<StorageAddonOffer | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -369,9 +382,11 @@ function StorageUsageCard() {
   }, [activeClientId]);
 
   const excessGib = Math.ceil((usage?.estimatedCost?.excessStorageBytes ?? 0) / (1024 ** 3));
-  const storagePurchaseGib = Math.max(1, storageAddon?.minimumGib ?? 1, excessGib);
+  // Enough whole 10 GB steps to cover what the files need beyond the plan.
+  const storagePackGib = storageAddon?.packGib ?? STORAGE_PACK_GIB;
+  const storagePurchaseGib = Math.max(storagePackGib, storageAddon?.minimumGib ?? 0, Math.ceil(excessGib / storagePackGib) * storagePackGib);
   const storagePurchaseLabel = storageAddon
-    ? `Buy ${storagePurchaseGib} GiB for ${formatMinorUnits(storageAddon.unitAmount * storagePurchaseGib, storageAddon.currency)} / month`
+    ? `Buy ${storagePurchaseGib} GB for ${formatMinorUnits(storageAddon.unitAmount * storagePurchaseGib, storageAddon.currency)} / month`
     : "";
 
   const buyAdditionalStorage = async () => {
@@ -386,7 +401,7 @@ function StorageUsageCard() {
       if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);
       toast({
         title: "Additional storage added",
-        description: `${gib} GiB has been added to your monthly Stripe subscription.`,
+        description: `${gib} GB has been added to your monthly subscription.`,
       });
       await usageQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["/api/billing/storage", activeClientId] });
@@ -402,14 +417,14 @@ function StorageUsageCard() {
     : 0;
 
   return (
-    <Card className="shadow-lg border-border/50 bg-card">
+    <Card id="storage" className="scroll-mt-6 shadow-lg border-border/50 bg-card">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <HardDrive className="w-5 h-5 text-sky-600" />
           <CardTitle className="font-display">File Storage</CardTitle>
         </div>
         <CardDescription>
-          Monitor retained documents and evidence for this account. The warning is informational and never blocks or deletes files.
+          Monitor retained documents and evidence for this account. When usage passes the warning level, the account's owners and admins get one email; it never blocks or deletes files.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -424,7 +439,7 @@ function StorageUsageCard() {
                 <AlertTriangle className="h-5 w-5 shrink-0" />
                 <div>
                   <p className="font-medium">Storage warning threshold reached</p>
-                  <p className="text-sm">Review retained files or raise the warning level. Uploads will continue normally.</p>
+                  <p className="text-sm">Buy extra storage, review retained files or raise the warning level. Uploads will continue normally.</p>
                 </div>
               </div>
             )}
@@ -456,14 +471,13 @@ function StorageUsageCard() {
                 <p className="mt-2 text-sm font-medium">
                   {usage.estimatedCost
                     ? (usage.estimatedCost.excessStorageBytes ?? 0) > 0
-                      ? `Estimated excess storage charge: US$${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)} / month (USD)`
-                      : `Within the included ${formatBytes(usage.estimatedCost.includedStorageBytes)} storage allowance`
+                      ? `Your files are ${formatBytes(usage.estimatedCost.excessStorageBytes)} over the ${formatBytes(usage.estimatedCost.includedStorageBytes)} of storage you have`
+                      : `Within the ${formatBytes(usage.estimatedCost.includedStorageBytes)} of storage you have`
                     : "Storage pricing is currently unavailable for this subscription."}
                 </p>
                 {usage.estimatedCost && (usage.estimatedCost.excessStorageBytes ?? 0) > 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Based on our storage provider’s cost plus a {usage.estimatedCost.markupPercent ?? 20}% ALPS margin.
-                    Downloads are measured separately and are not charged here.
+                    Nothing extra is charged automatically and uploads carry on. Extra storage is £1 per 10 GB a month.
                   </p>
                 )}
                 {storageAddon && (
@@ -480,7 +494,7 @@ function StorageUsageCard() {
                     {storagePurchaseBusy ? "Adding storage to Stripe…" : storagePurchaseLabel}
                   </Button>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {formatMinorUnits(storageAddon.unitAmount, storageAddon.currency)} per GiB each month, before any VAT. The first month is charged now.
+                    {formatMinorUnits(storageAddon.unitAmount * storagePackGib, storageAddon.currency)} per {storagePackGib} GB each month, before any VAT. The first month is charged now.
                   </p>
                   </>
                 )}
@@ -526,7 +540,7 @@ function StorageUsageCard() {
 }
 
 // ── Local types used by DepartmentsCard ──────────────────────────────────────
-interface Department { id: number; clientId: number; name: string; description?: string | null; createdAt: string; }
+interface Department { id: number; clientId: number; name: string; description?: string | null; createdAt: string; siteId?: number | null; siteName?: string | null; }
 interface DeptUser { id: number; name: string; email: string; role: string; departmentId?: number | null; active?: boolean; }
 interface DeptSite { id: number; name: string; departmentId?: number | null; }
 
@@ -545,9 +559,12 @@ function DepartmentsCard() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
 
-  // New department inline form
+  // New department inline form: the site it goes under ("all" spans every
+  // site), and whether the same name is added at every other site too.
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newSite, setNewSite] = useState<string>("");
+  const [copyToSites, setCopyToSites] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [deptToDelete, setDeptToDelete] = useState<{ id: number; name: string } | null>(null);
@@ -578,16 +595,27 @@ function DepartmentsCard() {
       return next;
     });
 
+  const chosenSite = newSite || (sites[0] ? String(sites[0].id) : "all");
+
   const createDept = async () => {
     const name = newName.trim();
     if (!name) return;
     setBusy(true);
     try {
-      await apiFetch("/departments", {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      });
+      const siteId = chosenSite === "all" ? null : Number(chosenSite);
+      // With "every other site" ticked, a site that already has the name is skipped.
+      const targets = siteId !== null && copyToSites
+        ? [siteId, ...sites.map(s => s.id).filter(id => id !== siteId)]
+        : [siteId];
+      for (const target of targets) {
+        if (target !== siteId && departments.some(d => d.siteId === target && d.name.trim().toLowerCase() === name.toLowerCase())) continue;
+        await apiFetch("/departments", {
+          method: "POST",
+          body: JSON.stringify(target === null ? { name } : { name, siteId: target }),
+        });
+      }
       setNewName("");
+      setCopyToSites(false);
       setCreating(false);
       await refresh();
     } catch (err: any) {
@@ -623,6 +651,18 @@ function DepartmentsCard() {
       await refresh();
     } catch (err: any) {
       toast({ title: "Failed to delete", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const moveDept = async (id: number, value: string) => {
+    setBusy(true);
+    try {
+      await apiFetch(`/departments/${id}`, { method: "PUT", body: JSON.stringify({ siteId: value === "all" ? null : Number(value) }) });
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Couldn't move the department", description: err.message, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -665,9 +705,9 @@ function DepartmentsCard() {
           <CardTitle className="font-display">Departments</CardTitle>
         </div>
         <CardDescription>
-          Organise your sites and staff into departments. Staff and viewer accounts assigned to a
-          department will only see data for sites in that department. Users or sites with no
-          department assignment can see everything.
+          Each department sits under one of your sites. Staff in a department see only that site
+          and their department's records there. A department under "Every site" covers all your
+          sites. People with no department see every site.
         </CardDescription>
       </CardHeader>
 
@@ -690,7 +730,15 @@ function DepartmentsCard() {
           </div>
         ) : (
           <>
-            {departments.map(dept => {
+            {[
+              ...sites.map(site => ({ key: `site-${site.id}`, label: site.name, rows: departments.filter(d => d.siteId === site.id) })),
+              { key: "all", label: "Every site", rows: departments.filter(d => d.siteId == null || !sites.some(s => s.id === d.siteId)) },
+            ].filter(group => group.rows.length > 0).map(group => (
+            <div key={group.key} className="space-y-2" data-testid={`departments-${group.key}`}>
+              {sites.length > 0 && (
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-1">{group.label}</p>
+              )}
+            {group.rows.map(dept => {
               const members = users.filter(u => u.departmentId === dept.id);
               const deptSites = sites.filter(s => s.departmentId === dept.id);
               const isOpen = expanded.has(dept.id);
@@ -736,7 +784,8 @@ function DepartmentsCard() {
                     )}
 
                     <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      {members.length} {members.length === 1 ? "member" : "members"} · {deptSites.length} {deptSites.length === 1 ? "site" : "sites"}
+                      {members.length} {members.length === 1 ? "member" : "members"}
+                      {dept.siteId == null && <> · {deptSites.length} {deptSites.length === 1 ? "site" : "sites"}</>}
                     </span>
 
                     {canAdmin && !isEditing && (
@@ -808,9 +857,32 @@ function DepartmentsCard() {
                         )}
                       </div>
 
-                      {/* Sites */}
+                      {/* The site it sits under */}
+                      {sites.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Site</p>
+                          {canAdmin ? (
+                            <Select value={dept.siteId != null ? String(dept.siteId) : "all"} onValueChange={val => moveDept(dept.id, val)} disabled={busy}>
+                              <SelectTrigger className="h-7 text-xs w-52" aria-label={`Site for ${dept.name}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {sites.map(s => (
+                                  <SelectItem key={s.id} value={String(s.id)} className="text-xs">{s.name}</SelectItem>
+                                ))}
+                                <SelectItem value="all" className="text-xs">Every site</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">{dept.siteName ?? "Every site"}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Sites given only to this department (departments that span every site) */}
+                      {dept.siteId == null && (
                       <div>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sites</p>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sites only this department sees</p>
                         {deptSites.length === 0 ? (
                           <p className="text-xs text-muted-foreground italic">No sites assigned yet.</p>
                         ) : (
@@ -850,29 +922,53 @@ function DepartmentsCard() {
                           </Select>
                         )}
                       </div>
+                      )}
                     </div>
                   )}
                 </div>
               );
             })}
+            </div>
+            ))}
 
             {/* New department inline form */}
             {canAdmin && (
               creating ? (
-                <div className="flex items-center gap-2 pt-1">
-                  <Input
-                    placeholder="Department name"
-                    value={newName}
-                    onChange={e => setNewName(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === "Enter") createDept();
-                      if (e.key === "Escape") { setCreating(false); setNewName(""); }
-                    }}
-                    className="h-8 text-sm w-52"
-                    autoFocus
-                  />
-                  <Button size="sm" onClick={createDept} disabled={busy || !newName.trim()}>Create</Button>
-                  <Button size="sm" variant="ghost" onClick={() => { setCreating(false); setNewName(""); }}>Cancel</Button>
+                <div className="space-y-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      placeholder="Department name"
+                      value={newName}
+                      onChange={e => setNewName(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") createDept();
+                        if (e.key === "Escape") { setCreating(false); setNewName(""); }
+                      }}
+                      className="h-8 text-sm w-52"
+                      autoFocus
+                    />
+                    {sites.length > 0 && (
+                      <Select value={chosenSite} onValueChange={setNewSite}>
+                        <SelectTrigger className="h-8 text-sm w-48" aria-label="Site for the new department">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {sites.map(s => (
+                            <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                          ))}
+                          <SelectItem value="all">Every site</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Button size="sm" onClick={createDept} disabled={busy || !newName.trim()}>Create</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setCreating(false); setNewName(""); }}>Cancel</Button>
+                  </div>
+                  {sites.length > 1 && chosenSite !== "all" && (
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <input type="checkbox" checked={copyToSites} onChange={e => setCopyToSites(e.target.checked)} />
+                      Also add it to every other site (the name only; each site's department has its own staff)
+                    </label>
+                  )}
                 </div>
               ) : (
                 <Button
@@ -1115,7 +1211,7 @@ function TrackSummaryRoutingCard() {
                     <span className="max-w-[55%] truncate text-xs text-muted-foreground">
                       {!Object.hasOwn(routing, track.key)
                         ? "Automatic department match"
-                        : [...departments.filter((department) => selectedDepartments.includes(department.id)).map((department) => department.name),
+                        : [...departments.filter((department) => selectedDepartments.includes(department.id)).map((department) => departmentLabel(department)),
                             ...selectedManagers.map((manager) => manager.name)].join(", ") || "Senior management only"}
                     </span>
                   </summary>
@@ -1142,7 +1238,7 @@ function TrackSummaryRoutingCard() {
                           onChange={() => toggleDepartment(track.key, department.id)}
                           disabled={!canAdmin || saving || !Object.hasOwn(routing, track.key)}
                           className="h-4 w-4 accent-primary" />
-                        {department.name}
+                        {departmentLabel(department)}
                       </label>
                     ))}
                     <span className="sm:col-span-2 text-xs font-semibold text-muted-foreground">Named managers</span>
@@ -2632,7 +2728,7 @@ function RequiredActionTemplatesCard() {
           <div className="space-y-1.5"><Label>Default owner</Label><Input value={draft.ownerName} onChange={e => setDraft({ ...draft, ownerName: e.target.value })} placeholder="Role or person" /></div>
           <div className="space-y-1.5"><Label>Lead time (days)</Label><Input type="number" min="0" value={draft.leadTimeDays} onChange={e => setDraft({ ...draft, leadTimeDays: e.target.value })} /></div>
           <div className="space-y-1.5"><Label>Site scope <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "all"} onValueChange={siteId => setDraft({ ...draft, siteId: siteId === "all" ? "" : siteId })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All sites</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
-          <div className="space-y-1.5"><Label>Department scope <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.departmentId || "all"} onValueChange={departmentId => setDraft({ ...draft, departmentId: departmentId === "all" ? "" : departmentId })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All departments</SelectItem>{departments.map(department => <SelectItem key={department.id} value={String(department.id)}>{department.name}</SelectItem>)}</SelectContent></Select></div>
+          <div className="space-y-1.5"><Label>Department scope <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.departmentId || "all"} onValueChange={departmentId => setDraft({ ...draft, departmentId: departmentId === "all" ? "" : departmentId })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All departments</SelectItem>{departments.map(department => <SelectItem key={department.id} value={String(department.id)}>{departmentLabel(department)}</SelectItem>)}</SelectContent></Select></div>
           <div className="flex gap-2 sm:col-span-2"><Button type="button" disabled={busy || !draft.title.trim() || !draft.instruction.trim()} onClick={save}>{editingId ? "Save template" : "Create template"}</Button>{editingId && <Button type="button" variant="outline" onClick={() => { setEditingId(null); setDraft(emptyActionTemplate); }}>Cancel</Button>}</div>
         </div>
         {loading ? <p className="text-sm text-muted-foreground">Loading templates…</p> : templates.length === 0 ? <p className="text-sm text-muted-foreground">No required-action templates yet.</p> : <div className="divide-y rounded-lg border">{[...templates].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((template, index, list) => <div key={template.id} className="flex items-start gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{template.title}</p><span className={`text-xs ${template.active ?? true ? "text-emerald-700" : "text-muted-foreground"}`}>{template.active ?? true ? "Enabled" : "Disabled"}</span></div><p className="mt-1 text-xs text-muted-foreground">{template.module ? TRACK_SUMMARY_MODULES.find(item => item.key === template.module)?.label ?? template.module : "All modules"} · {template.severity.replace("_", " ")} · {template.ownerDefault || "No owner"} · {template.leadTimeDays ?? 0} day lead time</p>{template.instruction && <p className="mt-1 text-sm text-muted-foreground">Instruction: {template.instruction}</p>}</div><div className="flex flex-wrap gap-1"><Button size="sm" variant="ghost" disabled={busy || index === 0} onClick={() => move(template, -1)}>↑</Button><Button size="sm" variant="ghost" disabled={busy || index === list.length - 1} onClick={() => move(template, 1)}>↓</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => beginEdit(template)}>Edit</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => patchTemplate(template, { active: !(template.active ?? true) })}>{template.active ?? true ? "Disable" : "Enable"}</Button></div></div>)}</div>}
@@ -3043,7 +3139,7 @@ function TwoFactorPolicyCard() {
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
-        if (!cancelled) setRequired(data?.requireTwoFactor !== "false");
+        if (!cancelled) setRequired(data?.requireTwoFactor === "true");
       })
       .catch((err: Error) => {
         if (!cancelled) toast({ title: "Couldn't load the two-factor setting", description: err.message, variant: "destructive" });
@@ -3060,7 +3156,7 @@ function TwoFactorPolicyCard() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
-      setRequired(data?.requireTwoFactor !== "false");
+      setRequired(data?.requireTwoFactor === "true");
       toast({
         title: next ? "Two-factor authentication is now required" : "Two-factor authentication is now optional",
         description: next

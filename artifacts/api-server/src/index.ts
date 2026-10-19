@@ -29,12 +29,14 @@ import { setReadinessNote } from "./lib/readinessDetails";
 import { Sentry } from "./lib/sentry";
 import {
   ensureServicePrices,
+  ensureStoragePrice,
   getServicePricePreflight,
   getServicePriceReadinessBlocker,
   type ServicePricePreflight,
 } from "./lib/services";
 import { describeEmailConfigurationIssues, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./lib/email";
 import { runTrialEndedEmailJob, runTrialReminderJob } from "./lib/trialReminders";
+import { runStorageWarningEmailJob } from "./lib/storageWarningEmails";
 import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
 import { runDocAckReminderJob } from "./lib/docAckReminders";
 import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
@@ -137,6 +139,14 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
   } catch (err) {
     repairFailed = true;
     logger.error({ err }, "ensureServicePrices failed — run POST /api/admin/ensure-service-prices manually");
+  }
+
+  // The extra-storage price (£1 per 10 GB) is made the same way. A failure
+  // only hides "Buy storage"; it never blocks start-up.
+  try {
+    if (await ensureStoragePrice()) logger.info("Created the Stripe extra-storage price");
+  } catch (err) {
+    logger.error({ err }, "ensureStoragePrice failed — extra storage stays unavailable until the next start");
   }
 
   // Confirm the repair result before the application becomes ready. This is
@@ -319,6 +329,13 @@ function startScheduler() {
   // trial has just ended without a subscription (daily at 08:15).
   schedule("15 8 * * *", "trial-reminders", runTrialReminders, { daily: true });
   logger.info("Trial reminder scheduler started (daily at 08:15)");
+
+  // Email a business's managers once when its stored files pass the storage
+  // warning level set in Settings (daily at 08:10, from the usage ledger).
+  schedule("10 8 * * *", "storage-warning-emails", logged(
+    "Storage warning email job complete", () => runStorageWarningEmailJob(),
+  ), { daily: true });
+  logger.info("Storage warning email scheduler started (daily at 08:10)");
 
   // Email safety check reminders for overdue/due-soon checks (daily at 08:45)
   schedule("45 8 * * *", "check-reminder-emails", logged(

@@ -136,8 +136,9 @@ export default function SetupPage() {
   const sites = state?.sites ?? [];
   const activeDeptSiteId = deptSiteId ?? sites[0]?.id ?? null;
   const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  // A department with no site (made before departments moved under sites) counts at every site.
   const departmentsAt = (site: number | null) =>
-    perSiteDepartments ? departments.filter((d) => d.siteId === site) : departments;
+    perSiteDepartments ? departments.filter((d) => d.siteId == null || d.siteId === site) : departments;
   const shownDepartments = departmentsAt(activeDeptSiteId);
   const departmentSuggestions = DEPARTMENT_SUGGESTIONS[businessType || "other"] ?? DEPARTMENT_SUGGESTIONS.other;
   const businessTypeLabel = BUSINESS_TYPE_OPTIONS.find((o) => o.value === businessType)?.label;
@@ -171,7 +172,7 @@ export default function SetupPage() {
     let perSite = perSiteDepartments;
     let created = 0;
     for (const target of targets) {
-      const existing = perSite === false ? departments : departments.filter((d) => perSite === null || d.siteId === target);
+      const existing = perSite === false ? departments : departments.filter((d) => perSite === null || d.siteId == null || d.siteId === target);
       for (const name of names) {
         if (existing.some((d) => sameName(d.name, name))) continue;
         const row = await post("/departments", target ? { name, siteId: target } : { name }) as Department;

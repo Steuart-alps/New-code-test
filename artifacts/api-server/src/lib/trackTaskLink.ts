@@ -6,6 +6,7 @@ import { appendAuditEvent } from "./audit";
 import { completionDateFromDay, completionFields } from "./complianceCompletion";
 import { supersedeStaleReminderCycles } from "./reminderCycles";
 import { getActiveDepartmentId } from "../middleware/requireAuth";
+import { siteVisibleToDepartment } from "./departmentSites";
 
 /**
  * Track checks that a ComplyTrack task also covers, keyed by the task's
@@ -101,7 +102,7 @@ export async function completeLinkedTasksFromCheck(req: Request, track: LinkedTr
   const completedAt = completionDateFromDay(String(check.checkDate).slice(0, 10));
   const completed: number[] = [];
   for (const { task, siteDepartmentId } of rows) {
-    if (deptId !== null && ((siteDepartmentId != null && siteDepartmentId !== deptId)
+    if (deptId !== null && ((task.siteId != null && !(await siteVisibleToDepartment({ id: task.siteId, departmentId: siteDepartmentId }, deptId)))
       || (task.departmentId != null && task.departmentId !== deptId))) continue;
     if (task.completedAt && new Date(task.completedAt).getTime() >= completedAt.getTime()) continue;
     const completion = completionFields(task.frequencyMonths, completedAt);
