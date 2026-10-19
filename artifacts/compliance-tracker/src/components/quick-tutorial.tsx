@@ -1,11 +1,11 @@
 import { useState, useSyncExternalStore, type ComponentType } from "react";
 import { useLocation } from "wouter";
 import {
-  ArrowLeft, ArrowRight, Bell, CheckCircle2, ClipboardCheck, GraduationCap, LayoutDashboard, ListChecks, Menu, BarChart2, Users,
+  ArrowLeft, ArrowRight, Bell, CheckCircle2, ClipboardCheck, GraduationCap, KeyRound, LayoutDashboard, ListChecks, Menu, BarChart2, Users,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { useAuth, type UserRole } from "@/context/auth-context";
+import { useAuth, type AuthUser } from "@/context/auth-context";
 import { cn } from "@/lib/utils";
 
 /**
@@ -63,10 +63,10 @@ type Step = {
   icon: ComponentType<{ className?: string }>;
   title: string;
   body: string[];
-  link?: { href: string; label: string };
+  links?: { href: string; label: string }[];
 };
 
-export function getQuickTutorialSteps(role: UserRole): Step[] {
+export function getQuickTutorialSteps({ role, totpEnabled }: Pick<AuthUser, "role" | "totpEnabled">): Step[] {
   const manager = role === "consultant" || role === "client_admin";
   const viewer = role === "client_viewer";
 
@@ -86,7 +86,7 @@ export function getQuickTutorialSteps(role: UserRole): Step[] {
         "Your dashboard starts with My tasks today: the checks your manager has given you. Tick each one off when it's done.",
         "Below that, each module shows its status: green is up to date, amber needs attention soon and red is overdue.",
       ],
-      link: { href: "/tasks", label: "Open my tasks" },
+      links: [{ href: "/tasks", label: "Open my tasks" }],
     }
     : {
       icon: LayoutDashboard,
@@ -133,7 +133,22 @@ export function getQuickTutorialSteps(role: UserRole): Step[] {
       "Invite your staff under Users so they can sign in and log checks themselves. Each person sees their own tasks for the day.",
       "Have more than one location? Add each one under Sites.",
     ],
-    link: { href: "/users", label: "Open Users" },
+    links: [{ href: "/users", label: "Open Users" }],
+  };
+  const security: Step = {
+    icon: KeyRound,
+    title: "Keep your account safe",
+    body: [
+      totpEnabled
+        ? "Two-step sign-in is on for your account: when you sign in, you type the 6-digit code from your authenticator app as well as your password."
+        : "Turn on two-step sign-in so a stolen password isn't enough to get in. You scan a code with an authenticator app on your phone, such as Microsoft Authenticator or Google Authenticator, then type the 6-digit code it shows each time you sign in.",
+      "You'll find it under Security at the top of the page. On a phone, tap your initials at the top right.",
+      ...(manager ? ["As an owner you can also make it required for everyone in your business, under Settings in Two-factor requirement."] : []),
+    ],
+    links: [
+      ...(totpEnabled ? [] : [{ href: "/account-security", label: "Set up two-step sign-in" }]),
+      ...(manager ? [{ href: "/settings", label: "Open Settings" }] : []),
+    ],
   };
   const reminders: Step = {
     icon: Bell,
@@ -151,7 +166,7 @@ export function getQuickTutorialSteps(role: UserRole): Step[] {
     body: [
       "Reports pulls your records together, ready to show an inspector, insurer or head office, and you can download them.",
     ],
-    link: { href: "/reports", label: "Open Reports" },
+    links: [{ href: "/reports", label: "Open Reports" }],
   };
   const done: Step = {
     icon: CheckCircle2,
@@ -162,8 +177,8 @@ export function getQuickTutorialSteps(role: UserRole): Step[] {
     ],
   };
 
-  if (manager) return [welcome, dashboard, modules, record, team, reminders, reports, done];
-  return [welcome, dashboard, modules, record, reminders, done];
+  if (manager) return [welcome, dashboard, modules, record, team, security, reminders, reports, done];
+  return [welcome, dashboard, modules, record, security, reminders, done];
 }
 
 export function QuickTutorial() {
@@ -173,7 +188,7 @@ export function QuickTutorial() {
   const [, navigate] = useLocation();
   if (!user) return null;
 
-  const steps = getQuickTutorialSteps(user.role);
+  const steps = getQuickTutorialSteps(user);
   const step = steps[Math.min(index, steps.length - 1)];
   const isFirst = index === 0;
   const isLast = index >= steps.length - 1;
@@ -206,11 +221,15 @@ export function QuickTutorial() {
               {step.body.map((line) => <p key={line}>{line}</p>)}
             </div>
           </DialogDescription>
-          {step.link && (
-            <button type="button" onClick={() => goTo(step.link!.href)}
-              className="inline-flex items-center gap-1 text-sm font-medium text-primary underline underline-offset-2">
-              {step.link.label} <ArrowRight className="h-4 w-4" />
-            </button>
+          {step.links && step.links.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
+              {step.links.map((link) => (
+                <button key={link.href} type="button" onClick={() => goTo(link.href)}
+                  className="inline-flex items-center gap-1 text-sm font-medium text-primary underline underline-offset-2">
+                  {link.label} <ArrowRight className="h-4 w-4" />
+                </button>
+              ))}
+            </div>
           )}
         </div>
 
