@@ -104,8 +104,11 @@ async function addUser(owner, role, label) {
   return { request, email, id: created.data.id };
 }
 
-test("a client admin cannot take over the owner or set another user's sign-in details", async () => {
+test("an Owner cannot take over the consultant's account or set another user's sign-in details", async () => {
+  // The consultant (ALPS) belongs to the business like its Owners, so this is
+  // the account an Owner (client_admin) must not be able to take over.
   const owner = await registerOwner("takeover");
+  promoteToConsultant(owner.email);
   const admin = await addUser(owner, "client_admin", "admin");
   const staff = await addUser(owner, "client_staff", "staff");
 
