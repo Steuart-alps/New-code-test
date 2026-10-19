@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { auditContext, db } from "@workspace/db";
-import { clientsTable, consultantClientsTable } from "@workspace/db/schema";
+import { clientsTable, consultantClientsTable, userDepartmentsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
 import { storedCredentialCandidates } from "../lib/sessionRevocation";
@@ -15,6 +15,10 @@ declare global {
       // consultant-role users from consultant_clients plus their own clientId;
       // a consultant who is also a platform operator gets every business.
       allowedClientIds?: Set<number>;
+      // Every department a Manager covers, main one first. Set for Managers
+      // without every-department access; currentUser.departmentId is then
+      // the one they're working in.
+      departmentIds?: number[];
     }
   }
 }
@@ -37,6 +41,33 @@ async function loadConsultantClients(req: Request, userId: number) {
     .where(eq(consultantClientsTable.userId, userId));
   for (const m of memberships) allowed.add(m.clientId);
   req.allowedClientIds = allowed;
+}
+
+/** A Manager's main department and any extra ones, main first. */
+export async function managerDepartmentIds(user: Pick<SafeUser, "id" | "departmentId">): Promise<number[]> {
+  const extras = await db
+    .select({ departmentId: userDepartmentsTable.departmentId })
+    .from(userDepartmentsTable)
+    .where(eq(userDepartmentsTable.userId, user.id));
+  const ids = user.departmentId != null ? [user.departmentId] : [];
+  for (const row of extras) if (!ids.includes(row.departmentId)) ids.push(row.departmentId);
+  return ids;
+}
+
+/**
+ * A Manager with several departments works in one at a time, chosen with
+ * PUT /users/me/active-department and kept in their session. Department
+ * scoping everywhere reads currentUser.departmentId, so it is set to that
+ * department (their main one until they switch, and always on the phone app).
+ */
+async function loadManagerDepartments(req: Request) {
+  const user = req.currentUser;
+  if (!user || user.role !== "client_manager" || user.allDepartments) return;
+  const ids = await managerDepartmentIds(user);
+  req.departmentIds = ids;
+  const chosen = req.session?.activeDepartmentId;
+  const active = chosen != null && ids.includes(chosen) ? chosen : ids[0] ?? null;
+  if (active !== user.departmentId) req.currentUser = { ...user, departmentId: active };
 }
 
 export async function loadUser(req: Request, _res: Response, next: NextFunction) {
@@ -73,6 +104,7 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
     if (user && user.active) {
       req.currentUser = user;
       await loadConsultantClients(req, userId);
+      await loadManagerDepartments(req);
     }
   }
 

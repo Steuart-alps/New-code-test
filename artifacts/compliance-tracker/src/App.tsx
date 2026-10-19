@@ -11,6 +11,7 @@ import { trackModuleFirstUse } from "@/lib/analytics";
 // Each page is its own chunk so the landing and sign-in pages stay small and a
 // page's code is only downloaded when someone opens it.
 const Dashboard = lazy(() => import("@/pages/dashboard"));
+const MyTrainingPage = lazy(() => import("@/pages/my-training"));
 const ContractorsPage = lazy(() => import("@/pages/contractors"));
 const ContractorDetailPage = lazy(() => import("@/pages/contractor-detail"));
 const ExternalChecksPage = lazy(() => import("@/pages/external-checks"));
@@ -184,6 +185,12 @@ function ProtectedRoutes() {
       return <PortfolioPage />;
     }
     return <TrialEndedPage />;
+  }
+
+  // A Viewer only ever sees their own training records.
+  if (user.role === "client_viewer") {
+    if (location !== "/my-training") return <Redirect to="/my-training" />;
+    return <MyTrainingPage />;
   }
 
   // Logged in — redirect away from public pages

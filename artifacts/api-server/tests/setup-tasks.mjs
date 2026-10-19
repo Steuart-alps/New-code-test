@@ -1,10 +1,10 @@
 // Setup wizard and staff tasks. Run through test:setup-tasks (self-booted API).
 //  - Setup: state, business type + hub nation, module picks, starter-check
 //    selection with real due dates (claim / create / remove-untouched / keep
-//    edited), completion, tenant isolation and viewer read-only.
+//    edited), completion, tenant isolation and viewers refused.
 //  - Tasks: one-off and recurring occurrences, "mine" vs "all", staff can only
 //    complete their own or their role's tasks (today/yesterday), managers
-//    manage, department scoping, tenant isolation and viewer read-only;
+//    manage, department scoping, tenant isolation and viewers refused;
 //    undoing a mistaken "Mark done"; DailyTrack-linked tasks done automatically
 //    when the site's checklist is submitted.
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
@@ -172,7 +172,7 @@ async function setupWizard(a, b, viewer) {
 
   // Viewer read-only.
   const viewerState = await viewer("GET", "/setup/state");
-  check("setup viewer: can read summary without management data", viewerState.status === 200 && viewerState.data?.canManage === false && !viewerState.data?.starterChecks);
+  check("setup viewer: can't read the setup summary (own training only)", viewerState.status === 403);
   check("setup viewer: cannot change business", (await viewer("PUT", "/setup/business", { businessType: "retail" })).status === 403);
   check("setup viewer: cannot apply starter checks", (await viewer("POST", "/setup/starter-checks", { checks: [] })).status === 403);
   check("setup viewer: cannot complete setup", (await viewer("POST", "/setup/complete", {})).status === 403);
@@ -281,7 +281,7 @@ async function tasks(a, b, siteId) {
 
   // Viewers: read-only.
   const viewerAll = await viewer("GET", "/tasks?scope=all");
-  check("tasks viewer: can read every task", viewerAll.status === 200 && (viewerAll.data?.tasks ?? []).length >= 4);
+  check("tasks viewer: can't read tasks (own training only)", viewerAll.status === 403);
   check("tasks viewer: cannot complete", (await viewer("POST", `/tasks/${daily.data?.id}/complete`, { date: today })).status === 403);
   check("tasks viewer: cannot create", (await viewer("POST", "/tasks", { title: "V", recurrence: "daily", startsOn: today, assigneeRole: "client_staff" })).status === 403);
   check("tasks viewer: cannot edit", (await viewer("PATCH", `/tasks/${daily.data?.id}`, { active: false })).status === 403);

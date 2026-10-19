@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
-import { departmentsTable, usersTable } from "@workspace/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { departmentsTable, userDepartmentsTable, usersTable } from "@workspace/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 import { escapeHtml, getPublicAppUrl, sendEmail } from "./email";
 import { getNotificationEmails } from "./getNotificationEmails";
@@ -24,6 +24,17 @@ export interface TrackSummaryManager {
   role?: string;
   isDepartmentManager?: boolean;
   isMaintenanceManager?: boolean;
+  /** A Manager's extra departments (beyond departmentId). */
+  extraDepartmentIds?: number[];
+  /** A Manager who covers every department. */
+  allDepartments?: boolean;
+}
+
+/** Whether a summary recipient covers a department (Managers may cover several, or all). */
+function managerCovers(manager: TrackSummaryManager, departmentId: number): boolean {
+  if (manager.role === "client_manager" && manager.allDepartments) return true;
+  return manager.departmentId === departmentId
+    || (manager.role === "client_manager" && (manager.extraDepartmentIds ?? []).includes(departmentId));
 }
 
 export interface TrackSummaryRecipient {
@@ -193,7 +204,7 @@ export function buildTrackSummaryRecipients(
     const assignment = routing[module] ?? { managerIds: [], departmentIds: [] };
     const assignedIds = new Set(assignment.managerIds);
     for (const manager of configuredManagers) {
-      if (manager.departmentId != null && assignment.departmentIds.includes(manager.departmentId) &&
+      if (assignment.departmentIds.some((departmentId) => managerCovers(manager, departmentId)) &&
           (manager.role === "client_manager" || manager.isDepartmentManager || manager.isMaintenanceManager)) {
         assignedIds.add(manager.id);
       }
@@ -209,7 +220,7 @@ export function buildTrackSummaryRecipients(
         // Staff see unassigned sites and their own department's sites, never
         // another department's action. Admins retain their normal global view.
         if (manager.role !== "client_admin" && action.site_department_id != null &&
-            action.site_department_id !== manager.departmentId) continue;
+            !managerCovers(manager, action.site_department_id)) continue;
         group.actions.add(action);
       }
     }
@@ -382,16 +393,22 @@ export async function runTrackActionReminderJob(
           departmentId: usersTable.departmentId,
           isDepartmentManager: usersTable.isDepartmentManager,
           isMaintenanceManager: usersTable.isMaintenanceManager,
+          allDepartments: usersTable.allDepartments,
         })
         .from(usersTable)
         .where(and(eq(usersTable.clientId, client.id), eq(usersTable.active, true)));
+      const extras = users.length
+        ? await db.select().from(userDepartmentsTable).where(inArray(userDepartmentsTable.userId, users.map((user) => user.id)))
+        : [];
       const seniorUsers = users
         .filter((user) => seniorUserIds.includes(user.id))
         .map(({ id, email }) => ({ id, email }));
       const configuredManagers = users
         .filter((user) => user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff")
-        .map(({ id, email, departmentId, role, isDepartmentManager, isMaintenanceManager }) =>
-          ({ id, email, departmentId, role, isDepartmentManager, isMaintenanceManager }));
+        .map(({ id, email, departmentId, role, isDepartmentManager, isMaintenanceManager, allDepartments }) => ({
+          id, email, departmentId, role, isDepartmentManager, isMaintenanceManager, allDepartments,
+          extraDepartmentIds: extras.filter((extra) => extra.userId === id).map((extra) => extra.departmentId),
+        }));
       const recipients = buildTrackSummaryRecipients(
         actions,
         seniorEmails,

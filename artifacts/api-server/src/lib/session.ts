@@ -34,5 +34,7 @@ declare module "express-session" {
   interface SessionData {
     userId: number;
     csrfToken?: string;
+    // The department a Manager with several is working in (see loadUser).
+    activeDepartmentId?: number;
   }
 }

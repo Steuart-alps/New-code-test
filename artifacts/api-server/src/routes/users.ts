@@ -2,10 +2,10 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
-import { usersTable, userRoleEnum, departmentsTable, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
-import { eq, and, inArray, isNull, desc, gt } from "drizzle-orm";
+import { usersTable, userRoleEnum, departmentsTable, userDepartmentsTable, staffMembersTable, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
+import { eq, and, inArray, isNull, desc, gt, sql } from "drizzle-orm";
 import { hashPassword, getUserWithClientByEmail } from "../lib/auth";
-import { requireAuth, requireClientAdmin, requireUserManager, canAccessClient } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, requireRole, requireUserManager, canAccessClient } from "../middleware/requireAuth";
 import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
 import { resetTwoFactorWithAlert, deliverTwoFactorResetAlert } from "../lib/twoFactorResetAlerts";
 import { hashStoredCredential, revokeUserSessions } from "../lib/sessionRevocation";
@@ -21,6 +21,8 @@ const CreateUserBody = z.object({
   clientId: z.number().nullable().optional(),
   departmentId: z.number().nullable().optional(),
   allDepartments: z.boolean().optional(),
+  departmentIds: z.array(z.number().int().positive()).max(200).optional(),
+  staffRosterId: z.number().int().positive().nullable().optional(),
   isMaintenanceManager: z.boolean().optional(),
   active: z.boolean().default(true),
 });
@@ -171,24 +173,67 @@ const UpdateUserBody = z.object({
   isMaintenanceManager: z.boolean().optional(),
   isDepartmentManager: z.boolean().optional(),
   allDepartments: z.boolean().optional(),
+  departmentIds: z.array(z.number().int().positive()).max(200).optional(),
+  staffRosterId: z.number().int().positive().nullable().optional(),
 });
 
 /** The roles a Manager may give and look after. */
 const MANAGED_ROLES = new Set(["client_staff", "client_viewer"]);
 
-type ManagerActor = { id: number; role: string; clientId: number | null; departmentId: number | null; allDepartments?: boolean | null };
+type ManagerActor = { id: number; role: string; clientId: number | null; departmentId: number | null; allDepartments?: boolean | null; departmentIds: number[] };
 
 function isManager(actor: { role: string }): boolean {
   return actor.role === "client_manager";
 }
 
+/** The signed-in user, with every department they cover when they're a Manager. */
+function actorOf(req: Request): ManagerActor {
+  const user = req.currentUser!;
+  return { ...user, departmentIds: req.departmentIds ?? (user.departmentId != null ? [user.departmentId] : []) };
+}
+
 /** Whether a department id is one this Manager covers (null = no department). */
 async function managerCoversDepartment(actor: ManagerActor, departmentId: number | null | undefined): Promise<boolean> {
   if (departmentId == null) return actor.allDepartments === true;
-  if (actor.allDepartments !== true) return departmentId === actor.departmentId;
-  const [department] = await db.select({ id: departmentsTable.id }).from(departmentsTable)
-    .where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, actor.clientId ?? -1)));
-  return !!department;
+  if (actor.allDepartments !== true) return actor.departmentIds.includes(departmentId);
+  return (await departmentsInClient(actor.clientId, [departmentId]));
+}
+
+/** Whether every id is a department of this business. */
+async function departmentsInClient(clientId: number | null, ids: number[]): Promise<boolean> {
+  if (!ids.length) return true;
+  const rows = await db.select({ id: departmentsTable.id }).from(departmentsTable)
+    .where(and(inArray(departmentsTable.id, ids), eq(departmentsTable.clientId, clientId ?? -1)));
+  return rows.length === new Set(ids).size;
+}
+
+/** Whether a staff roster entry belongs to this business. */
+async function rosterEntryInClient(clientId: number | null, staffRosterId: number): Promise<boolean> {
+  const [row] = await db.select({ id: staffMembersTable.id }).from(staffMembersTable)
+    .where(and(eq(staffMembersTable.id, staffRosterId), eq(staffMembersTable.clientId, clientId ?? -1)));
+  return !!row;
+}
+
+/** Adds each user's departments (main first, then a Manager's extra ones). */
+async function withDepartmentIds<T extends { id: number; departmentId: number | null }>(rows: T[]): Promise<Array<T & { departmentIds: number[] }>> {
+  const extras = rows.length
+    ? await db.select().from(userDepartmentsTable).where(inArray(userDepartmentsTable.userId, rows.map((row) => row.id)))
+    : [];
+  return rows.map((row) => {
+    const ids = row.departmentId != null ? [row.departmentId] : [];
+    for (const extra of extras) if (extra.userId === row.id && !ids.includes(extra.departmentId)) ids.push(extra.departmentId);
+    return { ...row, departmentIds: ids };
+  });
+}
+
+/** Replaces a user's extra departments (everything after the main one). */
+async function setExtraDepartments(userId: number, extraIds: number[]) {
+  await db.transaction(async (tx) => {
+    await tx.delete(userDepartmentsTable).where(eq(userDepartmentsTable.userId, userId));
+    if (extraIds.length) {
+      await tx.insert(userDepartmentsTable).values([...new Set(extraIds)].map((departmentId) => ({ userId, departmentId })));
+    }
+  });
 }
 
 /**
@@ -199,7 +244,7 @@ async function managerCoversDepartment(actor: ManagerActor, departmentId: number
 function managerCanActOn(actor: ManagerActor, target: { role: string; clientId: number | null; departmentId: number | null }): boolean {
   if (target.clientId == null || target.clientId !== actor.clientId) return false;
   if (!MANAGED_ROLES.has(target.role)) return false;
-  return actor.allDepartments === true || (target.departmentId != null && target.departmentId === actor.departmentId);
+  return actor.allDepartments === true || (target.departmentId != null && actor.departmentIds.includes(target.departmentId));
 }
 
 /**
@@ -221,7 +266,7 @@ function rejectsConsultantTarget(
 }
 
 router.get("/users", requireAuth, requireUserManager, async (req, res) => {
-  const user = req.currentUser!;
+  const user = actorOf(req);
   
   let rows;
   if (user.role === "consultant") {
@@ -234,7 +279,7 @@ router.get("/users", requireAuth, requireUserManager, async (req, res) => {
         return;
       }
       rows = await db
-        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, staffRosterId: usersTable.staffRosterId, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
         .from(usersTable)
         .where(eq(usersTable.clientId, clientId));
     } else {
@@ -246,24 +291,24 @@ router.get("/users", requireAuth, requireUserManager, async (req, res) => {
         return;
       }
       rows = await db
-        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, staffRosterId: usersTable.staffRosterId, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
         .from(usersTable)
         .where(inArray(usersTable.clientId, allowed));
     }
   } else {
     rows = await db
-      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, staffRosterId: usersTable.staffRosterId, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
       .from(usersTable)
       .where(eq(usersTable.clientId, user.clientId!));
     if (isManager(user)) rows = rows.filter((row) => row.id === user.id || managerCanActOn(user, row));
   }
 
   const invitations = await invitationsFor(rows.map((row) => row.id));
-  res.json(rows.map((row) => ({ ...row, invitation: invitations.get(row.id) ?? null })));
+  res.json((await withDepartmentIds(rows)).map((row) => ({ ...row, invitation: invitations.get(row.id) ?? null })));
 });
 
 router.post("/users", requireAuth, requireUserManager, async (req, res) => {
-  const actor = req.currentUser!;
+  const actor = actorOf(req);
   const body = CreateUserBody.parse(req.body);
 
   if (isManager(actor)) {
@@ -271,10 +316,11 @@ router.post("/users", requireAuth, requireUserManager, async (req, res) => {
       res.status(403).json({ error: "Managers can add Staff and Viewers only" });
       return;
     }
-    if (body.allDepartments || body.isMaintenanceManager) {
+    if (body.allDepartments || body.isMaintenanceManager || (body.departmentIds?.length ?? 0) > 1) {
       res.status(403).json({ error: "Only an Owner can give these extra rights" });
       return;
     }
+    if (body.departmentIds?.length === 1) body.departmentId = body.departmentIds[0];
     if (body.departmentId === undefined && actor.allDepartments !== true) body.departmentId = actor.departmentId;
     if (!(await managerCoversDepartment(actor, body.departmentId))) {
       res.status(403).json({ error: "Managers can add people to their own departments only" });
@@ -290,6 +336,39 @@ router.post("/users", requireAuth, requireUserManager, async (req, res) => {
     body.clientId = actor.clientId;
     if (body.role === "consultant") {
       res.status(403).json({ error: "Cannot create consultant users" });
+      return;
+    }
+  }
+
+  // A Manager may cover several departments: the first is their main one.
+  const departmentIds = body.departmentIds ?? (body.departmentId != null ? [body.departmentId] : []);
+  if (departmentIds.length > 1 && body.role !== "client_manager") {
+    res.status(400).json({ error: "Only Managers can have more than one department" });
+    return;
+  }
+  if (body.departmentIds) body.departmentId = departmentIds[0] ?? null;
+  if (!(await departmentsInClient(body.clientId ?? null, departmentIds))) {
+    res.status(400).json({ error: "Department not found" });
+    return;
+  }
+  // A Viewer is linked to their staff roster entry; with none picked, the
+  // entry with the same email address is used when there is one.
+  if (body.role === "client_viewer" && body.staffRosterId === undefined) {
+    const matched = await db.execute(sql`
+      SELECT id FROM staff_roster
+      WHERE client_id = ${body.clientId ?? -1} AND active = true AND lower(email) = ${body.email.trim().toLowerCase()}
+      ORDER BY id LIMIT 1
+    `);
+    const match = (matched.rows ?? [])[0] as { id: number } | undefined;
+    if (match) body.staffRosterId = Number(match.id);
+  }
+  if (body.staffRosterId != null) {
+    if (body.role !== "client_viewer") {
+      res.status(400).json({ error: "Only Viewers are linked to a staff roster entry" });
+      return;
+    }
+    if (!(await rosterEntryInClient(body.clientId ?? null, body.staffRosterId))) {
+      res.status(400).json({ error: "Staff member not found on the roster" });
       return;
     }
   }
@@ -329,10 +408,11 @@ router.post("/users", requireAuth, requireUserManager, async (req, res) => {
         departmentId: body.departmentId ?? null,
         allDepartments: body.role === "client_manager" && body.allDepartments === true,
         isMaintenanceManager: body.isMaintenanceManager === true,
+        staffRosterId: body.role === "client_viewer" ? body.staffRosterId ?? null : null,
         active: body.active,
         passwordHash,
       })
-      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, staffRosterId: usersTable.staffRosterId, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
   } catch (error: any) {
     // A concurrent create of the same address.
     if ((error?.code ?? error?.cause?.code) === "23505") {
@@ -342,13 +422,18 @@ router.post("/users", requireAuth, requireUserManager, async (req, res) => {
     throw error;
   }
 
+  if (body.role === "client_manager" && body.allDepartments !== true && departmentIds.length > 1) {
+    await setExtraDepartments(rows[0].id, departmentIds.slice(1));
+  }
+
   // The account stands either way; when the invitation can't be delivered the
   // admin is told and can resend it from User Management.
   const inviteEmail = invite
     ? (await sendInviteEmail(rows[0], req.log) ? "sent" : "failed")
     : null;
 
-  res.status(201).json({ ...rows[0], inviteEmail });
+  const [created] = await withDepartmentIds(rows);
+  res.status(201).json({ ...created, inviteEmail });
 });
 
 /**
@@ -357,7 +442,7 @@ router.post("/users", requireAuth, requireUserManager, async (req, res) => {
  * and returns null when the caller may not act on it.
  */
 async function setupLinkTarget(req: Request, res: Response, verb: string) {
-  const actor = req.currentUser!;
+  const actor = actorOf(req);
   const id = Number(req.params.id);
 
   const [target] = await db.select().from(usersTable).where(eq(usersTable.id, id));
@@ -425,8 +510,25 @@ router.post("/users/:id/revoke-invite", requireAuth, requireUserManager, async (
   res.json({ ok: true, revoked: revoked.length });
 });
 
+// A Manager with several departments picks the one they're working in; it is
+// kept in their session (see loadUser) and scopes every page they open.
+router.put("/users/me/active-department", requireAuth, requireRole("client_manager"), async (req, res) => {
+  const parsed = z.object({ departmentId: z.number().int().positive() }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "departmentId is required" });
+    return;
+  }
+  const ids = req.departmentIds ?? [];
+  if (!ids.includes(parsed.data.departmentId)) {
+    res.status(404).json({ error: "Department not found" });
+    return;
+  }
+  req.session.activeDepartmentId = parsed.data.departmentId;
+  res.json({ departmentId: parsed.data.departmentId, departmentIds: ids });
+});
+
 router.put("/users/:id", requireAuth, requireUserManager, async (req, res) => {
-  const actor = req.currentUser!;
+  const actor = actorOf(req);
   const id = Number(req.params.id);
   const body = UpdateUserBody.parse(req.body);
 
@@ -472,14 +574,18 @@ router.put("/users/:id", requireAuth, requireUserManager, async (req, res) => {
     if (target.id === actor.id) {
       // A Manager keeps their own name and sign-in details up to date; their
       // role and departments are set by an Owner.
+      // (The edit form sends back the department they're working in.)
+      const ownDepartment = body.departmentId === undefined || body.departmentId === target.departmentId
+        || (body.departmentId != null && actor.departmentIds.includes(body.departmentId));
       if ((body.role !== undefined && body.role !== target.role)
-        || (body.departmentId !== undefined && body.departmentId !== target.departmentId)
+        || !ownDepartment
         || (body.active !== undefined && body.active !== target.active)
         || body.isMaintenanceManager !== undefined || body.isDepartmentManager !== undefined
-        || body.allDepartments !== undefined) {
+        || body.allDepartments !== undefined || body.departmentIds !== undefined || body.staffRosterId !== undefined) {
         res.status(403).json({ error: "Only an Owner can change a Manager's role or departments" });
         return;
       }
+      delete body.departmentId;
     } else {
       if (!managerCanActOn(actor, target)) {
         res.status(404).json({ error: "User not found" });
@@ -489,6 +595,13 @@ router.put("/users/:id", requireAuth, requireUserManager, async (req, res) => {
         res.status(403).json({ error: "Managers can give the Staff or Viewer role only" });
         return;
       }
+      if ((body.departmentIds?.length ?? 0) > 1) {
+        res.status(403).json({ error: "Only an Owner can give someone several departments" });
+        return;
+      }
+      if (body.departmentIds?.length === 1) body.departmentId = body.departmentIds[0];
+      if (body.departmentIds?.length === 0) body.departmentId = null;
+      delete body.departmentIds;
       if (body.departmentId !== undefined && !(await managerCoversDepartment(actor, body.departmentId))) {
         res.status(403).json({ error: "Managers can move people within their own departments only" });
         return;
@@ -497,6 +610,32 @@ router.put("/users/:id", requireAuth, requireUserManager, async (req, res) => {
         res.status(403).json({ error: "Only an Owner can change these switches" });
         return;
       }
+    }
+  }
+
+  const finalRole = body.role ?? target.role;
+  if (body.departmentIds !== undefined) {
+    if (body.departmentIds.length > 1 && finalRole !== "client_manager") {
+      res.status(400).json({ error: "Only Managers can have more than one department" });
+      return;
+    }
+    if (!(await departmentsInClient(target.clientId, body.departmentIds))) {
+      res.status(400).json({ error: "Department not found" });
+      return;
+    }
+    body.departmentId = body.departmentIds[0] ?? null;
+  } else if (body.departmentId != null && !(await departmentsInClient(target.clientId, [body.departmentId]))) {
+    res.status(400).json({ error: "Department not found" });
+    return;
+  }
+  if (body.staffRosterId != null) {
+    if (finalRole !== "client_viewer") {
+      res.status(400).json({ error: "Only Viewers are linked to a staff roster entry" });
+      return;
+    }
+    if (!(await rosterEntryInClient(target.clientId, body.staffRosterId))) {
+      res.status(400).json({ error: "Staff member not found on the roster" });
+      return;
     }
   }
 
@@ -525,24 +664,32 @@ router.put("/users/:id", requireAuth, requireUserManager, async (req, res) => {
     updates.allDepartments = body.allDepartments;
   }
   if (body.role && body.role !== "client_manager") updates.allDepartments = false;
+  if (body.staffRosterId !== undefined) updates.staffRosterId = body.staffRosterId;
+  if (finalRole !== "client_viewer") updates.staffRosterId = null;
   if (body.password) updates.passwordHash = await hashPassword(body.password);
 
   const rows = await db
     .update(usersTable)
     .set(updates)
     .where(eq(usersTable.id, id))
-    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, staffRosterId: usersTable.staffRosterId, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+
+  // Extra departments are for Managers who don't already cover every one.
+  const finalAll = updates.allDepartments ?? target.allDepartments;
+  if (finalRole !== "client_manager" || finalAll) await setExtraDepartments(id, []);
+  else if (body.departmentIds !== undefined) await setExtraDepartments(id, body.departmentIds.slice(1));
 
   // A changed password signs the user out everywhere except this session.
   if (updates.passwordHash) {
     await revokeUserSessions(id, { exceptSessionId: req.sessionID });
   }
 
-  res.json(rows[0]);
+  const [updated] = await withDepartmentIds(rows);
+  res.json(updated);
 });
 
 router.delete("/users/:id", requireAuth, requireUserManager, async (req, res) => {
-  const actor = req.currentUser!;
+  const actor = actorOf(req);
   const id = Number(req.params.id);
 
   const targetRows = await db.select().from(usersTable).where(eq(usersTable.id, id));
@@ -575,7 +722,7 @@ router.delete("/users/:id", requireAuth, requireUserManager, async (req, res) =>
       .update(usersTable)
       .set({ active: false, updatedAt: new Date() })
       .where(eq(usersTable.id, id))
-      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, staffRosterId: usersTable.staffRosterId, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
     res.json({ ...rows[0], deactivated: true });
     return;
   }

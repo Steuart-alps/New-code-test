@@ -1671,8 +1671,10 @@ async function testKitchenClosedDays(admin, viewer, staff, ts) {
   // ── Closures added after the day are flagged for inspectors ──
   const pastDay = isoDate(-40);
   expectStatus("closed-days: retroactive closure → 201", (await close(admin, c, { from: pastDay, to: pastDay, reason: "Power cut" })).status, 201);
-  const pastList = await viewer("GET", `/food-safety/closed-days?from=${pastDay}&to=${pastDay}&siteId=${c}`);
-  expectOk("closed-days: viewer can list closures", pastList.status);
+  const pastList = await admin("GET", `/food-safety/closed-days?from=${pastDay}&to=${pastDay}&siteId=${c}`);
+  expectOk("closed-days: owner can list closures", pastList.status);
+  // Viewers see only their own training records.
+  expectStatus("closed-days: viewer list → 403", (await viewer("GET", `/food-safety/closed-days?from=${pastDay}&to=${pastDay}&siteId=${c}`)).status, 403);
   check("closed-days: retroactive closure flagged added afterwards", pastList.data?.closedDays?.[0]?.addedAfterDay === true, JSON.stringify(pastList.data));
 
   // ── Removing a closure brings the day back as missing ──

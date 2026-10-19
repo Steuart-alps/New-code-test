@@ -6,6 +6,9 @@
 //    maintenance switch, can't change their own role, and has no billing,
 //    settings, sites or 2FA resets.
 //  - A Manager given every department sees all departments' Staff and sites.
+//  - A Manager (or Maintenance manager) given several departments looks after
+//    the people in all of them and switches between them for everything else.
+//  - A Viewer is linked to a staff roster entry of their own business.
 //  - A consultant on the PLATFORM_ADMIN_EMAILS list (ALPS's own sign-in) sees
 //    every business, with its sites on the Portfolio; other consultants see
 //    only the businesses they're linked to.
@@ -210,7 +213,67 @@ async function roles() {
   const crossEdit = await otherHead("PUT", `/users/${chef?.id}`, { name: "Changed" });
   check("Another business's Manager can't edit this business's Staff", [403, 404].includes(crossEdit.status), String(crossEdit.status));
 
+  await severalDepartments({ owner, other, kitchenId, roomsId, kitchenSite: kitchenSite.data, roomsSite: roomsSite.data, chef, cleaner });
   await everyBusiness({ owner, other, siteNames: ["Main kitchen", "East wing"] });
+}
+
+async function severalDepartments({ owner, other, kitchenId, roomsId, kitchenSite, roomsSite, chef, cleaner }) {
+  const both = await member(owner, "ops-manager", "client_manager", { departmentIds: [roomsId, kitchenId] });
+  check("an Owner gives a Manager several departments, main first",
+    both?.departmentId === roomsId && JSON.stringify(both?.departmentIds) === JSON.stringify([roomsId, kitchenId]), JSON.stringify(both));
+  const staffTwo = await owner("POST", "/users", { name: "Refused", email: email("staff-two"), password: "password-456", role: "client_staff", clientId: owner.clientId, departmentIds: [kitchenId, roomsId] });
+  check("only Managers get more than one department", staffTwo.status === 400, String(staffTwo.status));
+  const foreignDept = await other("POST", "/departments", { name: "Elsewhere", clientId: other.clientId });
+  const withForeign = await owner("POST", "/users", { name: "Refused", email: email("foreign-dept"), password: "password-456", role: "client_manager", clientId: owner.clientId, departmentIds: [kitchenId, foreignDept.data?.id] });
+  check("another business's department can't be given", withForeign.status === 400, String(withForeign.status));
+
+  const ops = await signIn("ops-manager");
+  const me = (await ops("GET", "/auth/me")).data?.user;
+  check("/auth/me lists the Manager's departments and the one they're in",
+    me?.departmentId === roomsId && JSON.stringify(me?.departmentIds) === JSON.stringify([roomsId, kitchenId]), JSON.stringify(me));
+  const people = new Set(((await ops("GET", "/users")).data ?? []).map((u) => u.id));
+  check("the Manager looks after Staff in all their departments", people.has(chef?.id) && people.has(cleaner?.id), JSON.stringify([...people]));
+  const siteIds = async () => new Set(((await ops("GET", "/sites")).data ?? []).map((site) => site.id));
+  let visible = await siteIds();
+  check("they start in their main department", visible.has(roomsSite?.id) && !visible.has(kitchenSite?.id), JSON.stringify([...visible]));
+  const switched = await ops("PUT", "/users/me/active-department", { departmentId: kitchenId });
+  check("they switch to another of their departments", switched.status === 200 && switched.data?.departmentId === kitchenId, JSON.stringify(switched.data));
+  visible = await siteIds();
+  check("after switching they see that department's sites", visible.has(kitchenSite?.id) && !visible.has(roomsSite?.id), JSON.stringify([...visible]));
+  check("/auth/me shows the department they switched to", (await ops("GET", "/auth/me")).data?.user?.departmentId === kitchenId);
+  const notTheirs = await ops("PUT", "/users/me/active-department", { departmentId: foreignDept.data?.id });
+  check("they can't switch to a department that isn't theirs", notTheirs.status === 404, String(notTheirs.status));
+  const ownerSwitch = await owner("PUT", "/users/me/active-department", { departmentId: kitchenId });
+  check("the department switch is for Managers", ownerSwitch.status === 403, String(ownerSwitch.status));
+  const selfEdit = await ops("PUT", `/users/${both?.id}`, { name: "Ops Manager", departmentId: kitchenId });
+  check("a Manager renames themselves from the department they're in", selfEdit.status === 200 && selfEdit.data?.departmentId === roomsId, JSON.stringify(selfEdit.data));
+  const widen = await ops("PUT", `/users/${both?.id}`, { departmentIds: [kitchenId] });
+  check("a Manager can't change their own departments", widen.status === 403, String(widen.status));
+
+  const narrowed = await owner("PUT", `/users/${both?.id}`, { departmentIds: [kitchenId] });
+  check("an Owner narrows a Manager to one department", narrowed.status === 200 && JSON.stringify(narrowed.data?.departmentIds) === JSON.stringify([kitchenId]), JSON.stringify(narrowed.data));
+  visible = await siteIds();
+  check("a removed department disappears at once", visible.has(kitchenSite?.id) && !visible.has(roomsSite?.id), JSON.stringify([...visible]));
+  const restored = await owner("PUT", `/users/${both?.id}`, { departmentIds: [kitchenId, roomsId] });
+  check("an Owner adds a department back", JSON.stringify(restored.data?.departmentIds) === JSON.stringify([kitchenId, roomsId]), JSON.stringify(restored.data));
+  const toStaff = await owner("PUT", `/users/${both?.id}`, { role: "client_staff" });
+  check("changing a Manager to Staff keeps only their main department",
+    toStaff.status === 200 && JSON.stringify(toStaff.data?.departmentIds) === JSON.stringify([kitchenId]), JSON.stringify(toStaff.data));
+
+  const maintenance = await member(owner, "maintenance-lead", "client_manager", { departmentIds: [kitchenId, roomsId], isMaintenanceManager: true });
+  check("a Maintenance manager is a Manager with several departments",
+    maintenance?.role === "client_manager" && maintenance?.isMaintenanceManager === true && maintenance?.departmentIds?.length === 2, JSON.stringify(maintenance));
+
+  // Viewers are linked to their own business's staff roster.
+  const ownEntry = await owner("POST", "/staff-roster", { name: "Roster person", email: email("roster-viewer") });
+  const foreignEntry = await other("POST", "/staff-roster", { name: "Foreign person" });
+  check("roster entries created", ownEntry.status === 201 && foreignEntry.status === 201, `${ownEntry.status} ${foreignEntry.status}`);
+  const matched = await member(owner, "roster-viewer", "client_viewer", { departmentId: kitchenId });
+  check("a new Viewer is linked to the roster entry with their email", matched?.staffRosterId === ownEntry.data?.id, JSON.stringify(matched));
+  const foreignLink = await owner("PUT", `/users/${matched?.id}`, { staffRosterId: foreignEntry.data?.id });
+  check("a Viewer can't be linked to another business's roster", foreignLink.status === 400, String(foreignLink.status));
+  const staffLink = await owner("PUT", `/users/${chef?.id}`, { staffRosterId: ownEntry.data?.id });
+  check("only Viewers are linked to the roster", staffLink.status === 400, String(staffLink.status));
 }
 
 async function everyBusiness({ owner, other, siteNames }) {

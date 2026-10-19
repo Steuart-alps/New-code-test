@@ -680,7 +680,11 @@ router.get("/auth/me", async (req, res) => {
     }
   }
 
-  const { totpSecret: _s, ...safeUser } = user;
+  const { totpSecret: _s, ...stored } = user;
+  // A Manager with several departments: the one they're working in, and all of them.
+  const safeUser = req.departmentIds
+    ? { ...stored, departmentId: req.currentUser.departmentId, departmentIds: req.departmentIds }
+    : stored;
   const passkeys = await getUserPasskeys(user.id);
   const twoFactorRequired = await isTwoFactorRequired(user);
   if (!user.totpEnabled) {

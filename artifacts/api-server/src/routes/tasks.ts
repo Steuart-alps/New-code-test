@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 import { appSettingsTable, consultantClientsTable, sitesTable, taskCompletionsTable, tasksTable, usersTable } from "@workspace/db/schema";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { denyViewers, getActiveDepartmentId, getClientId, isDepartmentLead, requireAuth } from "../middleware/requireAuth";
+import { denyViewers, getActiveDepartmentId, getClientId, isDepartmentLead, managerDepartmentIds, requireAuth } from "../middleware/requireAuth";
 import { ACCOUNT_TIMEZONE_SETTING, normalizeAccountTimezone } from "../middleware/dailyEntryCutoff";
 import { addDays, isCalendarDay, occursOn, todayIn } from "../lib/taskSchedule";
 import { submittedDailyChecklists } from "../lib/dailyChecklistCompletion";
@@ -142,7 +142,8 @@ async function validateScope(user: Viewer, clientId: number, value: { siteId: nu
     }
     if (!assignee || !member || !assignee.active || assignee.role === "client_viewer") return "Assignee must be an active member of this business";
     const departmentScoped = assignee.role === "client_staff" || (assignee.role === "client_manager" && !assignee.allDepartments);
-    if (siteDepartmentId != null && departmentScoped && assignee.departmentId !== siteDepartmentId) {
+    if (siteDepartmentId != null && departmentScoped && assignee.departmentId !== siteDepartmentId
+      && !(assignee.role === "client_manager" && (await managerDepartmentIds(assignee)).includes(siteDepartmentId))) {
       return "That person's department cannot see this site";
     }
   }

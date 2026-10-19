@@ -13,7 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff, Mail, MailX, UsersRound } from "lucide-react";
 
 const NO_DEPT_VALUE = "__none__";
-const ALL_DEPTS_VALUE = "__all__";
 
 interface User {
   id: number;
@@ -27,6 +26,10 @@ interface User {
   isMaintenanceManager: boolean;
   isDepartmentManager: boolean;
   allDepartments?: boolean;
+  /** Main department first, then a Manager's extra ones. */
+  departmentIds?: number[];
+  /** A Viewer's staff roster entry (whose training records they see). */
+  staffRosterId?: number | null;
   /** Latest password setup link; null when none was ever sent. */
   invitation?: {
     status: "pending" | "expired" | "completed" | "revoked" | "undelivered";
@@ -43,6 +46,15 @@ interface Department {
   name: string;
   clientId: number;
 }
+
+interface RosterEntry {
+  id: number;
+  name: string;
+  email: string | null;
+}
+
+/** Roles that cover departments the Owner picks (one, several or all). */
+const isManagerChoice = (role: string) => role === "client_manager" || role === MAINTENANCE_MANAGER_CHOICE;
 
 function InvitationState({ invitation }: { invitation: User["invitation"] }) {
   if (!invitation) return null;
@@ -96,6 +108,7 @@ function UserDialog({
   onSaved,
   user,
   departments,
+  roster,
   clientId,
   isConsultant,
   currentUserId,
@@ -106,11 +119,12 @@ function UserDialog({
   onSaved: (notice?: ActionMessage) => void;
   user: User | null;
   departments: Department[];
+  roster: RosterEntry[];
   clientId: number | null;
   isConsultant: boolean;
   currentUserId: number | null;
   /** The signed-in user; a Manager adds and edits Staff and Viewers in their own departments. */
-  actor: { role: string; departmentId: number | null; allDepartments?: boolean } | null;
+  actor: { role: string; departmentId: number | null; departmentIds?: number[]; allDepartments?: boolean } | null;
 }) {
   const actorIsManager = actor?.role === "client_manager";
   const editingSelfAsManager = actorIsManager && !!user && user.id === currentUserId;
@@ -123,7 +137,10 @@ function UserDialog({
     password: "",
     role: "client_viewer",
     departmentId: "",
+    // A Manager's departments in the order picked; the first is their main one.
+    departmentIds: [] as number[],
     allDepartments: false,
+    staffRosterId: "",
     active: true,
   });
   const [saving, setSaving] = useState(false);
@@ -136,15 +153,17 @@ function UserDialog({
         name: user.name,
         email: user.email,
         password: "",
-        role: user.role === "client_staff" && user.isMaintenanceManager ? MAINTENANCE_MANAGER_CHOICE : user.role,
+        role: user.role === "client_manager" && user.isMaintenanceManager ? MAINTENANCE_MANAGER_CHOICE : user.role,
         departmentId: user.departmentId?.toString() ?? "",
+        departmentIds: user.departmentIds ?? (user.departmentId != null ? [user.departmentId] : []),
         allDepartments: user.allDepartments === true,
+        staffRosterId: user.staffRosterId?.toString() ?? "",
         active: user.active,
       });
     } else {
-      // A Manager's new people start in the Manager's own department.
+      // A Manager's new people start in the department the Manager is working in.
       const departmentId = actorIsManager && !actor?.allDepartments ? actor?.departmentId?.toString() ?? "" : "";
-      setForm({ name: "", email: "", password: "", role: "client_viewer", departmentId, allDepartments: false, active: true });
+      setForm({ name: "", email: "", password: "", role: "client_viewer", departmentId, departmentIds: [], allDepartments: false, staffRosterId: "", active: true });
     }
     setError("");
   }, [user, open]);
@@ -155,20 +174,28 @@ function UserDialog({
     setError("");
     try {
       const maintenance = form.role === MAINTENANCE_MANAGER_CHOICE;
-      const role = maintenance ? "client_staff" : form.role;
+      const role = maintenance ? "client_manager" : form.role;
       const body: Record<string, unknown> = {
         name: form.name,
         email: form.email,
         role,
-        departmentId: form.departmentId ? Number(form.departmentId) : null,
         active: form.active,
         clientId,
       };
-      // Only Owners and consultants give a Manager every department.
+      // Only Owners and consultants give a Manager several or every department.
+      if (!actorIsManager && role === "client_manager") {
+        body.allDepartments = form.allDepartments;
+        body.departmentIds = form.allDepartments ? [] : form.departmentIds;
+      } else {
+        body.departmentId = form.departmentId ? Number(form.departmentId) : null;
+      }
       if (!actorIsManager) {
         body.allDepartments = role === "client_manager" && form.allDepartments;
         // Choosing Maintenance manager, or moving someone off it, sets the switch.
         if (maintenance || user?.isMaintenanceManager) body.isMaintenanceManager = maintenance;
+      }
+      if (role === "client_viewer" && (form.staffRosterId || user)) {
+        body.staffRosterId = form.staffRosterId ? Number(form.staffRosterId) : null;
       }
       // Password is optional. When creating a user and leaving it blank, the
       // server emails an invite link so they can set their own password.
@@ -226,16 +253,18 @@ function UserDialog({
   const availableRoles = isConsultant
     ? ["consultant", "client_admin", "client_manager", MAINTENANCE_MANAGER_CHOICE, "client_staff", "client_viewer"]
     : actorIsManager
-      // A Manager keeps someone's existing maintenance access but can't give it.
-      ? (form.role === MAINTENANCE_MANAGER_CHOICE ? [MAINTENANCE_MANAGER_CHOICE] : []).concat(["client_staff", "client_viewer"])
+      ? ["client_staff", "client_viewer"]
       : ["client_admin", "client_manager", MAINTENANCE_MANAGER_CHOICE, "client_staff", "client_viewer"];
-  // A Manager picks from their own department unless they cover them all.
+  // A Manager picks from their own departments unless they cover them all.
+  const actorDepartments = actor?.departmentIds ?? (actor?.departmentId != null ? [actor.departmentId] : []);
   const departmentChoices = actorIsManager && !actor?.allDepartments
-    ? departments.filter(d => d.id === actor?.departmentId)
+    ? departments.filter(d => actorDepartments.includes(d.id))
     : departments;
-  const departmentValue = form.role === "client_manager" && form.allDepartments
-    ? ALL_DEPTS_VALUE
-    : form.departmentId || NO_DEPT_VALUE;
+  const toggleDepartment = (id: number, on: boolean) => setForm(f => ({
+    ...f,
+    departmentIds: on ? [...f.departmentIds.filter(d => d !== id), id] : f.departmentIds.filter(d => d !== id),
+  }));
+  const departmentValue = form.departmentId || NO_DEPT_VALUE;
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
@@ -295,15 +324,59 @@ function UserDialog({
               <p className="text-xs text-muted-foreground">{ROLE_DESCRIPTIONS[form.role]}</p>
             )}
           </div>
-          {(form.role === "client_manager" || form.role === "client_staff" || form.role === MAINTENANCE_MANAGER_CHOICE || form.role === "client_viewer") && (
+          {isManagerChoice(form.role) && !actorIsManager && (
+            <fieldset className="space-y-2" data-testid="manager-departments">
+              <legend className="text-sm font-medium">Departments</legend>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.allDepartments}
+                  onChange={e => setForm(f => ({ ...f, allDepartments: e.target.checked }))}
+                />
+                All departments
+              </label>
+              {!form.allDepartments && (
+                <div className="space-y-1.5 rounded-md border border-border p-2">
+                  {departments.length === 0 && <p className="text-xs text-muted-foreground">No departments yet. Add them in Settings first.</p>}
+                  {departments.map(d => (
+                    <label key={d.id} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={form.departmentIds.includes(d.id)} onChange={e => toggleDepartment(d.id, e.target.checked)} />
+                      {d.name}
+                      {form.departmentIds[0] === d.id && form.departmentIds.length > 1 && <span className="text-xs text-muted-foreground">(main)</span>}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                With more than one department they switch between them at the top of the page. The first one ticked is where they start.
+              </p>
+            </fieldset>
+          )}
+          {form.role === "client_viewer" && (
+            <div className="space-y-2">
+              <Label>Name on the staff roster</Label>
+              <Select value={form.staffRosterId || NO_DEPT_VALUE} onValueChange={v => setForm(f => ({ ...f, staffRosterId: v === NO_DEPT_VALUE ? "" : v }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pick their name..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_DEPT_VALUE}>{user ? "Not linked yet" : "Match by email address"}</SelectItem>
+                  {roster.map(r => (
+                    <SelectItem key={r.id} value={r.id.toString()}>{r.name}{r.email ? ` (${r.email})` : ""}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">They see and sign off only this person's training records.</p>
+            </div>
+          )}
+          {(form.role === "client_staff" || form.role === "client_viewer") && (
             <div className="space-y-2">
               <Label>Department scope</Label>
               <Select
                 value={departmentValue}
                 onValueChange={v => setForm(f => ({
                   ...f,
-                  departmentId: v === NO_DEPT_VALUE || v === ALL_DEPTS_VALUE ? "" : v,
-                  allDepartments: v === ALL_DEPTS_VALUE,
+                  departmentId: v === NO_DEPT_VALUE ? "" : v,
                 }))}
               >
                 <SelectTrigger>
@@ -312,9 +385,6 @@ function UserDialog({
                 <SelectContent>
                   {(!actorIsManager || actor?.allDepartments) && (
                     <SelectItem value={NO_DEPT_VALUE}>No department</SelectItem>
-                  )}
-                  {form.role === "client_manager" && !actorIsManager && (
-                    <SelectItem value={ALL_DEPTS_VALUE}>All departments</SelectItem>
                   )}
                   {departmentChoices.map(d => (
                     <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
@@ -362,6 +432,7 @@ export default function UsersPage() {
   const canManageStaff = canAdmin || isManager;
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -373,12 +444,14 @@ export default function UsersPage() {
   async function load() {
     setLoading(true);
     try {
-      const [usersRes, deptsRes] = await Promise.all([
+      const [usersRes, deptsRes, rosterRes] = await Promise.all([
         apiFetch(`/users${activeClientId ? `?clientId=${activeClientId}` : ""}`),
         apiFetch(`/departments${activeClientId ? `?clientId=${activeClientId}` : ""}`),
+        apiFetch("/staff-roster"),
       ]);
       if (usersRes.ok) setUsers(await usersRes.json());
       if (deptsRes.ok) setDepartments(await deptsRes.json());
+      if (rosterRes.ok) setRoster(await rosterRes.json());
     } finally {
       setLoading(false);
     }
@@ -489,7 +562,7 @@ export default function UsersPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <p className="text-muted-foreground text-sm">
-            {isManager ? "Add and look after the Staff and Viewers in your department" : "Manage user accounts and access levels"}
+            {isManager ? "Add and look after the Staff and Viewers in your departments" : "Manage user accounts and access levels"}
           </p>
           <Button onClick={() => { setEditingUser(null); setDialogOpen(true); }}>
             <Plus className="w-4 h-4 mr-2" />
@@ -537,13 +610,25 @@ export default function UsersPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {users.map(u => {
-                  const dept = departments.find(d => d.id === u.departmentId);
+                  const userDepartments = (u.departmentIds ?? (u.departmentId != null ? [u.departmentId] : []))
+                    .map(id => departments.find(d => d.id === id)?.name)
+                    .filter((name): name is string => !!name);
                   const self = u.id === currentUser?.id;
                   const seesAllDepartments = u.role === "consultant" || u.role === "client_admin"
                     || (u.role === "client_manager" && u.allDepartments === true);
+                  const rosterName = u.role === "client_viewer"
+                    ? roster.find(r => r.id === u.staffRosterId)?.name ?? null
+                    : null;
                   return (
                     <tr key={u.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 font-medium text-sm">{u.name}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="font-medium">{u.name}</span>
+                        {u.role === "client_viewer" && (
+                          <span className="block text-xs text-muted-foreground">
+                            {rosterName ? `Training records of ${rosterName}` : "Not linked to the staff roster yet"}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{u.email}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${ROLE_COLORS[u.role] ?? "bg-gray-100 text-gray-700"}`}>
@@ -551,7 +636,7 @@ export default function UsersPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        {canAdmin && !(u.role === "client_manager" && u.allDepartments) ? (
+                        {canAdmin && u.role !== "client_manager" ? (
                           <Select
                             value={u.departmentId?.toString() ?? NO_DEPT_VALUE}
                             onValueChange={val => reassignDept(u.id, val)}
@@ -573,7 +658,7 @@ export default function UsersPage() {
                           </Select>
                         ) : (
                           <span className="text-sm text-muted-foreground">
-                            {dept?.name ?? (seesAllDepartments ? "All departments" : "No department")}
+                            {seesAllDepartments ? "All departments" : userDepartments.length ? userDepartments.join(", ") : "No department"}
                           </span>
                         )}
                       </td>
@@ -677,10 +762,11 @@ export default function UsersPage() {
         }}
         user={editingUser}
         departments={departments}
+        roster={roster}
         clientId={activeClientId}
         isConsultant={isConsultant}
         currentUserId={currentUser?.id ?? null}
-        actor={currentUser ? { role: currentUser.role, departmentId: currentUser.departmentId, allDepartments: currentUser.allDepartments } : null}
+        actor={currentUser ? { role: currentUser.role, departmentId: currentUser.departmentId, departmentIds: currentUser.departmentIds, allDepartments: currentUser.allDepartments } : null}
       />
     </AppLayout>
   );

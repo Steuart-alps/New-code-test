@@ -5,6 +5,41 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export interface SignTrainingRecordRequest {
+  /** Signature image as a data URL */
+  signature: string;
+}
+
+export interface ActiveDepartmentRequest {
+  departmentId: number;
+}
+
+export type OwnTrainingRecordRecordType = typeof OwnTrainingRecordRecordType[keyof typeof OwnTrainingRecordRecordType];
+
+
+export const OwnTrainingRecordRecordType = {
+  certificate: 'certificate',
+  signoff: 'signoff',
+  internal: 'internal',
+} as const;
+
+export interface OwnTrainingRecord {
+  id: number;
+  record_type: OwnTrainingRecordRecordType;
+  staff_name: string;
+  training_type?: string | null;
+  document_title?: string | null;
+  document_type?: string | null;
+  provider?: string | null;
+  trainer?: string | null;
+  completed_date: string;
+  expiry_date?: string | null;
+  notes?: string | null;
+  signed: boolean;
+  updated_at?: string;
+  site_name?: string | null;
+}
+
 export type FeedbackReportCategory = typeof FeedbackReportCategory[keyof typeof FeedbackReportCategory];
 
 
@@ -2164,6 +2199,16 @@ clientId?: number;
 
 export type ListFeedbackReportHistoryParams = {
 clientId?: number;
+};
+
+export type ListMyTrainingRecords200 = {
+  linked: boolean;
+  records: OwnTrainingRecord[];
+};
+
+export type SetActiveDepartment200 = {
+  departmentId: number;
+  departmentIds: number[];
 };
 
 export type ListAuditLogParams = {

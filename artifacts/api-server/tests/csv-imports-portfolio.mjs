@@ -246,16 +246,16 @@ async function portfolio(owner, ownerClientId, secondClientId, admin, viewer) {
 }
 
 async function branding(owner, ownerClientId, viewer, admin, other, otherAdmin) {
-  check("branding: nothing shown before it is set", (await viewer("GET", "/managed-by")).data === null);
+  check("branding: nothing shown before it is set", (await admin("GET", "/managed-by")).data === null);
   const saved = await owner("PUT", "/consultant-branding", { practiceName: "  Example Safety Partners  " });
   check("branding: consultant saves a practice name", saved.status === 200 && saved.data?.practiceName === "Example Safety Partners", JSON.stringify(saved.data));
-  const shown = await viewer("GET", "/managed-by");
-  check("branding: linked client viewer sees Managed by", shown.data?.practiceName === "Example Safety Partners" && shown.data?.hasLogo === false, JSON.stringify(shown.data));
-  check("branding: linked client admin sees Managed by", (await admin("GET", "/managed-by")).data?.practiceName === "Example Safety Partners");
+  const shown = await admin("GET", "/managed-by");
+  check("branding: linked client admin sees Managed by", shown.data?.practiceName === "Example Safety Partners" && shown.data?.hasLogo === false, JSON.stringify(shown.data));
+  check("branding: a viewer (own training only) does not", (await viewer("GET", "/managed-by")).status === 403);
   check("branding: another tenant's admin does not", (await otherAdmin("GET", "/managed-by")).data === null);
   check("branding: another tenant's admin cannot select the branded business",
     (await otherAdmin("GET", `/managed-by?clientId=${ownerClientId}`)).status === 403);
-  check("branding: no logo returns 404", (await viewer("GET", "/managed-by/logo")).status === 404);
+  check("branding: no logo returns 404", (await admin("GET", "/managed-by/logo")).status === 404);
 
   check("branding: viewer cannot set branding", (await viewer("PUT", "/consultant-branding", { practiceName: "Hijack" })).status === 403);
   check("branding: client admin cannot set branding", (await admin("PUT", "/consultant-branding", { practiceName: "Hijack" })).status === 403);
@@ -271,7 +271,7 @@ async function branding(owner, ownerClientId, viewer, admin, other, otherAdmin) 
   const otherClaim = await other("POST", "/consultant-branding/logo", { objectPath: "/objects/uploads/tenant-consultant-1/00000000-0000-0000-0000-000000000000.png" });
   check("branding: another consultant's upload cannot be claimed", [403, 404].includes(otherClaim.status), String(otherClaim.status));
   const cleared = await owner("PUT", "/consultant-branding", { practiceName: "" });
-  check("branding: clearing the name hides Managed by", cleared.status === 200 && (await viewer("GET", "/managed-by")).data === null);
+  check("branding: clearing the name hides Managed by", cleared.status === 200 && (await admin("GET", "/managed-by")).data === null);
 }
 
 async function main() {

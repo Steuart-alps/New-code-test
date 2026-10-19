@@ -32,6 +32,7 @@ export async function getUserById(id: number): Promise<SafeUser | null> {
       isMaintenanceManager: usersTable.isMaintenanceManager,
       isDepartmentManager: usersTable.isDepartmentManager,
       allDepartments: usersTable.allDepartments,
+      staffRosterId: usersTable.staffRosterId,
       createdAt: usersTable.createdAt,
       updatedAt: usersTable.updatedAt,
     })

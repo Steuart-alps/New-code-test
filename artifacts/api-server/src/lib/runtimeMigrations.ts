@@ -4900,6 +4900,18 @@ async function migrateMaintenanceManager() {
     ALTER TABLE "users"
       ADD COLUMN IF NOT EXISTS "all_departments" boolean NOT NULL DEFAULT false
   `);
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "user_departments" (
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "department_id" integer NOT NULL REFERENCES "departments"("id") ON DELETE CASCADE,
+      PRIMARY KEY ("user_id", "department_id")
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_user_departments_department" ON "user_departments" ("department_id")`);
 }
 
 async function migrateMobileSessions() {

@@ -321,10 +321,14 @@ test("injury details are only returned to managers", async () => {
 
   const managerList = await owner.request("GET", "/incidents");
   assert.equal(managerList.data.find((row) => row.id === reported.data.id).injuriesSustained, "Fractured wrist");
+  // Viewers see only their own training records.
+  assert.equal((await viewer.request("GET", "/incidents")).status, 403);
   for (const reader of [staff, viewer]) {
-    const list = await reader.request("GET", "/incidents");
-    assert.equal(list.status, 200);
-    assert.equal(list.data.find((row) => row.id === reported.data.id).injuriesSustained, null);
+    if (reader === staff) {
+      const list = await reader.request("GET", "/incidents");
+      assert.equal(list.status, 200);
+      assert.equal(list.data.find((row) => row.id === reported.data.id).injuriesSustained, null);
+    }
     // Exports carry the unredacted incident rows (incidents/records.csv) and
     // audit history, so they stay limited to roles that can read injuries.
     assert.equal((await reader.request("GET", "/export")).status, 403, "full data export is management-only");

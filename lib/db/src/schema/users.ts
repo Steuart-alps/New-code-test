@@ -1,8 +1,9 @@
-import { pgTable, serial, text, integer, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, boolean, primaryKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { clientsTable } from "./clients";
 import { departmentsTable } from "./departments";
+import { staffMembersTable } from "./staff-members";
 
 // Shown in the app as Consultant (hidden from businesses), Owner, Manager,
 // Staff and Viewer. client_admin is the stored name for a business Owner.
@@ -31,6 +32,8 @@ export const usersTable = pgTable("users", {
   // A Manager normally covers their department; the Owner can widen that to
   // every department in the business.
   allDepartments: boolean("all_departments").notNull().default(false),
+  // A Viewer sees only the training records of this staff roster entry.
+  staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -45,3 +48,10 @@ export const insertUserSchema = createInsertSchema(usersTable).omit({
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof usersTable.$inferSelect;
 export type SafeUser = Omit<User, "passwordHash" | "totpRecoveryHash">;
+
+// Departments a Manager covers besides their main one (users.department_id).
+// A Manager with several works in one at a time and switches between them.
+export const userDepartmentsTable = pgTable("user_departments", {
+  userId: integer("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  departmentId: integer("department_id").notNull().references(() => departmentsTable.id, { onDelete: "cascade" }),
+}, (table) => [primaryKey({ columns: [table.userId, table.departmentId] })]);
