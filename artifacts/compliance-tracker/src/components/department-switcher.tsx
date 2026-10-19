@@ -5,6 +5,7 @@ import { useAuth } from "@/context/auth-context";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { departmentLabel, type DepartmentRow } from "@/lib/departments";
 
 /**
  * A Manager given several departments works in one at a time. The choice is
@@ -16,7 +17,7 @@ export function DepartmentSwitcher() {
   const { toast } = useToast();
   const [switching, setSwitching] = useState(false);
   const ids = user?.role === "client_manager" && !user.allDepartments ? user.departmentIds ?? [] : [];
-  const departments = useQuery<Array<{ id: number; name: string }>>({
+  const departments = useQuery<DepartmentRow[]>({
     queryKey: ["departments", "switcher"],
     enabled: ids.length > 1,
     queryFn: async () => {
@@ -26,7 +27,7 @@ export function DepartmentSwitcher() {
     },
   });
   if (ids.length < 2) return null;
-  const choices = ids.map(id => ({ id, name: departments.data?.find(d => d.id === id)?.name ?? "Department" }));
+  const choices = ids.map(id => ({ id, name: departmentLabel(departments.data?.find(d => d.id === id)) || "Department" }));
 
   async function choose(value: string) {
     setSwitching(true);

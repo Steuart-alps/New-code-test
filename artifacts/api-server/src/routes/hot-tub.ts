@@ -9,6 +9,7 @@ import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStore
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 import { PER_TUB_CHECK_TYPES, sitesWithUnreadHotTubs } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
+import { sitesTableVisibleTo, siteVisibleToDepartment, visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -86,11 +87,7 @@ router.get("/tubs", requireAuth, async (req, res) => {
     WHERE ht.client_id = ${clientId}
       ${departmentId !== null ? sql`AND (
         ht.site_id IS NULL
-        OR ht.site_id IN (
-          SELECT id FROM sites
-          WHERE client_id = ${clientId}
-            AND (department_id IS NULL OR department_id = ${departmentId})
-        )
+        OR ht.site_id IN (${visibleSiteIdsSql(clientId, departmentId)})
       )` : sql``}
       ${activeFilter !== undefined ? sql`AND ht.active = ${activeFilter}` : sql``}
       ${search ? sql`AND (
@@ -198,7 +195,7 @@ async function checkSiteAccess(
   if (siteId == null) return null;
   const site = await fetchClientSite(siteId, clientId);
   if (!site) return "not_found";
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return "forbidden";
+  if (!(await siteVisibleToDepartment(site, deptId))) return "forbidden";
   return "ok";
 }
 
@@ -208,7 +205,7 @@ function allowedSitesSubquery(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
@@ -357,7 +354,7 @@ router.get("/status", requireAuth, async (req, res) => {
       AND check_date = ${todayIso}
       AND check_type IN ('water_chemistry', 'temperature')
       AND site_id = ${selectedSiteId}
-      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))` : sql``}
+      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))` : sql``}
   `);
   const unitsByType = new Map<string, Set<number>>();
   const sessionsByType = new Map<string, Map<number, Set<string>>>();
@@ -366,7 +363,7 @@ router.get("/status", requireAuth, async (req, res) => {
     FROM hot_tubs
     WHERE client_id = ${clientId} AND active = true
       AND site_id = ${selectedSiteId}
-      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))` : sql``}
+      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))` : sql``}
   `);
   const expectedUnitIds = (expectedUnits.rows ?? []).map((row: any) => Number(row.unit_id));
   for (const checkType of DAILY_SESSION_TYPES) unitsByType.set(checkType, new Set(expectedUnitIds));

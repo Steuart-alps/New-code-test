@@ -8,6 +8,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin, getActiveDepartmentId } from "../middleware/requireAuth";
 import { createCleaningSchedulePdf, type CleaningScheduleCompletion } from "../lib/cleaningSchedulePdf";
+import { siteVisibleSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -36,15 +37,11 @@ async function resolveAccessibleSite(
 
   const departmentId = getActiveDepartmentId(req);
   const result = await db.execute(sql`
-    SELECT id
-    FROM sites
-    WHERE id = ${siteId}
-      AND client_id = ${clientId}
-      AND (
-        ${departmentId}::integer IS NULL
-        OR department_id IS NULL
-        OR department_id = ${departmentId}
-      )
+    SELECT s.id
+    FROM sites s
+    WHERE s.id = ${siteId}
+      AND s.client_id = ${clientId}
+      ${departmentId === null ? sql`` : sql`AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)}`}
     LIMIT 1
   `);
   if (!result.rows[0]) {

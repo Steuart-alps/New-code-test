@@ -5,6 +5,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 
 const router = Router();
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
@@ -41,7 +42,7 @@ async function allowedSites(clientId: number, departmentId: number | null): Prom
   if (departmentId === null) return null;
   const found = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.clientId, clientId),
-    or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+    sitesTableVisibleTo(departmentId),
   ));
   return found.map((site) => site.id);
 }

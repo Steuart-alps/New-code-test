@@ -2,9 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { kitchenWeeklyResult } from "@workspace/api-zod/kitchen-weekly";
 
 const router = Router();
@@ -37,7 +38,7 @@ async function resolveSiteId(req: any, res: any, clientId: number, raw: unknown)
   const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.id, siteId),
     eq(sitesTable.clientId, clientId),
-    ...(departmentId != null ? [or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))] : []),
+    ...(departmentId != null ? [sitesTableVisibleTo(departmentId)] : []),
   )).limit(1);
   if (!site) {
     res.status(403).json({ error: "Site not accessible" });

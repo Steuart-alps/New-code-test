@@ -4963,6 +4963,12 @@ async function migrateMaintenanceManager() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_user_departments_department" ON "user_departments" ("department_id")`);
+  // Departments sit under a site; existing ones keep spanning every site.
+  await db.execute(sql`
+    ALTER TABLE "departments"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_departments_site" ON "departments" ("site_id")`);
 }
 
 async function migrateMobileSessions() {

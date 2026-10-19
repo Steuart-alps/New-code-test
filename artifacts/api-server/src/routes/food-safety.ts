@@ -9,8 +9,9 @@ import { KitchenTemperatureError, recordKitchenTemperatureActions } from "../lib
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, or, sql, inArray, isNull } from "drizzle-orm";
+import { eq, and, sql, inArray, isNull } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { defaultFoodJurisdiction } from "../lib/foodJurisdiction";
 
@@ -295,7 +296,7 @@ async function siteBelongsToClient(siteId: number, clientId: number, departmentI
     .where(and(
       eq(sitesTable.id, siteId),
       eq(sitesTable.clientId, clientId),
-      ...(departmentId != null ? [or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))] : []),
+      ...(departmentId != null ? [sitesTableVisibleTo(departmentId)] : []),
     ))
     .limit(1);
   return !!row;
@@ -1447,7 +1448,7 @@ router.get("/status", requireAuth, async (req, res) => {
     const siteRows = await db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable)
       .where(and(
         eq(sitesTable.clientId, clientId),
-        departmentId === null ? undefined : or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+        departmentId === null ? undefined : sitesTableVisibleTo(departmentId),
       ))
       .orderBy(sitesTable.name, sitesTable.id);
     units = siteRows.length ? siteRows : [{ id: null, name: null }];
