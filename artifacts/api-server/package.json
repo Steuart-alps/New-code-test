@@ -123,6 +123,7 @@
     "test:storage-metering": "bash tests/run-fresh-schema.sh tests/storage-metering.mjs",
     "test:storage-usage-snapshot": "bash tests/run-fresh-schema.sh tests/storage-usage-snapshot.mjs",
     "test:storage-capacity-reduction": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/storage-capacity-reduction.mjs",
+    "test:upload-size-limit": "node tests/upload-size-limit.mjs",
     "test:doc-track-object-acl": "bash tests/run-doc-track-object-acl.sh",
     "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
     "test:billing-addon-catalog": "node tests/billing-addon-catalog.mjs",

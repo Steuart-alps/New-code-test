@@ -10,6 +10,25 @@ export class ObjectContentError extends Error {
 }
 
 export const MAX_RESTRICTED_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+const DEFAULT_MAX_UPLOAD_MB = 250;
+/**
+ * Largest single file any upload may store, videos included: MAX_UPLOAD_MB
+ * (whole MB, 1–5120), default 250 MB. Photos keep their own 10 MB limit.
+ */
+export function maxUploadBytes(): number {
+  const raw = process.env.MAX_UPLOAD_MB?.trim();
+  const mb = raw ? Number(raw) : DEFAULT_MAX_UPLOAD_MB;
+  return (Number.isInteger(mb) && mb >= 1 && mb <= 5120 ? mb : DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024;
+}
+
+export class UploadTooLargeError extends ObjectContentError {
+  constructor(limitBytes = maxUploadBytes()) {
+    super(`Files can be up to ${Math.round(limitBytes / (1024 * 1024))} MB. Trim or compress it (for a video, record a shorter clip or at a lower resolution) and try again.`);
+    this.name = "UploadTooLargeError";
+    Object.setPrototypeOf(this, UploadTooLargeError.prototype);
+  }
+}
 const MAX_IMAGE_DIMENSION = 12_000;
 // ~50 megapixels: well above any phone camera (48 MP), but a full decode stays
 // around 200 MB, which a 512 MB instance can afford one at a time.

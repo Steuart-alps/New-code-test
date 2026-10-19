@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
 
@@ -355,9 +356,7 @@ export default function FixTrackDetailPage() {
           if (contentType.startsWith("image/") && file.size > 10 * 1024 * 1024) {
             throw new Error("Photos must be 10 MB or smaller.");
           }
-          if (contentType.startsWith("video/") && file.size > 250 * 1024 * 1024) {
-            throw new Error("Videos must be 250 MB or smaller.");
-          }
+          assertWithinUploadLimit(file);
 
           setMediaUploadProgress({
             fileName: file.name,
