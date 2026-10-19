@@ -1,0 +1,55 @@
+name: Training certificates across midnight
+
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/pages/train-track.tsx"
+      - "artifacts/compliance-tracker/src/hooks/use-local-today.ts"
+      - "artifacts/compliance-tracker/src/lib/training-expiry.ts"
+      - "artifacts/compliance-tracker/src/lib/training-matrix.ts"
+      - "artifacts/compliance-tracker/tests/training-midnight-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/training-midnight-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/pages/train-track.tsx"
+      - "artifacts/compliance-tracker/src/hooks/use-local-today.ts"
+      - "artifacts/compliance-tracker/src/lib/training-expiry.ts"
+      - "artifacts/compliance-tracker/src/lib/training-matrix.ts"
+      - "artifacts/compliance-tracker/tests/training-midnight-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/training-midnight-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  training-midnight:
+    name: TrainTrack expiry rolls over at local midnight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run training midnight checks
+        run: pnpm --filter @workspace/compliance-tracker run test:training-midnight-browser

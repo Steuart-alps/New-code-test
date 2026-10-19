@@ -83,7 +83,9 @@ async function createDocument(request, siteId, title) {
     siteId,
   });
   expectStatus(`finalize ${title}`, created, [201]);
-  return { document: created.data, content: title };
+  // The route returns the database row, so the stored path is object_path.
+  assert(`stored path returned for ${title}`, typeof created.data?.object_path === "string");
+  return { document: { ...created.data, objectPath: created.data.object_path }, content: title };
 }
 
 async function main() {

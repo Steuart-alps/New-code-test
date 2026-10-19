@@ -109,6 +109,44 @@ export interface HealthStatus {
   status: string;
 }
 
+export type PublicLinkAccessEntryLinkType = typeof PublicLinkAccessEntryLinkType[keyof typeof PublicLinkAccessEntryLinkType];
+
+
+export const PublicLinkAccessEntryLinkType = {
+  sign_off: 'sign_off',
+  contractor_portal: 'contractor_portal',
+  fix_track_action: 'fix_track_action',
+  fix_track_quote: 'fix_track_quote',
+} as const;
+
+export type PublicLinkAccessEntryActionType = typeof PublicLinkAccessEntryActionType[keyof typeof PublicLinkAccessEntryActionType];
+
+
+export const PublicLinkAccessEntryActionType = {
+  view: 'view',
+  submit: 'submit',
+} as const;
+
+export interface PublicLinkAccessEntry {
+  id: number;
+  linkType: PublicLinkAccessEntryLinkType;
+  actionType: PublicLinkAccessEntryActionType;
+  activity: string;
+  /**
+     * @minLength 8
+     * @maxLength 8
+     */
+  linkRef: string;
+  occurredAt: string;
+}
+
+export interface PublicLinkAccessPage {
+  /** @maxItems 100 */
+  entries: PublicLinkAccessEntry[];
+  /** @nullable */
+  nextCursor: string | null;
+}
+
 export type AuditLogEntryAction = typeof AuditLogEntryAction[keyof typeof AuditLogEntryAction];
 
 
@@ -2144,6 +2182,49 @@ export const ListAuditLogModule = {
   train: 'train',
   doc: 'doc',
   incidents: 'incidents',
+} as const;
+
+export type ListPublicLinkAccessParams = {
+linkType?: ListPublicLinkAccessLinkType;
+actionType?: ListPublicLinkAccessActionType;
+/**
+ * Only access at or after this instant (ISO 8601).
+ * @maxLength 40
+ */
+from?: string;
+/**
+ * Only access before this instant (ISO 8601).
+ * @maxLength 40
+ */
+to?: string;
+/**
+ * nextCursor from the previous page.
+ * @maxLength 200
+ */
+cursor?: string;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+};
+
+export type ListPublicLinkAccessLinkType = typeof ListPublicLinkAccessLinkType[keyof typeof ListPublicLinkAccessLinkType];
+
+
+export const ListPublicLinkAccessLinkType = {
+  sign_off: 'sign_off',
+  contractor_portal: 'contractor_portal',
+  fix_track_action: 'fix_track_action',
+  fix_track_quote: 'fix_track_quote',
+} as const;
+
+export type ListPublicLinkAccessActionType = typeof ListPublicLinkAccessActionType[keyof typeof ListPublicLinkAccessActionType];
+
+
+export const ListPublicLinkAccessActionType = {
+  view: 'view',
+  submit: 'submit',
 } as const;
 
 export type ListComplianceItemsParams = {

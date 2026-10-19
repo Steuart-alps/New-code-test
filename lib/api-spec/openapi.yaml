@@ -11,6 +11,8 @@ tags:
     description: Health operations
   - name: audit-log
     description: Compliance change history
+  - name: public-link-access
+    description: Privacy-safe history of public link use
   - name: compliance-items
     description: Compliance item operations
   - name: categories
@@ -164,6 +166,65 @@ paths:
                 maxItems: 50
                 items:
                   $ref: "#/components/schemas/AuditLogEntry"
+
+  /public-link-access:
+    get:
+      operationId: listPublicLinkAccess
+      tags: [public-link-access]
+      summary: List recent public-link access for the signed-in business
+      description: >-
+        Client admins and consultants only. Newest first, scoped to the active
+        business. Entries never include link tokens; linkRef is a short prefix
+        of the stored SHA-256 fingerprint so repeat use of one link can be
+        matched without exposing the credential.
+      parameters:
+        - in: query
+          name: linkType
+          required: false
+          schema:
+            type: string
+            enum: [sign_off, contractor_portal, fix_track_action, fix_track_quote]
+        - in: query
+          name: actionType
+          required: false
+          schema:
+            type: string
+            enum: [view, submit]
+        - in: query
+          name: from
+          required: false
+          description: Only access at or after this instant (ISO 8601).
+          schema:
+            type: string
+            maxLength: 40
+        - in: query
+          name: to
+          required: false
+          description: Only access before this instant (ISO 8601).
+          schema:
+            type: string
+            maxLength: 40
+        - in: query
+          name: cursor
+          required: false
+          description: nextCursor from the previous page.
+          schema:
+            type: string
+            maxLength: 200
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: One page of access events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicLinkAccessPage"
 
   /categories:
     get:
@@ -2611,6 +2672,40 @@ components:
           type: string
       required:
         - status
+
+    PublicLinkAccessPage:
+      type: object
+      required: [entries, nextCursor]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/PublicLinkAccessEntry"
+        nextCursor:
+          type: [string, "null"]
+
+    PublicLinkAccessEntry:
+      type: object
+      required: [id, linkType, actionType, activity, linkRef, occurredAt]
+      properties:
+        id:
+          type: integer
+        linkType:
+          type: string
+          enum: [sign_off, contractor_portal, fix_track_action, fix_track_quote]
+        actionType:
+          type: string
+          enum: [view, submit]
+        activity:
+          type: string
+        linkRef:
+          type: string
+          minLength: 8
+          maxLength: 8
+        occurredAt:
+          type: string
+          format: date-time
 
     AuditLogEntry:
       type: object

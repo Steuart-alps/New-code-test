@@ -1103,8 +1103,9 @@ export function DailyDiaryTab() {
     coolingLimit: entryCoolingLimit,
     reheatingLimit: entryReheatingLimit,
     hotHoldingLimit: entryHotHoldingLimit,
-    correctives: correctives || undefined,
-    managerSignature: managerSignature || undefined,
+    // "" clears a saved value; leave unset fields out so a stale save can still merge.
+    correctives: correctives || (record?.correctives ? "" : undefined),
+    managerSignature: managerSignature || (record?.managerSignature ? "" : undefined),
     submittedAt,
   });
   const temperatureAssessment = (() => {

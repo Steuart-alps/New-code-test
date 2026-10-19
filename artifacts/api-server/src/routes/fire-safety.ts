@@ -19,12 +19,14 @@ const CHECK_TYPES = FIRE_CHECK_TYPES;
 const FREQUENCY_DAYS = FIRE_FREQUENCY_DAYS;
 
 const FIRE_PROFILE_MODULE = "fire";
+// The Template form sends "" for an untouched date or nation; store that as "not set".
+const blankAsNull = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(v => (v === "" ? null : v), schema);
 const fireProfileSchema = z.object({
   riskAssessmentReference: z.string().trim().max(2000).nullable().optional(),
-  riskAssessmentDate: z.string().date().nullable().optional(),
-  nextReviewDate: z.string().date().nullable().optional(),
+  riskAssessmentDate: blankAsNull(z.string().date().nullable().optional()),
+  nextReviewDate: blankAsNull(z.string().date().nullable().optional()),
   responsiblePerson: z.string().trim().max(500).nullable().optional(),
-  ukNation: z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional(),
+  ukNation: blankAsNull(z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional()),
   evacuationPeepArrangements: z.string().trim().max(10000).nullable().optional(),
   maintenanceEvidenceReference: z.string().trim().max(2000).nullable().optional(),
   defectClosureVerification: z.string().trim().max(10000).nullable().optional(),
@@ -538,7 +540,13 @@ router.put("/config", requireAuth, denyViewers, async (req, res) => {
   if (updates.controlProfile !== undefined) {
     if (siteId == null) return res.status(400).json({ error: "A site is required for a control profile" });
     const profile = fireProfileSchema.safeParse(updates.controlProfile);
-    if (!profile.success) return res.status(400).json({ error: profile.error.flatten() });
+    if (!profile.success) {
+      const issue = profile.error.issues[0];
+      return res.status(400).json({
+        error: `Invalid control profile: ${issue?.path.join(".") || "profile"} — ${issue?.message ?? "invalid value"}`,
+        details: profile.error.flatten(),
+      });
+    }
     await db.insert(trackControlProfilesTable).values({
       clientId, siteId, module: FIRE_PROFILE_MODULE, profile: profile.data,
     }).onConflictDoUpdate({

@@ -75,6 +75,17 @@ async function verifySite(siteId: number | null | undefined, clientId: number) {
   return !!r;
 }
 
+// Department-scoped staff may only use sites in their department (or sites
+// with no department), on create and when a draft's site changes. Edits pass
+// the raw body value, before parsing; the schemas reject a non-number siteId.
+async function siteInDepartment(siteId: unknown, clientId: number, deptId: number | null) {
+  if (typeof siteId !== "number" || deptId === null) return true;
+  const [r] = await db.select({ id: sitesTable.id }).from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId),
+      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)))).limit(1);
+  return !!r;
+}
+
 // ── Manager Sign-offs (MUST come before /:id) ────────────────────────────────
 
 router.get("/signoffs", requireAuth, async (req, res) => {
@@ -100,6 +111,7 @@ router.post("/signoffs", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+  if (!(await siteInDepartment(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   const siteId = data.siteId ?? null;
   // One sign-off per client/site/date, so a double submit or retry never adds
   // a second row. As for checklists (lib/dailyChecklistWrite.ts) there is no
@@ -151,8 +163,10 @@ router.put("/signoffs/:id", requireAuth, denyViewers, async (req, res) => {
     .where(and(eq(dailyManagerSignoffsTable.id, id), eq(dailyManagerSignoffsTable.clientId, clientId))).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (existing.submittedAt) return res.status(409).json({ error: "Sign-off already submitted" });
+  if (!(await siteInDepartment(req.body?.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   const parsed = signoffCreateSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  if (!(await verifySite(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
   const data = parsed.data as any;
   const [row] = await db.update(dailyManagerSignoffsTable)
     .set({ ...data, submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined, updatedAt: new Date() })
@@ -231,6 +245,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     });
   }
   if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+  if (!(await siteInDepartment(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   // Idempotent: a repeat POST for the same site/type/date updates its draft
   // rather than adding a duplicate row.
   const result = await saveDailyChecklist({
@@ -270,8 +285,10 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
       service: requiredService,
     });
   }
+  if (!(await siteInDepartment(req.body?.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  if (!(await verifySite(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
   const data = parsed.data as any;
   if (data.items) data.items = normaliseChecklistItems(data.items);
   if (data.submittedAt) {

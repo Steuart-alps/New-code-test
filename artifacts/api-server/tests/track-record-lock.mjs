@@ -9,7 +9,7 @@ const source = await readFile(
 const javascript = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { getDailyEntryCutoffDecision, parseOverrideReason, TRACK_WRITE_PREFIXES } = await import(
+const { getDailyEntryCutoffDecision, parseOverrideReason, TRACK_WRITE_PREFIXES, isNonCanonicalRecordPath } = await import(
   `data:text/javascript,${encodeURIComponent(javascript)}`
 );
 
@@ -51,6 +51,20 @@ for (const prefix of TRACK_WRITE_PREFIXES) {
     true,
     `${prefix} uses the shared record lock`,
   );
+}
+// Express routes these spellings to the same handler, so the lock must too.
+for (const path of ['/food-safety/42/', '/FOOD-SAFETY/42', '/Pat-Track/tests/42', '/food-safety/%34%32']) {
+  assert.equal(
+    getDailyEntryCutoffDecision(request({ recordDate: '2026-09-21' }, { path }), staff, now).blocked,
+    true,
+    `${path} uses the shared record lock`,
+  );
+}
+for (const path of ['/pat-track/tests/+42', '/pat-track/tests/%2042', '/swim-track/incidents/0x2a', '/GREEN-TRACK/defects/4_2/']) {
+  assert.equal(isNonCanonicalRecordPath(path), true, `${path} is refused as a non-canonical record id`);
+}
+for (const path of ['/pat-track/tests/42', '/pat-track/tests', '/daily-track-pm/signoffs', '/pat-track/appliances/+42', '/daily-checklists/7/2026-09-21/am']) {
+  assert.equal(isNonCanonicalRecordPath(path), false, `${path} is not a non-canonical mapped record id`);
 }
 assert.equal(
   getDailyEntryCutoffDecision(

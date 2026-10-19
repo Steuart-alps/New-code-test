@@ -182,10 +182,11 @@ async function routeApi(route, url) {
   if (pathname === "/api/billing/cancellation-status" && method === "GET") {
     return jsonResponse(route, { accessEndsAt: null });
   }
-  // Settings also loads track owners (#92).
+  // Settings also loads track owners (#92) and paid storage (#100).
   if (pathname === "/api/track-owners" && method === "GET") {
     return jsonResponse(route, { modules: [], owners: [], sites: [], users: [], defaultRecipients: [] });
   }
+  if (pathname === "/api/billing/storage" && method === "GET") return jsonResponse(route, { subscribed: false });
   // The header's notification bell (#92).
   if (pathname === "/api/notifications" && method === "GET") {
     return jsonResponse(route, { notifications: [], unreadCount: 0 });

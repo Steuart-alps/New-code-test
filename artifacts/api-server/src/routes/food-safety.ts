@@ -1151,7 +1151,7 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
     ...(recordedAt ? { _recordedAt: recordedAt } : {}),
   };
   const rowJson = JSON.stringify(storedRow);
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
   // Stamp the scope's limits whichever section opens the day, so a diary
   // started with a delivery does not fall back to the column defaults.
   const limits = await resolveDiaryLimits(clientId, siteId);

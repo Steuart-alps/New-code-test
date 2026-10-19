@@ -125,6 +125,12 @@ try {
   assert.equal(system.changed_by, null);
   assert.ok(!JSON.stringify(system.diff).includes("do-not-store"));
   assert.ok(!JSON.stringify(system.diff).includes("https://"));
+  // Text around a link or credential is kept; only the secret parts go.
+  await db.execute(sql`INSERT INTO fire_safety_checks(client_id,notes) VALUES (2,
+    'Boiler serviced. Quote https://app.test/q?token=abc123 sent; Bearer xyz789 used; see /quote?id=1&amp;token=def456')`);
+  const kept = (await db.execute(sql`SELECT diff->'notes'->>'after' AS notes FROM audit_log
+    WHERE diff->'notes'->>'after' LIKE 'Boiler serviced.%'`)).rows[0].notes as string;
+  assert.equal(kept, "Boiler serviced. Quote [link removed] sent; Bearer [REDACTED] used; see /quote?id=1&amp;token=[REDACTED]");
   const causedBy = (message: string) => (error: any) => String(error.cause?.message ?? error.message).includes(message);
   await assert.rejects(db.execute(sql`UPDATE audit_log SET changed_by=1`), causedBy("append-only"));
   await assert.rejects(db.execute(sql`DELETE FROM audit_log`), causedBy("append-only"));
