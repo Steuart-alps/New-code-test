@@ -29,6 +29,7 @@ import { setReadinessNote } from "./lib/readinessDetails";
 import { Sentry } from "./lib/sentry";
 import {
   ensureServicePrices,
+  ensureStoragePrice,
   getServicePricePreflight,
   getServicePriceReadinessBlocker,
   type ServicePricePreflight,
@@ -138,6 +139,14 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
   } catch (err) {
     repairFailed = true;
     logger.error({ err }, "ensureServicePrices failed — run POST /api/admin/ensure-service-prices manually");
+  }
+
+  // The extra-storage price (£1 per 10 GB) is made the same way. A failure
+  // only hides "Buy storage"; it never blocks start-up.
+  try {
+    if (await ensureStoragePrice()) logger.info("Created the Stripe extra-storage price");
+  } catch (err) {
+    logger.error({ err }, "ensureStoragePrice failed — extra storage stays unavailable until the next start");
   }
 
   // Confirm the repair result before the application becomes ready. This is

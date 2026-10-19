@@ -107,7 +107,9 @@ function formatCheckedAge(seconds: number): string {
 }
 
 /** Storage add-on offer from /billing/config: per-GiB monthly price in minor units. */
-type StorageAddonOffer = { unitAmount: number; currency: string; minimumGib: number };
+type StorageAddonOffer = { unitAmount: number; currency: string; minimumGib: number; packGib?: number };
+/** Extra storage is sold in steps of this many GB (£1 per 10 GB). */
+const STORAGE_PACK_GIB = 10;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -187,6 +189,7 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
     capacity.unitAmount !== null && capacity.currency ? formatMinorUnits(capacity.unitAmount * gib, capacity.currency) : null;
   const target = Number(targetGib);
   const targetValid = Number.isInteger(target)
+    && target % STORAGE_PACK_GIB === 0
     && capacity.minimumGib !== null
     && target >= capacity.minimumGib
     && target < capacity.renewingGib;
@@ -207,7 +210,7 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
       setConfirmOpen(false);
       toast({
         title: "Storage reduction confirmed",
-        description: `Stripe has been updated. From ${formatUkDate(data.effectiveAt)} your subscription renews with ${data.toGib} GiB of extra storage. You keep ${data.paidGibThisPeriod} GiB until then.`,
+        description: `Stripe has been updated. From ${formatUkDate(data.effectiveAt)} your subscription renews with ${data.toGib} GB of extra storage. You keep ${data.paidGibThisPeriod} GB until then.`,
       });
       await capacityQuery.refetch();
       onChanged();
@@ -223,10 +226,10 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
       <div>
         <p className="text-sm text-muted-foreground">Extra storage you pay for</p>
         <p className="mt-1 text-lg font-semibold">
-          {capacity.renewingGib} GiB each month{price(capacity.renewingGib) ? ` (${price(capacity.renewingGib)} / month)` : ""}
+          {capacity.renewingGib} GB each month{price(capacity.renewingGib) ? ` (${price(capacity.renewingGib)} / month)` : ""}
         </p>
         {capacity.planIncludedGib !== null && (
-          <p className="text-xs text-muted-foreground">On top of the {capacity.planIncludedGib} GiB included with your plan.</p>
+          <p className="text-xs text-muted-foreground">On top of the {capacity.planIncludedGib} GB included with your plan.</p>
         )}
       </div>
 
@@ -234,32 +237,32 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
         <div key={`${row.requestedAt}-${row.toGib}`} className="flex gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            Reduction confirmed on {formatUkDate(row.requestedAt)}: from {formatUkDate(row.effectiveAt)} your subscription renews with {row.toGib} GiB instead of {row.fromGib} GiB.
+            Reduction confirmed on {formatUkDate(row.requestedAt)}: from {formatUkDate(row.effectiveAt)} your subscription renews with {row.toGib} GB instead of {row.fromGib} GB.
           </span>
         </div>
       ))}
       {capacity.paidGibThisPeriod > capacity.renewingGib && (
-        <p className="text-sm">You keep {capacity.paidGibThisPeriod} GiB of extra storage until {periodEnd}, because this month is already paid for.</p>
+        <p className="text-sm">You keep {capacity.paidGibThisPeriod} GB of extra storage until {periodEnd}, because this month is already paid for.</p>
       )}
 
       {capacity.minimumGib !== null && capacity.planIncludedGib !== null && (
         <p className="text-sm text-muted-foreground" data-testid="storage-minimum">
           {capacity.minimumGib > 0
-            ? `Your retained files (${formatBytes(capacity.usedBytes)}) need at least ${capacity.minimumGib} GiB of extra storage, so you can't go below that.`
-            : `Your retained files (${formatBytes(capacity.usedBytes)}) fit in the ${capacity.planIncludedGib} GiB included with your plan, so you can remove all extra storage.`}
+            ? `Your retained files (${formatBytes(capacity.usedBytes)}) need at least ${capacity.minimumGib} GB of extra storage, so you can't go below that.`
+            : `Your retained files (${formatBytes(capacity.usedBytes)}) fit in the ${capacity.planIncludedGib} GB included with your plan, so you can remove all extra storage.`}
         </p>
       )}
 
       {capacity.canReduce ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex-1 space-y-1.5">
-            <Label htmlFor="storage-renew-gib">Renew with (GiB of extra storage)</Label>
+            <Label htmlFor="storage-renew-gib">Renew with (GB of extra storage, in steps of {STORAGE_PACK_GIB})</Label>
             <Input
               id="storage-renew-gib"
               type="number"
               min={capacity.minimumGib ?? 0}
-              max={capacity.renewingGib - 1}
-              step="1"
+              max={capacity.renewingGib - STORAGE_PACK_GIB}
+              step={STORAGE_PACK_GIB}
               value={targetGib}
               onChange={(event) => setTargetGib(event.target.value)}
             />
@@ -278,14 +281,14 @@ function PaidStorageSection({ activeClientId, onChanged }: { activeClientId: num
       <Dialog open={confirmOpen} onOpenChange={(open) => { if (!busy) setConfirmOpen(open); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Reduce extra storage to {targetValid ? target : "…"} GiB?</DialogTitle>
+            <DialogTitle>Reduce extra storage to {targetValid ? target : "…"} GB?</DialogTitle>
             <DialogDescription asChild>
               <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm">
                 <li>
-                  From {periodEnd}, your subscription renews with {target} GiB instead of {capacity.renewingGib} GiB
+                  From {periodEnd}, your subscription renews with {target} GB instead of {capacity.renewingGib} GB
                   {price(capacity.renewingGib) && price(target) ? ` (${price(capacity.renewingGib)} → ${price(target)} a month)` : ""}.
                 </li>
-                <li>You keep {capacity.paidGibThisPeriod} GiB until then. Nothing is refunded for the current month.</li>
+                <li>You keep {capacity.paidGibThisPeriod} GB until then. Nothing is refunded for the current month.</li>
                 <li>No files are deleted and nobody loses access. If your files grow, you can buy storage again.</li>
               </ul>
             </DialogDescription>
@@ -363,7 +366,7 @@ function StorageUsageCard() {
   };
 
   // Only offer to buy storage when the storage add-on is configured and its
-  // Stripe price matches the provider rate plus margin (checked server-side).
+  // Stripe price is the £1 per 10 GB storage price (checked server-side).
   const [storageAddon, setStorageAddon] = useState<StorageAddonOffer | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -378,9 +381,11 @@ function StorageUsageCard() {
   }, [activeClientId]);
 
   const excessGib = Math.ceil((usage?.estimatedCost?.excessStorageBytes ?? 0) / (1024 ** 3));
-  const storagePurchaseGib = Math.max(1, storageAddon?.minimumGib ?? 1, excessGib);
+  // Enough whole 10 GB steps to cover what the files need beyond the plan.
+  const storagePackGib = storageAddon?.packGib ?? STORAGE_PACK_GIB;
+  const storagePurchaseGib = Math.max(storagePackGib, storageAddon?.minimumGib ?? 0, Math.ceil(excessGib / storagePackGib) * storagePackGib);
   const storagePurchaseLabel = storageAddon
-    ? `Buy ${storagePurchaseGib} GiB for ${formatMinorUnits(storageAddon.unitAmount * storagePurchaseGib, storageAddon.currency)} / month`
+    ? `Buy ${storagePurchaseGib} GB for ${formatMinorUnits(storageAddon.unitAmount * storagePurchaseGib, storageAddon.currency)} / month`
     : "";
 
   const buyAdditionalStorage = async () => {
@@ -395,7 +400,7 @@ function StorageUsageCard() {
       if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);
       toast({
         title: "Additional storage added",
-        description: `${gib} GiB has been added to your monthly Stripe subscription.`,
+        description: `${gib} GB has been added to your monthly subscription.`,
       });
       await usageQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["/api/billing/storage", activeClientId] });
@@ -465,14 +470,13 @@ function StorageUsageCard() {
                 <p className="mt-2 text-sm font-medium">
                   {usage.estimatedCost
                     ? (usage.estimatedCost.excessStorageBytes ?? 0) > 0
-                      ? `Estimated excess storage charge: US$${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)} / month (USD)`
-                      : `Within the included ${formatBytes(usage.estimatedCost.includedStorageBytes)} storage allowance`
+                      ? `Your files are ${formatBytes(usage.estimatedCost.excessStorageBytes)} over the ${formatBytes(usage.estimatedCost.includedStorageBytes)} of storage you have`
+                      : `Within the ${formatBytes(usage.estimatedCost.includedStorageBytes)} of storage you have`
                     : "Storage pricing is currently unavailable for this subscription."}
                 </p>
                 {usage.estimatedCost && (usage.estimatedCost.excessStorageBytes ?? 0) > 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Based on our storage provider’s cost plus a {usage.estimatedCost.markupPercent ?? 20}% ALPS margin.
-                    Downloads are measured separately and are not charged here.
+                    Nothing extra is charged automatically and uploads carry on. Extra storage is £1 per 10 GB a month.
                   </p>
                 )}
                 {storageAddon && (
@@ -489,7 +493,7 @@ function StorageUsageCard() {
                     {storagePurchaseBusy ? "Adding storage to Stripe…" : storagePurchaseLabel}
                   </Button>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {formatMinorUnits(storageAddon.unitAmount, storageAddon.currency)} per GiB each month, before any VAT. The first month is charged now.
+                    {formatMinorUnits(storageAddon.unitAmount * storagePackGib, storageAddon.currency)} per {storagePackGib} GB each month, before any VAT. The first month is charged now.
                   </p>
                   </>
                 )}

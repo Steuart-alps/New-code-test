@@ -2,7 +2,8 @@ export { default as billingRouter } from "../src/routes/billing";
 export {
   checkStorageAddonPrice,
   evaluateStorageAddonPrice,
-  minimumStoragePurchaseGib,
+  isWholeStoragePacks,
+  roundUpToStoragePacks,
   readStorageRateConfig,
   resetStoragePriceCheckCache,
   STRIPE_MINIMUM_CHARGE_MINOR_UNITS,
