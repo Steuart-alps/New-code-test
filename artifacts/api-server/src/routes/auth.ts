@@ -830,6 +830,7 @@ export const BUSINESS_TYPES = [
   "offices_commercial",
   "retail",
   "pest_control",
+  "golf_club",
   "other",
 ] as const;
 
