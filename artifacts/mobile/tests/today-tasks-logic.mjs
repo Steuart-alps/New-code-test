@@ -55,8 +55,12 @@ const component = await readFile(new URL('../components/TodayTasks.tsx', import.
 const today = await readFile(new URL('../app/(tabs)/index.tsx', import.meta.url), 'utf8');
 assert.ok(today.includes('<TodayTasks />'), 'Today screen shows the tasks section');
 assert.ok(component.includes('canMarkDone(task, user?.role) ?'), 'Mark done is gated');
-assert.ok(component.includes('`/api/tasks/${task.id}/complete`'));
-assert.ok(component.includes('JSON.stringify({ date: task.occurrenceDate })'), 'completes the occurrence shown');
+// "Mark done" goes through the device outbox (saved on this phone with no
+// signal, resent under the same entry ID) to POST /tasks/:id/complete.
+assert.ok(component.includes("useOutboxAction('task-completion')"), 'Mark done is saved on the device first');
+assert.ok(component.includes('ACTION_TARGETS.taskCompletion(task.id, task.occurrenceDate)'));
+assert.ok(component.includes('{ date: task.occurrenceDate }'), 'completes the occurrence shown');
+assert.ok(component.includes('<OutboxEntries'), 'unsent completions are shown with their state');
 assert.ok(!/clientId/.test(component.replace('user?.clientId', '')), 'no client id is sent');
 
 console.log('today tasks logic: ok');

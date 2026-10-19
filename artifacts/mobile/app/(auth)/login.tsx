@@ -19,6 +19,7 @@ import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { isInvalidMobileLoginChallenge } from '@/lib/api';
 import { privacyPolicyUrl, termsUrl } from '@/lib/links';
+import { onlineActionMessage } from '@/components/outbox-status-logic';
 
 export default function LoginScreen() {
   const colors = useColors();
@@ -61,8 +62,12 @@ export default function LoginScreen() {
       }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Sign-in failed. Please try again.';
+      // Signing in (and two-factor verification) needs the server.
+      const message = onlineActionMessage(
+        err,
+        'Sign-in failed. Please try again.',
+        'Signing in needs an internet connection. Try again when you have signal.',
+      );
       if (isInvalidMobileLoginChallenge(err)) {
         setPendingToken(null);
         setCode('');

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
@@ -9,6 +9,11 @@ import { bikeDepartmentWrites, departmentScope } from "../lib/bikeTrackDepartmen
 import { createBikeHireRegisterPdf, type BikeHireRegisterRow } from "../lib/bikeHireRegisterPdf";
 import { resolveStaffPerformer } from "../lib/staffPerformer";
 import { parseBikeOverdueRepeatInterval } from "../lib/bikeOverdueReminders";
+import {
+  clientEntryFrom, clientEntryIdSchema, findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, respondToStoredEntry,
+  type ClientEntry,
+} from "../lib/clientEntryReplay";
+import { resolveSiteAccessScope } from "../lib/siteAccessScope";
 
 const router = Router();
 
@@ -60,6 +65,10 @@ const hireSchema = z.object({
     checkNotes:    z.string().max(2000).nullable().optional(),
   }).optional(),
 });
+
+// Creation only: the phone's device entry ID (lib/clientEntryReplay.ts), so a
+// resend after a lost response returns the stored hire instead of a duplicate.
+const hireCreateSchema = hireSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 const returnSchema = z.object({
   returnDateActual: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -297,9 +306,22 @@ router.get("/hires", requireAuth, async (req, res) => {
 router.post("/hires", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const parsed = hireSchema.safeParse(req.body);
+  const parsed = hireCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
   const d = parsed.data;
+  // The authenticated user (web session or phone bearer token).
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(d);
+  const storedEntry = async () => entry && (await db.select().from(bikeHireRecordsTable)
+    .where(and(eq(bikeHireRecordsTable.clientId, clientId), eq(bikeHireRecordsTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  // Checked before the availability rule: once a hire is applied its bike is
+  // on hire, and a resend must get the stored hire back, not "already on hire".
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredHire(res, prior, userId, entry);
+
+  // A hire's site must be one of this account's sites the user can reach.
+  if (d.siteId != null && !(await resolveSiteAccessScope(req, res, clientId, d.siteId))) return;
 
   // Verify bike belongs to client and is available
   const [bike] = await db.select().from(bikesTable)
@@ -310,63 +332,89 @@ router.post("/hires", requireAuth, denyViewers, async (req, res) => {
   if (bike.status === "maintenance") return res.status(409).json({ error: "Bike is currently in maintenance" });
   if (bike.status === "retired") return res.status(409).json({ error: "Bike is retired" });
 
-  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
+  // Resolve the checker before writing anything, so an invalid roster member
+  // never leaves a hire without its check (or a bike marked hired).
+  const c = d.preHireCheck;
+  const performer = c ? await resolveStaffPerformer(clientId, c.staffRosterId, c.performedBy) : null;
+  if (c && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-  const userId = req.currentUser?.id ?? null;
-
-  // Validate the pre-hire performer before writing anything.
-  const preCheckPerformer = d.preHireCheck
-    ? await resolveStaffPerformer(clientId, d.preHireCheck.staffRosterId, d.preHireCheck.performedBy)
-    : null;
-  if (d.preHireCheck && !preCheckPerformer) return res.status(400).json({ error: "Invalid staff roster member" });
-
-  const { hire, preCheck } = await db.transaction(async (tx) => {
-    // Create hire record
-    const [hire] = await tx.insert(bikeHireRecordsTable).values({
-      clientId,
-      siteId: d.siteId ?? null,
-      bikeId: d.bikeId,
-      guestName: d.guestName,
-      guestContact: d.guestContact ?? null,
-      hireDate: d.hireDate,
-      returnDateExpected: d.returnDateExpected ?? null,
-      depositPence: d.depositPence ?? null,
-      depositReturned: false,
-      status: "active",
-      notes: d.notes ?? null,
-      createdBy: userId,
-    }).returning();
-
-    // Mark bike as hired
-    await tx.update(bikesTable).set({ status: "hired", updatedAt: new Date() })
-      .where(eq(bikesTable.id, d.bikeId));
-
-    // Save pre-hire check if provided
-    let preCheck = null;
-    if (d.preHireCheck && preCheckPerformer) {
-      const c = d.preHireCheck;
-      const performer = preCheckPerformer;
-      const overallResult = c.overallResult ?? "pass";
-      const [check] = await tx.insert(bikeChecksTable).values({
+  let result;
+  try {
+    result = await db.transaction(async (tx) => {
+      const [hire] = await tx.insert(bikeHireRecordsTable).values({
         clientId,
-        hireRecordId: hire.id,
+        siteId: d.siteId ?? null,
         bikeId: d.bikeId,
-        checkType: "pre_hire",
-        checkDate: c.checkDate ?? d.hireDate,
-         performedBy: performer.performedBy,
-         staffRosterId: performer.staffRosterId,
-        overallResult,
-        ...checkItemsToRow(c),
-        notes: c.checkNotes ?? null,
+        guestName: d.guestName,
+        guestContact: d.guestContact ?? null,
+        hireDate: d.hireDate,
+        returnDateExpected: d.returnDateExpected ?? null,
+        depositPence: d.depositPence ?? null,
+        depositReturned: false,
+        status: "active",
+        notes: d.notes ?? null,
         createdBy: userId,
+        clientEntryId: entry?.id ?? null,
+        clientEntryHash: entry?.hash ?? null,
       }).returning();
-      preCheck = check;
-    }
-    return { hire, preCheck };
-  });
 
-  res.status(201).json({ hire, preCheck });
+      // Mark bike as hired, only if it is still available: two hires of one
+      // bike sent at once (e.g. two phones syncing) cannot both succeed.
+      const [marked] = await tx.update(bikesTable).set({ status: "hired", updatedAt: new Date() })
+        .where(and(eq(bikesTable.id, d.bikeId), eq(bikesTable.clientId, clientId), eq(bikesTable.status, "available")))
+        .returning({ id: bikesTable.id });
+      if (!marked) throw new BikeNoLongerAvailable();
+
+      // Save pre-hire check if provided
+      let preCheck = null;
+      if (c && performer) {
+        const [check] = await tx.insert(bikeChecksTable).values({
+          clientId,
+          hireRecordId: hire.id,
+          bikeId: d.bikeId,
+          checkType: "pre_hire",
+          checkDate: c.checkDate ?? d.hireDate,
+          performedBy: performer.performedBy,
+          staffRosterId: performer.staffRosterId,
+          overallResult: c.overallResult ?? "pass",
+          ...checkItemsToRow(c),
+          notes: c.checkNotes ?? null,
+          createdBy: userId,
+        }).returning();
+        preCheck = check;
+      }
+      return { hire, preCheck };
+    });
+  } catch (err) {
+    if (err instanceof BikeNoLongerAvailable) return res.status(409).json({ error: "Bike is already on hire" });
+    // A concurrent resend of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredHire(res, raced, userId, entry);
+    throw err;
+  }
+
+  res.status(201).json(result);
 });
+
+/** Rolls back a hire whose bike stopped being available after it was checked. */
+class BikeNoLongerAvailable extends Error {}
+
+/** Answer a resent hire with the stored hire and its pre-hire check (the 201 shape). */
+async function respondToStoredHire(
+  res: Response,
+  hire: typeof bikeHireRecordsTable.$inferSelect,
+  userId: number,
+  entry: ClientEntry,
+) {
+  const [preCheck] = await db.select().from(bikeChecksTable)
+    .where(and(
+      eq(bikeChecksTable.hireRecordId, hire.id),
+      eq(bikeChecksTable.clientId, hire.clientId),
+      eq(bikeChecksTable.checkType, "pre_hire"),
+    ))
+    .limit(1);
+  return respondToStoredEntry(res, hire, userId, entry, (row) => ({ hire: row, preCheck: preCheck ?? null }));
+}
 
 router.put("/hires/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
@@ -402,7 +450,7 @@ router.post("/hires/:id/return", requireAuth, denyViewers, async (req, res) => {
   if (hire.status === "returned") return res.status(409).json({ error: "Hire already returned" });
 
   const today = todayIso();
-  const userId = req.currentUser?.id ?? null;
+  const userId = req.currentUser!.id;
 
   // Save post-return check
   let postCheck = null;
@@ -503,6 +551,8 @@ const serviceSchema = z.object({
   costPence:         z.number().int().min(0).nullable().optional(),
   notes:             z.string().max(2000).nullable().optional(),
 });
+// Creation only: the phone's device entry ID (see hireCreateSchema).
+const serviceCreateSchema = serviceSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 router.get("/services", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -546,26 +596,39 @@ router.get("/services/latest", requireAuth, async (req, res) => {
 router.post("/services", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const parsed = serviceSchema.safeParse(req.body);
+  const parsed = serviceCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
   const d = parsed.data;
+  // The authenticated user (web session or phone bearer token).
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(d);
+  const prior = await findRawStoredEntry("bike_services", clientId, entry);
+  if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
 
   // Verify bike belongs to this client
   const bikeCheckResult = await db.execute(sql`SELECT id FROM bikes WHERE id = ${d.bikeId} AND client_id = ${clientId} LIMIT 1`);
   const bike = ((bikeCheckResult as any).rows ?? [])[0];
   if (!bike) return res.status(400).json({ error: "Bike not found" });
 
-  const userId = req.currentUser?.id ?? null;
-
-  const insertResult = await db.execute(sql`
-    INSERT INTO bike_services
-      (client_id, bike_id, service_date, service_type, serviced_by, next_service_date, cost_pence, notes, created_by)
-    VALUES
-      (${clientId}, ${d.bikeId}, ${d.serviceDate}, ${d.serviceType}, ${d.servicedBy ?? null},
-       ${d.nextServiceDate ?? null}, ${d.costPence ?? null}, ${d.notes ?? null}, ${userId})
-    RETURNING *
-  `);
-  const row = ((insertResult as any).rows ?? [])[0];
+  let row;
+  try {
+    const insertResult = await db.execute(sql`
+      INSERT INTO bike_services
+        (client_id, bike_id, service_date, service_type, serviced_by, next_service_date, cost_pence, notes, created_by,
+         client_entry_id, client_entry_hash)
+      VALUES
+        (${clientId}, ${d.bikeId}, ${d.serviceDate}, ${d.serviceType}, ${d.servicedBy ?? null},
+         ${d.nextServiceDate ?? null}, ${d.costPence ?? null}, ${d.notes ?? null}, ${userId},
+         ${entry?.id ?? null}, ${entry?.hash ?? null})
+      RETURNING *
+    `);
+    row = ((insertResult as any).rows ?? [])[0];
+  } catch (err) {
+    // A concurrent resend of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await findRawStoredEntry("bike_services", clientId, entry) : undefined;
+    if (entry && raced) return respondToRawStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
   res.status(201).json(row);
 });
 

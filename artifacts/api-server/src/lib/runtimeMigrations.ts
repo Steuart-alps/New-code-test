@@ -2130,6 +2130,14 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_survey_history_record_idx" ON "asbestos_survey_history" ("client_id", "record_id")`);
 
+    // Mobile outbox replays (lib/clientEntryReplay.ts) for FixTrack issue
+    // reports and notes, "Mark done" and tasks a manager creates on the
+    // phone. Schema: lib/db fix-track, tasks.
+    await addClientEntryReplayColumns("fix_track_issues");
+    await addClientEntryReplayColumns("fix_track_issue_activity");
+    await addClientEntryReplayColumns("task_completions");
+    await addClientEntryReplayColumns("tasks");
+
     // ---- Track owners and in-app notifications (Oct 2026) ----
     await migrateTrackOwnersAndNotifications();
     await migrateCertificateOutcomes();
@@ -2725,6 +2733,10 @@ async function migrateAuditFixes2026_08() {
     ON "kitchen_probe_checks" ("client_id", "site_id", "check_date")
     WHERE "site_id" IS NOT NULL
   `);
+  // Phone weekly reviews and probe calibrations carry a device entry ID
+  // (mobile outbox replays). Runtime-only tables: no Drizzle schema.
+  await addClientEntryReplayColumns("kitchen_weekly_records");
+  await addClientEntryReplayColumns("kitchen_probe_checks");
 }
 
 async function migrateLegacyCategories() {
@@ -2918,6 +2930,8 @@ async function migrateTreeTrack() {
     END $$
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_client" ON "tree_inspections" ("client_id")`);
+  // Mobile replay keys (created_by is added above). Schema: lib/db tree-inspections.
+  await addClientEntryReplayColumns("tree_inspections");
 }
 
 // ---- BikeTrack ----
@@ -3029,6 +3043,9 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_checks_bike" ON "bike_checks" ("bike_id")`);
+  // Phone hires carry a device entry ID (mobile outbox replays); created_by
+  // already exists. Schema: lib/db bike-track.ts.
+  await addClientEntryReplayColumns("bike_hire_records");
 }
 
 async function migrateBikeServices() {
@@ -3050,6 +3067,9 @@ async function migrateBikeServices() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_services_bike" ON "bike_services" ("bike_id")`);
+  // Phone service logs carry a device entry ID (mobile outbox replays).
+  // bike_services is runtime-only (no Drizzle table).
+  await addClientEntryReplayColumns("bike_services");
 }
 
 // ---- Two-factor authentication ----
@@ -3642,6 +3662,14 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_fuel_client_machine"
     ON "green_fuel_logs" ("client_id", "machine_id")
   `);
+
+  // Phone defect reports, fuel logs, service records and PUWER inspections
+  // carry a device entry ID (mobile outbox replays), recognised only for the
+  // user who created the row.
+  for (const table of ["green_defects", "green_fuel_logs", "green_service_records", "green_puwer_inspections"]) {
+    await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`));
+    await addClientEntryReplayColumns(table);
+  }
 }
 
 // ---- SwimTrack ----
@@ -3751,6 +3779,13 @@ async function migrateSwimTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_swim_incidents_client_date"
     ON "swim_incidents" ("client_id", "incident_date")
   `);
+
+  // Phone surveillance checks, first-aid checks and incidents carry a device
+  // entry ID (mobile outbox replays); created_by identifies whose entry it is.
+  for (const table of ["swim_surveillance_checks", "swim_first_aid_checks", "swim_incidents"]) {
+    await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`));
+    await addClientEntryReplayColumns(table);
+  }
 }
 
 // ---- Check photos & photo requirements ----
@@ -4674,6 +4709,10 @@ async function migratePestTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pest_activity_client" ON "pest_activity" ("client_id")`);
+  // Phone sightings and contractor visits carry a device entry ID (mobile
+  // outbox replays); created_by already exists. Schema: lib/db pest-track.ts.
+  await addClientEntryReplayColumns("pest_visits");
+  await addClientEntryReplayColumns("pest_activity");
 }
 
 async function migrateComplianceHub() {
@@ -4780,6 +4819,8 @@ async function migratePremisesTrack() {
   `);
   await db.execute(sql`ALTER TABLE "premises_inspections" ADD COLUMN IF NOT EXISTS "next_inspection_date" date`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_premises_inspections_client" ON "premises_inspections" ("client_id", "inspection_date")`);
+  // Mobile outbox replays (lib/clientEntryReplay.ts). Schema: lib/db premises-track.
+  await addClientEntryReplayColumns("premises_inspections");
 }
 
 async function migrateRoomTrack() {
@@ -4839,6 +4880,8 @@ async function migrateRoomTrack() {
   await db.execute(sql`ALTER TABLE "room_track_checks" ALTER COLUMN "status" DROP NOT NULL`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_room_track_rooms_client_site" ON "room_track_rooms" ("client_id", "site_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_room_track_checks_client_date" ON "room_track_checks" ("client_id", "check_date", "site_id")`);
+  // Mobile outbox replays (lib/clientEntryReplay.ts); schema: lib/db room-track.
+  await addClientEntryReplayColumns("room_track_checks");
 }
 
 async function migrateKitchenCleaning() {
@@ -4884,6 +4927,24 @@ async function migrateKitchenCleaning() {
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS "IDX_kitchen_cleaning_logs_unique"
     ON "kitchen_cleaning_logs" ("client_id", "log_date", "frequency", "site_id")
+  `);
+  // Mobile outbox receipts: each device entry ID applied to a cleaning log, so
+  // a resend after a lost response is recognised instead of applied again.
+  // Kept apart from the log row because every save updates that row.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "kitchen_cleaning_log_entries" (
+      "id"                serial PRIMARY KEY,
+      "client_id"         integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "log_id"            integer REFERENCES "kitchen_cleaning_logs"("id") ON DELETE CASCADE,
+      "client_entry_id"   text NOT NULL,
+      "client_entry_hash" text NOT NULL,
+      "created_by"        integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"        timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_cleaning_log_entries_client_entry"
+    ON "kitchen_cleaning_log_entries" ("client_id", "client_entry_id")
   `);
 }
 

@@ -1,4 +1,5 @@
-import { pgTable, serial, integer, text, boolean, timestamp, date } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, boolean, timestamp, date, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const pestVisitsTable = pgTable("pest_visits", {
   id:                 serial("id").primaryKey(),
@@ -16,9 +17,17 @@ export const pestVisitsTable = pgTable("pest_visits", {
   signedOffByRosterId: integer("signed_off_by_roster_id"),
   notes:              text("notes"),
   createdBy:          integer("created_by"),
+  // Mobile outbox entry ID and payload fingerprint: a replay of an applied
+  // submission is recognised instead of creating a duplicate. Not a credential.
+  clientEntryId:      text("client_entry_id"),
+  clientEntryHash:    text("client_entry_hash"),
   createdAt:          timestamp("created_at").notNull().defaultNow(),
   updatedAt:          timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_pest_visits_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
+]);
 
 export const pestActivityTable = pgTable("pest_activity", {
   id:           serial("id").primaryKey(),
@@ -36,6 +45,13 @@ export const pestActivityTable = pgTable("pest_activity", {
   resolvedAt:   timestamp("resolved_at"),
   notes:        text("notes"),
   createdBy:    integer("created_by"),
+  // Mobile outbox entry ID and payload fingerprint (see pest_visits).
+  clientEntryId:   text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt:    timestamp("created_at").notNull().defaultNow(),
   updatedAt:    timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_pest_activity_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
+]);

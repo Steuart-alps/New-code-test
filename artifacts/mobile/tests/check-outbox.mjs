@@ -9,7 +9,7 @@ const source = await readFile(new URL('../lib/checkOutboxCore.ts', import.meta.u
 const js = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { CheckOutbox, checkOutboxKey, isRetryableStatus, RECORD_KINDS, RECORD_PATHS, deliveredQueryKeys } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
+const { CheckOutbox, checkOutboxKey, isRetryableStatus, RECORD_KINDS, RECORD_PATHS, ACTION_TARGETS, deliveredQueryKeys } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
 
 const A = { clientId: 301, userId: 401 };
 const B = { clientId: 301, userId: 402 };
@@ -174,6 +174,10 @@ assert.equal(isRetryableStatus(400), false);
   await assert.rejects(records.enqueue({ ...record('pat-test', 'pat-entry-000001', {}), path: '/api/pat-track/appliances' }), /cannot be saved/);
   await assert.rejects(records.enqueue({ ...record('incident', 'incident-entry-02', {}), path: '/api/incidents/5' }), /cannot be saved/);
   await assert.rejects(records.enqueue({ ...record('pool-check', 'pool-entry-000001', {}), path: '/api/pool-track/5' }), /cannot be saved/);
+  await assert.rejects(records.enqueue({ ...record('tree-inspection', 'tree-entry-000001', {}), path: '/api/tree-track/5' }), /cannot be saved/);
+  await assert.rejects(records.enqueue({ ...record('tree-inspection', 'tree-entry-000002', {}), path: '/api/tree-track/status' }), /cannot be saved/);
+  await assert.rejects(records.enqueue({ ...record('room-check', 'room-entry-000001', {}), path: '/api/room-track/rooms' }), /cannot be saved/);
+  await assert.rejects(records.enqueue({ ...record('room-check', 'room-entry-000002', {}), path: '/api/room-track/checks/5' }), /cannot be saved/);
   online = true;
   await records.replay();
   assert.deepEqual(records.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent', 'sent']);
@@ -189,5 +193,454 @@ assert.deepEqual(deliveredQueryKeys('pat-test'), [['pat-tests'], ['pat-appliance
 assert.deepEqual(deliveredQueryKeys('daily-checklist'), [['daily-checklist'], ['daily-overview']]);
 assert.equal(RECORD_PATHS['pool-check'], '/api/pool-track');
 assert.deepEqual(deliveredQueryKeys('pool-check'), [['pool-checks'], ['track-controls'], ['dashboard-summary']]);
+assert.ok(RECORD_KINDS.includes('tree-inspection'), 'TreeTrack inspections are independent records');
+assert.equal(RECORD_PATHS['tree-inspection'], '/api/tree-track');
+assert.deepEqual(deliveredQueryKeys('tree-inspection'), [['tree-inspections'], ['tree-status'], ['dashboard-summary']]);
+
+// PremisesTrack inspections: saved offline, resent unchanged under one entry
+// ID, and only the create path is accepted.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  const records = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      return { id: 21, status: 'open' };
+    },
+    async onSent() {},
+  });
+  await records.activate(A, 'token-A');
+  assert.ok(RECORD_KINDS.includes('premises-inspection'));
+  assert.equal(RECORD_PATHS['premises-inspection'], '/api/premises-track');
+  const premises = (entryId, path = RECORD_PATHS['premises-inspection']) => ({
+    entryId, kind: 'premises-inspection', path, scopeKey: `premises-inspection:${entryId}`, label: 'Premises inspection',
+    body: { inspectionDate: '2026-10-12', inspectionType: 'hazard', area: 'Stairwell', findings: 'Loose nosing', status: 'open', siteId: 7 },
+  });
+  await records.enqueue(premises('premises-entry-0001'));
+  await records.replay();
+  assert.deepEqual(records.getSnapshot().entries.map((entry) => entry.state), ['queued'], 'saved on the device while offline');
+  await assert.rejects(records.enqueue(premises('premises-entry-0002', '/api/premises-track/5')), /cannot be saved/);
+  await assert.rejects(records.enqueue(premises('premises-entry-0003', '/api/premises-track/summary')), /cannot be saved/);
+  online = true;
+  await records.replay();
+  assert.deepEqual(records.getSnapshot().entries.map((entry) => entry.state), ['sent']);
+  assert.ok(sent.length >= 2, 'offline attempt then automatic resend');
+  for (const attempt of sent) {
+    assert.equal(attempt.path, '/api/premises-track');
+    assert.deepEqual(attempt.body, { ...premises('premises-entry-0001').body, clientEntryId: 'premises-entry-0001' },
+      'every resend is identical, with the same entry ID');
+  }
+  assert.deepEqual(records.takeResponse('premises-entry-0001'), { id: 21, status: 'open' });
+  records.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('premises-inspection'), [['premises-inspections'], ['dashboard-summary']]);
+assert.equal(RECORD_PATHS['room-check'], '/api/room-track/checks');
+assert.ok(RECORD_KINDS.includes('room-check'));
+assert.deepEqual(deliveredQueryKeys('room-check'), [['room-track-checks'], ['dashboard-summary']]);
+// RoomTrack room checks wait offline and resend the identical body.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  const rooms = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      return { id: 31, roomId: 4 };
+    },
+    async onSent() {},
+  });
+  await rooms.activate(A, 'token-A');
+  const body = { roomId: 4, siteId: 7, checkDate: '2026-10-12', clean: true, tidy: true, toStandard: false, checkedBy: 'Housekeeper' };
+  await rooms.enqueue({ entryId: 'room-entry-000003', kind: 'room-check', path: RECORD_PATHS['room-check'], scopeKey: 'room-check:room-entry-000003', label: 'Room 4', body });
+  await rooms.replay();
+  assert.equal(rooms.getSnapshot().entries[0].state, 'queued', 'a room check waits on the device while offline');
+  online = true;
+  await rooms.replay();
+  assert.equal(rooms.getSnapshot().entries[0].state, 'sent');
+  assert.ok(sent.length >= 2);
+  for (const attempt of sent) assert.deepEqual(attempt, { path: '/api/room-track/checks', body: { ...body, clientEntryId: 'room-entry-000003' } });
+  assert.deepEqual(rooms.takeResponse('room-entry-000003'), { id: 31, roomId: 4 });
+  rooms.suspend();
+}
+
+// PestTrack sightings and contractor visits: saved offline, resent unchanged,
+// and only the two create paths can be stored (no edits, deletes or config).
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  const pest = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      return { id: 11 };
+    },
+    async onSent() {},
+  });
+  await pest.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  assert.ok(RECORD_KINDS.includes('pest-activity') && RECORD_KINDS.includes('pest-visit'));
+  assert.equal(RECORD_PATHS['pest-activity'], '/api/pest-track/activity');
+  assert.equal(RECORD_PATHS['pest-visit'], '/api/pest-track/visits');
+  await pest.enqueue(record('pest-activity', 'pest-activity-00001', {
+    recordedDate: '2026-10-12', pestType: 'rodent', evidenceType: 'droppings', severity: 'high', siteId: 7,
+  }));
+  await pest.enqueue(record('pest-visit', 'pest-visit-0000001', { visitDate: '2026-10-12', contractorName: 'J Smith', siteId: 7 }));
+  for (const path of ['/api/pest-track/activity/5', '/api/pest-track/visits/5', '/api/pest-track/config']) {
+    await assert.rejects(pest.enqueue({ ...record('pest-activity', 'pest-activity-00002', {}), path }), /cannot be saved/, path);
+    await assert.rejects(pest.enqueue({ ...record('pest-visit', 'pest-visit-0000002', {}), path }), /cannot be saved/, path);
+  }
+  await assert.rejects(pest.enqueue({ ...record('pest-visit', 'pest-visit-0000003', {}), path: RECORD_PATHS['pest-activity'] }), /cannot be saved/,
+    'a visit cannot be posted to the activity log');
+  await pest.replay();
+  assert.deepEqual(pest.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued'], 'both wait on the device offline');
+  online = true;
+  await pest.replay();
+  assert.deepEqual(pest.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent']);
+  const activityAttempts = sent.filter((attempt) => attempt.body.clientEntryId === 'pest-activity-00001');
+  assert.ok(activityAttempts.length >= 2, 'offline attempt then automatic resend');
+  for (const attempt of activityAttempts) assert.deepEqual(attempt, activityAttempts[0], 'every resend is identical, with the same entry ID');
+  assert.ok(sent.every((attempt) => attempt.path === (attempt.body.clientEntryId.startsWith('pest-visit') ? '/api/pest-track/visits' : '/api/pest-track/activity')));
+  pest.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('pest-activity'), [['pest-activity'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('pest-visit'), [['pest-visits'], ['dashboard-summary']]);
+
+// AquaTrack surveillance checks, first-aid checks and pool incidents: saved
+// offline, resent unchanged, a server rejection (e.g. photos now required)
+// kept on the device with its reason, and only the three create paths stored.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  let rejectIncidents = false;
+  const swim = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      if (rejectIncidents && entry.kind === 'swim-incident') {
+        throw Object.assign(new Error('At least 1 verified photo(s) are required'), { status: 422 });
+      }
+      return { id: 21 };
+    },
+    async onSent() {},
+  });
+  await swim.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  const kinds = { 'swim-surveillance': 'surveillance', 'swim-first-aid': 'first-aid', 'swim-incident': 'incidents' };
+  for (const [kind, segment] of Object.entries(kinds)) {
+    assert.ok(RECORD_KINDS.includes(kind), kind);
+    assert.equal(RECORD_PATHS[kind], `/api/swim-track/${segment}`);
+  }
+  await swim.enqueue(record('swim-surveillance', 'swim-surveillance-001', { checkDate: '2026-10-12', scanCompleted: true, siteId: 7 }));
+  await swim.enqueue(record('swim-first-aid', 'swim-first-aid-00001', { checkDate: '2026-10-12', aedOk: false, siteId: 7 }));
+  await swim.enqueue(record('swim-incident', 'swim-incident-000001', { incidentDate: '2026-10-12', description: 'Slip', siteId: 7 }));
+  for (const path of [
+    '/api/swim-track/surveillance/5', '/api/swim-track/first-aid/5', '/api/swim-track/incidents/5',
+    '/api/swim-track/sessions', '/api/swim-track/status', '/api/photos/staged',
+  ]) {
+    for (const kind of Object.keys(kinds)) {
+      await assert.rejects(swim.enqueue({ ...record(kind, `${kind}-0000099`, {}), path }), /cannot be saved/, `${kind} ${path}`);
+    }
+  }
+  await assert.rejects(swim.enqueue({ ...record('swim-incident', 'swim-incident-000002', {}), path: RECORD_PATHS['swim-first-aid'] }), /cannot be saved/,
+    'an incident cannot be posted as a first-aid check');
+  await swim.replay();
+  assert.deepEqual(swim.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued', 'queued'], 'all wait on the device offline');
+  online = true;
+  rejectIncidents = true;
+  await swim.replay();
+  const states = Object.fromEntries(swim.getSnapshot().entries.map((entry) => [entry.kind, entry]));
+  assert.equal(states['swim-surveillance'].state, 'sent');
+  assert.equal(states['swim-first-aid'].state, 'sent');
+  assert.equal(states['swim-incident'].state, 'failed', 'a rejected incident stays on the device');
+  assert.match(states['swim-incident'].error, /photo/, 'with the server reason shown');
+  for (const id of ['swim-surveillance-001', 'swim-first-aid-00001', 'swim-incident-000001']) {
+    const attempts = sent.filter((attempt) => attempt.body.clientEntryId === id);
+    // A pass stops at the first network failure, so only the oldest entry was tried offline.
+    assert.ok(attempts.length >= (id === 'swim-surveillance-001' ? 2 : 1), `${id}: offline attempt then automatic resend`);
+    for (const attempt of attempts) assert.deepEqual(attempt, attempts[0], `${id}: every resend is identical, with the same entry ID`);
+  }
+  swim.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('swim-surveillance'), [['swim-surveillance'], ['track-controls'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('swim-first-aid'), [['swim-first-aid'], ['track-controls'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('swim-incident'), [['swim-incidents'], ['dashboard-summary']]);
+// GreenTrack machine records (defects, fuel logs, service records, PUWER
+// inspections): saved offline, resent unchanged, create paths only (no
+// machine, edit, delete or config paths).
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  const green = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      return { id: 21 };
+    },
+    async onSent() {},
+  });
+  await green.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  const kinds = {
+    'green-defect': '/api/green-track/defects',
+    'green-fuel': '/api/green-track/fuel-logs',
+    'green-service': '/api/green-track/service-records',
+    'green-puwer': '/api/green-track/puwer-inspections',
+  };
+  for (const [kind, path] of Object.entries(kinds)) {
+    assert.ok(RECORD_KINDS.includes(kind), kind);
+    assert.equal(RECORD_PATHS[kind], path);
+    await green.enqueue(record(kind, `${kind}-000001`, { machineId: 4, notes: kind }));
+  }
+  for (const path of ['/api/green-track/defects/5', '/api/green-track/fuel-logs/5', '/api/green-track/machines',
+    '/api/green-track/machines/5', '/api/green-track/config', '/api/green-track/pre-use-checks']) {
+    for (const kind of Object.keys(kinds)) {
+      await assert.rejects(green.enqueue({ ...record(kind, `${kind}-000002`, {}), path }), /cannot be saved/, `${kind} ${path}`);
+    }
+  }
+  await assert.rejects(green.enqueue({ ...record('green-fuel', 'green-fuel-000003', {}), path: kinds['green-puwer'] }), /cannot be saved/,
+    'a fuel log cannot be posted as a PUWER inspection');
+  await green.replay();
+  assert.deepEqual(green.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued', 'queued', 'queued'], 'all wait on the device offline');
+  online = true;
+  await green.replay();
+  assert.deepEqual(green.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent', 'sent', 'sent']);
+  for (const [kind, path] of Object.entries(kinds)) {
+    const attempts = sent.filter((attempt) => attempt.body.clientEntryId === `${kind}-000001`);
+    // A replay stops at the first network failure, so only the oldest entry
+    // was tried while offline.
+    assert.ok(attempts.length >= (kind === 'green-defect' ? 2 : 1), `${kind}: sent once back online`);
+    for (const attempt of attempts) assert.deepEqual(attempt, { path, body: { machineId: 4, notes: kind, clientEntryId: `${kind}-000001` } });
+  }
+  green.suspend();
+}
+for (const [kind, tab] of [['green-defect', 'defect'], ['green-fuel', 'fuel'], ['green-service', 'service'], ['green-puwer', 'puwer']]) {
+  assert.deepEqual(deliveredQueryKeys(kind), [['green-records', tab], ['dashboard-summary']]);
+}
+// KitchenTrack probe calibrations and weekly reviews: saved offline, resent
+// unchanged, and only the two create paths can be stored (no edits by id).
+// A review the server refuses (one per week already exists) needs the user.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  let refuseWeekly = false;
+  const kitchen = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      if (refuseWeekly && entry.kind === 'kitchen-weekly') {
+        throw Object.assign(new Error('Record already exists for this week'), { status: 409 });
+      }
+      return { id: 21 };
+    },
+    async onSent() {},
+  });
+  await kitchen.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  assert.ok(RECORD_KINDS.includes('kitchen-probe') && RECORD_KINDS.includes('kitchen-weekly'));
+  assert.equal(RECORD_PATHS['kitchen-probe'], '/api/kitchen-weekly/probe');
+  assert.equal(RECORD_PATHS['kitchen-weekly'], '/api/kitchen-weekly/weekly');
+  await kitchen.enqueue(record('kitchen-probe', 'kitchen-probe-00001', {
+    checkDate: '2026-10-14', probes: [{ name: 'Probe 1', iceTemp: '0.2', accurateIce: true }], overallResult: 'pass',
+    signature: 'Manager', submittedAt: '2026-10-14T09:00:00.000Z',
+  }));
+  await kitchen.enqueue(record('kitchen-weekly', 'kitchen-weekly-0001', {
+    weekCommencing: '2026-10-12', checks: { training: 'yes' }, managerSignature: 'Manager', submittedAt: '2026-10-14T09:00:00.000Z',
+  }));
+  for (const path of ['/api/kitchen-weekly/probe/5', '/api/kitchen-weekly/weekly/5', '/api/kitchen-weekly/probe/by-date/2026-10-14']) {
+    await assert.rejects(kitchen.enqueue({ ...record('kitchen-probe', 'kitchen-probe-00002', {}), path }), /cannot be saved/, path);
+    await assert.rejects(kitchen.enqueue({ ...record('kitchen-weekly', 'kitchen-weekly-0002', {}), path }), /cannot be saved/, path);
+  }
+  await assert.rejects(kitchen.enqueue({ ...record('kitchen-weekly', 'kitchen-weekly-0003', {}), path: RECORD_PATHS['kitchen-probe'] }), /cannot be saved/,
+    'a weekly review cannot be posted as a probe check');
+  await kitchen.replay();
+  assert.deepEqual(kitchen.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued'], 'both wait on the device offline');
+  online = true;
+  refuseWeekly = true;
+  await kitchen.replay();
+  const stateOf = (kind) => kitchen.getSnapshot().entries.find((entry) => entry.kind === kind);
+  assert.equal(stateOf('kitchen-probe').state, 'sent');
+  assert.equal(stateOf('kitchen-weekly').state, 'failed', 'a refused review is kept on the device for the user');
+  assert.match(stateOf('kitchen-weekly').error ?? '', /already exists/);
+  const probeAttempts = sent.filter((attempt) => attempt.body.clientEntryId === 'kitchen-probe-00001');
+  assert.ok(probeAttempts.length >= 2, 'offline attempt then automatic resend');
+  for (const attempt of probeAttempts) assert.deepEqual(attempt, probeAttempts[0], 'every resend is identical, with the same entry ID');
+  assert.ok(sent.every((attempt) => attempt.path === (attempt.body.clientEntryId.startsWith('kitchen-weekly') ? '/api/kitchen-weekly/weekly' : '/api/kitchen-weekly/probe')));
+  kitchen.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('kitchen-probe'), [['kitchen-probe-checks'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('kitchen-weekly'), [['kitchen-weekly-reviews'], ['dashboard-summary']]);
+
+// Cleaning schedule saves (drafts and sign-offs) go to the upsert route only.
+assert.equal(RECORD_PATHS['cleaning-log'], '/api/kitchen-cleaning/logs');
+assert.ok(RECORD_KINDS.includes('cleaning-log'));
+assert.deepEqual(deliveredQueryKeys('cleaning-log'), [['kitchen-cleaning-log'], ['kitchen-cleaning-history'], ['dashboard-summary']]);
+{
+  const cleaning = new CheckOutbox({
+    storage: { async getItem() { return null; }, async setItem() {} },
+    async send() {}, async onSent() {},
+  });
+  await cleaning.activate(A, 'token-A');
+  const entry = (path) => ({ entryId: 'cleaning-entry-01', kind: 'cleaning-log', path, scopeKey: 'cleaning-log:x', label: 'Cleaning', body: {} });
+  await assert.rejects(cleaning.enqueue(entry('/api/kitchen-cleaning/tasks')), /cannot be saved/);
+  await assert.rejects(cleaning.enqueue(entry('/api/kitchen-cleaning/logs/history')), /cannot be saved/);
+  cleaning.suspend();
+}
+// BikeTrack hires (with their pre-ride check) and service logs: saved offline,
+// resent unchanged. A return updates an existing hire, so its path (and bike
+// edits, deletes, hire edits and settings) can never be stored on the device.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  let refuse = false;
+  const bikes = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      if (refuse) throw Object.assign(new Error('Bike is already on hire'), { status: 409 });
+      return { id: 12 };
+    },
+    async onSent() {},
+  });
+  await bikes.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  assert.ok(RECORD_KINDS.includes('bike-hire') && RECORD_KINDS.includes('bike-service'));
+  assert.equal(RECORD_PATHS['bike-hire'], '/api/bike-track/hires');
+  assert.equal(RECORD_PATHS['bike-service'], '/api/bike-track/services');
+  await bikes.enqueue(record('bike-hire', 'bike-hire-0000001', {
+    bikeId: 4, guestName: 'Alex', hireDate: '2026-10-15', siteId: 7,
+    preHireCheck: { brakesFront: 'pass', overallResult: 'pass', checkDate: '2026-10-15' },
+  }));
+  await bikes.enqueue(record('bike-service', 'bike-service-00001', { bikeId: 4, serviceDate: '2026-10-15', serviceType: 'annual' }));
+  for (const path of [
+    '/api/bike-track/hires/5/return', '/api/bike-track/hires/5', '/api/bike-track/bikes', '/api/bike-track/bikes/4',
+    '/api/bike-track/services/5', '/api/bike-track/config',
+  ]) {
+    await assert.rejects(bikes.enqueue({ ...record('bike-hire', 'bike-hire-0000002', {}), path }), /cannot be saved/, path);
+    await assert.rejects(bikes.enqueue({ ...record('bike-service', 'bike-service-00002', {}), path }), /cannot be saved/, path);
+  }
+  await assert.rejects(bikes.enqueue({ ...record('bike-service', 'bike-service-00003', {}), path: RECORD_PATHS['bike-hire'] }), /cannot be saved/,
+    'a service cannot be posted as a hire');
+  await bikes.replay();
+  assert.deepEqual(bikes.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued'], 'both wait on the device offline');
+  online = true;
+  await bikes.replay();
+  assert.deepEqual(bikes.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent']);
+  const hireAttempts = sent.filter((attempt) => attempt.body.clientEntryId === 'bike-hire-0000001');
+  assert.ok(hireAttempts.length >= 2, 'offline attempt then automatic resend');
+  for (const attempt of hireAttempts) assert.deepEqual(attempt, hireAttempts[0], 'every resend is identical, with the same entry ID and check');
+  assert.ok(sent.every((attempt) => attempt.path === (attempt.body.clientEntryId.startsWith('bike-service') ? '/api/bike-track/services' : '/api/bike-track/hires')));
+
+  // A queued hire whose bike was hired by someone else meanwhile is refused
+  // by the server (409): it is kept on the device for the user, not retried.
+  refuse = true;
+  await bikes.enqueue(record('bike-hire', 'bike-hire-0000004', { bikeId: 4, guestName: 'Sam', hireDate: '2026-10-15', siteId: 7 }));
+  await bikes.replay();
+  const refused = bikes.getSnapshot().entries.find((entry) => entry.entryId === 'bike-hire-0000004');
+  assert.equal(refused.state, 'failed');
+  assert.match(refused.error, /already on hire/);
+  bikes.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('bike-hire'), [['bike-hires'], ['bike-fleet'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('bike-service'), [['bike-services'], ['bike-services-latest'], ['dashboard-summary']]);
+// Offline staff actions: FixTrack issue reports (a record kind) and notes,
+// "Mark done", SafeTrack and DocTrack acknowledgements. Each is saved before
+// sending, resent identically, limited to its own path shape, and an action
+// can be queued only once per target (notes: once per note). A 409 is kept as
+// a conflict with its reason; a delivered entry records when it was synced.
+{
+  let online = false;
+  let answer = null;
+  const sent = [];
+  const actions = new CheckOutbox({
+    storage,
+    async send(entry) {
+      sent.push({ path: entry.path, body: structuredClone(entry.body) });
+      if (!online) throw new TypeError('Network request failed');
+      // One rejection, then the server accepts again.
+      if (answer) { const rejection = answer; answer = null; throw rejection; }
+      return { ok: true };
+    },
+    async onSent() {},
+  });
+  await actions.activate({ clientId: 301, userId: 499 }, 'token-actions');
+  assert.ok(RECORD_KINDS.includes('fix-issue'));
+  assert.equal(RECORD_PATHS['fix-issue'], '/api/fix-track/issues');
+  const task = ACTION_TARGETS.taskCompletion(12, '2026-10-12');
+  assert.deepEqual(task, { path: '/api/tasks/12/complete', scopeKey: 'task-completion:12:2026-10-12' });
+  assert.equal(ACTION_TARGETS.safeAck('sops', 4).path, '/api/safe-track/sops/4/self-acknowledge');
+  assert.equal(ACTION_TARGETS.docAck(9).path, '/api/doc-track/documents/9/acknowledge');
+  assert.equal(ACTION_TARGETS.fixNote(3).perEntry, true, 'several notes may wait for one issue');
+  const entry = (kind, entryId, target, body) => ({ entryId, kind, ...target, label: kind, body });
+  await actions.enqueue(entry('fix-issue', 'fix-issue-000001', { path: RECORD_PATHS['fix-issue'], scopeKey: 'fix-issue:fix-issue-000001' },
+    { title: 'Leaking tap', location: 'Kitchen', reportedBy: 'Porter', reportedDate: '2026-10-12' }));
+  await actions.enqueue(entry('task-completion', 'task-done-000001', task, { date: '2026-10-12' }));
+  await assert.rejects(actions.enqueue(entry('task-completion', 'task-done-000002', task, { date: '2026-10-12' })), /already has a saved device entry/,
+    'one unsent "Mark done" per task occurrence');
+  await actions.enqueue(entry('safe-ack', 'safe-ack-0000001', ACTION_TARGETS.safeAck('risk-assessments', 4), { staffName: 'Sam' }));
+  await actions.enqueue(entry('doc-ack', 'doc-ack-00000001', ACTION_TARGETS.docAck(9), { self: true, signature: null }));
+  const note = ACTION_TARGETS.fixNote(3);
+  await actions.enqueue(entry('fix-note', 'fix-note-0000001', { path: note.path, scopeKey: `${note.scopeKey}:fix-note-0000001` }, { note: 'Bulb ordered' }));
+  await actions.enqueue(entry('fix-note', 'fix-note-0000002', { path: note.path, scopeKey: `${note.scopeKey}:fix-note-0000002` }, { note: 'Fitted' }));
+  for (const [kind, path] of [
+    ['fix-issue', '/api/fix-track/issues/3'], ['fix-note', '/api/fix-track/issues/3'], ['fix-note', '/api/fix-track/issues/x/notes'],
+    ['task-completion', '/api/tasks/12'], ['task-completion', '/api/tasks/12/complete?undo=1'],
+    ['safe-ack', '/api/safe-track/training-records/4/self-acknowledge'], ['safe-ack', '/api/safe-track/sops/4/acknowledge'],
+    ['doc-ack', '/api/doc-track/documents/9'], ['doc-ack', '/api/safe-track/sops/9/self-acknowledge'],
+  ]) {
+    await assert.rejects(actions.enqueue(entry(kind, 'blocked-path-0001', { path, scopeKey: `${kind}:blocked` }, {})), /cannot be saved/, path);
+  }
+  await actions.replay();
+  assert.ok(actions.getSnapshot().entries.every((row) => row.state === 'queued'), 'all wait on the device offline');
+  assert.match(actions.getSnapshot().entries[0].error, /Network request failed/, 'the failed attempt is shown');
+  online = true;
+  answer = Object.assign(new Error('This task is already marked done'), { status: 409 });
+  await actions.replay();
+  const [first] = actions.getSnapshot().entries;
+  assert.equal(first.state, 'failed');
+  assert.equal(first.rejection, 'conflict', 'a 409 is shown as a conflict');
+  assert.equal(first.error, 'This task is already marked done', 'with the server reason');
+  await actions.retry(first.entryId);
+  await actions.replay();
+  const delivered = actions.getSnapshot().entries;
+  assert.ok(delivered.every((row) => row.state === 'sent' && row.sentAt && !row.rejection), 'all synced, with the time');
+  // Offline attempt, conflict, retry: always the same body and entry ID.
+  const attempts = sent.filter((attempt) => attempt.body.clientEntryId === 'fix-issue-000001');
+  assert.ok(attempts.length >= 3);
+  for (const attempt of attempts) assert.deepEqual(attempt, attempts[0], 'every resend is identical');
+  assert.ok(sent.some((attempt) => attempt.path === '/api/fix-track/issues/3/notes' && attempt.body.note === 'Fitted'));
+  answer = Object.assign(new Error('Forbidden'), { status: 403 });
+  await actions.enqueue(entry('task-completion', 'task-done-000003', ACTION_TARGETS.taskCompletion(13, '2026-10-12'), { date: '2026-10-12' }));
+  await actions.replay();
+  const rejected = actions.getSnapshot().entries.find((row) => row.entryId === 'task-done-000003');
+  assert.deepEqual([rejected.state, rejected.rejection], ['failed', 'rejected'], 'other rejections are not conflicts');
+  actions.suspend();
+}
+assert.deepEqual(deliveredQueryKeys('task-completion'), [['tasks']]);
+assert.deepEqual(deliveredQueryKeys('fix-issue'), [['fix-track-issues'], ['fix-track-issues-all'], ['dashboard-summary']]);
 
 console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');

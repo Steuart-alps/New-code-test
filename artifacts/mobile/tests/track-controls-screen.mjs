@@ -95,8 +95,12 @@ function answer(path, siteId) {
   if (path === '/api/fire-safety/status') return [200, [
     { checkType: 'alarm', frequencyDays: 7, lastDate: isoDaysFromToday(-2), lastResult: 'pass', dueDate: isoDaysFromToday(5), status: 'ok' },
     { checkType: 'fire_walk', frequencyDays: 14, lastDate: null, lastResult: null, dueDate: null, status: 'never' },
+    { checkType: 'fire_drill', frequencyDays: 180, lastDate: isoDaysFromToday(-30), lastResult: 'pass', dueDate: isoDaysFromToday(150), status: 'ok' },
   ]];
-  if (path === '/api/fire-safety') return [200, [fireCheck(11, 'alarm', isoDaysFromToday(-2))]];
+  if (path === '/api/fire-safety') return [200, [
+    fireCheck(11, 'alarm', isoDaysFromToday(-2), { callPoint: 'CP3 First floor exit', callPointId: 4 }),
+    fireCheck(12, 'fire_drill', isoDaysFromToday(-30), { nightStaff: 'not_included' }),
+  ]];
   return null;
 }
 
@@ -206,6 +210,11 @@ try {
     assert.match(alarm, /Weekly \(every 7 days\)/);
     assert.match(alarm, /Next due:/);
     assert.match(alarm, /Night Porter · Reception/);
+    assert.match(alarm, /Weekly fire alarm test/);
+    assert.match(alarm, /Call point: CP3 First floor exit/, 'the call point tested is shown in the history');
+    const drill = await page.getByTestId('site-controls-check-fire_drill').innerText();
+    assert.match(drill, /Fire drill \(6-monthly, with night staff\)[\s\S]*At least every 6 months/);
+    assert.match(drill, /Night staff did not take part/, 'the night staff answer is shown in the history');
     assert.match(await page.getByTestId('site-controls-check-fire_walk').innerText(), /Fire walk \(escape routes\)[\s\S]*Fortnightly \(every 14 days\)/);
 
     const before = requests.length;

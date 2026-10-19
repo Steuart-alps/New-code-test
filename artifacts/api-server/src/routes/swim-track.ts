@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sitesTable } from "@workspace/db/schema";
@@ -6,7 +6,7 @@ import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, de
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/stagedPhotoReceipts";
 import {
-  findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, stagedPhotoEntry,
+  findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, stagedPhotoEntry, type RawClientEntryTable,
 } from "../lib/clientEntryReplay";
 
 const router = Router();
@@ -36,6 +36,49 @@ async function checkSiteAccess(
     return "forbidden";
   }
   return null;
+}
+
+/**
+ * Site (and optional swim session) of a new surveillance, first-aid or
+ * incident record: either may be omitted (as on the website), but when given
+ * it must belong to this client and, for a site, the active department.
+ * Returns an error to send, or null when the references are usable.
+ */
+async function checkRecordRefs(
+  body: Record<string, unknown>,
+  clientId: number,
+  departmentId: number | null,
+  withSession = false,
+): Promise<{ status: number; error: string } | null> {
+  const rawSiteId = body.siteId;
+  const siteId = rawSiteId == null ? null : Number(rawSiteId);
+  if (rawSiteId != null && (
+    (typeof rawSiteId !== "number" && typeof rawSiteId !== "string")
+    || !Number.isSafeInteger(siteId)
+    || siteId! <= 0
+  )) {
+    return { status: 400, error: "Invalid siteId" };
+  }
+  if (siteId !== null) {
+    const access = await checkSiteAccess(siteId, clientId, departmentId);
+    if (access === "invalid") return { status: 400, error: "Invalid site" };
+    if (access === "forbidden") return { status: 403, error: "Site not accessible" };
+  }
+  if (withSession && body.sessionId != null) {
+    const sessionId = Number(body.sessionId);
+    if (!Number.isSafeInteger(sessionId) || sessionId <= 0) return { status: 400, error: "Invalid sessionId" };
+    const found = await db.execute(sql`SELECT 1 FROM swim_sessions WHERE id = ${sessionId} AND client_id = ${clientId} LIMIT 1`);
+    if (!found.rows.length) return { status: 400, error: "Invalid session" };
+  }
+  return null;
+}
+
+/** The stored row when a concurrent resend of the same device entry won the insert. */
+async function racedEntry(table: RawClientEntryTable, req: Request, err: unknown) {
+  const entry = stagedPhotoEntry(req.body ?? {});
+  if (!entry || entry === "invalid" || !isUniqueViolation(err)) return null;
+  const row = await findRawStoredEntry(table, getClientId(req)!, entry);
+  return row ? { row, entry } : null;
 }
 
 /**
@@ -255,10 +298,18 @@ router.post("/surveillance", denyViewers, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
      const { sessionId, siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, checkedByRosterId, photoUploadIds } = req.body;
-    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
+    // Phone resends (device entry ID): the stored check is returned before the
+    // roster and site rules, so one applied earlier is still recognised.
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
+    const userId = req.currentUser!.id;
+    const prior = await findRawStoredEntry("swim_surveillance_checks", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
      const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
      if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
+    const refError = await checkRecordRefs(req.body, clientId, getActiveDepartmentId(req), true);
+    if (refError) return res.status(refError.status).json({ error: refError.error });
 
     const canonicalResult = scanCompleted === false ? "fail" : "pass";
     const created = await createWithStagedPhotoReceipts({
@@ -271,11 +322,13 @@ router.post("/surveillance", denyViewers, async (req, res) => {
       const dbResult = await tx.execute(sql`
         INSERT INTO swim_surveillance_checks (
           client_id, session_id, site_id, check_date, check_time,
-           bather_count, scan_completed, observations, checked_by, checked_by_roster_id, result
+           bather_count, scan_completed, observations, checked_by, checked_by_roster_id, result,
+          created_by, client_entry_id, client_entry_hash
         ) VALUES (
           ${clientId}, ${sessionId ?? null}, ${siteId ?? null}, ${checkDate},
           ${checkTime ?? null}, ${batherCount ?? null}, ${scanCompleted ?? true},
-           ${observations?.trim() ?? null}, ${performer?.performedBy ?? checkedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${canonicalResult}
+           ${observations?.trim() ?? null}, ${performer?.performedBy ?? checkedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${canonicalResult},
+          ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
         )
         RETURNING *
       `);
@@ -284,6 +337,8 @@ router.post("/surveillance", denyViewers, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
+    const raced = await racedEntry("swim_surveillance_checks", req, err);
+    if (raced) return respondToRawStoredEntry(res, raced.row, req.currentUser!.id, raced.entry);
     res.status(500).json({ error: "Failed to create surveillance check" });
   }
 });
@@ -362,10 +417,17 @@ router.post("/first-aid", denyViewers, async (req, res) => {
       throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk,
        checkedBy, checkedByRosterId, defectsFound, notes, photoUploadIds,
     } = req.body;
-    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
+    // Phone resends: see POST /surveillance.
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
+    const userId = req.currentUser!.id;
+    const prior = await findRawStoredEntry("swim_first_aid_checks", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
      const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
      if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
+    const refError = await checkRecordRefs(req.body, clientId, getActiveDepartmentId(req));
+    if (refError) return res.status(refError.status).json({ error: refError.error });
 
     const allOk = [aedOk, firstAidKitOk, rescuePoleOk, throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk]
       .every(v => v !== false);
@@ -382,14 +444,16 @@ router.post("/first-aid", denyViewers, async (req, res) => {
         INSERT INTO swim_first_aid_checks (
           client_id, site_id, check_date, aed_ok, first_aid_kit_ok,
           rescue_pole_ok, throw_bag_ok, spine_board_ok, ring_buoy_ok, oxygen_kit_ok,
-           checked_by, checked_by_roster_id, defects_found, notes, result
+           checked_by, checked_by_roster_id, defects_found, notes, result,
+          created_by, client_entry_id, client_entry_hash
         ) VALUES (
           ${clientId}, ${siteId ?? null}, ${checkDate},
           ${aedOk ?? true}, ${firstAidKitOk ?? true},
           ${rescuePoleOk ?? true}, ${throwBagOk ?? true}, ${spineBoardOk ?? true},
           ${ringBuoyOk ?? true}, ${oxygenKitOk ?? true},
            ${performer?.performedBy ?? checkedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${defectsFound?.trim() ?? null},
-          ${notes?.trim() ?? null}, ${result}
+          ${notes?.trim() ?? null}, ${result},
+          ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
         )
         RETURNING *
       `);
@@ -398,6 +462,8 @@ router.post("/first-aid", denyViewers, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
+    const raced = await racedEntry("swim_first_aid_checks", req, err);
+    if (raced) return respondToRawStoredEntry(res, raced.row, req.currentUser!.id, raced.entry);
     res.status(500).json({ error: "Failed to create first-aid check" });
   }
 });
@@ -510,9 +576,16 @@ router.post("/incidents", denyViewers, async (req, res) => {
       personsInvolved, description, actionTaken, reportedTo,
       reportedDate, outcome, notes, photoUploadIds,
     } = req.body;
-    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
+    // Phone resends: see POST /surveillance.
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
+    const userId = req.currentUser!.id;
+    const prior = await findRawStoredEntry("swim_incidents", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
     if (!incidentDate) return res.status(400).json({ error: "incidentDate is required" });
     if (!description?.trim()) return res.status(400).json({ error: "description is required" });
+    const refError = await checkRecordRefs(req.body, clientId, getActiveDepartmentId(req));
+    if (refError) return res.status(refError.status).json({ error: refError.error });
 
     const created = await createWithStagedPhotoReceipts({
       clientId,
@@ -525,13 +598,14 @@ router.post("/incidents", denyViewers, async (req, res) => {
         INSERT INTO swim_incidents (
           client_id, site_id, incident_date, incident_time, incident_type, severity,
           persons_involved, description, action_taken, reported_to,
-          reported_date, outcome, notes
+          reported_date, outcome, notes, created_by, client_entry_id, client_entry_hash
         ) VALUES (
           ${clientId}, ${siteId ?? null}, ${incidentDate}, ${incidentTime ?? null},
           ${incidentType ?? "near_miss"}, ${severity ?? "low"},
           ${personsInvolved?.trim() ?? null}, ${description.trim()},
           ${actionTaken?.trim() ?? null}, ${reportedTo?.trim() ?? null},
-          ${reportedDate ?? null}, ${outcome?.trim() ?? null}, ${notes?.trim() ?? null}
+          ${reportedDate ?? null}, ${outcome?.trim() ?? null}, ${notes?.trim() ?? null},
+          ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
         )
         RETURNING *
       `);
@@ -540,6 +614,8 @@ router.post("/incidents", denyViewers, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
+    const raced = await racedEntry("swim_incidents", req, err);
+    if (raced) return respondToRawStoredEntry(res, raced.row, req.currentUser!.id, raced.entry);
     res.status(500).json({ error: "Failed to create incident" });
   }
 });

@@ -20,6 +20,10 @@ import { useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { entryStatus, onlineActionMessage } from '@/components/outbox-status-logic';
+import { useOutboxAction } from '@/hooks/useRecordOutbox';
+import { ACTION_TARGETS, type CheckEntry } from '@/lib/checkOutboxCore';
 
 type Tab = 'my-documents' | 'documents' | 'training';
 
@@ -118,6 +122,7 @@ function MyDocumentRow({
   signature,
   onSignatureChange,
   isSaving,
+  saved,
 }: {
   doc: MyDoc;
   completed?: boolean;
@@ -128,8 +133,11 @@ function MyDocumentRow({
   signature?: string;
   onSignatureChange?: (doc: MyDoc, value: string) => void;
   isSaving?: boolean;
+  /** This acknowledgement is saved on this phone and not yet on the server. */
+  saved?: CheckEntry;
 }) {
   const colors = useColors();
+  const savedFailed = saved?.state === 'failed';
   return (
     <View style={[styles.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={[styles.rowIcon, { backgroundColor: colors.primary + '1a' }]}>
@@ -147,12 +155,13 @@ function MyDocumentRow({
             {[doc.site_name, doc.department].filter(Boolean).join(' · ')}
           </Text>
         )}
-        <Text style={[styles.rowSub, { color: completed ? colors.success : colors.warning, marginTop: 5 }]}>
+        <Text style={[styles.rowSub, { color: completed ? colors.success : savedFailed ? colors.destructive : colors.warning, marginTop: 5 }]}>
           {completed && doc.acknowledged_at
             ? `Acknowledged ${new Date(doc.acknowledged_at).toLocaleDateString()}`
-            : 'Awaiting your acknowledgement'}
+            : saved ? `Acknowledgement ${entryStatus(saved).title.toLowerCase()}`
+              : 'Awaiting your acknowledgement'}
         </Text>
-        {!completed && onAcknowledge && (
+        {!completed && !saved && onAcknowledge && (
           <View style={styles.signatureField}>
             <Text style={[styles.signatureLabel, { color: colors.mutedForeground }]}>
               Typed signature (optional)
@@ -185,7 +194,7 @@ function MyDocumentRow({
               </>
             )}
           </TouchableOpacity>
-          {!completed && onAcknowledge && (
+          {!completed && !saved && onAcknowledge && (
             <>
               <TouchableOpacity
                 style={[
@@ -321,22 +330,28 @@ export default function DocsScreen() {
     enabled: trainingEnabled,
   });
 
+  // With no signal an acknowledgement is saved on this phone and sent
+  // automatically; the API keeps one current acknowledgement per staff member
+  // and document, so a resend never signs twice.
+  const docAckOutbox = useOutboxAction('doc-ack');
   const acknowledgeMutation = useMutation({
-    mutationFn: ({ doc, signature }: { doc: MyDoc; signature: string }) =>
-      apiFetch<{ created: number; records: unknown[] }>(
-        `/api/doc-track/documents/${doc.id}/acknowledge`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ self: true, signature: signature.trim() || null }),
-        },
-      ),
-    onSuccess: async (_result, { doc }) => {
+    mutationFn: async ({ doc, signature }: { doc: MyDoc; signature: string }) => {
+      const result = await docAckOutbox.send(
+        ACTION_TARGETS.docAck(doc.id),
+        { self: true, signature: signature.trim() || null },
+        `Acknowledged · ${doc.title}`,
+      );
+      if (result.state === 'rejected') throw new Error(result.error);
+      return result.state;
+    },
+    onSuccess: async (state, { doc }) => {
       setSignatures((current) => {
         const next = { ...current };
         delete next[doc.id];
         return next;
       });
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (state === 'queued') return;
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['doc-track-my-acknowledgements'] }),
         qc.invalidateQueries({ queryKey: ['doctrack-documents'] }),
@@ -357,10 +372,7 @@ export default function DocsScreen() {
       await Linking.openURL(response.downloadUrl);
       setOpenedDocIds((current) => new Set(current).add(doc.id));
     } catch (error) {
-      Alert.alert(
-        'Could not open document',
-        error instanceof Error ? error.message : 'Please try again.',
-      );
+      Alert.alert('Could not open document', onlineActionMessage(error));
     } finally {
       setOpeningDocId(null);
     }
@@ -460,6 +472,9 @@ export default function DocsScreen() {
             showEmpty('link-2', 'Staff record not linked', 'Your account is not linked to an active staff roster record. Ask a manager to check your roster email before signing off documents.')
           ) : (
             <>
+              <View style={{ marginHorizontal: -16 }}>
+                <OutboxEntries entries={docAckOutbox.entries} readError={docAckOutbox.readError} />
+              </View>
               <View style={styles.sectionHeader}>
                 <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pending</Text>
                 <Text style={[styles.sectionCount, { color: colors.warning }]}>{myAcknowledgements.pending.length}</Text>
@@ -481,6 +496,7 @@ export default function DocsScreen() {
                       setSignatures((current) => ({ ...current, [selected.id]: value }))
                     }
                     isSaving={acknowledgeMutation.isPending}
+                    saved={docAckOutbox.pending(ACTION_TARGETS.docAck(doc.id).scopeKey)}
                     canAcknowledge={openedDocIds.has(doc.id)}
                     isOpening={openingDocId === doc.id}
                   />

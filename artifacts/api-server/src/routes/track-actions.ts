@@ -169,12 +169,22 @@ router.post("/templates/reorder", requireAuth, requireClientAdmin, async (req, r
   res.json(rows);
 });
 
+// Without `module`, lists every module's actions (the phone's cross-module
+// action list); `status=unresolved` leaves out resolved history.
+const listQuerySchema = z.object({
+  module: z.enum(MODULES).optional(),
+  siteId: z.coerce.number().int().positive().optional(),
+  status: z.enum(["open", "in_progress", "resolved", "unresolved"]).optional(),
+});
 router.get("/", requireAuth, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
-  const query = z.object({ module: z.enum(MODULES), siteId: z.coerce.number().int().positive().optional() }).safeParse(req.query); if (!query.success) return res.status(400).json({ error: query.error.flatten() });
+  const query = listQuerySchema.safeParse(req.query); if (!query.success) return res.status(400).json({ error: query.error.flatten() });
   const departmentId = getActiveDepartmentId(req);
   if (!await canAccessSite(query.data.siteId, clientId, departmentId)) return res.status(403).json({ error: "Forbidden site" });
-  const siteIds = await accessibleSiteIds(clientId, departmentId); const conditions = [eq(trackActionsTable.clientId, clientId), eq(trackActionsTable.module, query.data.module)];
+  const siteIds = await accessibleSiteIds(clientId, departmentId); const conditions = [eq(trackActionsTable.clientId, clientId)];
+  if (query.data.module) conditions.push(eq(trackActionsTable.module, query.data.module));
+  if (query.data.status === "unresolved") conditions.push(ne(trackActionsTable.status, "resolved"));
+  else if (query.data.status) conditions.push(eq(trackActionsTable.status, query.data.status));
   if (siteIds) conditions.push(or(isNull(trackActionsTable.siteId), inArray(trackActionsTable.siteId, siteIds))!); if (query.data.siteId) conditions.push(or(isNull(trackActionsTable.siteId), eq(trackActionsTable.siteId, query.data.siteId))!);
   res.json(await db.select().from(trackActionsTable).where(and(...conditions)).orderBy(desc(trackActionsTable.createdAt)));
 });

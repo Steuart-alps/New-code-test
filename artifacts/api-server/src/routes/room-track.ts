@@ -5,6 +5,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 
 const router = Router();
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
@@ -27,6 +28,8 @@ const CheckCreateBody = z.object({
   checkedBy: z.string().trim().max(200).optional().nullable(),
   checkedByRosterId: z.number().int().positive().optional().nullable(),
 });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const CheckPostBody = CheckCreateBody.extend({ clientEntryId: clientEntryIdSchema.optional() });
 const CheckUpdateBody = CheckCreateBody.partial().omit({ roomId: true, checkDate: true }).extend({
   roomId: z.number().int().positive().optional(),
   checkDate: dateString.optional(),
@@ -155,9 +158,18 @@ router.get("/checks/:id", requireAuth, async (req, res) => {
 
 router.post("/checks", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
-  const body = CheckCreateBody.safeParse(req.body); if (!body.success) return res.status(400).json({ error: body.error.flatten() });
+  const body = CheckPostBody.safeParse(req.body); if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const siteIds = await allowedSites(clientId, getActiveDepartmentId(req));
   const room = await getScopedRoom(body.data.roomId, clientId, siteIds);
+  // A phone resending after a lost response gets its stored check back, even
+  // if the room has been archived in the meantime.
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(body.data);
+  const storedEntry = async () => entry && (await db.select().from(roomTrackChecksTable)
+    .where(and(eq(roomTrackChecksTable.clientId, clientId), eq(roomTrackChecksTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = room ? await storedEntry() : undefined;
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
   if (!room || !room.active) return res.status(404).json({ error: "Active room not found" });
   const checkSiteId = body.data.siteId ?? room.siteId;
   if (room.siteId != null && checkSiteId !== room.siteId) return res.status(400).json({ error: "Check siteId must match the room site" });
@@ -165,9 +177,12 @@ router.post("/checks", requireAuth, denyViewers, async (req, res) => {
   const performer = await resolveStaffRoster(clientId, body.data.checkedByRosterId, body.data.checkedBy);
   if (body.data.checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   try {
-    const [check] = await db.insert(roomTrackChecksTable).values({ ...body.data, clientId, siteId: checkSiteId, notes: body.data.notes ?? null, checkedBy: performer?.performedBy ?? null, checkedByRosterId: performer?.staffRosterId ?? null, createdBy: req.currentUser!.id, updatedBy: req.currentUser!.id } as any).returning();
+    const [check] = await db.insert(roomTrackChecksTable).values({ ...body.data, clientId, siteId: checkSiteId, notes: body.data.notes ?? null, checkedBy: performer?.performedBy ?? null, checkedByRosterId: performer?.staffRosterId ?? null, createdBy: userId, updatedBy: userId, clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null } as any).returning();
     res.status(201).json(check);
   } catch (error: any) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(error) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
     if (postgresErrorCode(error) === "23505") return res.status(409).json({ error: "A check already exists for this room and date" });
     throw error;
   }

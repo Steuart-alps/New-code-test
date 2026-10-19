@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const net = require('net');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
+const { metroResponseError } = require('./metro-error');
 
 let metroProcess = null;
 let metroPort = null;
@@ -183,7 +184,7 @@ async function startMetro(expoPublicDomain) {
   process.exit(1);
 }
 
-async function downloadFile(url, outputPath) {
+async function downloadFile(url, outputPath, what = url) {
   const controller = new AbortController();
   const fiveMinMS = 5 * 60 * 1_000;
   const timeoutId = setTimeout(() => controller.abort(), fiveMinMS);
@@ -193,7 +194,8 @@ async function downloadFile(url, outputPath) {
     const response = await fetch(url, { signal: controller.signal });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      // Metro explains a rejected bundle (parser stack, file and line) in the body.
+      throw await metroResponseError(response, what);
     }
 
     const file = fs.createWriteStream(outputPath);
@@ -245,7 +247,7 @@ async function downloadBundle(platform, timestamp) {
   );
 
   console.log(`Fetching ${platform} bundle...`);
-  await downloadFile(url.toString(), output);
+  await downloadFile(url.toString(), output, `${platform} bundle`);
   console.log(`${platform} bundle ready`);
 }
 
@@ -261,7 +263,7 @@ async function downloadManifest(platform) {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw await metroResponseError(response, `${platform} manifest`);
     }
 
     const manifest = await response.json();
@@ -576,10 +578,15 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((error) => {
-  console.error('Build failed:', error.message);
-  if (metroProcess) {
-    metroProcess.kill();
-  }
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('Build failed:', error.message);
+    if (metroProcess) {
+      metroProcess.kill();
+    }
+    process.exit(1);
+  });
+}
+
+// For tests (tests/build-metro-error.mjs); `node scripts/build.js` runs main().
+module.exports = { downloadFile };

@@ -1,4 +1,5 @@
 import { boolean, date, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const roomTrackRoomsTable = pgTable("room_track_rooms", {
   id: serial("id").primaryKey(),
@@ -32,8 +33,15 @@ export const roomTrackChecksTable = pgTable("room_track_checks", {
   checkedByRosterId: integer("checked_by_roster_id"),
   createdBy: integer("created_by"),
   updatedBy: integer("updated_by"),
+  // Mobile outbox entry ID and payload fingerprint: a replay of an applied
+  // submission is recognised instead of creating a duplicate. Not a credential.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
   oneCheckPerRoomDay: uniqueIndex("UQ_room_track_checks_room_date").on(table.roomId, table.checkDate),
+  clientEntry: uniqueIndex("UQ_room_track_checks_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
 }));

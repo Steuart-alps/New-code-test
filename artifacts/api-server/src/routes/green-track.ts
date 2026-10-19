@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
 import { getClientId, requireClientAdmin, requireAuth, denyViewers } from "../middleware/requireAuth";
@@ -7,6 +7,7 @@ import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdat
 import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/stagedPhotoReceipts";
 import {
   findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, stagedPhotoEntry,
+  type RawClientEntryTable,
 } from "../lib/clientEntryReplay";
 
 const router = Router();
@@ -68,6 +69,21 @@ function normalizeMachineType(value: unknown): string | null {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function rows<T = any>(result: any): T[] {
   return result.rows as T[];
+}
+
+/**
+ * After a failed insert: the row a concurrent resend of the same phone entry
+ * stored first, if that is why the insert failed. Phone records send a device
+ * entry ID (lib/clientEntryReplay.ts); stagedPhotoEntry leaves photo receipts
+ * out of the fingerprint and is the plain body fingerprint for forms without
+ * photos (fuel logs, PUWER inspections).
+ */
+async function racedEntry(table: RawClientEntryTable, req: Request, err: unknown) {
+  const entry = stagedPhotoEntry(req.body ?? {});
+  const clientId = getClientId(req);
+  if (!entry || entry === "invalid" || !clientId || !isUniqueViolation(err)) return null;
+  const row = await findRawStoredEntry(table, clientId, entry);
+  return row ? { row, entry } : null;
 }
 
 // List endpoints return camelCase keys, matching the web app's row types.
@@ -499,11 +515,18 @@ router.post("/service-records", requireClientAdmin, async (req, res) => {
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!serviceDate) return res.status(400).json({ error: "serviceDate is required" });
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
 
     const machineCheck = await db.execute(sql`
       SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const userId = req.currentUser!.id;
+    // Checked before the roster rule: a record applied before its signer left
+    // the roster is still recognised as already recorded.
+    const prior = await findRawStoredEntry("green_service_records", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
     const performer = await resolveStaffRoster(clientId, servicedByRosterId, servicedBy);
     if (servicedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -517,12 +540,14 @@ router.post("/service-records", requireClientAdmin, async (req, res) => {
       const result = await tx.execute(sql`
         INSERT INTO green_service_records (
           client_id, machine_id, service_date, service_type, hours_at_service, next_service_hours,
-          next_service_date, work_performed, serviced_by, serviced_by_roster_id, cost_pence, notes
+          next_service_date, work_performed, serviced_by, serviced_by_roster_id, cost_pence, notes,
+          created_by, client_entry_id, client_entry_hash
         ) VALUES (
           ${clientId}, ${machineId}, ${serviceDate}, ${serviceType ?? "scheduled"},
           ${hoursAtService ?? null}, ${nextServiceHours ?? null}, ${nextServiceDate ?? null},
           ${workPerformed?.trim() ?? null}, ${performer?.performedBy ?? servicedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null},
-          ${costPence ?? null}, ${notes?.trim() ?? null}
+          ${costPence ?? null}, ${notes?.trim() ?? null},
+          ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
         )
         RETURNING *
       `);
@@ -531,6 +556,8 @@ router.post("/service-records", requireClientAdmin, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
+    const raced = await racedEntry("green_service_records", req, err);
+    if (raced) return respondToRawStoredEntry(res, raced.row, req.currentUser!.id, raced.entry);
     res.status(500).json({ error: "Failed to create service record" });
   }
 });
@@ -611,11 +638,17 @@ router.post("/defects", denyViewers, async (req, res) => {
     const { machineId, reportDate, reportedBy, reportedByRosterId, description, severity, outOfService, status, resolution, resolvedDate, notes, photoUploadIds } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!description?.trim()) return res.status(400).json({ error: "description is required" });
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
 
     const machineCheck = await db.execute(sql`
       SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const userId = req.currentUser!.id;
+    // Checked before the roster rule (see service records).
+    const prior = await findRawStoredEntry("green_defects", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
     const performer = await resolveStaffRoster(clientId, reportedByRosterId, reportedBy);
     if (reportedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -629,12 +662,13 @@ router.post("/defects", denyViewers, async (req, res) => {
       const result = await tx.execute(sql`
         INSERT INTO green_defects (
           client_id, machine_id, report_date, reported_by, reported_by_roster_id, description, severity, out_of_service,
-          status, resolution, resolved_date, notes
+          status, resolution, resolved_date, notes, created_by, client_entry_id, client_entry_hash
         ) VALUES (
           ${clientId}, ${machineId}, ${reportDate ?? new Date().toISOString().split("T")[0]},
           ${performer?.performedBy ?? reportedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${description.trim()},
           ${severity ?? "minor"}, ${outOfService ?? false},
-          ${status ?? "open"}, ${resolution?.trim() || null}, ${resolvedDate || null}, ${notes?.trim() ?? null}
+          ${status ?? "open"}, ${resolution?.trim() || null}, ${resolvedDate || null}, ${notes?.trim() ?? null},
+          ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
         )
         RETURNING *
       `);
@@ -643,6 +677,8 @@ router.post("/defects", denyViewers, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
+    const raced = await racedEntry("green_defects", req, err);
+    if (raced) return respondToRawStoredEntry(res, raced.row, req.currentUser!.id, raced.entry);
     res.status(500).json({ error: "Failed to create defect report" });
   }
 });
@@ -718,11 +754,19 @@ router.post("/puwer-inspections", requireClientAdmin, async (req, res) => {
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!inspectionDate) return res.status(400).json({ error: "inspectionDate is required" });
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
 
     const machineCheck = await db.execute(sql`
       SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const userId = req.currentUser!.id;
+    // Checked before the roster rule; a replay never raises a second
+    // Compliance Hub action for a failed inspection.
+    const prior = await findRawStoredEntry("green_puwer_inspections", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
     const performer = await resolveStaffRoster(clientId, inspectorRosterId, inspectorName);
     if (inspectorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -730,18 +774,22 @@ router.post("/puwer-inspections", requireClientAdmin, async (req, res) => {
     const result = await db.execute(sql`
       INSERT INTO green_puwer_inspections (
         client_id, machine_id, inspection_date, next_inspection_date, inspection_type,
-        inspector_name, inspector_roster_id, inspector_company, cert_ref, safe_to_operate, defects_found, result, notes
+        inspector_name, inspector_roster_id, inspector_company, cert_ref, safe_to_operate, defects_found, result, notes,
+        created_by, client_entry_id, client_entry_hash
       ) VALUES (
         ${clientId}, ${machineId}, ${inspectionDate}, ${nextInspectionDate ?? null},
         ${inspectionType ?? "thorough_examination"},
         ${performer?.performedBy ?? inspectorName?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${inspectorCompany?.trim() ?? null},
         ${certRef?.trim() ?? null}, ${safeToOperate ?? true},
-        ${defectsFound?.trim() ?? null}, ${canonicalResult}, ${notes?.trim() ?? null}
+        ${defectsFound?.trim() ?? null}, ${canonicalResult}, ${notes?.trim() ?? null},
+        ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
       )
       RETURNING *
     `);
     res.status(201).json(rows(result)[0]);
   } catch (err) {
+    const raced = await racedEntry("green_puwer_inspections", req, err);
+    if (raced) return respondToRawStoredEntry(res, raced.row, req.currentUser!.id, raced.entry);
     res.status(500).json({ error: "Failed to create PUWER inspection" });
   }
 });
@@ -817,28 +865,39 @@ router.get("/fuel-logs", async (req, res) => {
 router.post("/fuel-logs", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const { machineId, logDate, fuelType, quantityLitres, engineHours, costPence, filledBy, filledByRosterId, notes } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
 
     const machineCheck = await db.execute(sql`
       SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const userId = req.currentUser!.id;
+    // Checked before the roster rule (see service records).
+    const prior = await findRawStoredEntry("green_fuel_logs", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
     const performer = await resolveStaffRoster(clientId, filledByRosterId, filledBy);
     if (filledByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
     const result = await db.execute(sql`
       INSERT INTO green_fuel_logs (
-        client_id, machine_id, log_date, fuel_type, quantity_litres, engine_hours, cost_pence, filled_by, filled_by_roster_id, notes
+        client_id, machine_id, log_date, fuel_type, quantity_litres, engine_hours, cost_pence, filled_by, filled_by_roster_id, notes,
+        created_by, client_entry_id, client_entry_hash
       ) VALUES (
         ${clientId}, ${machineId}, ${logDate ?? new Date().toISOString().split("T")[0]},
         ${fuelType ?? "diesel"}, ${quantityLitres ?? null}, ${engineHours ?? null},
-        ${costPence ?? null}, ${performer?.performedBy ?? filledBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${notes?.trim() ?? null}
+        ${costPence ?? null}, ${performer?.performedBy ?? filledBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${notes?.trim() ?? null},
+        ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
       )
       RETURNING *
     `);
     res.status(201).json(rows(result)[0]);
   } catch (err) {
+    const raced = await racedEntry("green_fuel_logs", req, err);
+    if (raced) return respondToRawStoredEntry(res, raced.row, req.currentUser!.id, raced.entry);
     res.status(500).json({ error: "Failed to create fuel log" });
   }
 });

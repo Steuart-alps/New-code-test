@@ -5,6 +5,7 @@ import { eq, and, or, isNull, inArray, desc, gte, lte, lt, sql } from "drizzle-o
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { z } from "zod";
 
 const router = Router();
@@ -149,11 +150,15 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+// Creation only: the phone sends a stable device entry ID so a resend after a
+// lost response returns the stored inspection instead of a duplicate.
+const PostInspectionBody = InspectionBody.extend({ clientEntryId: clientEntryIdSchema.optional() });
+
 router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const body = InspectionBody.safeParse(req.body);
+  const body = PostInspectionBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
   const performer = await resolveStaffPerformer(clientId, d.staffRosterId, d.inspectedBy);
@@ -165,22 +170,40 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!(await siteIsAccessible(d.siteId, clientId, getActiveDepartmentId(req))))
     return res.status(400).json({ error: "Invalid siteId for this client" });
 
-  const [row] = await db.insert(premisesInspectionsTable).values({
-    clientId,
-    siteId:         d.siteId ?? null,
-    inspectionDate: d.inspectionDate,
-    nextInspectionDate: d.nextInspectionDate ?? null,
-    inspectionType: d.inspectionType,
-    area:           d.area ?? null,
-    findings:       d.findings ?? null,
-    hazardDetails:  d.hazardDetails ?? null,
-    actionRequired: d.actionRequired ?? null,
-    actionTaken:    d.actionTaken ?? null,
-    status:         d.status,
-    inspectedBy:    performer.performedBy,
-    staffRosterId:  performer.staffRosterId,
-    createdBy:      req.currentUser!.id,
-  } as any).returning();
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(d);
+  const storedEntry = async () => entry && (await db.select().from(premisesInspectionsTable)
+    .where(and(eq(premisesInspectionsTable.clientId, clientId), eq(premisesInspectionsTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+
+  let row;
+  try {
+    [row] = await db.insert(premisesInspectionsTable).values({
+      clientId,
+      siteId:         d.siteId ?? null,
+      inspectionDate: d.inspectionDate,
+      nextInspectionDate: d.nextInspectionDate ?? null,
+      inspectionType: d.inspectionType,
+      area:           d.area ?? null,
+      findings:       d.findings ?? null,
+      hazardDetails:  d.hazardDetails ?? null,
+      actionRequired: d.actionRequired ?? null,
+      actionTaken:    d.actionTaken ?? null,
+      status:         d.status,
+      inspectedBy:    performer.performedBy,
+      staffRosterId:  performer.staffRosterId,
+      createdBy:      userId,
+      clientEntryId:  entry?.id ?? null,
+      clientEntryHash: entry?.hash ?? null,
+    } as any).returning();
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
   res.status(201).json(row);
 });
 

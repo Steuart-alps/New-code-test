@@ -49,6 +49,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # Two commits so the phone bundle gate can diff a pull request's
+          # merge commit against its base.
+          fetch-depth: 2
 
       # The pnpm version comes from "packageManager" in package.json
       # (pnpm@10.28.0, matching render.yaml).
@@ -63,6 +67,38 @@ jobs:
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
+
+      # Runs before the root typecheck, while no lib declaration outputs exist,
+      # so the mobile check must build the API client it references itself.
+      - name: Typecheck mobile app from a clean checkout
+        run: pnpm --filter @workspace/mobile run typecheck
+
+      # Starts the Expo Go dev server (pnpm run dev) and checks Metro and the
+      # Expo Go manifest come up without fatal native-tool errors.
+      - name: Phone app startup smoke check
+        run: pnpm --filter @workspace/mobile run test:expo-start
+
+      # The production iOS and Android exports (about a minute) run only
+      # when the phone app, lib/api-client-react, patches, or an Expo, Metro,
+      # React Native, Babel or image-size line in the root package.json,
+      # pnpm-workspace.yaml or pnpm-lock.yaml changes. Web-only and API-only
+      # changes skip them (artifacts/mobile/scripts/production-bundle-gate.mjs).
+      - name: Decide whether the phone production bundle check is needed
+        id: mobile-bundle-gate
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "$BASE" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE" || true
+          fi
+          node artifacts/mobile/scripts/production-bundle-gate.mjs "$BASE" HEAD
+
+      - name: Phone production bundle check
+        if: steps.mobile-bundle-gate.outputs.run == 'true'
+        env:
+          # Placeholder API host: the bundle is checked, never published.
+          EXPO_PUBLIC_DOMAIN: ci-bundle-check.invalid
+        run: pnpm --filter @workspace/mobile run validate:production
 
       - name: Typecheck
         run: pnpm run typecheck

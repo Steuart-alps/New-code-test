@@ -19,6 +19,7 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { IssueCard, type FixTrackIssue } from '@/components/IssueCard';
 import { TodayTasks } from '@/components/TodayTasks';
+import { OutboxStatus } from '@/components/OutboxStatus';
 import { localIsoDate } from '@/components/date-stepper-logic';
 
 interface Site {
@@ -234,7 +235,7 @@ export default function TodayScreen() {
           <View testID="offline-notice" style={styles.offlineNotice}>
             <Feather name="wifi-off" size={14} color="#ffffff" />
             <Text style={styles.offlineText}>
-              Offline — using your saved sign-in. Saved checks are sent when you reconnect.
+              Offline — using your saved sign-in. Checks, issue reports, tasks marked done and acknowledgements are saved on this phone and sent when you reconnect.
             </Text>
           </View>
         )}
@@ -291,6 +292,8 @@ export default function TodayScreen() {
           </ScrollView>
         )}
       </View>
+
+      <OutboxStatus />
 
       <TodayTasks />
 

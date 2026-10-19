@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { treeInspectionsTable, sitesTable, TREE_CHECK_TYPES } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 
 const router = Router();
 
@@ -30,6 +31,11 @@ const createSchema = z.object({
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
+
+// Creation only: the phone sends a stable device entry ID so a resend after a
+// lost response returns the stored inspection instead of a duplicate (and the
+// failed-result track action is raised once, by the one insert).
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 function readInspection<T extends { result: string; actionSeverity?: string | null }>(inspection: T) {
   const legacySeverity = ["monitor", "action_required", "urgent_action"].includes(inspection.result)
@@ -162,7 +168,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = createSchema.safeParse(req.body);
+  const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
 
@@ -171,23 +177,41 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
-  const [inserted] = await db
-    .insert(treeInspectionsTable)
-    .values({
-      clientId,
-      checkType: data.checkType,
-      checkDate: data.checkDate,
-      result: data.result,
-      actionSeverity: data.actionSeverity ?? null,
-      treeRef: data.treeRef ?? null,
-      location: data.location ?? null,
-      inspector: data.inspector ?? null,
-      followUpDate: data.followUpDate ?? null,
-      siteId: data.siteId ?? null,
-      notes: data.notes ?? null,
-      createdBy: req.currentUser!.id,
-    })
-    .returning();
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(data);
+  const storedEntry = async () => entry && (await db.select().from(treeInspectionsTable)
+    .where(and(eq(treeInspectionsTable.clientId, clientId), eq(treeInspectionsTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry, readInspection);
+
+  let inserted;
+  try {
+    [inserted] = await db
+      .insert(treeInspectionsTable)
+      .values({
+        clientId,
+        checkType: data.checkType,
+        checkDate: data.checkDate,
+        result: data.result,
+        actionSeverity: data.actionSeverity ?? null,
+        treeRef: data.treeRef ?? null,
+        location: data.location ?? null,
+        inspector: data.inspector ?? null,
+        followUpDate: data.followUpDate ?? null,
+        siteId: data.siteId ?? null,
+        notes: data.notes ?? null,
+        createdBy: userId,
+        clientEntryId: entry?.id ?? null,
+        clientEntryHash: entry?.hash ?? null,
+      })
+      .returning();
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry, readInspection);
+    throw err;
+  }
 
   res.status(201).json(readInspection(inserted));
 });

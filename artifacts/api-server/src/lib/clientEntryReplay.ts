@@ -6,7 +6,10 @@ import { sql } from "drizzle-orm";
 
 /**
  * Replay recognition for mobile outbox submissions (fire, legionella, hot tub,
- * PAT, incident and pool records, GreenTrack pre-use checks and swim sessions). The device sends a stable `clientEntryId` with
+ * PAT, incident and pool records, GreenTrack pre-use checks, defects, fuel logs,
+ * service records and PUWER inspections, swim sessions, surveillance checks,
+ * first-aid checks and incidents; KitchenTrack cleaning logs keep their receipts
+ * in kitchen_cleaning_log_entries because every save updates the same log). The device sends a stable `clientEntryId` with
  * every attempt; the row stores it with a fingerprint of the validated
  * payload under a partial unique index on (client_id, client_entry_id).
  *
@@ -68,7 +71,8 @@ export function isUniqueViolation(error: unknown): boolean {
 }
 
 /** Runtime-only tables (raw SQL, snake_case rows) that store device entry IDs. */
-export type RawClientEntryTable = "pool_checks" | "green_pre_use_checks" | "swim_sessions";
+export type RawClientEntryTable = "pool_checks" | "green_pre_use_checks" | "swim_sessions"
+  | "swim_surveillance_checks" | "swim_first_aid_checks" | "swim_incidents" | "green_defects" | "green_fuel_logs" | "green_service_records" | "green_puwer_inspections" | "kitchen_weekly_records" | "kitchen_probe_checks" | "bike_services";
 
 /** The raw row already stored for this client's device entry, if any. */
 export async function findRawStoredEntry(

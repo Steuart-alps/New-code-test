@@ -23,15 +23,21 @@ import { UnsentSubmissions } from '@/components/UnsentSubmissions';
 import { OutboxEntries } from '@/components/OutboxEntries';
 import { useRecordOutbox } from '@/hooks/useRecordOutbox';
 import { isIsoDate, localIsoDate } from '@/components/date-stepper-logic';
-
-// ─── Fire check types ────────────────────────────────────────────────────────
-const FIRE_TYPES = [
-  { value: 'alarm', label: 'Alarm test' },
-  { value: 'emergency_lights', label: 'Emergency lights' },
-  { value: 'extinguishers', label: 'Extinguisher check' },
-  { value: 'fire_doors', label: 'Fire doors' },
-  { value: 'fire_drill', label: 'Fire drill' },
-];
+import { formatControlDate } from '@/components/track-controls-logic';
+import {
+  FIRE_TYPES,
+  FLICK_TEST_GUIDE,
+  NIGHT_STAFF_OPTIONS,
+  NO_CALL_POINT,
+  activeCallPoints,
+  callPointsPath,
+  fireDetailsBody,
+  fireDetailsError,
+  linkedTaskGuide,
+  nextCallPoint,
+  type CallPointChoice,
+  type NightStaff,
+} from '@/components/fire-check-logic';
 
 // ─── Water / Legionella check types (HSG274 Part 2 Table 2.1) ────────────────
 const WATER_TYPES = [
@@ -151,6 +157,9 @@ export default function CheckFormScreen() {
   const [performedBy, setPerformedBy] = useState(user?.name ?? '');
   const [performedByEdited, setPerformedByEdited] = useState(false);
   const [siteId, setSiteId] = useState<number | null>(null);
+  // Weekly alarm tests name the call point; drills say whether night staff took part.
+  const [callPointChoice, setCallPointChoice] = useState<CallPointChoice>(NO_CALL_POINT);
+  const [nightStaff, setNightStaff] = useState<NightStaff | null>(null);
   const unsent = useUnsentSubmissions(`check:${type ?? ''}`);
 
   useEffect(() => {
@@ -171,6 +180,26 @@ export default function CheckFormScreen() {
     queryFn: () => apiFetch(`/api/hot-tub/config${siteId ? `?siteId=${siteId}` : ''}`),
     enabled: isHotTub,
   });
+
+  const isAlarm = isFire && checkType === 'alarm';
+  const callPointsQuery = useQuery<unknown>({
+    queryKey: ['fire-call-points', siteId ?? 'none'],
+    queryFn: () => apiFetch(callPointsPath(siteId)),
+    enabled: isAlarm,
+    retry: false,
+  });
+  // No list (none set up, offline, or an older API): the call point is typed in.
+  const callPoints = activeCallPoints(callPointsQuery.data, siteId);
+  const suggestedCallPoint = nextCallPoint(callPoints);
+  useEffect(() => {
+    // A call point belongs to one site.
+    setCallPointChoice(NO_CALL_POINT);
+  }, [siteId]);
+  useEffect(() => {
+    // Suggest the call point tested longest ago when nothing is chosen yet.
+    if (!isAlarm || callPointChoice.callPointId != null || callPointChoice.callPoint || !suggestedCallPoint) return;
+    setCallPointChoice({ callPointId: suggestedCallPoint.id, callPoint: suggestedCallPoint.name });
+  }, [isAlarm, suggestedCallPoint?.id, callPointChoice.callPointId, callPointChoice.callPoint]);
 
   const outboxKind = isFire ? 'fire-check' : isHotTub ? 'hot-tub-check' : 'legionella-check';
 
@@ -202,6 +231,9 @@ export default function CheckFormScreen() {
       setFireResult(null);
       setWaterResult(null);
       setHotResult(null);
+      setNightStaff(null);
+      setCallPointChoice(NO_CALL_POINT);
+      if (isAlarm) void callPointsQuery.refetch();
       if (outcome.state === 'queued') {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         Alert.alert(
@@ -249,6 +281,11 @@ export default function CheckFormScreen() {
       Alert.alert('Result required', 'Choose Pass or Fail for this check.');
       return;
     }
+    const fireMissing = isFire ? fireDetailsError(checkType, callPointChoice, nightStaff) : null;
+    if (fireMissing) {
+      Alert.alert(checkType === 'alarm' ? 'Call point required' : 'Night staff required', `${fireMissing}.`);
+      return;
+    }
     if (isHotTub && checkType === 'water_chemistry' && (!ph || !sanitiser)) {
       Alert.alert('Reading required', 'Enter both pH and sanitiser for a water chemistry check.');
       return;
@@ -265,6 +302,7 @@ export default function CheckFormScreen() {
       ...(location ? { location } : {}),
       ...(notes ? { notes } : {}),
       ...(performedBy.trim() ? { performedBy: performedBy.trim() } : {}),
+      ...(isFire ? fireDetailsBody(checkType, callPointChoice, nightStaff) : {}),
       ...(isWater && temperature ? { temperature: parseFloat(temperature) } : {}),
       ...(isHotTub && ph ? { phValue: Number(ph) } : {}),
       ...(isHotTub && sanitiser ? { sanitiserLevel: Number(sanitiser) } : {}),
@@ -550,6 +588,115 @@ export default function CheckFormScreen() {
         </View>
       )}
 
+      {isAlarm && (
+        <View style={styles.field} testID="fire-call-point">
+          <Text style={[styles.label, { color: colors.foreground }]}>Call point tested</Text>
+          <Text style={[styles.hint, { color: colors.mutedForeground }]}>
+            Test the alarm weekly from a different call point each time.
+          </Text>
+          {callPointsQuery.isLoading ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : callPoints.length > 0 ? (
+            <View style={{ gap: 8 }}>
+              {callPoints.map((point) => {
+                const selected = callPointChoice.callPointId === point.id;
+                return (
+                  <TouchableOpacity
+                    key={point.id}
+                    testID={`fire-call-point-${point.id}`}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    style={[
+                      styles.optionRow,
+                      {
+                        borderColor: selected ? colors.primary : colors.border,
+                        backgroundColor: selected ? colors.primary + '1a' : colors.card,
+                      },
+                    ]}
+                    onPress={() => setCallPointChoice({ callPointId: point.id, callPoint: point.name })}
+                  >
+                    <Text style={[styles.optionTitle, { color: selected ? colors.primary : colors.foreground }]}>
+                      {point.name}
+                    </Text>
+                    <Text style={[styles.hint, { color: colors.mutedForeground, marginBottom: 0 }]}>
+                      {point.lastTestedDate ? `Last tested ${formatControlDate(point.lastTestedDate)}` : 'Not tested yet'}
+                      {point.id === suggestedCallPoint?.id ? ' · next in turn' : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : (
+            <>
+              <TextInput
+                testID="fire-call-point-text"
+                style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
+                value={callPointChoice.callPoint}
+                onChangeText={(text) => setCallPointChoice({ callPointId: null, callPoint: text })}
+                placeholder='e.g. "CP3, first floor fire exit"'
+                placeholderTextColor={colors.mutedForeground}
+                maxLength={200}
+              />
+              <Text style={[styles.hint, { color: colors.mutedForeground, marginTop: 6 }]}>
+                {callPointsQuery.isError
+                  ? 'The call point list could not be loaded, so type the call point.'
+                  : "Managers can list this site's call points on the website."}
+              </Text>
+            </>
+          )}
+        </View>
+      )}
+      {isFire && checkType === 'fire_drill' && (
+        <View style={styles.field} testID="fire-night-staff">
+          <Text style={[styles.label, { color: colors.foreground }]}>Night staff</Text>
+          <Text style={[styles.hint, { color: colors.mutedForeground }]}>
+            Drills are due at least every 6 months and should include night staff.
+          </Text>
+          <View style={{ gap: 8 }}>
+            {NIGHT_STAFF_OPTIONS.map((option) => {
+              const selected = nightStaff === option.value;
+              return (
+                <TouchableOpacity
+                  key={option.value}
+                  testID={`fire-night-staff-${option.value}`}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  style={[
+                    styles.optionRow,
+                    {
+                      borderColor: selected ? colors.primary : colors.border,
+                      backgroundColor: selected ? colors.primary + '1a' : colors.card,
+                    },
+                  ]}
+                  onPress={() => setNightStaff(option.value)}
+                >
+                  <Text style={[styles.optionTitle, { color: selected ? colors.primary : colors.foreground }]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {nightStaff === 'not_included' && (
+            <Text style={{ color: '#b45309', marginTop: 6 }}>Plan the next drill so night staff take part.</Text>
+          )}
+        </View>
+      )}
+      {isFire && linkedTaskGuide(checkType) && (
+        <View style={styles.field}>
+          <Text style={[styles.hint, { color: colors.mutedForeground }]} testID="fire-linked-task-guide">
+            {linkedTaskGuide(checkType)}
+          </Text>
+        </View>
+      )}
+      {isFire && checkType === 'emergency_lights' && (
+        <View style={styles.field}>
+          <Text style={[styles.hint, { color: colors.mutedForeground }]} testID="fire-flick-test-guide">
+            {FLICK_TEST_GUIDE}
+          </Text>
+        </View>
+      )}
+
       {/* Location */}
       <View style={styles.field}>
         <Text style={[styles.label, { color: colors.foreground }]}>
@@ -662,6 +809,9 @@ const styles = StyleSheet.create({
   controlsLinkText: { flex: 1, fontSize: 14, fontFamily: 'Inter_500Medium' },
   field: { paddingHorizontal: 16, marginBottom: 20 },
   label: { fontSize: 13, fontFamily: 'Inter_600SemiBold', marginBottom: 8 },
+  hint: { fontSize: 12, fontFamily: 'Inter_400Regular', marginBottom: 8 },
+  optionRow: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10 },
+  optionTitle: { fontSize: 14, fontFamily: 'Inter_500Medium' },
   input: {
     minHeight: 46,
     borderWidth: 1,

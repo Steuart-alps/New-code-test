@@ -26,6 +26,10 @@ export interface ControlHistoryRow {
   performedBy?: string | null;
   location?: string | null;
   notes?: string | null;
+  /** FireTrack alarm tests: the call point tested. */
+  callPoint?: string | null;
+  /** FireTrack drills: included | not_included | no_night_staff. */
+  nightStaff?: string | null;
 }
 
 export interface ControlField {
@@ -43,13 +47,16 @@ export interface MonitoringPlan {
 }
 
 export const FIRE_CHECK_LABELS: Record<string, string> = {
-  alarm: 'Fire alarm test',
+  alarm: 'Weekly fire alarm test',
   alarm_panel: 'Alarm panel check',
-  emergency_lights: 'Emergency lighting',
-  extinguishers: 'Extinguisher check',
-  fire_doors: 'Fire doors',
+  emergency_lights: 'Monthly emergency lighting flick test',
+  extinguishers: 'Weekly extinguisher visual check',
+  fire_doors: 'Fire door check',
   fire_walk: 'Fire walk (escape routes)',
-  fire_drill: 'Fire drill',
+  fire_drill: 'Fire drill (6-monthly, with night staff)',
+  emergency_lights_annual: 'Annual 3-hour emergency lighting discharge test',
+  alarm_service: '6-monthly fire alarm service',
+  extinguisher_service: 'Annual fire extinguisher service',
 };
 
 export const WATER_CHECK_LABELS: Record<string, string> = {
@@ -119,6 +126,8 @@ export function cadenceLabel(frequencyDays: number | null | undefined): string {
   if (frequencyDays == null || !Number.isInteger(frequencyDays) || frequencyDays < 1) {
     return 'No approved frequency';
   }
+  // FireTrack drills: the legal minimum, as the website says it.
+  if (frequencyDays === 180) return 'At least every 6 months';
   const named: Record<number, string> = {
     1: 'Daily', 7: 'Weekly', 14: 'Fortnightly', 30: 'Monthly', 31: 'Monthly',
     90: 'Quarterly', 91: 'Quarterly', 92: 'Quarterly', 182: 'Six-monthly', 183: 'Six-monthly',

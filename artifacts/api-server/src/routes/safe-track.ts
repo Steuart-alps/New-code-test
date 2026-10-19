@@ -332,6 +332,9 @@ function ackSaveRoute(table: any, docType: string) {
 // Identity comes from the session: the user's roster entry (by email, as
 // DocTrack resolves it) so managers see it against that staff member; users
 // with no roster entry are recorded by their account name.
+// One acknowledgement per staff member (or account) and document: the phone's
+// outbox may resend after a lost response (its clientEntryId is ignored) and
+// gets alreadyAcknowledged back instead of a second row.
 
 function selfAckRoute(table: any, docType: string) {
   return async (req: any, res: any) => {
@@ -344,6 +347,8 @@ function selfAckRoute(table: any, docType: string) {
       .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
     if (!doc) return res.status(404).json({ error: "Not found" });
 
+    // The signed-in user from the web session or the phone's bearer token (a
+    // bearer request has no session userId).
     const userId: number | null = req.currentUser?.id ?? null;
     const signature: string | null = req.body?.signature ?? null;
     const matches = await findOwnRosterEntries(clientId, req.currentUser?.email);

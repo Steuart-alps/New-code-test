@@ -1,4 +1,5 @@
-import { pgTable, serial, text, timestamp, integer, date, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -40,11 +41,18 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   emailSentAt: timestamp("email_sent_at"),
   mediaUrls: jsonb("media_urls").default([]).$type<string[]>(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Mobile outbox entry ID and payload fingerprint: a replay of an applied
+  // submission is recognised instead of creating a duplicate. Not a credential.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
   // Created by the api-server runtime migrations (dashboard read paths).
   index("IDX_fix_track_issues_client_status").on(table.clientId, table.status),
+  uniqueIndex("UQ_fix_track_issues_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
 ]);
 
 export const fixTrackIssueActivityTable = pgTable("fix_track_issue_activity", {
@@ -55,8 +63,15 @@ export const fixTrackIssueActivityTable = pgTable("fix_track_issue_activity", {
   status: text("status"),
   note: text("note"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Set on notes added from the phone's outbox (see fixTrackIssuesTable).
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_fix_track_issue_activity_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
+]);
 
 export type FixTrackIssue = typeof fixTrackIssuesTable.$inferSelect;
 export type FixTrackIssueActivity = typeof fixTrackIssueActivityTable.$inferSelect;

@@ -18,11 +18,21 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { PoolChecks } from '@/components/PoolChecks';
 import { Sessions } from '@/components/Sessions';
+import { SurveillanceChecks } from '@/components/SurveillanceChecks';
+import { FirstAidChecks } from '@/components/FirstAidChecks';
+import { PoolIncidents } from '@/components/PoolIncidents';
 import { AquaEmptyState } from '@/components/aqua-track-ui';
 import { aquaTrackAccess, hasSelectedAquaSite } from '@/components/aqua-track-logic';
 import type { Site } from '@/components/aqua-track-types';
 
-type ActiveTab = 'pool' | 'sessions';
+type ActiveTab = 'pool' | 'sessions' | 'surveillance' | 'first-aid' | 'incidents';
+/** Tabs on the swim-track API (swimtrack or aquatrack); 'pool' is pool-track. */
+const SWIM_TABS: { key: Exclude<ActiveTab, 'pool'>; label: string; icon: React.ComponentProps<typeof Feather>['name'] }[] = [
+  { key: 'sessions', label: 'Sessions', icon: 'users' },
+  { key: 'surveillance', label: 'Surveillance', icon: 'eye' },
+  { key: 'first-aid', label: 'First aid', icon: 'heart' },
+  { key: 'incidents', label: 'Incidents', icon: 'alert-triangle' },
+];
 
 export default function AquaTrackScreen() {
   const colors = useColors();
@@ -57,7 +67,7 @@ export default function AquaTrackScreen() {
     hasSelectedAquaSite(siteId, sitesQuery.data);
 
   useEffect(() => {
-    if (!access.pool && access.sessions && activeTab !== 'sessions') setActiveTab('sessions');
+    if (!access.pool && access.sessions && activeTab === 'pool') setActiveTab('sessions');
     if (!access.sessions && access.pool && activeTab !== 'pool') setActiveTab('pool');
   }, [access.pool, access.sessions, activeTab]);
 
@@ -67,6 +77,9 @@ export default function AquaTrackScreen() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['pool-checks'] }),
         queryClient.invalidateQueries({ queryKey: ['swim-sessions'] }),
+        queryClient.invalidateQueries({ queryKey: ['swim-surveillance'] }),
+        queryClient.invalidateQueries({ queryKey: ['swim-first-aid'] }),
+        queryClient.invalidateQueries({ queryKey: ['swim-incidents'] }),
         queryClient.invalidateQueries({ queryKey: ['sites'] }),
       ]);
     } finally {
@@ -152,7 +165,7 @@ export default function AquaTrackScreen() {
           </ScrollView>
           {sitesQuery.data.length > 1 && !hasSelectedAquaSite(siteId, sitesQuery.data) && (
             <Text style={[styles.siteChipText, { color: colors.mutedForeground }]}>
-              Choose a site before logging a pool check or session.
+              Choose a site before logging a pool record.
             </Text>
           )}
         </View>
@@ -162,34 +175,40 @@ export default function AquaTrackScreen() {
         </View>
       )}
 
-      <View style={[styles.tabBar, { borderBottomColor: colors.border }]}>
-        {access.pool && (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={[styles.tabBar, { borderBottomColor: colors.border }]}
+        contentContainerStyle={styles.tabRow}
+      >
+        {[
+          ...(access.pool ? [{ key: 'pool' as const, label: 'Pool Checks', icon: 'droplet' as const }] : []),
+          ...(access.sessions ? SWIM_TABS : []),
+        ].map((tab) => (
           <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'pool' && { borderBottomColor: colors.primary }]}
-            onPress={() => setActiveTab('pool')}
+            key={tab.key}
+            style={[styles.tabButton, activeTab === tab.key && { borderBottomColor: colors.primary }, formOpen && activeTab !== tab.key && styles.disabled]}
+            onPress={() => setActiveTab(tab.key)}
             disabled={formOpen}
-            testID="aqua-tab-pool"
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === tab.key, disabled: formOpen }}
+            testID={`aqua-tab-${tab.key}`}
           >
-            <Feather name="droplet" size={16} color={activeTab === 'pool' ? colors.primary : colors.mutedForeground} />
-            <Text style={[styles.tabLabel, { color: activeTab === 'pool' ? colors.primary : colors.mutedForeground }]}>Pool Checks</Text>
+            <Feather name={tab.icon} size={16} color={activeTab === tab.key ? colors.primary : colors.mutedForeground} />
+            <Text style={[styles.tabLabel, { color: activeTab === tab.key ? colors.primary : colors.mutedForeground }]}>{tab.label}</Text>
           </TouchableOpacity>
-        )}
-        {access.sessions && (
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'sessions' && { borderBottomColor: colors.primary }]}
-            onPress={() => setActiveTab('sessions')}
-            disabled={formOpen}
-            testID="aqua-tab-sessions"
-          >
-            <Feather name="users" size={16} color={activeTab === 'sessions' ? colors.primary : colors.mutedForeground} />
-            <Text style={[styles.tabLabel, { color: activeTab === 'sessions' ? colors.primary : colors.mutedForeground }]}>Sessions</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+        ))}
+      </ScrollView>
 
       <View style={styles.content}>
         {activeTab === 'pool' && access.pool ? (
           <PoolChecks siteId={siteId} canUseSite={canUseSite} onFormOpenChange={setFormOpen} />
+        ) : activeTab === 'surveillance' && access.sessions ? (
+          <SurveillanceChecks siteId={siteId} canUseSite={canUseSite} onFormOpenChange={setFormOpen} />
+        ) : activeTab === 'first-aid' && access.sessions ? (
+          <FirstAidChecks siteId={siteId} canUseSite={canUseSite} onFormOpenChange={setFormOpen} />
+        ) : activeTab === 'incidents' && access.sessions ? (
+          <PoolIncidents siteId={siteId} canUseSite={canUseSite} onFormOpenChange={setFormOpen} />
         ) : access.sessions ? (
           <Sessions siteId={siteId} canUseSite={canUseSite} onFormOpenChange={setFormOpen} />
         ) : (
@@ -216,9 +235,11 @@ const styles = StyleSheet.create({
   siteChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
   siteChipText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   disabled: { opacity: 0.5 },
-  tabBar: { flexDirection: 'row', borderBottomWidth: 1, marginTop: 16, marginHorizontal: 16 },
+  tabBar: { borderBottomWidth: 1, marginTop: 16, marginHorizontal: 16, flexGrow: 0 },
+  tabRow: { flexGrow: 1, flexDirection: 'row' },
   tabButton: {
-    flex: 1,
+    flexGrow: 1,
+    paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

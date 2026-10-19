@@ -1,7 +1,8 @@
 # ComplyTrack mobile: App Store and Google Play launch pack
 
 This covers how to ship `artifacts/mobile` (Expo SDK 57) as EAS standalone builds.
-Expo Go stays the development loop (`pnpm --filter @workspace/mobile run dev`).
+Expo Go stays the development loop (`pnpm --filter @workspace/mobile run dev`). After an Expo CLI, Node or system package change, run `pnpm --filter @workspace/mobile run test:expo-start`: it starts the same dev server, checks Metro and the Expo Go manifest come up, and fails on fatal native-tool errors such as missing shared libraries (CI runs it too).
+CI also runs `pnpm --filter @workspace/mobile run validate:production` (the real iOS and Android production exports) whenever a change touches the phone app, `lib/api-client-react`, `patches/`, or an Expo, Metro, React Native, Babel or image-size line in the root `package.json`, `pnpm-workspace.yaml` or `pnpm-lock.yaml`; web-only and API-only changes skip it. A phone change is publish-ready only once that step has passed. If the publish build (`pnpm --filter @workspace/mobile run build`) fails while downloading a bundle, its log now shows Metro's own error (file, line and code frame) instead of a bare HTTP 500.
 Every native-only feature must stay optional when its module is missing, because
 Expo Go doesn't include it.
 
@@ -24,7 +25,7 @@ What's already in the repository:
 
 Run these on your own computer from `artifacts/mobile`. You need Node 24 and the repository up to date on `main`.
 
-1. **Deploy the API first.** Mobile builds from this branch send a `clientEntryId` with each fire, legionella, hot tub, PAT, incident and pool record, GreenTrack pre-use check and swim session, so a resend after a lost response doesn't create a duplicate. An older API ignores the field, which would bring the duplicates back. Merge this branch and let Render deploy before you build.
+1. **Deploy the API first.** Mobile builds from this branch send a `clientEntryId` with each fire, legionella, hot tub, PAT, incident, pool, premises, tree, room, pest, bike hire and bike service record, GreenTrack pre-use check, defect, fuel log, service record and PUWER inspection, swim session, lifeguard surveillance check, first-aid check and pool incident, kitchen probe calibration, weekly kitchen review and cleaning schedule save, FixTrack issue report and note, "Mark done" and SafeTrack acknowledgement, so a resend after a lost response doesn't create a duplicate. An older API ignores the field, which would bring the duplicates back. Merge this branch and let Render deploy before you build.
 2. **Apple Developer Program**, £79 a year: <https://developer.apple.com/programs/enroll/>.
    - Enrol as the legal entity, ALPS Consulting Ltd (it trades as ALPS Consultancy; "ALPS Consultancy Ltd" is a different company), so the store shows the company as the seller. That needs a D-U-N-S number, which Apple can look up or request for free.
    - Enrolling as an individual shows your personal name instead.
@@ -111,11 +112,13 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > RECORD CHECKS
 > • FireTrack: fire alarm, emergency lighting, extinguisher and fire-walk checks
 > • LegionellaTrack: water temperatures and flushing (L8 / HSG274)
-> • HotTubTrack and AquaTrack: hot tub and pool water tests and swim sessions
-> • KitchenTrack: food safety diary, temperature checks and cleaning schedules
+> • HotTubTrack and AquaTrack: hot tub and pool water tests, swim sessions, lifeguard surveillance, first-aid equipment checks and pool incidents
+> • KitchenTrack: food safety diary, temperature checks, cleaning schedules, probe calibration and weekly reviews
 > • DailyTrack: opening and closing checklists
 > • PATtrack: portable appliance tests
-> • GreenTrack: pre-use checks for grounds equipment
+> • GreenTrack: pre-use checks, defect reports, fuel logs, services and PUWER inspections for grounds equipment
+> • BikeTrack: bike hires with pre-ride safety checks, returns and services
+> • PremisesTrack, TreeTrack, RoomTrack and PestTrack: premises inspections, tree inspections, room checks, pest activity and contractor visits
 > • IncidentTrack: accidents and incidents, with RIDDOR deadlines
 >
 > REPORT AND FIX ISSUES
@@ -125,8 +128,16 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > DOCUMENTS
 > • Risk assessments, certificates and training records for your sites
 >
+> MANAGE AND LOOK UP
+> • Work through open corrective actions: update, resolve with a signature, or send to FixTrack
+> • See contractor certificates that are expiring or overdue, and approve contractor emails
+> • Set, assign and review staff tasks
+> • A calendar of what is overdue, due today and coming up
+> • Look up allergen, COSHH and asbestos records on site, even without signal
+> • Check staff training, and hand the phone to staff without a login to sign their documents
+>
 > WORKS ON PATCHY SIGNAL
-> Fire, water, hot tub, pool, PAT, incident, daily and kitchen temperature checks you record without a connection are saved on the device and sent automatically when you are back online, without creating duplicates.
+> Checks, inspections, hires, issue reports and cleaning schedules you record without a connection are saved on the device and sent automatically when you are back online, without creating duplicates. The app shows what is waiting, what has synced and anything that needs your attention.
 >
 > SECURE BY DESIGN
 > Each business only sees its own data. Two-factor sign-in protects accounts, and viewer accounts are read-only.

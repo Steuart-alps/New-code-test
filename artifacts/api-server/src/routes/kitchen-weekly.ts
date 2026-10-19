@@ -5,6 +5,9 @@ import { sitesTable } from "@workspace/db/schema";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import {
+  clientEntryFrom, clientEntryIdSchema, findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry,
+} from "../lib/clientEntryReplay";
 import { kitchenWeeklyResult } from "@workspace/api-zod/kitchen-weekly";
 
 const router = Router();
@@ -48,14 +51,6 @@ async function resolveSiteId(req: any, res: any, clientId: number, raw: unknown)
 
 const scopeSql = (siteId: number | null) =>
   siteId === null ? sql`site_id IS NULL` : sql`site_id = ${siteId}`;
-
-function isUniqueViolation(error: unknown): boolean {
-  let current: any = error;
-  for (let depth = 0; current && depth < 5; depth++, current = current.cause) {
-    if (current.code === "23505") return true;
-  }
-  return false;
-}
 
 async function fetchWeekly(clientId: number, date: string, siteId: number | null) {
   const r = await db.execute(sql`
@@ -129,22 +124,32 @@ const weeklyBody = z.object({
   submittedAt: z.string().nullable().optional(),
   siteId: z.number().int().positive().nullable().optional(),
 });
+// Creation only: the phone's device entry ID (lib/clientEntryReplay.ts), so a
+// resend after a lost response returns the stored review instead of a 409.
+const weeklyCreateBody = weeklyBody.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = weeklyBody.safeParse(req.body);
+  const parsed = weeklyCreateBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { weekCommencing, checks, deviations, additional, managerSignature, submittedAt, siteId } = parsed.data;
   const resolvedSiteId = await resolveSiteId(req, res, clientId, siteId);
   if (resolvedSiteId === undefined) return;
 
+  // Web session or phone bearer token: both set currentUser (the session
+  // userId alone left phone records without a creator).
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(parsed.data);
+  // Before the one-review-per-week rule: the stored review is this entry's own.
+  const prior = await findRawStoredEntry("kitchen_weekly_records", clientId, entry);
+  if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
+
   const existing = await fetchWeekly(clientId, weekCommencing, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this week", id: existing.id });
 
-  const userId = req.currentUser?.id ?? null;
   const checksJson = JSON.stringify(checks ?? {});
   const deviationsJson = JSON.stringify(deviations ?? []);
   const additionalJson = JSON.stringify(additional ?? {});
@@ -153,19 +158,23 @@ router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
   try {
     const result = await db.execute(sql`
       INSERT INTO kitchen_weekly_records
-        (client_id, site_id, week_commencing, checks, deviations, additional, overall_result, manager_signature, submitted_at, created_by)
+        (client_id, site_id, week_commencing, checks, deviations, additional, overall_result, manager_signature, submitted_at, created_by,
+         client_entry_id, client_entry_hash)
       VALUES (
         ${clientId}, ${resolvedSiteId}, ${weekCommencing},
          ${checksJson}::jsonb, ${deviationsJson}::jsonb, ${additionalJson}::jsonb, ${overallResult},
         ${managerSignature ?? null},
         ${submittedAt ? new Date(submittedAt) : null},
-        ${userId}
+        ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
       )
       RETURNING *
     `);
     res.status(201).json(result.rows[0]);
   } catch (error) {
     if (isUniqueViolation(error)) {
+      // A concurrent resend of the same device entry won the insert.
+      const raced = await findRawStoredEntry("kitchen_weekly_records", clientId, entry);
+      if (entry && raced) return respondToRawStoredEntry(res, raced, userId, entry);
       const duplicate = await fetchWeekly(clientId, weekCommencing, resolvedSiteId);
       return res.status(409).json({ error: "Record already exists for this week", id: duplicate?.id });
     }
@@ -274,40 +283,51 @@ const probeBody = z.object({
   submittedAt: z.string().nullable().optional(),
   siteId: z.number().int().positive().nullable().optional(),
 });
+// Creation only: the phone's device entry ID (see weeklyCreateBody).
+const probeCreateBody = probeBody.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 router.post("/probe", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = probeBody.safeParse(req.body);
+  const parsed = probeCreateBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { checkDate, probes, overallResult, checkedBy, checkedByRosterId, signature, notes, submittedAt, siteId } = parsed.data;
   const resolvedSiteId = await resolveSiteId(req, res, clientId, siteId);
   if (resolvedSiteId === undefined) return;
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(parsed.data);
+  // Before the roster and one-check-per-date rules: a check applied before
+  // its signer left the roster is still recognised as recorded.
+  const prior = await findRawStoredEntry("kitchen_probe_checks", clientId, entry);
+  if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
   const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
   if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const existing = await fetchProbe(clientId, checkDate, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
-  const userId = req.currentUser?.id ?? null;
   const probesJson = JSON.stringify(probes ?? []);
 
   try {
     const result = await db.execute(sql`
       INSERT INTO kitchen_probe_checks
-        (client_id, site_id, check_date, probes, overall_result, checked_by, checked_by_roster_id, signature, notes, submitted_at, created_by)
+        (client_id, site_id, check_date, probes, overall_result, checked_by, checked_by_roster_id, signature, notes, submitted_at, created_by,
+         client_entry_id, client_entry_hash)
       VALUES (
         ${clientId}, ${resolvedSiteId}, ${checkDate},
         ${probesJson}::jsonb,
         ${overallResult || null}, ${performer?.performedBy ?? null}, ${performer?.staffRosterId ?? null}, ${signature ?? null}, ${notes ?? null},
         ${submittedAt ? new Date(submittedAt) : null},
-        ${userId}
+        ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
       )
       RETURNING *
     `);
     res.status(201).json(result.rows[0]);
   } catch (error) {
     if (isUniqueViolation(error)) {
+      // A concurrent resend of the same device entry won the insert.
+      const raced = await findRawStoredEntry("kitchen_probe_checks", clientId, entry);
+      if (entry && raced) return respondToRawStoredEntry(res, raced, userId, entry);
       const duplicate = await fetchProbe(clientId, checkDate, resolvedSiteId);
       return res.status(409).json({ error: "Record already exists for this date", id: duplicate?.id });
     }
