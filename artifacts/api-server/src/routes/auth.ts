@@ -1051,12 +1051,26 @@ router.post("/auth/resend-verification", resendVerificationRateLimit, resendVeri
             email_verification_expires_at = ${new Date(Date.now() + 24 * 60 * 60 * 1000)}
         WHERE id = ${user.id}
       `);
-      const verifyUrl = `${getPublicAppUrl().replace(/\/$/, "")}/verify-email?token=${verificationToken}`;
+      const appUrl = getPublicAppUrl().replace(/\/$/, "");
+      const verifyUrl = `${appUrl}/verify-email?token=${verificationToken}`;
+      // Same look as the welcome email it replaces.
       void sendSystemEmail({
         to: user.email,
         subject: "Verify your ComplyTrack email address",
-        html: `<p>Hi ${escapeHtml(user.name)},</p><p><a href="${verifyUrl}">Verify your email address</a></p><p>This link expires in 24 hours. It replaces any earlier verification link.</p>`,
-        text: `Verify your ComplyTrack email address: ${verifyUrl}\n\nThis link expires in 24 hours. It replaces any earlier verification link.`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #1e293b;">Verify your ComplyTrack email address</h2>
+            <p>Hi ${escapeHtml(user.name)},</p>
+            <p>Here is a new link to confirm your email address and activate your ComplyTrack account.</p>
+            <p style="margin: 24px 0;">
+              <a href="${verifyUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Verify email address</a>
+            </p>
+            <p>You can access ComplyTrack at <a href="${appUrl}">${appUrl}</a>.</p>
+            <p>This link expires in 24 hours and replaces any earlier verification link. If you did not ask for it, you can ignore this email.</p>
+            <p>Best regards,<br><strong>ComplyTrack</strong></p>
+          </div>
+        `,
+        text: `Hi ${user.name},\n\nHere is a new link to confirm your email address and activate your ComplyTrack account:\n${verifyUrl}\n\nOpen ComplyTrack: ${appUrl}\n\nThis link expires in 24 hours and replaces any earlier verification link. If you did not ask for it, you can ignore this email.\n\nBest regards,\nComplyTrack`,
       }).catch((err) => {
         req.log.warn({ err }, "Failed to resend verification email");
       });

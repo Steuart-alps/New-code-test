@@ -66,6 +66,13 @@ export async function signUpTenant(context, { appUrl, label, email, password, na
   assert.equal(registered.status, 200, `${label} registration: ${registered.text}`);
   const verified = await api(page, "GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`);
   assert.equal(verified.status, 200, `${label} email verification: ${verified.text}`);
+  // 2FA is optional until a manager requires it: turn the requirement on so
+  // the sign-in below exercises mandatory enrolment.
+  const owner = await api(page, "POST", "/auth/login", { email, password }, { csrf: false });
+  assert.equal(owner.status, 200, `${label} password sign-in before 2FA is required: ${owner.text}`);
+  const required = await api(page, "PUT", "/settings", { requireTwoFactor: "true" });
+  assert.equal(required.status, 200, `${label} requiring 2FA: ${required.text}`);
+  await api(page, "POST", "/auth/logout");
   const me = await signIn(page, label, email, password);
   const clientId = me?.user?.clientId;
   assert.ok(Number.isInteger(clientId), `${label} needs its own client`);

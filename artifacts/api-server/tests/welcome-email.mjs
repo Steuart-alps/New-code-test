@@ -124,6 +124,13 @@ async function main() {
       if (!resent) await new Promise((resolve) => setTimeout(resolve, 100));
     }
     check("a new verification email is sent", !!resent);
+    check(
+      "the resent email has the same branded layout as the welcome email",
+      /<h2[^>]*>Verify your ComplyTrack email address<\/h2>/.test(resent?.html ?? "")
+        && /<a href="[^"]+verify-email\?token=[0-9a-f]{64}" style="background: #2563eb/.test(resent?.html ?? "")
+        && /<strong>ComplyTrack<\/strong>/.test(resent?.html ?? ""),
+      resent?.html,
+    );
     check("no email is sent for an unknown address", !capturedEmails().some((entry) => entry.to.startsWith("nobody-")));
     const newToken = resent?.html?.match(/verify-email\?token=([0-9a-f]{64})/)?.[1] ?? "";
     const oldLink = await session("GET", `/auth/verify-email?token=${encodeURIComponent(response.data?.verificationToken ?? "")}`);
