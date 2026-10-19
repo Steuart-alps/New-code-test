@@ -2091,7 +2091,10 @@ interface InvoiceRow {
 }
 
 function DataExportCard() {
-  const [busy, setBusy] = useState(false);
+  // The part being downloaded, and how many parts the last download said the
+  // export has (large exports are split; the records are in part 1).
+  const [busy, setBusy] = useState<number | null>(null);
+  const [parts, setParts] = useState(1);
   const { toast } = useToast();
   const canAdmin = useCanAdmin();
   useEffect(() => {
@@ -2105,11 +2108,11 @@ function DataExportCard() {
   }, [canAdmin]);
   if (!canAdmin) return null;
 
-  async function handleExport() {
-    setBusy(true);
+  async function handleExport(part = 1) {
+    setBusy(part);
     try {
       // The ZIP needs the raw response; the JSON helper above would return null.
-      const res = await authenticatedApiFetch("/export");
+      const res = await authenticatedApiFetch(part === 1 ? "/export" : `/export?part=${part}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as any).error ?? `Export failed (${res.status})`);
@@ -2120,7 +2123,10 @@ function DataExportCard() {
       a.href = url;
       const date = new Date().toISOString().slice(0, 10);
       const incomplete = res.headers.get("X-Export-Status") === "incomplete";
-      a.download = `complytrack-export-${date}${incomplete ? "-INCOMPLETE" : ""}.zip`;
+      const total = Math.max(1, Number(res.headers.get("X-Export-Parts")) || 1);
+      setParts(total);
+      const partSuffix = total > 1 ? `-part-${part}-of-${total}` : "";
+      a.download = `complytrack-export-${date}${partSuffix}${incomplete ? "-INCOMPLETE" : ""}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -2136,7 +2142,7 @@ function DataExportCard() {
     } catch (err: any) {
       toast({ title: "Export failed", description: err.message, variant: "destructive" });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -2156,12 +2162,25 @@ function DataExportCard() {
           <div className="flex-1 text-sm text-muted-foreground space-y-1">
             <p>The export includes every record scoped to your account: sites, departments, staff, all compliance logs and contractor records.</p>
             <p className="text-xs">Available private file attachments (PDFs, photos) are included in the ZIP. Check its manifest for any files that could not be bundled.</p>
+            {parts > 1 && (
+              <p className="text-xs font-medium text-foreground">Your files are split into {parts} downloads. Download each part and unzip them into the same folder; the records are in part 1.</p>
+            )}
           </div>
-          <Button onClick={handleExport} disabled={busy} className="shrink-0 gap-2">
-            {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            {busy ? "Preparing…" : "Export all data"}
+          <Button onClick={() => handleExport(1)} disabled={busy !== null} className="shrink-0 gap-2">
+            {busy === 1 ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {busy === 1 ? "Preparing…" : parts > 1 ? `Download part 1 of ${parts}` : "Export all data"}
           </Button>
         </div>
+        {parts > 1 && (
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            {Array.from({ length: parts - 1 }, (_, i) => i + 2).map((part) => (
+              <Button key={part} variant="outline" onClick={() => handleExport(part)} disabled={busy !== null} className="gap-2">
+                {busy === part ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                {busy === part ? "Preparing…" : `Download part ${part} of ${parts}`}
+              </Button>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

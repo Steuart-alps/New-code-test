@@ -33,6 +33,7 @@ export const clientsTable = pgTable("clients", {
   // Offboarding / data retention
   cancelledAt: timestamp("cancelled_at"),
   offboardingEmailSentAt: timestamp("offboarding_email_sent_at"),
+  deletionReminderSentAt: timestamp("deletion_reminder_sent_at", { withTimezone: true }),
   dataDeletionScheduledAt: timestamp("data_deletion_scheduled_at"),
   dataDeletedAt: timestamp("data_deleted_at"),
   // When a cancelled business's stored files were moved to cheaper storage

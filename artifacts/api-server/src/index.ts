@@ -42,7 +42,7 @@ import { runTwoFactorResetAlertRecovery } from "./lib/twoFactorResetAlerts";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
 import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
-import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob } from "./lib/offboarding";
+import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob, runDeletionReminderJob } from "./lib/offboarding";
 import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
 import { runCancelledStorageClassJob } from "./lib/cancelledClientStorage";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
@@ -373,6 +373,13 @@ function startScheduler() {
     "Cancellation detection job complete", () => runCancellationDetectionJob(),
   ), { daily: true });
   logger.info("Cancellation detection scheduler started (daily at 07:00)");
+
+  // One reminder, with the download link, 30 days before a cancelled
+  // business's 12-month deletion (daily at 07:15).
+  schedule("15 7 * * *", "deletion-reminders", logged(
+    "Deletion reminder job complete", () => runDeletionReminderJob(),
+  ), { daily: true });
+  logger.info("Deletion reminder scheduler started (daily at 07:15)");
 
   // Reconcile any cancellation/scheduled-cancellation webhook missed by Stripe
   // sync and warn account admins before their paid access cutoff.

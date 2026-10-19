@@ -608,6 +608,7 @@ export async function clearRetentionSchedule(clientId: number): Promise<boolean>
        SET cancelled_at = NULL,
            data_deletion_scheduled_at = NULL,
            offboarding_email_sent_at = NULL,
+           deletion_reminder_sent_at = NULL,
            updated_at = now()
      WHERE id = ${clientId}
        AND data_deleted_at IS NULL
@@ -761,6 +762,112 @@ export async function runCancellationDetectionJob(deps: CancellationDetectionDep
   }
 
   return { clientsDetected, trialsLapsed, clientsReactivated, emailsSent, skipped };
+}
+
+// ── Reminder before the 12-month deletion ─────────────────────────────────────
+
+/** How long before the scheduled deletion the reminder goes out. */
+export const DELETION_REMINDER_DAYS = 30;
+
+function buildDeletionReminderEmail(opts: {
+  recipientName: string;
+  companyName: string;
+  deletionDate: Date;
+  settingsUrl: string;
+}) {
+  const deletionStr = formatUkDate(opts.deletionDate);
+  const safeName = escapeHtml(opts.recipientName);
+  const safeCompany = escapeHtml(opts.companyName);
+  const subject = `Reminder: your ComplyTrack data will be deleted on ${deletionStr}`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #1e293b;">Your records will be deleted soon</h2>
+      <p>Hi ${safeName},</p>
+      <p>We have kept the compliance records for <strong>${safeCompany}</strong> for the ${RETENTION_MONTHS} months
+         since the account ended. They will be <strong>permanently deleted on ${deletionStr}</strong>.</p>
+      <p>We recommend downloading a copy before then, as you may need these records for inspections,
+         insurance claims or legal enquiries.</p>
+      <p><a href="${opts.settingsUrl}"
+            style="display:inline-block;background:#ea580c;color:white;text-decoration:none;
+                   padding:12px 24px;border-radius:6px;font-weight:600;">Download your data</a></p>
+      <p style="color:#64748b;font-size:13px;">If you resubscribe before ${deletionStr}, nothing will be deleted.</p>
+      <p>Best regards,<br><strong>ComplyTrack</strong></p>
+    </div>`;
+  const text = `
+Your records will be deleted soon
+
+Hi ${opts.recipientName},
+
+We have kept the compliance records for ${opts.companyName} for the ${RETENTION_MONTHS} months since the account ended. They will be permanently deleted on ${deletionStr}.
+
+We recommend downloading a copy before then, as you may need these records for inspections, insurance claims or legal enquiries:
+${opts.settingsUrl}
+
+If you resubscribe before ${deletionStr}, nothing will be deleted.
+
+Best regards,
+ComplyTrack
+`.trim();
+  return { subject, html, text };
+}
+
+/**
+ * Sends one reminder, DELETION_REMINDER_DAYS before a cancelled business's
+ * scheduled 12-month deletion, with the download link. Claimed atomically via
+ * deletion_reminder_sent_at; a claim with no delivered email is released so
+ * the next run retries. Resubscribing clears it with the retention clock.
+ */
+export async function runDeletionReminderJob(deps: {
+  sendEmail?: typeof sendSystemEmail;
+  clientIds?: readonly number[];
+} = {}): Promise<{ clientsReminded: number; emailsSent: number }> {
+  const sendEmail = deps.sendEmail ?? sendSystemEmail;
+  if (deps.clientIds?.length === 0) return { clientsReminded: 0, emailsSent: 0 };
+  const scope = deps.clientIds === undefined
+    ? sql`TRUE`
+    : sql`id IN (${sql.join(deps.clientIds.map((id) => sql`${id}`), sql`, `)})`;
+  const due = await db.execute(sql`
+    SELECT id, name, data_deletion_scheduled_at FROM clients
+    WHERE ${scope}
+      AND data_deleted_at IS NULL AND cancelled_at IS NOT NULL
+      AND deletion_reminder_sent_at IS NULL
+      AND data_deletion_scheduled_at > now()
+      AND data_deletion_scheduled_at <= now() + interval '${sql.raw(String(DELETION_REMINDER_DAYS))} days'
+  `);
+  let clientsReminded = 0;
+  let emailsSent = 0;
+  const settingsUrl = `${getPublicAppUrl()}/settings#data-export`;
+  for (const row of due.rows as { id: number; name: string; data_deletion_scheduled_at: Date | string }[]) {
+    const claimed = await db.execute(sql`
+      UPDATE clients SET deletion_reminder_sent_at = now()
+      WHERE id = ${row.id} AND deletion_reminder_sent_at IS NULL AND data_deleted_at IS NULL
+      RETURNING id
+    `);
+    if ((claimed.rows ?? []).length === 0) continue;
+    const deletionDate = new Date(row.data_deletion_scheduled_at);
+    let sent = 0;
+    for (const r of await getClientRecipients(row.id)) {
+      try {
+        const { subject, html, text } = buildDeletionReminderEmail({
+          recipientName: r.name ?? r.email, companyName: row.name, deletionDate, settingsUrl,
+        });
+        await sendEmail({
+          to: r.email, subject, html, text,
+          idempotencyKey: `deletion-reminder:${row.id}:${deletionDate.toISOString()}:${r.id}`,
+        });
+        sent++;
+      } catch (err) {
+        logger.error({ err, clientId: row.id }, "Deletion reminder email failed for recipient");
+      }
+    }
+    if (sent === 0) {
+      await db.execute(sql`UPDATE clients SET deletion_reminder_sent_at = NULL WHERE id = ${row.id}`);
+      continue;
+    }
+    clientsReminded++;
+    emailsSent += sent;
+  }
+  return { clientsReminded, emailsSent };
 }
 
 // ── Job 2: Hard data deletion ──────────────────────────────────────────────────

@@ -46,9 +46,16 @@ async function register(label) {
 try {
   const first = await register("First");
   const second = await register("Second");
+  // The owner of a business still subscribed cannot ask yet, whatever its role.
+  const active = await first.request("GET", `/data-deletion/request?clientId=${first.clientId}`);
+  assert.equal(active.status, 200);
+  assert.equal(active.data.owner, true);
+  assert.equal(active.data.eligible, false, "deletion can only be requested after cancelling");
+  assert.equal((await first.request("POST", "/data-deletion/request", { clientId: first.clientId })).status, 403);
+  await db.execute(sql`UPDATE clients SET cancelled_at = now() WHERE id = ${first.clientId}`);
   const initial = await first.request("GET", `/data-deletion/request?clientId=${first.clientId}`);
   assert.equal(initial.status, 200);
-  assert.equal(initial.data.eligible, true, "consultants may request for their linked client");
+  assert.equal(initial.data.eligible, true, "the business's owner may request after cancelling");
   assert.equal(initial.data.request, null);
   const denied = await first.request("POST", "/data-deletion/request", { clientId: second.clientId });
   assert.equal(denied.status, 403, "consultants cannot request for unrelated tenants");
@@ -88,6 +95,14 @@ try {
     INSERT INTO consultant_clients (user_id, client_id)
     VALUES (${second.userId}, ${first.clientId})
   `);
+  // A linked consultant reviews requests but cannot make one for the business.
+  const linkedView = await second.request("GET", `/data-deletion/request?clientId=${first.clientId}`);
+  assert.equal(linkedView.status, 200);
+  assert.equal(linkedView.data.owner, false);
+  assert.equal(linkedView.data.eligible, false);
+  const linkedPost = await second.request("POST", "/data-deletion/request", { clientId: first.clientId });
+  assert.equal(linkedPost.status, 403, "only the business's owner can request deletion");
+  assert.match(linkedPost.data.error, /owner/);
   const reviewed = await second.request("PATCH", `/admin/data-deletion-requests/${requestId}/review`, {
     decision: "approved", note: "Reviewed client request and retention obligations",
   });
@@ -133,6 +148,7 @@ try {
   // Model the worker owning this client's lock and finishing deletion while
   // a request waits. The POST must recheck deletion state after acquiring it.
   const racing = await register("Race");
+  await db.execute(sql`UPDATE clients SET cancelled_at = now() WHERE id = ${racing.clientId}`);
   let delayedPost;
   await db.transaction(async tx => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(106, ${racing.clientId})`);

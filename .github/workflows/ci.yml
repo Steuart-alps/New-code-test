@@ -239,6 +239,18 @@ jobs:
       - name: Cancelled business storage class tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:cancelled-storage-class
 
+      # Only the business's owner can ask for deletion, after cancelling.
+      - name: Data deletion request tests
+        run: pnpm --filter @workspace/api-server run test:data-deletion-request
+
+      # One reminder with the download link 30 days before the 12-month deletion.
+      - name: Deletion reminder email tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:deletion-reminder
+
+      # Large exports come as numbered parts; every file is in exactly one.
+      - name: Export in parts tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:export-parts
+
       - name: FireTrack call point and night staff tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-call-points
 

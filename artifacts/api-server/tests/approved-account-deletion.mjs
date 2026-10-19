@@ -106,6 +106,10 @@ try {
   const retention = await createTenant("erasure-retention-window");
   const T = target.clientId;
   const N = neighbour.clientId;
+  // Sign-ups are Owners (client_admin); reviews need the consultant role. The
+  // target is an older self-signup owner (consultant role) so the review
+  // route's own refusal of a self-approval is what is tested.
+  await db.execute(sql`UPDATE users SET role = 'consultant' WHERE id IN (${target.userId}, ${reviewer.userId})`);
 
   // The target's files: two it owns under its prefix (one referenced), a
   // legacy file outside the prefix it owns and references, a reserved upload
