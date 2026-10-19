@@ -33,6 +33,7 @@ import {
   callPointsPath,
   fireDetailsBody,
   fireDetailsError,
+  linkedTaskGuide,
   nextCallPoint,
   type CallPointChoice,
   type NightStaff,
@@ -679,6 +680,13 @@ export default function CheckFormScreen() {
           {nightStaff === 'not_included' && (
             <Text style={{ color: '#b45309', marginTop: 6 }}>Plan the next drill so night staff take part.</Text>
           )}
+        </View>
+      )}
+      {isFire && linkedTaskGuide(checkType) && (
+        <View style={styles.field}>
+          <Text style={[styles.hint, { color: colors.mutedForeground }]} testID="fire-linked-task-guide">
+            {linkedTaskGuide(checkType)}
+          </Text>
         </View>
       )}
       {isFire && checkType === 'emergency_lights' && (

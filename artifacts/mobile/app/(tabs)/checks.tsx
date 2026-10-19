@@ -45,6 +45,7 @@ const MODULES: CheckModule[] = [
       'Extinguisher check',
       'Fire doors',
       'Fire drill (with night staff)',
+      'Alarm, extinguisher and lighting services',
     ],
   },
   {

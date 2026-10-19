@@ -481,13 +481,13 @@ try {
     assert.deepEqual(rivals.map((r) => r.status).sort(), [201, 409], `${name}: ${JSON.stringify(rivals.map((r) => r.data))}`);
     assert.equal(await count('bike_hire_records', owner.clientId), hiresBefore + 3);
     assert.equal(await count('bike_checks', owner.clientId), checksBefore + 3, `${name}: the refused rival wrote no check`);
-    // The phone reads the active hires list as raw rows (snake_case) and the
-    // fleet as Drizzle rows (camelCase); see mobile components/bike-track-logic.ts.
+    // The hires list is camelCase since #95 (the phone reads either casing;
+    // see mobile components/bike-track-logic.ts), as is the fleet.
     const listed = (await owner.request('GET', '/bike-track/hires?status=active')).data.find((row) => row.id === both[0].data.hire.id);
-    assert.equal(listed?.bike_ref, 'BIKE-02', JSON.stringify(listed));
-    assert.equal(listed.guest_name, 'Alex Guest');
-    assert.equal(listed.pre_result, 'fail');
-    assert.equal(String(listed.hire_date).slice(0, 10), day);
+    assert.equal(listed?.bikeRef, 'BIKE-02', JSON.stringify(listed));
+    assert.equal(listed.guestName, 'Alex Guest');
+    assert.equal(listed.preResult, 'fail');
+    assert.equal(String(listed.hireDate).slice(0, 10), day);
     const fleet = (await owner.request('GET', '/bike-track/bikes')).data.find((row) => row.id === racing.bikeId);
     assert.equal(fleet?.siteId, siteId, JSON.stringify(fleet));
     assert.equal(fleet.status, 'hired');

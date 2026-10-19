@@ -54,6 +54,9 @@ export const FIRE_CHECK_LABELS: Record<string, string> = {
   fire_doors: 'Fire door check',
   fire_walk: 'Fire walk (escape routes)',
   fire_drill: 'Fire drill (6-monthly, with night staff)',
+  emergency_lights_annual: 'Annual 3-hour emergency lighting discharge test',
+  alarm_service: '6-monthly fire alarm service',
+  extinguisher_service: 'Annual fire extinguisher service',
 };
 
 export const WATER_CHECK_LABELS: Record<string, string> = {

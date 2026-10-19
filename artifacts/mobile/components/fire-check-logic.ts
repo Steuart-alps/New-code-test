@@ -9,6 +9,10 @@ export const FIRE_TYPES = [
   { value: 'extinguishers', label: 'Weekly extinguisher visual check' },
   { value: 'fire_doors', label: 'Fire door check' },
   { value: 'fire_drill', label: 'Fire drill (6-monthly, with night staff)' },
+  // Contractor jobs, each kept in step with a ComplyTrack task.
+  { value: 'alarm_service', label: '6-monthly fire alarm service' },
+  { value: 'extinguisher_service', label: 'Annual fire extinguisher service' },
+  { value: 'emergency_lights_annual', label: 'Annual 3-hour emergency lighting discharge test' },
 ];
 
 export type NightStaff = 'included' | 'not_included' | 'no_night_staff';
@@ -21,6 +25,24 @@ export const NIGHT_STAFF_OPTIONS: { value: NightStaff; label: string }[] = [
 
 export const FLICK_TEST_GUIDE =
   'Monthly 5 minute flick test. Switch the emergency lighting to test for 5 minutes and check every fitting lights. Record Fail and note which fittings, if any, do not.';
+
+/** Contractor jobs that are also ComplyTrack tasks: who usually does it and the task a pass completes. */
+const LINKED_TASK_GUIDES: Record<string, { heading: string; who: string; task: string }> = {
+  emergency_lights_annual: {
+    heading: 'Annual 3-hour discharge test.', who: 'emergency lighting contractor, who certifies it', task: 'Emergency Light Maintenance',
+  },
+  alarm_service: { heading: '6-monthly fire alarm service.', who: 'fire alarm contractor (BS 5839)', task: 'Fire Alarm Maintenance' },
+  extinguisher_service: {
+    heading: 'Annual fire extinguisher service.', who: 'extinguisher contractor (BS 5306-3)', task: 'Fire Extinguishers Maintenance',
+  },
+};
+
+/** Guidance shown under a contractor job, as on the website, or null. */
+export function linkedTaskGuide(checkType: string): string | null {
+  const guide = LINKED_TASK_GUIDES[checkType];
+  if (!guide) return null;
+  return `${guide.heading} Usually done by your ${guide.who}. A pass here also completes the "${guide.task}" task in ComplyTrack, and completing that task records it here.`;
+}
 
 export const CALL_POINT_REQUIRED = 'Say which call point was tested';
 export const NIGHT_STAFF_REQUIRED = 'Say whether night staff took part in the drill';

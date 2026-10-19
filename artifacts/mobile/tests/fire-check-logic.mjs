@@ -11,12 +11,29 @@ const javascript = ts.transpileModule(source, {
 }).outputText;
 const {
   FIRE_TYPES, NIGHT_STAFF_OPTIONS, NO_CALL_POINT, CALL_POINT_REQUIRED, NIGHT_STAFF_REQUIRED,
-  activeCallPoints, callPointsPath, fireDetailsBody, fireDetailsError, fireHistoryDetails, nextCallPoint, nightStaffLabel,
+  activeCallPoints, callPointsPath, fireDetailsBody, fireDetailsError, fireHistoryDetails, linkedTaskGuide, nextCallPoint, nightStaffLabel,
 } = await import(`data:text/javascript,${encodeURIComponent(javascript)}`);
 
 const label = (value) => FIRE_TYPES.find((type) => type.value === value)?.label;
 assert.equal(label('emergency_lights'), 'Monthly emergency lighting flick test');
 assert.equal(label('fire_drill'), 'Fire drill (6-monthly, with night staff)');
+// The contractor jobs from #136 and #137, with the task a pass completes.
+assert.equal(label('emergency_lights_annual'), 'Annual 3-hour emergency lighting discharge test');
+assert.equal(label('alarm_service'), '6-monthly fire alarm service');
+assert.equal(label('extinguisher_service'), 'Annual fire extinguisher service');
+assert.match(linkedTaskGuide('emergency_lights_annual'), /"Emergency Light Maintenance" task/);
+assert.match(linkedTaskGuide('alarm_service'), /BS 5839[\s\S]*"Fire Alarm Maintenance"/);
+assert.match(linkedTaskGuide('extinguisher_service'), /BS 5306-3[\s\S]*"Fire Extinguishers Maintenance"/);
+assert.equal(linkedTaskGuide('alarm'), null);
+for (const type of ['emergency_lights_annual', 'alarm_service', 'extinguisher_service']) {
+  assert.equal(fireDetailsError(type, NO_CALL_POINT, null), null, `${type} needs no call point or night staff`);
+}
+
+// Every type the phone offers is one the API accepts.
+const apiTypes = (await readFile(new URL('../../api-server/src/lib/checkReminders.ts', import.meta.url), 'utf8'))
+  .match(/FIRE_CHECK_TYPES = \[([\s\S]*?)\]/)[1].match(/"([a-z_]+)"/g).map((t) => t.slice(1, -1));
+for (const { value } of FIRE_TYPES) assert.ok(apiTypes.includes(value), `${value} is an API fire check type`);
+
 assert.deepEqual(NIGHT_STAFF_OPTIONS.map((option) => option.value), ['included', 'not_included', 'no_night_staff']);
 
 // The list is per site; records with no site use siteId=none.
