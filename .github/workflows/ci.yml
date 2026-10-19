@@ -93,6 +93,9 @@ jobs:
       - name: Track record lock decision tests
         run: pnpm --filter @workspace/api-server run test:track-record-lock
 
+      - name: Stripe start-up copies Stripe data into the database
+        run: pnpm --filter @workspace/api-server run test:stripe-backfill-scope
+
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
       - name: Create base database schema
