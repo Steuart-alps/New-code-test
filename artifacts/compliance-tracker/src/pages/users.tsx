@@ -4,6 +4,7 @@ import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth, useIsConsultant, useCanAdmin, useIsManager } from "@/context/auth-context";
 import { roleLabel, roleChoiceLabel, ROLE_DESCRIPTIONS, MAINTENANCE_MANAGER_CHOICE } from "@/lib/roles";
+import { departmentLabel } from "@/lib/departments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,6 +46,8 @@ interface Department {
   id: number;
   name: string;
   clientId: number;
+  siteId?: number | null;
+  siteName?: string | null;
 }
 
 interface RosterEntry {
@@ -341,7 +344,7 @@ function UserDialog({
                   {departments.map(d => (
                     <label key={d.id} className="flex items-center gap-2 text-sm">
                       <input type="checkbox" checked={form.departmentIds.includes(d.id)} onChange={e => toggleDepartment(d.id, e.target.checked)} />
-                      {d.name}
+                      {departmentLabel(d)}
                       {form.departmentIds[0] === d.id && form.departmentIds.length > 1 && <span className="text-xs text-muted-foreground">(main)</span>}
                     </label>
                   ))}
@@ -387,7 +390,7 @@ function UserDialog({
                     <SelectItem value={NO_DEPT_VALUE}>No department</SelectItem>
                   )}
                   {departmentChoices.map(d => (
-                    <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
+                    <SelectItem key={d.id} value={d.id.toString()}>{departmentLabel(d)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -611,7 +614,7 @@ export default function UsersPage() {
               <tbody className="divide-y divide-border">
                 {users.map(u => {
                   const userDepartments = (u.departmentIds ?? (u.departmentId != null ? [u.departmentId] : []))
-                    .map(id => departments.find(d => d.id === id)?.name)
+                    .map(id => departmentLabel(departments.find(d => d.id === id)))
                     .filter((name): name is string => !!name);
                   const self = u.id === currentUser?.id;
                   const seesAllDepartments = u.role === "consultant" || u.role === "client_admin"
@@ -651,7 +654,7 @@ export default function UsersPage() {
                               </SelectItem>
                               {departments.map(d => (
                                 <SelectItem key={d.id} value={d.id.toString()} className="text-xs">
-                                  {d.name}
+                                  {departmentLabel(d)}
                                 </SelectItem>
                               ))}
                             </SelectContent>

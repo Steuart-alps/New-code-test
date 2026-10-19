@@ -14,6 +14,7 @@ export interface ReminderAction {
   owner_name: string | null;
   due_date: string | null;
   severity: "monitor" | "action_required" | "urgent";
+  site_id?: number | null;
   site_department_id?: number | null;
 }
 
@@ -28,6 +29,8 @@ export interface TrackSummaryManager {
   extraDepartmentIds?: number[];
   /** A Manager who covers every department. */
   allDepartments?: boolean;
+  /** Department id -> site, for departments that sit under a site. */
+  departmentSiteIds?: Record<number, number>;
 }
 
 /** Whether a summary recipient covers a department (Managers may cover several, or all). */
@@ -35,6 +38,21 @@ function managerCovers(manager: TrackSummaryManager, departmentId: number): bool
   if (manager.role === "client_manager" && manager.allDepartments) return true;
   return manager.departmentId === departmentId
     || (manager.role === "client_manager" && (manager.extraDepartmentIds ?? []).includes(departmentId));
+}
+
+/**
+ * Whether a summary recipient sees an action's site: one of their departments
+ * covers it when the site is shared or that department's, and the department
+ * does not sit under another site.
+ */
+function managerCoversSite(manager: TrackSummaryManager, siteId: number | null, siteDepartmentId: number | null): boolean {
+  if (manager.role === "client_manager" && manager.allDepartments) return true;
+  const departmentIds = [manager.departmentId ?? null, ...(manager.role === "client_manager" ? manager.extraDepartmentIds ?? [] : [])];
+  return departmentIds.some((departmentId) => {
+    if (siteDepartmentId != null && departmentId !== siteDepartmentId) return false;
+    const departmentSite = departmentId == null ? undefined : manager.departmentSiteIds?.[departmentId];
+    return departmentSite == null || departmentSite === siteId;
+  });
 }
 
 export interface TrackSummaryRecipient {
@@ -218,9 +236,10 @@ export function buildTrackSummaryRecipients(
       for (const action of actions) {
         if (action.module !== module) continue;
         // Staff see unassigned sites and their own department's sites, never
-        // another department's action. Admins retain their normal global view.
-        if (manager.role !== "client_admin" && action.site_department_id != null &&
-            !managerCovers(manager, action.site_department_id)) continue;
+        // another department's action, and only their department's own site
+        // when it sits under one. Admins retain their normal global view.
+        if (manager.role !== "client_admin" && (action.site_department_id != null || action.site_id != null) &&
+            !managerCoversSite(manager, action.site_id ?? null, action.site_department_id ?? null)) continue;
         group.actions.add(action);
       }
     }
@@ -359,7 +378,7 @@ export async function runTrackActionReminderJob(
       if (modules.length === 0) continue;
       const actionsResult = await db.execute(sql`
         SELECT a.module, a.title, a.owner_name, a.due_date, a.severity,
-               s.department_id AS site_department_id
+               a.site_id, s.department_id AS site_department_id
         FROM track_actions a
         LEFT JOIN sites s ON s.id = a.site_id AND s.client_id = a.client_id
         WHERE a.client_id = ${client.id}
@@ -384,8 +403,11 @@ export async function runTrackActionReminderJob(
         LIMIT 1
       `);
       const routing = parseTrackSummaryRouting(((routingResult as any).rows ?? [])[0]?.value);
-      const departments = await db.select({ id: departmentsTable.id, name: departmentsTable.name })
+      const departments = await db.select({ id: departmentsTable.id, name: departmentsTable.name, siteId: departmentsTable.siteId })
         .from(departmentsTable).where(eq(departmentsTable.clientId, client.id));
+      const departmentSiteIds = Object.fromEntries(departments
+        .filter((department) => department.siteId != null)
+        .map((department) => [department.id, department.siteId!]));
       const effectiveRouting = effectiveTrackRouting(routing, departments, modules);
       const users = await db
         .select({
@@ -408,6 +430,7 @@ export async function runTrackActionReminderJob(
         .map(({ id, email, departmentId, role, isDepartmentManager, isMaintenanceManager, allDepartments }) => ({
           id, email, departmentId, role, isDepartmentManager, isMaintenanceManager, allDepartments,
           extraDepartmentIds: extras.filter((extra) => extra.userId === id).map((extra) => extra.departmentId),
+          departmentSiteIds,
         }));
       const recipients = buildTrackSummaryRecipients(
         actions,

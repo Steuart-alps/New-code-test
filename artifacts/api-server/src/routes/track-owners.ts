@@ -14,6 +14,7 @@ import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireCl
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { TRACK_MODULES, TRACK_MODULE_KEYS } from "../lib/trackModules";
 import { candidateCanSeeSite, loadEligibleOwners } from "../lib/trackOwners";
+import { siteVisibleSql } from "../lib/departmentSites";
 
 const router: IRouter = Router();
 
@@ -38,7 +39,12 @@ router.get("/track-owners", requireAuth, async (req, res) => {
   const [services, candidates, siteResult, ownerResult] = await Promise.all([
     getEntitledServices(clientId),
     loadEligibleOwners(clientId),
-    db.execute(sql`SELECT id, name, department_id FROM sites WHERE client_id = ${clientId} ORDER BY name, id`),
+    db.execute(sql`
+      SELECT s.id, s.name FROM sites s
+      WHERE s.client_id = ${clientId}
+        ${departmentId !== null ? sql`AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)}` : sql``}
+      ORDER BY s.name, s.id
+    `),
     db.execute(sql`
       SELECT o.id, o.module, o.site_id, o.user_id, u.name AS user_name
       FROM track_owners o
@@ -47,8 +53,7 @@ router.get("/track-owners", requireAuth, async (req, res) => {
       ORDER BY o.module, o.site_id NULLS FIRST
     `),
   ]);
-  const sites = rowsOf<{ id: number; name: string; department_id: number | null }>(siteResult)
-    .filter((site) => departmentId === null || site.department_id == null || site.department_id === departmentId)
+  const sites = rowsOf<{ id: number; name: string }>(siteResult)
     .map((site) => ({ id: Number(site.id), name: site.name }));
   const visibleSiteIds = new Set(sites.map((site) => site.id));
   const eligibleIds = new Set(candidates.map((candidate) => candidate.id));
@@ -105,7 +110,7 @@ router.put("/track-owners", requireAuth, denyViewers, requireClientAdmin, async 
   if (!candidate) {
     return res.status(400).json({ error: "Choose an active admin, staff member or consultant of this business" });
   }
-  if (siteId !== null && !candidateCanSeeSite(candidate, siteDepartmentId)) {
+  if (siteId !== null && !candidateCanSeeSite(candidate, siteDepartmentId, siteId)) {
     return res.status(400).json({ error: `${candidate.name} can't access that site's department` });
   }
 

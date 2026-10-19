@@ -16,6 +16,7 @@ import { getEntitledServices, isEntitled } from "../lib/services";
 import { addCalendarDays, getAccountToday } from "../lib/accountClock";
 import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
 import { getPickedModules } from "./setup";
+import { siteVisibleSql, visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -104,18 +105,14 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   let accessibleSiteIds: number[] | null = null;
   try {
     if (departmentId != null) {
-      const accessibleRows = await db.execute(sql`
-        SELECT id FROM sites
-        WHERE client_id = ${clientId}
-          AND (department_id IS NULL OR department_id = ${departmentId})
-      `);
+      const accessibleRows = await db.execute(visibleSiteIdsSql(clientId, departmentId));
       accessibleSiteIds = rows(accessibleRows).map((site: any) => Number(site.id));
     }
     if (siteId != null) {
       const requestedSite = await db.execute(sql`
         SELECT id FROM sites
         WHERE id = ${siteId} AND client_id = ${clientId}
-          ${departmentId != null ? sql`AND (department_id IS NULL OR department_id = ${departmentId})` : sql``}
+          ${departmentId != null ? sql`AND ${siteVisibleSql(sql`id`, sql`department_id`, departmentId)}` : sql``}
         LIMIT 1
       `);
       if (rows(requestedSite).length === 0) {

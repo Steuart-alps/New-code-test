@@ -21,6 +21,7 @@ import {
   isTenantReservedObjectPath,
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -30,7 +31,7 @@ function allowedSites(clientId: number, deptId: number) {
   return db
     .select({ id: sitesTable.id })
     .from(sitesTable)
-    .where(and(eq(sitesTable.clientId, clientId), or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId))));
+    .where(and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(deptId)));
 }
 
 async function verifySite(siteId: number | null | undefined, clientId: number) {
@@ -45,7 +46,7 @@ async function siteInDepartment(siteId: number | null | undefined, clientId: num
   if (siteId == null || deptId === null) return true;
   const [row] = await db.select({ id: sitesTable.id }).from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)))).limit(1);
+      sitesTableVisibleTo(deptId))).limit(1);
   return !!row;
 }
 

@@ -53,6 +53,7 @@ const INVENTORY = {
   "fix-track.ts POST /issues/:id/request-upload": notAMove("workflow action on the issue's stored site"),
   "fix-track.ts PUT /issues/:id": siteMove("FixTrack issue"),
   "food-safety.ts PUT /:id": notAMove("the record's site is not editable"),
+  "departments.ts PUT /departments/:id": adminOnly("moves a department under another site"),
   "food-safety.ts PUT /config": adminOnly("diary template settings"),
   "green-track.ts PUT /machines/:id": adminOnly("machine register"),
   "hot-tub.ts PUT /:id": covered("scoped staff cannot move HotTub check"),
@@ -90,6 +91,7 @@ const INVENTORY = {
   // crudFor serves risk assessments, SOPs, training, inductions, competency
   // and handbook with one handler; the training record exercises it.
   "safe-track.ts PUT /:id": siteMove("SafeTrack training record"),
+  "sites.ts PATCH /sites/:id": adminOnly("site editor (department checked against the site)"),
   "sites.ts POST /sites/:id/documents": adminOnly("site documents"),
   "sites.ts POST /sites/:id/documents/request-upload": adminOnly("site documents"),
   "staff-roster.ts PATCH /staff-roster/:id": adminOnly("staff roster"),
