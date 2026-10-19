@@ -9,7 +9,8 @@ import {
 } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useIsConsultant } from "@/context/auth-context";
+import { roleLabel } from "@/lib/roles";
 import { apiFetch as authenticatedApiFetch, withActiveClient, withCsrfToken } from "@/lib/api";
 import { BusinessTypeCard } from "@/components/business-type-card";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
@@ -532,6 +533,7 @@ interface DeptSite { id: number; name: string; departmentId?: number | null; }
 function DepartmentsCard() {
   const { toast } = useToast();
   const canAdmin = useCanAdmin();
+  const isConsultant = useIsConsultant();
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [users, setUsers] = useState<DeptUser[]>([]);
@@ -798,7 +800,7 @@ function DepartmentsCard() {
                             <SelectContent>
                               {unassignedUsers.map(u => (
                                 <SelectItem key={u.id} value={String(u.id)} className="text-xs">
-                                  {u.name} <span className="text-muted-foreground ml-1">({u.role.replace("client_", "")})</span>
+                                  {u.name} <span className="text-muted-foreground ml-1">({roleLabel(u.role, isConsultant)})</span>
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -1026,7 +1028,7 @@ function TrackSummaryRoutingCard() {
   }, [activeClientId]);
 
   const managers = users.filter(
-    (user) => user.active !== false && (user.role === "client_admin" || user.role === "client_staff"),
+    (user) => user.active !== false && (user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff"),
   );
   const seniorManagers = users.filter((user) => user.active !== false && user.role === "client_admin");
 
@@ -1158,7 +1160,7 @@ function TrackSummaryRoutingCard() {
                           <span>
                             <span className="block font-medium">{manager.name}</span>
                             <span className="block text-xs text-muted-foreground">
-                              {department?.name ?? (manager.role === "client_admin" ? "Account admin" : "No department")}
+                              {department?.name ?? (manager.role === "client_admin" ? "Owner" : "No department")}
                             </span>
                           </span>
                         </label>

@@ -102,7 +102,8 @@ try {
   const staff = await joinBusiness("staff-a", "client_staff", A);
   const viewer = await joinBusiness("viewer-a", "client_viewer", A);
   const linked = await register("consultant-c"); // own business, linked to A
-  await q(`INSERT INTO consultant_clients (user_id, client_id) VALUES ($1, $2)`, [linked.userId, A]);
+  await q(`UPDATE users SET role = 'consultant' WHERE id = $1`, [linked.userId]);
+  await q(`INSERT INTO consultant_clients (user_id, client_id) VALUES ($1, $2), ($1, $3)`, [linked.userId, linked.clientId, A]);
   const ownerB = await register("owner-b");
   const B = ownerB.clientId;
   assert.notEqual(A, B);

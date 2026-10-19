@@ -130,6 +130,84 @@ paths:
           description: Not an administrator or not authorised for this client
         "404":
           description: Report not found in the selected client
+  /train-track/my-records:
+    get:
+      operationId: listMyTrainingRecords
+      tags: [train-track]
+      summary: The signed-in Viewer's own training records (their linked staff roster entry)
+      responses:
+        "200":
+          description: Whether the account is linked to the roster, and that person's records, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [linked, records]
+                properties:
+                  linked: { type: boolean }
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-records/{id}/sign:
+    post:
+      operationId: signMyTrainingRecord
+      tags: [train-track]
+      summary: Add the signed-in Viewer's signature to one of their own unsigned training records
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The signed record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not one of this Viewer's records
+        "409":
+          description: Already signed
+  /users/me/active-department:
+    put:
+      operationId: setActiveDepartment
+      tags: [users]
+      summary: Choose which of their departments a Manager with several is working in (kept for the session)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActiveDepartmentRequest" }
+      responses:
+        "200":
+          description: The chosen department and all of the Manager's departments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [departmentId, departmentIds]
+                properties:
+                  departmentId: { type: integer }
+                  departmentIds:
+                    type: array
+                    items: { type: integer }
+        "400":
+          description: No department given
+        "403":
+          description: Not a Manager
+        "404":
+          description: Not one of the Manager's departments
   /healthz:
     get:
       operationId: healthCheck
@@ -2615,6 +2693,34 @@ paths:
 
 components:
   schemas:
+    SignTrainingRecordRequest:
+      type: object
+      required: [signature]
+      properties:
+        signature: { type: string, description: Signature image as a data URL }
+    ActiveDepartmentRequest:
+      type: object
+      required: [departmentId]
+      properties:
+        departmentId: { type: integer }
+    OwnTrainingRecord:
+      type: object
+      required: [id, record_type, staff_name, completed_date, signed]
+      properties:
+        id: { type: integer }
+        record_type: { type: string, enum: [certificate, signoff, internal] }
+        staff_name: { type: string }
+        training_type: { type: string, nullable: true }
+        document_title: { type: string, nullable: true }
+        document_type: { type: string, nullable: true }
+        provider: { type: string, nullable: true }
+        trainer: { type: string, nullable: true }
+        completed_date: { type: string }
+        expiry_date: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        signed: { type: boolean }
+        updated_at: { type: string }
+        site_name: { type: string, nullable: true }
     FeedbackReport:
       type: object
       required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, updatedByName, revision, submitterName]

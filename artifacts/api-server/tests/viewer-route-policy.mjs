@@ -76,7 +76,7 @@ const EXCEPTIONS = {
   "admin.ts POST /admin/seed-demo": secretToken("demo price seed", /\bprocess\.env\.DEMO_SEED_TOKEN\b/, /\bpresented !== token\b/),
 };
 
-const VIEWER_GUARD = /\bdenyViewers\b|\brequire(?:ClientAdmin|Consultant|Role)\b/;
+const VIEWER_GUARD = /\bdenyViewers\b|\brequire(?:ClientAdmin|Consultant|Role|UserManager)\b/;
 const routesDirectory = fileURLToPath(new URL("../src/routes", import.meta.url));
 const routeFiles = execFileSync(
   "find",

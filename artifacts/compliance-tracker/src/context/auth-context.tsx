@@ -12,7 +12,7 @@ import { setClientIdGetter, setUnauthorizedHandler, setPaymentRequiredHandler, s
 import { createCompletedWorkObserver } from "@/lib/analytics";
 import { clearApprovalRefreshStateForUser } from "@/lib/contractor-approval-refresh-state";
 
-export type UserRole = "consultant" | "client_admin" | "client_staff" | "client_viewer";
+export type UserRole = "consultant" | "client_admin" | "client_manager" | "client_staff" | "client_viewer";
 
 export interface AuthUser {
   id: number;
@@ -25,6 +25,12 @@ export interface AuthUser {
   totpEnabled?: boolean;
   isMaintenanceManager?: boolean;
   isDepartmentManager?: boolean;
+  /** A Manager given every department rather than their own. */
+  allDepartments?: boolean;
+  /** A Manager's departments, main first; departmentId is the one they're working in. */
+  departmentIds?: number[];
+  /** A Viewer's staff roster entry. */
+  staffRosterId?: number | null;
   /** Named in PLATFORM_ADMIN_EMAILS: may issue ALPS discount codes. */
   platformOperator?: boolean;
 }
@@ -185,16 +191,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Auto log-out after 30 minutes of inactivity, matching the server-side
+  // Auto log-out after 2 hours of inactivity, matching the server-side
   // session expiry. The last-activity timestamp is shared across tabs via
   // localStorage so an idle background tab never logs out a user who is
   // actively working in another tab — logout fires only once EVERY tab has
-  // been idle for 30 minutes. The server session (rolling 30-min expiry) is
+  // been idle for 2 hours. The server session (rolling 2-hour expiry) is
   // the source of truth; this timer just brings idle tabs to the login page
   // promptly and best-effort destroys the by-then-idle server session.
   const lastActivityRef = useRef<number>(Date.now());
   useEffect(() => {
-    const IDLE_LIMIT_MS = 30 * 60 * 1000;
+    const IDLE_LIMIT_MS = 2 * 60 * 60 * 1000;
     const STORAGE_KEY = "complytrack:lastActivity";
     const WRITE_THROTTLE_MS = 15_000;
 
@@ -343,13 +349,25 @@ export function useAuth() {
 export function useCanEdit() {
   const { user } = useAuth();
   if (!user) return false;
-  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_staff";
+  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff";
 }
 
 export function useCanAdmin() {
   const { user } = useAuth();
   if (!user) return false;
   return user.role === "consultant" || user.role === "client_admin";
+}
+
+/** Owners and consultants manage every user; Managers manage their own Staff and Viewers. */
+export function useCanManageUsers() {
+  const { user } = useAuth();
+  if (!user) return false;
+  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_manager";
+}
+
+export function useIsManager() {
+  const { user } = useAuth();
+  return user?.role === "client_manager";
 }
 
 export function useIsConsultant() {
@@ -359,5 +377,7 @@ export function useIsConsultant() {
 
 export function useIsMaintenanceManager() {
   const { user } = useAuth();
-  return user?.isMaintenanceManager === true;
+  // Managers (heads of department) also run FixTrack and contractor emails,
+  // so a business without a maintenance manager is still covered.
+  return user?.isMaintenanceManager === true || user?.role === "client_manager";
 }

@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { auditContext, db } from "@workspace/db";
-import { consultantClientsTable } from "@workspace/db/schema";
+import { clientsTable, consultantClientsTable, userDepartmentsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
 import { storedCredentialCandidates } from "../lib/sessionRevocation";
@@ -12,8 +12,13 @@ declare global {
     interface Request {
       currentUser?: SafeUser;
       // Client accounts the current user is allowed to act on. Populated for
-      // consultant-role users from consultant_clients plus their own clientId.
+      // consultant-role users from consultant_clients plus their own clientId;
+      // a consultant who is also a platform operator gets every business.
       allowedClientIds?: Set<number>;
+      // Every department a Manager covers, main one first. Set for Managers
+      // without every-department access; currentUser.departmentId is then
+      // the one they're working in.
+      departmentIds?: number[];
     }
   }
 }
@@ -23,12 +28,46 @@ async function loadConsultantClients(req: Request, userId: number) {
   if (!user || user.role !== "consultant") return;
   const allowed = new Set<number>();
   if (user.clientId != null) allowed.add(user.clientId);
+  if (isPlatformOperator(user)) {
+    // ALPS's own consultant sign-in looks after every business on the service.
+    const clients = await db.select({ id: clientsTable.id }).from(clientsTable);
+    for (const client of clients) allowed.add(client.id);
+    req.allowedClientIds = allowed;
+    return;
+  }
   const memberships = await db
     .select({ clientId: consultantClientsTable.clientId })
     .from(consultantClientsTable)
     .where(eq(consultantClientsTable.userId, userId));
   for (const m of memberships) allowed.add(m.clientId);
   req.allowedClientIds = allowed;
+}
+
+/** A Manager's main department and any extra ones, main first. */
+export async function managerDepartmentIds(user: Pick<SafeUser, "id" | "departmentId">): Promise<number[]> {
+  const extras = await db
+    .select({ departmentId: userDepartmentsTable.departmentId })
+    .from(userDepartmentsTable)
+    .where(eq(userDepartmentsTable.userId, user.id));
+  const ids = user.departmentId != null ? [user.departmentId] : [];
+  for (const row of extras) if (!ids.includes(row.departmentId)) ids.push(row.departmentId);
+  return ids;
+}
+
+/**
+ * A Manager with several departments works in one at a time, chosen with
+ * PUT /users/me/active-department and kept in their session. Department
+ * scoping everywhere reads currentUser.departmentId, so it is set to that
+ * department (their main one until they switch, and always on the phone app).
+ */
+async function loadManagerDepartments(req: Request) {
+  const user = req.currentUser;
+  if (!user || user.role !== "client_manager" || user.allDepartments) return;
+  const ids = await managerDepartmentIds(user);
+  req.departmentIds = ids;
+  const chosen = req.session?.activeDepartmentId;
+  const active = chosen != null && ids.includes(chosen) ? chosen : ids[0] ?? null;
+  if (active !== user.departmentId) req.currentUser = { ...user, departmentId: active };
 }
 
 export async function loadUser(req: Request, _res: Response, next: NextFunction) {
@@ -65,6 +104,7 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
     if (user && user.active) {
       req.currentUser = user;
       await loadConsultantClients(req, userId);
+      await loadManagerDepartments(req);
     }
   }
 
@@ -212,9 +252,11 @@ export function requireConsultant(req: Request, res: Response, next: NextFunctio
 
 /**
  * Platform operators run the ComplyTrack service itself (Stripe catalogue
- * repair, ALPS discount codes, unrestricted business creation). The
- * "consultant" role cannot be used for this because every self-signup owner
- * has it, so operators are named explicitly by sign-in email in the
+ * repair, ALPS discount codes, unrestricted business creation, and, when
+ * signed in as a consultant, access to every business). The "consultant" role
+ * cannot be used for this because outside consultancies have it too (and
+ * older self-signup owners still do), so operators are named explicitly by
+ * sign-in email in the
  * PLATFORM_ADMIN_EMAILS allowlist (comma-separated, case-insensitive). Unset
  * or empty means nobody is a platform operator.
  */
@@ -263,7 +305,8 @@ export function denyViewers(req: Request, res: Response, next: NextFunction) {
  * Returns the department ID that should restrict what data this user can see,
  * or null if the user is unrestricted (admin / consultant).
  *
- * Only client_staff and client_viewer are subject to department scoping.
+ * client_staff, client_viewer and client_manager are subject to department
+ * scoping, unless the Manager has been given every department.
  * Unassigned staff/viewers receive a non-matching sentinel. Existing route
  * filters consequently expose only explicitly unassigned/site-neutral records,
  * never every department's records.
@@ -272,7 +315,23 @@ export function getActiveDepartmentId(req: Request): number | null {
   const user = req.currentUser;
   if (!user) return null;
   if (user.role === "client_admin" || user.role === "consultant") return null;
+  if (user.role === "client_manager" && user.allDepartments === true) return null;
   return (user as any).departmentId ?? -1;
+}
+
+/**
+ * Managers, and Staff with the older "Department manager" switch, lead their
+ * department: department summaries, CSV imports, inspection exports, RIDDOR
+ * health data and department tasks.
+ */
+export function isDepartmentLead(user: Pick<SafeUser, "role" | "isDepartmentManager"> | null | undefined): boolean {
+  if (!user) return false;
+  return user.role === "client_manager" || (user.role === "client_staff" && user.isDepartmentManager === true);
+}
+
+/** Owners and consultants manage every user; Managers manage the Staff and Viewers in their departments. */
+export function requireUserManager(req: Request, res: Response, next: NextFunction) {
+  return requireRole("consultant", "client_admin", "client_manager")(req, res, next);
 }
 
 export function getClientId(req: Request): number | null {
