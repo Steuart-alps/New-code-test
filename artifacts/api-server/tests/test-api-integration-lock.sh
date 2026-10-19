@@ -152,6 +152,7 @@ const pure = new Set([
   "test:billing-addon-catalog", // fake Stripe/database; in-process Express router
   "test:private-file-acl", // real routes with isolated provider/database doubles
   "test:service-price-preflight", // read-only source assertions and fake inputs
+  "test:stripe-backfill-scope", // stubbed sync library and source assertions; no database or Stripe
   "test:biketrack-billing", // fake Stripe/static wiring assertions
   "test:pesttrack-billing", // fake Stripe/static wiring assertions
   "test:pattrack-billing", // static catalogue assertions; unique temp bundle
@@ -268,7 +269,7 @@ for (const [name, command] of scripts) {
 // build output or live storage. Helper modules are only imported by suites.
 const pureEntrypoints = new Set([
   "billing-addon-activation.mjs", "billing-addon-catalog.mjs", "biketrack-billing.mjs", "login-rate-limit.mjs",
-  "pesttrack-billing.mjs", "service-price-preflight.mjs", "track-summary-routing.mjs",
+  "pesttrack-billing.mjs", "service-price-preflight.mjs", "stripe-backfill-scope.mjs", "track-summary-routing.mjs",
   "private-file-acl.mjs", "staged-photo-creation.mjs", "pattrack-billing.mjs",
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",

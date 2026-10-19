@@ -123,6 +123,7 @@
     "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
     "test:billing-addon-catalog": "node tests/billing-addon-catalog.mjs",
     "test:service-price-preflight": "node tests/service-price-preflight.mjs",
+    "test:stripe-backfill-scope": "node tests/stripe-backfill-scope.mjs",
     "test:service-price-preflight-db": "bash tests/run-fresh-schema.sh tests/service-price-preflight-db.mjs",
     "test:service-price-audit": "bash tests/run-fresh-schema.sh tests/service-price-audit.mjs",
     "test:storage-price-check": "node tests/storage-price-check.mjs",
