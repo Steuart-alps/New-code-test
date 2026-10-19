@@ -191,16 +191,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Auto log-out after 30 minutes of inactivity, matching the server-side
+  // Auto log-out after 2 hours of inactivity, matching the server-side
   // session expiry. The last-activity timestamp is shared across tabs via
   // localStorage so an idle background tab never logs out a user who is
   // actively working in another tab — logout fires only once EVERY tab has
-  // been idle for 30 minutes. The server session (rolling 30-min expiry) is
+  // been idle for 2 hours. The server session (rolling 2-hour expiry) is
   // the source of truth; this timer just brings idle tabs to the login page
   // promptly and best-effort destroys the by-then-idle server session.
   const lastActivityRef = useRef<number>(Date.now());
   useEffect(() => {
-    const IDLE_LIMIT_MS = 30 * 60 * 1000;
+    const IDLE_LIMIT_MS = 2 * 60 * 60 * 1000;
     const STORAGE_KEY = "complytrack:lastActivity";
     const WRITE_THROTTLE_MS = 15_000;
 
