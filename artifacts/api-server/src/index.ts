@@ -47,8 +47,10 @@ import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
 import { runTrackActionReminderJob } from "./lib/trackActionReminders";
+import { runTrackReminderJob } from "./lib/trackReminders";
 import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
+import { runScheduledStoragePriceAudit, STORAGE_PRICE_AUDIT_CRON } from "./lib/storagePriceAudit";
 import { cleanupStagedPhotoUploads } from "./lib/stagedPhotoCleanup";
 import { purgeExpiredAnalyticsEvents } from "./lib/analytics";
 import { ObjectStorageService } from "./lib/objectStorage";
@@ -84,15 +86,20 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
   logger.info("Stripe schema ready");
 
   const stripeSync = await getStripeSync(onStage);
-  // The managed webhook is keyed by URL: changing PUBLIC_APP_URL registers a
-  // second Stripe webhook rather than replacing the first.
+  // The managed webhook is keyed by URL: after PUBLIC_APP_URL changes, the sync
+  // library deletes the webhook it registered for the old URL and creates one
+  // for the new URL (it also deletes stripe-sync webhooks this database does
+  // not know, e.g. one left by an older deployment on the same Stripe account).
   const webhookBaseUrl = getPublicAppUrl();
   onStage("managed webhook");
   await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
   logger.info("Stripe webhook configured");
 
   onStage("backfill sync");
-  await stripeSync.syncBackfill();
+  // The sync library's default (no arguments) copies nothing, so name the
+  // scope: products and prices feed the service-price catalogue check below,
+  // customers and subscriptions feed billing state.
+  await stripeSync.syncBackfill({ object: "all" });
   logger.info("Stripe data synced");
   onStage("service-price catalogue");
 
@@ -411,6 +418,20 @@ function startScheduler() {
   // changes prices, products, subscriptions or charges.
   schedule(SERVICE_PRICE_AUDIT_CRON, "service-price-audit", () => runScheduledServicePriceAudit());
   logger.info("Stripe service-price audit scheduler started (hourly at :25)");
+
+  // In-app reminders (bell + mobile push, never email) to each track's owner
+  // for unsubmitted AM/PM checklists and kitchen diaries and overdue checks.
+  // Hourly; each business is evaluated at its own local 09:00/11:00/21:00.
+  schedule("5 * * * *", "track-reminders", logged(
+    "Track reminder job complete", () => runTrackReminderJob(),
+    (result) => result.notificationsCreated === 0 && result.errors === 0,
+  ), { daily: true });
+  logger.info("Track owner reminder scheduler started (hourly at :05)");
+
+  // Storage add-on price vs provider rate plus margin. Purchases pause on
+  // drift; this alerts operators once per finding and reports recovery.
+  schedule(STORAGE_PRICE_AUDIT_CRON, "storage-price-audit", () => runScheduledStoragePriceAudit());
+  logger.info("Storage add-on price audit scheduler started (hourly at :35)");
 }
 async function runTrialReminders() {
   logger.info("Running trial ending reminder job...");
@@ -629,6 +650,7 @@ async function startApplication() {
   setTimeout(() => void runMonitoredJob("trial-reminders", runTrialReminders), 20_000);
   // First catalogue audit after the startup preflight; deduped across restarts.
   setTimeout(() => void runMonitoredJob("service-price-audit", () => runScheduledServicePriceAudit()), 30_000);
+  setTimeout(() => void runMonitoredJob("storage-price-audit", () => runScheduledStoragePriceAudit()), 35_000);
   setTimeout(() => {
     void runMonitoredJob("fixtrack-alert-recovery", () => runFixTrackOverdueAlertJob(undefined, { recoverOnly: true }));
   }, 25_000);

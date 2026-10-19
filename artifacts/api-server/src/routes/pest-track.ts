@@ -1,8 +1,8 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { db } from "@workspace/db";
 import { pestVisitsTable, pestActivityTable, appSettingsTable, clientsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, desc, gte, inArray, lte, sql } from "drizzle-orm";
-import { requireAuth, denyViewers, getClientId, requireClientAdmin } from "../middleware/requireAuth";
+import { eq, and, desc, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { requireAuth, denyViewers, getActiveDepartmentId, getClientId, requireClientAdmin } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { createPestControlRegisterPdf } from "../lib/pestControlRegisterPdf";
 import { z } from "zod";
@@ -10,7 +10,66 @@ import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdat
 
 const router = Router();
 
+// Department-scoped staff and viewers see and change only pest records at
+// their department's sites, plus site-neutral ones, as on the other tracks.
+// Writes are checked here, ahead of every handler, so the web and phone
+// routes share the rule.
+function departmentSiteIds(clientId: number, departmentId: number) {
+  return db.select({ id: sitesTable.id }).from(sitesTable).where(and(
+    eq(sitesTable.clientId, clientId),
+    or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+  ));
+}
+
+function departmentScope(req: Request, clientId: number, siteColumn: typeof pestVisitsTable.siteId | typeof pestActivityTable.siteId) {
+  const departmentId = getActiveDepartmentId(req);
+  return departmentId === null ? undefined : or(isNull(siteColumn), inArray(siteColumn, departmentSiteIds(clientId, departmentId)));
+}
+
+// Takes the raw body value; the body schemas reject a non-number siteId.
+async function siteInDepartment(siteId: unknown, clientId: number, departmentId: number) {
+  if (typeof siteId !== "number") return true;
+  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
+    eq(sitesTable.id, siteId),
+    eq(sitesTable.clientId, clientId),
+    or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+  )).limit(1);
+  return !!site;
+}
+
+const RECORD_WRITE_PATH = /^\/(visits|activity)(?:\/(\d+))?\/?$/i;
+router.use(async (req, res, next) => {
+  const clientId = getClientId(req);
+  const departmentId = getActiveDepartmentId(req);
+  const match = RECORD_WRITE_PATH.exec(req.path);
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method) || !clientId || departmentId === null || !match) return next();
+  try {
+    if (match[2]) {
+      const table = match[1].toLowerCase() === "visits" ? pestVisitsTable : pestActivityTable;
+      const [record] = await db.select({ siteId: table.siteId }).from(table)
+        .where(and(eq(table.id, Number(match[2])), eq(table.clientId, clientId))).limit(1);
+      if (record && !(await siteInDepartment(record.siteId, clientId, departmentId))) {
+        return void res.status(403).json({ error: "Forbidden" });
+      }
+    }
+    if (!(await siteInDepartment(req.body?.siteId, clientId, departmentId))) {
+      return void res.status(403).json({ error: "Site not accessible" });
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// A supplied siteId must name one of the caller's own sites.
+async function siteBelongsToClient(siteId: number | null | undefined, clientId: number): Promise<boolean> {
+  if (siteId == null) return true;
+  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
+  return !!site;
+}
 
 
 const CONFIG_KEYS = [
@@ -47,7 +106,7 @@ router.get("/status", requireAuth, async (req, res) => {
       contractor_name: pestVisitsTable.contractorName,
     })
       .from(pestVisitsTable)
-      .where(eq(pestVisitsTable.clientId, clientId))
+      .where(and(eq(pestVisitsTable.clientId, clientId), departmentScope(req, clientId, pestVisitsTable.siteId)))
       .orderBy(desc(pestVisitsTable.visitDate))
       .limit(1),
     db.select({ count: sql<number>`count(*)::int` })
@@ -55,12 +114,14 @@ router.get("/status", requireAuth, async (req, res) => {
       .where(and(
         eq(pestActivityTable.clientId, clientId),
         eq(pestActivityTable.resolved, false),
+        departmentScope(req, clientId, pestActivityTable.siteId),
       )),
     db.select({ count: sql<number>`count(*)::int` })
       .from(pestVisitsTable)
       .where(and(
         eq(pestVisitsTable.clientId, clientId),
         gte(pestVisitsTable.visitDate, yearStart),
+        departmentScope(req, clientId, pestVisitsTable.siteId),
       )),
   ]);
 
@@ -156,7 +217,7 @@ router.get("/visits", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const rows = await db.select().from(pestVisitsTable)
-    .where(eq(pestVisitsTable.clientId, clientId))
+    .where(and(eq(pestVisitsTable.clientId, clientId), departmentScope(req, clientId, pestVisitsTable.siteId)))
     .orderBy(desc(pestVisitsTable.visitDate));
   res.json(rows);
 });
@@ -168,6 +229,7 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
   const body = VisitBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
    const d = body.data;
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
    const performer = await resolveStaffRoster(clientId, d.signedOffByRosterId, d.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const [row] = await db.insert(pestVisitsTable).values({
@@ -202,6 +264,7 @@ router.put("/visits/:id", requireAuth, denyViewers, async (req, res) => {
   const body = VisitBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
    const d = body.data;
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
    const performer = await resolveStaffPerformerUpdate(clientId, d.signedOffByRosterId, d.signedOffBy, existingVisit.signedOffByRosterId, existingVisit.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   await db.update(pestVisitsTable).set({
@@ -258,7 +321,7 @@ router.get("/activity", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const rows = await db.select().from(pestActivityTable)
-    .where(eq(pestActivityTable.clientId, clientId))
+    .where(and(eq(pestActivityTable.clientId, clientId), departmentScope(req, clientId, pestActivityTable.siteId)))
     .orderBy(desc(pestActivityTable.recordedDate));
   res.json(rows);
 });
@@ -270,6 +333,7 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   const body = ActivityBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
   const performer = await resolveStaffRoster(clientId, d.recordedByRosterId, d.recordedBy);
   if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -319,6 +383,7 @@ router.put("/activity/:id", requireAuth, denyViewers, async (req, res) => {
     .where(and(eq(pestActivityTable.id, id), eq(pestActivityTable.clientId, clientId)))
     .limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
   const performer = await resolveStaffPerformerUpdate(clientId, d.recordedByRosterId, d.recordedBy, existing.recordedByRosterId, existing.recordedBy);
   if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 

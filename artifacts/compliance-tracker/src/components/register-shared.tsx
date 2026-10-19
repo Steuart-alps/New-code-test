@@ -108,11 +108,13 @@ const ACCEPTED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
  * Uploads a PDF/JPEG/PNG straight to storage, then hands the staging path to
  * the form. The API verifies the contents and secures the file on save.
  */
-export function DocumentField({ label, value, onChange, disabled }: {
+export function DocumentField({ label, value, onChange, disabled, requestUrlPath = "/registers/uploads/request-url" }: {
   label: string;
   value: DocumentValue;
   onChange: (value: DocumentValue) => void;
   disabled?: boolean;
+  /** API route that signs the upload (registers by default). */
+  requestUrlPath?: string;
 }) {
   const api = useActiveClientApi();
   const { toast } = useToast();
@@ -126,7 +128,7 @@ export function DocumentField({ label, value, onChange, disabled }: {
     }
     setUploading(true);
     try {
-      const signed = await ensureOk(await api("/registers/uploads/request-url", {
+      const signed = await ensureOk(await api(requestUrlPath, {
         method: "POST",
         body: JSON.stringify({ contentType: file.type }),
       }), "Could not start the upload");

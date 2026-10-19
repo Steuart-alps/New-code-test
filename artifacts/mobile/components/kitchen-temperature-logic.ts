@@ -11,6 +11,7 @@ export interface TemperatureFormValues {
   cooking: { item: string; coreTemp: string; timeStart: string; timeFinish: string };
   cooling: { item: string; coreTemp: string; timeStart: string; timeFinish: string };
   reheating: { item: string; coreTemp: string; timeStart: string; timeFinish: string };
+  sousVide?: { item: string; waterTemp: string; coreTemp: string; timeStarted: string; timeFinished: string; holdMinutes: string };
   correctives: string;
 }
 
@@ -20,6 +21,7 @@ export interface TemperatureSectionVisibility {
   cooking: boolean;
   cooling: boolean;
   reheating: boolean;
+  sousVide?: boolean;
 }
 
 export function hasAnyValue(row: object): boolean {
@@ -43,6 +45,7 @@ export function canSaveTemperatureForm(
     (visible.cooking && hasAnyValue(values.cooking)) ||
     (visible.cooling && hasAnyValue(values.cooling)) ||
     (visible.reheating && hasAnyValue(values.reheating)) ||
+    (!!visible.sousVide && !!values.sousVide && hasAnyValue(values.sousVide)) ||
     !!values.correctives.trim()
   );
 }

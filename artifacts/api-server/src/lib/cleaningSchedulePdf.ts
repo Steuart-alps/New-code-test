@@ -89,7 +89,7 @@ export async function createCleaningSchedulePdf(register: CleaningScheduleRegist
       .text(`${index + 1}. ${formatDate(log.date)} — ${completed}/${log.completions.length} tasks completed`);
     if (register.siteName === null) {
       doc.font(REGULAR_FONT).fontSize(8).fillColor("#374151")
-        .text(`Site: ${log.siteName ?? "No site recorded"}`);
+        .text(`Site: ${log.siteName ?? "Account-level (not tied to a kitchen)"}`);
     }
     doc.font(REGULAR_FONT).fontSize(8).fillColor("#374151")
       .text(

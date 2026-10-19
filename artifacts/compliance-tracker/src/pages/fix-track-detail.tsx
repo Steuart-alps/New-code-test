@@ -66,13 +66,16 @@ type MediaUploadProgress = {
 };
 
 const API_BASE = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
+// HEIC/HEIF is left out on purpose: the server cannot decode iPhone HEIC
+// (HEVC) photos, and because the picker does not list HEIC, iPhones hand
+// over their photos as JPEG.
+const MEDIA_INPUT_ACCEPT = "image/jpeg,image/png,image/webp,image/avif,video/mp4,video/quicktime,video/webm";
+const HEIC_EXTENSION = /\.(heic|heif)$/i;
 const MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   png: "image/png",
   webp: "image/webp",
-  heic: "image/heic",
-  heif: "image/heif",
   avif: "image/avif",
   mp4: "video/mp4",
   mov: "video/quicktime",
@@ -344,6 +347,9 @@ export default function FixTrackDetailPage() {
       for (const [index, file] of files.entries()) {
         try {
           const contentType = mediaContentType(file);
+          if (/^image\/hei[cf]/.test(contentType) || HEIC_EXTENSION.test(file.name)) {
+            throw new Error("HEIC photos can't be read. Save the photo as JPEG and upload it again.");
+          }
           if (!Object.values(MEDIA_TYPE_BY_EXTENSION).includes(contentType)) {
             throw new Error("Use a JPEG, PNG, WebP, MP4, MOV, or WebM file.");
           }
@@ -629,7 +635,7 @@ export default function FixTrackDetailPage() {
                   <input
                     ref={cameraInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,video/mp4,video/quicktime,video/webm"
+                    accept={MEDIA_INPUT_ACCEPT}
                     capture="environment"
                     className="hidden"
                     onChange={handleMediaSelection}
@@ -638,7 +644,7 @@ export default function FixTrackDetailPage() {
                   <input
                     ref={mediaInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,video/mp4,video/quicktime,video/webm"
+                    accept={MEDIA_INPUT_ACCEPT}
                     multiple
                     className="hidden"
                     onChange={handleMediaSelection}

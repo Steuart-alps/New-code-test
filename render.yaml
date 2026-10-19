@@ -54,6 +54,13 @@ services:
       # Monthly per-GiB Stripe price for extra storage (unset hides "Buy").
       - key: STORAGE_ADDON_PRICE_ID
         sync: false
+      # Storage price check (see .env.example): the provider's USD rate per
+      # GiB-month (default 0.015) and USD -> GBP rate. Without the exchange
+      # rate a GBP storage price cannot be checked, so "Buy" stays hidden.
+      - key: STORAGE_PROVIDER_USD_PER_GIB_MONTH
+        sync: false
+      - key: STORAGE_USD_EXCHANGE_RATE
+        sync: false
       # Email (Resend)
       - key: RESEND_API_KEY
         sync: false
@@ -61,6 +68,10 @@ services:
         sync: false
       - key: ADMIN_EMAIL
         sync: false
+      # In-app "Submit feedback" reports are emailed here (unset = saved only
+      # in the business's own feedback inbox).
+      - key: FEEDBACK_RECIPIENT_EMAIL
+        value: info@alpsconsultancy.co.uk
       # Sign-in emails of platform operators (comma-separated), who may repair
       # the Stripe price catalogue, issue ALPS discount codes and create
       # businesses without a trial. Unset means nobody.

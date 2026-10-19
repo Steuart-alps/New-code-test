@@ -29,7 +29,7 @@ export async function syncClientSubscriptionState(customerId: string): Promise<C
     LEFT JOIN LATERAL (
       SELECT id, status FROM stripe.subscriptions
       WHERE customer = c.stripe_customer_id
-      ORDER BY (status IN ('active', 'trialing', 'past_due')) DESC, current_period_end DESC NULLS LAST
+      ORDER BY (status IN ('active', 'trialing', 'past_due')) DESC, current_period_end DESC NULLS LAST, created DESC
       LIMIT 1
     ) s ON true
     WHERE c.stripe_customer_id = ${customerId}

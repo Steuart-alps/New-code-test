@@ -4,12 +4,12 @@ import { createHmac } from "node:crypto";
 const BASE = process.env.API_BASE;
 assert.ok(BASE, "Run through test:daily-track-month-history to start a test-mode API");
 
-function session() {
+function session(defaultHeaders = {}) {
   let cookie = "";
   return async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -39,7 +39,8 @@ async function enrol(request) {
 }
 
 async function register(suffix) {
-  const request = session();
+  // The admin deliberately backfills 2025 records: owners may, with a reason.
+  const request = session({ "X-Override-Reason": encodeURIComponent("Month history fixture: backfilled record") });
   const email = `month-history-${suffix}@test.local`;
   const { verificationToken } = await request("POST", "/auth/register", {
     name: "Month History Admin", email, password: "password-123",
@@ -68,7 +69,7 @@ const otherSite = await second.request("POST", "/sites", { name: `Other ${suffix
 // dates never age into lock results. Do not make them relative to today.
 const submittedAt = "2025-04-10T12:00:00.000Z";
 const checklist = (siteId, checkDate, checklistType, submitted = false) => ({
-  siteId, checkDate, checklistType, items: [],
+  siteId, checkDate, checklistType, items: [{ label: "Checked", checked: true, result: "pass" }],
   ...(submitted ? { submittedAt } : {}),
 });
 const signoff = (siteId, signoffDate, submitted = false) => ({

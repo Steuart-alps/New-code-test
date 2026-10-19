@@ -7,6 +7,8 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers, isPlatformOperator } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
+import { runDataDeletionJob } from "../lib/offboarding";
+import { eraseClientStorageObjects } from "../lib/clientStorageErasure";
 
 const router = Router();
 
@@ -183,15 +185,20 @@ router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) =
       ) AS blocked
     `);
     if ((holdCheck.rows[0] as { blocked?: boolean } | undefined)?.blocked) return "hold";
-    await tx.delete(clientsTable).where(eq(clientsTable.id, id));
-    return "deleted";
+    return "ready";
   });
-  if (result !== "deleted") {
-    return res.status(409).json({ error: result === "request"
-      ? "Account deletion requires manual review and the full 30-day retention window. Request deletion from Settings; it can be completed once the request is approved and 30 days have passed."
-      : "Client data cannot be deleted while a privacy legal hold or deletion exception is active" });
+  if (result === "ready") {
+    // Same erasure as the scheduled job: client rows and stored files go, the
+    // client row and append-only audit history stay (a raw DELETE of the
+    // client would cascade through every table, including the audit trail's
+    // erasure request, or fail on the audit ledger's RESTRICT).
+    const { clientsDeleted } = await runDataDeletionJob({ clientIds: [id], eraseStorage: eraseClientStorageObjects });
+    if (clientsDeleted !== 1) return res.status(409).json({ error: "Client data could not be deleted yet; it will be retried by the daily deletion job" });
+    return res.json({ ok: true });
   }
-  res.json({ ok: true });
+  res.status(409).json({ error: result === "request"
+    ? "Account deletion requires manual review and the full 30-day retention window. Request deletion from Settings; it can be completed once the request is approved and 30 days have passed."
+    : "Client data cannot be deleted while a privacy legal hold or deletion exception is active" });
 });
 
 export default router;

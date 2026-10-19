@@ -1,0 +1,63 @@
+name: KitchenTrack diary checks
+
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/pages/kitchen.tsx"
+      - "artifacts/compliance-tracker/src/pages/food-safety.tsx"
+      - "artifacts/compliance-tracker/src/lib/kitchen-state.ts"
+      - "artifacts/compliance-tracker/src/components/kitchen-temperature-*"
+      - "lib/api-zod/src/kitchen-temperature.ts"
+      - "artifacts/compliance-tracker/tests/kitchen-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/kitchen-diary-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/pages/kitchen.tsx"
+      - "artifacts/compliance-tracker/src/pages/food-safety.tsx"
+      - "artifacts/compliance-tracker/src/lib/kitchen-state.ts"
+      - "artifacts/compliance-tracker/src/components/kitchen-temperature-*"
+      - "lib/api-zod/src/kitchen-temperature.ts"
+      - "artifacts/compliance-tracker/tests/kitchen-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/kitchen-diary-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  kitchen-diary:
+    name: Template, completeness and unsaved diary edits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Template and completeness checks
+        run: pnpm --filter @workspace/compliance-tracker run test:kitchen-template-completeness
+
+      - name: Unsaved diary edits survive date and site changes
+        run: pnpm --filter @workspace/compliance-tracker run test:kitchen-diary-browser
+
+      - name: Country temperature guidance in the numeric controls
+        run: pnpm --filter @workspace/compliance-tracker run test:kitchen-country-guidance-browser

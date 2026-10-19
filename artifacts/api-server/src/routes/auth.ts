@@ -13,6 +13,8 @@ import {
   forgotPasswordRateLimit,
   loginRateLimit,
   registrationRateLimit,
+  resendVerificationEmailRateLimit,
+  resendVerificationRateLimit,
   resetPasswordRateLimit,
   totpAccountRateLimit,
 } from "../lib/loginRateLimit";
@@ -1020,8 +1022,11 @@ router.get("/auth/verify-email", async (req, res) => {
   res.json({ verified: true });
 });
 
-// POST /auth/resend-verification — generic response prevents email enumeration.
-router.post("/auth/resend-verification", registrationRateLimit, async (req, res) => {
+// POST /auth/resend-verification — the same response whatever the address,
+// so it can't be used to find out who has an account. The email goes out in
+// the background (like the welcome email) so response time doesn't reveal it
+// either, and a provider failure is only logged.
+router.post("/auth/resend-verification", resendVerificationRateLimit, resendVerificationEmailRateLimit, async (req, res) => {
   const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
   if (email) {
     const result = await db.execute(sql`
@@ -1046,17 +1051,15 @@ router.post("/auth/resend-verification", registrationRateLimit, async (req, res)
             email_verification_expires_at = ${new Date(Date.now() + 24 * 60 * 60 * 1000)}
         WHERE id = ${user.id}
       `);
-      try {
-        const verifyUrl = `${getPublicAppUrl().replace(/\/$/, "")}/verify-email?token=${verificationToken}`;
-        await sendSystemEmail({
-          to: user.email,
-          subject: "Verify your ComplyTrack email address",
-          html: `<p>Hi ${user.name},</p><p><a href="${verifyUrl}">Verify your email address</a></p><p>This link expires in 24 hours.</p>`,
-          text: `Verify your ComplyTrack email address: ${verifyUrl}\n\nThis link expires in 24 hours.`,
-        });
-      } catch (err) {
-        logger.warn({ err }, "Failed to resend verification email");
-      }
+      const verifyUrl = `${getPublicAppUrl().replace(/\/$/, "")}/verify-email?token=${verificationToken}`;
+      void sendSystemEmail({
+        to: user.email,
+        subject: "Verify your ComplyTrack email address",
+        html: `<p>Hi ${escapeHtml(user.name)},</p><p><a href="${verifyUrl}">Verify your email address</a></p><p>This link expires in 24 hours. It replaces any earlier verification link.</p>`,
+        text: `Verify your ComplyTrack email address: ${verifyUrl}\n\nThis link expires in 24 hours. It replaces any earlier verification link.`,
+      }).catch((err) => {
+        req.log.warn({ err }, "Failed to resend verification email");
+      });
     }
   }
   res.json({ sent: true });

@@ -9,7 +9,7 @@ const source = await readFile(
 const javascript = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { getDailyEntryCutoffDecision, TRACK_WRITE_PREFIXES } = await import(
+const { getDailyEntryCutoffDecision, parseOverrideReason, TRACK_WRITE_PREFIXES, isNonCanonicalRecordPath } = await import(
   `data:text/javascript,${encodeURIComponent(javascript)}`
 );
 
@@ -38,7 +38,7 @@ assert.equal(
 );
 assert.deepEqual(
   getDailyEntryCutoffDecision(request({ recordDate: '2026-09-21' }), staff, now),
-  { blocked: true, today: '2026-09-23', reason: 'record_lock' },
+  { blocked: true, today: '2026-09-23', reason: 'record_lock', entryDate: '2026-09-21' },
   'records lock after the correction window',
 );
 for (const prefix of TRACK_WRITE_PREFIXES) {
@@ -51,6 +51,20 @@ for (const prefix of TRACK_WRITE_PREFIXES) {
     true,
     `${prefix} uses the shared record lock`,
   );
+}
+// Express routes these spellings to the same handler, so the lock must too.
+for (const path of ['/food-safety/42/', '/FOOD-SAFETY/42', '/Pat-Track/tests/42', '/food-safety/%34%32']) {
+  assert.equal(
+    getDailyEntryCutoffDecision(request({ recordDate: '2026-09-21' }, { path }), staff, now).blocked,
+    true,
+    `${path} uses the shared record lock`,
+  );
+}
+for (const path of ['/pat-track/tests/+42', '/pat-track/tests/%2042', '/swim-track/incidents/0x2a', '/GREEN-TRACK/defects/4_2/']) {
+  assert.equal(isNonCanonicalRecordPath(path), true, `${path} is refused as a non-canonical record id`);
+}
+for (const path of ['/pat-track/tests/42', '/pat-track/tests', '/daily-track-pm/signoffs', '/pat-track/appliances/+42', '/daily-checklists/7/2026-09-21/am']) {
+  assert.equal(isNonCanonicalRecordPath(path), false, `${path} is not a non-canonical mapped record id`);
 }
 assert.equal(
   getDailyEntryCutoffDecision(
@@ -79,16 +93,47 @@ assert.equal(
   true,
   'date-addressed routes cannot bypass the lock',
 );
-assert.equal(
-  getDailyEntryCutoffDecision(request({ recordDate: '2026-09-21' }), clientAdmin, now).blocked,
-  false,
-  'client admins retain the correction override',
+assert.deepEqual(
+  getDailyEntryCutoffDecision(request({ recordDate: '2026-09-21' }), clientAdmin, now),
+  { blocked: true, today: '2026-09-23', reason: 'override_reason_required', entryDate: '2026-09-21' },
+  'client admins can change older records only with a reason',
 );
 assert.equal(
-  getDailyEntryCutoffDecision(request({ recordDate: '2026-09-21' }), consultant, now).blocked,
-  false,
-  'consultants retain the correction override',
+  getDailyEntryCutoffDecision(request({ recordDate: '2026-09-21' }), consultant, now).reason,
+  'override_reason_required',
+  'consultants (self-signup owners) can change older records only with a reason',
 );
+assert.equal(
+  getDailyEntryCutoffDecision(request({ recordDate: '2026-09-22' }), clientAdmin, now).blocked,
+  false,
+  'owners need no reason inside the correction window',
+);
+assert.equal(
+  getDailyEntryCutoffDecision(request({}, { method: 'POST', path: '/fire-safety', body: { checkDate: '2026-09-18' } }), consultant, now).reason,
+  'override_reason_required',
+  'owner backfills dated before the window need a reason',
+);
+for (const path of ['/fix-track/issues/9', '/track-actions/4']) {
+  assert.equal(
+    getDailyEntryCutoffDecision(request({ targetDate: '2026-09-01' }, { path }), clientAdmin, now).blocked,
+    false,
+    `${path}: owners edit workflow records without a reason`,
+  );
+  assert.equal(
+    getDailyEntryCutoffDecision(request({ targetDate: '2026-09-01' }, { path }), staff, now).reason,
+    'record_lock',
+    `${path}: the staff rule is unchanged`,
+  );
+}
+assert.equal(parseOverrideReason(undefined), null, 'no header, no reason');
+assert.equal(parseOverrideReason('    '), null, 'blank reasons are rejected');
+assert.equal(parseOverrideReason('typo'), null, 'reasons need at least five characters');
+assert.equal(parseOverrideReason(' %20%20ab%20 '), null, 'whitespace does not count toward the minimum');
+assert.equal(parseOverrideReason(encodeURIComponent('Wrong fridge — corrected')), 'Wrong fridge — corrected', 'URI-encoded reasons are decoded');
+assert.equal(parseOverrideReason('100%25 sure%'), '100%25 sure%', 'malformed encoding is kept as sent');
+assert.equal(parseOverrideReason(encodeURIComponent('line one\n\tline two')), 'line one line two', 'control characters collapse to spaces');
+assert.equal(parseOverrideReason(['first reason', 'second']), 'first reason', 'the first repeated header wins');
+assert.equal(parseOverrideReason('x'.repeat(800)).length, 500, 'reasons are capped at 500 characters');
 assert.equal(
   getDailyEntryCutoffDecision(
     request({ recordDate: '2026-09-21' }, { method: 'GET' }),

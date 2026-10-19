@@ -33,7 +33,7 @@ type PublicDocumentType = "doc" | "ra" | "sop" | "handbook";
 
 async function resolveStaff(clientId: number, staffRosterId: number) {
   const result = await db.execute(sql`
-    SELECT id, name, department
+    SELECT id, name, department, site_id
     FROM staff_roster
     WHERE id = ${staffRosterId} AND client_id = ${clientId} AND active = true
     LIMIT 1
@@ -49,7 +49,7 @@ async function resolvePublicDocument(
 ) {
   const result = await db.execute(sql`
     WITH selected_staff AS (
-      SELECT department
+      SELECT department, site_id
       FROM staff_roster
       WHERE id = ${staffRosterId} AND client_id = ${clientId} AND active = true
     ),
@@ -60,6 +60,7 @@ async function resolvePublicDocument(
       WHERE d.client_id = ${clientId}
         AND d.requires_acknowledgement = true
         AND (d.department IS NULL OR d.department = staff.department)
+        AND (d.site_id IS NULL OR d.site_id = staff.site_id)
 
       UNION ALL
 
@@ -187,6 +188,7 @@ router.get("/:token/documents", async (req, res) => {
         WHERE d.client_id = ${client.id}
           AND d.requires_acknowledgement = true
           AND (d.department = ${staff.department} OR d.department IS NULL)
+          AND (d.site_id IS NULL OR d.site_id = ${staff.site_id ?? null}::integer)
 
         UNION ALL
 
@@ -227,18 +229,27 @@ router.get("/:token/documents", async (req, res) => {
           AND (site_dep.name IS NULL OR site_dep.name = ${staff.department})
       )
       SELECT d.*,
-             (a.acknowledged_at IS NOT NULL) AS signed,
+             COALESCE(a.is_current, false) AS signed,
              a.acknowledged_at, a.signature AS ack_signature
       FROM required_documents d
       LEFT JOIN LATERAL (
-        SELECT da.acknowledged_at, da.signature
+        -- A DocTrack acknowledgement stops being current when its TrainTrack
+        -- record is deleted or its annual expiry passes (as doc-track.ts).
+        SELECT da.acknowledged_at, da.signature,
+               CASE
+                 WHEN da.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN false
+                 WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN false
+                 ELSE true
+               END AS is_current
         FROM doc_acknowledgements da
+        LEFT JOIN train_track_records tr
+          ON tr.id = da.train_track_record_id AND tr.client_id = da.client_id
         WHERE d.document_type = 'doc'
           AND da.document_id = d.id
           AND da.client_id = ${client.id}
           AND da.staff_roster_id = ${staffIdNum}
         UNION ALL
-        SELECT sa.acknowledged_at, sa.signature
+        SELECT sa.acknowledged_at, sa.signature, true
         FROM safe_track_acknowledgements sa
         WHERE d.document_type <> 'doc'
           AND sa.document_id = d.id
@@ -372,11 +383,11 @@ router.post("/:token/acknowledge", async (req, res) => {
       // Create TrainTrack signoff record
       const trainResult = await tx.execute(sql`
         INSERT INTO train_track_records
-          (client_id, site_id, record_type, staff_name, document_title,
+          (client_id, site_id, record_type, staff_name, staff_roster_id, training_type, document_title,
            document_type, completed_date, expiry_date, notes, signature)
         VALUES
-          (${client.id}, ${doc.site_id ?? null}, 'signoff', ${staffName},
-           ${doc.title}, ${doc.category}, ${today}::date,
+          (${client.id}, ${doc.site_id ?? null}, 'signoff', ${staffName}, ${staffRosterId},
+           ${doc.title}, ${doc.title}, ${doc.category}, ${today}::date,
             ${doc.annual_acknowledgement ? sql`(${today}::date + interval '1 year')::date` : sql`NULL::date`},
            ${"Document acknowledgement (staff self-sign)"},
            ${signatureValue})

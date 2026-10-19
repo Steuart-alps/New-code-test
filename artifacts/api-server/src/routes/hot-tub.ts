@@ -69,11 +69,18 @@ router.get("/tubs", requireAuth, async (req, res) => {
         ? false
         : null;
   if (activeFilter === null) return res.status(400).json({ error: "Invalid active filter" });
+  // Optional case-insensitive match on the tub's name or its site's name.
+  const searchParam = req.query.search;
+  if (searchParam !== undefined && (typeof searchParam !== "string" || searchParam.length > 200)) {
+    return res.status(400).json({ error: "Invalid search" });
+  }
+  const search = searchParam?.trim() ?? "";
+  const searchPattern = `%${search.replace(/[\\%_]/g, ch => `\\${ch}`)}%`;
   const departmentId = getActiveDepartmentId(req);
   const rows = await db.execute(sql`
-    SELECT ht.id, ht.client_id, ht.site_id, ht.name, ht.description, ht.active,
-           ht.created_at, ht.updated_at,
-           s.name AS site_name
+    SELECT ht.id, ht.client_id AS "clientId", ht.site_id AS "siteId", ht.name, ht.description, ht.active,
+           ht.created_at AS "createdAt", ht.updated_at AS "updatedAt",
+           s.name AS "siteName"
     FROM hot_tubs ht
     LEFT JOIN sites s ON s.id = ht.site_id
     WHERE ht.client_id = ${clientId}
@@ -86,6 +93,10 @@ router.get("/tubs", requireAuth, async (req, res) => {
         )
       )` : sql``}
       ${activeFilter !== undefined ? sql`AND ht.active = ${activeFilter}` : sql``}
+      ${search ? sql`AND (
+        ht.name ILIKE ${searchPattern} ESCAPE '\\'
+        OR s.name ILIKE ${searchPattern} ESCAPE '\\'
+      )` : sql``}
     ORDER BY ht.active DESC, ht.name
   `);
   res.json(rows.rows ?? rows);
@@ -455,7 +466,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         clientEntryId: entry?.id ?? null,
         clientEntryHash: entry?.hash ?? null,
       }).returning();
-      if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
+      if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, req.currentUser?.id ?? null, performer.performedBy);
       return row;
     });
   } catch (err) {
@@ -538,7 +549,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(hotTubChecksTable).set(updateData)
       .where(and(eq(hotTubChecksTable.id, id), eq(hotTubChecksTable.clientId, clientId))).returning();
-    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, id, breach, (req.session as any).userId ?? null, performer.performedBy);
+    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, id, breach, req.currentUser?.id ?? null, performer.performedBy);
     return row;
   });
 

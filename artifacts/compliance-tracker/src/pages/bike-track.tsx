@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,7 +145,7 @@ const CHECK_ITEMS: { key: string; label: string; icon?: string }[] = [
 const baseUrl = `${import.meta.env.BASE_URL?.replace(/\/$/, "") ?? ""}/api`;
 async function apiFetch(path: string, opts?: RequestInit) {
   const mutationSucceeded = beginApiMutation(opts?.method, path);
-  const res = await fetch(withActiveClient(`${baseUrl}${path}`, opts?.body), await withCsrfToken({
+  const res = await fetchWithOverrideReason(withActiveClient(`${baseUrl}${path}`, opts?.body), await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     ...opts,

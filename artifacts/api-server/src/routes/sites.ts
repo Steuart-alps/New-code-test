@@ -162,8 +162,22 @@ router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => 
     }
   }
   const updates: Record<string, unknown> = { updatedAt: new Date() };
-  for (const key of ["name", "responsiblePerson", "address", "phone"] as const) {
+  for (const key of ["responsiblePerson", "address", "phone"] as const) {
     if (key in req.body) updates[key] = req.body[key];
+  }
+  // Same name rules as POST /sites.
+  if ("name" in req.body) {
+    const name = String(req.body.name ?? "").trim();
+    if (!name) {
+      res.status(400).json({ error: "Site name is required" });
+      return;
+    }
+    const nameCheck = filterName(name);
+    if (!nameCheck.ok) {
+      res.status(400).json({ error: nameCheck.message });
+      return;
+    }
+    updates.name = name;
   }
   // Allow tagging / un-tagging a site to a department
   if ("departmentId" in req.body) updates.departmentId = departmentId;

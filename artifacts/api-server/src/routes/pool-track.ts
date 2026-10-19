@@ -40,11 +40,11 @@ const createSchema = z.object({
   airTempC: z.number().min(-20).max(60).optional().nullable(),
   turbidity: z.enum(["clear", "slightly_hazy", "hazy", "cloudy"]).optional().nullable(),
   poolOpen: z.boolean().default(true),
-  performedBy: z.string().max(200).optional(),
+  performedBy: z.string().max(200).optional().nullable(),
   staffRosterId: z.number().int().positive().nullable().optional(),
-  actionsTaken: z.string().max(2000).optional(),
+  actionsTaken: z.string().max(2000).optional().nullable(),
   result: z.enum(["pass", "fail"]).default("pass"),
-  notes: z.string().max(2000).optional(),
+  notes: z.string().max(2000).optional().nullable(),
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
@@ -192,6 +192,12 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   if (!existing) return res.status(404).json({ error: "Not found" });
 
   const body = updateSchema.parse(req.body);
+  if (body.siteId !== undefined) {
+    const siteAccess = await checkSiteAccess(body.siteId, clientId, getActiveDepartmentId(req));
+    if (siteAccess === "required") return res.status(400).json({ error: "siteId is required" });
+    if (siteAccess === "invalid") return res.status(400).json({ error: "Invalid site" });
+    if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const performer = await resolveStaffPerformerUpdate(clientId, body.staffRosterId, body.performedBy,
     existing.staff_roster_id ?? null, existing.performed_by ?? null);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
@@ -334,8 +340,8 @@ router.get("/summary", requireAuth, async (req, res) => {
     LIMIT 1
   `);
 
-  const today = (todayResult as any)[0];
-  const last = (lastResult as any)[0];
+  const today = todayResult.rows[0] as Record<string, any> | undefined;
+  const last = lastResult.rows[0] as Record<string, any> | undefined;
 
   res.json({
     totalToday: Number(today?.total_today ?? 0),

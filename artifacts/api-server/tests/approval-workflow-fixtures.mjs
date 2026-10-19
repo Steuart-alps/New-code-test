@@ -28,7 +28,7 @@ try {
   await rm(temp, { recursive: true, force: true });
 }
 export const {
-  db, sql, pool, runReminderJob, runRuntimeMigrations, decryptTokenPayload,
+  db, sql, pool, runReminderJob, runContractorComplianceReminderJob, runRuntimeMigrations, decryptTokenPayload,
   encryptTokenPayload, tokenPayloadNeedsReencryption, reencryptQueuedTokenPayloads,
 } = runtime;
 
@@ -36,14 +36,18 @@ export const {
 // the production CSRF policy: unsafe requests carry the API origin and the
 // session-bound X-CSRF-Token from /auth/csrf-token. Legacy suites keep the
 // original header-free contract.
-export function requestSession({ browserPolicy = false } = {}) {
+// With `overrideReason`, every request carries it as X-Override-Reason: for an
+// owner whose suite deliberately writes records older than the correction
+// window (owners may, with a reason). `extraHeaders` on a request override it.
+export function requestSession({ browserPolicy = false, overrideReason = null } = {}) {
   let cookie = "";
   let csrfToken = null;
   const origin = new URL(base).origin;
+  const defaultHeaders = overrideReason ? { "x-override-reason": encodeURIComponent(overrideReason) } : {};
   const send = async (method, path, body, format, extraHeaders = {}) => {
     const response = await fetch(`${base}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...extraHeaders },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders, ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     });
@@ -54,14 +58,14 @@ export function requestSession({ browserPolicy = false } = {}) {
     }
     return { status: response.status, data: format === "buffer" ? Buffer.from(await response.arrayBuffer()) : await response.json().catch(() => null) };
   };
-  const request = async (method, path, body, format = "json") => {
-    if (!browserPolicy || ["GET", "HEAD"].includes(method)) return send(method, path, body, format);
+  const request = async (method, path, body, format = "json", extraHeaders = {}) => {
+    if (!browserPolicy || ["GET", "HEAD"].includes(method)) return send(method, path, body, format, extraHeaders);
     if (!csrfToken) {
       const issued = await send("GET", "/auth/csrf-token", undefined, "json");
       assert.equal(issued.status, 200, JSON.stringify(issued.data));
       csrfToken = issued.data.token;
     }
-    const result = await send(method, path, body, format, { origin, "x-csrf-token": csrfToken });
+    const result = await send(method, path, body, format, { ...extraHeaders, origin, "x-csrf-token": csrfToken });
     // Authentication steps may change the session; fetch a fresh token next time.
     if (path.startsWith("/auth/")) csrfToken = null;
     return result;
@@ -94,8 +98,8 @@ async function enrolTwoFactor(request, login) {
 }
 
 const password = "private-approval-fixture-123";
-export async function createTenant(label, { browserPolicy = false } = {}) {
-  const request = requestSession({ browserPolicy });
+export async function createTenant(label, { browserPolicy = false, overrideReason = null } = {}) {
+  const request = requestSession({ browserPolicy, overrideReason });
   const email = `approval-${label}-${randomUUID()}@test.local`;
   const registered = await request("POST", "/auth/register", { name: `${label} manager`, email, password });
   assert.equal(registered.status, 200, JSON.stringify(registered.data));

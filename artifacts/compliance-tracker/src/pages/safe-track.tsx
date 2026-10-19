@@ -25,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLiveAcknowledgements } from "@/hooks/use-live-acknowledgements";
 import { cn } from "@/lib/utils";
 import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry";
+import { useLocalToday } from "@/hooks/use-local-today";
 import { INDUCTION_SECTIONS, parseChecklist, renderInductionHtml, type InductionChecklist, type SectionKey, type ChecklistItem } from "@/lib/induction-print";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
@@ -451,6 +452,8 @@ function SiteSelect({ value, onChange }: { value: string; onChange: (v: string) 
 
 export default function SafeTrackPage() {
   const { activeClientId } = useAuth();
+  // Training expiry states roll over at local midnight while the page is open.
+  const now = useLocalToday();
   const canAdmin = useCanAdmin();
   const { data: sites = [] } = useListSites();
   const { toast } = useToast();
@@ -531,13 +534,14 @@ export default function SafeTrackPage() {
     delete payload.id; delete payload.clientId; delete payload.createdBy;
     delete payload.createdAt; delete payload.updatedAt;
     try {
-      if (editing) {
-        await apiFetch(`${base}/${sub}/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) });
-      } else {
-        await apiFetch(`${base}/${sub}`, { method: "POST", body: JSON.stringify(payload) });
-      }
+      const res = editing
+        ? await apiFetch(`${base}/${sub}/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(`${base}/${sub}`, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "Could not save this record"));
       setDialogOpen(false);
       load();
+    } catch (err: any) {
+      toast({ title: "Save failed", description: err.message, variant: "destructive" });
     } finally { setSaving(false); }
   }
 
@@ -611,8 +615,6 @@ export default function SafeTrackPage() {
         <span className="text-muted-foreground">{siteName(h.siteId) ?? "All sites"}</span>,
       ],
     }));
-
-  const now = new Date();
 
   const expiringTrainingCount = training.filter(record => {
     return getTrainingExpiry(record.expiryDate, now).state === "expiring_soon";
@@ -868,7 +870,7 @@ function RaForm({ form, setForm }: { form: any; setForm: any }) {
     <F label="Description"><Textarea value={form.description ?? ""} onChange={e => setForm({ ...form, description: e.target.value })} rows={3} /></F>
     <F label="Assessed By"><Input value={form.assessedBy ?? ""} onChange={e => setForm({ ...form, assessedBy: e.target.value })} placeholder="Name" /></F>
     <div className="grid grid-cols-2 gap-4">
-      <F label="Review Date"><Input type="date" value={form.reviewDate ?? ""} onChange={e => setForm({ ...form, reviewDate: e.target.value })} /></F>
+      <F label="Review Date"><Input type="date" value={form.reviewDate ?? ""} onChange={e => setForm({ ...form, reviewDate: e.target.value || null })} /></F>
       <F label="Version"><Input value={form.version ?? "1.0"} onChange={e => setForm({ ...form, version: e.target.value })} placeholder="1.0" /></F>
     </div>
     <F label="Status">

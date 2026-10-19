@@ -320,6 +320,203 @@ async function main() {
     !directCancellationMessage?.html?.includes("/api/fix-track/action/") &&
       !directCancellationMessage?.icsAttachment?.includes("/api/fix-track/action/"));
 
+  // After a successful approval the cancellation's audit state is final: the
+  // queue row and issue record who sent it and when, and neither a repeated
+  // approval (retry or page refresh) nor any other send route dispatches it again.
+  const ownerUserId = ownerMe.data?.user?.id;
+  const directCancellationKey = `fix-track-cancellation-${ownerClientId}-${directCancellationId}-1`;
+  const sentDirectCancellation = JSON.parse((await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `SELECT json_build_object('status',status,'approvedBy',approved_by,'approvedAt',approved_at,
+      'sentBy',sent_by,'sentAt',sent_at,'idempotencyKey',idempotency_key)
+      FROM contractor_email_queue WHERE id=${Number(directCancellationQueue?.id)} AND client_id=${Number(ownerClientId)}`,
+  ])).stdout.trim() || "null");
+  check("approved cancellation queue row is no longer pending and records its sender",
+    sentDirectCancellation?.status === "sent" &&
+      sentDirectCancellation.approvedBy === ownerUserId && !!sentDirectCancellation.approvedAt &&
+      sentDirectCancellation.sentBy === ownerUserId && !!sentDirectCancellation.sentAt &&
+      sentDirectCancellation.idempotencyKey === directCancellationKey,
+    JSON.stringify({ ownerUserId, sentDirectCancellation }));
+  check("approved cancellation leaves the manager queue",
+    !(await owner("GET", "/fix-track/contractor-email-queue")).data?.some((entry) => entry.id === directCancellationQueue?.id));
+  const sentCancellationIssue = (await owner("GET", `/fix-track/issues/${directCancellationId}`)).data;
+  check("approved cancellation records sent status, sender and time on the issue",
+    sentCancellationIssue?.emailRequestStatus === "sent" &&
+      sentCancellationIssue.emailSentBy === ownerUserId &&
+      !!sentCancellationIssue.emailSentAt &&
+      Date.parse(sentCancellationIssue.emailSentAt) >= Date.parse(sentCancellationIssue.emailRequestedAt),
+    JSON.stringify(sentCancellationIssue));
+  const outboxAfterDirectCancellation = await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8");
+  const secondApproval = await owner("POST", `/fix-track/contractor-email-queue/${directCancellationQueue?.id}/approve-and-send`);
+  check("second approval of a sent cancellation is rejected",
+    secondApproval.status === 409, JSON.stringify(secondApproval));
+  const secondEditedApproval = await owner("POST", `/fix-track/contractor-email-queue/${directCancellationQueue?.id}/edit-and-send`, {
+    subject: "Cancelled again", bodyText: "Second attempt.",
+  });
+  check("edited re-approval of a sent cancellation is rejected",
+    secondEditedApproval.status === 409, JSON.stringify(secondEditedApproval));
+  check("re-approvals say the draft was already handled",
+    [secondApproval, secondEditedApproval].every(result => result.data?.code === "queue_entry_not_pending"),
+    JSON.stringify([secondApproval.data, secondEditedApproval.data]));
+  const lateDismissal = await owner("POST", `/fix-track/contractor-email-queue/${directCancellationQueue?.id}/cancel`);
+  check("dismissing a sent cancellation says it was already handled",
+    lateDismissal.status === 409 && lateDismissal.data?.code === "queue_entry_not_pending", JSON.stringify(lateDismissal));
+  check("a late dismissal leaves the sent cancellation sent",
+    (await execFile("psql", [process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+      `SELECT status FROM contractor_email_queue WHERE id=${Number(directCancellationQueue?.id)}`,
+    ])).stdout.trim() === "sent");
+  const missingDismissal = await owner("POST", "/fix-track/contractor-email-queue/2147483000/cancel");
+  check("dismissing an unknown draft stays not found",
+    missingDismissal.status === 404 && missingDismissal.data?.code === undefined, JSON.stringify(missingDismissal));
+  const issueRedispatch = await owner("POST", `/fix-track/issues/${directCancellationId}/send-to-contractor`);
+  check("issue send route cannot redispatch a sent cancellation",
+    issueRedispatch.status >= 400, JSON.stringify(issueRedispatch));
+  check("rejected re-approvals add no provider submission",
+    (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8")) === outboxAfterDirectCancellation);
+  check("outbox holds exactly one submission of the direct cancellation",
+    outboxAfterDirectCancellation.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+      .filter((message) => message.idempotencyKey === directCancellationKey).length === 1);
+  const issueAfterSecondApproval = (await owner("GET", `/fix-track/issues/${directCancellationId}`)).data;
+  check("rejected re-approvals leave the issue's sent audit state unchanged",
+    issueAfterSecondApproval?.emailRequestStatus === "sent" &&
+      issueAfterSecondApproval.emailSentBy === sentCancellationIssue?.emailSentBy &&
+      issueAfterSecondApproval.emailSentAt === sentCancellationIssue?.emailSentAt,
+    JSON.stringify(issueAfterSecondApproval));
+
+  // A provider failure on an approved cancellation must leave the stored
+  // draft pending for a manager retry, and the retry must hand the provider
+  // the same calendar event and idempotency key, exactly once.
+  const outboxPath = process.env.FIXTRACK_TEST_EMAIL_OUTBOX;
+  const retryCancellationId = await contractorIssue(owner, "calendar-cancellation-retry", "2030-03-20");
+  check("cancellation retry fixture queues its dated assignment",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/request-send`, { mode: "assign" })).status === 200);
+  check("cancellation retry fixture approves its assignment",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/approve-send`)).status === 200);
+  check("cancellation retry fixture dispatches its assignment",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/send-to-contractor`)).status === 200);
+  check("cancellation retry fixture enters the manager approval queue",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/request-cancellation`)).status === 202);
+  const retryCancellationQueue = (await owner("GET", "/fix-track/contractor-email-queue")).data?.find(
+    (entry) => entry.entityId === retryCancellationId && entry.emailType === "cancellation",
+  );
+  check("cancellation retry fixture appears in the manager queue",
+    !!retryCancellationQueue, JSON.stringify(retryCancellationQueue));
+  const retryQueueId = Number(retryCancellationQueue?.id);
+  const storedCancellation = async () => JSON.parse((await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `SELECT json_build_object('status',status,'approvedBy',approved_by,'approvedAt',approved_at,
+      'sentBy',sent_by,'sentAt',sent_at,'lastError',last_error,'ics',ics_content,'icsFilename',ics_filename,
+      'idempotencyKey',idempotency_key,'subject',subject,'bodyHtml',body_html,'bodyText',body_text)
+      FROM contractor_email_queue WHERE id=${retryQueueId} AND client_id=${Number(ownerClientId)}`,
+  ])).stdout.trim() || "null");
+  const beforeFailure = await storedCancellation();
+  const cancellationKey = `fix-track-cancellation-${ownerClientId}-${retryCancellationId}-1`;
+  check("queued cancellation stores its calendar event and provider key",
+    beforeFailure?.ics?.includes(`UID:fix-track-${ownerClientId}-${retryCancellationId}@complytrack`) &&
+      beforeFailure?.ics?.includes("METHOD:CANCEL") &&
+      beforeFailure?.ics?.includes("SEQUENCE:1") &&
+      beforeFailure?.idempotencyKey === cancellationKey,
+    JSON.stringify(beforeFailure));
+
+  // The test outbox is the provider boundary: a directory in its place makes
+  // the submission fail. The captured messages are restored afterwards.
+  const outboxBeforeFailure = await readFile(outboxPath, "utf8");
+  await rm(outboxPath);
+  await mkdir(outboxPath);
+  let failedCancellation;
+  try {
+    failedCancellation = await owner("POST", `/fix-track/contractor-email-queue/${retryQueueId}/approve-and-send`);
+  } finally {
+    await rm(outboxPath, { recursive: true });
+    await writeFile(outboxPath, outboxBeforeFailure);
+  }
+  check("provider failure on a cancellation reports a retryable error",
+    failedCancellation.status === 502, JSON.stringify(failedCancellation));
+  const afterFailure = await storedCancellation();
+  check("failed cancellation stays pending with no approval consumed",
+    afterFailure?.status === "pending" && afterFailure.approvedBy == null && afterFailure.approvedAt == null &&
+      afterFailure.sentBy == null && afterFailure.sentAt == null && !!afterFailure.lastError,
+    JSON.stringify(afterFailure));
+  check("failed cancellation keeps its draft, calendar event and provider key unchanged",
+    afterFailure?.ics === beforeFailure?.ics &&
+      afterFailure?.icsFilename === beforeFailure?.icsFilename &&
+      afterFailure?.idempotencyKey === beforeFailure?.idempotencyKey &&
+      afterFailure?.subject === beforeFailure?.subject &&
+      afterFailure?.bodyHtml === beforeFailure?.bodyHtml &&
+      afterFailure?.bodyText === beforeFailure?.bodyText,
+    JSON.stringify({ beforeFailure, afterFailure }));
+  check("failed cancellation is listed again for manager retry",
+    !!(await owner("GET", "/fix-track/contractor-email-queue")).data?.some((entry) => entry.id === retryQueueId));
+  check("failed cancellation keeps the issue awaiting approval",
+    (await owner("GET", `/fix-track/issues/${retryCancellationId}`)).data?.emailRequestStatus === "pending");
+  check("failed cancellation still locks contractor-facing edits",
+    (await owner("PUT", `/fix-track/issues/${retryCancellationId}`, { targetDate: "2030-03-21" })).status === 409);
+  check("failed cancellation cannot be queued a second time",
+    (await owner("POST", `/fix-track/issues/${retryCancellationId}/request-cancellation`)).status === 409);
+  check("failed cancellation submitted nothing to the provider",
+    (await readFile(outboxPath, "utf8")) === outboxBeforeFailure);
+
+  // Managers can see the failed send in the cancellation history, distinct
+  // from a sent one, and the queue row is flagged for retry.
+  const retryContractorId = (await owner("GET", `/fix-track/issues/${retryCancellationId}`)).data?.contractorId;
+  const cancellationHistory = async (request = owner) =>
+    request("GET", `/fix-track/calendar-cancellations?contractorId=${retryContractorId}`);
+  const failedHistory = (await cancellationHistory()).data?.find((entry) => entry.id === retryQueueId);
+  check("failed cancellation is listed as failed in the contractor's cancellation history",
+    failedHistory?.status === "failed" && failedHistory.sentAt === null && failedHistory.sentByName === null &&
+      !!failedHistory.lastFailedAt && failedHistory.failedAttempts === 1 &&
+      failedHistory.issueId === retryCancellationId &&
+      failedHistory.jobTitle === "Approval-gated work calendar-cancellation-retry" &&
+      failedHistory.eventDate === "2030-03-20" &&
+      failedHistory.contractorName === "Email contractor calendar-cancellation-retry" &&
+      failedHistory.sentTo === "contractor-calendar-cancellation-retry@test.local",
+    JSON.stringify(failedHistory));
+  check("failed cancellation is flagged in the approval queue",
+    (await owner("GET", "/fix-track/contractor-email-queue")).data?.find((entry) => entry.id === retryQueueId)?.lastSendFailed === true);
+  check("non-managers cannot read the cancellation history",
+    (await staff("GET", "/fix-track/calendar-cancellations")).status === 403);
+  const foreignHistory = await cancellationHistory(foreign);
+  check("another business sees none of this cancellation history",
+    foreignHistory.status === 200 && Array.isArray(foreignHistory.data) && foreignHistory.data.length === 0,
+    JSON.stringify(foreignHistory));
+
+  const retriedCancellation = await owner("POST", `/fix-track/contractor-email-queue/${retryQueueId}/approve-and-send`);
+  check("manager retry of the failed cancellation succeeds",
+    retriedCancellation.status === 200, JSON.stringify(retriedCancellation));
+  check("a second retry cannot resubmit the delivered cancellation",
+    (await owner("POST", `/fix-track/contractor-email-queue/${retryQueueId}/approve-and-send`)).status === 409);
+  const cancellationSubmissions = (await readFile(outboxPath, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    .filter((message) => message.idempotencyKey === cancellationKey);
+  check("outbox holds exactly one cancellation submission after recovery",
+    cancellationSubmissions.length === 1, JSON.stringify(cancellationSubmissions));
+  check("retry sends the stored cancellation event identity and sequence unchanged",
+    cancellationSubmissions[0]?.icsAttachment === beforeFailure?.ics &&
+      cancellationSubmissions[0]?.icsFilename === beforeFailure?.icsFilename,
+    cancellationSubmissions[0]?.icsAttachment);
+  const afterRetry = await storedCancellation();
+  check("recovered cancellation is recorded as sent",
+    afterRetry?.status === "sent" && !!afterRetry.sentAt && afterRetry.ics === beforeFailure?.ics,
+    JSON.stringify(afterRetry));
+  check("recovered cancellation marks the issue sent",
+    (await owner("GET", `/fix-track/issues/${retryCancellationId}`)).data?.emailRequestStatus === "sent");
+  const sentHistory = (await cancellationHistory()).data?.find((entry) => entry.id === retryQueueId);
+  check("recovered cancellation is listed as sent with its manager and time",
+    sentHistory?.status === "sent" && sentHistory.sentByName === "owner manager" && !!sentHistory.sentAt &&
+      sentHistory.lastFailedAt === null && sentHistory.failedAttempts === 1 &&
+      sentHistory.eventDate === "2030-03-20" && sentHistory.sentTo === "contractor-calendar-cancellation-retry@test.local",
+    JSON.stringify(sentHistory));
+  const deliveryTrail = (await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `SELECT string_agg(event_type || ':' || coalesce(note, ''), ',' ORDER BY id) FROM fix_track_issue_activity
+      WHERE client_id=${Number(ownerClientId)} AND issue_id=${Number(retryCancellationId)}
+        AND event_type IN ('email_sent','email_failed')`,
+  ])).stdout.trim();
+  check("the issue's activity keeps both the failed and the successful send",
+    deliveryTrail === "email_failed:cancellation,email_sent:cancellation", deliveryTrail);
+  check("cancellation history rejects a malformed contractor filter",
+    (await owner("GET", "/fix-track/calendar-cancellations?contractorId=abc")).status === 400);
+
   check("changing a sent assignment target date succeeds",
     (await owner("PUT", `/fix-track/issues/${calendarId}`, { targetDate: "2030-02-12" })).status === 200);
   check("resend still requires explicit force",

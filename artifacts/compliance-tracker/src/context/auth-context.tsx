@@ -10,6 +10,7 @@ import {
 } from "@/lib/api";
 import { setClientIdGetter, setUnauthorizedHandler, setPaymentRequiredHandler, setMutationObserver } from "@workspace/api-client-react";
 import { createCompletedWorkObserver } from "@/lib/analytics";
+import { clearApprovalRefreshStateForUser } from "@/lib/contractor-approval-refresh-state";
 
 export type UserRole = "consultant" | "client_admin" | "client_staff" | "client_viewer";
 
@@ -115,6 +116,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /** Signs the tab out locally and forgets everything loaded for that user. */
   function clearSession() {
+    // Only the signed-out user's Contractor Approvals acknowledgments go;
+    // another account's state in this browser is left alone.
+    clearApprovalRefreshStateForUser(window, userRef.current?.id ?? null);
     userRef.current = null;
     setUser(null);
     setClient(null);

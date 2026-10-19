@@ -24,6 +24,15 @@ import { findLiveSubscription } from "./billing";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, markEmailDeliverySent, settleEmailDelivery } from "./emailDeliveryClaims";
 import { randomUUID } from "crypto";
 
+/**
+ * When a synced subscription's access ends, in Unix seconds (the stripe.*
+ * columns are integers, so compare with `extract(epoch from now())`, never
+ * `now()`). Stripe API versions from 2025-03-31.basil no longer put
+ * current_period_end on the subscription, so a subscription cancelled outright
+ * (no cancel_at) falls back to ended_at. Expects the subscription aliased `s`.
+ */
+export const SUBSCRIPTION_ACCESS_ENDS_AT = sql.raw("COALESCE(s.cancel_at, s.current_period_end, s.ended_at)");
+
 const RETENTION_MONTHS = 12;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -184,7 +193,7 @@ async function getCurrentCancellation(
   execute: SqlExecutor,
 ): Promise<CancellationCandidate | null> {
   const result = await execute(sql`
-    SELECT s.customer, COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+    SELECT s.customer, ${SUBSCRIPTION_ACCESS_ENDS_AT} AS access_ends_at
     FROM stripe.subscriptions s
     WHERE s.customer = ${stripeCustomerId}
       AND (s.status = 'canceled' OR s.cancel_at_period_end = true)
@@ -195,7 +204,7 @@ async function getCurrentCancellation(
           AND live.status IN ('active', 'trialing', 'past_due')
           AND COALESCE(live.cancel_at_period_end, false) = false
       )
-    ORDER BY s.current_period_end DESC NULLS LAST
+    ORDER BY ${SUBSCRIPTION_ACCESS_ENDS_AT} DESC NULLS LAST, s.created DESC
     LIMIT 1
   `);
   return ((result.rows ?? [])[0] as CancellationCandidate | undefined) ?? null;
@@ -274,7 +283,7 @@ export async function sendCancellationWarningEmail(opts: {
           AND (s.status = 'canceled' OR s.cancel_at_period_end = true)
           -- Do not send a stale date if a concurrent Stripe update moved the
           -- cutoff after the initial read; that update will claim its own key.
-          AND COALESCE(s.cancel_at, s.current_period_end) = ${cancellation.access_ends_at}
+          AND ${SUBSCRIPTION_ACCESS_ENDS_AT} = ${cancellation.access_ends_at}
           AND NOT EXISTS (
             SELECT 1 FROM stripe.subscriptions live
             WHERE live.customer = s.customer
@@ -386,7 +395,7 @@ ComplyTrack
            SELECT 1 FROM stripe.subscriptions s
             WHERE s.customer = ${opts.stripeCustomerId}
               AND (s.status = 'canceled' OR s.cancel_at_period_end = true)
-              AND COALESCE(s.cancel_at, s.current_period_end) = ${cancellation.access_ends_at}
+              AND ${SUBSCRIPTION_ACCESS_ENDS_AT} = ${cancellation.access_ends_at}
               AND NOT EXISTS (
                 SELECT 1 FROM stripe.subscriptions live
                  WHERE live.customer = s.customer
@@ -466,16 +475,16 @@ export async function runCancellationWarningJob(
   const candidates = await execute(sql`
     WITH current_subscriptions AS (
       SELECT DISTINCT ON (c.id) c.id, s.customer, s.status, s.cancel_at_period_end,
-        COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+        ${SUBSCRIPTION_ACCESS_ENDS_AT} AS access_ends_at
       FROM clients c
       JOIN stripe.subscriptions s ON s.customer = c.stripe_customer_id
-      ORDER BY c.id, s.current_period_end DESC NULLS LAST
+      ORDER BY c.id, s.created DESC NULLS LAST
     )
     SELECT id, customer, access_ends_at
     FROM current_subscriptions
     WHERE (status = 'canceled' OR cancel_at_period_end = true)
-      AND (access_ends_at > now()
-        OR (status = 'canceled' AND access_ends_at > now() - interval '7 days'))
+      AND (access_ends_at > extract(epoch from now())
+        OR (status = 'canceled' AND access_ends_at > extract(epoch from now() - interval '7 days')))
   `).catch((err) => {
     logger.warn({ err }, "Cancellation warning reconciliation unavailable");
     return { rows: [] };
@@ -761,14 +770,22 @@ type TxExecutor = Pick<typeof db, "execute">;
 /** Deletes a client's stored files inside the deletion transaction (see clientStorageErasure.ts). */
 export type ClientStorageEraser = (clientId: number, executor: TxExecutor) => Promise<{ objectsDeleted: number }>;
 
-/** How many stored files a client still has (ledger rows plus attachment references). */
+/**
+ * How many stored files a client still has to erase (ledger rows plus
+ * attachment references). HSE receipts stay with the retained RIDDOR events
+ * (see RETAINED_CLIENT_TABLES), so they are not counted.
+ */
 export async function countClientStoredObjects(clientId: number, executor: TxExecutor = db): Promise<number> {
   const result = await executor.execute(sql`
-    SELECT (SELECT COUNT(*) FROM storage_usage_objects WHERE client_id = ${clientId} AND present)::int AS ledger
+    SELECT (SELECT COUNT(*) FROM storage_usage_objects WHERE client_id = ${clientId} AND present
+      AND object_path NOT IN (SELECT receipt_object_path FROM incident_riddor_events
+        WHERE client_id = ${clientId} AND receipt_object_path IS NOT NULL))::int AS ledger
   `);
   const ledger = Number((result.rows[0] as { ledger?: number } | undefined)?.ledger ?? 0);
   const { listTenantAttachmentObjectPaths } = await import("./attachmentReferences");
-  return ledger + (await listTenantAttachmentObjectPaths(executor, clientId)).length;
+  const { listRetainedRiddorReceiptPaths } = await import("./riddorReceipts");
+  const retained = new Set(await listRetainedRiddorReceiptPaths(executor, clientId));
+  return ledger + (await listTenantAttachmentObjectPaths(executor, clientId)).filter((path) => !retained.has(path)).length;
 }
 
 /**
@@ -928,7 +945,7 @@ export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): P
  * - incident_riddor_events: append-only RIDDOR decision/submission history
  *   (RIDDOR reg. 12 requires records for at least 3 years). The incidents it
  *   references are kept with it (RESTRICT foreign key); every other incident
- *   is deleted.
+ *   is deleted. HSE receipt files bound to its events are kept too.
  * - client_data_deletion_requests: the record that this erasure was requested,
  *   reviewed and completed.
  * - users: anonymised in place below (audit rows reference them).

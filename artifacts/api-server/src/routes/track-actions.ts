@@ -232,13 +232,14 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
   const departmentId = getActiveDepartmentId(req);
   const result = await db.transaction(async (tx) => {
     const [action] = await tx.select().from(trackActionsTable).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId))).for("update");
-    if (!action) return { status: 404 as const, error: "Action not found" };
+    // Another department's action answers exactly like a missing one.
+    if (!action || !await canAccessSite(action.siteId, clientId, departmentId)) return { status: 404 as const, error: "Action not found" };
     if (action.module === "green") return { status: 400 as const, error: "GreenTrack actions stay within GreenTrack" };
     if (action.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be sent to FixTrack" };
-    if (action.module === "kitchen" && action.sourceKind?.startsWith("kitchen_temperature_") && parsed.data.create) {
-      return { status: 409 as const, error: "Temperature corrective actions must stay in KitchenTrack for manager verification; raise a separate maintenance issue if necessary" };
-    }
-    if (!await canAccessSite(action.siteId, clientId, departmentId)) return { status: 403 as const, error: "Forbidden site" };
+    // A failed temperature can still get a repair job, but a manager verifies
+    // and resolves the action in KitchenTrack ("parallel"). The department
+    // check now runs with the lookup above and answers 404 (#105).
+    const keptInTrack = action.module === "kitchen" && !!action.sourceKind?.startsWith("kitchen_temperature_");
     if (!parsed.data.create) {
       const [row] = await tx.update(trackActionsTable).set({ fixTrackDisposition: "not_needed", updatedAt: new Date() }).where(eq(trackActionsTable.id, action.id)).returning();
       return { status: 200 as const, row };
@@ -254,7 +255,7 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
       targetDate: action.dueDate, assignedTo: action.ownerName, createdBy: req.currentUser!.id,
     }).returning();
     await tx.insert(fixTrackIssueActivityTable).values({ clientId, issueId: issue.id, eventType: "status", status: "reported", createdBy: req.currentUser!.id });
-    const [row] = await tx.update(trackActionsTable).set({ fixTrackIssueId: issue.id, fixTrackDisposition: "linked", updatedAt: new Date() }).where(and(eq(trackActionsTable.id, action.id), isNull(trackActionsTable.fixTrackIssueId))).returning();
+    const [row] = await tx.update(trackActionsTable).set({ fixTrackIssueId: issue.id, fixTrackDisposition: keptInTrack ? "parallel" : "linked", updatedAt: new Date() }).where(and(eq(trackActionsTable.id, action.id), isNull(trackActionsTable.fixTrackIssueId))).returning();
     if (!row) return { status: 409 as const, error: "This action was linked by another user" };
     return { status: 201 as const, row };
   });
@@ -271,7 +272,10 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     const siteIds = [...new Set([current.siteId, parsed.data.siteId].filter((value): value is number => value != null))].sort((a, b) => a - b);
     const sites = siteIds.length ? await tx.select({ id: sitesTable.id, clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(inArray(sitesTable.id, siteIds)).for("update") : [];
     const canUse = (siteId: number | null | undefined) => siteId == null || sites.some(site => site.id === siteId && site.clientId === clientId && (departmentId == null || site.departmentId == null || site.departmentId === departmentId));
-    if (!canUse(current.siteId) || ("siteId" in parsed.data && !canUse(parsed.data.siteId))) return { status: 403 as const, error: "Forbidden site" };
+    // Another department's action answers exactly like a missing one; only a
+    // move to a site the caller cannot use is reported as forbidden.
+    if (!canUse(current.siteId)) return { status: 404 as const, error: "Action not found" };
+    if ("siteId" in parsed.data && !canUse(parsed.data.siteId)) return { status: 403 as const, error: "Forbidden site" };
     if (current.sourceKind && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
       return { status: 409 as const, error: "The source record controls this action's site" };
     }
@@ -282,7 +286,7 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
-    if (nextStatus === "resolved" && current.fixTrackIssueId) return { status: 409 as const, error: "Resolve the linked FixTrack issue to complete this action" };
+    if (nextStatus === "resolved" && current.fixTrackIssueId && current.fixTrackDisposition !== "parallel") return { status: 409 as const, error: "Resolve the linked FixTrack issue to complete this action" };
     if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes) || !parsed.data.resolverSignature)) {
       return { status: 400 as const, error: "remedialAction, evidenceReference, resolutionNotes and a drawn signature are required to resolve an action" };
     }
@@ -335,6 +339,25 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     const [row] = await tx.update(trackActionsTable).set(updates as any).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId), ne(trackActionsTable.status, "resolved"))).returning();
     if (!row) return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
+    // Signing off an action in its track also finishes its automatically
+    // raised FixTrack job, unless a contractor email is mid-send.
+    if (nextStatus === "resolved" && current.fixTrackIssueId && current.fixTrackDisposition === "parallel") {
+      const [job] = await tx.update(fixTrackIssuesTable).set({
+        status: "resolved",
+        resolvedDate: sql`(now() AT TIME ZONE 'Europe/London')::date` as any,
+        resolvedByName: row.resolvedByName,
+        resolverSignature: row.resolverSignature,
+        solutionNotes: sql`coalesce(nullif(trim(${fixTrackIssuesTable.solutionNotes}), ''), ${`Completed in the originating track: ${row.resolutionNotes ?? row.remedialAction ?? ""}`.trim()})` as any,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(fixTrackIssuesTable.id, current.fixTrackIssueId), eq(fixTrackIssuesTable.clientId, clientId),
+        inArray(fixTrackIssuesTable.status, ["reported", "in_progress"]),
+        or(isNull(fixTrackIssuesTable.emailRequestStatus), ne(fixTrackIssuesTable.emailRequestStatus, "sending")),
+      )).returning({ id: fixTrackIssuesTable.id });
+      if (job) await tx.insert(fixTrackIssueActivityTable).values({
+        clientId, issueId: job.id, eventType: "status", status: "resolved", createdBy: req.currentUser!.id,
+      });
+    }
     if (kitchenFailure) await tx.insert(auditEventsTable).values({
       clientId, actorId: req.currentUser!.id, entityType: "track_action", entityId: id,
       action: nextStatus === "resolved" ? "manager_verified_and_resolved" : "updated",
