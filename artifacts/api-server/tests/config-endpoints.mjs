@@ -60,6 +60,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const runId = resolveRunId();
 const fixtures = createFixtureOwnership({ runId, suite: "config-endpoints" });
@@ -123,8 +124,9 @@ function isoDate(daysOffset = 0) {
   return d.toISOString().slice(0, 10);
 }
 
-// Register a fresh self-service account (role "consultant" linked to a single
-// auto-provisioned client). Returns { session, clientId, email }.
+// Register a fresh self-service account and make it a consultant linked to its
+// auto-provisioned client, so it can add and switch to a second client.
+// Returns { session, clientId, email }.
 async function registerAccount(label, ts) {
   // Account owners deliberately write past-dated records here, which needs a reason.
   const session = makeSession({ "X-Override-Reason": encodeURIComponent("Config fixture: past-dated record") });
@@ -150,6 +152,7 @@ async function registerAccount(label, ts) {
       throw new Error(`FATAL: login after verification failed for ${label} (${login.status})`);
     }
   }
+  promoteToConsultant(email);
   const me = await session("GET", "/auth/me");
   const user = me.data?.user ?? me.data;
   const clientId = user?.clientId;

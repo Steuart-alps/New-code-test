@@ -11,6 +11,7 @@
 //  - Branding: "Managed by" reaches linked client users only; logo claims are
 //    tied to the consultant's own storage tenant.
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const BASE = process.env.API_BASE;
 if (!BASE) throw new Error("API_BASE is required");
@@ -55,6 +56,7 @@ async function consultant(label) {
   }
   const loggedIn = await request("POST", "/auth/login", { email, password: "password-123" });
   check(`${label}: login`, loggedIn.status === 200, String(loggedIn.status));
+  promoteToConsultant(email);
   const me = await request("GET", "/auth/me");
   const clientId = (me.data?.user ?? me.data)?.clientId;
   ownership.trackClient(clientId);

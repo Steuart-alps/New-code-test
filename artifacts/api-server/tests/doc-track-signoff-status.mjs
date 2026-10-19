@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { skipWhenStorageUnavailable } from "./storage-test-availability.mjs";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 const execFile = promisify(execFileCallback);
@@ -83,7 +84,7 @@ function session() {
   };
 }
 
-async function signUp(label) {
+async function signUp(label, { consultant = false } = {}) {
   const as = session();
   const email = `doc-register-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@test.local`;
   const registered = await as("POST", "/auth/register", { name: `Doc register ${label}`, email, password: "password-123" });
@@ -91,6 +92,7 @@ async function signUp(label) {
   requireSuccess(`verify ${label}`,
     await as("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`), 200);
   requireSuccess(`log in ${label}`, await as("POST", "/auth/login", { email, password: "password-123" }), 200);
+  if (consultant) promoteToConsultant(email);
   const me = await as("GET", "/auth/me");
   const user = me.data?.user ?? me.data;
   if (!Number.isInteger(user?.clientId)) throw new Error(`${label} has no client`);
@@ -124,7 +126,7 @@ async function seedRegister(tenant, label) {
 async function checkConsultantRegisterTenantBoundary() {
   const alpha = await signUp("Alpha");
   const bravo = await signUp("Bravo");
-  const consultant = await signUp("Charlie");
+  const consultant = await signUp("Charlie", { consultant: true });
   check("register test account is a consultant", consultant.role === "consultant");
   await execFile("psql", [
     process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",

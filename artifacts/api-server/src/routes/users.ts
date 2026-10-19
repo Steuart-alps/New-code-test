@@ -2,10 +2,10 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
-import { usersTable, userRoleEnum, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
+import { usersTable, userRoleEnum, departmentsTable, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
 import { eq, and, inArray, isNull, desc, gt } from "drizzle-orm";
 import { hashPassword, getUserWithClientByEmail } from "../lib/auth";
-import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, requireUserManager, canAccessClient } from "../middleware/requireAuth";
 import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
 import { resetTwoFactorWithAlert, deliverTwoFactorResetAlert } from "../lib/twoFactorResetAlerts";
 import { hashStoredCredential, revokeUserSessions } from "../lib/sessionRevocation";
@@ -20,6 +20,8 @@ const CreateUserBody = z.object({
   role: z.enum(userRoleEnum as unknown as [string, ...string[]]).default("client_viewer"),
   clientId: z.number().nullable().optional(),
   departmentId: z.number().nullable().optional(),
+  allDepartments: z.boolean().optional(),
+  isMaintenanceManager: z.boolean().optional(),
   active: z.boolean().default(true),
 });
 
@@ -168,7 +170,37 @@ const UpdateUserBody = z.object({
   active: z.boolean().optional(),
   isMaintenanceManager: z.boolean().optional(),
   isDepartmentManager: z.boolean().optional(),
+  allDepartments: z.boolean().optional(),
 });
+
+/** The roles a Manager may give and look after. */
+const MANAGED_ROLES = new Set(["client_staff", "client_viewer"]);
+
+type ManagerActor = { id: number; role: string; clientId: number | null; departmentId: number | null; allDepartments?: boolean | null };
+
+function isManager(actor: { role: string }): boolean {
+  return actor.role === "client_manager";
+}
+
+/** Whether a department id is one this Manager covers (null = no department). */
+async function managerCoversDepartment(actor: ManagerActor, departmentId: number | null | undefined): Promise<boolean> {
+  if (departmentId == null) return actor.allDepartments === true;
+  if (actor.allDepartments !== true) return departmentId === actor.departmentId;
+  const [department] = await db.select({ id: departmentsTable.id }).from(departmentsTable)
+    .where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, actor.clientId ?? -1)));
+  return !!department;
+}
+
+/**
+ * Managers look after the Staff and Viewers in their own business and
+ * departments. Anyone else answers like a missing user, so a Manager can't
+ * learn who else has an account.
+ */
+function managerCanActOn(actor: ManagerActor, target: { role: string; clientId: number | null; departmentId: number | null }): boolean {
+  if (target.clientId == null || target.clientId !== actor.clientId) return false;
+  if (!MANAGED_ROLES.has(target.role)) return false;
+  return actor.allDepartments === true || (target.departmentId != null && target.departmentId === actor.departmentId);
+}
 
 /**
  * Self-signup owners have the consultant role and belong to their business
@@ -188,7 +220,7 @@ function rejectsConsultantTarget(
   return false;
 }
 
-router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
+router.get("/users", requireAuth, requireUserManager, async (req, res) => {
   const user = req.currentUser!;
   
   let rows;
@@ -202,7 +234,7 @@ router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
         return;
       }
       rows = await db
-        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
         .from(usersTable)
         .where(eq(usersTable.clientId, clientId));
     } else {
@@ -214,24 +246,41 @@ router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
         return;
       }
       rows = await db
-        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
         .from(usersTable)
         .where(inArray(usersTable.clientId, allowed));
     }
   } else {
     rows = await db
-      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
       .from(usersTable)
       .where(eq(usersTable.clientId, user.clientId!));
+    if (isManager(user)) rows = rows.filter((row) => row.id === user.id || managerCanActOn(user, row));
   }
 
   const invitations = await invitationsFor(rows.map((row) => row.id));
   res.json(rows.map((row) => ({ ...row, invitation: invitations.get(row.id) ?? null })));
 });
 
-router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
+router.post("/users", requireAuth, requireUserManager, async (req, res) => {
   const actor = req.currentUser!;
   const body = CreateUserBody.parse(req.body);
+
+  if (isManager(actor)) {
+    if (!MANAGED_ROLES.has(body.role)) {
+      res.status(403).json({ error: "Managers can add Staff and Viewers only" });
+      return;
+    }
+    if (body.allDepartments || body.isMaintenanceManager) {
+      res.status(403).json({ error: "Only an Owner can give these extra rights" });
+      return;
+    }
+    if (body.departmentId === undefined && actor.allDepartments !== true) body.departmentId = actor.departmentId;
+    if (!(await managerCoversDepartment(actor, body.departmentId))) {
+      res.status(403).json({ error: "Managers can add people to their own departments only" });
+      return;
+    }
+  }
 
   if (actor.role !== "consultant") {
     if (body.clientId && body.clientId !== actor.clientId) {
@@ -278,10 +327,12 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
         role: body.role as typeof userRoleEnum[number],
         clientId: body.clientId ?? null,
         departmentId: body.departmentId ?? null,
+        allDepartments: body.role === "client_manager" && body.allDepartments === true,
+        isMaintenanceManager: body.isMaintenanceManager === true,
         active: body.active,
         passwordHash,
       })
-      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
   } catch (error: any) {
     // A concurrent create of the same address.
     if ((error?.code ?? error?.cause?.code) === "23505") {
@@ -318,6 +369,10 @@ async function setupLinkTarget(req: Request, res: Response, verb: string) {
     res.status(403).json({ error: "Forbidden" });
     return null;
   }
+  if (isManager(actor) && !managerCanActOn(actor, target)) {
+    res.status(404).json({ error: "User not found" });
+    return null;
+  }
   if (target.role !== "client_staff") {
     res.status(400).json({ error: `Password setup links can only be ${verb} for staff accounts` });
     return null;
@@ -325,7 +380,7 @@ async function setupLinkTarget(req: Request, res: Response, verb: string) {
   return target;
 }
 
-router.post("/users/:id/resend-invite", requireAuth, requireClientAdmin, async (req, res) => {
+router.post("/users/:id/resend-invite", requireAuth, requireUserManager, async (req, res) => {
   const target = await setupLinkTarget(req, res, "resent");
   if (!target) return;
 
@@ -340,7 +395,7 @@ router.post("/users/:id/resend-invite", requireAuth, requireClientAdmin, async (
 // Cancels every live setup or reset link for a staff member without sending
 // a new one, e.g. when an invitation went to the wrong address. The rows are
 // kept (marked used and revoked) and the action is recorded in audit_events.
-router.post("/users/:id/revoke-invite", requireAuth, requireClientAdmin, async (req, res) => {
+router.post("/users/:id/revoke-invite", requireAuth, requireUserManager, async (req, res) => {
   const target = await setupLinkTarget(req, res, "revoked");
   if (!target) return;
 
@@ -370,7 +425,7 @@ router.post("/users/:id/revoke-invite", requireAuth, requireClientAdmin, async (
   res.json({ ok: true, revoked: revoked.length });
 });
 
-router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
+router.put("/users/:id", requireAuth, requireUserManager, async (req, res) => {
   const actor = req.currentUser!;
   const id = Number(req.params.id);
   const body = UpdateUserBody.parse(req.body);
@@ -413,6 +468,38 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
     return;
   }
 
+  if (isManager(actor)) {
+    if (target.id === actor.id) {
+      // A Manager keeps their own name and sign-in details up to date; their
+      // role and departments are set by an Owner.
+      if ((body.role !== undefined && body.role !== target.role)
+        || (body.departmentId !== undefined && body.departmentId !== target.departmentId)
+        || (body.active !== undefined && body.active !== target.active)
+        || body.isMaintenanceManager !== undefined || body.isDepartmentManager !== undefined
+        || body.allDepartments !== undefined) {
+        res.status(403).json({ error: "Only an Owner can change a Manager's role or departments" });
+        return;
+      }
+    } else {
+      if (!managerCanActOn(actor, target)) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+      if (body.role !== undefined && !MANAGED_ROLES.has(body.role)) {
+        res.status(403).json({ error: "Managers can give the Staff or Viewer role only" });
+        return;
+      }
+      if (body.departmentId !== undefined && !(await managerCoversDepartment(actor, body.departmentId))) {
+        res.status(403).json({ error: "Managers can move people within their own departments only" });
+        return;
+      }
+      if (body.isMaintenanceManager !== undefined || body.isDepartmentManager !== undefined || body.allDepartments !== undefined) {
+        res.status(403).json({ error: "Only an Owner can change these switches" });
+        return;
+      }
+    }
+  }
+
   const updates: Partial<typeof usersTable.$inferInsert> = {
     updatedAt: new Date(),
   };
@@ -430,13 +517,21 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
     updates.isDepartmentManager = body.isDepartmentManager;
   }
   if (body.role && body.role !== "client_staff") updates.isDepartmentManager = false;
+  if (body.allDepartments !== undefined) {
+    if (body.allDepartments && (body.role ?? target.role) !== "client_manager") {
+      res.status(400).json({ error: "Only Managers can be given every department" });
+      return;
+    }
+    updates.allDepartments = body.allDepartments;
+  }
+  if (body.role && body.role !== "client_manager") updates.allDepartments = false;
   if (body.password) updates.passwordHash = await hashPassword(body.password);
 
   const rows = await db
     .update(usersTable)
     .set(updates)
     .where(eq(usersTable.id, id))
-    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
 
   // A changed password signs the user out everywhere except this session.
   if (updates.passwordHash) {
@@ -446,7 +541,7 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
   res.json(rows[0]);
 });
 
-router.delete("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
+router.delete("/users/:id", requireAuth, requireUserManager, async (req, res) => {
   const actor = req.currentUser!;
   const id = Number(req.params.id);
 
@@ -462,6 +557,10 @@ router.delete("/users/:id", requireAuth, requireClientAdmin, async (req, res) =>
     return;
   }
   if (rejectsConsultantTarget(actor, target, res)) return;
+  if (isManager(actor) && !managerCanActOn(actor, target)) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
 
   // Audit trails are append-only, so a user one names as actor can't be
   // deleted (ON DELETE SET NULL would rewrite those rows). Deactivate them
@@ -476,7 +575,7 @@ router.delete("/users/:id", requireAuth, requireClientAdmin, async (req, res) =>
       .update(usersTable)
       .set({ active: false, updatedAt: new Date() })
       .where(eq(usersTable.id, id))
-      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, allDepartments: usersTable.allDepartments, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
     res.json({ ...rows[0], deactivated: true });
     return;
   }

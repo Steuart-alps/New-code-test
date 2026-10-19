@@ -164,6 +164,7 @@
     "test:contractor-queue-migration-bounds": "bash tests/run-contractor-queue-migration-bounds.sh",
     "test:twofa-recovery": "bash tests/run-twofa-recovery.sh",
     "test:staff-invitations": "bash tests/run-staff-invitations.sh",
+    "test:manager-role": "bash tests/run-manager-role.sh",
     "test:welcome-email": "bash tests/run-welcome-email.sh",
     "test:viewer-route-policy": "node tests/viewer-route-policy.mjs",
     "test:openapi-routes": "node tests/openapi-route-inventory.mjs",

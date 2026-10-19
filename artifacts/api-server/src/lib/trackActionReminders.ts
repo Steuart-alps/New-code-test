@@ -194,7 +194,7 @@ export function buildTrackSummaryRecipients(
     const assignedIds = new Set(assignment.managerIds);
     for (const manager of configuredManagers) {
       if (manager.departmentId != null && assignment.departmentIds.includes(manager.departmentId) &&
-          (manager.isDepartmentManager || manager.isMaintenanceManager)) {
+          (manager.role === "client_manager" || manager.isDepartmentManager || manager.isMaintenanceManager)) {
         assignedIds.add(manager.id);
       }
     }
@@ -389,7 +389,7 @@ export async function runTrackActionReminderJob(
         .filter((user) => seniorUserIds.includes(user.id))
         .map(({ id, email }) => ({ id, email }));
       const configuredManagers = users
-        .filter((user) => user.role === "client_admin" || user.role === "client_staff")
+        .filter((user) => user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff")
         .map(({ id, email, departmentId, role, isDepartmentManager, isMaintenanceManager }) =>
           ({ id, email, departmentId, role, isDepartmentManager, isMaintenanceManager }));
       const recipients = buildTrackSummaryRecipients(

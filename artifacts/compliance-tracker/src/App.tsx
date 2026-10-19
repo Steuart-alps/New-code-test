@@ -194,7 +194,8 @@ function ProtectedRoutes() {
   }
 
   const canAdmin = user.role === "consultant" || user.role === "client_admin";
-  const canManageContractorEmails = canAdmin || user.isMaintenanceManager === true;
+  const canManageUsers = canAdmin || user.role === "client_manager";
+  const canManageContractorEmails = canAdmin || user.isMaintenanceManager === true || user.role === "client_manager";
   const isConsultant = user.role === "consultant";
 
   return (
@@ -242,7 +243,7 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/sites" component={SitesPage} />}
       {canAdmin && <Route path="/categories/:id" component={CategoryDetailPage} />}
       {canAdmin && <Route path="/categories" component={CategoriesPage} />}
-      {canAdmin && <Route path="/users" component={UsersPage} />}
+      {canManageUsers && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
       {canAdmin && <Route path="/feedback" component={FeedbackInboxPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}

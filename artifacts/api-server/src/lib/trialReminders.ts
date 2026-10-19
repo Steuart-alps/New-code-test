@@ -130,6 +130,10 @@ async function isPayingCustomer(client: ClientRow, findLive: typeof findLiveSubs
   return true;
 }
 
+/**
+ * The business's own owners: its Owners (client_admin) and, for accounts
+ * signed up before sign-up created Owners, its own consultant.
+ */
 async function activeConsultants(clientId: number) {
   return db
     .select()
@@ -137,7 +141,7 @@ async function activeConsultants(clientId: number) {
     .where(
       and(
         eq(usersTable.clientId, clientId),
-        eq(usersTable.role, "consultant"),
+        inArray(usersTable.role, ["consultant", "client_admin"]),
         eq(usersTable.active, true),
       ),
     );

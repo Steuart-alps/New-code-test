@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 import { appSettingsTable, consultantClientsTable, sitesTable, taskCompletionsTable, tasksTable, usersTable } from "@workspace/db/schema";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { denyViewers, getActiveDepartmentId, getClientId, requireAuth } from "../middleware/requireAuth";
+import { denyViewers, getActiveDepartmentId, getClientId, isDepartmentLead, requireAuth } from "../middleware/requireAuth";
 import { ACCOUNT_TIMEZONE_SETTING, normalizeAccountTimezone } from "../middleware/dailyEntryCutoff";
 import { addDays, isCalendarDay, occursOn, todayIn } from "../lib/taskSchedule";
 import { submittedDailyChecklists } from "../lib/dailyChecklistCompletion";
@@ -55,7 +55,8 @@ type Viewer = NonNullable<Request["currentUser"]>;
 /** Department managers manage tasks for their own department's sites only. */
 function managerScope(user: Viewer): "all" | number | null {
   if (user.role === "consultant" || user.role === "client_admin") return "all";
-  if (user.role === "client_staff" && user.isDepartmentManager && user.departmentId != null) return user.departmentId;
+  if (user.role === "client_manager" && user.allDepartments) return "all";
+  if (isDepartmentLead(user) && user.departmentId != null) return user.departmentId;
   return null;
 }
 
@@ -132,7 +133,7 @@ async function validateScope(user: Viewer, clientId: number, value: { siteId: nu
   }
   if (scope !== "all" && (value.siteId == null || siteDepartmentId !== scope)) return "Department managers can only set tasks for their department's sites";
   if (value.assigneeUserId != null) {
-    const [assignee] = await db.select({ id: usersTable.id, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active })
+    const [assignee] = await db.select({ id: usersTable.id, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, allDepartments: usersTable.allDepartments, active: usersTable.active })
       .from(usersTable).where(eq(usersTable.id, value.assigneeUserId));
     let member = assignee?.clientId === clientId;
     if (assignee && !member && assignee.role === "consultant") {
@@ -140,7 +141,8 @@ async function validateScope(user: Viewer, clientId: number, value: { siteId: nu
         .where(and(eq(consultantClientsTable.userId, assignee.id), eq(consultantClientsTable.clientId, clientId))))[0];
     }
     if (!assignee || !member || !assignee.active || assignee.role === "client_viewer") return "Assignee must be an active member of this business";
-    if (siteDepartmentId != null && (assignee.role === "client_staff") && assignee.departmentId !== siteDepartmentId) {
+    const departmentScoped = assignee.role === "client_staff" || (assignee.role === "client_manager" && !assignee.allDepartments);
+    if (siteDepartmentId != null && departmentScoped && assignee.departmentId !== siteDepartmentId) {
       return "That person's department cannot see this site";
     }
   }

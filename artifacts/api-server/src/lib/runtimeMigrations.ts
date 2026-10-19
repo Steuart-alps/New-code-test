@@ -4896,6 +4896,10 @@ async function migrateMaintenanceManager() {
     ALTER TABLE "users"
       ADD COLUMN IF NOT EXISTS "is_department_manager" boolean NOT NULL DEFAULT false
   `);
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "all_departments" boolean NOT NULL DEFAULT false
+  `);
 }
 
 async function migrateMobileSessions() {

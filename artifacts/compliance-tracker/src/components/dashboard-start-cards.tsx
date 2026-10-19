@@ -12,13 +12,13 @@ type SetupSummary = { needsSetup: boolean; canManage: boolean; deferredAt?: stri
 /**
  * Top-of-dashboard cards: the setup wizard banner for admins of a business
  * that has not finished setup (sending them to /setup once per session until
- * they choose "Finish later"), and "My tasks today" for staff.
+ * they choose "Finish later"), and "My tasks today" for staff and Managers.
  */
 export function DashboardStartCards() {
   const { user } = useAuth();
   if (!user) return null;
   if (user.role === "consultant" || user.role === "client_admin") return <SetupBanner />;
-  if (user.role === "client_staff") return <MyTasksTodayCard />;
+  if (user.role === "client_staff" || user.role === "client_manager") return <MyTasksTodayCard />;
   return null;
 }
 

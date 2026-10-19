@@ -12,7 +12,7 @@ import { setClientIdGetter, setUnauthorizedHandler, setPaymentRequiredHandler, s
 import { createCompletedWorkObserver } from "@/lib/analytics";
 import { clearApprovalRefreshStateForUser } from "@/lib/contractor-approval-refresh-state";
 
-export type UserRole = "consultant" | "client_admin" | "client_staff" | "client_viewer";
+export type UserRole = "consultant" | "client_admin" | "client_manager" | "client_staff" | "client_viewer";
 
 export interface AuthUser {
   id: number;
@@ -25,6 +25,8 @@ export interface AuthUser {
   totpEnabled?: boolean;
   isMaintenanceManager?: boolean;
   isDepartmentManager?: boolean;
+  /** A Manager given every department rather than their own. */
+  allDepartments?: boolean;
   /** Named in PLATFORM_ADMIN_EMAILS: may issue ALPS discount codes. */
   platformOperator?: boolean;
 }
@@ -343,13 +345,25 @@ export function useAuth() {
 export function useCanEdit() {
   const { user } = useAuth();
   if (!user) return false;
-  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_staff";
+  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff";
 }
 
 export function useCanAdmin() {
   const { user } = useAuth();
   if (!user) return false;
   return user.role === "consultant" || user.role === "client_admin";
+}
+
+/** Owners and consultants manage every user; Managers manage their own Staff and Viewers. */
+export function useCanManageUsers() {
+  const { user } = useAuth();
+  if (!user) return false;
+  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_manager";
+}
+
+export function useIsManager() {
+  const { user } = useAuth();
+  return user?.role === "client_manager";
 }
 
 export function useIsConsultant() {
@@ -359,5 +373,7 @@ export function useIsConsultant() {
 
 export function useIsMaintenanceManager() {
   const { user } = useAuth();
-  return user?.isMaintenanceManager === true;
+  // Managers (heads of department) also run FixTrack and contractor emails,
+  // so a business without a maintenance manager is still covered.
+  return user?.isMaintenanceManager === true || user?.role === "client_manager";
 }

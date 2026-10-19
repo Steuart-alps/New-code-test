@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { db, pool } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const base = process.env.API_BASE;
 const emails = process.env.TEST_EMAIL_CAPTURE_PATH;
@@ -33,6 +34,8 @@ async function register(label) {
     assert.equal((await request("GET", `/auth/verify-email?token=${created.data.verificationToken}`)).status, 200);
     assert.equal((await request("POST", "/auth/login", { email, password: "password-123" })).status, 200);
   }
+  // These accounts act as consultants (reviewers of each other's requests).
+  promoteToConsultant(email);
   const me = await request("GET", "/auth/me");
   assert.equal(me.status, 200);
   const user = me.data.user ?? me.data;

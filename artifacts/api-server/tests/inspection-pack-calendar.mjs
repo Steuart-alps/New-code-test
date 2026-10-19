@@ -140,6 +140,7 @@ try {
   const owner = await createTenant('pack');
   const foreign = await createTenant('pack-foreign');
   const consultant = await createTenant('pack-consultant');
+  await pool.query("UPDATE users SET role = 'consultant' WHERE id = $1", [consultant.userId]);
   await pool.query('INSERT INTO consultant_clients (user_id, client_id) VALUES ($1, $2)', [consultant.userId, owner.clientId]);
 
   const deptA = (await owner.request('POST', '/departments', { name: 'Front of house' })).data;

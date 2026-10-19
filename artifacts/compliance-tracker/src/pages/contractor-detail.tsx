@@ -125,7 +125,7 @@ export default function ContractorDetailPage() {
   const qc = useQueryClient();
   const { activeClientId, user } = useAuth();
   const canResend = user?.role === "consultant" || user?.role === "client_admin";
-  const canManageContractorEmails = canResend || user?.isMaintenanceManager === true;
+  const canManageContractorEmails = canResend || user?.isMaintenanceManager === true || user?.role === "client_manager";
   const clientApiFetch = useActiveClientApi();
 
   const [, navigate] = useLocation();

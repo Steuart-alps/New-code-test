@@ -263,7 +263,8 @@ export function denyViewers(req: Request, res: Response, next: NextFunction) {
  * Returns the department ID that should restrict what data this user can see,
  * or null if the user is unrestricted (admin / consultant).
  *
- * Only client_staff and client_viewer are subject to department scoping.
+ * client_staff, client_viewer and client_manager are subject to department
+ * scoping, unless the Manager has been given every department.
  * Unassigned staff/viewers receive a non-matching sentinel. Existing route
  * filters consequently expose only explicitly unassigned/site-neutral records,
  * never every department's records.
@@ -272,7 +273,23 @@ export function getActiveDepartmentId(req: Request): number | null {
   const user = req.currentUser;
   if (!user) return null;
   if (user.role === "client_admin" || user.role === "consultant") return null;
+  if (user.role === "client_manager" && user.allDepartments === true) return null;
   return (user as any).departmentId ?? -1;
+}
+
+/**
+ * Managers, and Staff with the older "Department manager" switch, lead their
+ * department: department summaries, CSV imports, inspection exports, RIDDOR
+ * health data and department tasks.
+ */
+export function isDepartmentLead(user: Pick<SafeUser, "role" | "isDepartmentManager"> | null | undefined): boolean {
+  if (!user) return false;
+  return user.role === "client_manager" || (user.role === "client_staff" && user.isDepartmentManager === true);
+}
+
+/** Owners and consultants manage every user; Managers manage the Staff and Viewers in their departments. */
+export function requireUserManager(req: Request, res: Response, next: NextFunction) {
+  return requireRole("consultant", "client_admin", "client_manager")(req, res, next);
 }
 
 export function getClientId(req: Request): number | null {

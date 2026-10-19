@@ -4,7 +4,9 @@ import { z } from "zod/v4";
 import { clientsTable } from "./clients";
 import { departmentsTable } from "./departments";
 
-export const userRoleEnum = ["consultant", "client_admin", "client_staff", "client_viewer"] as const;
+// Shown in the app as Consultant (hidden from businesses), Owner, Manager,
+// Staff and Viewer. client_admin is the stored name for a business Owner.
+export const userRoleEnum = ["consultant", "client_admin", "client_manager", "client_staff", "client_viewer"] as const;
 export type UserRole = (typeof userRoleEnum)[number];
 
 export const usersTable = pgTable("users", {
@@ -26,6 +28,9 @@ export const usersTable = pgTable("users", {
   totpRecoveryHash: text("totp_recovery_hash"),
   isMaintenanceManager: boolean("is_maintenance_manager").notNull().default(false),
   isDepartmentManager: boolean("is_department_manager").notNull().default(false),
+  // A Manager normally covers their department; the Owner can widen that to
+  // every department in the business.
+  allDepartments: boolean("all_departments").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
