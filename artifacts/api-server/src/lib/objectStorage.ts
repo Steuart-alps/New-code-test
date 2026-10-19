@@ -392,6 +392,17 @@ export class ObjectStorageService {
       }
       return [{ objectPath: `/objects/test-fake-usage/tenant-${tenantId}`, sizeBytes: syntheticBytes }];
     }
+    return listOwnedObjectMetadata(await this.tenantObjectCandidates(tenantId, referencedPaths), tenantId);
+  }
+
+  /**
+   * The tenant's own provider prefixes plus its legacy references outside
+   * them. Ownership is not checked here: callers filter by the ACL owner.
+   */
+  private async tenantObjectCandidates(
+    tenantId: number | string,
+    referencedPaths: string[],
+  ): Promise<Array<{ objectPath: string; file: File }>> {
     const { bucketName, objectName: privatePrefix } = parseObjectPath(this.getPrivateObjectDir());
     const root = privatePrefix.replace(/\/$/, "");
     const bucket = objectStorageClient.bucket(bucketName);
@@ -410,8 +421,50 @@ export class ObjectStorageService {
       .filter((objectPath) => !tenantPrefixes.some((prefix) => objectPath.startsWith(`/objects/${prefix}`)))
       .map((objectPath) => ({ objectPath, file: this.objectEntityFileRef(objectPath) }))
       .filter((object): object is { objectPath: string; file: File } => object.file !== null);
+    return [...new Map([...tenantObjects, ...legacyObjects].map((object) => [object.objectPath, object])).values()];
+  }
 
-    return listOwnedObjectMetadata([...tenantObjects, ...legacyObjects], tenantId);
+  /**
+   * Move every object this tenant owns (private ACL, same set as
+   * listTenantStorageObjects) to a provider storage class. Objects already in
+   * that class are not rewritten: a rewrite of a cold object counts as an early
+   * deletion. The rewrite keeps the object's path, content and ACL metadata, and
+   * every class stays readable by the same code.
+   */
+  async setTenantObjectsStorageClass(
+    tenantId: number | string,
+    referencedPaths: string[],
+    storageClass: string,
+  ): Promise<{ changed: number; unchanged: number }> {
+    const owner = String(tenantId);
+    let changed = 0;
+    let unchanged = 0;
+    for (const { file } of await this.tenantObjectCandidates(tenantId, referencedPaths)) {
+      let metadata = file.metadata?.size !== undefined ? file.metadata : undefined;
+      if (!metadata) {
+        try {
+          [metadata] = await file.getMetadata();
+        } catch (error) {
+          if (isProviderNotFound(error)) continue;
+          throw error;
+        }
+      }
+      let policy: ObjectAclPolicy | null = null;
+      try {
+        const raw = metadata.metadata?.["custom:aclPolicy"];
+        policy = raw ? JSON.parse(String(raw)) as ObjectAclPolicy : null;
+      } catch {
+        policy = null;
+      }
+      if (policy?.owner !== owner || policy.visibility !== "private") continue;
+      if (String(metadata.storageClass ?? "").toUpperCase() === storageClass) {
+        unchanged++;
+        continue;
+      }
+      await file.setStorageClass(storageClass);
+      changed++;
+    }
+    return { changed, unchanged };
   }
 
   async getObjectEntityUploadURL(

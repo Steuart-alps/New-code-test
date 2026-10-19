@@ -306,7 +306,11 @@ export default function TrialEndedPage() {
           )}
           {(user?.role === "client_admin" || user?.role === "consultant") && (
             <p className="text-center text-sm text-muted-foreground">
-              If your subscription was cancelled, you can{" "}
+              Your records are kept for 12 months after access ends.{" "}
+              <Link href="/settings#data-export" className="underline underline-offset-2" data-testid="link-locked-data-export">
+                Download all your data
+              </Link>{" "}
+              (records, documents and photos) at any time, or{" "}
               <Link href="/settings" className="underline underline-offset-2">request data deletion</Link>.
               {user.role === "consultant" && <> You can also <Link href="/clients" className="underline underline-offset-2">view pending requests</Link>.</>}
             </p>

@@ -114,6 +114,9 @@ jobs:
       - name: Track record lock decision tests
         run: pnpm --filter @workspace/api-server run test:track-record-lock
 
+      - name: Billing lock allowlist test
+        run: pnpm --filter @workspace/api-server run test:trial-lock-allowlist
+
       - name: Storage add-on price check test
         run: pnpm --filter @workspace/api-server run test:storage-price-check
 
@@ -222,6 +225,31 @@ jobs:
       # Warning job and banner against synced Stripe rows in the current API shape.
       - name: Cancellation warning tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:cancellation-warnings:fresh
+
+      # Reviewed account deletion: no purge before approval, the 30-day wait or
+      # with a legal hold; only the tenant's ACL-owned files; durable outcome.
+      - name: Approved account deletion tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:approved-account-deletion
+
+      - name: Client data deletion completeness tests (fresh schema)
+        run: pnpm --filter @workspace/api-server run test:client-data-deletion-feedback
+
+      # Cancelled businesses' files: cold storage after 30 days, back on
+      # reactivation, only their own ACL-owned files.
+      - name: Cancelled business storage class tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:cancelled-storage-class
+
+      # Only the business's owner can ask for deletion, after cancelling.
+      - name: Data deletion request tests
+        run: pnpm --filter @workspace/api-server run test:data-deletion-request
+
+      # One reminder with the download link 30 days before the 12-month deletion.
+      - name: Deletion reminder email tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:deletion-reminder
+
+      # Large exports come as numbered parts; every file is in exactly one.
+      - name: Export in parts tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:export-parts
 
       - name: FireTrack call point and night staff tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-call-points
