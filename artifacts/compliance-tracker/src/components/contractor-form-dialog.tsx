@@ -89,17 +89,21 @@ export function ContractorFormDialog({
   const [trades, setTrades] = useState<string[]>([]);
 
   // Per-client customisable trade list. Fall back to the built-in labels for
-  // known values and humanise any custom entries. Any trade already saved on
-  // this contractor is always shown so removing an option never hides an
-  // existing selection.
+  // known values and humanise any custom entries. A trade saved on this
+  // contractor (or still ticked) that the client no longer offers stays listed
+  // and marked disabled, so editing keeps it and an untick can be undone; the
+  // API accepts it on edit because it is unchanged. New contractors only ever
+  // see the active list.
   const { data: formOptions } = useFormOptions();
   const tradeLabels: Record<string, string> = Object.fromEntries(TRADE_OPTIONS.map(o => [o.value, o.label]));
   const humanizeTrade = (v: string) => v.split("_").map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(" ");
   const effectiveTradeValues = pickOptions(formOptions, "fixtrack_trades");
-  const tradeOptionList = [
-    ...effectiveTradeValues,
-    ...trades.filter(t => !effectiveTradeValues.includes(t)),
-  ].map(value => ({ value, label: tradeLabels[value] ?? humanizeTrade(value) }));
+  const storedTrades: string[] = Array.isArray((contractor as any)?.trades) ? (contractor as any).trades : [];
+  const retiredTrades = [...new Set([...storedTrades, ...trades])].filter(t => !effectiveTradeValues.includes(t));
+  const tradeOptionList = [...effectiveTradeValues, ...retiredTrades].map(value => {
+    const label = tradeLabels[value] ?? humanizeTrade(value);
+    return { value, label: formOptions && retiredTrades.includes(value) ? `${label} (disabled)` : label };
+  });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -309,6 +313,7 @@ export function ContractorFormDialog({
                   <button
                     key={opt.value}
                     type="button"
+                    aria-pressed={checked}
                     onClick={() => toggleTrade(opt.value)}
                     className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm text-left transition-colors ${
                       checked

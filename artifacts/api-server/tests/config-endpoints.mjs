@@ -31,6 +31,11 @@
 //        - an unrelated edit keeps an unchanged disabled value
 //        - re-enabling the value lets new records use it again
 //        - TrainTrack "Other" free text cannot reintroduce a disabled type
+//   2d. PestTrack pest/evidence types and BikeTrack bike types for two
+//       consultant-selectable clients
+//        - each client's active values are accepted, the other client's are not
+//        - disabled values are rejected for new records; unrelated edits keep them
+//        - option settings are reset afterwards
 //   3. /api/food-safety/config
 //        - PUT/DELETE require admin (viewer/staff → 403)
 //        - invalid section-toggle values (not "true"/"false") → 400
@@ -904,6 +909,114 @@ async function testDisabledOptionsOnEveryRoute(admin, ts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 2d. PestTrack and BikeTrack options across two consultant-selectable clients
+// ─────────────────────────────────────────────────────────────────────────────
+// Each client's custom pest, evidence and bike types are accepted only for that
+// client's records, a disabled value is rejected for new records, and an
+// unrelated edit keeps an unchanged disabled value.
+async function testPestAndBikeOptionsAcrossClients(admin, clientAId, clientBId, ts) {
+  console.log("\n── PestTrack + BikeTrack options across two clients ──");
+
+  const scope = (clientId) => (clientId === clientAId ? "" : `?clientId=${clientId}`);
+  const setOptions = (clientId, key, items) => admin("PUT", `/form-options/${key}${scope(clientId)}`, { items });
+  const pestBody = (pestType, evidenceType, notes) => ({
+    recordedDate: isoDate(-1),
+    pestType,
+    evidenceType,
+    location: "Store room",
+    severity: "low",
+    notes,
+  });
+  const pestRow = async (clientId, id) => {
+    const list = await admin("GET", `/pest-track/activity${scope(clientId)}`);
+    return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id);
+  };
+
+  const lists = [
+    {
+      key: "pest_types",
+      label: "pest type",
+      create: (clientId, value, note) =>
+        admin("POST", `/pest-track/activity${scope(clientId)}`, pestBody(value, "droppings", note)),
+      edit: (clientId, id, value) =>
+        admin("PUT", `/pest-track/activity/${id}${scope(clientId)}`, pestBody(value, "droppings", "Edited, type unchanged")),
+      stored: async (clientId, id) => (await pestRow(clientId, id))?.pestType,
+    },
+    {
+      key: "pest_evidence_types",
+      label: "pest evidence type",
+      create: (clientId, value, note) =>
+        admin("POST", `/pest-track/activity${scope(clientId)}`, pestBody("rodent", value, note)),
+      edit: (clientId, id, value) =>
+        admin("PUT", `/pest-track/activity/${id}${scope(clientId)}`, pestBody("rodent", value, "Edited, evidence unchanged")),
+      stored: async (clientId, id) => (await pestRow(clientId, id))?.evidenceType,
+    },
+    {
+      key: "bike_types",
+      label: "bike type",
+      create: (clientId, value, note) =>
+        admin("POST", `/bike-track/bikes${scope(clientId)}`, { ref: `X-${clientId}-${note}-${ts}`.slice(0, 100), type: value }),
+      edit: (clientId, id, value) =>
+        admin("PUT", `/bike-track/bikes/${id}${scope(clientId)}`, {
+          ref: `X-${clientId}-active-${ts}`.slice(0, 100),
+          type: value,
+          notes: "Edited, type unchanged",
+        }),
+      stored: async (clientId, id) => {
+        const list = await admin("GET", `/bike-track/bikes${scope(clientId)}`);
+        return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id)?.type;
+      },
+    },
+  ];
+
+  try {
+    for (const list of lists) {
+      const valueA = `A ${list.label} ${ts}`.slice(0, 60);
+      const valueB = `B ${list.label} ${ts}`.slice(0, 60);
+      const spareA = `A spare ${list.label} ${ts}`.slice(0, 60);
+
+      expectOk(`${list.label}: save client A custom list`, (await setOptions(clientAId, list.key, [valueA])).status);
+      expectOk(`${list.label}: save client B custom list via ?clientId`, (await setOptions(clientBId, list.key, [valueB])).status);
+
+      const aRecord = await list.create(clientAId, valueA, "active");
+      expectOk(`${list.label}: client A accepts its active value`, aRecord.status, [201]);
+      expectStatus(`${list.label}: client A rejects client B's value`, (await list.create(clientAId, valueB, "foreign")).status, 400);
+      expectOk(`${list.label}: client B accepts its active value`, (await list.create(clientBId, valueB, "active")).status, [201]);
+      expectStatus(`${list.label}: client B rejects client A's value`, (await list.create(clientBId, valueA, "foreign")).status, 400);
+
+      expectOk(`${list.label}: disable client A value`, (await setOptions(clientAId, list.key, [spareA])).status);
+      expectStatus(`${list.label}: client A rejects its disabled value`, (await list.create(clientAId, valueA, "disabled")).status, 400);
+
+      const aId = aRecord.data?.id;
+      if (Number.isInteger(aId)) {
+        expectOk(`${list.label}: unrelated edit keeps disabled value`, (await list.edit(clientAId, aId, valueA)).status, [200]);
+        const stored = await list.stored(clientAId, aId);
+        check(`${list.label}: stored value unchanged after edit`, stored === valueA, `got ${JSON.stringify(stored)}`);
+      } else {
+        check(`${list.label}: client A record id`, false, `got ${JSON.stringify(aRecord.data)}`);
+      }
+      // Back to the defaults before the next list (pest evidence records need
+      // the default pest type).
+      expectOk(`${list.label}: reset client A list`, (await admin("DELETE", `/form-options/${list.key}`)).status);
+      expectOk(`${list.label}: reset client B list`, (await admin("DELETE", `/form-options/${list.key}?clientId=${clientBId}`)).status);
+    }
+  } finally {
+    // Also reset after a failure; the records go with the fixture purge of
+    // both clients.
+    for (const list of lists) {
+      await admin("DELETE", `/form-options/${list.key}`).catch(() => {});
+      await admin("DELETE", `/form-options/${list.key}?clientId=${clientBId}`).catch(() => {});
+    }
+  }
+  const after = await admin("GET", `/form-options?clientId=${clientBId}`);
+  check(
+    "pest/bike options: client B lists reset after the run",
+    lists.every((list) => after.data?.customised?.[list.key] === false),
+    `customised=${JSON.stringify(after.data?.customised)}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 3. /api/food-safety/config
 // ─────────────────────────────────────────────────────────────────────────────
 async function testFoodSafetyConfig(admin, viewer, staff, clientBId, ts) {
@@ -1388,6 +1501,106 @@ async function testSiteJurisdictionReheating(admin, ts) {
   await admin("DELETE", "/food-safety/config");
 }
 
+// Countries outside the UK: choosing one gives its starting labels and numeric
+// rules wherever nothing is saved, for GET /config and for every way a diary
+// day is created. Saved labels and rules still win.
+async function testCountryGuidance(admin, ts) {
+  console.log("\n── food-safety: country temperature guidance ──");
+  const IRELAND = {
+    cookingLimit: "75°C or above (core)",
+    coolingLimit: "In the fridge within 2 hours (below 10°C by 2½ hours at the latest)",
+    reheatingLimit: "70°C or above (core), reheat once only",
+    hotHoldingLimit: "Above 63°C",
+  };
+  const US = {
+    coolingLimit: "57°C (135°F) to 21°C (70°F) within 2 hours, then 5°C (41°F) within 6 hours in total",
+    reheatingLimit: "74°C (165°F) for 15 seconds, within 2 hours",
+    hotHoldingLimit: "57°C (135°F) or above",
+  };
+  const site = await admin("POST", "/sites", { name: `Country Site ${ts}` });
+  expectOk("country: create site", site.status, [200, 201]);
+  const siteId = site.data?.id;
+  await admin("DELETE", "/food-safety/config");
+
+  let dayOfMonth = 0;
+  const nextDay = () => `2097-04-${String(++dayOfMonth).padStart(2, "0")}`;
+  const scope = (id) => (id == null ? "" : `?siteId=${id}`);
+  const configOf = async (id) => (await admin("GET", `/food-safety/config${scope(id)}`)).data ?? {};
+  const labelsOf = (record) => ({
+    cookingLimit: record?.cookingLimit, coolingLimit: record?.coolingLimit,
+    reheatingLimit: record?.reheatingLimit, hotHoldingLimit: record?.hotHoldingLimit,
+  });
+  const configLabels = (config) => ({
+    cookingLimit: config.food_cooking_limit, coolingLimit: config.food_cooling_limit,
+    reheatingLimit: config.food_reheating_limit, hotHoldingLimit: config.food_hot_holding_limit,
+  });
+  // A day opened by POST without labels (as the phone app does) and one
+  // opened by a delivery append both carry the scope's labels.
+  const expectStamps = async (label, id, expected) => {
+    const posted = await admin("POST", `/food-safety${scope(id)}`, { recordDate: nextDay() });
+    check(`country: ${label} POST stamps labels`, posted.status === 201
+      && JSON.stringify(labelsOf(posted.data)) === JSON.stringify(expected), `${posted.status} ${JSON.stringify(labelsOf(posted.data))}`);
+    const recordDate = nextDay();
+    const appended = await admin("POST", `/food-safety/append${scope(id)}`, {
+      recordDate, section: "deliveries", row: { supplier: "Dairy", tempChilled: "3" }, entryId: randomUUID(),
+    });
+    const day = (await admin("GET", `/food-safety/by-date/${recordDate}${scope(id)}`)).data;
+    check(`country: ${label} delivery-first append stamps labels`, appended.status === 201
+      && JSON.stringify(labelsOf(day)) === JSON.stringify(expected), `${appended.status} ${JSON.stringify(labelsOf(day))}`);
+  };
+
+  const unknown = await admin("PUT", "/food-safety/config", { food_jurisdiction: "atlantis" });
+  check("country: unknown country → 400 naming the choices",
+    unknown.status === 400 && /ireland/.test(unknown.data?.error ?? "") && /united_states/.test(unknown.data?.error ?? ""),
+    `${unknown.status} ${JSON.stringify(unknown.data)}`);
+
+  // ── Organisation on Ireland ──
+  expectOk("country: organisation chooses Ireland",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "ireland" })).status);
+  const ireland = await configOf(null);
+  check("country: Ireland labels in config", ireland.food_jurisdiction === "ireland"
+    && JSON.stringify(configLabels(ireland)) === JSON.stringify(IRELAND), JSON.stringify(configLabels(ireland)));
+  const irelandRules = JSON.parse(ireland.food_temperature_rules ?? "{}");
+  check("country: Ireland numeric rules in config",
+    irelandRules.reheating?.min === 70 && irelandRules.cooling?.max === 10 && irelandRules.coolingMinutes === 150
+      && irelandRules.chilledDelivery?.max === 5, ireland.food_temperature_rules);
+  await expectStamps("Ireland", null, IRELAND);
+
+  // ── A saved label wins over the country's ──
+  const ownCooking = `Our HACCP: 80°C ${ts}`.slice(0, 60);
+  expectOk("country: organisation saves its own cooking label",
+    (await admin("PUT", "/food-safety/config", { food_cooking_limit: ownCooking })).status);
+  check("country: saved cooking label shown", (await configOf(null)).food_cooking_limit === ownCooking);
+
+  // ── Site on the United States inherits the saved label, not the rest ──
+  expectOk("country: site chooses the United States",
+    (await admin("PUT", `/food-safety/config?siteId=${siteId}`, { food_jurisdiction: "united_states" })).status);
+  const usLabels = { cookingLimit: ownCooking, ...US };
+  const usConfig = await configOf(siteId);
+  check("country: US site labels in config", usConfig.food_jurisdiction === "united_states"
+    && JSON.stringify(configLabels(usConfig)) === JSON.stringify(usLabels), JSON.stringify(configLabels(usConfig)));
+  check("country: US site numeric rules", JSON.parse(usConfig.food_temperature_rules ?? "{}").hotHolding?.min === 57, usConfig.food_temperature_rules);
+  await expectStamps("US site", siteId, usLabels);
+  check("country: organisation stays on Ireland", (await configOf(null)).food_jurisdiction === "ireland");
+
+  // ── Saved numeric rules win over the country preset ──
+  const ownRules = { ...irelandRules, hotHolding: { min: 65, max: null } };
+  expectOk("country: organisation saves its own rules",
+    (await admin("PUT", "/food-safety/config", { food_temperature_rules: JSON.stringify(ownRules) })).status);
+  check("country: US site inherits the saved rules",
+    JSON.parse((await configOf(siteId)).food_temperature_rules ?? "{}").hotHolding?.min === 65);
+
+  // ── Back to a UK nation: the UK labels return ──
+  await admin("DELETE", `/food-safety/config?siteId=${siteId}`);
+  await admin("DELETE", "/food-safety/config");
+  expectOk("country: organisation back on England/Wales",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "england_wales" })).status);
+  const uk = { cookingLimit: "75°C or above (core)", coolingLimit: "8°C within 90 minutes", reheatingLimit: "Above 75°C", hotHoldingLimit: "Above 63°C" };
+  check("country: England/Wales labels in config", JSON.stringify(configLabels(await configOf(null))) === JSON.stringify(uk));
+  await expectStamps("England/Wales", null, uk);
+  await admin("DELETE", "/food-safety/config");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 3c. KitchenTrack closed (non-operating) days
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1720,9 +1933,11 @@ async function runSuite() {
   fixtures.probe("after-record-validation");
   await testCustomTradeAndInspectionValidation(a.session, a.clientId, clientBId, ts);
   await testDisabledOptionsOnEveryRoute(a.session, ts);
+  await testPestAndBikeOptionsAcrossClients(a.session, a.clientId, clientBId, ts);
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
   await testSiteJurisdictionReheating(a.session, ts);
+  await testCountryGuidance(a.session, ts);
   await testKitchenClosedDays(a.session, viewer, staff, ts);
   await testPushToken(a.session, other, ts);
   await testStorageUsage(a.session, viewer, staff, a.clientId, clientBId);

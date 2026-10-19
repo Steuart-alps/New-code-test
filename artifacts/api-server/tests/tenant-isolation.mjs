@@ -58,10 +58,11 @@ function expectOk(name, status, allowed = [200, 201]) {
 }
 
 // Unique date string to avoid food-safety recordDate collisions between tenants
+// in the account's own day (Europe/London), which the record lock compares
+// against; a UTC date is a day behind between 23:00 and 00:00 UTC in BST.
 function uniqueDate(offset = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() - offset);
-  return d.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" })
+    .format(new Date(Date.now() - offset * 86400000));
 }
 
 async function setupTenant(label) {
@@ -114,7 +115,7 @@ async function setupTenant(label) {
   // ── Fire-safety module ───────────────────────────────────────────────────────
   // Trial accounts have "all" entitlements so module routes are always open.
   const fireSafetyCheck = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(),
     result: "pass",
   });
@@ -263,7 +264,7 @@ async function attack(attacker, victim) {
   expectBlocked(
     `${tag}: POST /fire-safety body clientId`,
     (await req("POST", "/fire-safety", {
-      checkType: "alarm",
+      checkType: "alarm", callPoint: "CP1",
       checkDate: uniqueDate(2),
       result: "pass",
       clientId: victim.clientId,

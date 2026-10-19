@@ -19,6 +19,7 @@ import { appendAuditEvent } from "../lib/audit";
 import { completionFields, completionDateFromDay } from "../lib/complianceCompletion";
 import { NO_ACTION, itemActionState, itemActionStates, type ItemActionState } from "../lib/certificateOutcomes";
 import { getAccountToday } from "../lib/accountClock";
+import { recordTrackCheckFromTask } from "../lib/trackTaskLink";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -383,7 +384,13 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     Object.assign(updateData, completion.fields);
     if (completion.recurring) recurrence = { completedAt, nextDueDate: completion.fields.dueDate };
   }
-  else if (body.status) updateData.completedAt = null;
+  // The edit form always re-sends the status. Only reopening a completed
+  // one-off check clears its completion; a repeating check keeps its "last
+  // completed" date.
+  else if (body.status && existing[0].status === "completed"
+    && !((body.frequencyMonths !== undefined ? body.frequencyMonths : existing[0].frequencyMonths) ?? 0)) {
+    updateData.completedAt = null;
+  }
   // A reminder delivered for the old due date does not cover the new one, so
   // the scheduler may remind again for the new cycle.
   const nextDueDate = updateData.dueDate as Date | null | undefined;
@@ -404,6 +411,11 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     action: "updated", before: existing[0], after: joined!.item,
     ...(recurrence ? { metadata: { recurringCompletion: recurrence } } : {}),
   });
+  // Completing a task a track also keeps (emergency lighting, fire alarm and
+  // extinguisher servicing, cleaning the water tanks) records it in that track.
+  if (recurrence || (body.status === "completed" && String(joined!.item.completedAt) !== String(existing[0].completedAt))) {
+    await recordTrackCheckFromTask(req, joined!.item, joined!.item.completedAt);
+  }
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
     await itemActionState(existing[0].clientId, id)));
 });
@@ -492,7 +504,12 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
         // The next due date starts a new reminder cycle.
         ...(completion.recurring ? { notificationSentAt: null } : {}),
       }
-    : { status, completedAt: null };
+    : {
+        status,
+        // Reopening a completed one-off check clears its completion; a
+        // repeating check keeps its "last completed" date.
+        ...(existing[0].status === "completed" && !existing[0].frequencyMonths ? { completedAt: null } : {}),
+      };
   await db.transaction(async (tx) => {
     await tx
       .update(complianceItemsTable)
@@ -509,6 +526,7 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
       ? { metadata: { recurringCompletion: { completedAt: completion.fields.completedAt, nextDueDate: completion.fields.dueDate } } }
       : {}),
   });
+  if (completion) await recordTrackCheckFromTask(req, joined!.item, completion.fields.completedAt);
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
     await itemActionState(existing[0].clientId, id)));
 });

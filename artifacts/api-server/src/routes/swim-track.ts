@@ -1,4 +1,4 @@
-import { Router, type Request } from "express";
+import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sitesTable } from "@workspace/db/schema";
@@ -79,6 +79,29 @@ async function racedEntry(table: RawClientEntryTable, req: Request, err: unknown
   if (!entry || entry === "invalid" || !isUniqueViolation(err)) return null;
   const row = await findRawStoredEntry(table, getClientId(req)!, entry);
   return row ? { row, entry } : null;
+}
+
+/**
+ * Rejects a client-supplied siteId that is malformed, not this client's, or
+ * outside the active department. Sends the error and returns true when it did.
+ * A null/absent siteId passes (these records may be business-wide).
+ */
+async function rejectInaccessibleSite(
+  res: Response,
+  rawSiteId: unknown,
+  clientId: number,
+  departmentId: number | null,
+): Promise<boolean> {
+  if (rawSiteId == null) return false;
+  const siteId = Number(rawSiteId);
+  if ((typeof rawSiteId !== "number" && typeof rawSiteId !== "string") || !Number.isSafeInteger(siteId) || siteId <= 0) {
+    res.status(400).json({ error: "Invalid siteId" });
+    return true;
+  }
+  const access = await checkSiteAccess(siteId, clientId, departmentId);
+  if (access === "invalid") { res.status(400).json({ error: "Invalid site" }); return true; }
+  if (access === "forbidden") { res.status(403).json({ error: "Site not accessible" }); return true; }
+  return false;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -201,6 +224,8 @@ router.put("/sessions/:id", denyViewers, async (req, res) => {
       maxBathers, batherCountPeak, preSessionResult, preSessionNotes,
       poolClosed, closureReason, notes,
     } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
     const existing = (await db.execute(sql`SELECT lifeguard_roster_id, lifeguard_name FROM swim_sessions WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
     if (!existing) return res.status(404).json({ error: "Session not found" });
     const performer = await resolveStaffPerformerUpdate(clientId, lifeguardRosterId, lifeguardName, existing.lifeguard_roster_id, existing.lifeguard_name);
@@ -322,6 +347,8 @@ router.put("/surveillance/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
      const { siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, checkedByRosterId } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
      const existing = (await db.execute(sql`SELECT checked_by_roster_id, checked_by FROM swim_surveillance_checks WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
      if (!existing) return res.status(404).json({ error: "Check not found" });
      const performer = await resolveStaffPerformerUpdate(clientId, checkedByRosterId, checkedBy, existing.checked_by_roster_id, existing.checked_by);
@@ -449,6 +476,8 @@ router.put("/first-aid/:id", denyViewers, async (req, res) => {
       throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk,
        checkedBy, checkedByRosterId, defectsFound, notes,
     } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
      const existing = (await db.execute(sql`
        SELECT *
        FROM swim_first_aid_checks
@@ -599,6 +628,8 @@ router.put("/incidents/:id", denyViewers, async (req, res) => {
       personsInvolved, description, actionTaken, reportedTo,
       reportedDate, outcome, notes,
     } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    if (await rejectInaccessibleSite(res, siteId, clientId, getActiveDepartmentId(req))) return;
     const dbResult = await db.execute(sql`
       UPDATE swim_incidents SET
         site_id = ${siteId ?? null}, incident_date = ${incidentDate},

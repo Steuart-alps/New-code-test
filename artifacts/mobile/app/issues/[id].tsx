@@ -375,7 +375,18 @@ export default function IssueDetailScreen() {
                 { backgroundColor: colors.navy },
                 isPending && { opacity: 0.6 },
               ]}
-              onPress={() => updateStatus(t.value)}
+              onPress={() => {
+                // The API requires the resolver's drawn signature, which the
+                // app cannot capture yet.
+                if (t.value === 'resolved') {
+                  Alert.alert(
+                    'Sign off on the web',
+                    'Resolving an issue needs your drawn signature. Open this issue in ComplyTrack on the web to resolve it.',
+                  );
+                  return;
+                }
+                updateStatus(t.value);
+              }}
               disabled={isPending}
             >
               {isPending ? (

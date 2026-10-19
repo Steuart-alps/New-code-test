@@ -109,6 +109,44 @@ export interface HealthStatus {
   status: string;
 }
 
+export type PublicLinkAccessEntryLinkType = typeof PublicLinkAccessEntryLinkType[keyof typeof PublicLinkAccessEntryLinkType];
+
+
+export const PublicLinkAccessEntryLinkType = {
+  sign_off: 'sign_off',
+  contractor_portal: 'contractor_portal',
+  fix_track_action: 'fix_track_action',
+  fix_track_quote: 'fix_track_quote',
+} as const;
+
+export type PublicLinkAccessEntryActionType = typeof PublicLinkAccessEntryActionType[keyof typeof PublicLinkAccessEntryActionType];
+
+
+export const PublicLinkAccessEntryActionType = {
+  view: 'view',
+  submit: 'submit',
+} as const;
+
+export interface PublicLinkAccessEntry {
+  id: number;
+  linkType: PublicLinkAccessEntryLinkType;
+  actionType: PublicLinkAccessEntryActionType;
+  activity: string;
+  /**
+     * @minLength 8
+     * @maxLength 8
+     */
+  linkRef: string;
+  occurredAt: string;
+}
+
+export interface PublicLinkAccessPage {
+  /** @maxItems 100 */
+  entries: PublicLinkAccessEntry[];
+  /** @nullable */
+  nextCursor: string | null;
+}
+
 export type AuditLogEntryAction = typeof AuditLogEntryAction[keyof typeof AuditLogEntryAction];
 
 
@@ -1077,6 +1115,9 @@ export const FireCheckType = {
   fire_drill: 'fire_drill',
   fire_walk: 'fire_walk',
   alarm_panel: 'alarm_panel',
+  emergency_lights_annual: 'emergency_lights_annual',
+  alarm_service: 'alarm_service',
+  extinguisher_service: 'extinguisher_service',
 } as const;
 
 export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof FireSafetyCheckResult];
@@ -1085,6 +1126,18 @@ export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof Fi
 export const FireSafetyCheckResult = {
   pass: 'pass',
   fail: 'fail',
+} as const;
+
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type FireSafetyCheckNightStaff = typeof FireSafetyCheckNightStaff[keyof typeof FireSafetyCheckNightStaff] | null;
+
+
+export const FireSafetyCheckNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
 } as const;
 
 export interface FireSafetyCheck {
@@ -1097,6 +1150,12 @@ export interface FireSafetyCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: FireSafetyCheckNightStaff;
   createdAt: string;
   updatedAt: string;
 }
@@ -1109,6 +1168,18 @@ export const CreateFireSafetyCheckRequestResult = {
   fail: 'fail',
 } as const;
 
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type CreateFireSafetyCheckRequestNightStaff = typeof CreateFireSafetyCheckRequestNightStaff[keyof typeof CreateFireSafetyCheckRequestNightStaff] | null;
+
+
+export const CreateFireSafetyCheckRequestNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
 export interface CreateFireSafetyCheckRequest {
   checkType: FireCheckType;
   checkDate: string;
@@ -1117,6 +1188,12 @@ export interface CreateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: CreateFireSafetyCheckRequestNightStaff;
 }
 
 export type UpdateFireSafetyCheckRequestResult = typeof UpdateFireSafetyCheckRequestResult[keyof typeof UpdateFireSafetyCheckRequestResult];
@@ -1127,6 +1204,18 @@ export const UpdateFireSafetyCheckRequestResult = {
   fail: 'fail',
 } as const;
 
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type UpdateFireSafetyCheckRequestNightStaff = typeof UpdateFireSafetyCheckRequestNightStaff[keyof typeof UpdateFireSafetyCheckRequestNightStaff] | null;
+
+
+export const UpdateFireSafetyCheckRequestNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
 export interface UpdateFireSafetyCheckRequest {
   checkDate?: string;
   result?: UpdateFireSafetyCheckRequestResult;
@@ -1134,6 +1223,31 @@ export interface UpdateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
+}
+
+export interface FireCallPoint {
+  id: number;
+  siteId: number | null;
+  name: string;
+  archivedAt: string | null;
+  /** Date of the latest alarm test that used this call point. */
+  lastTestedDate: string | null;
+}
+
+export interface CreateFireCallPointRequest {
+  siteId: number | null;
+  name: string;
+}
+
+export interface UpdateFireCallPointRequest {
+  name?: string;
+  archived?: boolean;
 }
 
 export type FireSafetyStatusLastResult = typeof FireSafetyStatusLastResult[keyof typeof FireSafetyStatusLastResult] | null;
@@ -1643,7 +1757,7 @@ export interface PoolTrackConfig {
 }
 
 /**
- * Food-safety jurisdiction used to choose the standard reheating limit.
+ * Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
  */
 export type FoodSafetyConfigFoodJurisdiction = typeof FoodSafetyConfigFoodJurisdiction[keyof typeof FoodSafetyConfigFoodJurisdiction] | null;
 
@@ -1652,6 +1766,12 @@ export const FoodSafetyConfigFoodJurisdiction = {
   scotland: 'scotland',
   england_wales: 'england_wales',
   northern_ireland: 'northern_ireland',
+  ireland: 'ireland',
+  australia: 'australia',
+  new_zealand: 'new_zealand',
+  canada: 'canada',
+  united_states: 'united_states',
+  other: 'other',
 } as const;
 
 export interface FoodSafetyConfig {
@@ -1671,7 +1791,7 @@ export interface FoodSafetyConfig {
   food_show_sous_vide?: string | null;
   food_num_fridges?: string | null;
   food_num_freezers?: string | null;
-  /** Food-safety jurisdiction used to choose the standard reheating limit. */
+  /** Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels. */
   food_jurisdiction?: FoodSafetyConfigFoodJurisdiction;
   food_cooking_limit?: string | null;
   food_cooling_limit?: string | null;
@@ -2064,6 +2184,49 @@ export const ListAuditLogModule = {
   incidents: 'incidents',
 } as const;
 
+export type ListPublicLinkAccessParams = {
+linkType?: ListPublicLinkAccessLinkType;
+actionType?: ListPublicLinkAccessActionType;
+/**
+ * Only access at or after this instant (ISO 8601).
+ * @maxLength 40
+ */
+from?: string;
+/**
+ * Only access before this instant (ISO 8601).
+ * @maxLength 40
+ */
+to?: string;
+/**
+ * nextCursor from the previous page.
+ * @maxLength 200
+ */
+cursor?: string;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+};
+
+export type ListPublicLinkAccessLinkType = typeof ListPublicLinkAccessLinkType[keyof typeof ListPublicLinkAccessLinkType];
+
+
+export const ListPublicLinkAccessLinkType = {
+  sign_off: 'sign_off',
+  contractor_portal: 'contractor_portal',
+  fix_track_action: 'fix_track_action',
+  fix_track_quote: 'fix_track_quote',
+} as const;
+
+export type ListPublicLinkAccessActionType = typeof ListPublicLinkAccessActionType[keyof typeof ListPublicLinkAccessActionType];
+
+
+export const ListPublicLinkAccessActionType = {
+  view: 'view',
+  submit: 'submit',
+} as const;
+
 export type ListComplianceItemsParams = {
 status?: ListComplianceItemsStatus;
 siteId?: number;
@@ -2122,6 +2285,22 @@ export type GetFireSafetyStatusParams = {
  */
 siteId?: number;
 };
+
+export type ListFireCallPointsParams = {
+/**
+ * A site id, or "none" for call points not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
+includeArchived?: ListFireCallPointsIncludeArchived;
+};
+
+export type ListFireCallPointsIncludeArchived = typeof ListFireCallPointsIncludeArchived[keyof typeof ListFireCallPointsIncludeArchived];
+
+
+export const ListFireCallPointsIncludeArchived = {
+  true: 'true',
+  false: 'false',
+} as const;
 
 export type GetFoodSafetyConfigParams = {
 /**

@@ -242,13 +242,14 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
   const departmentId = getActiveDepartmentId(req);
   const result = await db.transaction(async (tx) => {
     const [action] = await tx.select().from(trackActionsTable).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId))).for("update");
-    if (!action) return { status: 404 as const, error: "Action not found" };
+    // Another department's action answers exactly like a missing one.
+    if (!action || !await canAccessSite(action.siteId, clientId, departmentId)) return { status: 404 as const, error: "Action not found" };
     if (action.module === "green") return { status: 400 as const, error: "GreenTrack actions stay within GreenTrack" };
     if (action.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be sent to FixTrack" };
     // A failed temperature can still get a repair job, but a manager verifies
-    // and resolves the action in KitchenTrack ("parallel").
+    // and resolves the action in KitchenTrack ("parallel"). The department
+    // check now runs with the lookup above and answers 404 (#105).
     const keptInTrack = action.module === "kitchen" && !!action.sourceKind?.startsWith("kitchen_temperature_");
-    if (!await canAccessSite(action.siteId, clientId, departmentId)) return { status: 403 as const, error: "Forbidden site" };
     if (!parsed.data.create) {
       const [row] = await tx.update(trackActionsTable).set({ fixTrackDisposition: "not_needed", updatedAt: new Date() }).where(eq(trackActionsTable.id, action.id)).returning();
       return { status: 200 as const, row };
@@ -281,7 +282,10 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     const siteIds = [...new Set([current.siteId, parsed.data.siteId].filter((value): value is number => value != null))].sort((a, b) => a - b);
     const sites = siteIds.length ? await tx.select({ id: sitesTable.id, clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(inArray(sitesTable.id, siteIds)).for("update") : [];
     const canUse = (siteId: number | null | undefined) => siteId == null || sites.some(site => site.id === siteId && site.clientId === clientId && (departmentId == null || site.departmentId == null || site.departmentId === departmentId));
-    if (!canUse(current.siteId) || ("siteId" in parsed.data && !canUse(parsed.data.siteId))) return { status: 403 as const, error: "Forbidden site" };
+    // Another department's action answers exactly like a missing one; only a
+    // move to a site the caller cannot use is reported as forbidden.
+    if (!canUse(current.siteId)) return { status: 404 as const, error: "Action not found" };
+    if ("siteId" in parsed.data && !canUse(parsed.data.siteId)) return { status: 403 as const, error: "Forbidden site" };
     if (current.sourceKind && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
       return { status: 409 as const, error: "The source record controls this action's site" };
     }

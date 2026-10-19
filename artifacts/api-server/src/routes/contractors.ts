@@ -13,6 +13,8 @@ import { randomUUID } from "node:crypto";
 import { filterName } from "../lib/contentFilter";
 import { digestBearerToken, newBearerToken } from "../lib/bearerTokens";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { getPublicAppUrl } from "../lib/email";
+import { cancelUnsentPortalDrafts, lockPortalLinkAndDrafts, relinkUnsentPortalDrafts } from "../lib/contractorPortalDrafts";
 import { CONTRACTOR_DBS_TYPES, normalizeContractorDbsType } from "../lib/contractorDbsTypes";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
@@ -55,13 +57,14 @@ const PortalLinkBody = z.object({
 });
 
 async function portalAudit(
+  executor: Pick<typeof db, "execute">,
   clientId: number,
   contractorId: number,
   actorUserId: number | undefined,
   eventType: string,
   details: Record<string, unknown> = {},
 ) {
-  await db.execute(sql`
+  await executor.execute(sql`
     INSERT INTO contractor_portal_audit_log
       (client_id, contractor_id, actor_type, actor_user_id, event_type, details)
     VALUES
@@ -241,6 +244,9 @@ router.delete("/contractors/:id", requireAuth, requireClientAdmin, async (req, r
 // ── Manager-issued contractor self-service links ───────────────────────────
 // The plaintext bearer token is returned only at issuance time. Reissuing a
 // link atomically replaces the prior token; revocation preserves its audit row.
+// Both settle the contractor's unsent portal reminder drafts in the same
+// transaction (see lib/contractorPortalDrafts.ts): a reissue relinks them and
+// keeps them awaiting approval, a revocation cancels them.
 router.post("/contractors/:id/portal-link", requireAuth, requireClientAdmin, async (req, res) => {
   const contractorId = Number(req.params.id);
   if (!Number.isInteger(contractorId) || contractorId <= 0) {
@@ -248,36 +254,54 @@ router.post("/contractors/:id/portal-link", requireAuth, requireClientAdmin, asy
     return;
   }
   const body = PortalLinkBody.parse(req.body ?? {});
-  const contractor = await contractorInActiveClient(req, contractorId);
-  if (!contractor) {
+  const clientId = getClientId(req);
+  if (!clientId) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
 
-   const token = newBearerToken();
+  const token = newBearerToken();
   const expiresAt = new Date(Date.now() + body.expiresInDays * 24 * 60 * 60 * 1000);
-  await db.execute(sql`
-    INSERT INTO contractor_portal_tokens
-       (client_id, contractor_id, token, token_hash, expires_at, revoked_at, issued_by, created_at)
-    VALUES
-       (${contractor.clientId}, ${contractor.id}, NULL, ${digestBearerToken(token)}, ${expiresAt}, NULL, ${req.currentUser?.id ?? null}, now())
-    ON CONFLICT (contractor_id) DO UPDATE SET
-      client_id = EXCLUDED.client_id,
-       token = NULL,
-       token_hash = EXCLUDED.token_hash,
-      expires_at = EXCLUDED.expires_at,
-      revoked_at = NULL,
-      issued_by = EXCLUDED.issued_by,
-      created_at = now()
-  `);
-  await portalAudit(contractor.clientId, contractor.id, req.currentUser?.id, "link_issued", {
-    expiresAt: expiresAt.toISOString(),
+  const appUrl = getPublicAppUrl();
+  const issued = await db.transaction(async (tx) => {
+    const locked = await lockPortalLinkAndDrafts(tx, clientId, contractorId);
+    if (!locked) return null;
+    const link = (await tx.execute(sql`
+      INSERT INTO contractor_portal_tokens
+         (client_id, contractor_id, token, token_hash, expires_at, revoked_at, issued_by, created_at)
+      VALUES
+         (${clientId}, ${contractorId}, NULL, ${digestBearerToken(token)}, ${expiresAt}, NULL, ${req.currentUser?.id ?? null}, now())
+      ON CONFLICT (contractor_id) DO UPDATE SET
+        client_id = EXCLUDED.client_id,
+         token = NULL,
+         token_hash = EXCLUDED.token_hash,
+        expires_at = EXCLUDED.expires_at,
+        revoked_at = NULL,
+        issued_by = EXCLUDED.issued_by,
+        created_at = now()
+      RETURNING id, token_hash
+    `)).rows[0] as { id: number; token_hash: string };
+    const drafts = await relinkUnsentPortalDrafts(tx, link, locked.drafts, appUrl);
+    await portalAudit(tx, clientId, contractorId, req.currentUser?.id, "link_issued", {
+      expiresAt: expiresAt.toISOString(),
+      ...(drafts.relinked.length ? { queuedRemindersRelinked: drafts.relinked } : {}),
+      ...(drafts.approvalsWithdrawn.length ? { queuedReminderApprovalsWithdrawn: drafts.approvalsWithdrawn } : {}),
+      ...(drafts.withdrawn.length ? { queuedRemindersWithdrawn: drafts.withdrawn } : {}),
+    });
+    return drafts;
   });
-  const appUrl = (process.env.PUBLIC_APP_URL || "").replace(/\/$/, "");
+  if (!issued) {
+    res.status(404).json({ error: "Contractor not found" });
+    return;
+  }
   res.status(201).json({
     token,
     expiresAt: expiresAt.toISOString(),
     portalUrl: `${appUrl}/contractor-portal/${token}`,
+    // Unsent reminders now carry a link bound to this issuance and still need
+    // a manager's approval before anything is sent.
+    queuedRemindersRelinked: issued.relinked.length,
+    queuedRemindersWithdrawn: issued.withdrawn.length,
   });
 });
 
@@ -287,17 +311,28 @@ router.delete("/contractors/:id/portal-link", requireAuth, requireClientAdmin, a
     res.status(400).json({ error: "Invalid contractor ID" });
     return;
   }
-  const contractor = await contractorInActiveClient(req, contractorId);
-  if (!contractor) {
+  const clientId = getClientId(req);
+  if (!clientId) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
-  await db.execute(sql`
-    UPDATE contractor_portal_tokens SET revoked_at = now()
-    WHERE contractor_id = ${contractor.id} AND client_id = ${contractor.clientId}
-      AND revoked_at IS NULL
-  `);
-  await portalAudit(contractor.clientId, contractor.id, req.currentUser?.id, "link_revoked");
+  const revoked = await db.transaction(async (tx) => {
+    const locked = await lockPortalLinkAndDrafts(tx, clientId, contractorId);
+    if (!locked) return false;
+    await tx.execute(sql`
+      UPDATE contractor_portal_tokens SET revoked_at = now()
+      WHERE contractor_id = ${contractorId} AND client_id = ${clientId}
+        AND revoked_at IS NULL
+    `);
+    const cancelled = await cancelUnsentPortalDrafts(tx, locked.drafts);
+    await portalAudit(tx, clientId, contractorId, req.currentUser?.id, "link_revoked",
+      cancelled.length ? { queuedRemindersCancelled: cancelled } : {});
+    return true;
+  });
+  if (!revoked) {
+    res.status(404).json({ error: "Contractor not found" });
+    return;
+  }
   res.status(204).send();
 });
 

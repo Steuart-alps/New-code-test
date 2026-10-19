@@ -11,6 +11,8 @@ tags:
     description: Health operations
   - name: audit-log
     description: Compliance change history
+  - name: public-link-access
+    description: Privacy-safe history of public link use
   - name: compliance-items
     description: Compliance item operations
   - name: categories
@@ -164,6 +166,65 @@ paths:
                 maxItems: 50
                 items:
                   $ref: "#/components/schemas/AuditLogEntry"
+
+  /public-link-access:
+    get:
+      operationId: listPublicLinkAccess
+      tags: [public-link-access]
+      summary: List recent public-link access for the signed-in business
+      description: >-
+        Client admins and consultants only. Newest first, scoped to the active
+        business. Entries never include link tokens; linkRef is a short prefix
+        of the stored SHA-256 fingerprint so repeat use of one link can be
+        matched without exposing the credential.
+      parameters:
+        - in: query
+          name: linkType
+          required: false
+          schema:
+            type: string
+            enum: [sign_off, contractor_portal, fix_track_action, fix_track_quote]
+        - in: query
+          name: actionType
+          required: false
+          schema:
+            type: string
+            enum: [view, submit]
+        - in: query
+          name: from
+          required: false
+          description: Only access at or after this instant (ISO 8601).
+          schema:
+            type: string
+            maxLength: 40
+        - in: query
+          name: to
+          required: false
+          description: Only access before this instant (ISO 8601).
+          schema:
+            type: string
+            maxLength: 40
+        - in: query
+          name: cursor
+          required: false
+          description: nextCursor from the previous page.
+          schema:
+            type: string
+            maxLength: 200
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: One page of access events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicLinkAccessPage"
 
   /categories:
     get:
@@ -1201,6 +1262,76 @@ paths:
           description: The site is not one of this client's sites
         "403":
           description: The site belongs to a department the caller cannot see
+
+  /fire-safety/call-points:
+    get:
+      operationId: listFireCallPoints
+      tags: [fire-safety]
+      summary: List manual call points with when each was last tested
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for call points not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+        - in: query
+          name: includeArchived
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Call points
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireCallPoint"
+    post:
+      operationId: createFireCallPoint
+      tags: [fire-safety]
+      summary: Add a manual call point (managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFireCallPointRequest"
+      responses:
+        "201":
+          description: Created call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
+        "409":
+          description: The site already has a call point with that name
+
+  /fire-safety/call-points/{id}:
+    put:
+      operationId: updateFireCallPoint
+      tags: [fire-safety]
+      summary: Rename, archive or restore a call point (managers)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFireCallPointRequest"
+      responses:
+        "200":
+          description: Updated call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
 
   /fire-safety/{id}:
     put:
@@ -2541,6 +2672,40 @@ components:
           type: string
       required:
         - status
+
+    PublicLinkAccessPage:
+      type: object
+      required: [entries, nextCursor]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/PublicLinkAccessEntry"
+        nextCursor:
+          type: [string, "null"]
+
+    PublicLinkAccessEntry:
+      type: object
+      required: [id, linkType, actionType, activity, linkRef, occurredAt]
+      properties:
+        id:
+          type: integer
+        linkType:
+          type: string
+          enum: [sign_off, contractor_portal, fix_track_action, fix_track_quote]
+        actionType:
+          type: string
+          enum: [view, submit]
+        activity:
+          type: string
+        linkRef:
+          type: string
+          minLength: 8
+          maxLength: 8
+        occurredAt:
+          type: string
+          format: date-time
 
     AuditLogEntry:
       type: object
@@ -4003,7 +4168,7 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service]
 
     FireSafetyCheck:
       type: object
@@ -4031,6 +4196,19 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
         createdAt:
           type: string
           format: date-time
@@ -4068,6 +4246,19 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
       required:
         - checkType
         - checkDate
@@ -4093,6 +4284,64 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
+
+    FireCallPoint:
+      type: object
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastTestedDate:
+          type: string
+          nullable: true
+          description: Date of the latest alarm test that used this call point.
+      required:
+        - id
+        - siteId
+        - name
+        - archivedAt
+        - lastTestedDate
+
+    CreateFireCallPointRequest:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+      required:
+        - siteId
+        - name
+
+    UpdateFireCallPointRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        archived:
+          type: boolean
 
     FireSafetyStatus:
       type: object
@@ -4781,12 +5030,18 @@ components:
           type: string
           nullable: true
         food_jurisdiction:
-          description: Food-safety jurisdiction used to choose the standard reheating limit.
+          description: Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
           type: string
           enum:
             - scotland
             - england_wales
             - northern_ireland
+            - ireland
+            - australia
+            - new_zealand
+            - canada
+            - united_states
+            - other
           nullable: true
         food_cooking_limit:
           type: string

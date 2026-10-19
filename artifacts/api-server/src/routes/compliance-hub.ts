@@ -8,12 +8,15 @@ import { GUIDANCE_REVIEWED_AT, UK_COMPLIANCE_GAPS, UK_COMPLIANCE_GUIDANCE } from
 
 const router: IRouter = Router();
 
+// The web forms send "" for an optional field left blank.
+const blankToNull = (value: unknown) => (typeof value === "string" && value.trim() === "" ? null : value);
+
 const ProfileBody = z.object({
   nation: z.enum(["england", "wales", "scotland", "northern_ireland", "multi_nation"]),
   operationType: z.string().trim().min(2).max(160),
   responsiblePersonName: z.string().trim().min(2).max(160),
   responsiblePersonRole: z.string().trim().min(2).max(160),
-  responsiblePersonEmail: z.string().trim().email().optional().nullable(),
+  responsiblePersonEmail: z.preprocess(blankToNull, z.string().trim().email().optional().nullable()),
   competentAppointments: z.array(z.object({
     area: z.string().trim().min(2).max(100),
     person: z.string().trim().min(2).max(160),
@@ -31,7 +34,7 @@ const ActionBody = z.object({
   title: z.string().trim().min(3).max(240),
   severity: z.enum(["low", "medium", "high", "critical"]).default("medium"),
   ownerName: z.string().trim().min(2).max(160),
-  dueDate: z.string().date().optional().nullable(),
+  dueDate: z.preprocess(blankToNull, z.string().date().optional().nullable()),
   interimControl: z.string().trim().max(4000).optional().nullable(),
   correctiveAction: z.string().trim().min(3).max(4000),
   evidenceReference: z.string().trim().max(1000).optional().nullable(),

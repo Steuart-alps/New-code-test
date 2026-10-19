@@ -96,7 +96,7 @@ async function main() {
       controlProfile: { writtenControlSchemeReference: `WCS-${tag}-${ts}`, schemeReviewDate: "2027-01-31" },
     })).status, 200);
     expectStatus(`record ${tag} fire check`, (await admin("POST", "/fire-safety", {
-      checkType: "alarm", checkDate: "2026-10-01", result: "pass", siteId, notes: `fire-${tag}-${ts}`,
+      checkType: "alarm", callPoint: "CP1", checkDate: "2026-10-01", result: "pass", siteId, notes: `fire-${tag}-${ts}`,
     })).status, 201);
     expectStatus(`record ${tag} legionella check`, (await admin("POST", "/legionella", {
       checkType: "calorifier_temp", checkDate: "2026-10-01", result: "pass", temperature: 61, siteId, notes: `leg-${tag}-${ts}`,

@@ -79,3 +79,29 @@ export const storageUsageSnapshotsTable = pgTable("storage_usage_snapshots", {
   refreshLeaseUntil: timestamp("refresh_lease_until", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Manager-requested reductions of paid extra storage. Stripe bills the lower
+ * quantity from the next renewal; until effective_at (the end of the period
+ * already paid for) the reduced GiB stay available. Kept as the record of who
+ * changed capacity, when, from what and why it was allowed.
+ * Maintained by api-server src/routes/billing.ts (POST /billing/storage/reduce).
+ */
+export const storageCapacityReductionsTable = pgTable("storage_capacity_reductions", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  requestId: text("request_id").notNull(),
+  subscriptionId: text("subscription_id").notNull(),
+  subscriptionItemId: text("subscription_item_id").notNull(),
+  fromGib: integer("from_gib").notNull(),
+  toGib: integer("to_gib").notNull(),
+  minimumGib: integer("minimum_gib").notNull(),
+  usedBytes: bigint("used_bytes", { mode: "number" }).notNull(),
+  effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
+  requestedBy: integer("requested_by"),
+  requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("uq_storage_capacity_reductions_request").on(table.requestId),
+  index("idx_storage_capacity_reductions_tenant").on(table.clientId, table.subscriptionId, table.effectiveAt),
+  check("storage_capacity_reductions_lower", sql`${table.toGib} >= 0 AND ${table.toGib} < ${table.fromGib} AND ${table.toGib} >= ${table.minimumGib}`),
+]);

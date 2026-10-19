@@ -7,6 +7,8 @@
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "check:api-codegen": "node scripts/check-api-codegen.mjs",
+    "check:api-contract": "pnpm --dir lib/api-spec run check:contract",
+    "api-contract:accept": "pnpm --dir lib/api-spec run contract:accept",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --workspace-concurrency=1 --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "validate": "node scripts/validate.mjs",

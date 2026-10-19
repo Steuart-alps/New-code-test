@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/lib/api";
 import { format } from "date-fns";
 import { elapsedBoardDays, FixTrackBoard, type FixTrackBoardIssue } from "@/components/fix-track-board";
+import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -617,6 +618,8 @@ export default function FixTrackPage() {
   const [saving, setSaving]         = useState(false);
   const [notifying, setNotifying]         = useState<Record<number, boolean>>({});
   const [renotifyIssue, setRenotifyIssue] = useState<Issue | null>(null);
+  const [signingIssue, setSigningIssue]   = useState<Issue | null>(null);
+  const [signingBusy, setSigningBusy]     = useState(false);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"timing" | "audit">("timing");
   const [staleDays, setStaleDays] = useState(7);
@@ -727,8 +730,13 @@ export default function FixTrackPage() {
       delete payload.createdBy;
       delete payload.isOverdue;
       delete payload.resolvedDate;
+      // Sign-off fields are set only through the resolve-with-signature flow,
+      // and the edit dialog never changes the status.
+      delete payload.resolvedByName;
+      delete payload.resolverSignature;
 
       if (editing) {
+        delete payload.status;
         const res = await clientApiFetch(`/fix-track/issues/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) });
         if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
       } else {
@@ -771,13 +779,24 @@ export default function FixTrackPage() {
     toast({ title: "Issue deleted" });
   }
 
-  async function quickStatus(issue: Issue, newStatus: string) {
-    await clientApiFetch(`/fix-track/issues/${issue.id}`, {
+  async function quickStatus(issue: Issue, newStatus: string, resolverSignature?: string) {
+    // Resolving needs the resolver's drawn signature, as on the detail page.
+    if (newStatus === "resolved" && !resolverSignature) {
+      setSigningIssue(issue);
+      return;
+    }
+    const res = await clientApiFetch(`/fix-track/issues/${issue.id}`, {
       method: "PUT",
       body: JSON.stringify({
         status: newStatus,
+        ...(resolverSignature ? { resolverSignature } : {}),
       }),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      toast({ title: "Error updating status", description: body?.error ?? "Failed to update status", variant: "destructive" });
+      return;
+    }
     await load();
   }
 
@@ -1135,7 +1154,7 @@ export default function FixTrackPage() {
                         )}
                         {issue.completionDocumentPath && (
                           <a
-                            href={`/api/storage/objects/${issue.completionDocumentPath}`}
+                            href={`/api/storage${issue.completionDocumentPath.startsWith("/objects/") ? issue.completionDocumentPath : `/objects/${issue.completionDocumentPath.replace(/^\/+/, "")}`}${activeClientId ? `?clientId=${encodeURIComponent(activeClientId)}` : ""}`}
                             target="_blank"
                             rel="noreferrer"
                             className="inline-flex items-center gap-1 mt-1 text-xs text-blue-700 hover:underline"
@@ -1349,6 +1368,12 @@ export default function FixTrackPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <DrawnSignatureDialog open={!!signingIssue} busy={signingBusy} onCancel={() => setSigningIssue(null)} onConfirm={async signature => {
+        if (!signingIssue) return;
+        setSigningBusy(true);
+        try { await quickStatus(signingIssue, "resolved", signature); }
+        finally { setSigningBusy(false); setSigningIssue(null); }
+      }} />
     </AppLayout>
   );
 }

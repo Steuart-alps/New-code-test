@@ -7,13 +7,16 @@
 //     storage and canonical pass/fail results; same CRUD + status checks.
 //   - KitchenTrack (food-safety): config read/write, daily record
 //     create/update/list/by-date, duplicate-date 409 guard.
+//   - DocTrack/TrainTrack (doc-train-flows.mjs): acknowledgement identity,
+//     record variants, and acknowledgement races, retries and injected
+//     faults (that part registers a second account to check tenant scope).
 //
 // Usage: API_BASE=... DATABASE_URL=... node tests/module-routes.mjs
 // (normally via `pnpm run test:modules:ci`, which boots a private API).
 // Exits 0 when all checks pass, 1 otherwise. Every client and user this run
 // registers is removed in a finally block, including on failure paths; see
 // tests/fixture-ownership.mjs.
-import { testDocTrainFlows } from "./doc-train-flows.mjs";
+import { testDocAckConcurrency, testDocTrainFlows } from "./doc-train-flows.mjs";
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
 
 const runId = resolveRunId();
@@ -87,6 +90,8 @@ async function testFireSafety(req, siteId) {
   for (const checkType of TYPES) {
     const res = await req("POST", "/fire-safety", {
       checkType,
+      callPoint: "CP1 – Reception",
+      nightStaff: "included",
       checkDate: isoDate(-1), // yesterday → always "ok" or "due_soon", never "overdue" for daily checks
       result: "pass",
       notes: `Test record for ${checkType}`,
@@ -590,7 +595,7 @@ async function testSiteFiltering(req, siteId) {
 
   // Create one fire-safety check pinned to the site
   const siteCheck = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: isoDate(-2),
     result: "pass",
     siteId,
@@ -723,7 +728,7 @@ async function testSiteFiltering(req, siteId) {
 
   // Invalid siteId (belongs to nobody) → 400
   const wrongSite = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: isoDate(),
     result: "pass",
     siteId: 999999999,
@@ -822,21 +827,18 @@ async function testCleaningSiteFiltering(req, siteId, otherSiteId) {
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function runSuite() {
-  // The owner deliberately writes past-dated records (one day per module so
-  // runs never collide), which owners may do with a reason.
-  const req = makeSession({ "X-Override-Reason": encodeURIComponent("Module routes fixture: past-dated record") });
-
-  // Register a fresh account. Track it before anything can fail so the
-  // finally block in main() always knows what this run owns.
-  const email = `modules-${runId}@test.local`;
+// Registers, verifies and logs in a fresh tenant owned by this run, and tracks
+// it for cleanup before anything can fail.
+async function registerTenant(label, headers) {
+  const req = makeSession(headers);
+  const email = `${label}-${runId}@test.local`;
   const regRes = await req("POST", "/auth/register", {
     name: "Module Test Account",
     email,
     password: "password-123",
   });
   if (![200, 201].includes(regRes.status)) {
-    throw new Error(`FATAL: registration failed (${regRes.status})`);
+    throw new Error(`FATAL: ${label} registration failed (${regRes.status})`);
   }
   fixtures.trackRegisteredUser();
 
@@ -845,17 +847,24 @@ async function runSuite() {
   if (regRes.data?.verificationToken) {
     const verifyRes = await req("GET", `/auth/verify-email?token=${encodeURIComponent(regRes.data.verificationToken)}`);
     if (verifyRes.status !== 200) {
-      throw new Error(`FATAL: email verification failed (${verifyRes.status})`);
+      throw new Error(`FATAL: ${label} email verification failed (${verifyRes.status})`);
     }
     const loginRes = await req("POST", "/auth/login", { email, password: "password-123" });
     if (loginRes.status !== 200) {
-      throw new Error(`FATAL: login after verification failed (${loginRes.status})`);
+      throw new Error(`FATAL: ${label} login after verification failed (${loginRes.status})`);
     }
   }
   const me = await req("GET", "/auth/me");
   const clientId = (me.data?.user ?? me.data)?.clientId;
-  if (!Number.isInteger(clientId)) throw new Error(`FATAL: no client for the registered account (${me.status})`);
+  if (!Number.isInteger(clientId)) throw new Error(`FATAL: no client for the ${label} account (${me.status})`);
   fixtures.trackClient(clientId);
+  return req;
+}
+
+async function runSuite() {
+  // The owner deliberately writes past-dated records (one day per module so
+  // runs never collide), which owners may do with a reason.
+  const req = await registerTenant("modules", { "X-Override-Reason": encodeURIComponent("Module routes fixture: past-dated record") });
   fixtures.probe("after-registration");
 
   // Create a site (needed for site-scoped filter tests)
@@ -887,6 +896,14 @@ async function runSuite() {
     expectOk,
     siteId,
     isoDate,
+  });
+  await testDocAckConcurrency({
+    managerReq: req,
+    makeSession,
+    registerTenant,
+    check,
+    expectOk,
+    siteId,
   });
 }
 

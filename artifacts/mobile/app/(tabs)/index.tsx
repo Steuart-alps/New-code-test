@@ -20,6 +20,7 @@ import { apiFetch } from '@/lib/api';
 import { IssueCard, type FixTrackIssue } from '@/components/IssueCard';
 import { TodayTasks } from '@/components/TodayTasks';
 import { OutboxStatus } from '@/components/OutboxStatus';
+import { localIsoDate } from '@/components/date-stepper-logic';
 
 interface Site {
   id: number;
@@ -118,7 +119,7 @@ export default function TodayScreen() {
         `/api/fire-safety/status${selectedSiteId ? `?siteId=${selectedSiteId}` : ''}`,
       ),
   });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIsoDate();
   const { data: kitchenToday } = useQuery<{ submittedAt: string | null } | null>({
     queryKey: ['food-safety', 'today-status', selectedSiteId, today],
     queryFn: async () => {

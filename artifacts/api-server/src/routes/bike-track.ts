@@ -1,10 +1,11 @@
 import { Router, type Response } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable } from "@workspace/db/schema";
+import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, desc, sql, inArray, or, isNull } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { bikeDepartmentWrites, departmentScope } from "../lib/bikeTrackDepartment";
 import { createBikeHireRegisterPdf, type BikeHireRegisterRow } from "../lib/bikeHireRegisterPdf";
 import { resolveStaffPerformer } from "../lib/staffPerformer";
 import { parseBikeOverdueRepeatInterval } from "../lib/bikeOverdueReminders";
@@ -15,6 +16,8 @@ import {
 import { resolveSiteAccessScope } from "../lib/siteAccessScope";
 
 const router = Router();
+
+router.use(bikeDepartmentWrites);
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -87,6 +90,14 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// A supplied siteId must name one of the caller's own sites.
+async function siteBelongsToClient(siteId: number | null | undefined, clientId: number): Promise<boolean> {
+  if (siteId == null) return true;
+  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
+  return !!site;
+}
+
 function checkItemsToRow(items: Record<string, any>) {
   return {
     brakesFront:    items.brakesFront   ?? null,
@@ -112,7 +123,7 @@ router.get("/bikes", requireAuth, async (req, res) => {
   const rows = await db
     .select()
     .from(bikesTable)
-    .where(eq(bikesTable.clientId, clientId))
+    .where(and(eq(bikesTable.clientId, clientId), sql`TRUE ${departmentScope(req, clientId, sql`${bikesTable.siteId}`)}`))
     .orderBy(bikesTable.ref);
   res.json(rows);
 });
@@ -123,6 +134,7 @@ router.post("/bikes", requireAuth, denyViewers, async (req, res) => {
   const parsed = bikeSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
   // bike type is validated against the client's effective option list (custom
   // or default) rather than a fixed enum, so clients can customise the list.
   const allowedTypes = await getEffectiveOptionList(clientId, "bike_types");
@@ -153,6 +165,7 @@ router.put("/bikes/:id", requireAuth, denyViewers, async (req, res) => {
     .where(and(eq(bikesTable.id, id), eq(bikesTable.clientId, clientId)))
     .limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!(await siteBelongsToClient(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
 
   // Allow an unchanged stored type even if it is no longer in the effective
   // list; reject only NEW types not in it.
@@ -270,15 +283,20 @@ router.get("/hires", requireAuth, async (req, res) => {
   if (status) conditions.push(eq(bikeHireRecordsTable.status, status));
 
   const rows = await db.execute(sql`
-    SELECT h.*,
-           b.ref AS bike_ref, b.name AS bike_name, b.type AS bike_type,
-           pre.id AS pre_check_id, pre.overall_result AS pre_result,
-           post.id AS post_check_id, post.overall_result AS post_result
+    SELECT h.id, h.client_id AS "clientId", h.site_id AS "siteId", h.bike_id AS "bikeId",
+           h.guest_name AS "guestName", h.guest_contact AS "guestContact", h.hire_date AS "hireDate",
+           h.return_date_expected AS "returnDateExpected", h.return_date_actual AS "returnDateActual",
+           h.deposit_pence AS "depositPence", h.deposit_returned AS "depositReturned", h.status, h.notes,
+           h.created_by AS "createdBy", h.created_at AS "createdAt", h.updated_at AS "updatedAt",
+           b.ref AS "bikeRef", b.name AS "bikeName", b.type AS "bikeType",
+           pre.id AS "preCheckId", pre.overall_result AS "preResult",
+           post.id AS "postCheckId", post.overall_result AS "postResult"
     FROM bike_hire_records h
     JOIN bikes b ON b.id = h.bike_id
     LEFT JOIN bike_checks pre  ON pre.hire_record_id  = h.id AND pre.check_type  = 'pre_hire'
     LEFT JOIN bike_checks post ON post.hire_record_id = h.id AND post.check_type = 'post_return'
     WHERE h.client_id = ${clientId}
+    ${departmentScope(req, clientId, sql`COALESCE(h.site_id, b.site_id)`)}
     ${status ? sql`AND h.status = ${status}` : sql``}
     ORDER BY h.hire_date DESC, h.id DESC
   `);
@@ -406,6 +424,7 @@ router.put("/hires/:id", requireAuth, denyViewers, async (req, res) => {
   const updateSchema = hireSchema.omit({ bikeId: true, preHireCheck: true }).partial();
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  if (!(await siteBelongsToClient(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
   const [row] = await db.update(bikeHireRecordsTable)
     .set({ ...parsed.data, updatedAt: new Date() })
     .where(and(eq(bikeHireRecordsTable.id, id), eq(bikeHireRecordsTable.clientId, clientId)))
@@ -512,6 +531,7 @@ router.get("/checks", requireAuth, async (req, res) => {
     FROM bike_checks c
     JOIN bikes b ON b.id = c.bike_id
     WHERE c.client_id = ${clientId}
+    ${departmentScope(req, clientId, sql`b.site_id`)}
     ${bikeId ? sql`AND c.bike_id = ${parseInt(bikeId)}` : sql``}
     ${checkType ? sql`AND c.check_type = ${checkType}` : sql``}
     ORDER BY c.check_date DESC, c.id DESC
@@ -540,10 +560,15 @@ router.get("/services", requireAuth, async (req, res) => {
   const { bikeId } = req.query as { bikeId?: string };
 
   const rows = await db.execute(sql`
-    SELECT s.*, b.ref AS bike_ref, b.name AS bike_name, b.type AS bike_type
+    SELECT s.id, s.client_id AS "clientId", s.bike_id AS "bikeId", s.service_date AS "serviceDate",
+           s.service_type AS "serviceType", s.serviced_by AS "servicedBy",
+           s.next_service_date AS "nextServiceDate", s.cost_pence AS "costPence", s.notes,
+           s.created_by AS "createdBy", s.created_at AS "createdAt", s.updated_at AS "updatedAt",
+           b.ref AS "bikeRef", b.name AS "bikeName", b.type AS "bikeType"
     FROM bike_services s
     JOIN bikes b ON b.id = s.bike_id
     WHERE s.client_id = ${clientId}
+    ${departmentScope(req, clientId, sql`b.site_id`)}
     ${bikeId && !isNaN(parseInt(bikeId)) ? sql`AND s.bike_id = ${parseInt(bikeId)}` : sql``}
     ORDER BY s.service_date DESC, s.id DESC
     LIMIT 500
@@ -558,9 +583,11 @@ router.get("/services/latest", requireAuth, async (req, res) => {
 
   const rows = await db.execute(sql`
     SELECT DISTINCT ON (bike_id)
-      bike_id, service_date, service_type, serviced_by, next_service_date
+      bike_id AS "bikeId", service_date AS "serviceDate", service_type AS "serviceType",
+      serviced_by AS "servicedBy", next_service_date AS "nextServiceDate"
     FROM bike_services
     WHERE client_id = ${clientId}
+      AND bike_id IN (SELECT id FROM bikes WHERE client_id = ${clientId} ${departmentScope(req, clientId, sql`site_id`)})
     ORDER BY bike_id, service_date DESC, id DESC
   `);
   res.json(rows.rows ?? rows);
@@ -659,16 +686,17 @@ router.get("/summary", requireAuth, async (req, res) => {
       COUNT(*) FILTER (WHERE status = 'retired')      AS retired,
       COUNT(*)                                         AS total
     FROM bikes
-    WHERE client_id = ${clientId} AND active = true
+    WHERE client_id = ${clientId} AND active = true ${departmentScope(req, clientId, sql`site_id`)}
   `);
   const counts = ((countsResult as any).rows ?? [])[0];
 
   const hireCountsResult = await db.execute(sql`
     SELECT
-      COUNT(*) FILTER (WHERE status = 'active')  AS active_hires,
-      COUNT(*) FILTER (WHERE status = 'active' AND return_date_expected < ${today}) AS overdue
-    FROM bike_hire_records
-    WHERE client_id = ${clientId}
+      COUNT(*) FILTER (WHERE h.status = 'active')  AS active_hires,
+      COUNT(*) FILTER (WHERE h.status = 'active' AND h.return_date_expected < ${today}) AS overdue
+    FROM bike_hire_records h
+    JOIN bikes b ON b.id = h.bike_id
+    WHERE h.client_id = ${clientId} ${departmentScope(req, clientId, sql`COALESCE(h.site_id, b.site_id)`)}
   `);
   const hireCounts = ((hireCountsResult as any).rows ?? [])[0];
 
@@ -684,6 +712,7 @@ router.get("/summary", requireAuth, async (req, res) => {
     ) s ON true
     WHERE b.client_id = ${clientId}
       AND b.active = true
+      ${departmentScope(req, clientId, sql`b.site_id`)}
       AND s.next_service_date IS NOT NULL
       AND s.next_service_date < ${today}
   `);

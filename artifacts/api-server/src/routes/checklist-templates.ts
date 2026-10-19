@@ -69,7 +69,7 @@ router.get("/checklist-templates", requireAuth, async (req, res) => {
 router.put("/checklist-templates", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const userId = (req as any).userId as number;
+  const userId = req.currentUser!.id;
 
   const schema = z.object({
     type: z.string().min(1),
@@ -91,6 +91,8 @@ router.put("/checklist-templates", requireAuth, requireClientAdmin, async (req, 
 
   try {
     if (siteId) {
+      const owned = await db.execute(sql`SELECT 1 FROM sites WHERE id = ${siteId} AND client_id = ${clientId}`);
+      if (owned.rows.length === 0) return res.status(400).json({ error: "Invalid siteId for this client" });
       await db.execute(sql`
         INSERT INTO checklist_templates (client_id, site_id, checklist_type, items, updated_by, updated_at)
         VALUES (${clientId}, ${siteId}, ${type}, ${JSON.stringify(templateItems)}::jsonb, ${userId}, now())

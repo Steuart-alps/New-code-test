@@ -51,12 +51,9 @@ export const DEFAULT_KITCHEN_TEMPERATURE_RULES: KitchenTemperatureRules = {
   cookingHoldSeconds: null, sousVideHoldMinutes: null, items: { cooking: [], sousVide: [] },
 };
 export function parseKitchenTemperatureRules(raw?: string | null, jurisdiction?: string | null): KitchenTemperatureRules {
-  if (!raw) return kitchenTemperatureRulesSchema.parse({
-    ...DEFAULT_KITCHEN_TEMPERATURE_RULES,
-    // Scotland (FSS CookSafe) reheats to 82°C; England/Wales and Northern
-    // Ireland (FSA guidance) to 75°C.
-    reheating: { min: jurisdiction === 'england_wales' || jurisdiction === 'northern_ireland' ? 75 : 82, max: null },
-  });
+  // Nothing saved: the country's starting point (Scotland reheats to 82°C,
+  // England/Wales and Northern Ireland to 75°C; see KITCHEN_TEMPERATURE_GUIDANCE).
+  if (!raw) return kitchenTemperatureRulesSchema.parse(kitchenTemperatureGuidanceRules(jurisdiction));
   return kitchenTemperatureRulesSchema.parse(JSON.parse(raw));
 }
 export function temperatureRangeLabel(rule: { min: number | null; max: number | null }) {
@@ -181,4 +178,223 @@ export function assessKitchenTemperatures(
     });
   }
   return failures;
+}
+
+// ── Country guidance ─────────────────────────────────────────────────────────
+
+/**
+ * Country starting points for KitchenTrack temperature limits. Each preset
+ * is the regulator's published guidance squeezed into the app's rule model
+ * (values in °C; one cooling stage). Managers can change every value.
+ *
+ * Only the UK presets have been used in the app so far. The others were
+ * taken from the regulators' published guidance on 2026-10-16 and have not
+ * been reviewed by a qualified person in that country (`reviewed: false`),
+ * so the app must present them as a starting point to check, never as
+ * certified compliance. See the worldwide plan's rule-pack approach.
+ */
+export const FOOD_JURISDICTIONS = [
+  'scotland', 'england_wales', 'northern_ireland',
+  'ireland', 'australia', 'new_zealand', 'canada', 'united_states', 'other',
+] as const;
+export type FoodJurisdiction = (typeof FOOD_JURISDICTIONS)[number];
+
+export interface KitchenTemperatureGuidance {
+  id: FoodJurisdiction;
+  /** Country or nation shown in the selector. */
+  name: string;
+  /** Option group in the selector. */
+  group: 'United Kingdom' | 'Other countries';
+  authority: string;
+  source: { title: string; url: string } | null;
+  /** True once a qualified person in that country has checked the preset. */
+  reviewed: boolean;
+  /** Diary labels written on new records. */
+  labels: { cooking: string; cooling: string; reheating: string; hotHolding: string };
+  /** Where the preset simplifies or picks one value from several. */
+  notes: string[];
+  rules: KitchenTemperatureRules;
+}
+
+const noItems = (): KitchenTemperatureRules['items'] => ({ cooking: [], sousVide: [] });
+const ukRules = (reheating: number): KitchenTemperatureRules => ({
+  fridge: { min: 0, max: 5 }, freezer: { min: null, max: -18 },
+  chilledDelivery: { min: null, max: 8 }, frozenDelivery: { min: null, max: -15 },
+  cooking: { min: 75, max: null }, cooling: { min: null, max: 8 },
+  reheating: { min: reheating, max: null }, hotHolding: { min: 63, max: null },
+  sousVide: { min: 75, max: null }, coolingMinutes: 90,
+  cookingHoldSeconds: null, sousVideHoldMinutes: null, items: noItems(),
+});
+const twoStageNote = (first: string) =>
+  `The official rule has two cooling stages (${first}). The diary checks the final temperature and the total time only, so record the first stage in your own checks.`;
+
+const UK_LABELS = { cooking: '75°C or above (core)', cooling: '8°C within 90 minutes', hotHolding: 'Above 63°C' };
+
+export const KITCHEN_TEMPERATURE_GUIDANCE: Record<FoodJurisdiction, KitchenTemperatureGuidance> = {
+  scotland: {
+    id: 'scotland', name: 'Scotland', group: 'United Kingdom', authority: 'Food Standards Scotland (CookSafe)',
+    source: { title: 'Guidance on temperature control legislation', url: 'https://www.foodstandards.gov.scot/sites/default/files/migration/downloads/Guidance_on_temperature_control_legislation.pdf' },
+    reviewed: true,
+    labels: { ...UK_LABELS, reheating: 'Above 82°C' },
+    notes: ['Scotland expects reheated food to reach 82°C.'],
+    rules: ukRules(82),
+  },
+  england_wales: {
+    id: 'england_wales', name: 'England / Wales', group: 'United Kingdom', authority: 'Food Standards Agency (Safer food, better business)',
+    source: { title: 'Safer food, better business', url: 'https://www.food.gov.uk/business-guidance/safer-food-better-business' },
+    reviewed: true,
+    labels: { ...UK_LABELS, reheating: 'Above 75°C' },
+    notes: [],
+    rules: ukRules(75),
+  },
+  northern_ireland: {
+    id: 'northern_ireland', name: 'Northern Ireland', group: 'United Kingdom', authority: 'Food Standards Agency in Northern Ireland',
+    source: { title: 'Safer food, better business', url: 'https://www.food.gov.uk/business-guidance/safer-food-better-business' },
+    reviewed: true,
+    labels: { ...UK_LABELS, reheating: 'Above 75°C' },
+    notes: [],
+    rules: ukRules(75),
+  },
+  ireland: {
+    id: 'ireland', name: 'Ireland', group: 'Other countries', authority: 'Food Safety Authority of Ireland (Safe Catering)',
+    source: { title: 'FSAI: Temperature control for caterers', url: 'https://www.fsai.ie/Business-Advice/Running-a-Food-Business/Caterers/Temperature-Control' },
+    reviewed: false,
+    labels: {
+      cooking: '75°C or above (core)',
+      cooling: 'In the fridge within 2 hours (below 10°C by 2½ hours at the latest)',
+      reheating: '70°C or above (core), reheat once only',
+      hotHolding: 'Above 63°C',
+    },
+    notes: [
+      'FSAI asks for cooked food to be in the fridge within 2 hours. The diary uses its corrective-action limit: below 10°C within 2½ hours, otherwise serve at once or throw away.',
+      'Chilled deliveries are set to 5°C or below, matching FSAI chilled storage.',
+    ],
+    rules: {
+      fridge: { min: 0, max: 5 }, freezer: { min: null, max: -18 },
+      chilledDelivery: { min: null, max: 5 }, frozenDelivery: { min: null, max: -15 },
+      cooking: { min: 75, max: null }, cooling: { min: null, max: 10 },
+      reheating: { min: 70, max: null }, hotHolding: { min: 63, max: null },
+      sousVide: { min: 75, max: null }, coolingMinutes: 150,
+      cookingHoldSeconds: null, sousVideHoldMinutes: null, items: noItems(),
+    },
+  },
+  australia: {
+    id: 'australia', name: 'Australia', group: 'Other countries', authority: 'Food Standards Australia New Zealand (Standard 3.2.2)',
+    source: { title: 'FSANZ: Cooling and reheating food', url: 'https://www.foodstandards.gov.au/business/food-safety/cooling-and-reheating-food' },
+    reviewed: false,
+    labels: {
+      cooking: '75°C or above (core)',
+      cooling: '60°C to 21°C within 2 hours, then 5°C within 4 more hours',
+      reheating: '60°C or above, reheated rapidly',
+      hotHolding: '60°C or above',
+    },
+    notes: [
+      twoStageNote('60°C to 21°C within 2 hours'),
+      'The Standard sets 60°C for reheating food to hold hot. Many councils recommend 75°C; raise the limit if yours does.',
+      'The Standard says frozen food must stay frozen; -18°C storage and -15°C deliveries are common practice, not set numbers.',
+    ],
+    rules: {
+      fridge: { min: 0, max: 5 }, freezer: { min: null, max: -18 },
+      chilledDelivery: { min: null, max: 5 }, frozenDelivery: { min: null, max: -15 },
+      cooking: { min: 75, max: null }, cooling: { min: null, max: 5 },
+      reheating: { min: 60, max: null }, hotHolding: { min: 60, max: null },
+      sousVide: { min: 75, max: null }, coolingMinutes: 360,
+      cookingHoldSeconds: null, sousVideHoldMinutes: null, items: noItems(),
+    },
+  },
+  new_zealand: {
+    id: 'new_zealand', name: 'New Zealand', group: 'Other countries', authority: 'Ministry for Primary Industries (Food Control Plan)',
+    source: { title: 'MPI template Food Control Plan', url: 'https://www.mpi.govt.nz/dmsdocument/11800/direct' },
+    reviewed: false,
+    labels: {
+      cooking: '75°C or above (core)',
+      cooling: '60°C to 21°C within 2 hours, then 5°C within 4 more hours',
+      reheating: '75°C or above (core)',
+      hotHolding: '60°C or above',
+    },
+    notes: [
+      twoStageNote('60°C to 21°C within 2 hours'),
+      'Check these against the current version of your Food Control Plan or National Programme guidance.',
+    ],
+    rules: {
+      fridge: { min: 0, max: 5 }, freezer: { min: null, max: -18 },
+      chilledDelivery: { min: null, max: 5 }, frozenDelivery: { min: null, max: -15 },
+      cooking: { min: 75, max: null }, cooling: { min: null, max: 5 },
+      reheating: { min: 75, max: null }, hotHolding: { min: 60, max: null },
+      sousVide: { min: 75, max: null }, coolingMinutes: 360,
+      cookingHoldSeconds: null, sousVideHoldMinutes: null, items: noItems(),
+    },
+  },
+  canada: {
+    id: 'canada', name: 'Canada', group: 'Other countries', authority: 'Provincial food premises rules (Ontario Reg. 493/17 shown)',
+    source: { title: 'Ontario Regulation 493/17: Food Premises', url: 'https://www.ontario.ca/laws/regulation/170493' },
+    reviewed: false,
+    labels: {
+      cooking: '74°C or above (core)',
+      cooling: '60°C to 20°C within 2 hours, then 4°C within 4 more hours',
+      reheating: '74°C or above (core)',
+      hotHolding: '60°C or above',
+    },
+    notes: [
+      'Each province sets its own rules. These follow Ontario; check your province.',
+      twoStageNote('60°C to 20°C within 2 hours'),
+      'Whole poultry needs 82°C under Health Canada guidance; add an item rule for it.',
+    ],
+    rules: {
+      fridge: { min: 0, max: 4 }, freezer: { min: null, max: -18 },
+      chilledDelivery: { min: null, max: 4 }, frozenDelivery: { min: null, max: -15 },
+      cooking: { min: 74, max: null }, cooling: { min: null, max: 4 },
+      reheating: { min: 74, max: null }, hotHolding: { min: 60, max: null },
+      sousVide: { min: 74, max: null }, coolingMinutes: 360,
+      cookingHoldSeconds: null, sousVideHoldMinutes: null, items: noItems(),
+    },
+  },
+  united_states: {
+    id: 'united_states', name: 'United States', group: 'Other countries', authority: 'FDA Food Code 2022 (as adopted by your state)',
+    source: { title: 'FDA Food Code 2022', url: 'https://www.fda.gov/food/fda-food-code/food-code-2022' },
+    reviewed: false,
+    labels: {
+      cooking: '74°C (165°F) or above (core)',
+      cooling: '57°C (135°F) to 21°C (70°F) within 2 hours, then 5°C (41°F) within 6 hours in total',
+      reheating: '74°C (165°F) for 15 seconds, within 2 hours',
+      hotHolding: '57°C (135°F) or above',
+    },
+    notes: [
+      'The diary records in °C for now; °F is shown alongside in these labels.',
+      twoStageNote('57°C/135°F to 21°C/70°F within 2 hours'),
+      'Cooking uses the poultry temperature (74°C/165°F). Whole cuts and ground meat have lower Food Code temperatures; add item rules for them.',
+      'States adopt different Food Code editions; check your state or county.',
+    ],
+    rules: {
+      fridge: { min: 0, max: 5 }, freezer: { min: null, max: -18 },
+      chilledDelivery: { min: null, max: 5 }, frozenDelivery: { min: null, max: -15 },
+      cooking: { min: 74, max: null }, cooling: { min: null, max: 5 },
+      reheating: { min: 74, max: null }, hotHolding: { min: 57, max: null },
+      sousVide: { min: 74, max: null }, coolingMinutes: 360,
+      cookingHoldSeconds: null, sousVideHoldMinutes: null, items: noItems(),
+    },
+  },
+  other: {
+    id: 'other', name: 'Other country (set your own)', group: 'Other countries', authority: 'Your local food authority',
+    source: null,
+    reviewed: false,
+    labels: { ...UK_LABELS, reheating: 'Above 75°C' },
+    notes: ['Starts from the England / Wales values. Replace them with your local food authority\'s limits.'],
+    rules: ukRules(75),
+  },
+};
+
+export function isFoodJurisdiction(value: unknown): value is FoodJurisdiction {
+  return typeof value === 'string' && (FOOD_JURISDICTIONS as readonly string[]).includes(value);
+}
+
+/** The guidance for a stored jurisdiction; unknown or missing values read as
+ *  Scotland, matching the app's original default. */
+export function kitchenTemperatureGuidance(jurisdiction: string | null | undefined): KitchenTemperatureGuidance {
+  return isFoodJurisdiction(jurisdiction) ? KITCHEN_TEMPERATURE_GUIDANCE[jurisdiction] : KITCHEN_TEMPERATURE_GUIDANCE.scotland;
+}
+
+/** A fresh copy of a country's preset rules, safe to edit. */
+export function kitchenTemperatureGuidanceRules(jurisdiction: string | null | undefined): KitchenTemperatureRules {
+  return JSON.parse(JSON.stringify(kitchenTemperatureGuidance(jurisdiction).rules)) as KitchenTemperatureRules;
 }

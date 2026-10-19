@@ -4,7 +4,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 let passed = 0;
@@ -12,7 +13,9 @@ let testIpSequence = 10;
 const failures = [];
 const sessions = [];
 const resetNoticeSubject = "Security alert: your two-factor authentication was reset";
-const fixtureId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+// The run id is in every fixture email, so cleanup removes only this run's
+// tenants (tests/fixture-ownership.mjs).
+const fixtureId = resolveRunId();
 const fixtureCompany = `TwoFA Co ${fixtureId}`;
 // A second, isolated tenant for the cross-tenant reset check.
 const otherFixtureCompany = `TwoFA Other Co ${fixtureId}`;
@@ -1318,15 +1321,18 @@ try {
   try {
     if (!pool) throw new Error("Test database helpers were not initialized");
     cleanupClient = await pool.connect();
-    await cleanupClient.query("BEGIN");
     // Exact, UUID-scoped fixture identity only. Never delete other test tenants.
     const fixtureClients = await cleanupClient.query("SELECT id FROM clients WHERE name = ANY($1::text[])",
       [fixtureCompanies]);
     const clientIds = fixtureClients.rows.map(row => row.id);
-    await cleanupClient.query("DELETE FROM users WHERE email = ANY($1::text[]) OR client_id = ANY($2::int[])",
-      [fixtureEmails, clientIds]);
-    await cleanupClient.query("DELETE FROM clients WHERE id = ANY($1::int[])", [clientIds]);
-    await cleanupClient.query("COMMIT");
+    // The run's records leave audit_log rows that block a plain DELETE FROM
+    // clients, so the tenants and their users go through the owned-fixture
+    // purge. It walks the whole tenant graph, so lift this pool's short timeouts.
+    await cleanupClient.query("SET statement_timeout = 0");
+    await cleanupClient.query({
+      text: buildOwnedFixturePurgeSql({ runId: fixtureId, clientIds }),
+      query_timeout: 120000,
+    });
     const remaining = await cleanupClient.query(`
       SELECT
         (SELECT count(*)::int FROM users WHERE email = ANY($1::text[])) AS users,

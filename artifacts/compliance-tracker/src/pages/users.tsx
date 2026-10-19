@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { format, formatDistanceToNow } from "date-fns";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth, useIsConsultant, useCanAdmin } from "@/context/auth-context";
@@ -8,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff, Mail, UsersRound } from "lucide-react";
+import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff, Mail, MailX, UsersRound } from "lucide-react";
 
 const NO_DEPT_VALUE = "__none__";
 
@@ -23,7 +24,16 @@ interface User {
   totpEnabled?: boolean;
   isMaintenanceManager: boolean;
   isDepartmentManager: boolean;
+  /** Latest password setup link; null when none was ever sent. */
+  invitation?: {
+    status: "pending" | "expired" | "completed" | "revoked" | "undelivered";
+    sentAt: string;
+    expiresAt: string;
+    revokedAt: string | null;
+  } | null;
 }
+
+type ActionMessage = { kind: "success" | "error"; text: string };
 
 interface Department {
   id: number;
@@ -37,6 +47,44 @@ const ROLE_LABELS: Record<string, string> = {
   client_staff: "Staff",
   client_viewer: "Viewer",
 };
+
+function InvitationState({ invitation }: { invitation: User["invitation"] }) {
+  if (!invitation) return null;
+  const expiresAt = new Date(invitation.expiresAt);
+  const exact = format(expiresAt, "d MMM yyyy, HH:mm");
+  if (invitation.status === "pending") {
+    return (
+      <span className="block text-xs text-amber-700" title={`Setup link expires ${exact}`}>
+        <span className="block font-medium">Setup pending</span>
+        <span className="block">Link expires in {formatDistanceToNow(expiresAt)} · {format(expiresAt, "d MMM, HH:mm")}</span>
+      </span>
+    );
+  }
+  if (invitation.status === "expired") {
+    return (
+      <span className="block text-xs text-destructive" title={`Setup link expired ${exact}`}>
+        Setup link expired {formatDistanceToNow(expiresAt, { addSuffix: true })}
+      </span>
+    );
+  }
+  if (invitation.status === "undelivered") {
+    return (
+      <span className="block text-xs text-destructive">
+        <span className="block font-medium">Setup email not delivered</span>
+        <span className="block">Check the address, then resend</span>
+      </span>
+    );
+  }
+  if (invitation.status === "revoked" && invitation.revokedAt) {
+    const revokedAt = new Date(invitation.revokedAt);
+    return (
+      <span className="block text-xs text-muted-foreground" title={`Setup link revoked ${format(revokedAt, "d MMM yyyy, HH:mm")}`}>
+        Setup link revoked {formatDistanceToNow(revokedAt, { addSuffix: true })}
+      </span>
+    );
+  }
+  return <span className="block text-xs text-muted-foreground">Password set up</span>;
+}
 
 const ROLE_COLORS: Record<string, string> = {
   consultant: "bg-violet-100 text-violet-800",
@@ -57,7 +105,7 @@ function UserDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (notice?: ActionMessage) => void;
   user: User | null;
   departments: Department[];
   clientId: number | null;
@@ -119,7 +167,19 @@ function UserDialog({
         const d = await res.json().catch(() => null);
         throw new Error(d?.error ?? `Failed to save user (${res.status})`);
       }
-      onSaved();
+      // A new account without a password is invited by email. The account is
+      // created even if that email fails, so say which happened.
+      const saved = user ? null : await res.json().catch(() => null);
+      if (saved?.inviteEmail === "failed") {
+        onSaved({
+          kind: "error",
+          text: `${form.name}'s account was created, but the password setup email to ${form.email} could not be delivered. Check the address, then use the resend button next to their name to try again.`,
+        });
+      } else if (saved?.inviteEmail === "sent") {
+        onSaved({ kind: "success", text: `${form.name}'s account was created and a password setup link was emailed to ${form.email}.` });
+      } else {
+        onSaved();
+      }
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to save");
@@ -258,7 +318,8 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [reassigning, setReassigning] = useState<number | null>(null);
   const [resendingInvite, setResendingInvite] = useState<number | null>(null);
-  const [actionMessage, setActionMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [revokingInvite, setRevokingInvite] = useState<number | null>(null);
+  const [actionMessage, setActionMessage] = useState<ActionMessage | null>(null);
 
   async function load() {
     setLoading(true);
@@ -278,7 +339,15 @@ export default function UsersPage() {
 
   async function deleteUser(id: number) {
     if (!confirm("Remove this user?")) return;
-    await apiFetch(`/users/${id}`, { method: "DELETE" });
+    setActionMessage(null);
+    const res = await apiFetch(`/users/${id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      setActionMessage({ kind: "error", text: data?.error ?? "Failed to remove user" });
+    } else if (data?.deactivated) {
+      // Users named in the audit trail are kept, deactivated, so the record stays complete.
+      setActionMessage({ kind: "success", text: `${data.name} has recorded activity in the audit trail, so they were deactivated rather than removed.` });
+    }
     load();
   }
 
@@ -317,13 +386,38 @@ export default function UsersPage() {
         throw new Error(data?.error ?? "Failed to resend password setup link");
       }
       setActionMessage({ kind: "success", text: `A fresh password setup link was sent to ${user.email}.` });
+      await load();
     } catch (err: unknown) {
       setActionMessage({
         kind: "error",
         text: err instanceof Error ? err.message : "Failed to resend password setup link",
       });
+      // A failed delivery cancels the new link; show that state in the list.
+      await load();
     } finally {
       setResendingInvite(null);
+    }
+  }
+
+  async function revokeInvite(user: User) {
+    if (!confirm(`Revoke the password setup link sent to ${user.name} at ${user.email}? The link stops working straight away and no new email is sent.`)) return;
+    setRevokingInvite(user.id);
+    setActionMessage(null);
+    try {
+      const res = await apiFetch(`/users/${user.id}/revoke-invite`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error ?? "Failed to revoke the password setup link");
+      }
+      setActionMessage({ kind: "success", text: `The password setup link for ${user.email} was revoked and no longer works.` });
+      await load();
+    } catch (err: unknown) {
+      setActionMessage({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Failed to revoke the password setup link",
+      });
+    } finally {
+      setRevokingInvite(null);
     }
   }
 
@@ -423,6 +517,7 @@ export default function UsersPage() {
                           {u.active ? <UserCheck className="w-3 h-3" /> : <UserX className="w-3 h-3" />}
                           {u.active ? "Active" : "Inactive"}
                         </span>
+                        <InvitationState invitation={u.invitation} />
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
@@ -464,6 +559,19 @@ export default function UsersPage() {
                               <Mail className={`w-4 h-4 ${resendingInvite === u.id ? "animate-pulse text-primary" : "text-muted-foreground"}`} />
                             </Button>
                           )}
+                          {canAdmin && u.role === "client_staff" && u.invitation?.status === "pending" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => revokeInvite(u)}
+                              disabled={revokingInvite === u.id}
+                              title="Revoke password setup link"
+                              aria-label={`Revoke password setup link for ${u.name}`}
+                            >
+                              <MailX className={`w-4 h-4 ${revokingInvite === u.id ? "animate-pulse text-destructive" : "text-destructive"}`} />
+                            </Button>
+                          )}
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(u)} title={u.active ? "Deactivate" : "Activate"}>
                             {u.active ? <UserX className="w-4 h-4 text-muted-foreground" /> : <UserCheck className="w-4 h-4 text-green-600" />}
                           </Button>
@@ -494,7 +602,10 @@ export default function UsersPage() {
       <UserDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        onSaved={load}
+        onSaved={(notice) => {
+          setActionMessage(notice ?? null);
+          load();
+        }}
         user={editingUser}
         departments={departments}
         clientId={activeClientId}

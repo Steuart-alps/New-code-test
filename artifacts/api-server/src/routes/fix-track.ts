@@ -20,6 +20,7 @@ import { getObjectAclPolicy } from "../lib/objectAcl";
 import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload, decryptTokenPayload, TokenPayloadError, isDamagedTokenPayload } from "../lib/bearerTokens";
 import { reminderDraftStillCurrent, SUPERSEDED_REMINDER_ERROR } from "../lib/reminderCycles";
+import { PortalLinkChangedError, sendPortalDraftWithCurrentLink } from "../lib/contractorPortalDrafts";
 
 /** Claim-transaction result for a reminder withdrawn as out of date. */
 const SUPERSEDED = Symbol("superseded");
@@ -70,6 +71,11 @@ const unusableDraftNote = (err: unknown) =>
 
 /** Respond to a draft whose credentials cannot be used. Nothing is claimed,
  *  approved or sent; the reason is recorded without revealing credentials. */
+/** A queue action on a draft that is no longer pending: another manager (or
+ *  another tab) already approved, sent or dismissed it. The web app keys its
+ *  "already handled" message on this code. */
+const NOT_PENDING_RESPONSE = { code: "queue_entry_not_pending", error: "Queue entry is no longer pending" } as const;
+
 async function refuseUnusableDraft(res: any, err: unknown, queueId: number | null, clientId: number): Promise<boolean> {
   if (!(err instanceof TokenPayloadError)) return false;
   const damaged = isDamagedTokenPayload(err);
@@ -756,7 +762,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         issueId: id,
         eventType: "status",
         status: data.status,
-        createdBy: (req.session as any).userId ?? null,
+        createdBy: req.currentUser?.id ?? null,
       });
     }
     // The linked module action completes with the repair. A job a contractor
@@ -874,7 +880,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         issueId: id,
         eventType: "email_invalidated",
         note: "Contractor email content changed; manager reapproval required",
-        createdBy: (req.session as any).userId ?? null,
+        createdBy: req.currentUser?.id ?? null,
       });
     }
     return { kind: "updated" as const, row: updated[0] };
@@ -1239,6 +1245,26 @@ function queueDepartmentScope(req: any) {
   return dept === null ? sql`` : sql` AND (department_id IS NULL OR department_id=${dept})`;
 }
 
+/** Delivery outcomes of an approved FixTrack contractor email, kept in the
+ *  issue's activity trail (note = the email type) so a failed attempt stays
+ *  on record after a later retry succeeds. */
+async function recordQueueDelivery(
+  clientId: number,
+  q: { entity_type?: string | null; entity_id?: number | null; email_type?: string | null },
+  eventType: "email_sent" | "email_failed",
+  userId: number | null,
+  executor: { execute: typeof db.execute } = db,
+) {
+  if (q.entity_type !== "fix_track" || !q.entity_id) return;
+  await executor.execute(sql`INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, note, created_by)
+    VALUES (${clientId}, ${q.entity_id}, ${eventType}, ${q.email_type ?? null}, ${userId})`);
+}
+
+function calendarEventDate(ics: unknown): string | null {
+  const match = typeof ics === "string" ? ics.match(/^DTSTART;VALUE=DATE:(\d{4})(\d{2})(\d{2})\r?$/m) : null;
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+}
+
 // Staff: request that a contractor email be sent (needs manager approval)
 router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
@@ -1415,12 +1441,12 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     }
     await tx.update(fixTrackIssuesTable).set({
       emailRequestMode: parsed.data.mode, emailRequestStatus: "pending",
-      emailRequestedBy: (req.session as any).userId ?? null, emailRequestedAt: new Date(),
+      emailRequestedBy: req.currentUser?.id ?? null, emailRequestedAt: new Date(),
       emailApprovedBy: null, emailApprovedAt: null, emailSentBy: null, emailSentAt: null, updatedAt: new Date(),
     }).where(and(...requestConditions));
     await tx.insert(fixTrackIssueActivityTable).values({
       clientId, issueId: id, eventType: "email_requested", note: parsed.data.mode,
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser?.id ?? null,
     });
     await tx.execute(sql`
     INSERT INTO contractor_email_queue
@@ -1433,7 +1459,7 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
        ${JSON.stringify({ subject: previewSubject, text: previewText, html: previewHtml })}::jsonb,
        ${null}, ${quoteToken ? digestBearerToken(quoteToken) : null}, ${quoteToken ? sql`now() + interval '30 days'` : null},
        ${encryptedTokenPayload},
-      ${(req.session as any).userId ?? null}, ${randomUUID()}
+      ${req.currentUser?.id ?? null}, ${randomUUID()}
     FROM fix_track_issues i
     LEFT JOIN sites s ON s.id = i.site_id
     JOIN contractors c ON c.id = i.contractor_id
@@ -1524,7 +1550,7 @@ router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async 
     const updated = await tx.update(fixTrackIssuesTable).set({
       emailRequestMode: "assign",
       emailRequestStatus: "pending",
-      emailRequestedBy: (req.session as any).userId ?? null,
+      emailRequestedBy: req.currentUser?.id ?? null,
       emailRequestedAt: new Date(),
       emailApprovedBy: null,
       emailApprovedAt: null,
@@ -1539,7 +1565,7 @@ router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async 
       issueId: id,
       eventType: "email_requested",
       note: "cancellation",
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser?.id ?? null,
     });
     await tx.execute(sql`
       INSERT INTO contractor_email_queue
@@ -1549,7 +1575,7 @@ router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async 
       SELECT ${clientId}, i.id, 'fix_track', i.id, s.department_id, i.contractor_id, 'assign', 'cancellation',
         c.email, ${persisted.subject}, ${persisted.html}, ${persisted.text}, ${icsContent},
         ${calendarFilename(draft.title)}, ${JSON.stringify(persisted.preview)}::jsonb,
-        ${(req.session as any).userId ?? null},
+        ${req.currentUser?.id ?? null},
         ${`fix-track-cancellation-${clientId}-${id}-${nextCalendarSequence(draft.previous_ics)}`}
       FROM fix_track_issues i
       LEFT JOIN sites s ON s.id=i.site_id
@@ -1598,7 +1624,7 @@ router.get("/contractor-email-queue", requireAuth, async (req, res) => {
     id: q.id, entityType: q.entity_type, entityId: q.entity_id ?? q.issue_id,
     contractorId: q.contractor_id, emailType: q.email_type ?? (q.mode === "quote" ? "quote_request" : "assignment"),
     status: q.status, requestedBy: q.requested_by, approvedBy: q.approved_by,
-     createdAt: q.created_at, ...previewOf(q),
+     createdAt: q.created_at, lastSendFailed: !!q.last_error, ...previewOf(q),
     siteName: q.site_name ?? null, contractorName: q.contractor_name ?? null,
     jobTitle: q.item_title, quote: q.quote ?? null,
   })));
@@ -1611,6 +1637,49 @@ router.get("/contractor-email-queue/count", requireAuth, async (req, res) => {
   const result = await db.execute(sql`SELECT count(*)::int AS count FROM contractor_email_queue
     WHERE client_id=${clientId} AND status='pending'${scope}`);
   res.json({ count: Number((result.rows as any[])[0]?.count ?? 0) });
+});
+
+// Calendar cancellations that were sent, or whose last send failed and await
+// a manager retry, newest first. Optional contractorId narrows to one contractor.
+router.get("/calendar-cancellations", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const rawContractorId = req.query.contractorId;
+  const contractorId = rawContractorId === undefined ? null : Number(rawContractorId);
+  if (contractorId !== null && !Number.isInteger(contractorId)) return res.status(400).json({ error: "Invalid contractor" });
+  const dept = getActiveDepartmentId(req);
+  const deptScope = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})`;
+  const contractorScope = contractorId === null ? sql`` : sql` AND q.contractor_id = ${contractorId}`;
+  const result = await db.execute(sql`SELECT q.id, q.entity_id, q.contractor_id, q.to_email, q.status, q.ics_content,
+      q.sent_at, q.updated_at, q.last_error, i.title AS job_title, c.name AS contractor_name,
+      sender.name AS sent_by_name, approver.name AS approved_by_name,
+      (SELECT count(*)::int FROM fix_track_issue_activity a
+        WHERE a.client_id = q.client_id AND a.issue_id = q.entity_id AND a.event_type = 'email_failed'
+          AND a.note = 'cancellation' AND a.created_at >= q.created_at) AS failed_attempts
+    FROM contractor_email_queue q
+    JOIN fix_track_issues i ON i.id = q.entity_id AND i.client_id = q.client_id
+    LEFT JOIN contractors c ON c.id = q.contractor_id AND c.client_id = q.client_id
+    LEFT JOIN users sender ON sender.id = q.sent_by
+    LEFT JOIN users approver ON approver.id = q.approved_by
+    WHERE q.client_id = ${clientId} AND q.entity_type = 'fix_track' AND q.email_type = 'cancellation'
+      AND (q.status = 'sent' OR (q.status = 'pending' AND q.last_error IS NOT NULL))${deptScope}${contractorScope}
+    ORDER BY COALESCE(q.sent_at, q.updated_at) DESC, q.id DESC
+    LIMIT 50`);
+  res.json((result.rows as any[]).map((q) => ({
+    id: q.id,
+    issueId: q.entity_id,
+    jobTitle: q.job_title,
+    eventDate: calendarEventDate(q.ics_content),
+    contractorId: q.contractor_id,
+    contractorName: q.contractor_name ?? null,
+    sentTo: q.to_email,
+    // A failed send is put back to pending with last_error, awaiting retry.
+    status: q.status === "sent" ? "sent" : "failed",
+    sentByName: q.status === "sent" ? (q.sent_by_name ?? q.approved_by_name ?? null) : null,
+    sentAt: q.status === "sent" ? q.sent_at : null,
+    lastFailedAt: q.status === "sent" ? null : q.updated_at,
+    failedAttempts: Number(q.failed_attempts ?? 0),
+  })));
 });
 
 router.put("/contractor-email-queue/:queueId", requireAuth, denyViewers, async (req, res) => {
@@ -1663,9 +1732,46 @@ router.post("/contractor-email-queue/:queueId/cancel", requireAuth, denyViewers,
     }
     return row;
   });
-  if (!cancelled) return res.status(404).json({ error: "Queue entry not found" });
+  if (!cancelled) {
+    // Already approved, sent or dismissed (by another manager or tab) is told
+    // apart from a draft this manager cannot see, which stays a plain 404.
+    const handled = Number.isInteger(qid) && (await db.execute(sql`SELECT 1 FROM contractor_email_queue
+      WHERE id=${qid} AND client_id=${clientId}${scope} LIMIT 1`)).rows.length > 0;
+    if (handled) return res.status(409).json(NOT_PENDING_RESPONSE);
+    return res.status(404).json({ error: "Queue entry not found" });
+  }
   res.json({ ok: true });
 });
+
+/**
+ * Send a draft this request has just claimed (status 'sending') and mark it
+ * sent. A contractor portal reminder is sent only while its portal link is
+ * still current (see lib/contractorPortalDrafts.ts); it throws
+ * PortalLinkChangedError, with nothing sent, when a manager reissued or
+ * revoked the link after the claim.
+ */
+async function sendClaimedDraft(q: any, clientId: number) {
+  const dispatch = async (row: any) => {
+    const hydrated = hydrateQueuedContent(row);
+    await dispatchStoredContractorEmail({
+      to: row.to_email,
+      subject: hydrated.subject,
+      html: hydrated.html,
+      text: hydrated.text ?? undefined,
+      cc: Array.isArray(row.cc_json) && row.cc_json.length ? row.cc_json : undefined,
+      icsAttachment: row.ics_content ?? undefined,
+      icsFilename: row.ics_filename ?? undefined,
+      clientId,
+      idempotencyKey: row.idempotency_key,
+    });
+    return hydrated;
+  };
+  if (q.entity_type === "contractor_compliance") return sendPortalDraftWithCurrentLink(db, q, dispatch);
+  const hydrated = await dispatch(q);
+  await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now()
+    WHERE id=${q.id} AND client_id=${clientId} AND status='sending'`);
+  return hydrated;
+}
 
 // Approval is atomic and idempotent: only one manager can claim a draft. A
 // draft whose credentials cannot be decrypted and validated is refused before
@@ -1678,7 +1784,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
   if (!Number.isInteger(qid)) return res.status(400).json({ error: "Invalid queue entry" });
   const pending = (await db.execute(sql`SELECT * FROM contractor_email_queue
     WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} LIMIT 1`)).rows[0] as any;
-  if (!pending) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  if (!pending) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
     hydrateQueuedContent(pending);
   } catch (err) {
@@ -1692,7 +1798,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
       FROM contractor_email_queue WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope}`)).rows[0] as any;
     if (pending && !(await reminderDraftStillCurrent(tx, pending))) return SUPERSEDED;
     const claimed = await tx.execute(sql`UPDATE contractor_email_queue
-      SET status='sending', approved_by=${(req.session as any).userId ?? null}, approved_at=now(), sent_by=${(req.session as any).userId ?? null}, updated_at=now()
+      SET status='sending', approved_by=${req.currentUser?.id ?? null}, approved_at=now(), sent_by=${req.currentUser?.id ?? null}, updated_at=now()
       WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} RETURNING *`);
     const row = (claimed.rows as any[])[0];
     if (row?.entity_type === "fix_track" && row.entity_id) {
@@ -1702,23 +1808,20 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
     return row;
   });
   if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
-  if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  if (!q) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
-    const hydrated = hydrateQueuedContent(q);
-    await dispatchStoredContractorEmail({ to: q.to_email, subject: hydrated.subject, html: hydrated.html, text: hydrated.text ?? undefined,
-      cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
-      icsAttachment: q.ics_content ?? undefined, icsFilename: q.ics_filename ?? undefined,
-      clientId, idempotencyKey: q.idempotency_key });
-    await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now() WHERE id=${qid} AND status='sending'`);
+    const hydrated = await sendClaimedDraft(q, clientId);
     if (q.entity_type === "fix_track" && q.entity_id) {
       await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
-        email_sent_by=${(req.session as any).userId ?? null}, email_sent_at=now(), updated_at=now()
+        email_sent_by=${req.currentUser?.id ?? null}, email_sent_at=now(), updated_at=now()
         WHERE id=${q.entity_id} AND client_id=${clientId}`);
+      await recordQueueDelivery(clientId, q, "email_sent", (req.session as any).userId ?? null);
     } else if (q.entity_type === "compliance" && q.entity_id) {
       await markComplianceNotified(q, clientId);
     }
     res.json({ ok: true, queueId: qid, mode: q.mode, subject: hydrated.subject, bodyHtml: hydrated.html });
   } catch (err) {
+    if (err instanceof PortalLinkChangedError) return res.status(409).json({ code: err.code, error: err.message });
     // Put the draft back exactly as it was before this attempt: pending and
     // unapproved, so a failed send consumes no approval. The idempotency key
     // is unchanged, so a retry cannot deliver twice.
@@ -1727,6 +1830,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
         approved_by=${pending.approved_by}, approved_at=${pending.approved_at}, sent_by=${pending.sent_by},
         last_error=${unusableDraftNote(err)}, updated_at=now() WHERE id=${qid} AND status='sending'`);
       if (q.entity_type === "fix_track" && q.entity_id) await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='pending',updated_at=now() WHERE id=${q.entity_id} AND client_id=${clientId} AND email_request_status='sending'`);
+      await recordQueueDelivery(clientId, q, "email_failed", (req.session as any).userId ?? null, tx);
     });
     sendFailureResponse(res, err);
   }
@@ -1743,7 +1847,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
     approved_by,approved_at,sent_by FROM contractor_email_queue
     WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} LIMIT 1`);
   const existingDraft = (existingResult.rows as any[])[0];
-  if (!existingDraft) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  if (!existingDraft) return res.status(409).json(NOT_PENDING_RESPONSE);
   let payload: Record<string, string>;
   try {
     payload = existingDraft.encrypted_token_payload ? decryptTokenPayload(existingDraft.encrypted_token_payload) : {};
@@ -1773,39 +1877,28 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
     if (pending && !(await reminderDraftStillCurrent(tx, pending))) return SUPERSEDED;
     const rows = await tx.execute(sql`UPDATE contractor_email_queue SET subject=${persisted.subject}, body_html=${persisted.html}, body_text=${persisted.text},
       email_preview_json=${JSON.stringify(persisted.preview)}::jsonb,
-      status='sending', approved_by=${(req.session as any).userId ?? null}, approved_at=now(),
-      sent_by=${(req.session as any).userId ?? null}, updated_at=now()
+      status='sending', approved_by=${req.currentUser?.id ?? null}, approved_at=now(),
+      sent_by=${req.currentUser?.id ?? null}, updated_at=now()
       WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} RETURNING *`);
     const row = (rows.rows as any[])[0];
     if (row?.entity_type === "fix_track" && row.entity_id) await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='sending',updated_at=now() WHERE id=${row.entity_id} AND client_id=${clientId} AND email_request_status='pending'`);
     return row;
   });
   if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
-  if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  if (!q) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
-    const hydrated = hydrateQueuedContent(q);
-    await dispatchStoredContractorEmail({
-      to: q.to_email,
-      subject: hydrated.subject,
-      html: hydrated.html,
-      text: hydrated.text ?? undefined,
-      cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
-      icsAttachment: q.ics_content ?? undefined,
-      icsFilename: q.ics_filename ?? undefined,
-      clientId,
-      idempotencyKey: q.idempotency_key,
-    });
-    await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now()
-      WHERE id=${qid} AND client_id=${clientId} AND status='sending'`);
+    const hydrated = await sendClaimedDraft(q, clientId);
     if (q.issue_id) {
       await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
-        email_sent_by=${(req.session as any).userId ?? null}, email_sent_at=now(), updated_at=now()
+        email_sent_by=${req.currentUser?.id ?? null}, email_sent_at=now(), updated_at=now()
         WHERE id=${q.issue_id} AND client_id=${clientId}`);
+      await recordQueueDelivery(clientId, q, "email_sent", (req.session as any).userId ?? null);
     } else if (q.entity_type === "compliance" && q.entity_id) {
       await markComplianceNotified(q, clientId);
     }
     res.json({ ok: true, queueId: qid, subject: hydrated.subject, bodyHtml: hydrated.html, bodyText: hydrated.text });
   } catch (err) {
+    if (err instanceof PortalLinkChangedError) return res.status(409).json({ code: err.code, error: err.message });
     // The manager's edits are kept; the approval taken by this attempt is
     // returned so the draft is pending exactly as before.
     await db.transaction(async (tx) => {
@@ -1814,6 +1907,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
         last_error=${unusableDraftNote(err)}, updated_at=now()
         WHERE id=${qid} AND client_id=${clientId} AND status='sending'`);
       if (q.entity_type === "fix_track" && q.entity_id) await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='pending',updated_at=now() WHERE id=${q.entity_id} AND client_id=${clientId} AND email_request_status='sending'`);
+      await recordQueueDelivery(clientId, q, "email_failed", (req.session as any).userId ?? null, tx);
     });
     sendFailureResponse(res, err);
   }
@@ -1855,41 +1949,43 @@ router.post("/quotes/:quoteId/accept", requireAuth, denyViewers, async (req, res
   const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR s.department_id=${deptId})`;
   const out = await db.transaction(async (tx) => {
     const r = await tx.execute(sql`SELECT qs.*,q.*,i.title,i.description,i.location,i.issue_type,i.priority,
-      s.name AS site_name,c.name AS contractor_name
+      i.site_id,i.target_date,s.name AS site_name,c.name AS contractor_name,q.to_email AS contractor_email,
+      cl.name AS company_name,
+      (SELECT ics_content FROM contractor_email_queue
+        WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
+        ORDER BY created_at DESC LIMIT 1) AS previous_ics
       FROM fix_track_quote_submissions qs
       JOIN contractor_email_queue q ON q.id=qs.queue_id JOIN fix_track_issues i ON i.id=q.issue_id
+      JOIN clients cl ON cl.id=i.client_id
       LEFT JOIN sites s ON s.id=i.site_id LEFT JOIN contractors c ON c.id=q.contractor_id
       WHERE qs.id=${id} AND qs.client_id=${clientId} AND qs.status='submitted'${deptScope}
       FOR UPDATE OF qs,q,i`);
     const q = (r.rows as any[])[0]; if (!q) return null;
-    const subject = `Job Assigned: ${q.title}`;
-    const text = [
-      `Dear ${q.contractor_name ?? "Contractor"},`,
-      `The job "${q.title}" has been assigned to you.`,
-      `Site: ${q.site_name ?? "Not specified"}`,
-      `Location: ${q.location ?? "Not specified"}`,
-      `Type: ${q.issue_type}`,
-      `Priority: ${q.priority}`,
-      q.description ?? "",
-    ].filter(Boolean).join("\n");
-    const html = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b">
-      <p>Dear ${escapeHtml(q.contractor_name ?? "Contractor")},</p>
-      <p>The following job has been assigned to you.</p>
-      <h2>${escapeHtml(q.title)}</h2>
-      <p><strong>Site:</strong> ${escapeHtml(q.site_name ?? "Not specified")}<br>
-      <strong>Location:</strong> ${escapeHtml(q.location ?? "Not specified")}<br>
-      <strong>Type:</strong> ${escapeHtml(q.issue_type)}<br>
-      <strong>Priority:</strong> ${escapeHtml(q.priority)}</p>
-      ${q.description ? `<p>${escapeHtml(q.description)}</p>` : ""}
-    </div>`;
+    // Same draft as request-send's "assign" mode: booked/completed links held
+    // only in the encrypted payload, plus the calendar invite.
+    const tokens = await generateActionTokens(q.issue_id, clientId, q.contractor_id, tx);
+    const tokenPayload = { booked: tokens.bookedToken, completed: tokens.completedToken };
+    const icsContent = fixTrackCalendarInvite(q, await getClientSenderEmail(clientId), clientId, q.issue_id, nextCalendarSequence(q.previous_ics));
+    const icsFilename = icsContent ? calendarFilename(q.title) : null;
+    const rendered = await sendContractorAssignmentEmail({
+      contractorName: q.contractor_name ?? "Contractor", contractorEmail: q.contractor_email,
+      issueTitle: q.title, issueType: q.issue_type, issuePriority: q.priority,
+      issueLocation: q.location, issueDescription: q.description, siteName: q.site_name,
+      companyName: q.company_name, bookedToken: tokens.bookedToken, completedToken: tokens.completedToken,
+      baseUrl: getPublicAppUrl(), clientId, siteDocuments: await siteDocumentsForContractorEmail(q.site_id, clientId),
+      icsAttachment: icsContent ?? undefined, icsFilename: icsFilename ?? undefined, previewOnly: true,
+    });
+    const persisted = placeholderizeQueuedDraft(rendered.subject, rendered.html,
+      rendered.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), tokenPayload);
     await tx.execute(sql`UPDATE fix_track_quote_submissions SET status='accepted' WHERE id=${id}`);
     await tx.execute(sql`UPDATE fix_track_issues SET contractor_id=${q.contractor_id}, email_request_mode='assign',
       email_request_status='pending', updated_at=now() WHERE id=${q.issue_id} AND client_id=${clientId}`);
     await tx.execute(sql`INSERT INTO contractor_email_queue
-      (client_id,issue_id,entity_type,entity_id,department_id,contractor_id,mode,email_type,to_email,subject,body_html,body_text,email_preview_json,requested_by,idempotency_key)
+      (client_id,issue_id,entity_type,entity_id,department_id,contractor_id,mode,email_type,to_email,subject,body_html,body_text,
+       ics_content,ics_filename,email_preview_json,encrypted_token_payload,requested_by,idempotency_key)
       VALUES (${clientId},${q.issue_id},'fix_track',${q.issue_id},${q.department_id},${q.contractor_id},'assign','assignment',${q.to_email},
-      ${subject},${html},${text},
-      ${JSON.stringify({ subject, text, html })},${(req.session as any).userId ?? null},${randomUUID()})`);
+      ${persisted.subject},${persisted.html},${persisted.text},${icsContent},${icsFilename},
+      ${JSON.stringify(persisted.preview)},${encryptTokenPayload(tokenPayload)},${req.currentUser?.id ?? null},${randomUUID()})`);
     return q;
   });
   if (!out) return res.status(404).json({ error: "Quote not found" });
@@ -1912,7 +2008,7 @@ router.post("/issues/:id/approve-send", requireAuth, denyViewers, async (req, re
   const result = await db.execute(sql`
     UPDATE fix_track_issues
     SET email_request_status = 'approved',
-        email_approved_by = ${(req.session as any).userId ?? null},
+        email_approved_by = ${req.currentUser?.id ?? null},
         email_approved_at = now(),
         updated_at = now()
     WHERE id = ${id} AND client_id = ${clientId}
@@ -1927,7 +2023,7 @@ router.post("/issues/:id/approve-send", requireAuth, denyViewers, async (req, re
     issueId: id,
     eventType: "email_approved",
     note: row.email_request_mode,
-    createdBy: (req.session as any).userId ?? null,
+    createdBy: req.currentUser?.id ?? null,
   });
   res.json({ ok: true, mode: row.email_request_mode });
 });
@@ -1972,7 +2068,7 @@ router.post("/issues/:id/reject-send", requireAuth, denyViewers, async (req, res
     issueId: id,
     eventType: "email_rejected",
     note: row.emailRequestMode ?? null,
-    createdBy: (req.session as any).userId ?? null,
+    createdBy: req.currentUser?.id ?? null,
   });
   res.json({ ok: true });
 });
@@ -2048,8 +2144,8 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   }
   const queueRow = await db.transaction(async (tx) => {
     const queued = await tx.execute(sql`UPDATE contractor_email_queue
-      SET status='sending', approved_by=COALESCE(approved_by,${(req.session as any).userId ?? null}),
-        approved_at=COALESCE(approved_at,now()), sent_by=${(req.session as any).userId ?? null}, updated_at=now()
+      SET status='sending', approved_by=COALESCE(approved_by,${req.currentUser?.id ?? null}),
+        approved_at=COALESCE(approved_at,now()), sent_by=${req.currentUser?.id ?? null}, updated_at=now()
       WHERE status='pending' AND id=(SELECT id FROM contractor_email_queue WHERE client_id=${clientId}
         AND entity_type='fix_track' AND entity_id=${id} AND status='pending'
         AND mode=${mode}${queueDepartmentScope(req)} ORDER BY created_at DESC LIMIT 1)
@@ -2071,7 +2167,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     await db.execute(sql`UPDATE contractor_email_queue SET status='sent',sent_at=now(),updated_at=now()
       WHERE id=${queueRow.id} AND client_id=${clientId} AND status='sending'`);
     await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
-      email_sent_by=${(req.session as any).userId ?? null},email_sent_at=now(),updated_at=now()
+      email_sent_by=${req.currentUser?.id ?? null},email_sent_at=now(),updated_at=now()
       WHERE id=${id} AND client_id=${clientId}`);
     return res.json({ ok: true, message: mode === "quote" ? "Quote request sent to contractor" : "Email sent to contractor" });
   } catch (err) {
