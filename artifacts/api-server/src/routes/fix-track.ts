@@ -557,7 +557,8 @@ router.get("/issues/:id", requireAuth, async (req, res) => {
       status: a.status,
       createdAt: a.createdAt,
     })),
-    notes: activity.filter(a => a.eventType === "note").map(a => ({
+    // Media deletions show in the notes so the issue keeps a record of them.
+    notes: activity.filter(a => a.eventType === "note" || a.eventType === "media_deleted").map(a => ({
       id: a.id,
       note: a.note,
       createdBy: a.createdBy ?? "Former user",
@@ -1138,6 +1139,118 @@ router.post("/issues/:id/media", requireAuth, denyViewers, async (req, res): Pro
 
   if (!result) {
     await storage.deleteTenantObject(finalizedPath, clientId).catch(() => {});
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.json({ mediaUrls: result });
+});
+
+// ── Delete media from a finished issue ───────────────────────────────────────
+//
+// To save storage, owners and admins can delete a photo or video once the
+// issue is resolved or closed. The issue, its notes and its history stay, and
+// the history records who deleted which file and when. Retrying a request
+// whose file is already gone just finishes removing the reference.
+
+const MEDIA_DELETE_ROLES = new Set(["consultant", "client_admin"]);
+const FINISHED_STATUSES = new Set(["resolved", "closed"]);
+const VIDEO_PATH = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i;
+
+router.post("/issues/:id/media/delete", requireAuth, denyViewers, async (req, res): Promise<void> => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
+  if (!MEDIA_DELETE_ROLES.has(req.currentUser?.role ?? "")) {
+    res.status(403).json({ error: "Only owners and admins can delete photos and videos." });
+    return;
+  }
+  const id = Number.parseInt(req.params.id as string, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const parsed = z.object({ objectPath: z.string().min(1).max(1000) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid media object" });
+    return;
+  }
+  const { objectPath } = parsed.data;
+
+  const deptId = getActiveDepartmentId(req);
+  const conditions: any[] = [
+    eq(fixTrackIssuesTable.id, id),
+    eq(fixTrackIssuesTable.clientId, clientId),
+  ];
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any,
+    );
+  }
+  const [existing] = await db.select({ status: fixTrackIssuesTable.status, mediaUrls: fixTrackIssuesTable.mediaUrls })
+    .from(fixTrackIssuesTable)
+    .where(and(...conditions))
+    .limit(1);
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (!FINISHED_STATUSES.has(existing.status)) {
+    res.status(409).json({ error: "Photos and videos can only be deleted once the issue is resolved." });
+    return;
+  }
+  if (!(existing.mediaUrls ?? []).includes(objectPath)) {
+    res.status(404).json({ error: "That file is not attached to this issue." });
+    return;
+  }
+
+  // Another issue may carry the same file (copied media); then only this
+  // issue's reference is removed and the file stays.
+  const sharedWith = await db.execute(sql`
+    SELECT 1 FROM fix_track_issues
+     WHERE client_id = ${clientId} AND id <> ${id}
+       AND media_urls @> ${JSON.stringify([objectPath])}::jsonb
+     LIMIT 1
+  `);
+  try {
+    if (sharedWith.rows.length === 0) await storage.deleteTenantObject(objectPath, clientId);
+  } catch (err) {
+    if (err instanceof ObjectOwnershipError) {
+      res.status(403).json({ error: err.message });
+      return;
+    }
+    if (!(err instanceof ObjectNotFoundError)) {
+      respondObjectStorageUnavailable(req, res, err, "FixTrack issue media deletion");
+      return;
+    }
+    // Already gone (an earlier attempt deleted it): remove the reference.
+  }
+
+  const kind = VIDEO_PATH.test(objectPath) ? "video" : "photo";
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx.select({ mediaUrls: fixTrackIssuesTable.mediaUrls })
+      .from(fixTrackIssuesTable)
+      .where(and(...conditions))
+      .for("update")
+      .limit(1);
+    if (!current) return null;
+    const currentPaths = current.mediaUrls ?? [];
+    if (!currentPaths.includes(objectPath)) return currentPaths;
+    const mediaUrls = currentPaths.filter((path) => path !== objectPath);
+    await tx.update(fixTrackIssuesTable)
+      .set({ mediaUrls, updatedAt: new Date() })
+      .where(and(...conditions));
+    await tx.insert(fixTrackIssueActivityTable).values({
+      clientId,
+      issueId: id,
+      eventType: "media_deleted",
+      note: `Deleted a ${kind} to free up storage (${objectPath}).`,
+      createdBy: req.currentUser?.id ?? null,
+    });
+    return mediaUrls;
+  });
+  if (!result) {
     res.status(404).json({ error: "Not found" });
     return;
   }

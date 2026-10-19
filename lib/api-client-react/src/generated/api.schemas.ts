@@ -211,6 +211,18 @@ export interface AuditLogEntry {
   actorName: string | null;
 }
 
+export interface FixTrackMediaDeleteRequest {
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  objectPath: string;
+}
+
+export interface FixTrackIssueMediaList {
+  mediaUrls: string[];
+}
+
 export interface ErrorResponse {
   error: string;
 }

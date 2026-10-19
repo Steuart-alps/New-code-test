@@ -27,6 +27,8 @@ tags:
     description: App settings
   - name: notifications
     description: Notification operations
+  - name: fix-track
+    description: FixTrack issue operations
   - name: storage
     description: File storage operations
   - name: fire-safety
@@ -1274,6 +1276,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RequestUploadUrlResponse"
+
+  /fix-track/issues/{id}/media/delete:
+    post:
+      operationId: deleteFixTrackIssueMedia
+      tags: [fix-track]
+      summary: Delete a photo or video from a resolved or closed issue (owners and admins)
+      description: >
+        Frees storage once an issue is finished. The issue, its notes and its
+        history stay; the history records who deleted which file and when.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FixTrackMediaDeleteRequest"
+      responses:
+        "200":
+          description: The issue's remaining photos and videos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FixTrackIssueMediaList"
+        "403":
+          description: Not an owner or admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue or file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The issue is not resolved or closed yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /fire-safety:
     get:
@@ -2845,6 +2893,22 @@ components:
         before: {}
         after: {}
 
+    FixTrackMediaDeleteRequest:
+      type: object
+      required: [objectPath]
+      properties:
+        objectPath:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    FixTrackIssueMediaList:
+      type: object
+      required: [mediaUrls]
+      properties:
+        mediaUrls:
+          type: array
+          items:
+            type: string
     ErrorResponse:
       type: object
       properties:
