@@ -164,6 +164,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
     if (!existingAcl?.owner && !objectPath.startsWith(tenantUploadPrefix)) {
       return res.status(403).json({ error: "Upload was not reserved for this account" });
     }
+    await storage.enforceUploadSizeLimit(objectPath, clientId);
     // The file's own bytes decide its type (an allow-list of document
     // formats), never the type the browser declared, so an uploaded HTML or
     // SVG file can't be served back as a page on the app's origin.

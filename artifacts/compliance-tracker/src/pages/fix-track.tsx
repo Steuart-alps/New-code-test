@@ -25,6 +25,7 @@ import { getApiErrorMessage } from "@/lib/api";
 import { format } from "date-fns";
 import { elapsedBoardDays, FixTrackBoard, type FixTrackBoardIssue } from "@/components/fix-track-board";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -219,6 +220,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
     const newPaths: string[] = [];
     for (const file of files) {
       try {
+        assertWithinUploadLimit(file);
         const res = await clientApiFetch(`/fix-track/issues/${issueId}/request-upload`, {
           method: "POST",
           body: JSON.stringify({ name: file.name, contentType: file.type }),

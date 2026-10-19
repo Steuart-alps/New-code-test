@@ -19,7 +19,7 @@ import { addMonthsUtc } from "../lib/complianceCompletion";
 import {
   CERTIFICATE_OUTCOMES, DEFECT_CODES, createDefect, defectsForCertificates, fixTrackIssueTypeFor, outcomeMovesDueDate,
 } from "../lib/certificateOutcomes";
-import { ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
+import { ObjectContentError, ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
@@ -83,6 +83,8 @@ async function secureCertificateFile(req: Request, res: any, fileUrl: string, cl
       res.status(403).json({ error: "File does not belong to this client" });
     } else if (err instanceof ObjectNotFoundError) {
       res.status(404).json({ error: "Uploaded file not found" });
+    } else if (err instanceof ObjectContentError) {
+      res.status(400).json({ error: err.message });
     } else {
       req.log.error({ err }, "Could not secure certificate file");
       res.status(503).json({ error: "File storage is temporarily unavailable. Please try again later." });

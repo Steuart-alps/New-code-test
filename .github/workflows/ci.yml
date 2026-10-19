@@ -111,6 +111,9 @@ jobs:
       - name: Web client override-reason retry test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-override-reason
 
+      - name: Upload size limit test
+        run: pnpm --filter @workspace/api-server run test:upload-size-limit
+
       - name: Track record lock decision tests
         run: pnpm --filter @workspace/api-server run test:track-record-lock
 

@@ -12,8 +12,10 @@ import { createDownloadToken } from "./downloadUsage";
 import {
   MAX_RESTRICTED_UPLOAD_BYTES,
   ObjectContentError,
+  UploadTooLargeError,
   detectIssueVideoType,
   detectUploadType,
+  maxUploadBytes,
   validateUploadContent,
 } from "./uploadValidation";
 import type {
@@ -24,6 +26,8 @@ import type {
 
 export {
   ObjectContentError,
+  UploadTooLargeError,
+  maxUploadBytes,
   detectIssueVideoType,
   detectUploadType,
   validatePdfInWorker,
@@ -79,7 +83,6 @@ export class ObjectGenerationError extends Error {
   }
 }
 
-const MAX_ISSUE_VIDEO_UPLOAD_BYTES = 250 * 1024 * 1024;
 /** The reservation namespace is part of the upload security boundary. */
 export function isTenantReservedObjectPath(objectPath: string, tenantId: number | string): boolean {
   return objectPath.startsWith(`/objects/uploads/tenant-${tenantId}/`);
@@ -583,7 +586,26 @@ export class ObjectStorageService {
     if (!isTenantReservedObjectPath(normalizedPath, tenantId)) {
       throw new ObjectOwnershipError("Upload was not reserved for this tenant");
     }
+    await this.enforceUploadSizeLimit(normalizedPath, tenantId);
     return this.setTenantObjectAcl(normalizedPath, tenantId);
+  }
+
+  /**
+   * Refuse a new upload over maxUploadBytes() before it becomes a record. The
+   * rejected bytes were never attached to anything, so they are dropped rather
+   * than left in the bucket costing money. Objects already finalised (outside
+   * this tenant's upload reservation) are never touched.
+   */
+  async enforceUploadSizeLimit(objectPath: string, tenantId: number | string): Promise<void> {
+    const normalizedPath = this.normalizeObjectEntityPath(objectPath);
+    if (!isTenantReservedObjectPath(normalizedPath, tenantId)) return;
+    const file = await this.getObjectEntityFile(normalizedPath);
+    const [metadata] = await file.getMetadata();
+    const limit = maxUploadBytes();
+    if (Number(metadata.size) > limit) {
+      await this.discardTenantUpload(normalizedPath, tenantId).catch(() => {});
+      throw new UploadTooLargeError(limit);
+    }
   }
 
   /** Delete an unfinalised reserved upload after content inspection rejects it. */
@@ -766,8 +788,9 @@ export class ObjectStorageService {
     const generation = String(metadata.generation ?? "");
     const metageneration = String(metadata.metageneration ?? "");
     const size = Number(metadata.size);
-    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0 || size > MAX_ISSUE_VIDEO_UPLOAD_BYTES) {
-      throw new ObjectContentError(`Video must be between 1 byte and ${MAX_ISSUE_VIDEO_UPLOAD_BYTES} bytes`);
+    if (Number.isSafeInteger(size) && size > maxUploadBytes()) throw new UploadTooLargeError();
+    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0) {
+      throw new ObjectContentError("Video must not be empty");
     }
 
     const pinned = staging.bucket.file(staging.name, {

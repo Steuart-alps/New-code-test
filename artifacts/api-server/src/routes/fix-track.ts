@@ -190,7 +190,7 @@ async function finalizeIssueMedia(paths: string[] | undefined, clientId: number)
     return null;
   } catch (err) {
     if (err instanceof ObjectNotFoundError) return "Uploaded media object not found";
-    if (err instanceof ObjectOwnershipError) return err.message;
+    if (err instanceof ObjectOwnershipError || err instanceof ObjectContentError) return err.message;
     return "Could not secure uploaded media";
   }
 }
