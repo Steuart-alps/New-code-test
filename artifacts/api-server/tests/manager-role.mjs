@@ -6,7 +6,11 @@
 //    maintenance switch, can't change their own role, and has no billing,
 //    settings, sites or 2FA resets.
 //  - A Manager given every department sees all departments' Staff and sites.
+//  - A consultant on the PLATFORM_ADMIN_EMAILS list (ALPS's own sign-in) sees
+//    every business, with its sites on the Portfolio; other consultants see
+//    only the businesses they're linked to.
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const BASE = process.env.API_BASE;
 if (!BASE) throw new Error("API_BASE is required");
@@ -39,13 +43,13 @@ function session() {
 
 const email = (label) => `manager-role-${label}-${ownership.runId}@test.local`;
 
-async function signUp(label) {
+async function signUp(label, address = email(label)) {
   const call = session();
-  const registered = await call("POST", "/auth/register", { name: `${label} Owner`, email: email(label), password: "password-123" });
+  const registered = await call("POST", "/auth/register", { name: `${label} Owner`, email: address, password: "password-123" });
   check(`${label}: register`, [200, 201].includes(registered.status), String(registered.status));
   ownership.trackRegisteredUser();
   await call("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data?.verificationToken ?? "")}`);
-  const login = await call("POST", "/auth/login", { email: email(label), password: "password-123" });
+  const login = await call("POST", "/auth/login", { email: address, password: "password-123" });
   check(`${label}: login`, login.status === 200, String(login.status));
   const me = await call("GET", "/auth/me");
   call.user = me.data?.user ?? me.data;
@@ -205,6 +209,42 @@ async function roles() {
   const otherHead = await signIn("other-head");
   const crossEdit = await otherHead("PUT", `/users/${chef?.id}`, { name: "Changed" });
   check("Another business's Manager can't edit this business's Staff", [403, 404].includes(crossEdit.status), String(crossEdit.status));
+
+  await everyBusiness({ owner, other, siteNames: ["Main kitchen", "East wing"] });
+}
+
+async function everyBusiness({ owner, other, siteNames }) {
+  const operatorEmail = process.env.PLATFORM_OPERATOR_EMAIL;
+  if (!operatorEmail) {
+    console.log("PLATFORM_OPERATOR_EMAIL not set (API was already running); skipping every-business checks.");
+    return;
+  }
+  const operator = await signUp("operator", operatorEmail);
+  promoteToConsultant(operatorEmail);
+  const adviser = await signUp("adviser");
+  promoteToConsultant(email("adviser"));
+
+  const operatorClients = new Set(((await operator("GET", "/clients")).data ?? []).map((c) => c.id));
+  check("The platform operator's consultant login lists every business",
+    operatorClients.has(owner.clientId) && operatorClients.has(other.clientId) && operatorClients.has(adviser.clientId),
+    JSON.stringify([...operatorClients]));
+  const portfolio = await operator("GET", "/portfolio");
+  const business = (portfolio.data?.businesses ?? []).find((b) => b.id === owner.clientId);
+  check("The operator's Portfolio includes an unlinked business", portfolio.status === 200 && !!business, JSON.stringify(portfolio.data));
+  const listed = (business?.siteList ?? []).map((site) => site.name);
+  check("The Portfolio lists each business's sites by name",
+    siteNames.every((name) => listed.includes(name)) && business?.sites === listed.length, JSON.stringify(business));
+  const sites = await operator("GET", `/sites?clientId=${owner.clientId}`);
+  check("The operator can open any business's sites", sites.status === 200 && (sites.data ?? []).length === siteNames.length, `${sites.status} ${JSON.stringify(sites.data)}`);
+
+  const adviserClients = new Set(((await adviser("GET", "/clients")).data ?? []).map((c) => c.id));
+  check("Another consultant lists only their own businesses",
+    adviserClients.has(adviser.clientId) && !adviserClients.has(owner.clientId), JSON.stringify([...adviserClients]));
+  const adviserPortfolio = await adviser("GET", "/portfolio");
+  check("Another consultant's Portfolio leaves out unlinked businesses",
+    !(adviserPortfolio.data?.businesses ?? []).some((b) => b.id === owner.clientId), JSON.stringify(adviserPortfolio.data));
+  const blocked = await adviser("GET", `/sites?clientId=${owner.clientId}`);
+  check("Another consultant can't open an unlinked business", blocked.status === 403, String(blocked.status));
 
 }
 

@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { auditContext, db } from "@workspace/db";
-import { consultantClientsTable } from "@workspace/db/schema";
+import { clientsTable, consultantClientsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
 import { storedCredentialCandidates } from "../lib/sessionRevocation";
@@ -12,7 +12,8 @@ declare global {
     interface Request {
       currentUser?: SafeUser;
       // Client accounts the current user is allowed to act on. Populated for
-      // consultant-role users from consultant_clients plus their own clientId.
+      // consultant-role users from consultant_clients plus their own clientId;
+      // a consultant who is also a platform operator gets every business.
       allowedClientIds?: Set<number>;
     }
   }
@@ -23,6 +24,13 @@ async function loadConsultantClients(req: Request, userId: number) {
   if (!user || user.role !== "consultant") return;
   const allowed = new Set<number>();
   if (user.clientId != null) allowed.add(user.clientId);
+  if (isPlatformOperator(user)) {
+    // ALPS's own consultant sign-in looks after every business on the service.
+    const clients = await db.select({ id: clientsTable.id }).from(clientsTable);
+    for (const client of clients) allowed.add(client.id);
+    req.allowedClientIds = allowed;
+    return;
+  }
   const memberships = await db
     .select({ clientId: consultantClientsTable.clientId })
     .from(consultantClientsTable)
@@ -212,9 +220,11 @@ export function requireConsultant(req: Request, res: Response, next: NextFunctio
 
 /**
  * Platform operators run the ComplyTrack service itself (Stripe catalogue
- * repair, ALPS discount codes, unrestricted business creation). The
- * "consultant" role cannot be used for this because every self-signup owner
- * has it, so operators are named explicitly by sign-in email in the
+ * repair, ALPS discount codes, unrestricted business creation, and, when
+ * signed in as a consultant, access to every business). The "consultant" role
+ * cannot be used for this because outside consultancies have it too (and
+ * older self-signup owners still do), so operators are named explicitly by
+ * sign-in email in the
  * PLATFORM_ADMIN_EMAILS allowlist (comma-separated, case-insensitive). Unset
  * or empty means nobody is a platform operator.
  */

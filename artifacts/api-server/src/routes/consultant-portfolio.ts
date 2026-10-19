@@ -78,7 +78,7 @@ router.get("/portfolio", requireAuth, requireConsultant, async (req, res) => {
       SELECT id, name, active, trial_ends_at, stripe_customer_id, cancelled_at
       FROM clients WHERE id IN (${idList}) ORDER BY lower(name), id
     `),
-    db.execute(sql`SELECT client_id, count(*) AS n FROM sites WHERE client_id IN (${idList}) GROUP BY client_id`),
+    db.execute(sql`SELECT id, client_id, name FROM sites WHERE client_id IN (${idList}) ORDER BY lower(name), id`),
     // Same rule as the dashboard stats: past due and not completed counts as overdue.
     db.execute(sql`
       SELECT client_id, count(*) AS n FROM compliance_items
@@ -109,7 +109,11 @@ router.get("/portfolio", requireAuth, requireConsultant, async (req, res) => {
 
   const clientRows = rowsOf<{ id: number; name: string; active: boolean; trial_ends_at: Date | null; stripe_customer_id: string | null; cancelled_at: Date | null }>(clients);
   const subscriptions = await liveSubscriptions([...new Set(clientRows.map((row) => row.stripe_customer_id).filter((id): id is string => !!id))]);
-  const siteCounts = countMap(rowsOf(sites));
+  const siteLists = new Map<number, Array<{ id: number; name: string }>>();
+  for (const site of rowsOf<{ id: number; client_id: number; name: string }>(sites)) {
+    const clientId = Number(site.client_id);
+    siteLists.set(clientId, [...(siteLists.get(clientId) ?? []), { id: Number(site.id), name: site.name }]);
+  }
   const overdueCounts = countMap(rowsOf(overdueChecks));
   const actionCounts = new Map(rowsOf<{ client_id: number; open: string; overdue: string }>(actions)
     .map((row) => [Number(row.client_id), { open: Number(row.open), overdue: Number(row.overdue) }]));
@@ -121,7 +125,8 @@ router.get("/portfolio", requireAuth, requireConsultant, async (req, res) => {
       id: Number(client.id),
       name: client.name,
       active: client.active,
-      sites: siteCounts.get(Number(client.id)) ?? 0,
+      sites: siteLists.get(Number(client.id))?.length ?? 0,
+      siteList: siteLists.get(Number(client.id)) ?? [],
       overdueChecks: overdueCounts.get(Number(client.id)) ?? 0,
       openActions: actionCounts.get(Number(client.id))?.open ?? 0,
       overdueActions: actionCounts.get(Number(client.id))?.overdue ?? 0,

@@ -19,7 +19,12 @@ trap cleanup EXIT
 
 if ! curl -sf -m 2 "${API_BASE%/api}/readyz" >/dev/null 2>&1; then
   pnpm run build
-  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  # The every-business checks need to know the platform operator's address
+  # before the API starts, so they only run against an API booted here.
+  # Fixture cleanup only purges accounts whose address carries the run id.
+  export TEST_RUN_ID="${TEST_RUN_ID:-$(python3 -c 'import uuid; print(uuid.uuid4())')}"
+  export PLATFORM_OPERATOR_EMAIL="manager-role-operator-${TEST_RUN_ID}@test.local"
+  NODE_ENV=test PORT="$TEST_PORT" PLATFORM_ADMIN_EMAILS="$PLATFORM_OPERATOR_EMAIL" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 45); do
     curl -sf -m 2 "${API_BASE%/api}/readyz" >/dev/null 2>&1 && break
