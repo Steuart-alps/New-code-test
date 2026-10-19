@@ -31,6 +31,7 @@ import {
   renewingStorageGib,
   stillPaidReducedGib,
 } from "../lib/storageCapacity";
+import { storageWarningThresholdBytes } from "../lib/storageWarningEmails";
 import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
@@ -43,7 +44,6 @@ const objectStorageService = new ObjectStorageService();
 // Every ObjectStorageService instance reports tenant uploads and deletions to
 // the usage ledger once this router is loaded.
 setStorageUsageRecorder(storageUsageLedger);
-const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 
 storageDownloadRouter.get("/storage/download/:token", async (req: Request, res: Response) => {
   let resolved: Awaited<ReturnType<typeof resolveDownloadToken>> = null;
@@ -155,10 +155,7 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
     const month = utcMonth();
     const monthlyDownloadBytes = await getMonthlyDownloadBytes(clientId, month);
     const estimatedCost = await estimateStorageCost(clientId, usedBytes, monthlyDownloadBytes);
-    const configuredThreshold = Number(thresholdSetting?.value);
-    const warningThresholdBytes = Number.isSafeInteger(configuredThreshold) && configuredThreshold > 0
-      ? configuredThreshold
-      : DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES;
+    const warningThresholdBytes = storageWarningThresholdBytes(thresholdSetting?.value);
 
     res.json(GetStorageUsageResponse.parse({
       usedBytes,

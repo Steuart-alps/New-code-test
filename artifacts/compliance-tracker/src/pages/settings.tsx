@@ -321,6 +321,15 @@ function StorageUsageCard() {
   });
   const usage = usageQuery.data;
 
+  // The storage warning email links to /settings#storage.
+  useEffect(() => {
+    if (window.location.hash !== "#storage" || usageQuery.isLoading) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("storage")?.scrollIntoView({ block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [usageQuery.isLoading]);
+
   useEffect(() => {
     if (usage) {
       setThresholdGb(String(Number((usage.warningThresholdBytes / (1024 ** 3)).toFixed(3))));
@@ -402,14 +411,14 @@ function StorageUsageCard() {
     : 0;
 
   return (
-    <Card className="shadow-lg border-border/50 bg-card">
+    <Card id="storage" className="scroll-mt-6 shadow-lg border-border/50 bg-card">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <HardDrive className="w-5 h-5 text-sky-600" />
           <CardTitle className="font-display">File Storage</CardTitle>
         </div>
         <CardDescription>
-          Monitor retained documents and evidence for this account. The warning is informational and never blocks or deletes files.
+          Monitor retained documents and evidence for this account. When usage passes the warning level, the account's owners and admins get one email; it never blocks or deletes files.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -424,7 +433,7 @@ function StorageUsageCard() {
                 <AlertTriangle className="h-5 w-5 shrink-0" />
                 <div>
                   <p className="font-medium">Storage warning threshold reached</p>
-                  <p className="text-sm">Review retained files or raise the warning level. Uploads will continue normally.</p>
+                  <p className="text-sm">Buy extra storage, review retained files or raise the warning level. Uploads will continue normally.</p>
                 </div>
               </div>
             )}

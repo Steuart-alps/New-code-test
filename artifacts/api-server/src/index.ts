@@ -35,6 +35,7 @@ import {
 } from "./lib/services";
 import { describeEmailConfigurationIssues, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./lib/email";
 import { runTrialEndedEmailJob, runTrialReminderJob } from "./lib/trialReminders";
+import { runStorageWarningEmailJob } from "./lib/storageWarningEmails";
 import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
 import { runDocAckReminderJob } from "./lib/docAckReminders";
 import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
@@ -319,6 +320,13 @@ function startScheduler() {
   // trial has just ended without a subscription (daily at 08:15).
   schedule("15 8 * * *", "trial-reminders", runTrialReminders, { daily: true });
   logger.info("Trial reminder scheduler started (daily at 08:15)");
+
+  // Email a business's managers once when its stored files pass the storage
+  // warning level set in Settings (daily at 08:10, from the usage ledger).
+  schedule("10 8 * * *", "storage-warning-emails", logged(
+    "Storage warning email job complete", () => runStorageWarningEmailJob(),
+  ), { daily: true });
+  logger.info("Storage warning email scheduler started (daily at 08:10)");
 
   // Email safety check reminders for overdue/due-soon checks (daily at 08:45)
   schedule("45 8 * * *", "check-reminder-emails", logged(
