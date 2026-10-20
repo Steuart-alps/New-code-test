@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api";
 import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
 import { KitchenStatusPill } from "@/components/kitchen-status-pill";
 import { ComplianceChecksDue } from "@/components/compliance-checks-due";
+import { TodayByDepartmentCard } from "@/components/today-by-department";
 import { RegisterReviewsDue } from "@/components/register-reviews-due";
 import { DashboardStartCards } from "@/components/dashboard-start-cards";
 import { cn } from "@/lib/utils";
@@ -659,6 +660,9 @@ export default function Dashboard() {
 
         {/* DailyTrack snapshot */}
         {hasDailytrack && <DailyTrackSnapshotCard totals={checklistTotals} loading={checklistLoading} />}
+
+        {/* Today by department (Owners; other roles as chosen in Settings) */}
+        <TodayByDepartmentCard siteId={siteId === "all" ? null : Number(siteId)} />
 
         {/* Summary bar */}
         {!loading && !error && tracks.length > 0 && (

@@ -1029,6 +1029,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/DashboardStats"
 
+  /dashboard/today-by-department:
+    get:
+      operationId: getTodayByDepartment
+      tags: [compliance-items]
+      summary: Today's checks per site and department
+      description: >
+        For each site, one bar per department (and one for the whole site) with
+        today's checks done, not done yet and failed, and what is outstanding.
+        Owners see every department, Managers the departments they cover, others
+        their own. Owners choose which roles see it (setting todayByDepartmentRoles).
+      parameters:
+        - in: query
+          name: siteId
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Today's status by site and department
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TodayByDepartment"
+        "403":
+          description: The card is not shown for this person's role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /settings:
     get:
       operationId: getSettings
@@ -2785,6 +2815,70 @@ paths:
 
 components:
   schemas:
+    TodayByDepartment:
+      type: object
+      required: [date, groups]
+      properties:
+        date:
+          type: string
+          format: date
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayByDepartmentGroup"
+    TodayByDepartmentGroup:
+      type: object
+      required: [siteId, siteName, rows]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+          description: null for work not tied to one site ("All sites")
+        siteName:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayByDepartmentRow"
+    TodayByDepartmentRow:
+      type: object
+      required: [key, kind, departmentId, name, done, todo, failed, items, moreItems]
+      properties:
+        key:
+          type: string
+        kind:
+          type: string
+          enum: [whole_site, department]
+        departmentId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        done:
+          type: integer
+        todo:
+          type: integer
+        failed:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayByDepartmentItem"
+        moreItems:
+          type: integer
+    TodayByDepartmentItem:
+      type: object
+      required: [status, label, detail, path]
+      properties:
+        status:
+          type: string
+          enum: [todo, failed]
+        label:
+          type: string
+        detail:
+          type: string
+        path:
+          type: string
     DailyTrackRequirement:
       type: string
       enum: [kitchen_opening, premises_opening, kitchen_closing, premises_closing, signoff]

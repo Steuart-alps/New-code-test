@@ -22,6 +22,7 @@ import {
 } from "../lib/safeTrackAckReminders";
 import { REQUIRE_TWO_FACTOR_SETTING } from "../lib/twoFactorPolicy";
 import { isAllowedTenantSender, sanitizeSenderName } from "../lib/email";
+import { TODAY_BY_DEPARTMENT_ROLES_SETTING, normalizeTodayByDepartmentRoles } from "../lib/todayByDepartment";
 
 const router: IRouter = Router();
 
@@ -59,6 +60,9 @@ const SETTING_KEYS = [
   // "false" lets login accounts in this business skip the authenticator app;
   // absent or "true" keeps two-factor authentication mandatory.
   REQUIRE_TWO_FACTOR_SETTING,
+  // JSON {managers, maintenance, staff}: who besides Owners sees the
+  // dashboard's "Today by department" card (lib/todayByDepartment.ts).
+  TODAY_BY_DEPARTMENT_ROLES_SETTING,
 ] as const;
 
 // Secrets are write-only: GET /settings reports only whether one is set.
@@ -334,6 +338,17 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
         return;
       }
       rawBody.smtpFrom = rawFrom.trim();
+    }
+  }
+  if (rawBody[TODAY_BY_DEPARTMENT_ROLES_SETTING] !== undefined) {
+    const rawRoles = rawBody[TODAY_BY_DEPARTMENT_ROLES_SETTING];
+    if (rawRoles !== null) {
+      const normalized = normalizeTodayByDepartmentRoles(rawRoles);
+      if (normalized === null) {
+        res.status(400).json({ error: "Today by department roles must be managers, maintenance and staff set to true or false" });
+        return;
+      }
+      rawBody[TODAY_BY_DEPARTMENT_ROLES_SETTING] = normalized;
     }
   }
   if (rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] !== undefined) {

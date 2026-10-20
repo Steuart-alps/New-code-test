@@ -1206,6 +1206,39 @@ export const GetDashboardStatsResponse = zod.object({
 
 
 /**
+ * For each site, one bar per department (and one for the whole site) with today's checks done, not done yet and failed, and what is outstanding. Owners see every department, Managers the departments they cover, others their own. Owners choose which roles see it (setting todayByDepartmentRoles).
+ * @summary Today's checks per site and department
+ */
+export const GetTodayByDepartmentQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetTodayByDepartmentResponse = zod.object({
+  "date": zod.date(),
+  "groups": zod.array(zod.object({
+  "siteId": zod.number().nullable().describe('null for work not tied to one site (\"All sites\")'),
+  "siteName": zod.string(),
+  "rows": zod.array(zod.object({
+  "key": zod.string(),
+  "kind": zod.enum(['whole_site', 'department']),
+  "departmentId": zod.number().nullable(),
+  "name": zod.string(),
+  "done": zod.number(),
+  "todo": zod.number(),
+  "failed": zod.number(),
+  "items": zod.array(zod.object({
+  "status": zod.enum(['todo', 'failed']),
+  "label": zod.string(),
+  "detail": zod.string(),
+  "path": zod.string()
+})),
+  "moreItems": zod.number()
+}))
+}))
+})
+
+
+/**
  * @summary Get all app settings
  */
 export const getSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');

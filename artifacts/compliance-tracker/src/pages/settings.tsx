@@ -2834,6 +2834,7 @@ export default function SettingsPage() {
         <DataExportCard />
         <DataDeletionRequestCard />
         <DepartmentsCard />
+        {canAdmin && <TodayByDepartmentRolesCard />}
         {canAdmin && <RequiredActionTemplatesCard />}
         <TrackOwnersCard />
         <TrackSummaryRoutingCard />
@@ -3125,6 +3126,103 @@ export default function SettingsPage() {
 }
 
 // ── Organisation two-factor requirement (managers only) ─────────────────────
+// ── Today by department: who sees the dashboard card ─────────────────────────
+
+type TodayByDepartmentRoles = { managers: boolean; maintenance: boolean; staff: boolean };
+
+// Matches DEFAULT_TODAY_BY_DEPARTMENT_ROLES in api-server lib/todayByDepartment.ts.
+const DEFAULT_TODAY_BY_DEPARTMENT_ROLES: TodayByDepartmentRoles = { managers: true, maintenance: true, staff: false };
+
+function parseTodayByDepartmentRoles(value: unknown): TodayByDepartmentRoles {
+  try {
+    const parsed = typeof value === "string" && value ? JSON.parse(value) : {};
+    const pick = (key: keyof TodayByDepartmentRoles) =>
+      typeof parsed?.[key] === "boolean" ? parsed[key] as boolean : DEFAULT_TODAY_BY_DEPARTMENT_ROLES[key];
+    return { managers: pick("managers"), maintenance: pick("maintenance"), staff: pick("staff") };
+  } catch {
+    return DEFAULT_TODAY_BY_DEPARTMENT_ROLES;
+  }
+}
+
+const TODAY_BY_DEPARTMENT_ROLE_OPTIONS: Array<{ key: keyof TodayByDepartmentRoles; label: string; help: string }> = [
+  { key: "managers", label: "Heads of Department", help: "Managers see bars for the departments they look after." },
+  { key: "maintenance", label: "Maintenance managers", help: "See bars for their own department(s)." },
+  { key: "staff", label: "Staff", help: "See their own department's bar only." },
+];
+
+function TodayByDepartmentRolesCard() {
+  const { activeClientId } = useAuth();
+  const { toast } = useToast();
+  const clientApi = useActiveClientApi();
+  const [roles, setRoles] = useState<TodayByDepartmentRoles | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRoles(null);
+    clientApi("/settings")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+        if (!cancelled) setRoles(parseTodayByDepartmentRoles(data?.todayByDepartmentRoles));
+      })
+      .catch((err: Error) => {
+        if (!cancelled) toast({ title: "Couldn't load who sees Today by department", description: err.message, variant: "destructive" });
+      });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
+
+  async function change(key: keyof TodayByDepartmentRoles, value: boolean) {
+    if (!roles) return;
+    const next = { ...roles, [key]: value };
+    setSaving(true);
+    try {
+      const res = await clientApi("/settings", {
+        method: "PUT",
+        body: JSON.stringify({ todayByDepartmentRoles: JSON.stringify(next) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+      setRoles(parseTodayByDepartmentRoles(data?.todayByDepartmentRoles));
+      toast({ title: "Saved", description: "The dashboard card follows this the next time each person opens it." });
+    } catch (err: any) {
+      toast({ title: "Couldn't save who sees Today by department", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6" data-testid="card-today-by-department-roles">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <CardTitle className="font-display text-lg flex items-center gap-2">
+          <Users className="w-4 h-4" /> Today by department on the dashboard
+        </CardTitle>
+        <CardDescription>
+          A bar for each department showing today's checks as done, not done yet or failed. Owners always see every department. Choose who else sees it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-6 space-y-4">
+        {TODAY_BY_DEPARTMENT_ROLE_OPTIONS.map((option) => (
+          <div key={option.key} className="flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <Label htmlFor={`today-by-department-${option.key}`}>{option.label}</Label>
+              <p className="text-xs text-muted-foreground">{option.help}</p>
+            </div>
+            <Switch
+              id={`today-by-department-${option.key}`}
+              checked={roles?.[option.key] ?? DEFAULT_TODAY_BY_DEPARTMENT_ROLES[option.key]}
+              disabled={roles === null || saving}
+              onCheckedChange={(checked) => void change(option.key, checked)}
+              data-testid={`switch-today-by-department-${option.key}`}
+            />
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 function TwoFactorPolicyCard() {
   const { activeClientId, refresh } = useAuth();
   const { toast } = useToast();
