@@ -6,6 +6,7 @@
     "GET /api/data-deletion/request",
     "PATCH /api/admin/data-deletion-requests/:id/review",
     "POST /api/admin/ensure-service-prices",
+    "POST /api/admin/error-reports/test",
     "POST /api/data-deletion/request"
   ],
   "routes/analytics.ts": [
