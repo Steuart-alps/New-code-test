@@ -2,9 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { kitchenWeeklyResult } from "@workspace/api-zod/kitchen-weekly";
 
 const router = Router();
@@ -37,7 +38,7 @@ async function resolveSiteId(req: any, res: any, clientId: number, raw: unknown)
   const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.id, siteId),
     eq(sitesTable.clientId, clientId),
-    ...(departmentId != null ? [or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))] : []),
+    ...(departmentId != null ? [sitesTableVisibleTo(departmentId)] : []),
   )).limit(1);
   if (!site) {
     res.status(403).json({ error: "Site not accessible" });
@@ -144,7 +145,7 @@ router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
   const existing = await fetchWeekly(clientId, weekCommencing, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this week", id: existing.id });
 
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
   const checksJson = JSON.stringify(checks ?? {});
   const deviationsJson = JSON.stringify(deviations ?? []);
   const additionalJson = JSON.stringify(additional ?? {});
@@ -289,7 +290,7 @@ router.post("/probe", requireAuth, denyViewers, async (req, res) => {
   if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const existing = await fetchProbe(clientId, checkDate, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
   const probesJson = JSON.stringify(probes ?? []);
 
   try {

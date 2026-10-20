@@ -10,7 +10,9 @@
 //     global documents reach exactly the right staff;
 //   - DocTrack and SafeTrack rows sharing one numeric id stay distinct;
 //   - concurrent duplicate SafeTrack acknowledgements create one row;
-//   - fileless SOP/handbook content and attachments without a file name work.
+//   - fileless SOP/handbook content and attachments without a file name work;
+//   - requests without a login session reach the token handlers, while expired
+//     and revoked links return 404 and record nothing.
 // Run via run-sign-off-access.sh, which boots the API with a tenant-owned
 // test object store.
 import assert from "node:assert/strict";
@@ -201,19 +203,25 @@ if (phase === "after-restart") {
   const copies = new Map();
   for (const doc of safeDocs) {
     const table = { ra: "safe_risk_assessments", sop: "safe_sops", handbook: "safe_handbook" }[doc.type];
-    const [copy] = await query(`SELECT c.id, c.department, c.title, c.requires_acknowledgement FROM ${table} s
+    const [copy] = await query(`SELECT c.id, c.department, c.site_id, c.title, c.requires_acknowledgement FROM ${table} s
       JOIN doc_track_documents c ON c.id = s.migrated_doc_id AND c.client_id = s.client_id
       WHERE s.id = ${lit(doc.id)} AND s.client_id = ${lit(alpha.clientId)}`);
     assert.ok(copy, `${doc.type}:${doc.id} was copied into DocTrack on restart`);
     assert.equal(copy.title, doc.title, `${doc.type}:${doc.id} copy title`);
     assert.equal(copy.department, doc.department, `${doc.type}:${doc.id} (${doc.title}) copy keeps department ${doc.department}`);
-    copies.set(copy.id, doc);
+    copies.set(copy.id, { ...doc, copySiteId: copy.site_id });
   }
   for (const [name, staffId] of Object.entries(staff)) {
     const listed = await listFor(alpha, staffId);
+    const [member] = await query(`SELECT site_id FROM staff_roster WHERE id = ${lit(staffId)}`);
     for (const [copyId, source] of copies) {
-      assert.equal(listed.has(`doc:${copyId}`), listed.has(`${source.type}:${source.id}`),
-        `${name}: DocTrack copy of ${source.title} is listed exactly when the source is`);
+      // A copy keeps its source's site, and DocTrack (manager overview, staff
+      // "my documents", acknowledgement eligibility) scopes by site as well
+      // as department: the copy is listed when the source is and the staff
+      // member is at the copy's site (or it has none).
+      const atCopySite = source.copySiteId == null || source.copySiteId === member.site_id;
+      assert.equal(listed.has(`doc:${copyId}`), listed.has(`${source.type}:${source.id}`) && atCopySite,
+        `${name}: DocTrack copy of ${source.title} is listed exactly when the source is and the staff member is at its site`);
     }
   }
   // The one-off repair gave copies made before the fix their department.
@@ -505,6 +513,49 @@ expectStatus("acknowledge without a signature", await alpha.pub("POST", "/acknow
   documentType: "ra", documentId: docs.raGlobal.id, staffRosterId: hal, typedName: "  ",
 }), 400);
 expectStatus("unknown link", await send("GET", "/sign-off/not-a-real-sign-off-token/info"), 404);
+
+// ── Anonymous access and link lifecycle ───────────────────────────────────────
+// Public requests never carry a session cookie (send() only sends one when
+// given). A live link reaches the token handlers without a login; an expired
+// or revoked link fails with the handlers' 404, never a login 401, and records
+// nothing. Issuing these links revokes Alpha's helper token, so this runs last.
+{
+  const doc = await addDocument(alpha, "doc", { title: `Link lifecycle policy ${stamp}`, department: null, ...file(alpha, "lifecycle") });
+  const unsigned = await addDocument(alpha, "doc", { title: `Link lifecycle unsigned ${stamp}`, department: null, ...file(alpha, "lifecycle-unsigned") });
+  const anonymous = (token) => (method, path, body) => send(method, `/sign-off/${encodeURIComponent(token)}${path}`, { body });
+  const ackBody = (target) => ({ documentType: "doc", documentId: target.id, staffRosterId: kim, typedName: "Kim Kitchen" });
+  const trainRows = (target) => query(`SELECT id FROM train_track_records WHERE client_id = ${lit(alpha.clientId)}
+    AND staff_name = 'Kim Kitchen' AND document_title = ${lit(target.title)}`);
+
+  const live = anonymous(expectStatus("lifecycle link", await alpha.as("POST", "/doc-track/sign-off-info"), 201).token);
+  const [business] = await query(`SELECT name FROM clients WHERE id = ${lit(alpha.clientId)}`);
+  assert.equal(expectStatus("anonymous info on a live link", await live("GET", "/info"), 200).clientName, business.name);
+  const listed = expectStatus("anonymous list on a live link", await live("GET", `/documents?staffId=${kim}`), 200);
+  assert.ok(listed.some((row) => row.document_type === "doc" && row.id === doc.id), "anonymous list includes the new document");
+  expectStatus("anonymous download on a live link", await live("GET", `/documents/${doc.id}/download?staffId=${kim}&documentType=doc`), 200);
+  expectStatus("anonymous first acknowledgement", await live("POST", "/acknowledge", ackBody(doc)), 201);
+  assert.deepEqual(expectStatus("anonymous repeat acknowledgement", await live("POST", "/acknowledge", ackBody(doc)), 200),
+    { alreadySigned: true }, "a repeat reports already signed");
+  assert.equal((await ackRows(alpha.clientId, doc, kim)).length, 1, "one acknowledgement after a repeat");
+  assert.equal((await trainRows(doc)).length, 1, "one TrainTrack sign-off after a repeat");
+
+  const refusedEverywhere = async (label, link) => {
+    expectStatus(`${label}: info`, await link("GET", "/info"), 404);
+    expectStatus(`${label}: list`, await link("GET", `/documents?staffId=${kim}`), 404);
+    expectStatus(`${label}: download`, await link("GET", `/documents/${unsigned.id}/download?staffId=${kim}&documentType=doc`), 404);
+    expectStatus(`${label}: acknowledge`, await link("POST", "/acknowledge", ackBody(unsigned)), 404);
+    assert.equal((await ackRows(alpha.clientId, unsigned, kim)).length, 0, `${label}: no acknowledgement row`);
+    assert.equal((await trainRows(unsigned)).length, 0, `${label}: no TrainTrack record`);
+  };
+  await query(`UPDATE clients SET sign_off_token_expires_at = now() - interval '1 minute'
+    WHERE id = ${lit(alpha.clientId)} RETURNING id`);
+  await refusedEverywhere("expired link", live);
+
+  const renewed = anonymous(expectStatus("renewed link", await alpha.as("POST", "/doc-track/sign-off-info"), 201).token);
+  expectStatus("anonymous info on the renewed link", await renewed("GET", "/info"), 200);
+  expectStatus("manager revokes the link", await alpha.as("DELETE", "/doc-track/sign-off-info"), 204);
+  await refusedEverywhere("revoked link", renewed);
+}
 
 // Hand the SafeTrack fixtures and their effective departments to the
 // after-restart phase.

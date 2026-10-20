@@ -23,12 +23,12 @@ function check(name, condition, detail = "") {
   }
 }
 
-function session() {
+function session(defaultHeaders = {}) {
   let cookie = "";
   return async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -38,7 +38,8 @@ function session() {
 }
 
 async function tenant(label, businessType) {
-  const request = session();
+  // The owner deliberately records past incidents (RIDDOR deadlines), which needs a reason.
+  const request = session({ "X-Override-Reason": encodeURIComponent("Compliance content fixture: past incident") });
   const email = `compliance-content-${label}-${ownership.runId}@test.local`;
   const registered = await request("POST", "/auth/register", {
     name: `${label} Manager`, email, password: "password-123", ...(businessType ? { businessType } : {}),

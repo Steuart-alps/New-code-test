@@ -79,7 +79,7 @@ const CHECK_TYPE_HINTS: Record<LegionellaCheckType, string> = {
   cold_sentinel_temp:    "HSG274 benchmark: sentinel cold-water monitoring — set outlets and frequency in the written scheme.",
   cold_nonsent_temp:     "HSG274 benchmark: representative cold-outlet monitoring — set sampling and frequency from the risk assessment.",
   cold_tank_inspection:  "HSG274 benchmark: inspect tank condition — use the risk-assessed written scheme.",
-  cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment.",
+  cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment. A pass here also completes the \"Clean & Disinfect Water Tanks\" task in ComplyTrack, and completing that task records it here.",
   calorifier_inspection: "HSG274 benchmark: inspect calorifier condition — set the scope and interval with a competent person.",
   calorifier_clean:      "HSG274 benchmark: clean and recommission a calorifier — arrange when justified by the risk assessment.",
   shower_clean:          "HSG274 benchmark: shower-head and hose cleaning — set method and frequency in the written scheme.",
@@ -219,7 +219,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
     setFrequencyDays(Object.fromEntries(Object.keys(DEFAULT_LEGIONELLA_FREQUENCIES).map(key => [key, String(savedProfile.frequencyDays?.[key] ?? saved[key] ?? DEFAULT_LEGIONELLA_FREQUENCIES[key])])));
     setProfile({
       systemInventoryReference: savedProfile.systemInventoryReference ?? "",
-      writtenControlSchemeReference: savedProfile.writtenControlSchemeReference ?? "",
+      writtenControlSchemeReference: savedProfile.writtenControlSchemeReference ?? savedProfile.writtenSchemeReference ?? "",
       riskAssessmentReference: savedProfile.riskAssessmentReference ?? "",
       riskAssessmentReviewDate: savedProfile.riskAssessmentReviewDate ?? "",
       competentPerson: savedProfile.competentPerson ?? "",
@@ -419,16 +419,20 @@ const OUTLET_TYPE_CLS: Record<string, string> = {
 
 // ── Add Outlet Dialog ─────────────────────────────────────────────────────────
 
-function AddOutletDialog({ open, onClose, onSuccess }: {
+function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  /** The page's selected site; the outlet belongs to it. Without one, the dialog asks. */
+  siteId?: number;
 }) {
   const [name, setName] = useState("");
   const [type, setType] = useState<OutletType>("hot");
   const [location, setLocation] = useState("");
+  const [outletSite, setOutletSite] = useState<number | undefined>(siteId);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
+  const { data: sites } = useListSites();
 
   const handleSave = async () => {
     if (!name.trim()) return;
@@ -436,7 +440,7 @@ function AddOutletDialog({ open, onClose, onSuccess }: {
     const r = await apiFetch("/legionella/outlets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), type, location: location.trim() || null }),
+      body: JSON.stringify({ name: name.trim(), type, location: location.trim() || null, siteId: siteId ?? outletSite ?? null }),
     });
     setBusy(false);
     if (r.ok) {
@@ -477,6 +481,18 @@ function AddOutletDialog({ open, onClose, onSuccess }: {
             <Input value={location} onChange={e => setLocation(e.target.value)}
               placeholder="e.g. Male toilets, ground floor" />
           </div>
+          {siteId == null && (sites?.length ?? 0) > 0 && (
+            <div className="space-y-1.5">
+              <Label>Site</Label>
+              <Select value={outletSite ? String(outletSite) : "none"} onValueChange={v => setOutletSite(v === "none" ? undefined : Number(v))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific site</SelectItem>
+                  {sites?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -613,7 +629,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
 
 // ── Sentinel Outlets Panel ─────────────────────────────────────────────────────
 
-function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
+function SentinelOutletsPanel({ canAdmin, siteId }: { canAdmin: boolean; siteId?: number }) {
   const [outlets, setOutlets] = useState<OutletStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [logOutlet, setLogOutlet] = useState<OutletStatus | null>(null);
@@ -777,6 +793,7 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
 
       {canAdmin && addOpen && (
         <AddOutletDialog
+          siteId={siteId}
           open={addOpen}
           onClose={() => setAddOpen(false)}
           onSuccess={() => { setAddOpen(false); refresh(); }}
@@ -1016,10 +1033,11 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
           checkDate,
           ...(resultChanged ? { result } : {}),
           temperature: isTemperatureCheck && temperature ? parseFloat(String(temperature)) : undefined,
-          siteId: selectedSite,
-          location: location || undefined,
+          // null (not undefined) so clearing a field on edit actually clears it
+          siteId: selectedSite ?? null,
+          location: location || null,
           performedBy: performedBy || null, staffRosterId: staffRosterId,
-          notes: notes || undefined,
+          notes: notes || null,
         } as any,
       },
       {
@@ -1308,7 +1326,7 @@ export default function LegionellaPage() {
         ))}
 
         {/* Sentinel Outlets — per-outlet monthly tracking */}
-        <SentinelOutletsPanel canAdmin={canAdmin} />
+        <SentinelOutletsPanel canAdmin={canAdmin} siteId={filterSite} />
 
         {(overdueStatuses.length > 0 || dueSoonStatuses.length > 0) && (
           <div className="space-y-3">

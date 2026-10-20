@@ -80,6 +80,7 @@ const directLocked = new Set([
   "test:fix-track-overdue-alerts", "test:track-summary-delivery",
   "test:contractor-upload-signatures", "test:contractor-compliance-reminders",
   "test:track-controls-mobile", "test:export-module-isolation",
+  "test:water-dept-isolation",
 ]);
 const runnerLocked = new Set([
   "test:two-factor-policy", "test:passkey-webauthn",
@@ -102,6 +103,7 @@ const runnerLocked = new Set([
   "test:track-export-isolation", "test:pat-export-attachments",
   "test:storage-happy-path", "test:storage-outage-routes",
   "test:pest-control-register", "test:water-safety",
+  "test:water-dept-isolation:ci", "test:viewer-read-only",
   "test:compliance-schedule-tokens", "test:compliance-reminder-cycles",
   "test:contractor-draft-tamper", "test:contractor-key-preflight",
   "test:contractor-queue-migration-bounds", "test:staff-invitations",
@@ -113,9 +115,10 @@ const freshSchema = new Set([
   "test:schema:fresh", "test:schema:pushed", "test:dashboard-accuracy:pushed", "test:kitchen-mobile-replay", "test:mobile-check-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
-  "test:inspection-pack-calendar",
+  "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
+  "test:owner-late-edit-reason",
   "test:kitchen-cleaning-export", "test:pat-register-access",
-  "test:storage-metering", "test:storage-usage-snapshot",
+  "test:storage-metering", "test:storage-usage-snapshot", "test:storage-capacity-reduction", "test:storage-warning-emails",
   "test:content-filter",
   "test:feedback-triage", "test:contractor-token-security",
   "test:contractor-key-rotation",
@@ -129,12 +132,19 @@ const freshSchema = new Set([
   "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
   "test:client-data-deletion-feedback",
   "test:retention-clock",
+  "test:cancellation-warnings:fresh",
   "test:train-track-roster-identity",
   "test:registers", // allergen, COSHH and asbestos registers on the private cluster
   "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
+  "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster
+  "test:fire-call-points", "test:fire-discharge-task-link", "test:track-task-links",
+  "test:hot-tub-registry:pushed", "test:kitchen-cleaning-legacy", "test:contractor-portal:pushed",
+  "test:public-link-access", "test:public-link-rate-limit", // two API instances on the private cluster
+  "test:safe-track-ack-reminders:fresh", "test:storage-price-audit",
 ]);
 const pure = new Set([
+  "test:upload-size-limit", // ObjectStorageService against an in-memory bucket
   "test:api-runner-lock", // validates this lock without application resources
   "test:staged-photo-creation", // real routes/helper with in-memory transaction/storage fakes
   "test:login-rate-limit", // isolated temp bundle and in-process Express fixture
@@ -143,6 +153,7 @@ const pure = new Set([
   "test:billing-addon-catalog", // fake Stripe/database; in-process Express router
   "test:private-file-acl", // real routes with isolated provider/database doubles
   "test:service-price-preflight", // read-only source assertions and fake inputs
+  "test:stripe-backfill-scope", // stubbed sync library and source assertions; no database or Stripe
   "test:biketrack-billing", // fake Stripe/static wiring assertions
   "test:pesttrack-billing", // fake Stripe/static wiring assertions
   "test:pattrack-billing", // static catalogue assertions; unique temp bundle
@@ -158,10 +169,14 @@ const pure = new Set([
   "test:byte-range", // run-bundled-unit.sh: pure Range header parsing
   "test:stripe-startup-readiness", // fake Stripe/clock; unique mkdtemp bundle
   "test:photo-roundtrip-config", // config gate only: env parsing, no storage or database
+  "test:storage-happy-path-config", // config gate only: env parsing, no storage or database
   "test:email-escaping", // run-bundled-unit.sh: pure renderers, nothing sent
   "test:billing-minimum-quantity", // run-bundled-unit.sh: pure added-site coverage rule
   "test:upload-pixel-cap", // unique temp bundle; in-memory images, no database
   "test:trial-lock-allowlist", // unique mkdtemp bundle; stubbed lock lookup, no database
+  "test:storage-price-check", // stubbed billing loaders; unique mkdtemp bundle, in-process router
+  "test:openapi-routes", // read-only route source and spec analysis
+  "test:site-move-routes", // read-only route source analysis
 ]);
 // Runners allowed for pure scripts. They must not source the lock, boot the
 // API or read DATABASE_URL; each one writes only to a unique temp directory.
@@ -206,12 +221,14 @@ for (const [name, command] of scripts) {
     if (!match) fail(`${name} must be \`bash tests/run-db-workflow.sh tests/<file>.mjs\`: ${command}`);
     mjsRefs(match[1]).forEach((entry) => lockedEntrypoints.add(entry));
   } else if (runnerLocked.has(name)) {
-    // Plain --flag arguments are allowed; the runner itself must take the lock.
-    const runner = command.match(/^bash (tests\/run-[A-Za-z0-9._-]+\.sh)(?: --[a-z][a-z0-9-]*)*$/)?.[1];
+    // Plain --flag arguments and suite files are allowed; the runner itself must take the lock.
+    const match = command.match(/^bash (tests\/run-[A-Za-z0-9._-]+\.sh)((?: tests\/[A-Za-z0-9._-]+\.mjs)*)(?: --[a-z][a-z0-9-]*)*$/);
+    const runner = match?.[1];
     if (!runner || runner === freshRunner || !sourcesLock(runner)) {
       fail(`${name} runner must source api-integration-lock.sh: ${command}`);
     }
     mjsRefs(read(runner)).forEach((entry) => lockedEntrypoints.add(entry));
+    mjsRefs(match[2]).forEach((entry) => lockedEntrypoints.add(entry));
   } else if (freshSchema.has(name)) {
     // FRESH_SCHEMA_BASE=push only changes how the private cluster's base schema is built.
     const direct = command.match(/^(?:FRESH_SCHEMA_BASE=push )?bash tests\/run-fresh-schema\.sh((?: tests\/[A-Za-z0-9._-]+\.mjs)*)$/);
@@ -253,12 +270,12 @@ for (const [name, command] of scripts) {
 // build output or live storage. Helper modules are only imported by suites.
 const pureEntrypoints = new Set([
   "billing-addon-activation.mjs", "billing-addon-catalog.mjs", "biketrack-billing.mjs", "login-rate-limit.mjs",
-  "pesttrack-billing.mjs", "service-price-preflight.mjs", "track-summary-routing.mjs",
+  "pesttrack-billing.mjs", "service-price-preflight.mjs", "stripe-backfill-scope.mjs", "track-summary-routing.mjs",
   "private-file-acl.mjs", "staged-photo-creation.mjs", "pattrack-billing.mjs",
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",
-  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "upload-pixel-cap.mjs",
-  "trial-lock-allowlist.mjs",
+  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "storage-happy-path-config.test.mjs", "upload-pixel-cap.mjs",
+  "trial-lock-allowlist.mjs", "storage-price-check.mjs", "openapi-route-inventory.mjs", "site-move-route-inventory.mjs", "upload-size-limit.mjs",
 ]);
 const helperModules = new Set([
   "pdf-text.mjs",

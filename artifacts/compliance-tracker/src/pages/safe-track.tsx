@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry";
 import { useLocalToday } from "@/hooks/use-local-today";
 import { INDUCTION_SECTIONS, parseChecklist, renderInductionHtml, type InductionChecklist, type SectionKey, type ChecklistItem } from "@/lib/induction-print";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -319,6 +320,7 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
   async function handleFile(file: File) {
     setUploading(true);
     try {
+      assertWithinUploadLimit(file);
       const urlRes = await apiFetch("/safe-track/request-upload", { method: "POST" });
       if (!urlRes.ok) {
         throw new Error(await getApiErrorMessage(urlRes, "Could not get upload URL"));
@@ -873,7 +875,7 @@ function RaForm({ form, setForm }: { form: any; setForm: any }) {
     <F label="Description"><Textarea value={form.description ?? ""} onChange={e => setForm({ ...form, description: e.target.value })} rows={3} /></F>
     <F label="Assessed By"><Input value={form.assessedBy ?? ""} onChange={e => setForm({ ...form, assessedBy: e.target.value })} placeholder="Name" /></F>
     <div className="grid grid-cols-2 gap-4">
-      <F label="Review Date"><Input type="date" value={form.reviewDate ?? ""} onChange={e => setForm({ ...form, reviewDate: e.target.value })} /></F>
+      <F label="Review Date"><Input type="date" value={form.reviewDate ?? ""} onChange={e => setForm({ ...form, reviewDate: e.target.value || null })} /></F>
       <F label="Version"><Input value={form.version ?? "1.0"} onChange={e => setForm({ ...form, version: e.target.value })} placeholder="1.0" /></F>
     </div>
     <F label="Status">

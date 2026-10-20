@@ -4,16 +4,20 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { requireAuth, requireClientAdmin, denyViewers, getClientId } from "../middleware/requireAuth";
 import { getActiveDepartmentId } from "../middleware/requireAuth";
+import { siteVisibleSql } from "../lib/departmentSites";
 import { GUIDANCE_REVIEWED_AT, UK_COMPLIANCE_GAPS, UK_COMPLIANCE_GUIDANCE } from "../lib/ukComplianceGuidance";
 
 const router: IRouter = Router();
+
+// The web forms send "" for an optional field left blank.
+const blankToNull = (value: unknown) => (typeof value === "string" && value.trim() === "" ? null : value);
 
 const ProfileBody = z.object({
   nation: z.enum(["england", "wales", "scotland", "northern_ireland", "multi_nation"]),
   operationType: z.string().trim().min(2).max(160),
   responsiblePersonName: z.string().trim().min(2).max(160),
   responsiblePersonRole: z.string().trim().min(2).max(160),
-  responsiblePersonEmail: z.string().trim().email().optional().nullable(),
+  responsiblePersonEmail: z.preprocess(blankToNull, z.string().trim().email().optional().nullable()),
   competentAppointments: z.array(z.object({
     area: z.string().trim().min(2).max(100),
     person: z.string().trim().min(2).max(160),
@@ -31,7 +35,7 @@ const ActionBody = z.object({
   title: z.string().trim().min(3).max(240),
   severity: z.enum(["low", "medium", "high", "critical"]).default("medium"),
   ownerName: z.string().trim().min(2).max(160),
-  dueDate: z.string().date().optional().nullable(),
+  dueDate: z.preprocess(blankToNull, z.string().date().optional().nullable()),
   interimControl: z.string().trim().max(4000).optional().nullable(),
   correctiveAction: z.string().trim().min(3).max(4000),
   evidenceReference: z.string().trim().max(1000).optional().nullable(),
@@ -116,6 +120,40 @@ router.put("/compliance-hub/profile", requireAuth, requireClientAdmin, async (re
   res.json(rows(result)[0]);
 });
 
+/** The site rule for the joined sites row `s`; no active department sees every site. */
+function siteVisibleTo(departmentId: number | null) {
+  return departmentId === null ? sql`TRUE` : siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId);
+}
+
+/** Actions linked to an incident or water check follow that record's department. */
+function visibleToDepartment(departmentId: number | null) {
+  return sql`(TRUE
+      AND (${departmentId}::integer IS NULL OR a.source_track <> 'IncidentTrack' OR EXISTS (
+        SELECT 1 FROM incidents i LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
+        WHERE i.client_id = a.client_id AND i.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
+            (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
+      ))
+      AND (a.source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
+        SELECT 1
+        FROM legionella_checks lc
+        LEFT JOIN sites s ON s.id = lc.site_id AND s.client_id = lc.client_id
+        WHERE a.source_track = 'LegionellaTrack'
+          AND lc.client_id = a.client_id AND lc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
+            (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
+      ) OR EXISTS (
+        SELECT 1
+        FROM hot_tub_checks hc
+        LEFT JOIN sites s ON s.id = hc.site_id AND s.client_id = hc.client_id
+        WHERE a.source_track = 'HotTubTrack'
+          AND hc.client_id = a.client_id AND hc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
+            (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
+      ))
+  )`;
+}
+
 router.get("/compliance-hub/actions", requireAuth, async (req, res): Promise<void> => {
   const clientId = clientOrError(req, res);
   if (!clientId) return;
@@ -125,31 +163,9 @@ router.get("/compliance-hub/actions", requireAuth, async (req, res): Promise<voi
       a.owner_name AS "ownerName", a.due_date::text AS "dueDate", a.interim_control AS "interimControl",
       a.corrective_action AS "correctiveAction", a.evidence_reference AS "evidenceReference",
       a.verification_notes AS "verificationNotes", a.verified_by AS "verifiedBy", a.verified_at AS "verifiedAt",
-      a.created_at AS "createdAt", a.updated_at AS "updatedAt"
+      a.created_at AS "createdAt", a.updated_at AS "updatedAt", a.fix_track_issue_id AS "fixTrackIssueId"
     FROM compliance_actions a WHERE a.client_id = ${clientId}
-      AND (${departmentId}::integer IS NULL OR a.source_track <> 'IncidentTrack' OR EXISTS (
-        SELECT 1 FROM incidents i LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
-        WHERE i.client_id = a.client_id AND i.id::text = a.source_record_id
-          AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
-            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
-      ))
-      AND (a.source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
-        SELECT 1
-        FROM legionella_checks lc
-        LEFT JOIN sites s ON s.id = lc.site_id AND s.client_id = lc.client_id
-        WHERE a.source_track = 'LegionellaTrack'
-          AND lc.client_id = a.client_id AND lc.id::text = a.source_record_id
-          AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
-            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
-      ) OR EXISTS (
-        SELECT 1
-        FROM hot_tub_checks hc
-        LEFT JOIN sites s ON s.id = hc.site_id AND s.client_id = hc.client_id
-        WHERE a.source_track = 'HotTubTrack'
-          AND hc.client_id = a.client_id AND hc.id::text = a.source_record_id
-          AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
-            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
-      ))
+      AND ${visibleToDepartment(departmentId)}
     ORDER BY CASE WHEN a.status = 'verified' THEN 1 ELSE 0 END, a.due_date NULLS LAST, a.created_at DESC
   `);
   res.json(rows(result));
@@ -182,7 +198,7 @@ router.post("/compliance-hub/actions", requireAuth, denyViewers, async (req, res
         SELECT i.status FROM incidents i LEFT JOIN sites s ON s.id = i.site_id
         WHERE i.client_id = ${clientId} AND i.id = ${incidentId}
           AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
-            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+            (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
         FOR UPDATE OF i
       `);
       if (!incident.rows.length || incident.rows[0].status === "closed") return null;
@@ -211,6 +227,64 @@ router.post("/compliance-hub/actions", requireAuth, denyViewers, async (req, res
   res.status(201).json(inserted);
 });
 
+// The user decides whether an action needs FixTrack repair or contractor
+// work. GreenTrack actions stay in GreenTrack.
+router.post("/compliance-hub/actions/:id/fix-track", requireAuth, denyViewers, async (req, res): Promise<void> => {
+  const clientId = clientOrError(req, res);
+  if (!clientId) return;
+  const id = Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    res.status(400).json({ error: "Invalid action id" });
+    return;
+  }
+  const departmentId = getActiveDepartmentId(req);
+  const outcome = await db.transaction(async tx => {
+    const found = await tx.execute(sql`
+      SELECT a.id, a.source_track, a.source_record_id, a.title, a.severity, a.status, a.owner_name, a.due_date::text AS due_date,
+        a.interim_control, a.corrective_action, a.fix_track_issue_id
+      FROM compliance_actions a
+      WHERE a.id = ${id} AND a.client_id = ${clientId} AND ${visibleToDepartment(departmentId)}
+      FOR UPDATE OF a
+    `);
+    const action = rows<{
+      id: number; source_track: string; source_record_id: string | null; title: string; severity: string; status: string;
+      owner_name: string; due_date: string | null; interim_control: string | null; corrective_action: string; fix_track_issue_id: number | null;
+    }>(found)[0];
+    if (!action) return { status: 404, body: { error: "Corrective action not found" } };
+    if (/green/i.test(action.source_track)) return { status: 400, body: { error: "GreenTrack actions stay within GreenTrack" } };
+    if (action.status === "verified") return { status: 409, body: { error: "Verified actions cannot be sent to FixTrack" } };
+    if (action.fix_track_issue_id) return { status: 200, body: { fixTrackIssueId: action.fix_track_issue_id } };
+    // Incident actions take the incident's site (same business only).
+    const site = action.source_track === "IncidentTrack" && action.source_record_id
+      ? rows<{ id: number; name: string }>(await tx.execute(sql`
+          SELECT s.id, s.name FROM incidents i JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
+          WHERE i.client_id = ${clientId} AND i.id::text = ${action.source_record_id}
+        `))[0]
+      : undefined;
+    const issue = await tx.execute(sql`
+      INSERT INTO fix_track_issues (
+        client_id, site_id, title, issue_type, location, description, priority, status,
+        reported_by, reported_date, target_date, assigned_to, created_by
+      ) VALUES (
+        ${clientId}, ${site?.id ?? null}, ${action.title}, 'general',
+        ${site?.name ?? "See Compliance Hub action"},
+        ${[action.corrective_action, action.interim_control ? `Interim control: ${action.interim_control}` : null, `Originating module: ${action.source_track}`, `Compliance Hub action: ${action.id}`].filter(Boolean).join("\n")},
+        ${action.severity === "critical" ? "urgent" : action.severity}, 'reported',
+        ${req.currentUser!.name?.trim() || "ComplyTrack"}, (now() AT TIME ZONE 'Europe/London')::date,
+        ${action.due_date}::date, ${action.owner_name}, ${req.currentUser!.id}
+      ) RETURNING id
+    `);
+    const issueId = rows<{ id: number }>(issue)[0].id;
+    await tx.execute(sql`
+      INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_by)
+      VALUES (${clientId}, ${issueId}, 'status', 'reported', ${req.currentUser!.id})
+    `);
+    await tx.execute(sql`UPDATE compliance_actions SET fix_track_issue_id = ${issueId}, updated_at = now() WHERE id = ${action.id} AND client_id = ${clientId}`);
+    return { status: 201, body: { fixTrackIssueId: issueId } };
+  });
+  res.status(outcome.status).json(outcome.body);
+});
+
 router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req, res): Promise<void> => {
   const clientId = clientOrError(req, res);
   if (!clientId) return;
@@ -233,7 +307,7 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
         SELECT 1 FROM incidents i LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
         WHERE i.client_id = a.client_id AND i.id::text = a.source_record_id
           AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
-            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+            (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
       ))
       AND (a.source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
         SELECT 1
@@ -242,7 +316,7 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
         WHERE a.source_track = 'LegionellaTrack'
           AND lc.client_id = a.client_id AND lc.id::text = a.source_record_id
           AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
-            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+            (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
       ) OR EXISTS (
         SELECT 1
         FROM hot_tub_checks hc
@@ -250,7 +324,7 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
         WHERE a.source_track = 'HotTubTrack'
           AND hc.client_id = a.client_id AND hc.id::text = a.source_record_id
           AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
-            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+            (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
       )) LIMIT 1
   `);
   const existing = rows<{ evidence_reference: string | null; verification_notes: string | null; status: string; created_by: number | null; source_track: string; source_record_id: string | null }>(existingResult)[0];
@@ -289,7 +363,7 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
     res.status(400).json({ error: "Evidence reference and verification notes are required before an action can be verified closed." });
     return;
   }
-  if (a.status === "verified" && (existing.status !== "awaiting_verification" || req.currentUser!.role === "client_staff" || existing.created_by === req.currentUser!.id)) {
+  if (a.status === "verified" && (existing.status !== "awaiting_verification" || req.currentUser!.role === "client_staff" || req.currentUser!.role === "client_manager" || existing.created_by === req.currentUser!.id)) {
     res.status(403).json({ error: "Only a different client admin or consultant may verify an action after it is awaiting verification." });
     return;
   }
@@ -315,7 +389,7 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
         SELECT 1 FROM incidents i LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
         WHERE i.client_id = ${clientId} AND i.id::text = compliance_actions.source_record_id
           AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
-            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+            (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
        ))
        AND (source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
          SELECT 1
@@ -325,7 +399,7 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
            AND lc.client_id = compliance_actions.client_id
            AND lc.id::text = compliance_actions.source_record_id
            AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
-             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+             (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
        ) OR EXISTS (
          SELECT 1
          FROM hot_tub_checks hc
@@ -334,7 +408,7 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
            AND hc.client_id = compliance_actions.client_id
            AND hc.id::text = compliance_actions.source_record_id
            AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
-             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+             (s.id IS NOT NULL AND ${siteVisibleTo(departmentId)}))
       ))
       AND (${a.status === "verified"} = false OR status = 'awaiting_verification')
       AND (${a.status === "verified"} = false OR NULLIF(btrim(evidence_reference), '') IS NOT NULL)

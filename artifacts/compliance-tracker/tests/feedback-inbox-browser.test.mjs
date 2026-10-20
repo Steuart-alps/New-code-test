@@ -193,6 +193,10 @@ async function routeApi(route, url) {
   if (pathname === "/api/billing/cancellation-status" && method === "GET") {
     return jsonResponse(route, { accessEndsAt: null });
   }
+  // The header's notification bell (#92).
+  if (pathname === "/api/notifications" && method === "GET") {
+    return jsonResponse(route, { notifications: [], unreadCount: 0 });
+  }
   if (pathname === "/api/clients" && method === "GET") {
     return jsonResponse(route, [
       {

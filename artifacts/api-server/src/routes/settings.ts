@@ -170,7 +170,7 @@ async function validateTrackSummaryRouting(
       ));
     const eligibleIds = new Set(
       eligible
-        .filter((user) => user.role === "client_admin" || user.role === "client_staff")
+        .filter((user) => user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff")
         .map((user) => user.id),
     );
     if ([...requestedIds].some((id) => !eligibleIds.has(id))) {
@@ -281,7 +281,7 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     }
     req.log.info(
-      { clientId, actorId: req.currentUser!.id, required: rawRequired !== "false" },
+      { clientId, actorId: req.currentUser!.id, required: rawRequired === "true" },
       "Two-factor requirement changed",
     );
   }

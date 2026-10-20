@@ -69,6 +69,10 @@ async function buildAll() {
       "@sentry/*",
       "@opentelemetry/*",
       "@google-cloud/*",
+      // PDF.js loads its parser (pdf.worker.mjs) from beside its own module,
+      // which a bundle does not have, so it stays in node_modules.
+      "pdfjs-dist",
+      "pdfjs-dist/*",
       "@google/*",
       "googleapis",
       "firebase-admin",

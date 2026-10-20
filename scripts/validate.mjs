@@ -25,6 +25,12 @@
 //   VALIDATE_ON_DUPLICATE       wait (default) | replace: what to do when the same check
 //                               is already running in another live runner
 //   VALIDATE_STATE_DIR          slot/claim directory (default $TMPDIR/complytrack-validate)
+//   STORAGE_HAPPY_PATH_REQUIRED 1 makes storage-happy-path fail instead of skip when no
+//                               dedicated test bucket is configured
+//
+// A check marked `canSkip` may exit 78 to say it intentionally did not run (for
+// example, no dedicated storage test bucket here). It is reported as SKIP, never
+// as pass, and does not fail the run. Any other check exiting 78 fails.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -33,6 +39,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BUSY_EXIT = 197; // flock -E: the slot was taken; retry later.
+const SKIP_EXIT = 78; // a canSkip check intentionally did not run.
 
 // class: heavy = typecheck/build/bundle, api = boots a private API (and builds it),
 // browser = Vite + Chromium, light = node-only unit checks.
@@ -71,6 +78,9 @@ const DEFAULT_CHECKS = {
   "billing-addon-catalog": { stage: "static", class: "light", cmd: api("test:billing-addon-catalog") },
   "staged-photo-creation": { stage: "static", class: "light", cmd: api("test:staged-photo-creation") },
   "fix-track-priority": { stage: "static", class: "light", cmd: web("test:fix-track-priority") },
+  "api-contract": { stage: "static", class: "light", cmd: "pnpm --filter @workspace/api-spec run test:contract && pnpm run check:api-contract" },
+  "openapi-route-inventory": { stage: "static", class: "light", cmd: api("test:openapi-routes") },
+  "generated-client-runtime": { stage: "static", class: "light", cmd: "pnpm --filter @workspace/api-client-react run test:generated-client" },
 
   "test-trial-reminders": { stage: "integration", class: "api", cmd: api("test:trial-reminders") },
   "test-tenant-isolation": { stage: "integration", class: "api", cmd: api("test:isolation:ci") },
@@ -78,6 +88,8 @@ const DEFAULT_CHECKS = {
   "test-config": { stage: "integration", class: "api", cmd: "cd artifacts/api-server && pnpm run test:config:ci" },
   "fresh-schema-regression": { stage: "integration", class: "api", cmd: api("test:schema:fresh") },
   "test-twofa-recovery": { stage: "integration", class: "api", cmd: api("test:twofa-recovery") },
+  "staff-invitations": { stage: "integration", class: "api", cmd: api("test:staff-invitations") },
+  "welcome-email": { stage: "integration", class: "api", cmd: api("test:welcome-email") },
   "pat-evidence-retention": { stage: "integration", class: "api", cmd: api("test:pat-dept-isolation") },
   "content-filter-endpoints": { stage: "integration", class: "api", cmd: api("test:content-filter") },
   "feedback-triage": { stage: "integration", class: "api", cmd: api("test:feedback-triage") },
@@ -89,9 +101,13 @@ const DEFAULT_CHECKS = {
   "kitchen-inspection-register-export": { stage: "integration", class: "api", cmd: api("test:kitchen-inspection-export") },
   // Boots its own API with a test-only signing fault; every upload route must answer the safe 503.
   "storage-outage-routes": { stage: "integration", class: "api", cmd: api("test:storage-outage-routes") },
+  // Real GCS ACL round trips in a dedicated test bucket (docs/testing/storage-test-bucket.md).
+  // Runs only after the fixture preflight; skips (exit 78) when no test bucket is configured.
+  "storage-happy-path": { stage: "integration", class: "api", canSkip: true, cmd: "cd artifacts/api-server && bash tests/run-storage-happy-path.sh" },
 
   "hot-tub-pdf-export": { stage: "integration", class: "browser", cmd: web("test:hot-tub-pdf") },
   "recovery-code-browser": { stage: "integration", class: "browser", cmd: web("test:recovery-code-browser") },
+  "verify-email-browser": { stage: "integration", class: "browser", cmd: web("test:verify-email-browser") },
   "photo-upload-browser": { stage: "integration", class: "browser", cmd: web("test:photo-upload-browser") },
   "billing-addon-settings-browser": { stage: "integration", class: "browser", cmd: web("test:billing-addon-settings-browser") },
   "required-track-photos-browser": { stage: "integration", class: "browser", cmd: web("test:required-track-photos-browser") },
@@ -115,6 +131,14 @@ const intEnv = (env, name, fallback) => {
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** "passed" | "skipped" | "failed" for a finished check. */
+function outcome(check, result) {
+  if (result.guardTripped) return "failed";
+  if (result.code === 0) return "passed";
+  if (result.code === SKIP_EXIT && check?.canSkip) return "skipped";
+  return "failed";
+}
 
 // ---------------------------------------------------------------- memory
 
@@ -565,9 +589,9 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
         }).then((result) => {
           inFlight.delete(name);
           results.set(name, result);
-          const ok = result.code === 0 && !result.guardTripped;
-          if (!ok) failed = true;
-          if (!single) log(`${ok ? "passed" : "FAILED"} ${name} (${Math.round(result.ms / 1000)}s${ok ? "" : `, exit ${result.code}`})`);
+          const status = outcome(checks[name], result);
+          if (status === "failed") failed = true;
+          if (!single) log(`${status === "failed" ? "FAILED" : status} ${name} (${Math.round(result.ms / 1000)}s${status === "failed" ? `, exit ${result.code}` : ""})`);
         });
         // Leave a moment between launches so the memory reading reflects the newcomer.
         await sleep(launchGapMs);
@@ -588,13 +612,16 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   if (single) {
     const [name] = selected;
     const result = results.get(name) ?? { code: 1 };
-    log(`${name} ${result.code === 0 && !result.guardTripped ? "passed" : "FAILED"}; lowest available memory ${minMemory} MB; ${previewNote}`);
+    const status = outcome(checks[name], result);
+    log(`${name} ${status === "failed" ? "FAILED" : status === "skipped" ? "SKIPPED (intentional; see its output)" : "passed"}; lowest available memory ${minMemory} MB; ${previewNote}`);
+    if (status === "skipped") return 0;
     return result.guardTripped ? 1 : result.code;
   }
   console.log("\nValidation summary");
   for (const name of selected) {
     const r = results.get(name);
-    const status = !r ? "not run" : r.code === 0 && !r.guardTripped ? "pass" : r.guardTripped ? "FAIL (port guard)" : `FAIL (exit ${r.code})`;
+    const outcomeStatus = r && outcome(checks[name], r);
+    const status = !r ? "not run" : outcomeStatus === "passed" ? "pass" : outcomeStatus === "skipped" ? "SKIP (not configured)" : r.guardTripped ? "FAIL (port guard)" : `FAIL (exit ${r.code})`;
     console.log(`  ${status.padEnd(18)} ${name.padEnd(36)} ${r ? `${Math.round(r.ms / 1000)}s` : ""}`);
   }
   console.log(`Lowest available memory during the run: ${minMemory} MB; ${previewNote}`);

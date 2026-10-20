@@ -20,6 +20,9 @@ export const legionellaChecksTable = pgTable("legionella_checks", {
   performedBy: text("performed_by"),
   staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Sentinel outlet this test was logged against. The column and its foreign key
+  // to legionella_sentinel_outlets come from runtime migrations.
+  outletId: integer("outlet_id"),
   // Mobile outbox entry ID and payload fingerprint: a replay of an applied
   // submission is recognised instead of creating a duplicate. Not a credential.
   clientEntryId: text("client_entry_id"),

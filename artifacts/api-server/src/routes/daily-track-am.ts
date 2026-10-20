@@ -5,6 +5,7 @@ import { dailyChecklistsTable, dailyManagerSignoffsTable, sitesTable } from "@wo
 import { eq, and, or, isNull, inArray, desc, gte, lte } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEntitledServices, requireAnyEntitlement, SERVICES } from "../lib/services";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import {
   accessibleDailyChecklistTypes,
   canAccessDailyChecklistType,
@@ -13,6 +14,7 @@ import {
 } from "../lib/dailyChecklistEntitlements";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { saveDailyChecklist } from "../lib/dailyChecklistWrite";
+import { checklistIncompleteReason, checklistItemSchema, createFailedChecklistItemActions, normaliseChecklistItems } from "../lib/dailyChecklistItems";
 
 const router = Router();
 
@@ -39,17 +41,12 @@ function serviceDenied(res: any, type: (typeof AM_TYPES)[number]) {
   });
 }
 
-const itemSchema = z.object({
-  label: z.string(),
-  checked: z.boolean(),
-  notes: z.string().optional(),
-});
 
 const createSchema = z.object({
   siteId: z.number().int().nullable().optional(),
   checklistType: z.enum(AM_TYPES),
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  items: z.array(itemSchema).optional(),
+  items: z.array(checklistItemSchema).optional(),
   completedBy: z.string().max(200).nullable().optional(),
   staffRosterId: z.number().int().positive().nullable().optional(),
   managerNote: z.string().max(2000).nullable().optional(),
@@ -60,7 +57,7 @@ const updateSchema = createSchema.partial().omit({ checklistType: true, checkDat
 
 function allowedSites(clientId: number, deptId: number) {
   return db.select({ id: sitesTable.id }).from(sitesTable).where(
-    and(eq(sitesTable.clientId, clientId), or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)))
+    and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(deptId))
   );
 }
 
@@ -68,6 +65,17 @@ async function verifySite(siteId: number | null | undefined, clientId: number) {
   if (siteId == null) return true;
   const [r] = await db.select({ id: sitesTable.id }).from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
+  return !!r;
+}
+
+// Department-scoped staff may only use sites visible in their department
+// (see departmentSites), on create and when a draft's site changes. Edits pass
+// the raw body value, before parsing; the schemas reject a non-number siteId.
+async function siteInDepartment(siteId: unknown, clientId: number, deptId: number | null) {
+  if (typeof siteId !== "number" || deptId === null) return true;
+  const [r] = await db.select({ id: sitesTable.id }).from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId),
+      sitesTableVisibleTo(deptId))).limit(1);
   return !!r;
 }
 
@@ -185,6 +193,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     });
   }
   if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+  if (!(await siteInDepartment(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   // Idempotent: a repeat POST for the same site/type/date updates its draft
   // rather than adding a duplicate row.
   const result = await saveDailyChecklist({
@@ -192,13 +201,14 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     siteId: data.siteId ?? null,
     checklistType: data.checklistType,
     checkDate: data.checkDate,
-    items: data.items,
+    items: data.items ? normaliseChecklistItems(data.items) : undefined,
     managerNote: data.managerNote,
     submittedAt: data.submittedAt ? new Date(data.submittedAt) : null,
     createdBy: req.currentUser!.id,
   }, (existing) => existing
     ? resolveStaffPerformerUpdate(clientId, data.staffRosterId, data.completedBy, existing.staffRosterId, existing.completedBy)
     : resolveStaffRoster(clientId, data.staffRosterId, data.completedBy));
+  if (result.outcome === "incomplete") return res.status(400).json({ error: result.reason, code: "CHECKLIST_INCOMPLETE" });
   if (result.outcome === "invalid_performer") return res.status(400).json({ error: "Invalid staff roster member" });
   if (result.outcome === "already_submitted") {
     return res.status(409).json({ error: "Checklist already submitted", code: "CHECKLIST_ALREADY_SUBMITTED", id: result.row.id });
@@ -224,14 +234,27 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
       service: requiredService,
     });
   }
+  if (!(await siteInDepartment(req.body?.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  if (!(await verifySite(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
   const data = parsed.data as any;
+  if (data.items) data.items = normaliseChecklistItems(data.items);
+  if (data.submittedAt) {
+    const reason = checklistIncompleteReason(data.items ?? existing.items);
+    if (reason) return res.status(400).json({ error: reason, code: "CHECKLIST_INCOMPLETE" });
+  }
   const performer = await resolveStaffPerformerUpdate(clientId, data.staffRosterId, data.completedBy, (existing as any).staffRosterId, existing.completedBy);
   if (data.staffRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  const [row] = await db.update(dailyChecklistsTable)
-    .set({ ...data, completedBy: performer?.performedBy, staffRosterId: performer?.staffRosterId, items: data.items as any, submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined, updatedAt: new Date() })
-    .where(and(eq(dailyChecklistsTable.id, id), eq(dailyChecklistsTable.clientId, clientId))).returning();
+  const row = await db.transaction(async (tx) => {
+    // Only a draft moves to submitted, so two racing submits create one set of actions.
+    const [updated] = await tx.update(dailyChecklistsTable)
+      .set({ ...data, completedBy: performer?.performedBy, staffRosterId: performer?.staffRosterId, items: data.items as any, submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined, updatedAt: new Date() })
+      .where(and(eq(dailyChecklistsTable.id, id), eq(dailyChecklistsTable.clientId, clientId), isNull(dailyChecklistsTable.submittedAt))).returning();
+    if (updated?.submittedAt) await createFailedChecklistItemActions(tx, updated, req.currentUser!.id);
+    return updated;
+  });
+  if (!row) return res.status(409).json({ error: "Checklist already submitted" });
   res.json(row);
 });
 

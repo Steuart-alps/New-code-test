@@ -1,7 +1,8 @@
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { historicalTestDepartmentScope } from "./patLegacyHistoryScope";
 import { submittedDailyChecklists } from "./dailyChecklistCompletion";
+import { departmentSiteIdSql, siteVisibleSql } from "./departmentSites";
 
 type Options = {
   clientId: number;
@@ -14,6 +15,16 @@ type Options = {
   restrictSitesToDepartment: boolean;
 };
 
+/**
+ * Boolean SQL: the site whose id and department_id columns are given is one of
+ * department `departmentId`'s own sites, i.e. given to it or the site it sits
+ * under (when not another department's), and never another site than that.
+ */
+export function departmentOwnsSiteSql(siteIdColumn: SQL, siteDepartmentColumn: SQL, departmentId: number): SQL {
+  return sql`(${siteVisibleSql(siteIdColumn, siteDepartmentColumn, departmentId)}
+    AND (${siteDepartmentColumn} = ${departmentId} OR ${siteIdColumn} = ${departmentSiteIdSql(departmentId)}))`;
+}
+
 /** Attribute records to the department of the account that entered them.
  * NULL/removed authors cannot be assigned reliably and are excluded.
  * The site restriction for department-scoped staff remains in effect; managers
@@ -25,7 +36,7 @@ export async function getDepartmentComplianceReport({
 }: Options) {
   const siteScope = sql`
     ${siteId !== undefined ? sql`AND s.id = ${siteId}` : sql``}
-    ${restrictSitesToDepartment ? sql`AND s.department_id = ${departmentId}` : sql``}
+    ${restrictSitesToDepartment ? sql`AND ${departmentOwnsSiteSql(sql`s.id`, sql`s.department_id`, departmentId)}` : sql``}
   `;
   const [sitesRes, dailyRes, moduleRes] = await Promise.all([
     db.execute(sql`

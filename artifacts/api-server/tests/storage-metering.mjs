@@ -163,7 +163,8 @@ async function pricingBoundaries({ user, clientId }) {
     t.clearObjects(prefix);
     if (usedBytes > 0) t.putObject(`${prefix}stored.bin`, { size: usedBytes, owner: String(clientId) });
     for (const name of PRICING_ENV) delete process.env[name];
-    Object.assign(process.env, env);
+    // The arithmetic below is worked at $0.015/GiB; the default has its own check.
+    Object.assign(process.env, { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.015", ...env });
     // Usage totals come from a reconciled snapshot (storageUsageSnapshot.ts);
     // the bucket was changed directly, so make this view reconcile it again.
     await query("DELETE FROM storage_usage_snapshots WHERE client_id = $1", [clientId]);
@@ -255,10 +256,10 @@ async function pricingBoundaries({ user, clientId }) {
     check(`${name}: usage still answers`, Number.isSafeInteger(response.usedBytes) && response.usedBytes === 101 * GIB, JSON.stringify(response));
     same(`${name}: no estimate`, response.estimatedCost, null);
   }
-  same("unset (empty) provider rate uses the $0.015 default", (await cost(101 * GIB, { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "" }))?.providerMinorUnits, 150);
+  same("unset (empty) provider rate uses the $0.026 default", (await cost(101 * GIB, { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "" }))?.providerMinorUnits, 260);
   same("unset (empty) markup uses the 20% default", (await cost(101 * GIB, { STORAGE_ALPS_MARKUP_PERCENT: "" }))?.markupMinorUnits, 30);
   // Blank values are unset, never zero: a stray space must not drop the margin to 0%.
-  same("blank provider rate uses the default", (await cost(101 * GIB, { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "  " }))?.providerMinorUnits, 150);
+  same("blank provider rate uses the default", (await cost(101 * GIB, { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "  " }))?.providerMinorUnits, 260);
   const blankMarkup = await cost(101 * GIB, { STORAGE_ALPS_MARKUP_PERCENT: " " });
   same("blank markup uses the 20% default, not 0%", [blankMarkup?.markupPercent, blankMarkup?.markupMinorUnits], [20, 30]);
 
@@ -504,7 +505,7 @@ async function downloadsDisplayedNotBilled(tenantA, pricing, month) {
   const after = await pricing.user("GET", "/storage/usage");
   same("heavy traffic is displayed", after.data?.monthlyDownloadBytes - before.data?.monthlyDownloadBytes, 500 * GIB);
   same("estimate is identical with or without 500 GiB of downloads", after.data?.estimatedCost, before.data?.estimatedCost);
-  same("downloads add nothing to the total", [after.data?.estimatedCost?.downloadMinorUnits, after.data?.estimatedCost?.totalMinorUnits], [0, 180]);
+  same("downloads add nothing to the total", [after.data?.estimatedCost?.downloadMinorUnits, after.data?.estimatedCost?.totalMinorUnits], [0, 312]); // 100 GiB at the $0.026 default + 20%
 
   t.clearObjects(prefix);
   await query("DELETE FROM storage_usage_snapshots WHERE client_id = $1", [pricing.clientId]);

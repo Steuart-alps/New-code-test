@@ -3,17 +3,19 @@
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 let passed = 0, failed = 0;
 const check = (name, ok, detail = "") => { if (ok) passed++; else { failed++; console.error(`FAIL ${name}`, detail); } };
-const client = () => {
+const client = (defaultHeaders = {}) => {
   let cookie = "";
   return async (method, path, body) => {
-    const r = await fetch(`${BASE}${path}`, { method, headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    const r = await fetch(`${BASE}${path}`, { method, headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body) });
     const c = r.headers.get("set-cookie"); if (c) cookie = c.split(";")[0];
     return { status: r.status, data: await r.json().catch(() => null) };
   };
 };
 const run = async () => {
-  const request = client();
+  // The manager deliberately records checks dated days ago (cadence and
+  // overdue cases), which an owner may do with a reason.
+  const request = client({ "X-Override-Reason": encodeURIComponent("Water safety fixture: past-dated check") });
   const email = `safety-${Date.now()}@test.local`;
   const reg = await request("POST", "/auth/register", { name: "Safety Integration Manager", email, password: "password-123" });
   check("register", [200, 201].includes(reg.status), reg.status);

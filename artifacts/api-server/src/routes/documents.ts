@@ -6,6 +6,7 @@ import { clientDocumentsTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, getClientId, canAccessClient, denyViewers } from "../middleware/requireAuth";
 import {
+  ObjectContentError,
   ObjectStorageService,
   ObjectNotFoundError,
   ObjectOwnershipError,
@@ -80,6 +81,10 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
     }
     if (err instanceof ObjectNotFoundError) {
       res.status(404).json({ error: "Uploaded object not found" });
+      return;
+    }
+    if (err instanceof ObjectContentError) {
+      res.status(400).json({ error: err.message });
       return;
     }
     req.log.error({ err }, "Could not finalize document upload");

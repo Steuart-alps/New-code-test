@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, BookOpen, CheckCircle2, ExternalLink, Plus, ShieldCheck, UserRoundCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { withCsrfToken } from "@/lib/api";
+import { fetchWithOverrideReason, withCsrfToken } from "@/lib/api";
 
 type Appointment = { area: string; person: string; evidence?: string | null };
 type Profile = {
@@ -27,7 +27,7 @@ type Action = {
   id: number; sourceTrack: string; sourceRecordId?: string | null; title: string;
   severity: "low" | "medium" | "high" | "critical"; status: "open" | "in_progress" | "awaiting_verification" | "verified";
   ownerName: string; dueDate?: string | null; interimControl?: string | null; correctiveAction: string;
-  evidenceReference?: string | null; verificationNotes?: string | null;
+  evidenceReference?: string | null; verificationNotes?: string | null; fixTrackIssueId?: number | null;
 };
 
 const emptyProfile: Profile = {
@@ -40,7 +40,7 @@ const emptyAction = {
   sourceTrack: "FireTrack", sourceRecordId: "", title: "", severity: "medium" as const,
   ownerName: "", dueDate: "", interimControl: "", correctiveAction: "", evidenceReference: "",
 };
-const trackOptions = ["DailyTrack AM", "DailyTrack PM", "KitchenTrack", "FireTrack", "LegionellaTrack", "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack", "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack", "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack"];
+const trackOptions = ["DailyTrack AM", "DailyTrack PM", "KitchenTrack", "FireTrack", "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack", "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack", "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack"];
 
 export default function ComplianceHubPage() {
   const { activeClientId, user } = useAuth();
@@ -64,13 +64,18 @@ export default function ComplianceHubPage() {
   const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${apiBase}${path}${clientQuery}`, await withCsrfToken({
+    const response = await fetchWithOverrideReason(`${apiBase}${path}${clientQuery}`, await withCsrfToken({
       credentials: "include",
       headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
       ...init,
     }));
     const data = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(data?.error || "Request failed");
+    if (!response.ok) {
+      // Validation failures carry zod's flattened errors rather than a string.
+      const error = data?.error;
+      const [field, messages] = Object.entries<string[]>(error?.fieldErrors ?? {})[0] ?? [];
+      throw new Error(typeof error === "string" ? error : field ? `${field}: ${messages?.[0] ?? "invalid"}` : "Request failed");
+    }
     return data as T;
   }
 
@@ -135,6 +140,18 @@ export default function ComplianceHubPage() {
     } catch (error: any) {
       toast({ title: "Couldn't log action", description: error.message, variant: "destructive" });
     } finally { setSavingAction(false); }
+  }
+
+  async function sendToFixTrack(id: number) {
+    const generation = loadGeneration.current;
+    try {
+      const sent = await request<{ fixTrackIssueId: number }>(`/compliance-hub/actions/${id}/fix-track`, { method: "POST", body: "{}" });
+      if (generation !== loadGeneration.current) return;
+      await refresh();
+      toast({ title: "Sent to FixTrack", description: `FixTrack issue #${sent.fixTrackIssueId} raised.` });
+    } catch (error: any) {
+      toast({ title: "Couldn't send to FixTrack", description: error.message, variant: "destructive" });
+    }
   }
 
   async function updateAction(id: number) {
@@ -220,7 +237,7 @@ export default function ComplianceHubPage() {
             </CardContent>
           </Card>}
           <div className="space-y-3">{loading ? <p className="text-muted-foreground">Loading corrective actions…</p> : actions.length === 0 ? <Card><CardContent className="p-6 text-muted-foreground">No corrective actions are logged for this client.</CardContent></Card> : actions.map(action => <Card key={action.id} className={action.status === "verified" ? "opacity-75" : ""}><CardContent className="p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row gap-3 sm:items-start sm:justify-between"><div><div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold">{action.title}</h3><Badge variant={action.status === "verified" ? "secondary" : "outline"}>{action.status.replaceAll("_", " ")}</Badge><Badge variant={action.severity === "critical" || action.severity === "high" ? "destructive" : "outline"}>{action.severity}</Badge></div><p className="text-sm text-muted-foreground mt-1">{action.sourceTrack}{action.sourceRecordId ? ` · ${action.sourceRecordId}` : ""} · Owner: {action.ownerName}{action.dueDate ? ` · Due ${action.dueDate}` : ""}</p></div>{canEdit && action.status !== "verified" && <Button variant="outline" size="sm" onClick={() => beginEditingAction(action)}>Update / verify</Button>}</div>
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-start sm:justify-between"><div><div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold">{action.title}</h3><Badge variant={action.status === "verified" ? "secondary" : "outline"}>{action.status.replaceAll("_", " ")}</Badge><Badge variant={action.severity === "critical" || action.severity === "high" ? "destructive" : "outline"}>{action.severity}</Badge></div><p className="text-sm text-muted-foreground mt-1">{action.sourceTrack}{action.sourceRecordId ? ` · ${action.sourceRecordId}` : ""} · Owner: {action.ownerName}{action.dueDate ? ` · Due ${action.dueDate}` : ""}</p></div><div className="flex flex-wrap gap-2">{action.fixTrackIssueId ? <a className="text-sm font-medium text-primary underline self-center" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a> : canEdit && action.status !== "verified" && !/green/i.test(action.sourceTrack) && <Button variant="outline" size="sm" onClick={() => sendToFixTrack(action.id)}>Send to FixTrack</Button>}{canEdit && action.status !== "verified" && <Button variant="outline" size="sm" onClick={() => beginEditingAction(action)}>Update / verify</Button>}</div></div>
             <div className="grid gap-3 md:grid-cols-2 text-sm"><div><span className="font-medium">Corrective action: </span>{action.correctiveAction}</div>{action.interimControl && <div><span className="font-medium">Interim control: </span>{action.interimControl}</div>}{action.evidenceReference && <div><span className="font-medium">Evidence: </span>{action.evidenceReference}</div>}{action.verificationNotes && <div><span className="font-medium">Verification: </span>{action.verificationNotes}</div>}</div>
             {editingAction === action.id && <div className="grid gap-3 border-t pt-4 md:grid-cols-2"><div className="space-y-2"><Label>Action status</Label><Select value={actionUpdate.status} onValueChange={status => setActionUpdate({ ...actionUpdate, status })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="open">Open</SelectItem><SelectItem value="in_progress">In progress</SelectItem><SelectItem value="awaiting_verification">Awaiting verification</SelectItem><SelectItem value="verified">Verified closed</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Evidence reference</Label><Input value={actionUpdate.evidenceReference} onChange={e => setActionUpdate({ ...actionUpdate, evidenceReference: e.target.value })} /></div><div className="space-y-2 md:col-span-2"><Label>Verification notes {actionUpdate.status === "verified" ? "(required)" : ""}</Label><Textarea value={actionUpdate.verificationNotes} onChange={e => setActionUpdate({ ...actionUpdate, verificationNotes: e.target.value })} placeholder="Who verified the action, what they checked and when" /><p className="text-xs text-muted-foreground">Verified closure is available only from “Awaiting verification”, by a different client admin or consultant. It cannot be edited afterwards.</p></div><div className="flex gap-2 md:col-span-2"><Button onClick={() => updateAction(action.id)}>Save action update</Button><Button variant="ghost" onClick={() => setEditingAction(null)}>Cancel</Button></div></div>}
           </CardContent></Card>)}</div>
