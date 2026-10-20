@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Building2, CheckCircle2, ClipboardCheck, LayoutGrid, MapPin, Sparkles } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, ClipboardCheck, LayoutGrid, MapPin, Network, Plus, Sparkles, X } from "lucide-react";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import {
-  BUSINESS_TYPE_OPTIONS, FIRST_RECORD_PRIORITY, MODULE_INFO, NATION_OPTIONS, RECOMMENDED_MODULES,
+  BUSINESS_TYPE_OPTIONS, DEPARTMENT_SUGGESTIONS, FIRST_RECORD_PRIORITY, MODULE_INFO, NATION_OPTIONS, RECOMMENDED_MODULES,
   formatDay, localToday, onboardingRequest,
 } from "@/lib/onboarding";
 
@@ -23,14 +23,24 @@ type SetupState = {
   modules?: { available: string[]; picked: string[] }; starterChecks?: StarterCheck[];
 };
 type Choice = { ticked: boolean; date: string };
+/** A department sits under one site; `siteId` null means it spans every site. */
+type Department = { id: number; name: string; siteId: number | null };
 
 const STEPS = [
   { label: "Your business", icon: Building2 },
-  { label: "First site", icon: MapPin },
+  { label: "Sites", icon: MapPin },
+  { label: "Departments", icon: Network },
   { label: "Modules", icon: LayoutGrid },
   { label: "Starter checks", icon: ClipboardCheck },
   { label: "First record", icon: Sparkles },
 ];
+/** "12 months (every year)", "60 months (every 5 years)". */
+function intervalLabel(months: number): string {
+  if (months % 12 !== 0) return `${months} month${months === 1 ? "" : "s"}`;
+  const years = months / 12;
+  return `${months} months (every ${years === 1 ? "year" : `${years} years`})`;
+}
+
 const selectClass = "w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
 export default function SetupPage() {
@@ -51,6 +61,13 @@ export default function SetupPage() {
   const [picked, setPicked] = useState<string[]>([]);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [removeUnticked, setRemoveUnticked] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [deptSiteId, setDeptSiteId] = useState<number | null>(null);
+  const [deptInput, setDeptInput] = useState("");
+  const [newDepartments, setNewDepartments] = useState<string[]>([]);
+  const [copyDepartments, setCopyDepartments] = useState(true);
+  const [departmentsLoaded, setDepartmentsLoaded] = useState(false);
+  const [suggestionsOffered, setSuggestionsOffered] = useState(false);
 
   async function load() {
     try {
@@ -66,6 +83,17 @@ export default function SetupPage() {
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Could not load setup");
     }
+    await loadDepartments();
+  }
+
+  async function loadDepartments() {
+    try {
+      const rows = await onboardingRequest<Department[]>("/departments", clientId);
+      setDepartments(rows);
+    } catch {
+      // The departments step still lets admins add new ones.
+    }
+    setDepartmentsLoaded(true);
   }
   useEffect(() => { void load(); }, [clientId]);
 
@@ -90,12 +118,66 @@ export default function SetupPage() {
     void refresh();
   });
 
+  // Stays on the step so several sites can be added in a row.
   const saveSite = () => run(async () => {
     if (!siteName.trim()) return;
     const site = await post("/sites", { name: siteName.trim(), address: siteAddress.trim() || null, seedStarterChecks: false }) as { id: number };
-    setSiteId(site.id);
+    setSiteId((current) => current ?? site.id);
+    setDeptSiteId((current) => current ?? site.id);
+    setSiteName("");
+    setSiteAddress("");
     void queryClient.invalidateQueries();
     await load();
+  }, false);
+
+  const sites = state?.sites ?? [];
+  const activeDeptSiteId = deptSiteId ?? sites[0]?.id ?? null;
+  const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  // A department with no site (made before departments moved under sites) counts at every site.
+  const departmentsAt = (site: number | null) =>
+    departments.filter((d) => d.siteId == null || d.siteId === site);
+  const shownDepartments = departmentsAt(activeDeptSiteId);
+  const departmentSuggestions = DEPARTMENT_SUGGESTIONS[businessType || "other"] ?? DEPARTMENT_SUGGESTIONS.other;
+  const businessTypeLabel = BUSINESS_TYPE_OPTIONS.find((o) => o.value === businessType)?.label;
+  const showCopyDepartments = sites.length > 1;
+
+  // First visit to the step with no departments yet: pre-tick the usual names.
+  useEffect(() => {
+    if (step !== 2 || !departmentsLoaded || suggestionsOffered) return;
+    setSuggestionsOffered(true);
+    if (departments.length === 0) setNewDepartments(departmentSuggestions);
+  }, [step, departmentsLoaded, suggestionsOffered]);
+
+  function addDepartmentName(raw: string) {
+    const name = raw.trim();
+    if (!name) return;
+    if (!newDepartments.some((n) => sameName(n, name)) && !shownDepartments.some((d) => sameName(d.name, name))) {
+      setNewDepartments((names) => [...names, name]);
+    }
+    setDeptInput("");
+  }
+
+  // Creates the new names at the chosen site, and with "copy" ticked at every
+  // other site too (names only; a site that already has a name is skipped).
+  const saveDepartments = () => run(async () => {
+    const names = deptInput.trim() ? [...newDepartments, deptInput.trim()] : newDepartments;
+    const targets = copyDepartments && showCopyDepartments
+      ? [activeDeptSiteId, ...sites.map((s) => s.id).filter((id) => id !== activeDeptSiteId)]
+      : [activeDeptSiteId];
+    let created = 0;
+    for (const target of targets) {
+      const existing = departmentsAt(target);
+      for (const name of names) {
+        if (existing.some((d) => sameName(d.name, name))) continue;
+        await post("/departments", target ? { name, siteId: target } : { name });
+        created += 1;
+      }
+    }
+    setNewDepartments([]);
+    setDeptInput("");
+    toast({ title: "Departments saved", description: `${created} added.` });
+    void queryClient.invalidateQueries();
+    await loadDepartments();
   });
 
   const saveModules = () => run(async () => { await post("/setup/modules", { modules: picked }, "PUT"); });
@@ -147,7 +229,7 @@ export default function SetupPage() {
           <Button variant="outline" size="sm" onClick={finishLater} disabled={busy}>Finish later</Button>
         </div>
 
-        <ol className="grid grid-cols-5 gap-1" aria-label="Setup steps">
+        <ol className="grid grid-cols-6 gap-1" aria-label="Setup steps">
           {STEPS.map(({ label, icon: Icon }, i) => (
             <li key={label}>
               <button type="button" onClick={() => setStep(i)} aria-current={i === step ? "step" : undefined}
@@ -193,35 +275,126 @@ export default function SetupPage() {
             {step === 1 && (
               <>
                 <div>
-                  <h2 className="text-lg font-semibold">Your first site</h2>
-                  <p className="text-sm text-muted-foreground">A site is a building or location where checks are recorded.</p>
+                  <h2 className="text-lg font-semibold">Your sites</h2>
+                  <p className="text-sm text-muted-foreground">A site is a building or location where checks are recorded. Add each of your locations now; you will set up their departments next.</p>
                 </div>
-                {(state.sites?.length ?? 0) > 0 ? (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="setup-site">Use this site for your starter checks</Label>
-                    <select id="setup-site" className={selectClass} value={siteId ?? ""} onChange={(e) => setSiteId(e.target.value ? Number(e.target.value) : null)}>
-                      {state.sites!.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    <p className="text-xs text-muted-foreground">You can add more sites later from Sites.</p>
-                    <div className="flex justify-end pt-2"><Button onClick={() => setStep(2)}>Continue <ArrowRight className="w-4 h-4 ml-1" /></Button></div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="setup-site-name">Site name</Label>
-                      <Input id="setup-site-name" value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="e.g. The Red Lion" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="setup-site-address">Address (optional)</Label>
-                      <Input id="setup-site-address" value={siteAddress} onChange={(e) => setSiteAddress(e.target.value)} placeholder="Street, town, postcode" />
-                    </div>
-                    <StepActions busy={busy} onSave={saveSite} onSkip={() => setStep(2)} disabled={!siteName.trim()} saveLabel="Add site" />
-                  </>
+                {sites.length > 0 && (
+                  <ul className="space-y-1.5" aria-label="Your sites">
+                    {sites.map((s) => (
+                      <li key={s.id} className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                        <MapPin className="h-4 w-4 text-primary shrink-0" /> {s.name}
+                      </li>
+                    ))}
+                  </ul>
                 )}
+                <div className="space-y-3 rounded-lg border p-3">
+                  <p className="text-sm font-medium">{sites.length > 0 ? "Add another site" : "Add your first site"}</p>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="setup-site-name">Site name</Label>
+                    <Input id="setup-site-name" value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="e.g. The Red Lion" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="setup-site-address">Address (optional)</Label>
+                    <Input id="setup-site-address" value={siteAddress} onChange={(e) => setSiteAddress(e.target.value)} placeholder="Street, town, postcode" />
+                  </div>
+                  <div className="flex justify-end">
+                    <Button variant={sites.length > 0 ? "outline" : "default"} onClick={saveSite} disabled={busy || !siteName.trim()}>
+                      <Plus className="w-4 h-4 mr-1" /> {busy ? "Adding…" : "Add site"}
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">Your plan is priced per site, so each extra site adds to the monthly price once your free trial ends. You can add or remove sites later from Sites.</p>
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  {sites.length === 0 && <Button variant="ghost" onClick={() => setStep(2)} disabled={busy}>Skip this step</Button>}
+                  {sites.length > 0 && <Button onClick={() => setStep(2)} disabled={busy}>Continue <ArrowRight className="w-4 h-4 ml-1" /></Button>}
+                </div>
               </>
             )}
 
             {step === 2 && (
+              <>
+                <div>
+                  <h2 className="text-lg font-semibold">Departments</h2>
+                  <p className="text-sm text-muted-foreground">Departments split a site into areas such as Kitchen or Housekeeping, so staff see the records for their own area. Skip this if you don't need them.</p>
+                </div>
+                {sites.length > 1 && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="setup-dept-site">Departments at</Label>
+                    <select id="setup-dept-site" className={selectClass} value={activeDeptSiteId ?? ""}
+                      onChange={(e) => setDeptSiteId(Number(e.target.value))}>
+                      {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {shownDepartments.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Already set up</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {shownDepartments.map((d) => (
+                        <span key={d.id} className="rounded-full border bg-muted/40 px-3 py-1 text-sm">{d.name}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <Label htmlFor="setup-dept-name">Add a department</Label>
+                  <div className="flex gap-2">
+                    <Input id="setup-dept-name" value={deptInput} onChange={(e) => setDeptInput(e.target.value)} placeholder="e.g. Kitchen"
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addDepartmentName(deptInput); } }} />
+                    <Button type="button" variant="outline" onClick={() => addDepartmentName(deptInput)} disabled={!deptInput.trim()}>
+                      <Plus className="w-4 h-4 mr-1" /> Add
+                    </Button>
+                  </div>
+                </div>
+                {(() => {
+                  const suggestions = departmentSuggestions
+                    .filter((n) => !newDepartments.some((x) => sameName(x, n)) && !shownDepartments.some((d) => sameName(d.name, n)));
+                  return suggestions.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">Common choices:</span>
+                      {suggestions.map((n) => (
+                        <button key={n} type="button" onClick={() => addDepartmentName(n)}
+                          className="inline-flex items-center gap-1 rounded-full border border-dashed px-2.5 py-0.5 text-xs hover:border-primary hover:text-primary">
+                          <Plus className="h-3 w-3" /> {n}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+                {newDepartments.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">To add</p>
+                    {departments.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        We've suggested the usual departments{businessTypeLabel && businessType !== "other" ? ` for ${businessTypeLabel}` : ""}. Remove any you don't need, or add your own.
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-1.5">
+                      {newDepartments.map((n) => (
+                        <span key={n} className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/5 px-3 py-1 text-sm">
+                          {n}
+                          <button type="button" aria-label={`Remove ${n}`} onClick={() => setNewDepartments((names) => names.filter((x) => x !== n))}
+                            className="rounded-full p-0.5 hover:bg-primary/10"><X className="h-3 w-3" /></button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {showCopyDepartments && (
+                  <label className="flex items-start gap-2 rounded-lg border p-3 text-sm cursor-pointer">
+                    <input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={copyDepartments} onChange={(e) => setCopyDepartments(e.target.checked)} />
+                    <span>
+                      <span className="block font-medium">Use these department names at {sites.length === 2 ? "both sites" : `all ${sites.length} sites`}</span>
+                      <span className="block text-xs text-muted-foreground">Only the names are copied. Staff, checks and other settings are set up separately at each site.</span>
+                    </span>
+                  </label>
+                )}
+                <StepActions busy={busy} onSave={saveDepartments} onSkip={() => setStep(3)}
+                  disabled={newDepartments.length === 0 && !deptInput.trim()} saveLabel="Save departments" />
+              </>
+            )}
+
+            {step === 3 && (
               <>
                 <div>
                   <h2 className="text-lg font-semibold">Which modules do you want to start with?</h2>
@@ -243,11 +416,11 @@ export default function SetupPage() {
                     ))}
                   </div>
                 )}
-                <StepActions busy={busy} onSave={saveModules} onSkip={() => setStep(3)} />
+                <StepActions busy={busy} onSave={saveModules} onSkip={() => setStep(4)} />
               </>
             )}
 
-            {step === 3 && (
+            {step === 4 && (
               <>
                 <div>
                   <h2 className="text-lg font-semibold">Starter compliance checks</h2>
@@ -273,7 +446,7 @@ export default function SetupPage() {
                                   <span className="block text-sm font-medium">{c.title}</span>
                                   <span className="block text-xs text-muted-foreground">
                                     {c.state === "customised" ? "Already on your list and edited, so it is left as it is."
-                                      : c.frequencyMonths ? `Repeats every ${c.frequencyMonths} months.` : "Interval set by your premises or competent person."}
+                                      : c.frequencyMonths ? `Repeats every ${intervalLabel(c.frequencyMonths)}.` : "Interval set by your premises or competent person."}
                                   </span>
                                 </span>
                               </label>
@@ -300,12 +473,21 @@ export default function SetupPage() {
                   <input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={removeUnticked} onChange={(e) => setRemoveUnticked(e.target.checked)} />
                   <span>Remove the starter checks I have unticked from my checks list (only ones nobody has edited; you can add checks again at any time).</span>
                 </label>
+                {sites.length > 1 && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="setup-site">Add these checks to</Label>
+                    <select id="setup-site" className={selectClass} value={siteId ?? ""} onChange={(e) => setSiteId(e.target.value ? Number(e.target.value) : null)}>
+                      {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                    <p className="text-xs text-muted-foreground">Save, then pick your next site to set up its checks too.</p>
+                  </div>
+                )}
                 {siteId == null && <p className="text-xs text-muted-foreground">Add a site first to attach these checks to it; otherwise they apply to the whole business.</p>}
-                <StepActions busy={busy} onSave={saveChecks} onSkip={() => setStep(4)} saveLabel="Save checks" />
+                <StepActions busy={busy} onSave={saveChecks} onSkip={() => setStep(5)} saveLabel="Save checks" />
               </>
             )}
 
-            {step === 4 && (
+            {step === 5 && (
               <>
                 <div>
                   <h2 className="text-lg font-semibold">Record your first check</h2>

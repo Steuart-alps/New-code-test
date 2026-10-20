@@ -29,6 +29,7 @@ import { apiFetch } from '@/lib/api';
 import { UnsentSubmissions } from '@/components/UnsentSubmissions';
 import { OutboxEntries } from '@/components/OutboxEntries';
 import { useRecordOutbox } from '@/hooks/useRecordOutbox';
+import { localIsoDate } from '@/components/date-stepper-logic';
 
 const MODULE_COLOR = '#ef4444';
 
@@ -84,7 +85,7 @@ function optionLabel(value: string): string {
 }
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localIsoDate();
 }
 
 function formatDate(dateStr: string): string {

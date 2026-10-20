@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { API_BASE } from "@/lib/api";
 import { downloadFile } from "@/lib/download";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 interface Doc {
   id: number;
@@ -107,6 +108,7 @@ function UploadDialog({
     setError("");
 
     try {
+      assertWithinUploadLimit(file);
       // 1. Get presigned upload URL
       setProgress("presign");
       const presignRes = await apiFetch("/storage/uploads/request-url", {

@@ -27,7 +27,7 @@ try {
   const cases = [
     {
       name: 'fire', path: '/fire-safety', table: 'fire_safety_checks',
-      body: { checkType: 'alarm', checkDate: day, result: 'pass', siteId, notes: 'Bell tested' },
+      body: { checkType: 'alarm', callPoint: 'CP1', checkDate: day, result: 'pass', siteId, notes: 'Bell tested' },
       changed: { notes: 'Different notes' },
     },
     {

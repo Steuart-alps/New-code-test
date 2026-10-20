@@ -39,6 +39,30 @@ const cases: FixtureCase[] = [
     }),
   },
   {
+    // First version of the event that the next fixture revises (same UID,
+    // later SEQUENCE, moved date and longer title), so calendar clients can
+    // be checked for an update rather than a duplicate.
+    filename: "uk-dst-end-original.ics",
+    expectedStart: "20301026",
+    expectedEnd: "20301027",
+    expectedSequence: "1",
+    expectedSummary: "Révision chaudière № 12",
+    invite: buildCalendarInvite({
+      itemTitle: "Révision chaudière № 12",
+      dueDate: new Date("2030-10-26T00:00:00.000Z"),
+      contractorName: "Zoë O’Connor",
+      contractorEmail: "zoe@example.test",
+      companyName: "ÅLPS “Facilities” ^ Europe",
+      fromEmail: "compliance@example.test",
+      notes: "Site: Café Français\nLocation: Sous-sol",
+      descriptionLabel: "Maintenance job",
+      uid: "fix-track-44-881@complytrack",
+      sequence: 1,
+      allDay: true,
+      generatedAt: new Date("2030-09-24T08:00:00.000Z"),
+    }),
+  },
+  {
     filename: "uk-dst-end-long-unicode-update.ics",
     expectedStart: "20301027",
     expectedEnd: "20301028",

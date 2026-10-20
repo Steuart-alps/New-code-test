@@ -110,6 +110,10 @@ async function createAccount(label) {
   const verified = await signup.request("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`);
   if (verified.status !== 200) throw new Error(`Could not verify ${label}'s email: ${verified.status}`);
   const id = Number(sql(`SELECT id FROM users WHERE email = '${email}'`));
+  // 2FA is optional unless the business requires it; these accounts need it.
+  sql(`INSERT INTO app_settings (client_id, key, value)
+    SELECT client_id, 'requireTwoFactor', 'true' FROM users WHERE id = ${id}
+    ON CONFLICT (client_id, key) DO UPDATE SET value = 'true'`);
   return { email, id, label };
 }
 

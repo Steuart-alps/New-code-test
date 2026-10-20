@@ -18,6 +18,11 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - ".github/workflows/contractor-approvals-browser.yml"
+  # Weekly, so a change in the runner image or browser dependencies shows up
+  # before the next approval change. Uses only the test fixture: no
+  # application secrets or data.
+  schedule:
+    - cron: "17 6 * * 1"
   workflow_dispatch:
 
 jobs:
@@ -52,4 +57,14 @@ jobs:
       - name: Run private-browser approval checks
         env:
           APPROVAL_BROWSER: ${{ matrix.browser }}
+          APPROVAL_FAILURE_DIR: ${{ runner.temp }}/approval-browser-failure
         run: pnpm --filter @workspace/compliance-tracker run test:contractor-approvals-browser-engine
+
+      - name: Upload trace and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: approval-browser-failure-${{ matrix.browser }}
+          path: ${{ runner.temp }}/approval-browser-failure
+          if-no-files-found: ignore
+          retention-days: 7

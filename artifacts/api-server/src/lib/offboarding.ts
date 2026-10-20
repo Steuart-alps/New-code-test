@@ -24,6 +24,15 @@ import { findLiveSubscription } from "./billing";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, markEmailDeliverySent, settleEmailDelivery } from "./emailDeliveryClaims";
 import { randomUUID } from "crypto";
 
+/**
+ * When a synced subscription's access ends, in Unix seconds (the stripe.*
+ * columns are integers, so compare with `extract(epoch from now())`, never
+ * `now()`). Stripe API versions from 2025-03-31.basil no longer put
+ * current_period_end on the subscription, so a subscription cancelled outright
+ * (no cancel_at) falls back to ended_at. Expects the subscription aliased `s`.
+ */
+export const SUBSCRIPTION_ACCESS_ENDS_AT = sql.raw("COALESCE(s.cancel_at, s.current_period_end, s.ended_at)");
+
 const RETENTION_MONTHS = 12;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -184,7 +193,7 @@ async function getCurrentCancellation(
   execute: SqlExecutor,
 ): Promise<CancellationCandidate | null> {
   const result = await execute(sql`
-    SELECT s.customer, COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+    SELECT s.customer, ${SUBSCRIPTION_ACCESS_ENDS_AT} AS access_ends_at
     FROM stripe.subscriptions s
     WHERE s.customer = ${stripeCustomerId}
       AND (s.status = 'canceled' OR s.cancel_at_period_end = true)
@@ -195,7 +204,7 @@ async function getCurrentCancellation(
           AND live.status IN ('active', 'trialing', 'past_due')
           AND COALESCE(live.cancel_at_period_end, false) = false
       )
-    ORDER BY s.current_period_end DESC NULLS LAST
+    ORDER BY ${SUBSCRIPTION_ACCESS_ENDS_AT} DESC NULLS LAST, s.created DESC
     LIMIT 1
   `);
   return ((result.rows ?? [])[0] as CancellationCandidate | undefined) ?? null;
@@ -274,7 +283,7 @@ export async function sendCancellationWarningEmail(opts: {
           AND (s.status = 'canceled' OR s.cancel_at_period_end = true)
           -- Do not send a stale date if a concurrent Stripe update moved the
           -- cutoff after the initial read; that update will claim its own key.
-          AND COALESCE(s.cancel_at, s.current_period_end) = ${cancellation.access_ends_at}
+          AND ${SUBSCRIPTION_ACCESS_ENDS_AT} = ${cancellation.access_ends_at}
           AND NOT EXISTS (
             SELECT 1 FROM stripe.subscriptions live
             WHERE live.customer = s.customer
@@ -386,7 +395,7 @@ ComplyTrack
            SELECT 1 FROM stripe.subscriptions s
             WHERE s.customer = ${opts.stripeCustomerId}
               AND (s.status = 'canceled' OR s.cancel_at_period_end = true)
-              AND COALESCE(s.cancel_at, s.current_period_end) = ${cancellation.access_ends_at}
+              AND ${SUBSCRIPTION_ACCESS_ENDS_AT} = ${cancellation.access_ends_at}
               AND NOT EXISTS (
                 SELECT 1 FROM stripe.subscriptions live
                  WHERE live.customer = s.customer
@@ -466,16 +475,16 @@ export async function runCancellationWarningJob(
   const candidates = await execute(sql`
     WITH current_subscriptions AS (
       SELECT DISTINCT ON (c.id) c.id, s.customer, s.status, s.cancel_at_period_end,
-        COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+        ${SUBSCRIPTION_ACCESS_ENDS_AT} AS access_ends_at
       FROM clients c
       JOIN stripe.subscriptions s ON s.customer = c.stripe_customer_id
-      ORDER BY c.id, s.current_period_end DESC NULLS LAST
+      ORDER BY c.id, s.created DESC NULLS LAST
     )
     SELECT id, customer, access_ends_at
     FROM current_subscriptions
     WHERE (status = 'canceled' OR cancel_at_period_end = true)
-      AND (access_ends_at > now()
-        OR (status = 'canceled' AND access_ends_at > now() - interval '7 days'))
+      AND (access_ends_at > extract(epoch from now())
+        OR (status = 'canceled' AND access_ends_at > extract(epoch from now() - interval '7 days')))
   `).catch((err) => {
     logger.warn({ err }, "Cancellation warning reconciliation unavailable");
     return { rows: [] };
@@ -599,6 +608,7 @@ export async function clearRetentionSchedule(clientId: number): Promise<boolean>
        SET cancelled_at = NULL,
            data_deletion_scheduled_at = NULL,
            offboarding_email_sent_at = NULL,
+           deletion_reminder_sent_at = NULL,
            updated_at = now()
      WHERE id = ${clientId}
        AND data_deleted_at IS NULL
@@ -754,21 +764,176 @@ export async function runCancellationDetectionJob(deps: CancellationDetectionDep
   return { clientsDetected, trialsLapsed, clientsReactivated, emailsSent, skipped };
 }
 
+// ── Reminder before the 12-month deletion ─────────────────────────────────────
+
+/** How long before the scheduled deletion the reminder goes out. */
+export const DELETION_REMINDER_DAYS = 30;
+
+function buildDeletionReminderEmail(opts: {
+  recipientName: string;
+  companyName: string;
+  deletionDate: Date;
+  settingsUrl: string;
+}) {
+  const deletionStr = formatUkDate(opts.deletionDate);
+  const safeName = escapeHtml(opts.recipientName);
+  const safeCompany = escapeHtml(opts.companyName);
+  const subject = `Reminder: your ComplyTrack data will be deleted on ${deletionStr}`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #1e293b;">Your records will be deleted soon</h2>
+      <p>Hi ${safeName},</p>
+      <p>We have kept the compliance records for <strong>${safeCompany}</strong> for the ${RETENTION_MONTHS} months
+         since the account ended. They will be <strong>permanently deleted on ${deletionStr}</strong>.</p>
+      <p>We recommend downloading a copy before then, as you may need these records for inspections,
+         insurance claims or legal enquiries.</p>
+      <p><a href="${opts.settingsUrl}"
+            style="display:inline-block;background:#ea580c;color:white;text-decoration:none;
+                   padding:12px 24px;border-radius:6px;font-weight:600;">Download your data</a></p>
+      <p style="color:#64748b;font-size:13px;">If you resubscribe before ${deletionStr}, nothing will be deleted.</p>
+      <p>Best regards,<br><strong>ComplyTrack</strong></p>
+    </div>`;
+  const text = `
+Your records will be deleted soon
+
+Hi ${opts.recipientName},
+
+We have kept the compliance records for ${opts.companyName} for the ${RETENTION_MONTHS} months since the account ended. They will be permanently deleted on ${deletionStr}.
+
+We recommend downloading a copy before then, as you may need these records for inspections, insurance claims or legal enquiries:
+${opts.settingsUrl}
+
+If you resubscribe before ${deletionStr}, nothing will be deleted.
+
+Best regards,
+ComplyTrack
+`.trim();
+  return { subject, html, text };
+}
+
+/**
+ * Sends one reminder, DELETION_REMINDER_DAYS before a cancelled business's
+ * scheduled 12-month deletion, with the download link. Claimed atomically via
+ * deletion_reminder_sent_at; a claim with no delivered email is released so
+ * the next run retries. Resubscribing clears it with the retention clock.
+ */
+export async function runDeletionReminderJob(deps: {
+  sendEmail?: typeof sendSystemEmail;
+  clientIds?: readonly number[];
+} = {}): Promise<{ clientsReminded: number; emailsSent: number }> {
+  const sendEmail = deps.sendEmail ?? sendSystemEmail;
+  if (deps.clientIds?.length === 0) return { clientsReminded: 0, emailsSent: 0 };
+  const scope = deps.clientIds === undefined
+    ? sql`TRUE`
+    : sql`id IN (${sql.join(deps.clientIds.map((id) => sql`${id}`), sql`, `)})`;
+  const due = await db.execute(sql`
+    SELECT id, name, data_deletion_scheduled_at FROM clients
+    WHERE ${scope}
+      AND data_deleted_at IS NULL AND cancelled_at IS NOT NULL
+      AND deletion_reminder_sent_at IS NULL
+      AND data_deletion_scheduled_at > now()
+      AND data_deletion_scheduled_at <= now() + interval '${sql.raw(String(DELETION_REMINDER_DAYS))} days'
+  `);
+  let clientsReminded = 0;
+  let emailsSent = 0;
+  const settingsUrl = `${getPublicAppUrl()}/settings#data-export`;
+  for (const row of due.rows as { id: number; name: string; data_deletion_scheduled_at: Date | string }[]) {
+    const claimed = await db.execute(sql`
+      UPDATE clients SET deletion_reminder_sent_at = now()
+      WHERE id = ${row.id} AND deletion_reminder_sent_at IS NULL AND data_deleted_at IS NULL
+      RETURNING id
+    `);
+    if ((claimed.rows ?? []).length === 0) continue;
+    const deletionDate = new Date(row.data_deletion_scheduled_at);
+    let sent = 0;
+    for (const r of await getClientRecipients(row.id)) {
+      try {
+        const { subject, html, text } = buildDeletionReminderEmail({
+          recipientName: r.name ?? r.email, companyName: row.name, deletionDate, settingsUrl,
+        });
+        await sendEmail({
+          to: r.email, subject, html, text,
+          idempotencyKey: `deletion-reminder:${row.id}:${deletionDate.toISOString()}:${r.id}`,
+        });
+        sent++;
+      } catch (err) {
+        logger.error({ err, clientId: row.id }, "Deletion reminder email failed for recipient");
+      }
+    }
+    if (sent === 0) {
+      await db.execute(sql`UPDATE clients SET deletion_reminder_sent_at = NULL WHERE id = ${row.id}`);
+      continue;
+    }
+    clientsReminded++;
+    emailsSent += sent;
+  }
+  return { clientsReminded, emailsSent };
+}
+
 // ── Job 2: Hard data deletion ──────────────────────────────────────────────────
 
 type TxExecutor = Pick<typeof db, "execute">;
 
-/** Deletes a client's stored files inside the deletion transaction (see clientStorageErasure.ts). */
-export type ClientStorageEraser = (clientId: number, executor: TxExecutor) => Promise<{ objectsDeleted: number }>;
+/**
+ * Deletes a client's stored files inside the deletion transaction (see
+ * clientStorageErasure.ts). objectsSkipped counts referenced files left in
+ * place because their ACL does not mark them as this tenant's private object
+ * (unmarked, another tenant's, or a retained RIDDOR receipt).
+ */
+export type ClientStorageEraser = (clientId: number, executor: TxExecutor) => Promise<{ objectsDeleted: number; objectsSkipped?: number }>;
 
-/** How many stored files a client still has (ledger rows plus attachment references). */
+/**
+ * Thrown by an eraser that fails part-way. Provider deletes cannot be rolled
+ * back with the transaction, so the failed outcome records how many files had
+ * already gone.
+ */
+export class ClientStorageErasureError extends Error {
+  constructor(message: string, readonly objectsDeleted: number, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "ClientStorageErasureError";
+  }
+}
+
+/** The fixed minimum wait between an account erasure request and its execution. */
+export const ACCOUNT_ERASURE_MIN_WAIT_DAYS = 30;
+
+/**
+ * An account erasure request (aliased `r`) that may be executed now: approved
+ * by a recorded reviewer other than the requester, past its earliest deletion
+ * date, and at least 30 days after it was made. Checked again at execution
+ * time so a back-dated earliest date or a self-approval written outside the
+ * review route still cannot run.
+ */
+const APPROVED_ERASURE_READY_SQL = `(
+  r.status = 'approved'
+  AND r.reviewed_by IS NOT NULL AND r.reviewed_at IS NOT NULL
+  AND r.reviewed_by IS DISTINCT FROM r.requested_by
+  AND r.earliest_deletion_at <= now()
+  AND r.requested_at + interval '${ACCOUNT_ERASURE_MIN_WAIT_DAYS} days' <= now()
+)`;
+export const APPROVED_ERASURE_REQUEST_READY = sql.raw(APPROVED_ERASURE_READY_SQL);
+
+/** An open request (aliased `r`) that blocks every deletion path until it is ready. */
+export const ERASURE_REQUEST_BLOCKING = sql.raw(
+  `(r.status = 'pending' OR (r.status = 'approved' AND NOT ${APPROVED_ERASURE_READY_SQL}))`,
+);
+
+/**
+ * How many stored files a client still has to erase (ledger rows plus
+ * attachment references). HSE receipts stay with the retained RIDDOR events
+ * (see RETAINED_CLIENT_TABLES), so they are not counted.
+ */
 export async function countClientStoredObjects(clientId: number, executor: TxExecutor = db): Promise<number> {
   const result = await executor.execute(sql`
-    SELECT (SELECT COUNT(*) FROM storage_usage_objects WHERE client_id = ${clientId} AND present)::int AS ledger
+    SELECT (SELECT COUNT(*) FROM storage_usage_objects WHERE client_id = ${clientId} AND present
+      AND object_path NOT IN (SELECT receipt_object_path FROM incident_riddor_events
+        WHERE client_id = ${clientId} AND receipt_object_path IS NOT NULL))::int AS ledger
   `);
   const ledger = Number((result.rows[0] as { ledger?: number } | undefined)?.ledger ?? 0);
   const { listTenantAttachmentObjectPaths } = await import("./attachmentReferences");
-  return ledger + (await listTenantAttachmentObjectPaths(executor, clientId)).length;
+  const { listRetainedRiddorReceiptPaths } = await import("./riddorReceipts");
+  const retained = new Set(await listRetainedRiddorReceiptPaths(executor, clientId));
+  return ledger + (await listTenantAttachmentObjectPaths(executor, clientId)).filter((path) => !retained.has(path)).length;
 }
 
 /**
@@ -799,6 +964,10 @@ export interface DataDeletionDependencies {
  * any error rolls that client back untouched (no data_deleted_at), and the run
  * then fails — alerting via ADMIN_EMAIL, the job monitor and Sentry — so the
  * client is retried the next day.
+ *
+ * Every attempt that passes the guard leaves one append-only row in
+ * client_data_deletion_outcomes: "completed" in the deletion transaction
+ * itself, or "failed" (with any files already removed) after the rollback.
  */
 export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): Promise<{ clientsDeleted: number }> {
   const eraseStorage = deps.eraseStorage ?? refuseStoredFiles;
@@ -815,21 +984,21 @@ export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): P
       (c.data_deletion_scheduled_at IS NOT NULL AND c.data_deletion_scheduled_at <= now()) AS retention_due,
       EXISTS (
         SELECT 1 FROM client_data_deletion_requests r
-        WHERE r.client_id = c.id AND r.status = 'approved'
-          AND r.earliest_deletion_at <= now()
+        WHERE r.client_id = c.id AND ${APPROVED_ERASURE_REQUEST_READY}
       ) AS request_due
     FROM clients c
     WHERE c.data_deleted_at IS NULL
       AND ((c.data_deletion_scheduled_at IS NOT NULL AND c.data_deletion_scheduled_at <= now())
         OR EXISTS (
           SELECT 1 FROM client_data_deletion_requests r
-          WHERE r.client_id = c.id AND r.status = 'approved'
-            AND r.earliest_deletion_at <= now()
+          WHERE r.client_id = c.id AND ${APPROVED_ERASURE_REQUEST_READY}
         ))
       ${scope}
   `);
 
   for (const client of due.rows as Array<{ id: number; name: string; stripe_customer_id: string | null; retention_due: boolean; request_due: boolean }>) {
+    // Set once the guard passes; `as` keeps TypeScript from narrowing it to null.
+    let attempt = null as DeletionAttempt | null;
     try {
       // A retention-only deletion is never run against a paying customer: if
       // they resubscribed, the clock is cleared instead. A Stripe error leaves
@@ -841,27 +1010,39 @@ export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): P
           continue;
         }
       }
-      // Submission and direct client deletion use the same per-client lock.
-      // Recheck both the 30-day window and legal holds after acquiring it,
-      // then hold the lock until the deletion and completion marker finish.
+      // Submission, review and direct client deletion use the same per-client
+      // lock. Recheck approval, the 30-day wait and legal holds after
+      // acquiring it, then hold it until the deletion and outcome commit.
       const deleted = await db.transaction(async tx => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(106, ${client.id})`);
         const guard = await tx.execute(sql`
-          SELECT c.id FROM clients c WHERE c.id = ${client.id}
+          SELECT c.id, clock_timestamp() AS started_at,
+            (SELECT r.id FROM client_data_deletion_requests r
+              WHERE r.client_id = c.id AND ${APPROVED_ERASURE_REQUEST_READY}
+              ORDER BY r.id LIMIT 1) AS request_id,
+            (SELECT r.reviewed_by FROM client_data_deletion_requests r
+              WHERE r.client_id = c.id AND ${APPROVED_ERASURE_REQUEST_READY}
+              ORDER BY r.id LIMIT 1) AS reviewed_by
+          FROM clients c WHERE c.id = ${client.id}
             AND c.data_deleted_at IS NULL
             AND ((c.data_deletion_scheduled_at IS NOT NULL AND c.data_deletion_scheduled_at <= now())
               OR EXISTS (SELECT 1 FROM client_data_deletion_requests r
-                WHERE r.client_id = c.id AND r.status = 'approved'
-                  AND r.earliest_deletion_at <= now()))
+                WHERE r.client_id = c.id AND ${APPROVED_ERASURE_REQUEST_READY}))
             AND NOT EXISTS (SELECT 1 FROM client_data_deletion_requests r
-              WHERE r.client_id = c.id
-                AND (r.status = 'pending' OR (r.status = 'approved' AND r.earliest_deletion_at > now())))
+              WHERE r.client_id = c.id AND ${ERASURE_REQUEST_BLOCKING})
             AND NOT EXISTS (SELECT 1 FROM privacy_retention_schedules h
               WHERE h.client_id = c.id AND h.active = true
                 AND (h.legal_hold_active = true OR h.deletion_exception = true))
         `);
-        if (guard.rows.length === 0) return false;
-        logger.info({ clientId: client.id }, "Starting data deletion for client");
+        const ready = guard.rows[0] as { started_at: string | Date; request_id: number | null; reviewed_by: number | null } | undefined;
+        if (!ready) return false;
+        attempt = {
+          startedAt: new Date(ready.started_at),
+          requestId: ready.request_id === null ? null : Number(ready.request_id),
+          reviewedBy: ready.reviewed_by === null ? null : Number(ready.reviewed_by),
+          reason: ready.request_id === null ? "retention_schedule" : "approved_request",
+        };
+        logger.info({ clientId: client.id, reason: attempt.reason }, "Starting data deletion for client");
         // Files first: their references are read from rows deleted below.
         const storage = await eraseStorage(client.id, tx);
         const rows = await deleteAllClientData(client.id, tx);
@@ -873,7 +1054,13 @@ export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): P
           UPDATE client_data_deletion_requests SET status = 'completed'
           WHERE client_id = ${client.id} AND status = 'approved'
         `);
-        logger.info({ clientId: client.id, rowsDeleted: rows.rowsDeleted, objectsDeleted: storage.objectsDeleted }, "Client data deletion committed");
+        await recordDeletionOutcome(tx, client.id, attempt, {
+          outcome: "completed",
+          rowsDeleted: rows.rowsDeleted,
+          objectsDeleted: storage.objectsDeleted,
+          objectsSkipped: storage.objectsSkipped ?? 0,
+        });
+        logger.info({ clientId: client.id, rowsDeleted: rows.rowsDeleted, objectsDeleted: storage.objectsDeleted, objectsSkipped: storage.objectsSkipped ?? 0 }, "Client data deletion committed");
         return true;
       });
       if (!deleted) {
@@ -887,18 +1074,30 @@ export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): P
       const adminEmail = process.env.ADMIN_EMAIL?.trim();
       if (adminEmail) {
         const safeCompany = escapeHtml(client.name);
+        const basis = attempt?.reason === "approved_request"
+          ? "following its reviewed and approved account deletion request"
+          : `as scheduled under the ${RETENTION_MONTHS}-month data retention policy`;
         await sendEmail({
           to: adminEmail,
           subject: `ComplyTrack: data deleted for ${client.name} (id ${client.id})`,
-          html: `<p>All compliance records and stored files for <strong>${safeCompany}</strong> (client id ${client.id}) have been permanently deleted as scheduled under the ${RETENTION_MONTHS}-month data retention policy.</p>`,
-          text: `All compliance records and stored files for ${client.name} (client id ${client.id}) have been permanently deleted as scheduled under the ${RETENTION_MONTHS}-month data retention policy.`,
+          html: `<p>All compliance records and stored files for <strong>${safeCompany}</strong> (client id ${client.id}) have been permanently deleted ${basis}.</p>`,
+          text: `All compliance records and stored files for ${client.name} (client id ${client.id}) have been permanently deleted ${basis}.`,
         }).catch((err) => logger.error({ err }, "Deletion confirmation email failed"));
       } else {
         logger.error({ clientId: client.id }, "ADMIN_EMAIL not configured — data-deletion confirmation email was not sent");
       }
     } catch (err) {
       failed.push({ id: client.id, name: client.name });
-      logger.error({ err, clientId: client.id }, "Data deletion failed for client — nothing was deleted; will retry tomorrow");
+      logger.error({ err, clientId: client.id }, "Data deletion failed for client — records were rolled back; will retry tomorrow");
+      if (attempt) {
+        await recordDeletionOutcome(db, client.id, attempt, {
+          outcome: "failed",
+          rowsDeleted: 0,
+          objectsDeleted: err instanceof ClientStorageErasureError ? err.objectsDeleted : 0,
+          objectsSkipped: 0,
+          error: err instanceof Error ? err.message : String(err),
+        }).catch((recordErr) => logger.error({ err: recordErr, clientId: client.id }, "Could not record the failed deletion outcome"));
+      }
     }
   }
 
@@ -909,13 +1108,37 @@ export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): P
       await sendEmail({
         to: adminEmail,
         subject: `ComplyTrack: scheduled data deletion failed for ${failed.length} client${failed.length === 1 ? "" : "s"}`,
-        html: `<p>Scheduled data deletion failed and was rolled back for:</p><ul>${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul><p>Nothing was deleted for these clients. The job retries daily; check the logs for the cause.</p>`,
-        text: `Scheduled data deletion failed and was rolled back for:\n${list.map((item) => `- ${item}`).join("\n")}\n\nNothing was deleted for these clients. The job retries daily; check the logs for the cause.`,
+        html: `<p>Scheduled data deletion failed and was rolled back for:</p><ul>${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul><p>No records were deleted for these clients; stored files removed before the failure are listed in client_data_deletion_outcomes. The job retries daily; check the logs for the cause.</p>`,
+        text: `Scheduled data deletion failed and was rolled back for:\n${list.map((item) => `- ${item}`).join("\n")}\n\nNo records were deleted for these clients; stored files removed before the failure are listed in client_data_deletion_outcomes. The job retries daily; check the logs for the cause.`,
       }).catch((err) => logger.error({ err }, "Deletion failure alert email failed"));
     }
     throw new Error(`Data deletion failed for ${failed.length} client(s): ${failed.map((c) => c.id).join(", ")}`);
   }
   return { clientsDeleted };
+}
+
+type DeletionAttempt = {
+  startedAt: Date;
+  requestId: number | null;
+  reviewedBy: number | null;
+  reason: "approved_request" | "retention_schedule";
+};
+
+/** Appends the durable outcome of one deletion attempt (the table is insert-only). */
+async function recordDeletionOutcome(
+  executor: TxExecutor,
+  clientId: number,
+  attempt: DeletionAttempt,
+  result: { outcome: "completed" | "failed"; rowsDeleted: number; objectsDeleted: number; objectsSkipped: number; error?: string },
+): Promise<void> {
+  await executor.execute(sql`
+    INSERT INTO client_data_deletion_outcomes
+      (client_id, request_id, reason, approved_by, outcome, started_at, finished_at,
+       rows_deleted, objects_deleted, objects_skipped, error)
+    VALUES (${clientId}, ${attempt.requestId}, ${attempt.reason}, ${attempt.reviewedBy}, ${result.outcome},
+      ${attempt.startedAt}, clock_timestamp(), ${result.rowsDeleted}, ${result.objectsDeleted}, ${result.objectsSkipped},
+      ${result.error ? result.error.slice(0, 1000) : null})
+  `);
 }
 
 // ── deleteAllClientData ────────────────────────────────────────────────────────
@@ -928,13 +1151,14 @@ export async function runDataDeletionJob(deps: DataDeletionDependencies = {}): P
  * - incident_riddor_events: append-only RIDDOR decision/submission history
  *   (RIDDOR reg. 12 requires records for at least 3 years). The incidents it
  *   references are kept with it (RESTRICT foreign key); every other incident
- *   is deleted.
- * - client_data_deletion_requests: the record that this erasure was requested,
- *   reviewed and completed.
+ *   is deleted. HSE receipt files bound to its events are kept too.
+ * - client_data_deletion_requests, client_data_deletion_outcomes: the record
+ *   that this erasure was requested, reviewed and carried out (append-only).
  * - users: anonymised in place below (audit rows reference them).
  */
 export const RETAINED_CLIENT_TABLES: ReadonlySet<string> = new Set([
-  "audit_log", "audit_events", "incident_riddor_events", "client_data_deletion_requests", "users",
+  "audit_log", "audit_events", "incident_riddor_events", "client_data_deletion_requests",
+  "client_data_deletion_outcomes", "users",
 ]);
 
 async function listClientScopedTables(tx: TxExecutor): Promise<string[]> {

@@ -7,7 +7,7 @@ import { apiFetch } from "@/lib/api";
 import { trackModuleActivation } from "@/lib/analytics";
 import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, KeyRound } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
-import { CHECKOUT_ADDONS, checkoutPerSiteTotal } from "@/lib/addon-catalog";
+import { CHECKOUT_ADDONS, SELECTED_MODULE_CARD, SELECTED_MODULE_CHECKBOX, checkoutPerSiteTotal } from "@/lib/addon-catalog";
 
 const ADDONS = CHECKOUT_ADDONS;
 
@@ -221,11 +221,11 @@ export default function TrialEndedPage() {
                   onClick={() => !bundle && toggleAddon(addon.key)}
                   className={`flex items-center gap-3 p-3 border-2 cursor-pointer transition-all ${
                     bundle ? "opacity-60 cursor-default border-border" :
-                    active ? `${addon.activeBorder} ${addon.activeBg}` : "border-border hover:border-primary/40"
+                    active ? SELECTED_MODULE_CARD : "border-border hover:border-primary/40"
                   }`}
                 >
                   <div className={`w-5 h-5 border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                    active ? `border-current bg-current ${addon.iconColor}` : "border-border bg-white"
+                    active ? SELECTED_MODULE_CHECKBOX : "border-border bg-white"
                   }`}>
                     {active && <CheckCircle2 className="w-3 h-3 text-white" />}
                   </div>
@@ -306,7 +306,11 @@ export default function TrialEndedPage() {
           )}
           {(user?.role === "client_admin" || user?.role === "consultant") && (
             <p className="text-center text-sm text-muted-foreground">
-              If your subscription was cancelled, you can{" "}
+              Your records are kept for 12 months after access ends.{" "}
+              <Link href="/settings#data-export" className="underline underline-offset-2" data-testid="link-locked-data-export">
+                Download all your data
+              </Link>{" "}
+              (records, documents and photos) at any time, or{" "}
               <Link href="/settings" className="underline underline-offset-2">request data deletion</Link>.
               {user.role === "consultant" && <> You can also <Link href="/clients" className="underline underline-offset-2">view pending requests</Link>.</>}
             </p>

@@ -4,13 +4,14 @@ import { dailyChecklistsTable, dailyManagerSignoffsTable, sitesTable } from "@wo
 import { eq, and, or, isNull, inArray, gte, lte } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { getEntitledServices } from "../lib/services";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { dailyTrackRequirements } from "../lib/dailyChecklistEntitlements";
 
 const router = Router();
 
 function allowedSites(clientId: number, deptId: number) {
   return db.select({ id: sitesTable.id }).from(sitesTable).where(
-    and(eq(sitesTable.clientId, clientId), or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)))
+    and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(deptId))
   );
 }
 

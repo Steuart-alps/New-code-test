@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusBadge, PriorityBadge, LiabilityBadge, DbsReviewBadge } from "@/components/badges";
 import { ExpiryBadge } from "@/components/badges";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { CalendarCancellationHistory } from "@/components/calendar-cancellation-history";
 import { useAuth } from "@/context/auth-context";
 import { format } from "date-fns";
 import {
@@ -124,6 +125,7 @@ export default function ContractorDetailPage() {
   const qc = useQueryClient();
   const { activeClientId, user } = useAuth();
   const canResend = user?.role === "consultant" || user?.role === "client_admin";
+  const canManageContractorEmails = canResend || user?.isMaintenanceManager === true || user?.role === "client_manager";
   const clientApiFetch = useActiveClientApi();
 
   const [, navigate] = useLocation();
@@ -431,6 +433,8 @@ export default function ContractorDetailPage() {
               )}
             </div>
           </Card>
+
+          {canManageContractorEmails && <CalendarCancellationHistory contractorId={id} />}
 
           {/* Compliance checks */}
           <Card className="shadow-lg border-border/50 overflow-hidden">
