@@ -135,6 +135,7 @@ const freshSchema = new Set([
   "test:cancellation-warnings:fresh",
   "test:train-track-roster-identity",
   "test:registers", // allergen, COSHH and asbestos registers on the private cluster
+  "test:coshh-track", // COSHHTrack assessments and checks on the private cluster
   "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
   "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster

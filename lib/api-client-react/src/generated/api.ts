@@ -30,6 +30,12 @@ import type {
   CertificateDefect,
   ComplianceItem,
   Contractor,
+  CoshhAssessment,
+  CoshhAssessmentInput,
+  CoshhCheck,
+  CoshhCheckInput,
+  CoshhDocumentUrl,
+  CoshhTrackStatus,
   CreateCategoryRequest,
   CreateCertificateDefectRequest,
   CreateCertificateRequest,
@@ -65,6 +71,7 @@ import type {
   FoodSafetyMonthlySummary,
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
+  GetCoshhTrackStatusParams,
   GetFireSafetyConfigParams,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
@@ -93,6 +100,8 @@ import type {
   LegionellaStatus,
   ListAuditLogParams,
   ListComplianceItemsParams,
+  ListCoshhAssessmentsParams,
+  ListCoshhChecksParams,
   ListFeedbackReportHistoryParams,
   ListFeedbackReportsParams,
   ListFireCallPointsParams,
@@ -9504,4 +9513,838 @@ export const useDeleteLegionellaCheck = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getDeleteLegionellaCheckMutationOptions(options));
     }
+
+export const getGetCoshhTrackStatusUrl = (params?: GetCoshhTrackStatusParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/coshh-track/status?${stringifiedParams}` : `/api/coshh-track/status`
+}
+
+/**
+ * @summary COSHHTrack assessment reviews and checks that are due, overdue or not yet recorded
+ */
+export const getCoshhTrackStatus = async (params?: GetCoshhTrackStatusParams, options?: RequestInit): Promise<CoshhTrackStatus> => {
+
+  return customFetch<CoshhTrackStatus>(getGetCoshhTrackStatusUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCoshhTrackStatusQueryKey = (params?: GetCoshhTrackStatusParams,) => {
+    return [
+    `/api/coshh-track/status`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetCoshhTrackStatusQueryOptions = <TData = Awaited<ReturnType<typeof getCoshhTrackStatus>>, TError = ErrorType<unknown>>(params?: GetCoshhTrackStatusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCoshhTrackStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCoshhTrackStatusQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCoshhTrackStatus>>> = ({ signal }) => getCoshhTrackStatus(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCoshhTrackStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCoshhTrackStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getCoshhTrackStatus>>>
+export type GetCoshhTrackStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary COSHHTrack assessment reviews and checks that are due, overdue or not yet recorded
+ */
+
+export function useGetCoshhTrackStatus<TData = Awaited<ReturnType<typeof getCoshhTrackStatus>>, TError = ErrorType<unknown>>(
+ params?: GetCoshhTrackStatusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCoshhTrackStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCoshhTrackStatusQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListCoshhAssessmentsUrl = (params?: ListCoshhAssessmentsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/coshh-track/assessments?${stringifiedParams}` : `/api/coshh-track/assessments`
+}
+
+/**
+ * @summary List COSHH assessments
+ */
+export const listCoshhAssessments = async (params?: ListCoshhAssessmentsParams, options?: RequestInit): Promise<CoshhAssessment[]> => {
+
+  return customFetch<CoshhAssessment[]>(getListCoshhAssessmentsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCoshhAssessmentsQueryKey = (params?: ListCoshhAssessmentsParams,) => {
+    return [
+    `/api/coshh-track/assessments`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCoshhAssessmentsQueryOptions = <TData = Awaited<ReturnType<typeof listCoshhAssessments>>, TError = ErrorType<unknown>>(params?: ListCoshhAssessmentsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCoshhAssessments>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCoshhAssessmentsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCoshhAssessments>>> = ({ signal }) => listCoshhAssessments(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCoshhAssessments>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCoshhAssessmentsQueryResult = NonNullable<Awaited<ReturnType<typeof listCoshhAssessments>>>
+export type ListCoshhAssessmentsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List COSHH assessments
+ */
+
+export function useListCoshhAssessments<TData = Awaited<ReturnType<typeof listCoshhAssessments>>, TError = ErrorType<unknown>>(
+ params?: ListCoshhAssessmentsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCoshhAssessments>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCoshhAssessmentsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateCoshhAssessmentUrl = () => {
+
+
+
+
+  return `/api/coshh-track/assessments`
+}
+
+/**
+ * @summary Record a COSHH assessment (owners, consultants and managers)
+ */
+export const createCoshhAssessment = async (coshhAssessmentInput: CoshhAssessmentInput, options?: RequestInit): Promise<CoshhAssessment> => {
+
+  return customFetch<CoshhAssessment>(getCreateCoshhAssessmentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(coshhAssessmentInput)
+  }
+);}
+
+
+
+
+
+export const getCreateCoshhAssessmentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCoshhAssessment>>, TError,{data: BodyType<CoshhAssessmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCoshhAssessment>>, TError,{data: BodyType<CoshhAssessmentInput>}, TContext> => {
+
+const mutationKey = ['createCoshhAssessment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCoshhAssessment>>, {data: BodyType<CoshhAssessmentInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createCoshhAssessment(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCoshhAssessmentMutationResult = NonNullable<Awaited<ReturnType<typeof createCoshhAssessment>>>
+    export type CreateCoshhAssessmentMutationBody = BodyType<CoshhAssessmentInput>
+    export type CreateCoshhAssessmentMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Record a COSHH assessment (owners, consultants and managers)
+ */
+export const useCreateCoshhAssessment = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCoshhAssessment>>, TError,{data: BodyType<CoshhAssessmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createCoshhAssessment>>,
+        TError,
+        {data: BodyType<CoshhAssessmentInput>},
+        TContext
+      > => {
+      return useMutation(getCreateCoshhAssessmentMutationOptions(options));
+    }
+
+export const getUpdateCoshhAssessmentUrl = (id: number,) => {
+
+
+
+
+  return `/api/coshh-track/assessments/${id}`
+}
+
+/**
+ * @summary Update a COSHH assessment (owners, consultants and managers)
+ */
+export const updateCoshhAssessment = async (id: number,
+    coshhAssessmentInput: CoshhAssessmentInput, options?: RequestInit): Promise<CoshhAssessment> => {
+
+  return customFetch<CoshhAssessment>(getUpdateCoshhAssessmentUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(coshhAssessmentInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateCoshhAssessmentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCoshhAssessment>>, TError,{id: number;data: BodyType<CoshhAssessmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCoshhAssessment>>, TError,{id: number;data: BodyType<CoshhAssessmentInput>}, TContext> => {
+
+const mutationKey = ['updateCoshhAssessment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCoshhAssessment>>, {id: number;data: BodyType<CoshhAssessmentInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateCoshhAssessment(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCoshhAssessmentMutationResult = NonNullable<Awaited<ReturnType<typeof updateCoshhAssessment>>>
+    export type UpdateCoshhAssessmentMutationBody = BodyType<CoshhAssessmentInput>
+    export type UpdateCoshhAssessmentMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update a COSHH assessment (owners, consultants and managers)
+ */
+export const useUpdateCoshhAssessment = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCoshhAssessment>>, TError,{id: number;data: BodyType<CoshhAssessmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCoshhAssessment>>,
+        TError,
+        {id: number;data: BodyType<CoshhAssessmentInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateCoshhAssessmentMutationOptions(options));
+    }
+
+export const getDeleteCoshhAssessmentUrl = (id: number,) => {
+
+
+
+
+  return `/api/coshh-track/assessments/${id}`
+}
+
+/**
+ * @summary Remove a COSHH assessment (kept in the audit trail and export)
+ */
+export const deleteCoshhAssessment = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteCoshhAssessmentUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteCoshhAssessmentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCoshhAssessment>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteCoshhAssessment>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteCoshhAssessment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCoshhAssessment>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteCoshhAssessment(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteCoshhAssessmentMutationResult = NonNullable<Awaited<ReturnType<typeof deleteCoshhAssessment>>>
+
+    export type DeleteCoshhAssessmentMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove a COSHH assessment (kept in the audit trail and export)
+ */
+export const useDeleteCoshhAssessment = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCoshhAssessment>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteCoshhAssessment>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteCoshhAssessmentMutationOptions(options));
+    }
+
+export const getGetCoshhAssessmentDocumentUrlUrl = (id: number,) => {
+
+
+
+
+  return `/api/coshh-track/assessments/${id}/document-url`
+}
+
+/**
+ * @summary Short-lived download link for an assessment's attached document
+ */
+export const getCoshhAssessmentDocumentUrl = async (id: number, options?: RequestInit): Promise<CoshhDocumentUrl> => {
+
+  return customFetch<CoshhDocumentUrl>(getGetCoshhAssessmentDocumentUrlUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCoshhAssessmentDocumentUrlQueryKey = (id: number,) => {
+    return [
+    `/api/coshh-track/assessments/${id}/document-url`
+    ] as const;
+    }
+
+
+export const getGetCoshhAssessmentDocumentUrlQueryOptions = <TData = Awaited<ReturnType<typeof getCoshhAssessmentDocumentUrl>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCoshhAssessmentDocumentUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCoshhAssessmentDocumentUrlQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCoshhAssessmentDocumentUrl>>> = ({ signal }) => getCoshhAssessmentDocumentUrl(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCoshhAssessmentDocumentUrl>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCoshhAssessmentDocumentUrlQueryResult = NonNullable<Awaited<ReturnType<typeof getCoshhAssessmentDocumentUrl>>>
+export type GetCoshhAssessmentDocumentUrlQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Short-lived download link for an assessment's attached document
+ */
+
+export function useGetCoshhAssessmentDocumentUrl<TData = Awaited<ReturnType<typeof getCoshhAssessmentDocumentUrl>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCoshhAssessmentDocumentUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCoshhAssessmentDocumentUrlQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListCoshhChecksUrl = (params?: ListCoshhChecksParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/coshh-track/checks?${stringifiedParams}` : `/api/coshh-track/checks`
+}
+
+/**
+ * @summary List LEV examinations, health checks, exposure monitoring and staff briefings
+ */
+export const listCoshhChecks = async (params?: ListCoshhChecksParams, options?: RequestInit): Promise<CoshhCheck[]> => {
+
+  return customFetch<CoshhCheck[]>(getListCoshhChecksUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCoshhChecksQueryKey = (params?: ListCoshhChecksParams,) => {
+    return [
+    `/api/coshh-track/checks`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCoshhChecksQueryOptions = <TData = Awaited<ReturnType<typeof listCoshhChecks>>, TError = ErrorType<unknown>>(params?: ListCoshhChecksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCoshhChecks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCoshhChecksQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCoshhChecks>>> = ({ signal }) => listCoshhChecks(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCoshhChecks>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCoshhChecksQueryResult = NonNullable<Awaited<ReturnType<typeof listCoshhChecks>>>
+export type ListCoshhChecksQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List LEV examinations, health checks, exposure monitoring and staff briefings
+ */
+
+export function useListCoshhChecks<TData = Awaited<ReturnType<typeof listCoshhChecks>>, TError = ErrorType<unknown>>(
+ params?: ListCoshhChecksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCoshhChecks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCoshhChecksQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateCoshhCheckUrl = () => {
+
+
+
+
+  return `/api/coshh-track/checks`
+}
+
+/**
+ * @summary Record a COSHH check
+ */
+export const createCoshhCheck = async (coshhCheckInput: CoshhCheckInput, options?: RequestInit): Promise<CoshhCheck> => {
+
+  return customFetch<CoshhCheck>(getCreateCoshhCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(coshhCheckInput)
+  }
+);}
+
+
+
+
+
+export const getCreateCoshhCheckMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCoshhCheck>>, TError,{data: BodyType<CoshhCheckInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCoshhCheck>>, TError,{data: BodyType<CoshhCheckInput>}, TContext> => {
+
+const mutationKey = ['createCoshhCheck'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCoshhCheck>>, {data: BodyType<CoshhCheckInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createCoshhCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCoshhCheckMutationResult = NonNullable<Awaited<ReturnType<typeof createCoshhCheck>>>
+    export type CreateCoshhCheckMutationBody = BodyType<CoshhCheckInput>
+    export type CreateCoshhCheckMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Record a COSHH check
+ */
+export const useCreateCoshhCheck = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCoshhCheck>>, TError,{data: BodyType<CoshhCheckInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createCoshhCheck>>,
+        TError,
+        {data: BodyType<CoshhCheckInput>},
+        TContext
+      > => {
+      return useMutation(getCreateCoshhCheckMutationOptions(options));
+    }
+
+export const getUpdateCoshhCheckUrl = (id: number,) => {
+
+
+
+
+  return `/api/coshh-track/checks/${id}`
+}
+
+/**
+ * @summary Update a COSHH check
+ */
+export const updateCoshhCheck = async (id: number,
+    coshhCheckInput: CoshhCheckInput, options?: RequestInit): Promise<CoshhCheck> => {
+
+  return customFetch<CoshhCheck>(getUpdateCoshhCheckUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(coshhCheckInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateCoshhCheckMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCoshhCheck>>, TError,{id: number;data: BodyType<CoshhCheckInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCoshhCheck>>, TError,{id: number;data: BodyType<CoshhCheckInput>}, TContext> => {
+
+const mutationKey = ['updateCoshhCheck'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCoshhCheck>>, {id: number;data: BodyType<CoshhCheckInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateCoshhCheck(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCoshhCheckMutationResult = NonNullable<Awaited<ReturnType<typeof updateCoshhCheck>>>
+    export type UpdateCoshhCheckMutationBody = BodyType<CoshhCheckInput>
+    export type UpdateCoshhCheckMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update a COSHH check
+ */
+export const useUpdateCoshhCheck = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCoshhCheck>>, TError,{id: number;data: BodyType<CoshhCheckInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCoshhCheck>>,
+        TError,
+        {id: number;data: BodyType<CoshhCheckInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateCoshhCheckMutationOptions(options));
+    }
+
+export const getDeleteCoshhCheckUrl = (id: number,) => {
+
+
+
+
+  return `/api/coshh-track/checks/${id}`
+}
+
+/**
+ * @summary Remove a COSHH check (kept in the audit trail and export)
+ */
+export const deleteCoshhCheck = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteCoshhCheckUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteCoshhCheckMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCoshhCheck>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteCoshhCheck>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteCoshhCheck'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCoshhCheck>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteCoshhCheck(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteCoshhCheckMutationResult = NonNullable<Awaited<ReturnType<typeof deleteCoshhCheck>>>
+
+    export type DeleteCoshhCheckMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Remove a COSHH check (kept in the audit trail and export)
+ */
+export const useDeleteCoshhCheck = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCoshhCheck>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteCoshhCheck>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteCoshhCheckMutationOptions(options));
+    }
+
+export const getGetCoshhCheckReportUrlUrl = (id: number,) => {
+
+
+
+
+  return `/api/coshh-track/checks/${id}/report-url`
+}
+
+/**
+ * @summary Short-lived download link for a check's attached report
+ */
+export const getCoshhCheckReportUrl = async (id: number, options?: RequestInit): Promise<CoshhDocumentUrl> => {
+
+  return customFetch<CoshhDocumentUrl>(getGetCoshhCheckReportUrlUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCoshhCheckReportUrlQueryKey = (id: number,) => {
+    return [
+    `/api/coshh-track/checks/${id}/report-url`
+    ] as const;
+    }
+
+
+export const getGetCoshhCheckReportUrlQueryOptions = <TData = Awaited<ReturnType<typeof getCoshhCheckReportUrl>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCoshhCheckReportUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCoshhCheckReportUrlQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCoshhCheckReportUrl>>> = ({ signal }) => getCoshhCheckReportUrl(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCoshhCheckReportUrl>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCoshhCheckReportUrlQueryResult = NonNullable<Awaited<ReturnType<typeof getCoshhCheckReportUrl>>>
+export type GetCoshhCheckReportUrlQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Short-lived download link for a check's attached report
+ */
+
+export function useGetCoshhCheckReportUrl<TData = Awaited<ReturnType<typeof getCoshhCheckReportUrl>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCoshhCheckReportUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCoshhCheckReportUrlQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 

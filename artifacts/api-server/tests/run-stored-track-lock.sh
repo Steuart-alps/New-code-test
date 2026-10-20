@@ -23,7 +23,7 @@ missing_schema="$(psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -At <<'SQL'
 WITH expected(table_name, column_name) AS (VALUES
  ('food_safety_records','record_date'),('fire_safety_checks','check_date'),
  ('legionella_checks','check_date'),('hot_tub_checks','check_date'),
- ('tree_inspections','check_date'),('pool_checks','check_date'),
+ ('tree_inspections','check_date'),('pool_checks','check_date'),('coshh_checks','check_date'),
  ('daily_checklists','check_date'),('daily_manager_signoffs','signoff_date'),
  ('incidents','incident_date'),('premises_inspections','inspection_date'),
  ('room_track_checks','check_date'),('staff_training_records','issued_at'),

@@ -4058,3 +4058,422 @@ export const DeleteLegionellaCheckParams = zod.object({
 export const DeleteLegionellaCheckResponse = zod.void()
 
 
+/**
+ * @summary COSHHTrack assessment reviews and checks that are due, overdue or not yet recorded
+ */
+export const GetCoshhTrackStatusQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetCoshhTrackStatusResponse = zod.object({
+  "today": zod.string(),
+  "dueSoonDays": zod.number(),
+  "overdue": zod.number(),
+  "dueSoon": zod.number(),
+  "missing": zod.number(),
+  "items": zod.array(zod.object({
+  "kind": zod.enum(['assessment_review', 'lev_examination', 'health_surveillance', 'exposure_monitoring', 'staff_briefing']),
+  "recordId": zod.number(),
+  "assessmentId": zod.number().nullable(),
+  "label": zod.string(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "dueDate": zod.string().nullable(),
+  "daysUntilDue": zod.number().nullable().describe('Negative = overdue by that many days; null for items not recorded yet.'),
+  "status": zod.enum(['overdue', 'due_soon', 'ok', 'missing'])
+}))
+})
+
+
+/**
+ * @summary List COSHH assessments
+ */
+export const ListCoshhAssessmentsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListCoshhAssessmentsResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "healthSurveillanceRequired": zod.boolean(),
+  "monitoringRequired": zod.boolean(),
+  "levRequired": zod.boolean(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish(),
+  "status": zod.string(),
+  "documentObjectPath": zod.string().nullish(),
+  "documentFileName": zod.string().nullish(),
+  "documentFileSize": zod.number().nullish(),
+  "documentMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.string().nullish(),
+  "draftedAt": zod.string().nullish(),
+  "checkedBy": zod.number().nullish(),
+  "checkedByName": zod.string().nullish(),
+  "checkedAt": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish(),
+  "reviewOverdue": zod.boolean()
+})
+export const ListCoshhAssessmentsResponse = zod.array(ListCoshhAssessmentsResponseItem)
+
+
+/**
+ * @summary Record a COSHH assessment (owners, consultants and managers)
+ */
+export const CreateCoshhAssessmentBody = zod.object({
+  "siteId": zod.number(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.enum(['inhalation', 'skin', 'eyes', 'ingestion', 'injection'])).optional(),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.union([zod.literal('danger'),zod.literal('warning'),zod.literal('none'),zod.literal(null)]).nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.enum(['gloves', 'eye_protection', 'face_shield', 'respirator', 'apron_overalls', 'footwear'])).optional(),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']),
+  "healthSurveillanceRequired": zod.boolean().optional(),
+  "monitoringRequired": zod.boolean().optional(),
+  "levRequired": zod.boolean().optional(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish().describe('Omitted on create = 12 months after the assessment date.'),
+  "status": zod.enum(['current', 'archived']).optional(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.union([zod.literal('ai'),zod.literal(null)]).nullish().describe('Set to ai when the form was pre-filled from a safety data sheet.'),
+  "draftedAt": zod.date().nullish(),
+  "checkedAgainstSds": zod.boolean().optional().describe('Required (true) to save an AI draft; the saver is recorded as having checked it.'),
+  "objectPath": zod.string().nullish().describe('A fresh upload from POST \/registers\/uploads\/request-url, null to detach, omitted to keep.'),
+  "fileName": zod.string().nullish()
+})
+
+export const CreateCoshhAssessmentResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "healthSurveillanceRequired": zod.boolean(),
+  "monitoringRequired": zod.boolean(),
+  "levRequired": zod.boolean(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish(),
+  "status": zod.string(),
+  "documentObjectPath": zod.string().nullish(),
+  "documentFileName": zod.string().nullish(),
+  "documentFileSize": zod.number().nullish(),
+  "documentMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.string().nullish(),
+  "draftedAt": zod.string().nullish(),
+  "checkedBy": zod.number().nullish(),
+  "checkedByName": zod.string().nullish(),
+  "checkedAt": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish(),
+  "reviewOverdue": zod.boolean()
+})
+
+
+/**
+ * @summary Update a COSHH assessment (owners, consultants and managers)
+ */
+export const UpdateCoshhAssessmentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateCoshhAssessmentBody = zod.object({
+  "siteId": zod.number(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.enum(['inhalation', 'skin', 'eyes', 'ingestion', 'injection'])).optional(),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.union([zod.literal('danger'),zod.literal('warning'),zod.literal('none'),zod.literal(null)]).nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.enum(['gloves', 'eye_protection', 'face_shield', 'respirator', 'apron_overalls', 'footwear'])).optional(),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.enum(['low', 'medium', 'high']),
+  "healthSurveillanceRequired": zod.boolean().optional(),
+  "monitoringRequired": zod.boolean().optional(),
+  "levRequired": zod.boolean().optional(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish().describe('Omitted on create = 12 months after the assessment date.'),
+  "status": zod.enum(['current', 'archived']).optional(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.union([zod.literal('ai'),zod.literal(null)]).nullish().describe('Set to ai when the form was pre-filled from a safety data sheet.'),
+  "draftedAt": zod.date().nullish(),
+  "checkedAgainstSds": zod.boolean().optional().describe('Required (true) to save an AI draft; the saver is recorded as having checked it.'),
+  "objectPath": zod.string().nullish().describe('A fresh upload from POST \/registers\/uploads\/request-url, null to detach, omitted to keep.'),
+  "fileName": zod.string().nullish()
+})
+
+export const UpdateCoshhAssessmentResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "substanceId": zod.number().nullish(),
+  "task": zod.string(),
+  "whoAtRisk": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "howOften": zod.string().nullish(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureLimits": zod.string().nullish(),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "healthSurveillanceRequired": zod.boolean(),
+  "monitoringRequired": zod.boolean(),
+  "levRequired": zod.boolean(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish(),
+  "assessor": zod.string().nullish(),
+  "assessmentDate": zod.string(),
+  "reviewDue": zod.string().nullish(),
+  "status": zod.string(),
+  "documentObjectPath": zod.string().nullish(),
+  "documentFileName": zod.string().nullish(),
+  "documentFileSize": zod.number().nullish(),
+  "documentMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "draftSource": zod.string().nullish(),
+  "draftedAt": zod.string().nullish(),
+  "checkedBy": zod.number().nullish(),
+  "checkedByName": zod.string().nullish(),
+  "checkedAt": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish(),
+  "reviewOverdue": zod.boolean()
+})
+
+
+/**
+ * @summary Remove a COSHH assessment (kept in the audit trail and export)
+ */
+export const DeleteCoshhAssessmentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteCoshhAssessmentResponse = zod.void()
+
+
+/**
+ * @summary Short-lived download link for an assessment's attached document
+ */
+export const GetCoshhAssessmentDocumentUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetCoshhAssessmentDocumentUrlResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string().nullish()
+})
+
+
+/**
+ * @summary List LEV examinations, health checks, exposure monitoring and staff briefings
+ */
+export const ListCoshhChecksQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "checkType": zod.enum(['lev_examination', 'health_surveillance', 'exposure_monitoring', 'staff_briefing']).optional(),
+  "assessmentId": zod.coerce.number().optional()
+})
+
+export const ListCoshhChecksResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.string(),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish(),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.string(),
+  "actionRequired": zod.string().nullish(),
+  "nextDueDate": zod.string().nullish(),
+  "reportObjectPath": zod.string().nullish(),
+  "reportFileName": zod.string().nullish(),
+  "reportFileSize": zod.number().nullish(),
+  "reportMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish()
+})
+export const ListCoshhChecksResponse = zod.array(ListCoshhChecksResponseItem)
+
+
+/**
+ * @summary Record a COSHH check
+ */
+export const CreateCoshhCheckBody = zod.object({
+  "siteId": zod.number(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.enum(['lev_examination', 'health_surveillance', 'exposure_monitoring', 'staff_briefing']),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish().describe('The extraction system, the person checked or briefed, or the area monitored.'),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.enum(['pass', 'fail']).optional(),
+  "actionRequired": zod.string().nullish().describe('Required when the result is fail.'),
+  "nextDueDate": zod.string().nullish().describe('Omitted on create = the suggested interval (LEV 14 months, others 12).'),
+  "notes": zod.string().nullish(),
+  "objectPath": zod.string().nullish(),
+  "fileName": zod.string().nullish()
+})
+
+export const CreateCoshhCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.string(),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish(),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.string(),
+  "actionRequired": zod.string().nullish(),
+  "nextDueDate": zod.string().nullish(),
+  "reportObjectPath": zod.string().nullish(),
+  "reportFileName": zod.string().nullish(),
+  "reportFileSize": zod.number().nullish(),
+  "reportMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Update a COSHH check
+ */
+export const UpdateCoshhCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateCoshhCheckBody = zod.object({
+  "siteId": zod.number(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.enum(['lev_examination', 'health_surveillance', 'exposure_monitoring', 'staff_briefing']),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish().describe('The extraction system, the person checked or briefed, or the area monitored.'),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.enum(['pass', 'fail']).optional(),
+  "actionRequired": zod.string().nullish().describe('Required when the result is fail.'),
+  "nextDueDate": zod.string().nullish().describe('Omitted on create = the suggested interval (LEV 14 months, others 12).'),
+  "notes": zod.string().nullish(),
+  "objectPath": zod.string().nullish(),
+  "fileName": zod.string().nullish()
+})
+
+export const UpdateCoshhCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "assessmentId": zod.number().nullish(),
+  "checkType": zod.string(),
+  "checkDate": zod.string(),
+  "subject": zod.string().nullish(),
+  "carriedOutBy": zod.string().nullish(),
+  "result": zod.string(),
+  "actionRequired": zod.string().nullish(),
+  "nextDueDate": zod.string().nullish(),
+  "reportObjectPath": zod.string().nullish(),
+  "reportFileName": zod.string().nullish(),
+  "reportFileSize": zod.number().nullish(),
+  "reportMimeType": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional(),
+  "deletedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Remove a COSHH check (kept in the audit trail and export)
+ */
+export const DeleteCoshhCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteCoshhCheckResponse = zod.void()
+
+
+/**
+ * @summary Short-lived download link for a check's attached report
+ */
+export const GetCoshhCheckReportUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetCoshhCheckReportUrlResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string().nullish()
+})
+
+

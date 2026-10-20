@@ -150,6 +150,7 @@
     "test:compliance-audit-history": "bash tests/run-compliance-audit-history.sh",
     "test:compliance-content": "bash tests/run-compliance-content.sh",
     "test:registers": "bash tests/run-fresh-schema.sh tests/registers.mjs",
+    "test:coshh-track": "bash tests/run-fresh-schema.sh tests/coshh-track.mjs",
 
     "test:csv-imports-portfolio": "bash tests/run-csv-imports-portfolio.sh",
     "test:trial-lock-allowlist": "node tests/trial-lock-allowlist.mjs",

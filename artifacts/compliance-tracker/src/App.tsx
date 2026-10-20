@@ -47,6 +47,7 @@ const DocTrackPage = lazy(() => import("@/pages/doc-track"));
 const TrainTrackPage = lazy(() => import("@/pages/train-track"));
 const HotTubPage = lazy(() => import("@/pages/hot-tub"));
 const TreeTrackPage = lazy(() => import("@/pages/tree-track"));
+const CoshhTrackPage = lazy(() => import("@/pages/coshh-track"));
 const BikeTrackPage = lazy(() => import("@/pages/bike-track"));
 const AquaTrackPage = lazy(() => import("@/pages/aqua-track"));
 const GreenTrackPage = lazy(() => import("@/pages/green-track"));
@@ -123,6 +124,7 @@ function ProtectedRoutes() {
       ["/train-track", "traintrack"],
       ["/hot-tub", "hottubtrack"],
       ["/tree-track", "treetrack"],
+      ["/coshh-track", "coshhtrack"],
       ["/bike-track", "biketrack"],
       ["/aqua-track", "aquatrack"],
       ["/pool-track", "pooltrack"],
@@ -227,6 +229,7 @@ function ProtectedRoutes() {
       <Route path="/train-track" component={TrainTrackPage} />
       <Route path="/hot-tub" component={HotTubPage} />
       <Route path="/tree-track" component={TreeTrackPage} />
+      <Route path="/coshh-track" component={CoshhTrackPage} />
       <Route path="/bike-track" component={BikeTrackPage} />
       <Route path="/aqua-track"  component={AquaTrackPage} />
       {/* Legacy URLs redirect to the combined AquaTrack page */}

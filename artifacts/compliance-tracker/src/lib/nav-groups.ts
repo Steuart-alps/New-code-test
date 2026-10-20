@@ -30,6 +30,7 @@ import {
   Inbox,
   Wheat,
   FlaskConical,
+  Beaker,
   ShieldAlert,
   LayoutGrid,
   CalendarDays
@@ -71,6 +72,7 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
         { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
         { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
         { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
+        { href: "/coshh-track",    label: "COSHHTrack",      icon: Beaker,          serviceKey: "coshhtrack" },
         { href: "/coshh",          label: "COSHH Register",  icon: FlaskConical },
         { href: "/asbestos",       label: "Asbestos Register", icon: ShieldAlert },
       ],

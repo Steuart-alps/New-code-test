@@ -12,7 +12,7 @@ import { logger } from "./logger";
 import { linkedTaskCompletions } from "./trackTaskLink";
 
 export interface CheckAlert {
-  module: "fire" | "legionella" | "pool" | "hot_tub";
+  module: "fire" | "legionella" | "pool" | "hot_tub" | "coshh";
   moduleLabel: string;
   modulePath: string;
   checkType: string;

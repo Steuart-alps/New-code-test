@@ -2,8 +2,8 @@
  * Daily check-reminder email job.
  *
  * Runs at 08:45. For each active client that has unsafe, overdue or due-soon safety
- * checks (fire, legionella, pool), sends one digest email to all active users
- * of that client. Uses check_reminder_log to ensure only one email per client
+ * checks (fire, legionella, pool, spa) or COSHHTrack reviews and checks, sends
+ * one digest email to the client's notification recipients. Uses check_reminder_log to ensure only one email per client
  * per day.
  */
 
@@ -14,6 +14,8 @@ import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl, escapeHtml } from "./email";
 import { getAccountToday } from "./accountClock";
 import { getCheckAlerts, type CheckAlert } from "./checkReminders";
+import { getCoshhDueItems } from "./coshhTrack";
+import { getEntitledServices, isEntitled } from "./services";
 import { getNotificationEmails } from "./getNotificationEmails";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
 
@@ -39,6 +41,8 @@ export function buildCheckReminderEmailHtml(alerts: CheckAlert[], appUrl: string
       : "";
     const last = a.lastDate
       ? `Last: ${new Date(`${a.lastDate}T00:00:00Z`).toLocaleDateString("en-GB")}`
+      : a.module === "coshh" && a.dueDate
+      ? `Due: ${new Date(`${a.dueDate}T00:00:00Z`).toLocaleDateString("en-GB")}`
       : "Never completed";
     return `
       <tr>
@@ -108,6 +112,28 @@ export interface CheckReminderJobResult {
   errors: number;
 }
 
+/** COSHHTrack items in the digest's shape, for businesses that have the track. */
+export async function coshhCheckAlerts(clientId: number, todayIso: string): Promise<CheckAlert[]> {
+  try {
+    if (!isEntitled(await getEntitledServices(clientId), "coshhtrack")) return [];
+    const items = await getCoshhDueItems(clientId, {}, todayIso);
+    return items
+      .filter((item) => item.status === "overdue" || item.status === "due_soon")
+      .map((item) => ({
+        module: "coshh" as const, moduleLabel: "COSHHTrack", modulePath: "/coshh-track",
+        checkType: item.kind,
+        checkLabel: item.siteName ? `${item.siteName}: ${item.label}` : item.label,
+        status: item.status as "overdue" | "due_soon",
+        lastDate: null, dueDate: item.dueDate, daysUntilDue: item.daysUntilDue,
+        frequencyLabel: item.kind === "assessment_review" ? "Assessment review" : "COSHH check",
+        siteId: item.siteId, siteName: item.siteName,
+      }));
+  } catch (err) {
+    logger.warn({ err, clientId }, "Unable to evaluate COSHHTrack reminders");
+    return [];
+  }
+}
+
 export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult> {
   const result: CheckReminderJobResult = { clientsChecked: 0, clientsEmailed: 0, emailsSent: 0, errors: 0 };
 
@@ -136,7 +162,7 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
       // Get actionable results and due checks — skip "never". Fire, water,
       // pool and spa checks are evaluated per site, so each site's own gaps
       // are reported (labelled with the site name).
-      const alerts = await getCheckAlerts(client.id);
+      const alerts = [...await getCheckAlerts(client.id), ...await coshhCheckAlerts(client.id, todayIso)];
       const actionable = alerts.filter(a => a.status === "action_required" || a.status === "overdue" || a.status === "due_soon");
       if (actionable.length === 0) continue;
 

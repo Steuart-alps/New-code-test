@@ -12,8 +12,7 @@
  * caller can see: client_staff/client_viewer are limited to sites in their
  * department or with no department, as on GET /sites. Deletes are soft
  * (deleted_at) so nothing is lost. Uploaded documents use the verified
- * finalisation flow (pinned generation, content signature check, immutable
- * copy, tenant ACL) also used for contractor certificates and photos.
+ * finalisation flow in lib/registerDocuments.ts.
  */
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
@@ -32,15 +31,15 @@ import type { PgColumn } from "drizzle-orm/pg-core";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { requireService } from "../lib/services";
+import { type AllowedUploadType } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import {
-  ObjectStorageService,
-  ObjectNotFoundError,
-  ObjectOwnershipError,
-  ObjectContentError,
-  ObjectGenerationError,
-  type AllowedUploadType,
-} from "../lib/objectStorage";
-import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+  ALLOWED_DOCUMENT_TYPES,
+  documentFields,
+  documentStorage as storage,
+  resolveDocument,
+  sendDownloadUrl,
+} from "../lib/registerDocuments";
 
 const router = Router();
 
@@ -59,8 +58,6 @@ export const ALLERGEN_KEYS = [
 export const GHS_PICTOGRAM_KEYS = [
   "ghs01", "ghs02", "ghs03", "ghs04", "ghs05", "ghs06", "ghs07", "ghs08", "ghs09",
 ] as const;
-
-const ALLOWED_DOCUMENT_TYPES: ReadonlySet<AllowedUploadType> = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -130,50 +127,6 @@ function siteFilter(req: Request, column: PgColumn): SQL | undefined | "invalid"
   return siteId === null ? "invalid" : eq(column, siteId);
 }
 
-const storage = new ObjectStorageService();
-
-/**
- * Turns a just-uploaded staging object into an immutable, content-checked,
- * tenant-owned file. Sends the error response and returns null on failure.
- */
-async function finalizeDocument(req: Request, res: Response, objectPath: string, clientId: number) {
-  try {
-    return await storage.finalizeVerifiedTenantUpload(objectPath, clientId, ALLOWED_DOCUMENT_TYPES);
-  } catch (err) {
-    // Rejected objects never received a tenant ACL; remove them best-effort.
-    await storage.discardTenantUpload(objectPath, clientId).catch(() => {});
-    if (!(err instanceof ObjectNotFoundError || err instanceof ObjectOwnershipError
-      || err instanceof ObjectContentError || err instanceof ObjectGenerationError)) {
-      req.log.error({ err }, "Could not finalise register document upload");
-    }
-    const error = err instanceof ObjectNotFoundError ? "Uploaded file not found"
-      : err instanceof ObjectContentError ? "The file must be a PDF, JPEG or PNG"
-      : err instanceof ObjectGenerationError ? err.message
-      : err instanceof ObjectOwnershipError ? err.message : "Could not secure the uploaded file";
-    res.status(err instanceof ObjectNotFoundError ? 404
-      : err instanceof ObjectContentError ? 400
-      : err instanceof ObjectGenerationError ? 409 : 403).json({ error });
-    return null;
-  }
-}
-
-async function sendDownloadUrl(req: Request, res: Response, objectPath: string | null, fileName: string | null, clientId: number, recordId: number) {
-  if (!objectPath) return res.status(404).json({ error: "No file attached" });
-  try {
-    const downloadUrl = await storage.getSignedDownloadURL(objectPath, 900, ALLOWED_DOCUMENT_TYPES, clientId);
-    return res.json({ downloadUrl, fileName });
-  } catch (err) {
-    if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "File not found" });
-    if (err instanceof ObjectOwnershipError) return res.status(403).json({ error: "File is not available for this account" });
-    if (err instanceof ObjectContentError) return res.status(409).json({ error: "File failed its content check" });
-    return respondObjectStorageDownloadUnavailable(req, res, err, "register document download", { recordId, clientId });
-  }
-}
-
-const documentFields = {
-  objectPath: z.string().min(1).max(2000).nullish(),
-  fileName: OPTIONAL_TEXT(500),
-};
 
 // Presigned upload for a safety data sheet or survey report.
 router.post("/uploads/request-url", requireAuth, denyViewers, async (req, res) => {
@@ -191,36 +144,6 @@ router.post("/uploads/request-url", requireAuth, denyViewers, async (req, res) =
     return respondObjectStorageUnavailable(req, res, err, "register document upload");
   }
 });
-
-/**
- * Resolves the document fields for a create/update. An unchanged path keeps
- * the stored file; null detaches it (the stored object is kept); a new path
- * must be a fresh upload for this client and is verified and finalised.
- */
-async function resolveDocument(
-  req: Request, res: Response, clientId: number,
-  input: { objectPath?: string | null; fileName?: string | null },
-  existing: { objectPath: string | null; fileName: string | null; fileSize: number | null; mimeType: string | null } | null,
-): Promise<{ objectPath: string | null; fileName: string | null; fileSize: number | null; mimeType: string | null } | "kept" | null> {
-  if (input.objectPath === undefined) return existing ? "kept" : { objectPath: null, fileName: null, fileSize: null, mimeType: null };
-  if (input.objectPath === null) return { objectPath: null, fileName: null, fileSize: null, mimeType: null };
-  if (existing && input.objectPath === existing.objectPath) return "kept";
-  const finalized = await finalizeDocument(req, res, input.objectPath, clientId);
-  if (!finalized) return null;
-  let size = NaN;
-  try {
-    const [metadata] = await (await storage.getObjectEntityFile(finalized.objectPath)).getMetadata();
-    size = Number(metadata.size);
-  } catch {
-    // The size is display-only; the file itself is already secured.
-  }
-  return {
-    objectPath: finalized.objectPath,
-    fileName: input.fileName ?? "document",
-    fileSize: Number.isSafeInteger(size) && size > 0 ? size : null,
-    mimeType: finalized.contentType,
-  };
-}
 
 // ── Allergen records (KitchenTrack) ───────────────────────────────────────────
 

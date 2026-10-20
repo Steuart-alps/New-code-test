@@ -1078,6 +1078,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "train", label: "TrainTrack" },
   { key: "hot_tub", label: "TubTrack" },
   { key: "tree", label: "TreeTrack" },
+  { key: "coshh", label: "COSHHTrack" },
   { key: "bike", label: "BikeTrack" },
   { key: "green", label: "GreenTrack" },
   { key: "swim", label: "AquaTrack (sessions & safety)" },

@@ -109,6 +109,7 @@ const moduleRoutes: Record<string, string> = {
   swim: "/swim-track",
   incident: "/incidents",
   room: "/room-track",
+  coshh: "/coshh-track",
 };
 
 const moduleLabels: Record<string, string> = {
@@ -132,6 +133,7 @@ const moduleLabels: Record<string, string> = {
   swim: "SwimTrack",
   incident: "IncidentTrack",
   room: "RoomTrack",
+  coshh: "COSHHTrack",
 };
 
 const moduleServices: Record<string, ServiceKey[]> = {
@@ -143,6 +145,7 @@ const moduleServices: Record<string, ServiceKey[]> = {
   safe: ["safetrack"], train: ["traintrack"], hot_tub: ["hottubtrack"],
   tree: ["treetrack"], bike: ["biketrack"], green: ["greentrack"],
   swim: ["aquatrack", "swimtrack"], incident: ["incidenttrack"], room: ["roomtrack"],
+  coshh: ["coshhtrack"],
 };
 
 // Applied only when an account has not explicitly set recipients for a track.
@@ -168,6 +171,7 @@ const defaultDepartments: Record<string, RegExp> = {
   swim: /leisure|pool/i,
   incident: /safety|operations/i,
   room: /housekeeping|maintenance/i,
+  coshh: /safety|housekeeping|cleaning|maintenance|facilit/i,
 };
 
 export function effectiveTrackRouting(

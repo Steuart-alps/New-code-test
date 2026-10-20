@@ -609,6 +609,7 @@ const OTHER_MODULES: Array<{ report: string; label: string; services: ServiceKey
   { report: "PATtrack", label: "PATtrack tests", services: ["pattrack"], action: "pat" },
   { report: "FixTrack", label: "FixTrack issues reported", services: ["fixtrack"], action: "fix" },
   { report: "TreeTrack", label: "TreeTrack inspections", services: ["treetrack"], action: "tree" },
+  { report: "COSHHTrack", label: "COSHHTrack checks", services: ["coshhtrack"], action: "coshh" },
 ];
 
 export async function buildInspectionPack(options: {
