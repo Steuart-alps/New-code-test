@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format, startOfWeek } from "date-fns";
 import { Calendar, CheckCircle2, Save, Plus, Trash2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { kitchenWeeklyAttentionAnswer, kitchenWeeklyNeedsAttention } from "@workspace/api-client-react";
 
 // ── Data shape ────────────────────────────────────────────────────────────────
 
@@ -62,10 +63,15 @@ const REVIEW_QUESTIONS: { key: string; label: string }[] = [
 
 // ── YNA toggle ────────────────────────────────────────────────────────────────
 
-function YNAToggle({ value, onChange, disabled, invertColors }: { value: Answer; onChange: (v: Answer) => void; disabled?: boolean; invertColors?: boolean }) {
+const ANSWER_GOOD = "bg-emerald-100 text-emerald-800 border-emerald-300";
+const ANSWER_ATTENTION = "bg-rose-100 text-rose-800 border-rose-300";
+const ANSWER_NEUTRAL = "bg-slate-100 text-slate-700 border-slate-300";
+
+/** invertColors: "Yes" is the answer that needs attention. neutral: neither answer does. */
+function YNAToggle({ value, onChange, disabled, invertColors, neutral }: { value: Answer; onChange: (v: Answer) => void; disabled?: boolean; invertColors?: boolean; neutral?: boolean }) {
   const opts: { v: Answer; label: string; cls: string }[] = [
-    { v: "yes", label: "Yes", cls: invertColors ? "bg-rose-100 text-rose-800 border-rose-300"    : "bg-emerald-100 text-emerald-800 border-emerald-300" },
-    { v: "no",  label: "No",  cls: invertColors ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-rose-100 text-rose-800 border-rose-300" },
+    { v: "yes", label: "Yes", cls: neutral ? ANSWER_NEUTRAL : invertColors ? ANSWER_ATTENTION : ANSWER_GOOD },
+    { v: "no",  label: "No",  cls: neutral ? ANSWER_NEUTRAL : invertColors ? ANSWER_GOOD : ANSWER_ATTENTION },
     { v: "na",  label: "N/A", cls: "bg-slate-100 text-slate-700 border-slate-300" },
   ];
   return (
@@ -103,7 +109,11 @@ function CheckRow({ q, value, onChange, disabled }: {
         <p className="text-sm font-medium">{q.label}</p>
         {q.sublabel && <p className="text-xs text-muted-foreground mt-0.5">{q.sublabel}</p>}
       </div>
-      <YNAToggle value={value} onChange={onChange} disabled={disabled} />
+      <YNAToggle
+        value={value} onChange={onChange} disabled={disabled}
+        invertColors={kitchenWeeklyAttentionAnswer(q.key) === "yes"}
+        neutral={kitchenWeeklyAttentionAnswer(q.key) === null}
+      />
     </div>
   );
 }
@@ -190,8 +200,8 @@ export default function WeeklyReviewTab() {
 
   const isSubmitted = !!record?.submitted_at;
 
-  // flag any "no" answers
-  const noAnswers = [...HOUSE_RULES, ...REVIEW_QUESTIONS].filter(q => checks[q.key] === "no");
+  // Flag the answers that fail the week (the same rule the API uses for the result).
+  const attentionAnswers = [...HOUSE_RULES, ...REVIEW_QUESTIONS].filter(q => kitchenWeeklyNeedsAttention(q.key, checks[q.key]));
 
   return (
     <div className="space-y-6">
@@ -263,7 +273,7 @@ export default function WeeklyReviewTab() {
                   key={q.key}
                   q={q}
                   value={checks[q.key] as Answer ?? ""}
-                  onChange={v => setChecks(prev => ({ ...prev, [q.key]: v }))}
+                  onChange={v => setChecks(prev => { const next = { ...prev, [q.key]: v }; if (!v) delete next[q.key]; return next; })}
                   disabled={isSubmitted}
                 />
               ))}
@@ -288,10 +298,10 @@ export default function WeeklyReviewTab() {
               </div>
             </CardHeader>
             <CardContent className="p-4 space-y-2">
-              {noAnswers.length > 0 && deviations.length === 0 && !isSubmitted && (
+              {attentionAnswers.length > 0 && deviations.length === 0 && !isSubmitted && (
                 <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2 mb-3">
                   <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                  <span>{noAnswers.map(q => q.label).join(", ")} answered "No" — please record the deviation and action taken below.</span>
+                  <span>{attentionAnswers.map(q => `${q.label} (${checks[q.key] === "yes" ? "Yes" : "No"})`).join(", ")}: these answers need attention. Please record the deviation and action taken below.</span>
                 </div>
               )}
               {deviations.length === 0 ? (
@@ -338,7 +348,7 @@ export default function WeeklyReviewTab() {
                   key={q.key}
                   q={q}
                   value={checks[q.key] as Answer ?? ""}
-                  onChange={v => setChecks(prev => ({ ...prev, [q.key]: v }))}
+                  onChange={v => setChecks(prev => { const next = { ...prev, [q.key]: v }; if (!v) delete next[q.key]; return next; })}
                   disabled={isSubmitted}
                 />
               ))}

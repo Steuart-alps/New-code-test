@@ -31,7 +31,7 @@ export default function TasksPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const isViewer = user?.role === "client_viewer";
-  const isManager = user?.role === "consultant" || user?.role === "client_admin" || (user?.role === "client_staff" && !!user.isDepartmentManager);
+  const isManager = user?.role === "consultant" || user?.role === "client_admin" || user?.role === "client_manager" || (user?.role === "client_staff" && !!user.isDepartmentManager);
   const [tab, setTab] = useState<"mine" | "all">(isManager || isViewer ? "all" : "mine");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -162,7 +162,7 @@ export default function TasksPage() {
             <h2 className="text-lg font-semibold">{draft.id ? "Edit task" : "New task"}</h2>
             <div className="space-y-1.5">
               <Label htmlFor="task-title">Task</Label>
-              <Input id="task-title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="e.g. Kitchen opening checklist" />
+              <Input id="task-title" dictation value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="e.g. Kitchen opening checklist" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="task-instruction">Instructions (optional)</Label>

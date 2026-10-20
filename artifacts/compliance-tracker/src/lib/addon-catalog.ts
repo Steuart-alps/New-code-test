@@ -13,10 +13,16 @@ export interface CheckoutAddon {
   desc: string;
   icon: LucideIcon;
   iconColor: string;
-  activeBorder: string;
-  activeBg: string;
   comingSoon?: boolean;
 }
+
+/**
+ * A picked module is always shown in green, whatever its own colour: a red or
+ * orange border on a chosen module reads as a fault.
+ */
+export const SELECTED_MODULE_CARD = "border-green-600 bg-green-50";
+export const SELECTED_MODULE_CHECKBOX = "border-green-600 bg-green-600";
+export const SELECTED_MODULE_TICK = "text-green-600";
 
 /** Per-site monthly prices in pounds; the bundle price is the per-site cap. */
 export const CORE_PRICE_GBP = 10;
@@ -36,8 +42,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Fire safety logbook",
     icon: Flame,
     iconColor: "text-orange-600",
-    activeBorder: "border-orange-400",
-    activeBg: "bg-orange-50/60",
   },
   {
     key: "kitchentrack",
@@ -45,8 +49,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Food safety diary",
     icon: UtensilsCrossed,
     iconColor: "text-amber-600",
-    activeBorder: "border-amber-400",
-    activeBg: "bg-amber-50/60",
   },
   {
     key: "legionellatrack",
@@ -54,8 +56,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Water safety logbook (L8/HSG274)",
     icon: Droplets,
     iconColor: "text-sky-600",
-    activeBorder: "border-sky-400",
-    activeBg: "bg-sky-50/60",
   },
   {
     key: "fixtrack",
@@ -63,8 +63,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Maintenance issue reporting",
     icon: Wrench,
     iconColor: "text-orange-700",
-    activeBorder: "border-orange-500",
-    activeBg: "bg-orange-50/60",
   },
   {
     key: "premisestrack",
@@ -72,8 +70,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Premises safety logbook",
     icon: Building2,
     iconColor: "text-violet-700",
-    activeBorder: "border-violet-500",
-    activeBg: "bg-violet-50/60",
   },
   {
     key: "safetrack",
@@ -81,8 +77,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Risk assessments, SOPs & staff handbook acknowledgements",
     icon: ShieldCheck,
     iconColor: "text-blue-700",
-    activeBorder: "border-blue-500",
-    activeBg: "bg-blue-50/60",
   },
   {
     key: "doctrack",
@@ -90,8 +84,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "H&S document library with staff sign-off & annual acknowledgements",
     icon: CheckCircle2,
     iconColor: "text-indigo-700",
-    activeBorder: "border-indigo-500",
-    activeBg: "bg-indigo-50/60",
   },
   {
     key: "traintrack",
@@ -99,8 +91,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Staff training & cert expiry",
     icon: BookOpen,
     iconColor: "text-emerald-700",
-    activeBorder: "border-emerald-500",
-    activeBg: "bg-emerald-50/60",
   },
   {
     key: "hottubtrack",
@@ -108,8 +98,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Hot tub & spa pool maintenance (HSG282)",
     icon: Waves,
     iconColor: "text-cyan-600",
-    activeBorder: "border-cyan-500",
-    activeBg: "bg-cyan-50/60",
   },
   {
     key: "treetrack",
@@ -117,8 +105,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Tree inspection logbook (BS 3998)",
     icon: TreePine,
     iconColor: "text-green-700",
-    activeBorder: "border-green-500",
-    activeBg: "bg-green-50/60",
   },
   {
     key: "incidenttrack",
@@ -126,8 +112,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Accident & incident log with RIDDOR reporting",
     icon: AlertOctagon,
     iconColor: "text-rose-700",
-    activeBorder: "border-rose-500",
-    activeBg: "bg-rose-50/60",
   },
   {
     key: "biketrack",
@@ -135,8 +119,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Bike hire service & maintenance records",
     icon: Bike,
     iconColor: "text-lime-700",
-    activeBorder: "border-lime-500",
-    activeBg: "bg-lime-50/60",
   },
   {
     key: "aquatrack",
@@ -144,18 +126,13 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Pool water quality, sessions, surveillance, first-aid & incidents",
     icon: Waves,
     iconColor: "text-blue-600",
-    activeBorder: "border-blue-400",
-    activeBg: "bg-blue-50/60",
   },
   {
     key: "greentrack",
     label: "GreenTrack",
     desc: "Grounds & landscaping maintenance records",
-    comingSoon: true,
     icon: Leaf,
     iconColor: "text-green-600",
-    activeBorder: "border-green-400",
-    activeBg: "bg-green-50/60",
   },
   {
     key: "pattrack",
@@ -163,8 +140,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Portable appliance testing records",
     icon: PlugZap,
     iconColor: "text-yellow-600",
-    activeBorder: "border-yellow-400",
-    activeBg: "bg-yellow-50/60",
   },
   {
     key: "pesttrack",
@@ -172,8 +147,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Pest control monitoring & treatment log",
     icon: Bug,
     iconColor: "text-stone-700",
-    activeBorder: "border-stone-500",
-    activeBg: "bg-stone-50/60",
   },
   {
     key: "dailytrack_am",
@@ -181,8 +154,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Opening checks & morning checklists",
     icon: Sunrise,
     iconColor: "text-amber-500",
-    activeBorder: "border-amber-400",
-    activeBg: "bg-amber-50/60",
   },
   {
     key: "dailytrack_pm",
@@ -190,8 +161,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Closing checks & evening checklists",
     icon: Sunset,
     iconColor: "text-orange-500",
-    activeBorder: "border-orange-400",
-    activeBg: "bg-orange-50/60",
   },
 ];
 

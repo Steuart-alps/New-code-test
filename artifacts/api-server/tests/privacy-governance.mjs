@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 let passed = 0;
@@ -443,6 +444,8 @@ async function main() {
   );
   expectStatus("legal hold evidence is recorded", holdEvidence, 201);
   check("verification evidence identifies the schedule", holdEvidence.data?.scheduleId === scheduleId);
+  // Deleting a business outright is a consultant action.
+  promoteToConsultant(managerB.email);
   expectStatus("manual account deletion is blocked by privacy hold", await managerB.session("DELETE", `/clients/${managerB.clientId}`), 409);
 
   const breach = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {

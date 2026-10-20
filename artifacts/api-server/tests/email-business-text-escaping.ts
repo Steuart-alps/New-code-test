@@ -314,7 +314,8 @@ console.log("Hostile text probe");
   for (const [label, html, baseline] of pairs) {
     check(`${label}: hostile text adds no elements or attributes`, () => {
       assert.deepEqual(structure(html), structure(baseline));
-      assert.ok(!/<img|<a href='javascript/i.test(html));
+      // The shared layout's own ALPS logo is an <img>; the hostile one is not.
+      assert.ok(!/<img src=x|<a href='javascript/i.test(html));
     });
   }
 }

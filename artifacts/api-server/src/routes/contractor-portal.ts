@@ -159,6 +159,7 @@ router.put("/:token", async (req, res) => {
         public_liability_expiry = ${data.insuranceExpiry ? new Date(data.insuranceExpiry) : null},
         dbs_type            = ${data.dbsType ?? null},
         dbs_expiry_date     = ${data.dbsType === "None" ? null : data.dbsExpiryDate ? new Date(data.dbsExpiryDate) : null},
+        dbs_issue_date      = CASE WHEN ${data.dbsType === "None"}::boolean THEN NULL ELSE dbs_issue_date END,
         gas_safe_number     = ${data.gasSafeNumber ?? null},
         updated_at          = now()
       WHERE id = ${row.contractor_id} AND client_id = ${row.client_id}

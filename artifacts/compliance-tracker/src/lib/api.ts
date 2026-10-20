@@ -1,4 +1,12 @@
-import { appendClientId, callerChoseClientId, setCsrfTokenProvider } from "@workspace/api-client-react";
+import {
+  appendClientId,
+  callerChoseClientId,
+  isReplayableBody,
+  OVERRIDE_REASON_HEADER,
+  overrideReasonMessage,
+  setCsrfTokenProvider,
+  type OverrideReasonHandler,
+} from "@workspace/api-client-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -100,6 +108,45 @@ export function setApiFetchPaymentRequiredHandler(handler: (() => void) | null):
   paymentRequiredHandler = handler;
 }
 
+let overrideReasonHandler: OverrideReasonHandler | null = null;
+
+/** Mirrors the generated client's setOverrideReasonHandler for hand-written fetches. */
+export function setApiFetchOverrideReasonHandler(handler: OverrideReasonHandler | null): void {
+  overrideReasonHandler = handler;
+}
+
+/**
+ * `fetch` for hand-written mutations of track records. When the API answers
+ * 423 OVERRIDE_REASON_REQUIRED (an owner changing a record older than its
+ * correction window), asks for a reason through the registered handler and
+ * resends the same request once with it. If the user cancels, or the request
+ * cannot be resent, the original 423 response is returned unchanged.
+ */
+export async function fetchWithOverrideReason(url: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetch(url, init);
+  const method = (init.method ?? "GET").toUpperCase();
+  if (
+    res.status !== 423 ||
+    !["POST", "PUT", "PATCH", "DELETE"].includes(method) ||
+    !overrideReasonHandler ||
+    !isReplayableBody(init.body)
+  ) {
+    return res;
+  }
+  const message = overrideReasonMessage(await res.clone().json().catch(() => null));
+  if (!message) return res;
+  let reason: string | null = null;
+  try {
+    reason = (await overrideReasonHandler({ method, url, message }))?.trim() || null;
+  } catch {
+    reason = null;
+  }
+  if (!reason) return res;
+  const headers = new Headers(init.headers);
+  headers.set(OVERRIDE_REASON_HEADER, encodeURIComponent(reason));
+  return fetch(url, { ...init, headers });
+}
+
 /**
  * Adds the selected business (`clientId`) to an API path or URL so reads and
  * writes go to the business the user is working in, not a consultant's home
@@ -139,7 +186,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
     const token = await getCsrfToken();
     if (token) headers.set("X-CSRF-Token", token);
   }
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithOverrideReason(`${API_BASE}${path}`, {
     ...init,
     credentials: "include",
     headers,

@@ -65,16 +65,22 @@ async function main() {
   check("manager registration succeeds", registered.status === 200);
   await manager("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`);
   const firstLogin = await manager("POST", "/auth/login", { email: managerEmail, password });
-  check("2FA is required by default", firstLogin.data?.requires2faSetup === true);
-  check("manager can enrol", await enrol(manager) !== null);
+  check("2FA is optional by default", firstLogin.status === 200 && !firstLogin.data?.requires2faSetup && firstLogin.data?.twoFactorRequired === false, JSON.stringify(firstLogin.data));
 
   const defaults = await manager("GET", "/settings");
   check("setting is unset by default", defaults.status === 200 && defaults.data?.requireTwoFactor === null);
   const me = await manager("GET", "/auth/me");
-  check("/auth/me reports 2FA as required by default", me.data?.twoFactorRequired === true);
+  check("/auth/me reports 2FA as optional by default", me.status === 200 && !me.data?.requires2faSetup && me.data?.twoFactorRequired === false);
+  check("a new business can use the app without 2FA", (await manager("GET", "/sites")).status === 200);
 
   const created = await manager("POST", "/users", { name: "Policy Staff", email: staffEmail, password, role: "client_staff", active: true, clientId: me.data?.user?.clientId });
   check("manager can create a staff account", created.status === 201, JSON.stringify(created.data));
+
+  // Turning the requirement on holds the manager's own session at setup too.
+  const required = await manager("PUT", "/settings", { requireTwoFactor: "true" });
+  check("manager can require 2FA", required.status === 200 && required.data?.requireTwoFactor === "true");
+  check("manager /auth/me asks for setup once required", (await manager("GET", "/auth/me")).data?.requires2faSetup === true);
+  check("manager can enrol", await enrol(manager) !== null);
 
   const staff = session();
   const staffLogin = await staff("POST", "/auth/login", { email: staffEmail, password });

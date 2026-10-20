@@ -13,6 +13,7 @@ import {
   useUpdatePrivacyRecord,
 } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
+import { PublicLinkAccessHistory } from "@/components/public-link-access-history";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -831,6 +832,7 @@ export default function PrivacyGovernancePage() {
             <TabsTrigger className={tabClass} value="retention">Retention & holds</TabsTrigger>
             <TabsTrigger className={tabClass} value="processors">Providers & transfers</TabsTrigger>
             <TabsTrigger className={tabClass} value="breaches">Breach assessments</TabsTrigger>
+            <TabsTrigger className={tabClass} value="link-access" data-testid="tab-privacy-link-access">Link access</TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile">
@@ -857,6 +859,10 @@ export default function PrivacyGovernancePage() {
 
           <TabsContent value="breaches">
             <RecordSection title="Personal-data breach assessments" description="Capture discovery time, risk decisions, containment and notification status. New incidents receive a 72-hour supervisory-notification tracking marker based on discovery time." kind="breach" items={data.breaches} saving={saving} verifications={data.retentionVerifications} editor={editor} onAdd={() => setEditor({ kind: "breach" })} onEdit={setEditor} onVerify={setVerificationSchedule} onSave={saveRecord} onCancel={() => setEditor(null)} />
+          </TabsContent>
+
+          <TabsContent value="link-access">
+            <PublicLinkAccessHistory />
           </TabsContent>
         </Tabs>
       </div>

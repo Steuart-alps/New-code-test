@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { db } from "@workspace/db";
 import { sql, type SQLWrapper } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendEmail, getPublicAppUrl } from "./email";
+import { sendEmail, getPublicAppUrl, renderEmailLayout } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 import { getNotificationEmails } from "./getNotificationEmails";
 
@@ -73,14 +73,12 @@ function buildEmailHtml(hires: OverdueHire[], appUrl: string): string {
           Due back ${fmtDate(h.expected_return)} · ${h.days_overdue} day${h.days_overdue === 1 ? "" : "s"} overdue${h.hirer_contact ? ` · Contact: ${esc(h.hirer_contact)}` : ""}
         </div>
       </td></tr>`).join("");
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;"><div style="font-size:22px;font-weight:700;color:#ffffff;">🛡️ ComplyTrack</div><div style="font-size:14px;color:#94a3b8;margin-top:6px;">BikeTrack — overdue hire${hires.length !== 1 ? "s" : ""}</div></div>
-    <div style="padding:32px 40px;"><p style="font-size:15px;color:#334155;margin:0 0 20px;">${hires.length} hired bike${hires.length !== 1 ? "s have" : " has"} not been returned by the expected time. Please contact the hirer${hires.length !== 1 ? "s" : ""} or record the return in BikeTrack.</p><table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;"><tbody>${rows}</tbody></table><div style="margin-top:28px;text-align:center;"><a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">Open ComplyTrack →</a></div></div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">ComplyTrack by ALPS Consultancy · Automatic BikeTrack notification.</div>
-  </div>
-</body></html>`;
+  return renderEmailLayout({
+    subtitle: `BikeTrack — overdue hire${hires.length !== 1 ? "s" : ""}`,
+    footerNote: `Automatic BikeTrack notification.`,
+    bodyHtml: `<p style="font-size:15px;color:#334155;margin:0 0 20px;">${hires.length} hired bike${hires.length !== 1 ? "s have" : " has"} not been returned by the expected time. Please contact the hirer${hires.length !== 1 ? "s" : ""} or record the return in BikeTrack.</p><table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;"><tbody>${rows}</tbody></table><div style="margin-top:28px;text-align:center;"><a href="${appUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">Open ComplyTrack →</a></div>
+`,
+  });
 }
 
 export interface BikeOverdueJobResult {

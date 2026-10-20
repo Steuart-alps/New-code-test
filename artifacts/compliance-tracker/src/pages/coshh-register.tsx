@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { differenceInCalendarDays, parseISO } from "date-fns";
-import { Download, FileText, FlaskConical, Info, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Download, FileText, FlaskConical, Info, Mic, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { AppLayout } from "@/components/layout";
+import { CoshhSpeakListDialog } from "@/components/coshh-speak-list-dialog";
+import { dictationSupported } from "@/components/dictation-button";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -106,6 +108,7 @@ export default function CoshhRegisterPage() {
   const [form, setForm] = useState<FormState | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Substance | null>(null);
+  const [listOpen, setListOpen] = useState(false);
 
   const { data: items = [], isLoading, error } = useRegisterList<Substance>(LIST_PATH);
   const visible = useMemo(() => items.filter((item) =>
@@ -177,6 +180,25 @@ export default function CoshhRegisterPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // Adds each product from a spoken or typed list; returns the ones that failed.
+  async function addList(siteId: number, productNames: string[]): Promise<string[]> {
+    const failed: string[] = [];
+    let firstError: string | undefined;
+    for (const productName of productNames) {
+      try {
+        await ensureOk(await api(LIST_PATH, { method: "POST", body: JSON.stringify({ siteId, productName }) }), "Could not add");
+      } catch (err) {
+        failed.push(productName);
+        firstError ??= err instanceof Error ? err.message : undefined;
+      }
+    }
+    await queryClient.invalidateQueries({ queryKey: [`/api${LIST_PATH}`] });
+    const added = productNames.length - failed.length;
+    if (added > 0) toast({ title: added === 1 ? "1 substance added" : `${added} substances added`, description: "Attach each safety data sheet and record the assessment." });
+    if (failed.length > 0) toast({ title: `${failed.length} could not be added`, description: firstError, variant: "destructive" });
+    return failed;
   }
 
   async function remove() {
@@ -291,6 +313,12 @@ export default function CoshhRegisterPage() {
               <Download className="w-3.5 h-3.5" /> Export CSV
             </Button>
             {canEdit && (
+              <Button variant="outline" size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={() => setListOpen(true)}>
+                {dictationSupported ? <Mic className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                {dictationSupported ? "Speak a list" : "Add a list"}
+              </Button>
+            )}
+            {canEdit && (
               <Button size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={openNew}>
                 <Plus className="w-3.5 h-3.5" /> Add substance
               </Button>
@@ -378,11 +406,11 @@ export default function CoshhRegisterPage() {
                 <SiteSelect value={form.siteId} onChange={(siteId) => setForm({ ...form, siteId })} />
                 <div className="space-y-1.5">
                   <Label htmlFor="coshh-product">Product name *</Label>
-                  <Input id="coshh-product" value={form.productName} maxLength={200} onChange={(e) => setForm({ ...form, productName: e.target.value })} />
+                  <Input id="coshh-product" dictation value={form.productName} maxLength={200} onChange={(e) => setForm({ ...form, productName: e.target.value })} />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="coshh-supplier">Supplier</Label>
-                  <Input id="coshh-supplier" value={form.supplier} maxLength={200} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
+                  <Input id="coshh-supplier" dictation value={form.supplier} maxLength={200} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="coshh-status">Status</Label>
@@ -452,6 +480,14 @@ export default function CoshhRegisterPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CoshhSpeakListDialog
+        open={listOpen}
+        defaultSiteId={siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : ""}
+        existing={items}
+        onClose={() => setListOpen(false)}
+        onAdd={addList}
+      />
 
       <ConfirmDelete
         open={deleteTarget !== null}

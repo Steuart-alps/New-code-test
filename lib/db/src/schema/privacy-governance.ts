@@ -108,6 +108,26 @@ export const clientDataDeletionRequestsTable = pgTable("client_data_deletion_req
   reviewNote: text("review_note"),
 });
 
+/**
+ * One append-only row per executed account deletion attempt (approved request
+ * or retention schedule): what was removed, or why it failed. Kept, with the
+ * request, when the client's other data is erased.
+ */
+export const clientDataDeletionOutcomesTable = pgTable("client_data_deletion_outcomes", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "restrict" }),
+  requestId: integer("request_id").references(() => clientDataDeletionRequestsTable.id, { onDelete: "restrict" }),
+  reason: text("reason").notNull(),
+  approvedBy: integer("approved_by"),
+  outcome: text("outcome").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }).notNull().defaultNow(),
+  rowsDeleted: integer("rows_deleted").notNull().default(0),
+  objectsDeleted: integer("objects_deleted").notNull().default(0),
+  objectsSkipped: integer("objects_skipped").notNull().default(0),
+  error: text("error"),
+});
+
 export const privacyRetentionSchedulesTable = pgTable("privacy_retention_schedules", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
@@ -205,6 +225,7 @@ export const insertPrivacyBreachSchema = createInsertSchema(privacyBreachesTable
 export type PrivacyProgram = typeof privacyProgramsTable.$inferSelect;
 export type PrivacyProcessingActivity = typeof privacyProcessingActivitiesTable.$inferSelect;
 export type PrivacyRightsRequest = typeof privacyRightsRequestsTable.$inferSelect;
+export type ClientDataDeletionOutcome = typeof clientDataDeletionOutcomesTable.$inferSelect;
 export type PrivacyRetentionSchedule = typeof privacyRetentionSchedulesTable.$inferSelect;
 export type PrivacyRetentionVerification = typeof privacyRetentionVerificationsTable.$inferSelect;
 export type PrivacyProcessor = typeof privacyProcessorsTable.$inferSelect;

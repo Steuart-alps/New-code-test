@@ -16,6 +16,7 @@ import { getEntitledServices, isEntitled } from "../lib/services";
 import { addCalendarDays, getAccountToday } from "../lib/accountClock";
 import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
 import { getPickedModules } from "./setup";
+import { siteVisibleSql, visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -104,18 +105,14 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   let accessibleSiteIds: number[] | null = null;
   try {
     if (departmentId != null) {
-      const accessibleRows = await db.execute(sql`
-        SELECT id FROM sites
-        WHERE client_id = ${clientId}
-          AND (department_id IS NULL OR department_id = ${departmentId})
-      `);
+      const accessibleRows = await db.execute(visibleSiteIdsSql(clientId, departmentId));
       accessibleSiteIds = rows(accessibleRows).map((site: any) => Number(site.id));
     }
     if (siteId != null) {
       const requestedSite = await db.execute(sql`
         SELECT id FROM sites
         WHERE id = ${siteId} AND client_id = ${clientId}
-          ${departmentId != null ? sql`AND (department_id IS NULL OR department_id = ${departmentId})` : sql``}
+          ${departmentId != null ? sql`AND ${siteVisibleSql(sql`id`, sql`department_id`, departmentId)}` : sql``}
         LIMIT 1
       `);
       if (rows(requestedSite).length === 0) {
@@ -303,10 +300,21 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             ${siteId ? sql`AND site_id = ${siteId}` : sql``}
         `);
         const submittedIds = new Set(rows(fsRows).map((r: any) => r.site_id));
-        const missing = allSites.filter((s) => !submittedIds.has(s.id));
+        // A site marked closed today (KitchenTrack closed days) is not missing.
+        const closedRows = await db.execute(sql`
+          SELECT site_id
+          FROM kitchen_closed_days
+          WHERE client_id = ${clientId}
+            AND closed_date = ${today}
+            AND site_id IS NOT NULL
+            AND removed_at IS NULL
+            ${siteId ? sql`AND site_id = ${siteId}` : sql``}
+        `);
+        const closedIds = new Set(rows(closedRows).map((r: any) => r.site_id));
+        const missing = allSites.filter((s) => !submittedIds.has(s.id) && !closedIds.has(s.id));
         if (missing.length === 0) {
           status = "ok";
-          badge = "All submitted";
+          badge = closedIds.size > 0 && submittedIds.size === 0 ? "Closed today" : "All submitted";
         } else if (!(await loadStarted()).kitchen) {
           status = "no_data";
           badge = "Not started";

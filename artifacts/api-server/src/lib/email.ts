@@ -157,7 +157,7 @@ export async function sendEmail(opts: {
     to: toList,
     cc: ccList,
     subject: opts.subject,
-    html: opts.html,
+    html: applyEmailLayout(opts.html),
     text: opts.text,
     attachments,
   };
@@ -186,6 +186,61 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, "&#x27;");
 }
 
+/** Marks HTML that already carries the shared layout, so it is not wrapped twice. */
+const EMAIL_LAYOUT_MARKER = 'data-complytrack-email="1"';
+
+/** Brand colours shared by every email. */
+export const EMAIL_BRAND = {
+  header: "#0f172a",
+  button: "#2563eb",
+} as const;
+
+/** Call-to-action link styled as the shared blue button. `href` must be safe for an attribute. */
+export function emailButton(href: string, label: string): string {
+  return `<a href="${href}" style="display:inline-block;background:${EMAIL_BRAND.button};color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">${label}</a>`;
+}
+
+/**
+ * The one design every ComplyTrack email uses: dark header with the
+ * ComplyTrack name, a white card for the message, and a footer with the ALPS
+ * logo and legal name. `subtitle` and `footerNote` are HTML; callers escape
+ * any business text in them.
+ */
+export function renderEmailLayout(opts: { bodyHtml: string; subtitle?: string; footerNote?: string }): string {
+  const appUrl = getPublicAppUrl();
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+<body ${EMAIL_LAYOUT_MARKER} style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
+    <div style="background:${EMAIL_BRAND.header};padding:32px 40px;">
+      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
+      ${opts.subtitle ? `<div style="font-size:14px;color:#94a3b8;margin-top:6px;">${opts.subtitle}</div>` : ""}
+    </div>
+    <div style="padding:32px 40px;color:#334155;font-size:15px;line-height:1.5;">
+${opts.bodyHtml}
+    </div>
+    <div style="padding:24px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;">
+      <a href="${escapeHtml(appUrl)}" style="color:#94a3b8;text-decoration:none;"><img src="${escapeHtml(appUrl)}/email-assets/alps-logo.png" width="96" height="60" alt="ALPS Consultancy" style="display:block;margin:0 auto 12px;border:0;color:#94a3b8;font-size:12px;"/></a>
+      ComplyTrack by ALPS Consultancy${opts.footerNote ? ` · ${opts.footerNote}` : ""}<br/>
+      ALPS Consulting Ltd t/as ALPS Consultancy
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+/**
+ * Put an email body into the shared layout. Bodies built with
+ * renderEmailLayout pass through unchanged; a full HTML document keeps only
+ * what is inside its <body>.
+ */
+export function applyEmailLayout(html: string): string {
+  if (html.includes(EMAIL_LAYOUT_MARKER)) return html;
+  const body = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? html;
+  return renderEmailLayout({ bodyHtml: body });
+}
+
 /** Extract a bare email address from a value that may include a display name,
  *  e.g. "Name <email@example.com>" → "email@example.com". */
 function extractEmail(raw: string): string {
@@ -207,6 +262,7 @@ export async function sendSystemEmail(opts: {
   // provider without sending real mail. The same test-only transport can
   // simulate slow or failed delivery. This is deliberately restricted to test
   // mode and an explicitly configured capture file or behavior.
+  const html = applyEmailLayout(opts.html);
   const capturePath = process.env.TEST_EMAIL_CAPTURE_PATH;
   const testBehavior = process.env.TEST_EMAIL_BEHAVIOR;
   if (process.env.NODE_ENV === "test" && (capturePath || testBehavior)) {
@@ -229,7 +285,7 @@ export async function sendSystemEmail(opts: {
     await appendFile(capturePath, `${JSON.stringify({
       to: opts.to,
       subject: opts.subject,
-      html: opts.html,
+      html,
       text: opts.text,
       ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
     })}\n`);
@@ -244,7 +300,7 @@ export async function sendSystemEmail(opts: {
     from,
     to: opts.to,
     subject: opts.subject,
-    html: opts.html,
+    html,
     text: opts.text,
   }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
   if (result.error) {
@@ -473,7 +529,7 @@ export function buildReminderEmail(opts: {
       <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
         <p style="margin: 0 0 12px; color: #1e293b; font-weight: 600;">Pick a suitable visit date</p>
         <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Click below to choose the day that works best for you. Once you confirm, a calendar invite will be sent to everyone.</p>
-        <a href="${safeScheduleLink}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Propose a Visit Date</a>
+        <a href="${safeScheduleLink}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Propose a Visit Date</a>
       </div>
       ` : `
       <p>Please contact us to arrange your visit or inspection at your earliest convenience.</p>

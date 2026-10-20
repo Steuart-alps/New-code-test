@@ -11,7 +11,7 @@ import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendEmail, getPublicAppUrl } from "./email";
+import { sendEmail, getPublicAppUrl, renderEmailLayout } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 import { getNotificationEmails } from "./getNotificationEmails";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
@@ -83,17 +83,10 @@ function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
     )
     .join("");
 
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Document acknowledgements outstanding</div>
-    </div>
-    <div style="padding:32px 40px;">
+  return renderEmailLayout({
+    subtitle: `Document acknowledgements outstanding`,
+    footerNote: `You are receiving this as an account manager.`,
+    bodyHtml: `
       <p style="font-size:15px;color:#334155;margin:0 0 20px;">
         Some staff still haven't acknowledged required documents. Please chase the sign-offs below or record them in DocTrack.
       </p>
@@ -101,17 +94,12 @@ function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
         <tbody>${rows}</tbody>
       </table>
       <div style="margin-top:28px;text-align:center;">
-        <a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        <a href="${appUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
           Open ComplyTrack →
         </a>
       </div>
-    </div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consultancy · You are receiving this as an account manager.
-    </div>
-  </div>
-</body>
-</html>`;
+`,
+  });
 }
 
 export interface DocAckReminderJobResult {

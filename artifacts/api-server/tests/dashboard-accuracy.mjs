@@ -55,7 +55,8 @@ try {
   assert.equal(futureCheckDate({ method: 'POST', path: '/fix-track', body: { targetDate: '2099-01-01' } }), null,
     'future target dates elsewhere are untouched');
 
-  const owner = await createTenant('dashboard-accuracy');
+  // The owner deliberately records past-dated checks, which needs a reason.
+  const owner = await createTenant('dashboard-accuracy', { overrideReason: 'Dashboard fixture: past-dated check' });
   const c = owner.clientId;
   const siteA = ok(await owner.request('POST', '/sites', { name: 'Site A', seedStarterChecks: false }));
   const siteB = ok(await owner.request('POST', '/sites', { name: 'B & Co', seedStarterChecks: false }));
@@ -76,7 +77,7 @@ try {
   // ── C6: future check dates are rejected for every role ──────────────────────
   const tomorrow = londonDay(1);
   for (const path of ['/fire-safety', '/legionella', '/hot-tub', '/pool-track', '/tree-track']) {
-    const response = await owner.request('POST', path, { checkType: 'alarm', checkDate: tomorrow, result: 'pass', siteId: siteA.id });
+    const response = await owner.request('POST', path, { checkType: 'alarm', callPoint: 'CP1', checkDate: tomorrow, result: 'pass', siteId: siteA.id });
     assert.equal(response.status, 400, `${path}: ${JSON.stringify(response)}`);
     assert.equal(response.data?.code, 'CHECK_DATE_IN_FUTURE', path);
   }
@@ -84,8 +85,8 @@ try {
 
   // ── C1: fire status per site ────────────────────────────────────────────────
   const fire = (body) => owner.request('POST', '/fire-safety', { result: 'pass', ...body });
-  ok(await fire({ checkType: 'alarm', checkDate: londonDay(), siteId: siteA.id }));
-  ok(await fire({ checkType: 'alarm', checkDate: londonDay(-10), siteId: siteB.id }));
+  ok(await fire({ checkType: 'alarm', callPoint: 'CP1', checkDate: londonDay(), siteId: siteA.id }));
+  ok(await fire({ checkType: 'alarm', callPoint: 'CP1', checkDate: londonDay(-10), siteId: siteB.id }));
   const fireStatus = async (query = '') => Object.fromEntries(
     ok(await owner.request('GET', `/fire-safety/status${query}`)).map(row => [row.checkType, row]));
 

@@ -39,7 +39,7 @@ export function FeedbackDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       if (!response.ok) throw new Error(body.error ?? "Feedback could not be submitted");
       toast({
         title: "Thank you — your report was saved",
-        description: body.emailSent ? "The ComplyTrack support team has also been notified." : "Support can review it even though the email notification was delayed.",
+        description: body.emailSent ? "The ComplyTrack support team has also been notified." : "It is in your Feedback inbox, but we could not email the support team just now. You can also email info@alpsconsultancy.co.uk.",
       });
       onOpenChange(false);
     } catch (err) {
@@ -73,7 +73,7 @@ export function FeedbackDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           </div>
           <div className="space-y-2">
             <Label htmlFor="feedback-summary">Summary</Label>
-            <Input id="feedback-summary" value={summary} onChange={(event) => setSummary(event.target.value)} maxLength={160} placeholder="What would you like us to know?" />
+            <Input id="feedback-summary" dictation value={summary} onChange={(event) => setSummary(event.target.value)} maxLength={160} placeholder="What would you like us to know?" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="feedback-details">Details</Label>

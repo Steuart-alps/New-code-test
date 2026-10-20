@@ -24,11 +24,12 @@ import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendEmail, getPublicAppUrl, escapeHtml } from "./email";
+import { sendEmail, getPublicAppUrl, escapeHtml, renderEmailLayout } from "./email";
 import { getNotificationEmails } from "./getNotificationEmails";
 import { sendPushToUsers } from "./pushNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload } from "./bearerTokens";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
+import { PORTAL_REMINDER_LINK_DAYS } from "./contractorPortalDrafts";
 import { createHash } from "crypto";
 
 /** Insurance is flagged when it expires within this many days (or has expired). */
@@ -254,17 +255,10 @@ export function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUr
     )
     .join("");
 
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Contractor compliance expiring</div>
-    </div>
-    <div style="padding:32px 40px;">
+  return renderEmailLayout({
+    subtitle: `Contractor compliance expiring`,
+    footerNote: `You are receiving this as an account manager.`,
+    bodyHtml: `
       <p style="font-size:15px;color:#334155;margin:0 0 20px;">
          ${alerts.length} contractor compliance item${alerts.length !== 1 ? "s need" : " needs"} attention — an insurance policy, DBS/PVG check or certificate needs review. Please chase renewals or update the records in ComplyTrack.
       </p>
@@ -272,17 +266,12 @@ export function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUr
         <tbody>${rows}</tbody>
       </table>
       <div style="margin-top:28px;text-align:center;">
-        <a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        <a href="${appUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
           Open ComplyTrack →
         </a>
       </div>
-    </div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consultancy · You are receiving this as an account manager.
-    </div>
-  </div>
-</body>
-</html>`;
+`,
+  });
 }
 
 /** Contractor-facing email: includes their expiring items + a link to the self-service portal. */
@@ -306,7 +295,7 @@ export function buildContractorEmailHtml(
           Use your personalised link to update your insurance renewal date, DBS details, and upload
           certificate documents directly — no email needed.
         </p>
-        <a href="${esc(portalUrl)}" style="display:inline-block;background:#166534;color:#ffffff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;">
+        <a href="${esc(portalUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;">
           Update my details →
         </a>
         <p style="font-size:11px;color:#4ade80;margin:10px 0 0;">Link valid for 90 days · No account needed</p>
@@ -317,17 +306,10 @@ export function buildContractorEmailHtml(
         earliest convenience so they can update their records.
       </p>`;
 
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
-    <div style="background:#0f172a;padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Compliance renewal reminder</div>
-    </div>
-    <div style="padding:32px 40px;">
+  return renderEmailLayout({
+    subtitle: `Compliance renewal reminder`,
+    footerNote: `Sent on behalf of ${esc(clientName)}.`,
+    bodyHtml: `
       <p style="font-size:15px;color:#334155;margin:0 0 16px;">Dear ${esc(contractorName)},</p>
       <p style="font-size:15px;color:#334155;margin:0 0 16px;">
         Our records held by <strong>${esc(clientName)}</strong> show that the following item${alerts.length !== 1 ? "s are" : " is"} due for renewal soon:
@@ -337,13 +319,8 @@ export function buildContractorEmailHtml(
       <p style="font-size:14px;color:#64748b;margin:0;">
         If you have already renewed, you can update the date directly via your portal link above.
       </p>
-    </div>
-    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consultancy · Sent on behalf of ${esc(clientName)}.
-    </div>
-  </div>
-</body>
-</html>`;
+`,
+  });
 }
 
 /**
@@ -533,7 +510,7 @@ async function queuePortalReminders(clientId: number, clientName: string, now: D
           INSERT INTO contractor_portal_reminder_tokens
             (portal_token_id, issuance_hash, token_hash, expires_at)
           VALUES (${canonical.id},${canonical.token_hash},${digestBearerToken(token)},
-            ${new Date(now.getTime() + 90 * 86_400_000)})
+            ${new Date(now.getTime() + PORTAL_REMINDER_LINK_DAYS * 86_400_000)})
         `);
       } else {
         // A first scheduler issuance remains compatible with manager issuance.
@@ -542,7 +519,7 @@ async function queuePortalReminders(clientId: number, clientName: string, now: D
         await tx.execute(sql`
         INSERT INTO contractor_portal_tokens (client_id,contractor_id,token,token_hash,expires_at)
         VALUES (${clientId},${contractorId},NULL,${digestBearerToken(token)},
-          ${new Date(now.getTime() + 90 * 86_400_000)})
+          ${new Date(now.getTime() + PORTAL_REMINDER_LINK_DAYS * 86_400_000)})
       `);
       }
     });

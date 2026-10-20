@@ -208,6 +208,28 @@ const cases = {
     assert.equal(alive(serverPid), false);
   },
 
+  async "reports an intentional skip as SKIP, never as pass"() {
+    const t = setup({
+      ok: { stage: "static", class: "light", cmd: "true" },
+      optional: { stage: "static", class: "light", canSkip: true, cmd: "echo 'SKIP: not configured'; exit 78" },
+    });
+    let { code, output } = await run(["--all"], t.env).done;
+    assert.equal(code, 0, output);
+    assert.match(output, /SKIP \(not configured\)\s+optional/);
+    assert.match(output, /pass\s+ok/);
+    assert.doesNotMatch(output, /pass\s+optional/);
+    ({ code, output } = await run(["optional"], t.env).done);
+    assert.equal(code, 0, output);
+    assert.match(output, /optional SKIPPED/);
+  },
+
+  async "exit 78 fails a check that cannot skip"() {
+    const t = setup({ ok: { stage: "static", class: "light", cmd: "true" }, strict: { stage: "static", class: "light", cmd: "exit 78" } });
+    const { code, output } = await run(["--all"], t.env).done;
+    assert.equal(code, 1, output);
+    assert.match(output, /FAIL \(exit 78\)\s+strict/);
+  },
+
   async "rejects the removed --check-config option"() {
     const t = setup({ one: { stage: "static", class: "light", cmd: "true" } });
     const { code, output } = await run(["--check-config"], t.env).done;

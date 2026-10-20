@@ -7,7 +7,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sendEmail } from "../lib/email";
 import { getPublicAppUrl } from "../lib/email";
-import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { ObjectContentError, ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { digestBearerToken } from "../lib/bearerTokens";
 import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
@@ -386,10 +386,14 @@ router.post("/:token", async (req, res) => {
   const notes                = typeof req.body?.notes === "string"                ? req.body.notes.slice(0, 5000) : null;
   const completionObjectPath = typeof req.body?.completionObjectPath === "string" ? req.body.completionObjectPath : null;
   const today                = new Date().toISOString().slice(0, 10);
+  // Appended like a manager note so the manager's own solution notes survive.
+  const stamp                = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const notesEntry           = notes?.trim() ? `[${stamp}] ${t.contractor_name ?? "Contractor"}: ${notes.trim()}` : null;
   if (completionObjectPath) {
     try {
       await storage.finalizeTenantUpload(completionObjectPath, t.client_id);
     } catch (err) {
+      if (err instanceof ObjectContentError) return res.status(400).json({ error: err.message });
       const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
         : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
       return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
@@ -411,7 +415,11 @@ router.post("/:token", async (req, res) => {
         UPDATE fix_track_issues
         SET status                   = 'resolved',
             resolved_date            = ${today},
-            solution_notes           = COALESCE(${notes}, solution_notes),
+            solution_notes           = CASE
+              WHEN ${notesEntry}::text IS NULL THEN solution_notes
+              WHEN solution_notes IS NULL OR solution_notes = '' THEN ${notesEntry}
+              ELSE solution_notes || E'\n\n' || ${notesEntry}
+            END,
             completion_document_path = COALESCE(${completionObjectPath}, completion_document_path),
             updated_at               = now()
         WHERE id = ${t.issue_id} AND client_id = ${t.client_id} AND status = 'in_progress'

@@ -9,6 +9,8 @@ import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStore
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 import { unreadLegionellaOutletUnits } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
+import { siteVisibleSql, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
+import { completeLinkedTasksFromCheck, linkedTaskCompletions } from "../lib/trackTaskLink";
 
 const router = Router();
 
@@ -86,6 +88,14 @@ async function isHealthcareClient(clientId: number): Promise<boolean> {
   return businessType != null && HEALTHCARE_BUSINESS_TYPES.has(businessType);
 }
 
+/** Whether a client-supplied outlet id is one of this client's sentinel outlets. */
+async function isClientOutlet(clientId: number, outletId: number): Promise<boolean> {
+  const result = await db.execute(sql`
+    SELECT 1 FROM legionella_sentinel_outlets WHERE id = ${outletId} AND client_id = ${clientId} LIMIT 1
+  `);
+  return result.rows.length > 0;
+}
+
 /** Whether the outlet a check is linked to is a TMV outlet (tenant-scoped). */
 async function isTmvOutlet(clientId: number, outletId: number | null | undefined): Promise<boolean> {
   if (outletId == null) return false;
@@ -99,17 +109,19 @@ async function isTmvOutlet(clientId: number, outletId: number | null | undefined
 function isCalorifierReturn(location: string | null | undefined): boolean {
   return typeof location === "string" && /\breturn\b/i.test(location);
 }
+// The Template form sends "" for an untouched date or nation; store that as "not set".
+const blankAsNull = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(v => (v === "" ? null : v), schema);
 const legionellaProfileSchema = z.object({
   systemInventoryReference: z.string().trim().max(2000).nullable().optional(),
   writtenControlSchemeReference: z.string().trim().max(2000).nullable().optional(),
   riskAssessmentReference: z.string().trim().max(2000).nullable().optional(),
-  riskAssessmentReviewDate: z.string().date().nullable().optional(),
+  riskAssessmentReviewDate: blankAsNull(z.string().date().nullable().optional()),
   competentPerson: z.string().trim().max(500).nullable().optional(),
   samplingLabRecordReference: z.string().trim().max(2000).nullable().optional(),
   controlLimitsRationale: z.string().trim().max(10000).nullable().optional(),
   remedialVerificationReference: z.string().trim().max(2000).nullable().optional(),
-  schemeReviewDate: z.string().date().nullable().optional(),
-  ukNation: z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional(),
+  schemeReviewDate: blankAsNull(z.string().date().nullable().optional()),
+  ukNation: blankAsNull(z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional()),
   frequencyDays: z.record(z.string(), z.number().int().min(1).max(3650)).optional(),
   temperatureLimits: z.record(z.enum(CHECK_TYPES), z.object({
     min: z.number().finite().optional(), max: z.number().finite().optional(),
@@ -178,7 +190,7 @@ async function checkSiteAccess(
   if (siteId == null) return null;
   const site = await fetchClientSite(siteId, clientId);
   if (!site) return "not_found";
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return "forbidden";
+  if (!(await siteVisibleToDepartment(site, deptId))) return "forbidden";
   return "ok";
 }
 
@@ -189,7 +201,7 @@ function allowedSitesSubquery(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
@@ -270,6 +282,16 @@ router.get("/status", requireAuth, async (req, res) => {
       ? "fail" : row.lastResult;
     lastByType.set(row.checkType, { lastDate, lastResult });
   }
+  // A completed ComplyTrack task that mirrors a water check (cleaning the cold
+  // water tanks) counts as a passed check on its date.
+  for (const [key, completedOn] of await linkedTaskCompletions(clientId, "legionella")) {
+    const [site, checkType] = key.split(":");
+    if (Number(site) !== selectedSiteId) continue;
+    const recorded = lastByType.get(checkType);
+    if (!recorded || String(recorded.lastDate).slice(0, 10) < completedOn) {
+      lastByType.set(checkType, { lastDate: completedOn, lastResult: "pass" });
+    }
+  }
   // A registered outlet that has never been tested keeps its check type at
   // "never" until it is, whatever the other outlets' readings say.
   const unreadOutlets = await unreadLegionellaOutletUnits(clientId, [selectedSiteId]);
@@ -315,6 +337,11 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const siteAccess = await checkSiteAccess(data.siteId, clientId, deptId);
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  if (data.outletId != null && !(await isClientOutlet(clientId, data.outletId)))
+    return res.status(400).json({ error: "Invalid outlet" });
+
+  const outletError = await outletLinkError(clientId, data.outletId, data.checkType, data.siteId);
+  if (outletError) return res.status(400).json({ error: outletError });
 
   const userId = req.currentUser!.id;
   const entry = clientEntryFrom(data);
@@ -339,7 +366,11 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         createdBy: userId,
         clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
       }).returning();
-      if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
+      // Link to sentinel outlet if provided (column added via runtime migration).
+      if (row && data.outletId) {
+        await tx.execute(sql`UPDATE legionella_checks SET outlet_id = ${data.outletId} WHERE id = ${row.id} AND client_id = ${clientId}`);
+      }
+      if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, req.currentUser?.id ?? null, performer.performedBy);
       return row;
     });
   } catch (err) {
@@ -349,13 +380,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     throw err;
   }
 
-  // Link to sentinel outlet if provided (column added via runtime migration).
-  if (inserted && data.outletId) {
-    await db.execute(sql`
-      UPDATE legionella_checks SET outlet_id = ${data.outletId}
-      WHERE id = ${inserted.id} AND client_id = ${clientId}
-    `);
-  }
+  // A passed tank clean also completes its ComplyTrack task.
+  if (inserted) await completeLinkedTasksFromCheck(req, "legionella", inserted);
 
   res.status(201).json(inserted);
 });
@@ -369,6 +395,32 @@ const OUTLET_CHECK_TYPE_MAP: Record<string, string> = {
   calorifier: "calorifier_temp",
   tmv:        "hot_sentinel_temp", // checked against TMV_OUTLET_MAX_C, not the hot minimum
 };
+
+/**
+ * Why a check cannot be linked to an outlet, or null when it can. The outlet
+ * must belong to this business, be at the check's own site (a site-neutral
+ * outlet takes site-neutral checks), and take this check type. New links also
+ * need an active outlet; an existing link survives the outlet's removal.
+ * Department access follows from the site, which callers have already checked.
+ */
+async function outletLinkError(
+  clientId: number,
+  outletId: number | null | undefined,
+  checkType: string,
+  siteId: number | null | undefined,
+  { requireActive = true } = {},
+): Promise<string | null> {
+  if (outletId == null) return null;
+  const result = await db.execute(sql`
+    SELECT type, site_id, active FROM legionella_sentinel_outlets
+    WHERE id = ${outletId} AND client_id = ${clientId} LIMIT 1
+  `);
+  const outlet = result.rows[0] as { type: string; site_id: number | null; active: boolean } | undefined;
+  if (!outlet || (requireActive && !outlet.active)) return "Outlet not found";
+  if (OUTLET_CHECK_TYPE_MAP[outlet.type] !== checkType) return "This check type cannot be recorded against that outlet";
+  if ((outlet.site_id == null ? null : Number(outlet.site_id)) !== (siteId ?? null)) return "The outlet belongs to a different site";
+  return null;
+}
 
 const outletCreateSchema = z.object({
   name:      z.string().min(1).max(500),
@@ -389,11 +441,11 @@ router.get("/outlets", requireAuth, async (req, res) => {
     SELECT id, client_id, site_id, name, type, location, sort_order, active, created_at, updated_at
     FROM legionella_sentinel_outlets o
     WHERE o.client_id = ${clientId} AND o.active = true
-      AND (${deptId}::integer IS NULL OR o.site_id IS NULL OR EXISTS (
+      ${deptId !== null ? sql`AND (o.site_id IS NULL OR EXISTS (
         SELECT 1 FROM sites s
         WHERE s.id = o.site_id AND s.client_id = o.client_id
-          AND (s.department_id IS NULL OR s.department_id = ${deptId})
-      ))
+          AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId)}
+      ))` : sql``}
     ORDER BY sort_order ASC, id ASC
   `);
   res.json(rows.rows ?? []);
@@ -425,17 +477,17 @@ router.get("/outlet-status", requireAuth, async (req, res) => {
       AND c.client_id = ${clientId}
       AND c.check_date >= ${monthStart}
       AND c.check_date <  ${monthEnd}
-      AND (${deptId}::integer IS NULL OR c.site_id IS NULL OR EXISTS (
+      ${deptId !== null ? sql`AND (c.site_id IS NULL OR EXISTS (
         SELECT 1 FROM sites cs
         WHERE cs.id = c.site_id AND cs.client_id = c.client_id
-          AND (cs.department_id IS NULL OR cs.department_id = ${deptId})
-      ))
+          AND ${siteVisibleSql(sql`cs.id`, sql`cs.department_id`, deptId)}
+      ))` : sql``}
     WHERE o.client_id = ${clientId} AND o.active = true
-      AND (${deptId}::integer IS NULL OR o.site_id IS NULL OR EXISTS (
+      ${deptId !== null ? sql`AND (o.site_id IS NULL OR EXISTS (
         SELECT 1 FROM sites s
         WHERE s.id = o.site_id AND s.client_id = o.client_id
-          AND (s.department_id IS NULL OR s.department_id = ${deptId})
-      ))
+          AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId)}
+      ))` : sql``}
     ORDER BY o.sort_order ASC, o.id ASC, c.check_date DESC
   `);
 
@@ -474,6 +526,9 @@ router.post("/outlets", requireAuth, denyViewers, async (req, res) => {
   const parsed = outletCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
+  const siteAccess = await checkSiteAccess(d.siteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   const rows = await db.execute(sql`
     INSERT INTO legionella_sentinel_outlets (client_id, site_id, name, type, location, sort_order)
     VALUES (${clientId}, ${d.siteId ?? null}, ${d.name}, ${d.type}, ${d.location ?? null}, ${d.sortOrder ?? 0})
@@ -495,11 +550,24 @@ router.put("/outlets/:id", requireAuth, denyViewers, async (req, res) => {
   `);
   const cur = (existing.rows ?? [])[0] as any;
   if (!cur) return res.status(404).json({ error: "Not found" });
+  const deptId = getActiveDepartmentId(req);
+  if (await checkSiteAccess(cur.site_id, clientId, deptId) === "forbidden")
+    return res.status(403).json({ error: "Forbidden" });
   const d = parsed.data;
+  if (d.siteId !== undefined) {
+    const newAccess = await checkSiteAccess(d.siteId, clientId, deptId);
+    if (newAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (newAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const name     = d.name     ?? cur.name;
   const type     = d.type     ?? cur.type;
   const location = d.location !== undefined ? d.location : cur.location;
   const siteId   = d.siteId   !== undefined ? d.siteId   : cur.site_id;
+  if (d.siteId !== undefined) {
+    const siteAccess = await checkSiteAccess(d.siteId, clientId, getActiveDepartmentId(req));
+    if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const sortOrd  = d.sortOrder ?? cur.sort_order;
   const rows = await db.execute(sql`
     UPDATE legionella_sentinel_outlets
@@ -517,6 +585,13 @@ router.delete("/outlets/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const existing = await db.execute(sql`
+    SELECT site_id FROM legionella_sentinel_outlets WHERE id = ${id} AND client_id = ${clientId}
+  `);
+  const cur = (existing.rows ?? [])[0] as { site_id: number | null } | undefined;
+  if (!cur) return res.status(404).json({ error: "Not found" });
+  if (await checkSiteAccess(cur.site_id, clientId, getActiveDepartmentId(req)) === "forbidden")
+    return res.status(403).json({ error: "Forbidden" });
   const rows = await db.execute(sql`
     UPDATE legionella_sentinel_outlets SET active = false, updated_at = now()
     WHERE id = ${id} AND client_id = ${clientId}
@@ -558,11 +633,24 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
     if (newAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
     if (newAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   }
+  if (parsed.data.outletId != null && !(await isClientOutlet(clientId, parsed.data.outletId)))
+    return res.status(400).json({ error: "Invalid outlet" });
   const performer = await resolveStaffPerformerUpdate(clientId, parsed.data.staffRosterId, parsed.data.performedBy,
     existing.staffRosterId, existing.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-  const { temperature, ...rest } = parsed.data;
+  const linkedOutlet = await db.execute(sql`SELECT outlet_id FROM legionella_checks WHERE id = ${id} AND client_id = ${clientId}`);
+  const currentOutletId = (linkedOutlet.rows[0] as { outlet_id: number | null } | undefined)?.outlet_id ?? null;
+  const outletChanged = parsed.data.outletId !== undefined && parsed.data.outletId !== currentOutletId;
+  const nextOutletId = parsed.data.outletId !== undefined ? parsed.data.outletId : currentOutletId;
+  const nextSiteId = parsed.data.siteId !== undefined ? parsed.data.siteId : existing.siteId;
+  if (outletChanged || nextSiteId !== existing.siteId) {
+    const outletError = await outletLinkError(clientId, nextOutletId, existing.checkType, nextSiteId,
+      { requireActive: outletChanged });
+    if (outletError) return res.status(400).json({ error: outletError });
+  }
+
+  const { temperature, outletId: _outletId, ...rest } = parsed.data;
   const updateData: any = { ...rest, ...(performer ?? {}), updatedAt: new Date() };
   if (temperature !== undefined) {
     updateData.temperature = temperature != null ? String(temperature) : null;
@@ -572,21 +660,24 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const nextTemperature = temperature !== undefined ? temperature : (existing.temperature == null ? null : Number(existing.temperature));
   if (existing.checkType.endsWith("_temp") && nextTemperature == null)
     return res.status(400).json({ error: "Record a temperature before marking this check" });
-  const linkedOutlet = await db.execute(sql`SELECT outlet_id FROM legionella_checks WHERE id = ${id} AND client_id = ${clientId}`);
   const breach = legionellaBreach(existing.checkType, nextTemperature, profile, {
     healthcare: await isHealthcareClient(clientId),
     location: parsed.data.location !== undefined ? parsed.data.location : existing.location,
-    tmvOutlet: await isTmvOutlet(clientId, (linkedOutlet.rows[0] as { outlet_id: number | null } | undefined)?.outlet_id),
+    tmvOutlet: await isTmvOutlet(clientId, nextOutletId),
   });
   updateData.result = breach ? "fail" : (parsed.data.result !== undefined ? parsed.data.result : existing.result);
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(legionellaChecksTable).set(updateData)
       .where(and(eq(legionellaChecksTable.id, id), eq(legionellaChecksTable.clientId, clientId))).returning();
-    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, id, breach, (req.session as any).userId ?? null, performer.performedBy);
+    if (row && outletChanged) {
+      await tx.execute(sql`UPDATE legionella_checks SET outlet_id = ${nextOutletId} WHERE id = ${id} AND client_id = ${clientId}`);
+    }
+    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, id, breach, req.currentUser?.id ?? null, performer.performedBy);
     return row;
   });
 
   if (!updated) return res.status(404).json({ error: "Not found" });
+  await completeLinkedTasksFromCheck(req, "legionella", updated);
   res.json(updated);
 });
 
@@ -733,13 +824,20 @@ router.put("/config", requireAuth, requireClientAdmin, async (req, res) => {
   if (updates.controlProfile !== undefined) {
     if (siteId == null) return res.status(400).json({ error: "A site is required for a control profile" });
     const profile = legionellaProfileSchema.safeParse(updates.controlProfile);
-    if (!profile.success) return res.status(400).json({ error: profile.error.flatten() });
+    if (!profile.success) {
+      const issue = profile.error.issues[0];
+      return res.status(400).json({
+        error: `Invalid control profile: ${issue?.path.join(".") || "profile"} — ${issue?.message ?? "invalid value"}`,
+        details: profile.error.flatten(),
+      });
+    }
     await db.transaction(async tx => {
       const [previous] = await tx.select({ profile: trackControlProfilesTable.profile })
         .from(trackControlProfilesTable).where(and(eq(trackControlProfilesTable.clientId, clientId),
           eq(trackControlProfilesTable.siteId, siteId), eq(trackControlProfilesTable.module, LEGIONELLA_PROFILE_MODULE))).limit(1);
       const merged = { ...(previous?.profile as Record<string, unknown> ?? {}), ...profile.data,
-        ...(profile.data.writtenControlSchemeReference !== undefined
+        // A blank Template field must not wipe the reference recorded at plan approval.
+        ...(profile.data.writtenControlSchemeReference?.trim()
           ? { writtenSchemeReference: profile.data.writtenControlSchemeReference } : {}),
         approvedAt: null, approvedBy: null, reviewRequired: true };
       await tx.insert(trackControlProfilesTable).values({

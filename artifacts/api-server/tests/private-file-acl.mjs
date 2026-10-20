@@ -38,6 +38,8 @@ try {
     validation: `
       export class ObjectContentError extends Error {}
       export const MAX_RESTRICTED_UPLOAD_BYTES = 10485760;
+      export const maxUploadBytes = () => 262144000;
+      export class UploadTooLargeError extends ObjectContentError {}
       // DocTrack registration checks the file signature; these PDFs are the only uploads.
       export const detectIssueVideoType = () => null;
       export const detectUploadType = (bytes) => bytes.subarray(0, 5).toString('latin1') === '%PDF-' ? 'application/pdf' : null;
@@ -48,6 +50,9 @@ try {
   await build({
     entryPoints: [path.join(dir, "private-file-acl.entry.ts")],
     bundle: true, platform: "node", format: "esm", outfile: output, logLevel: "silent",
+    // Load drizzle from node_modules: bundled, its pg-core modules can be
+    // initialised in an order that leaves a column builder undefined.
+    external: ["drizzle-orm", "drizzle-orm/*"],
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
     plugins: [{
       name: "isolated-acl-dependencies",

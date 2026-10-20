@@ -10,9 +10,9 @@ import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } 
 
 /**
  * How many days before trial end the reminder fires.
- * 14-day trial → reminder sent on day 10 (≤4 days remaining).
+ * 14-day trial → reminder sent on day 7 (one week remaining).
  */
-export const TRIAL_REMINDER_LEAD_DAYS = 4;
+export const TRIAL_REMINDER_LEAD_DAYS = 7;
 
 function daysUntil(date: Date): number {
   return Math.max(1, Math.ceil((date.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
@@ -87,7 +87,7 @@ function buildTrialReminderEmail(opts: {
       <p>${escapeHtml(priceLine)}</p>
       <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
         <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Subscribe now to keep your compliance tracking, reminders and certificates running without interruption.</p>
-        <a href="${opts.billingUrl}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Set Up Billing</a>
+        <a href="${opts.billingUrl}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Set Up Billing</a>
       </div>
       <p>Best regards,<br><strong>ComplyTrack</strong></p>
     </div>
@@ -130,6 +130,10 @@ async function isPayingCustomer(client: ClientRow, findLive: typeof findLiveSubs
   return true;
 }
 
+/**
+ * The business's own owners: its Owners (client_admin) and, for accounts
+ * signed up before sign-up created Owners, its own consultant.
+ */
 async function activeConsultants(clientId: number) {
   return db
     .select()
@@ -137,7 +141,7 @@ async function activeConsultants(clientId: number) {
     .where(
       and(
         eq(usersTable.clientId, clientId),
-        eq(usersTable.role, "consultant"),
+        inArray(usersTable.role, ["consultant", "client_admin"]),
         eq(usersTable.active, true),
       ),
     );
@@ -339,7 +343,7 @@ function buildTrialEndedEmail(opts: {
       <p>${escapeHtml(priceLine)}</p>
       <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
         <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Subscribe to restore access to your compliance tracking, reminders and certificates.</p>
-        <a href="${opts.billingUrl}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Subscribe now</a>
+        <a href="${opts.billingUrl}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Subscribe now</a>
       </div>
       <p>Best regards,<br><strong>ComplyTrack</strong></p>
     </div>

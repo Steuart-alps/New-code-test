@@ -1,6 +1,6 @@
 // Site registers (/registers): allergen records, COSHH register and asbestos.
 // Covers tenant isolation (lists, foreign ids, foreign sites, foreign
-// clientId), client_viewer read-only, department scoping for staff, the
+// clientId), client_viewer refused, department scoping for staff, the
 // allergen tick change log, soft delete, default review dates, overdue flags
 // and the upload path ownership check.
 // Run: pnpm --filter @workspace/api-server run test:registers
@@ -29,8 +29,8 @@ const siteA = await ok(owner.request("POST", "/sites", { name: "Main restaurant"
 const siteB = await ok(owner.request("POST", "/sites", { name: "Lodge block", departmentId: other.id }), 201, "site B");
 const foreignSite = await ok(foreign.request("POST", "/sites", { name: "Foreign site" }), 201, "foreign site");
 const viewer = await createUser(owner, { role: "client_viewer", departmentId: kitchen.id });
-// Unassigned staff/viewers only see site-neutral records (as on GET /sites).
-const unassignedViewer = await createUser(owner, { role: "client_viewer" });
+// Unassigned staff only see site-neutral records (as on GET /sites).
+const unassignedStaff = await createUser(owner, { role: "client_staff" });
 const staff = await createUser(owner, { role: "client_staff", departmentId: kitchen.id });
 
 // ── Allergens ────────────────────────────────────────────────────────────────
@@ -62,9 +62,11 @@ assert.deepEqual(changes[0].allergensAfter, ["gluten", "fish", "milk", "mustard"
 assert.equal(changes[0].reason, "New supplier for the white sauce");
 
 // Viewer: read-only.
-const viewerList = await ok(viewer.request("GET", "/registers/allergens"), 200, "viewer list");
-assert.ok(viewerList.some((i) => i.id === dish.id));
-assert.equal((await ok(unassignedViewer.request("GET", "/registers/allergens"), 200, "unassigned viewer list")).length, 0);
+const kitchenStaffList = await ok(staff.request("GET", "/registers/allergens"), 200, "kitchen staff list");
+assert.ok(kitchenStaffList.some((i) => i.id === dish.id));
+assert.equal((await ok(unassignedStaff.request("GET", "/registers/allergens"), 200, "unassigned staff list")).length, 0);
+// Viewers see only their own training records.
+await ok(viewer.request("GET", "/registers/allergens"), 403, "viewer list");
 await ok(viewer.request("POST", "/registers/allergens", { siteId: siteA.id, name: "V", allergens: [] }), 403, "viewer create");
 await ok(viewer.request("PUT", `/registers/allergens/${dish.id}`, { siteId: siteA.id, name: "V", allergens: [] }), 403, "viewer edit");
 await ok(viewer.request("DELETE", `/registers/allergens/${dish.id}`), 403, "viewer delete");
@@ -178,7 +180,7 @@ assert.equal(history[0].surveyDate, surveyDate);
 assert.equal(history[0].surveyor, "Survey Ltd");
 await ok(foreign.request("GET", `/registers/asbestos/${record.id}/history/${history[0].id}/report-url`), 404, "foreign history report link");
 await ok(owner.request("GET", `/registers/asbestos/${modern.id}/history/${history[0].id}/report-url`), 404, "history entry of another record");
-await ok(viewer.request("GET", "/registers/asbestos"), 200, "viewer reads history");
+await ok(viewer.request("GET", "/registers/asbestos"), 403, "viewer can't read the register");
 await ok(viewer.request("POST", `/registers/asbestos/${record.id}/entries`, { location: "x", material: "y", condition: "good", priority: "low", action: "manage" }), 403, "viewer add entry");
 await ok(viewer.request("PUT", `/registers/asbestos/${record.id}`, { siteId: siteA.id, builtBefore2000: "no" }), 403, "viewer edit record");
 await ok(viewer.request("DELETE", `/registers/asbestos/entries/${entry.id}`), 403, "viewer delete entry");
