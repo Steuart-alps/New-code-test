@@ -5,6 +5,37 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export type DailyTrackRequirement = typeof DailyTrackRequirement[keyof typeof DailyTrackRequirement];
+
+
+export const DailyTrackRequirement = {
+  kitchen_opening: 'kitchen_opening',
+  premises_opening: 'premises_opening',
+  kitchen_closing: 'kitchen_closing',
+  premises_closing: 'premises_closing',
+  signoff: 'signoff',
+} as const;
+
+export interface DailyTrackHistoryChecklist {
+  checkDate: string;
+  siteId: number | null;
+  checklistType: string;
+  submittedAt: string | null;
+}
+
+export interface DailyTrackHistorySignoff {
+  signoffDate: string;
+  siteId: number | null;
+  submittedAt: string | null;
+}
+
+export interface DailyTrackHistory {
+  /** The checks each site is expected to complete per day, in display order */
+  requirements: DailyTrackRequirement[];
+  checklists: DailyTrackHistoryChecklist[];
+  signoffs: DailyTrackHistorySignoff[];
+}
+
 export interface SignTrainingRecordRequest {
   /** Signature image as a data URL */
   signature: string;
@@ -2439,6 +2470,11 @@ export type GetPATPresetTemplates200 = {[key: string]: PATPresetItem[]};
 
 export type SavePATPresetTemplateBody = {
   items: PATPresetItem[];
+};
+
+export type GetDailyTrackHistoryParams = {
+from: string;
+to: string;
 };
 
 export type ListPremisesInspectionsParams = {

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
-import { useListSites, type Site } from "@workspace/api-client-react";
+import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,28 +10,71 @@ import { Card } from "@/components/ui/card";
 import { Link } from "wouter";
 import {
   LayoutGrid, RotateCcw, CheckCircle2, Clock, Circle,
-  Building2, UtensilsCrossed, Building, PenLine, Sunrise, Sunset,
+  Building2, UtensilsCrossed, Building, PenLine, Sunrise, Sunset, AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { monthDayStatuses, type HistoryChecklist, type HistorySignoff } from "@/lib/daily-track-month-status";
+import {
+  monthDayStatuses, parseDailyTrackHistory, siteDayStatuses,
+  type DailyTrackHistory, type DailyTrackRequirement, type RecordStatus,
+} from "@/lib/daily-track-month-status";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── History loading ───────────────────────────────────────────────────────────
 
-type RecordStatus = "submitted" | "draft" | "none";
+type HistoryState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; data: DailyTrackHistory };
 
-interface ChecklistRecord {
-  id: number;
-  checklistType: string;
-  checkDate: string;
-  siteId?: number | null;
-  submittedAt?: string | null;
+/**
+ * Loads /daily-track-status/history for a date range. A failed request is an
+ * error state, never an empty history: an empty one would paint every day as
+ * "nothing started" during an outage.
+ */
+function useDailyTrackHistory(from: string, to: string, refreshMs?: number) {
+  const { activeClientId } = useAuth();
+  const [state, setState] = useState<HistoryState>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  const reload = useCallback(() => setAttempt(n => n + 1), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async (showSpinner: boolean) => {
+      if (showSpinner) setState({ status: "loading" });
+      let next: HistoryState;
+      try {
+        const res = await apiFetch(`/daily-track-status/history?from=${from}&to=${to}`);
+        next = res.ok
+          ? { status: "ready", data: parseDailyTrackHistory(await res.json()) }
+          : { status: "error", message: await getApiErrorMessage(res, `The server responded with ${res.status}.`) };
+      } catch {
+        next = { status: "error", message: "Check your connection and try again." };
+      }
+      if (!cancelled) setState(next);
+    };
+    load(true);
+    const timer = refreshMs ? setInterval(() => load(false), refreshMs) : undefined;
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [from, to, refreshMs, attempt, activeClientId]);
+
+  return { state, reload };
 }
 
-interface SignoffRecord {
-  id: number;
-  signoffDate: string;
-  siteId?: number | null;
-  submittedAt?: string | null;
+function HistoryError({ what, message, onRetry }: { what: string; message: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="flex flex-col items-center gap-3 py-8 text-center">
+      <AlertTriangle className="w-6 h-6 text-destructive" />
+      <div>
+        <p className="text-sm font-medium">Couldn't load {what}</p>
+        <p className="text-xs text-muted-foreground">{message}</p>
+      </div>
+      <Button variant="outline" size="sm" onClick={onRetry} className="gap-1.5">
+        <RotateCcw className="w-3.5 h-3.5" /> Try again
+      </Button>
+    </div>
+  );
 }
 
 // ── Column config ─────────────────────────────────────────────────────────────
@@ -39,6 +82,7 @@ interface SignoffRecord {
 const COLUMNS = [
   {
     key: "kitchen_opening",
+    group: "am",
     label: "Kitchen Opening",
     short: "Kit. Open",
     route: "/kitchen",
@@ -49,6 +93,7 @@ const COLUMNS = [
   },
   {
     key: "premises_opening",
+    group: "am",
     label: "Premises Opening",
     short: "Prem. Open",
     route: "/daily-track-am",
@@ -58,6 +103,7 @@ const COLUMNS = [
   },
   {
     key: "kitchen_closing",
+    group: "pm",
     label: "Kitchen Closing",
     short: "Kit. Close",
     route: "/kitchen",
@@ -68,6 +114,7 @@ const COLUMNS = [
   },
   {
     key: "premises_closing",
+    group: "pm",
     label: "Premises Closing",
     short: "Prem. Close",
     route: "/daily-track-pm",
@@ -77,6 +124,7 @@ const COLUMNS = [
   },
   {
     key: "signoff",
+    group: "signoff",
     label: "Manager Sign-off",
     short: "Sign-off",
     route: "/daily-track-pm",
@@ -86,45 +134,9 @@ const COLUMNS = [
   },
 ] as const;
 
-type ColKey = typeof COLUMNS[number]["key"];
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function toStatus(found: boolean, submittedAt: string | null | undefined): RecordStatus {
-  if (!found) return "none";
-  return submittedAt ? "submitted" : "draft";
-}
-
-function buildSiteStatus(
-  site: Site,
-  amRows: ChecklistRecord[],
-  pmRows: ChecklistRecord[],
-  signoffs: SignoffRecord[],
-): Record<ColKey, RecordStatus> {
-  const id = site.id;
-  const am = (type: string) => {
-    const r = amRows.find(c => c.checklistType === type && c.siteId === id);
-    return toStatus(!!r, r?.submittedAt);
-  };
-  const pm = (type: string) => {
-    const r = pmRows.find(c => c.checklistType === type && c.siteId === id);
-    return toStatus(!!r, r?.submittedAt);
-  };
-  const so = () => {
-    const r = signoffs.find(s => s.siteId === id);
-    return toStatus(!!r, r?.submittedAt);
-  };
-  return {
-    kitchen_opening: am("kitchen_opening"),
-    premises_opening: am("premises_opening"),
-    kitchen_closing: pm("kitchen_closing"),
-    premises_closing: pm("premises_closing"),
-    signoff: so(),
-  };
-}
-
-function countSubmitted(row: Record<ColKey, RecordStatus>): number {
-  return Object.values(row).filter(s => s === "submitted").length;
+/** The columns for the checks the client's services enable, in display order. */
+function enabledColumns(requirements: DailyTrackRequirement[]) {
+  return COLUMNS.filter(col => requirements.includes(col.key));
 }
 
 // ── Status cell ───────────────────────────────────────────────────────────────
@@ -210,38 +222,22 @@ function shiftMonth(ym: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: string) => void }) {
+export function MonthOverview({ sites, onPickDay }: { sites: { id: number; name: string }[]; onPickDay: (date: string) => void }) {
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const lastMonth = shiftMonth(today.slice(0, 7), -1);
   const [month, setMonth] = useState(lastMonth);
   const [siteId, setSiteId] = useState<"all" | number>("all");
-  const [rows, setRows] = useState<{ checklists: HistoryChecklist[]; signoffs: HistorySignoff[] } | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const [y, m] = month.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
   const from = `${month}-01`;
   const to = `${month}-${String(daysInMonth).padStart(2, "0")}`;
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      const res = await apiFetch(`/daily-track-am/history?from=${from}&to=${to}`);
-      if (!cancelled) {
-        setRows(res.ok ? await res.json() : { checklists: [], signoffs: [] });
-        setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [from, to]);
+  const { state, reload } = useDailyTrackHistory(from, to);
 
   const selectedSites = siteId === "all" ? sites : sites.filter(site => site.id === siteId);
-  const expectedPerDay = selectedSites.length * COLUMNS.length;
-  const dayStatuses = monthDayStatuses(
-    month, today, selectedSites, rows?.checklists ?? [], rows?.signoffs ?? [],
-  );
+  const dayStatuses = state.status === "ready" ? monthDayStatuses(month, today, selectedSites, state.data) : [];
 
   const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Monday = 0
   const incompleteDays = dayStatuses.filter(d => d.status === "partial" || d.status === "missing").length;
@@ -276,10 +272,12 @@ function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: 
         </div>
       </div>
 
-      {loading ? (
+      {state.status === "loading" ? (
         <div className="flex justify-center py-8">
           <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
         </div>
+      ) : state.status === "error" ? (
+        <HistoryError what={`checklist history for ${monthLabel(month)}`} message={state.message} onRetry={reload} />
       ) : (
         <>
           <div className="grid grid-cols-7 gap-1.5 max-w-xl">
@@ -287,12 +285,12 @@ function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: 
               <div key={d} className="text-[10px] text-muted-foreground text-center font-medium">{d}</div>
             ))}
             {Array.from({ length: firstWeekday }).map((_, i) => <div key={`pad-${i}`} />)}
-            {dayStatuses.map(({ date, status, submitted, started }) => (
+            {dayStatuses.map(({ date, status, submitted, started, expected }) => (
               <button
                 key={date}
                 disabled={status === "future"}
                 onClick={() => onPickDay(date)}
-                title={status === "future" ? "" : `${date} — ${submitted}/${expectedPerDay} submitted, ${started} started`}
+                title={status === "future" ? "" : `${date} — ${submitted}/${expected} submitted, ${started} started`}
                 className={cn(
                   "aspect-square rounded-md text-xs font-medium flex items-center justify-center transition-transform",
                   status === "complete" && "bg-emerald-100 text-emerald-700 hover:scale-105",
@@ -324,52 +322,27 @@ function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DailyTrackStatusPage() {
-  const { activeClientId } = useAuth();
   const { data: sites = [], isLoading: sitesLoading } = useListSites();
 
   const today = new Date().toISOString().slice(0, 10);
   const [date, setDate] = useState(today);
-  const [amRows, setAmRows] = useState<ChecklistRecord[]>([]);
-  const [pmRows, setPmRows] = useState<ChecklistRecord[]>([]);
-  const [signoffs, setSignoffs] = useState<SignoffRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const params = new URLSearchParams({ date });
-    const [amRes, pmRes, soRes] = await Promise.all([
-      apiFetch(`/daily-track-am?${params}`),
-      apiFetch(`/daily-track-pm?${params}`),
-      apiFetch(`/daily-track-pm/signoffs?${params}`),
-    ]);
-    if (amRes.ok) setAmRows(await amRes.json());
-    if (pmRes.ok) setPmRows(await pmRes.json());
-    if (soRes.ok) setSignoffs(await soRes.json());
-    setLoading(false);
-  }, [date, activeClientId]);
-
-  // Initial load + auto-refresh every 60 s so the grid stays live
-  useEffect(() => {
-    load();
-    const id = setInterval(load, 60_000);
-    return () => clearInterval(id);
-  }, [load]);
-
-  const isLoading = loading || sitesLoading;
-
-  // Compute per-site status rows
-  const siteStatuses = sites.map(site => ({
-    site,
-    status: buildSiteStatus(site, amRows, pmRows, signoffs),
-  }));
-
-  // Summary counts across all sites
-  const totalSites = sites.length;
-  const allGreen = siteStatuses.filter(({ status }) =>
-    Object.values(status).every(s => s === "submitted")
-  ).length;
+  // Refreshes every 60 s so the grid stays live.
+  const { state, reload } = useDailyTrackHistory(date, date, 60_000);
 
   const isToday = date === today;
+  const history = state.status === "ready" ? state.data : null;
+  const columns = history ? enabledColumns(history.requirements) : [];
+  const statuses = history ? siteDayStatuses(date, sites, history) : new Map();
+  // Each period's first column starts a bordered group.
+  const groupStarts = new Set(columns.filter((col, i) => i === 0 || columns[i - 1].group !== col.group).map(col => col.key));
+  const groupSpan = (group: string) => columns.filter(col => col.group === group).length;
+  const siteStatuses = sites.map(site => {
+    const status: Partial<Record<DailyTrackRequirement, RecordStatus>> = statuses.get(site.id) ?? {};
+    const submitted = columns.filter(col => status[col.key] === "submitted").length;
+    return { site, status, submitted };
+  });
+  const allGreen = siteStatuses.filter(({ submitted }) => columns.length > 0 && submitted === columns.length).length;
+  const totalSites = sites.length;
 
   return (
     <AppLayout title="Daily Checklist Status">
@@ -407,13 +380,13 @@ export default function DailyTrackStatusPage() {
           </div>
         </div>
         <div className="flex items-end gap-2">
-          <Button variant="outline" size="sm" onClick={load} className="h-9 gap-1.5">
-            <RotateCcw className={cn("w-3.5 h-3.5", loading && "animate-spin")} /> Refresh
+          <Button variant="outline" size="sm" onClick={reload} className="h-9 gap-1.5">
+            <RotateCcw className={cn("w-3.5 h-3.5", state.status === "loading" && "animate-spin")} /> Refresh
           </Button>
         </div>
 
         {/* Summary pill */}
-        {!isLoading && totalSites > 0 && (
+        {history && !sitesLoading && totalSites > 0 && (
           <div className="flex items-end ml-auto">
             <div className={cn(
               "flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border",
@@ -428,7 +401,7 @@ export default function DailyTrackStatusPage() {
         )}
       </div>
 
-      {isLoading ? (
+      {state.status === "loading" || sitesLoading ? (
         <div className="flex justify-center py-16">
           <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
         </div>
@@ -436,6 +409,10 @@ export default function DailyTrackStatusPage() {
         <Card className="p-12 text-center">
           <Building2 className="w-8 h-8 mx-auto mb-3 text-muted-foreground/30" />
           <p className="text-muted-foreground text-sm">No sites configured yet.</p>
+        </Card>
+      ) : state.status === "error" ? (
+        <Card>
+          <HistoryError what="checklist status for this day" message={state.message} onRetry={reload} />
         </Card>
       ) : (
         <Card className="overflow-hidden">
@@ -447,27 +424,30 @@ export default function DailyTrackStatusPage() {
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground min-w-[160px] w-48">
                     Site
                   </th>
-                  {/* AM group header */}
-                  <th colSpan={2} className="px-2 py-2 text-center border-l border-border/50">
-                    <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-amber-700 uppercase tracking-wider">
-                      <Sunrise className="w-3.5 h-3.5" />
-                      AM
-                    </div>
-                  </th>
-                  {/* PM group header */}
-                  <th colSpan={2} className="px-2 py-2 text-center border-l border-border/50">
-                    <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-orange-700 uppercase tracking-wider">
-                      <Sunset className="w-3.5 h-3.5" />
-                      PM
-                    </div>
-                  </th>
-                  {/* Sign-off header */}
-                  <th className="px-2 py-2 text-center border-l border-border/50">
-                    <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
-                      <PenLine className="w-3.5 h-3.5" />
-                      Sign-off
-                    </div>
-                  </th>
+                  {groupSpan("am") > 0 && (
+                    <th colSpan={groupSpan("am")} className="px-2 py-2 text-center border-l border-border/50">
+                      <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-amber-700 uppercase tracking-wider">
+                        <Sunrise className="w-3.5 h-3.5" />
+                        AM
+                      </div>
+                    </th>
+                  )}
+                  {groupSpan("pm") > 0 && (
+                    <th colSpan={groupSpan("pm")} className="px-2 py-2 text-center border-l border-border/50">
+                      <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-orange-700 uppercase tracking-wider">
+                        <Sunset className="w-3.5 h-3.5" />
+                        PM
+                      </div>
+                    </th>
+                  )}
+                  {groupSpan("signoff") > 0 && (
+                    <th className="px-2 py-2 text-center border-l border-border/50">
+                      <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
+                        <PenLine className="w-3.5 h-3.5" />
+                        Sign-off
+                      </div>
+                    </th>
+                  )}
                   {/* Progress */}
                   <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground border-l border-border/50 min-w-[80px]">
                     Done
@@ -476,12 +456,12 @@ export default function DailyTrackStatusPage() {
                 {/* Sub-headers */}
                 <tr className="border-b border-border bg-muted/10">
                   <th className="px-4 py-2" />
-                  {COLUMNS.map((col, i) => (
+                  {columns.map(col => (
                     <th
                       key={col.key}
                       className={cn(
                         "px-2 py-2 text-center text-xs font-normal text-muted-foreground whitespace-nowrap w-24",
-                        (i === 0 || i === 2 || i === 4) && "border-l border-border/50",
+                        groupStarts.has(col.key) && "border-l border-border/50",
                       )}
                     >
                       <div className="flex flex-col items-center gap-1">
@@ -494,10 +474,9 @@ export default function DailyTrackStatusPage() {
                 </tr>
               </thead>
               <tbody>
-                {siteStatuses.map(({ site, status }, rowIdx) => {
-                  const submitted = countSubmitted(status);
-                  const total = COLUMNS.length;
-                  const pct = Math.round((submitted / total) * 100);
+                {siteStatuses.map(({ site, status, submitted }, rowIdx) => {
+                  const total = columns.length;
+                  const pct = total > 0 ? Math.round((submitted / total) * 100) : 0;
 
                   return (
                     <tr
@@ -516,16 +495,16 @@ export default function DailyTrackStatusPage() {
                       </td>
 
                       {/* Status cells */}
-                      {COLUMNS.map((col, i) => (
+                      {columns.map(col => (
                         <td
                           key={col.key}
                           className={cn(
                             "px-2 py-3 text-center",
-                            (i === 0 || i === 2 || i === 4) && "border-l border-border/50",
+                            groupStarts.has(col.key) && "border-l border-border/50",
                           )}
                         >
                           <StatusCell
-                            status={status[col.key]}
+                            status={status[col.key] ?? "none"}
                             route={col.route}
                             routeQuery={"routeQuery" in col ? col.routeQuery : undefined}
                             date={date}

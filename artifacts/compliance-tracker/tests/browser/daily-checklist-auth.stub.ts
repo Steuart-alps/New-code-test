@@ -7,6 +7,12 @@ export function useAuth() {
 export function useCanAdmin() {
   return false;
 }
+export function useCanManageUsers() {
+  return false;
+}
+export function useIsManager() {
+  return false;
+}
 export function useCanEdit() {
   return true;
 }
