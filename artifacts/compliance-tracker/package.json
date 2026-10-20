@@ -39,6 +39,7 @@
     "test:form-options-editor-browser": "node tests/form-options-editor-browser.test.mjs",
     "test:custom-option-forms-browser": "node tests/custom-option-forms-browser.test.mjs",
     "test:viewer-department-browser": "bash tests/run-viewer-department-browser.sh",
+    "test:user-department-inline-browser": "bash tests/run-viewer-department-browser.sh tests/user-department-inline-browser.test.mjs",
     "test:hot-tub-browser-firefox": "HOT_TUB_BROWSER=firefox node tests/hot-tub-browser.test.mjs",
     "test:hot-tub-browser-webkit": "HOT_TUB_BROWSER=webkit node tests/hot-tub-browser.test.mjs",
     "test:hot-tub-browser-engines": "pnpm run test:hot-tub-browser-firefox && pnpm run test:hot-tub-browser-webkit",

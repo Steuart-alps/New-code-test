@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run the browser against a real test-mode API with isolated login fixtures.
+# Usage: run-viewer-department-browser.sh [test file, relative to compliance-tracker]
 set -euo pipefail
+test_file="${1:-tests/viewer-department-browser.test.mjs}"
 cd "$(dirname "$0")/../../api-server"
 source tests/api-integration-lock.sh
 
@@ -19,4 +21,4 @@ for attempt in $(seq 1 90); do
 done
 curl -fsS "http://127.0.0.1:$port/readyz" >/dev/null
 cd ../compliance-tracker
-VIEWER_TEST_API="http://127.0.0.1:$port/api" node tests/viewer-department-browser.test.mjs
+VIEWER_TEST_API="http://127.0.0.1:$port/api" node "$test_file"
