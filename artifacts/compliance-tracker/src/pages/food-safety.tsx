@@ -6,10 +6,11 @@ import { apiFetch } from "@/lib/api";
 import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, ClipboardCheck, CalendarDays } from "lucide-react";
+import { CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, ClipboardCheck, CalendarDays, Moon } from "lucide-react";
 import {
   classifyFoodSafetyCompleteness,
   foodSafetyCompletenessPath,
+  foodSafetyMonthFigures,
   type FoodSafetyCompleteness,
 } from "@/lib/kitchen-state";
 
@@ -85,7 +86,7 @@ async function fetchGaps(
   from: string,
   to: string,
   siteId: number | null,
-): Promise<{ recorded: Set<string>; drafts: string[]; gaps: string[] }> {
+): Promise<{ recorded: Set<string>; drafts: string[]; gaps: string[]; closed: string[] }> {
   const res = await apiFetch(foodSafetyCompletenessPath(from, to, siteId));
   if (!res.ok) throw new Error("Food-safety completeness could not be loaded");
   const data: FoodSafetyCompleteness = await res.json();
@@ -101,18 +102,21 @@ function CalendarGrid({
   recorded,
   drafts,
   gaps,
+  closed,
   today,
 }: {
   ym: string;
   recorded: Set<string>;
   drafts: string[];
   gaps: string[];
+  closed: string[];
   today: string;
 }) {
   const days = daysInMonth(ym);
   const offset = firstDow(ym);
   const gapSet = new Set(gaps);
   const draftSet = new Set(drafts);
+  const closedSet = new Set(closed);
 
   return (
     <div>
@@ -134,11 +138,14 @@ function CalendarGrid({
           const isRecorded = recorded.has(date);
           const isDraft = draftSet.has(date);
           const isMissing = gapSet.has(date);
+          const isClosed = closedSet.has(date);
 
           let cellClass =
             "aspect-square rounded-lg flex flex-col items-center justify-center text-xs font-medium transition-colors border ";
 
-          if (isFuture) {
+          if (isClosed) {
+            cellClass += "bg-slate-100 border-slate-300 border-dashed text-slate-500";
+          } else if (isFuture) {
             cellClass += "bg-muted/20 border-border/30 text-muted-foreground/40 cursor-default";
           } else if (isRecorded) {
             cellClass += "bg-emerald-50 border-emerald-200 text-emerald-700";
@@ -153,8 +160,9 @@ function CalendarGrid({
           }
 
           return (
-            <div key={date} className={cellClass} title={date}>
+            <div key={date} className={cellClass} title={isClosed ? `${date} — closed (not operating)` : date}>
               <span>{dayNum(date)}</span>
+              {isClosed && <Moon className="w-2.5 h-2.5 mt-0.5 opacity-70" />}
               {isRecorded && <CheckCircle2 className="w-2.5 h-2.5 mt-0.5 opacity-70" />}
               {isDraft && <ClipboardCheck className="w-2.5 h-2.5 mt-0.5 opacity-70" />}
               {isMissing && !isFuture && <AlertCircle className="w-2.5 h-2.5 mt-0.5 opacity-70" />}
@@ -176,6 +184,7 @@ export default function FoodSafetyPage() {
   const [recorded, setRecorded] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<string[]>([]);
   const [gaps, setGaps] = useState<string[]>([]);
+  const [closed, setClosed] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -190,6 +199,7 @@ export default function FoodSafetyPage() {
       setRecorded(data.recorded);
       setDrafts(data.drafts);
       setGaps(data.gaps.filter(d => d <= today)); // only count past gaps
+      setClosed(data.closed);
     } catch {
       setLoadError(true);
     } finally {
@@ -201,12 +211,14 @@ export default function FoodSafetyPage() {
 
   const isCurrentMonth = ym === currentYM();
 
-  // Summary stats for visible month only
+  // Summary stats for visible month only, over operating days: planned
+  // closures are neither missing nor part of the percentage.
   const monthDays = daysInMonth(ym).filter(d => d <= today);
-  const monthRecorded = monthDays.filter(d => recorded.has(d)).length;
-  const monthDrafts = monthDays.filter(d => drafts.includes(d)).length;
-  const monthGaps = monthDays.filter(d => gaps.includes(d)).length;
-  const pct = monthDays.length > 0 ? Math.round((monthRecorded / monthDays.length) * 100) : 100;
+  const month = foodSafetyMonthFigures(monthDays, { recorded, drafts, gaps, closed });
+  const monthRecorded = month.recorded;
+  const monthDrafts = month.drafts;
+  const monthGaps = month.gaps;
+  const pct = month.pct;
 
   // Recent gaps (last 7 days)
   const recentGaps = Array.from({ length: 7 }, (_, i) => offsetDate(today, -(6 - i))).filter(d =>
@@ -258,7 +270,8 @@ export default function FoodSafetyPage() {
                   : `${monthGaps} missing · ${monthDrafts} draft${monthDrafts !== 1 ? "s" : ""} this month`}
               </p>
               <p className={`text-xs mt-0.5 ${monthGaps === 0 && monthDrafts === 0 ? "text-emerald-700" : "text-amber-700"}`}>
-                {monthRecorded} of {monthDays.length} days submitted · {pct}% complete
+                {monthRecorded} of {month.operatingDays} operating days submitted · {pct}% complete
+                {month.closed > 0 && ` · ${month.closed} closed day${month.closed !== 1 ? "s" : ""} not counted`}
               </p>
             </div>
           </div>
@@ -294,7 +307,7 @@ export default function FoodSafetyPage() {
                 Food-safety completeness could not be loaded. Try again shortly.
               </div>
             ) : (
-              <CalendarGrid ym={ym} recorded={recorded} drafts={drafts} gaps={gaps} today={today} />
+              <CalendarGrid ym={ym} recorded={recorded} drafts={drafts} gaps={gaps} closed={closed} today={today} />
             )}
           </div>
 
@@ -311,6 +324,10 @@ export default function FoodSafetyPage() {
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded bg-red-100 border border-red-300" />
               Missing
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded bg-slate-100 border border-dashed border-slate-300" />
+              Closed
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded bg-muted/50 border border-border" />

@@ -4,6 +4,7 @@ import { premisesInspectionsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, gte, lte, lt, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { z } from "zod";
 
@@ -34,7 +35,7 @@ const listInspectionsQuery = z.object({
 function allowedSitesSubquery(clientId: number, departmentId: number) {
   return db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.clientId, clientId),
-    or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+    sitesTableVisibleTo(departmentId),
   ));
 }
 
@@ -111,7 +112,7 @@ async function siteIsAccessible(siteId: number | null | undefined, clientId: num
   if (siteId == null) return true;
   const conditions = [eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)];
   if (departmentId !== null) {
-    conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)) as any);
+    conditions.push(sitesTableVisibleTo(departmentId) as any);
   }
   const [site] = await db.select({ id: sitesTable.id })
     .from(sitesTable)

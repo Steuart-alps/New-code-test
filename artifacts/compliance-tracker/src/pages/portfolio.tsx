@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearch } from "wouter";
 import { format } from "date-fns";
-import { AlertTriangle, ArrowRight, Building2, ClipboardList, ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, ArrowRight, Building2, ClipboardList, ImageIcon, Loader2, MapPin, Search, Trash2, Upload } from "lucide-react";
 import { AppLayout } from "@/components/layout";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
@@ -20,6 +20,7 @@ interface PortfolioBusiness {
   name: string;
   active: boolean;
   sites: number;
+  siteList: Array<{ id: number; name: string }>;
   overdueChecks: number;
   openActions: number;
   overdueActions: number;
@@ -54,6 +55,17 @@ const TONE: Record<"good" | "warn" | "bad" | "muted", string> = {
 function SubscriptionBadge({ business }: { business: PortfolioBusiness }) {
   const label = subscriptionLabel(business);
   return <span className={cn("inline-block whitespace-nowrap rounded-sm border px-2 py-0.5 text-xs font-medium", TONE[label.tone])}>{label.text}</span>;
+}
+
+function SiteNames({ business }: { business: PortfolioBusiness }) {
+  const names = business.siteList ?? [];
+  if (!names.length) return <p className="text-xs text-muted-foreground">No sites yet</p>;
+  return (
+    <p className="flex items-start gap-1 text-xs text-muted-foreground">
+      <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
+      <span className="break-words">{names.map(site => site.name).join(", ")}</span>
+    </p>
+  );
 }
 
 function Count({ value, alert }: { value: number; alert?: boolean }) {
@@ -176,6 +188,14 @@ export default function PortfolioPage() {
     },
   });
   const businesses = portfolio.data?.businesses ?? [];
+  const [query, setQuery] = useState("");
+  // Matches a business by its own name or any of its sites' names.
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return businesses;
+    return businesses.filter(business => business.name.toLowerCase().includes(needle)
+      || (business.siteList ?? []).some(site => site.name.toLowerCase().includes(needle)));
+  }, [businesses, query]);
 
   // The portfolio is the landing page only for consultants with two or more
   // businesses; everyone else continues to their dashboard.
@@ -219,14 +239,23 @@ export default function PortfolioPage() {
               <Card className="flex items-center gap-3 rounded-sm p-4"><ClipboardList className="h-5 w-5 text-amber-600" /><div><b className="text-xl">{totals.openActions}</b><p className="text-xs text-muted-foreground">Open actions</p></div></Card>
             </div>
 
+            {businesses.length > 1 && (
+              <div className="relative max-w-sm">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input aria-label="Search businesses and sites" placeholder="Search businesses or sites" value={query} onChange={event => setQuery(event.target.value)} className="pl-8" />
+              </div>
+            )}
+            {shown.length === 0 && <p className="text-sm text-muted-foreground">No business or site matches “{query.trim()}”.</p>}
+
             {/* Phones: one card per business */}
             <div className="space-y-3 md:hidden">
-              {businesses.map(business => (
+              {shown.map(business => (
                 <Card key={business.id} className="space-y-3 rounded-sm p-4" data-testid={`portfolio-card-${business.id}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="break-words font-semibold">{business.name}</p>
                       <p className="text-xs text-muted-foreground">Last activity {ukDate(business.lastActivityAt)}</p>
+                      <SiteNames business={business} />
                     </div>
                     <SubscriptionBadge business={business} />
                   </div>
@@ -255,9 +284,12 @@ export default function PortfolioPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {businesses.map(business => (
+                  {shown.map(business => (
                     <tr key={business.id} className="border-t" data-testid={`portfolio-row-${business.id}`}>
-                      <td className="p-3 font-medium">{business.name}{!business.active && <span className="ml-2 text-xs font-normal text-muted-foreground">(inactive)</span>}</td>
+                      <td className="p-3">
+                        <span className="font-medium">{business.name}</span>{!business.active && <span className="ml-2 text-xs text-muted-foreground">(inactive)</span>}
+                        <SiteNames business={business} />
+                      </td>
                       <td className="p-3 text-right"><Count value={business.sites} /></td>
                       <td className="p-3 text-right"><Count value={business.overdueChecks} alert /></td>
                       <td className="p-3 text-right"><Count value={business.openActions} alert={business.overdueActions > 0} />{business.overdueActions > 0 && <span className="block text-xs text-rose-700">{business.overdueActions} overdue</span>}</td>

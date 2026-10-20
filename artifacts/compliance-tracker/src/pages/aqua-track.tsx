@@ -23,6 +23,7 @@ import {
   Activity, HeartPulse, ShieldAlert, Search, XCircle, Anchor,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { camelCaseRows } from "@/lib/camel-case-rows";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -36,14 +37,14 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
-import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
   const mutationSucceeded = beginApiMutation(init?.method, path);
-  const res = await fetch(withActiveClient(`${apiBase}${path}`, init?.body), await withCsrfToken({
+  const res = await fetchWithOverrideReason(withActiveClient(`${apiBase}${path}`, init?.body), await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
@@ -321,11 +322,12 @@ function PoolRecordDialog({
   const handleSubmit = async () => {
     try {
       const payload = {
-        checkType, checkDate, checkTime: checkTime || undefined, siteId: selectedSite,
+        checkType, checkDate, checkTime: checkTime || undefined, siteId: selectedSite ?? null,
         phLevel: parsedPh, freeChlorine: parsedFree, combinedChlorine: parsedComb,
         waterTempC: parsedWT, airTempC: airTemp ? parseFloat(airTemp) : null,
         turbidity: turbidity || null, poolOpen, performedBy: performedBy || null, staffRosterId: staffRosterId,
-        actionsTaken: actionsTaken || undefined, result: effectiveResult, notes: notes || undefined,
+        // null (not undefined) so clearing a field on edit actually clears it
+        actionsTaken: actionsTaken || null, result: effectiveResult, notes: notes || null,
       };
       if (isEdit) await apiFetch(`/pool-track/${existing!.id}`, { method: "PUT", body: JSON.stringify(payload) });
       else await apiFetch("/pool-track", { method: "POST", body: JSON.stringify(payload) });
@@ -783,10 +785,10 @@ export default function AquaTrackPage() {
   const [deleteId, setDeleteId] = useState<{ type: string; id: number } | null>(null);
 
   const { data: swimStatus, refetch: refetchStatus } = useQuery({ queryKey: ["swim-status"], queryFn: () => apiFetch<SwimStatus>("/swim-track/status"), enabled: hasAqua, refetchInterval: 60_000 });
-  const { data: sessions = [], isLoading: sessionsLoading } = useQuery({ queryKey: ["swim-sessions"], queryFn: () => apiFetch<SwimSession[]>("/swim-track/sessions"), enabled: hasAqua && activeTab === "sessions" });
-  const { data: surveillance = [], isLoading: surveillanceLoading } = useQuery({ queryKey: ["swim-surveillance"], queryFn: () => apiFetch<SurveillanceCheck[]>("/swim-track/surveillance"), enabled: hasAqua && activeTab === "surveillance" });
-  const { data: firstAidChecks = [], isLoading: firstAidLoading } = useQuery({ queryKey: ["swim-first-aid"], queryFn: () => apiFetch<FirstAidCheck[]>("/swim-track/first-aid"), enabled: hasAqua && activeTab === "first-aid" });
-  const { data: incidents = [], isLoading: incidentsLoading } = useQuery({ queryKey: ["swim-incidents"], queryFn: () => apiFetch<Incident[]>("/swim-track/incidents"), enabled: hasAqua && activeTab === "incidents" });
+  const { data: sessions = [], isLoading: sessionsLoading } = useQuery({ queryKey: ["swim-sessions"], queryFn: () => apiFetch("/swim-track/sessions").then(camelCaseRows<SwimSession>), enabled: hasAqua && activeTab === "sessions" });
+  const { data: surveillance = [], isLoading: surveillanceLoading } = useQuery({ queryKey: ["swim-surveillance"], queryFn: () => apiFetch("/swim-track/surveillance").then(camelCaseRows<SurveillanceCheck>), enabled: hasAqua && activeTab === "surveillance" });
+  const { data: firstAidChecks = [], isLoading: firstAidLoading } = useQuery({ queryKey: ["swim-first-aid"], queryFn: () => apiFetch("/swim-track/first-aid").then(camelCaseRows<FirstAidCheck>), enabled: hasAqua && activeTab === "first-aid" });
+  const { data: incidents = [], isLoading: incidentsLoading } = useQuery({ queryKey: ["swim-incidents"], queryFn: () => apiFetch("/swim-track/incidents").then(camelCaseRows<Incident>), enabled: hasAqua && activeTab === "incidents" });
 
   const invalidateSwim = () => { ["swim-sessions", "swim-surveillance", "swim-first-aid", "swim-incidents", "swim-status"].forEach(k => queryClient.invalidateQueries({ queryKey: [k] })); };
 

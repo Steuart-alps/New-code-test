@@ -260,7 +260,7 @@ export function ImportCsvButton({ type, onImported, className }: { type: ImportC
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const isAdmin = user?.role === "consultant" || user?.role === "client_admin";
-  const allowed = isAdmin || (type === "pat-appliances" && user?.role === "client_staff" && user.isDepartmentManager === true);
+  const allowed = isAdmin || (type === "pat-appliances" && (user?.role === "client_manager" || (user?.role === "client_staff" && user.isDepartmentManager === true)));
   if (!allowed) return null;
   return (
     <>

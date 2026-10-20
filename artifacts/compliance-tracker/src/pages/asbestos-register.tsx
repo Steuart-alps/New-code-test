@@ -559,7 +559,7 @@ export default function AsbestosRegisterPage() {
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="entry-location">Location *</Label>
-                <Input id="entry-location" value={entryForm.location} maxLength={300} placeholder="For example: boiler room ceiling" onChange={(e) => setEntryForm({ ...entryForm, location: e.target.value })} />
+                <Input id="entry-location" dictation value={entryForm.location} maxLength={300} placeholder="For example: boiler room ceiling" onChange={(e) => setEntryForm({ ...entryForm, location: e.target.value })} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="entry-material">Material *</Label>

@@ -17,6 +17,7 @@ const RECOMMENDED = [
   "restaurant_cafe_pub",
   "care_home_healthcare",
   "holiday_park_campsite",
+  "golf_club",
 ];
 const NOT_RECOMMENDED = [
   "leisure_sports_centre",

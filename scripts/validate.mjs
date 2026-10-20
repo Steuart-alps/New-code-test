@@ -78,6 +78,9 @@ const DEFAULT_CHECKS = {
   "billing-addon-catalog": { stage: "static", class: "light", cmd: api("test:billing-addon-catalog") },
   "staged-photo-creation": { stage: "static", class: "light", cmd: api("test:staged-photo-creation") },
   "fix-track-priority": { stage: "static", class: "light", cmd: web("test:fix-track-priority") },
+  "api-contract": { stage: "static", class: "light", cmd: "pnpm --filter @workspace/api-spec run test:contract && pnpm run check:api-contract" },
+  "openapi-route-inventory": { stage: "static", class: "light", cmd: api("test:openapi-routes") },
+  "generated-client-runtime": { stage: "static", class: "light", cmd: "pnpm --filter @workspace/api-client-react run test:generated-client" },
 
   "test-trial-reminders": { stage: "integration", class: "api", cmd: api("test:trial-reminders") },
   "test-tenant-isolation": { stage: "integration", class: "api", cmd: api("test:isolation:ci") },
@@ -85,6 +88,8 @@ const DEFAULT_CHECKS = {
   "test-config": { stage: "integration", class: "api", cmd: "cd artifacts/api-server && pnpm run test:config:ci" },
   "fresh-schema-regression": { stage: "integration", class: "api", cmd: api("test:schema:fresh") },
   "test-twofa-recovery": { stage: "integration", class: "api", cmd: api("test:twofa-recovery") },
+  "staff-invitations": { stage: "integration", class: "api", cmd: api("test:staff-invitations") },
+  "welcome-email": { stage: "integration", class: "api", cmd: api("test:welcome-email") },
   "pat-evidence-retention": { stage: "integration", class: "api", cmd: api("test:pat-dept-isolation") },
   "content-filter-endpoints": { stage: "integration", class: "api", cmd: api("test:content-filter") },
   "feedback-triage": { stage: "integration", class: "api", cmd: api("test:feedback-triage") },
@@ -102,6 +107,7 @@ const DEFAULT_CHECKS = {
 
   "hot-tub-pdf-export": { stage: "integration", class: "browser", cmd: web("test:hot-tub-pdf") },
   "recovery-code-browser": { stage: "integration", class: "browser", cmd: web("test:recovery-code-browser") },
+  "verify-email-browser": { stage: "integration", class: "browser", cmd: web("test:verify-email-browser") },
   "photo-upload-browser": { stage: "integration", class: "browser", cmd: web("test:photo-upload-browser") },
   "billing-addon-settings-browser": { stage: "integration", class: "browser", cmd: web("test:billing-addon-settings-browser") },
   "required-track-photos-browser": { stage: "integration", class: "browser", cmd: web("test:required-track-photos-browser") },

@@ -20,6 +20,7 @@ export function KitchenInspectionExport({ siteId }: { siteId: number | null }) {
     return () => { generation.current++; controller.current?.abort(); };
   }, [siteId, activeClientId, user?.id]);
   if (user?.role !== "client_admin" && user?.role !== "consultant"
+    && user?.role !== "client_manager"
     && !(user?.role === "client_staff" && user.isDepartmentManager)) return null;
   async function download() {
     if (siteId === null || !from || !to || from > to) return;

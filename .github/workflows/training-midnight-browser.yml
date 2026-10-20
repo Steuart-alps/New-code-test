@@ -1,0 +1,83 @@
+name: Training pages browser checks
+
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/pages/train-track.tsx"
+      - "artifacts/compliance-tracker/src/hooks/use-local-today.ts"
+      - "artifacts/compliance-tracker/src/lib/training-expiry.ts"
+      - "artifacts/compliance-tracker/src/lib/training-matrix.ts"
+      - "artifacts/compliance-tracker/tests/training-midnight-*"
+      - "artifacts/compliance-tracker/src/pages/safe-track.tsx"
+      - "artifacts/compliance-tracker/src/lib/induction-print.ts"
+      - "artifacts/compliance-tracker/tests/induction-form-*"
+      - "artifacts/compliance-tracker/tests/safe-track-induction-*"
+      - "artifacts/api-server/src/routes/safe-track.ts"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/training-midnight-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/pages/train-track.tsx"
+      - "artifacts/compliance-tracker/src/hooks/use-local-today.ts"
+      - "artifacts/compliance-tracker/src/lib/training-expiry.ts"
+      - "artifacts/compliance-tracker/src/lib/training-matrix.ts"
+      - "artifacts/compliance-tracker/tests/training-midnight-*"
+      - "artifacts/compliance-tracker/src/pages/safe-track.tsx"
+      - "artifacts/compliance-tracker/src/lib/induction-print.ts"
+      - "artifacts/compliance-tracker/tests/induction-form-*"
+      - "artifacts/compliance-tracker/tests/safe-track-induction-*"
+      - "artifacts/api-server/src/routes/safe-track.ts"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/training-midnight-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  training-midnight:
+    name: Training expiry at midnight and induction forms
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run training midnight checks
+        run: pnpm --filter @workspace/compliance-tracker run test:training-midnight-browser
+
+      - name: Run induction form checks
+        run: pnpm --filter @workspace/compliance-tracker run test:induction-form-browser
+
+      # The save-and-reload check boots the API on a private PostgreSQL
+      # cluster (initdb/pg_ctl ship with ubuntu-latest but not on PATH).
+      - name: Put PostgreSQL server tools on PATH
+        run: |
+          bin="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$bin" ] || [ ! -x "$bin/initdb" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql
+            bin="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)"
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Run induction save, reload and print checks
+        run: pnpm --filter @workspace/api-server run test:safe-track-induction-browser

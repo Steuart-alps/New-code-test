@@ -97,10 +97,17 @@ const stubs = {
   `,
   drizzle: `
     export const eq = (left, right) => ({ left, right });
+    // offboarding.ts (imported through billing.ts) needs these at bundle time.
+    export const and = (...conditions) => ({ and: conditions });
+    export const isNull = (column) => ({ isNull: column });
+    export const isNotNull = (column) => ({ isNotNull: column });
+    export const inArray = (column, values) => ({ column, values });
+    export const lt = (left, right) => ({ lt: [left, right] });
     export const sql = (strings, ...values) => ({
       text: strings.reduce((text, part, index) => text + part + (index < values.length ? "?" : ""), ""),
       values,
     });
+    sql.raw = (text) => ({ text, values: [] });
   `,
   db: `
     const state = globalThis.__billingAddonCatalogState;
@@ -194,6 +201,7 @@ const stubs = {
     export const hashDiscountCode = (value) => value;
     export const issueClientDiscountCode = async () => ({});
     export const normaliseAlpsDiscountCode = (value) => value;
+    export const redeemAlpsDiscountOnSubscription = async () => ({});
     export const releaseAlpsDiscountReservation = async () => {};
     export const reserveAlpsDiscount = async () => null;
     export const verifyClientDiscountCode = async () => false;
@@ -399,25 +407,16 @@ try {
     assert.equal(state.calls, before, "rejected service keys must not touch fake Stripe");
   }
 
-  // GreenTrack's module is not available yet ("Coming soon"): it stays in the
-  // catalogue but cannot be bought on its own.
-  const comingSoon = new Set(["greentrack"]);
+  // Every module is live: none is marked "Coming soon", so each one, GreenTrack
+  // included, must be purchasable through the loop below.
   assert.deepEqual(
     config.data.services.catalog.filter(({ comingSoon: soon }) => soon === true).map(({ key }) => key),
-    [...comingSoon],
-    "GET /billing/config must mark coming-soon services",
+    [],
+    "GET /billing/config must not mark any live service as coming soon",
   );
-  for (const key of comingSoon) {
-    state.subscription = makeSubscription();
-    state.stripe = fakeStripe();
-    const response = await request("POST", "/services", { service: key, action: "add" }, { clientContext: true });
-    assert.equal(response.status, 400, `${key} is coming soon and must not be purchasable`);
-    assert.deepEqual(state.calls.subscriptionUpdate, [], `${key}: no Stripe mutation for a coming-soon service`);
-    assert.deepEqual(state.calls.invoiceCreate, [], `${key}: no charge for a coming-soon service`);
-  }
+  assert.ok(fixtures.some(({ key }) => key === "greentrack"), "GreenTrack must be a purchasable add-on");
 
   for (const fixture of fixtures) {
-    if (comingSoon.has(fixture.key)) continue;
     state.subscription = makeSubscription();
     state.stripe = fakeStripe();
     state.queries.length = 0;

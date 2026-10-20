@@ -14,6 +14,7 @@ import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const base = process.env.API_BASE;
 const outbox = process.env.TEST_EMAIL_CAPTURE_PATH;
@@ -103,8 +104,11 @@ async function addUser(owner, role, label) {
   return { request, email, id: created.data.id };
 }
 
-test("a client admin cannot take over the owner or set another user's sign-in details", async () => {
+test("an Owner cannot take over the consultant's account or set another user's sign-in details", async () => {
+  // The consultant (ALPS) belongs to the business like its Owners, so this is
+  // the account an Owner (client_admin) must not be able to take over.
   const owner = await registerOwner("takeover");
+  promoteToConsultant(owner.email);
   const admin = await addUser(owner, "client_admin", "admin");
   const staff = await addUser(owner, "client_staff", "staff");
 
@@ -285,6 +289,10 @@ test("roster responses never include PIN data and sites must belong to the busin
 
 test("platform routes, new-business trials and permanent deletion", async () => {
   const owner = await registerOwner("platform");
+  assert.equal((await owner.request("POST", "/clients", { name: "Not allowed", slug: `owner-${randomUUID().slice(0, 8)}` })).status, 403,
+    "a business Owner can't add businesses");
+  // Consultants who aren't platform operators add businesses on a trial.
+  promoteToConsultant(owner.email);
   assert.equal((await owner.request("POST", "/billing/discount-code", {})).status, 403, "owners cannot issue ALPS codes");
   assert.equal((await owner.request("POST", "/admin/ensure-service-prices", {})).status, 403);
   assert.equal((await owner.request("GET", "/admin/service-price-preflight")).status, 403, "served at /api/admin, not /api/api/admin");
@@ -313,10 +321,14 @@ test("injury details are only returned to managers", async () => {
 
   const managerList = await owner.request("GET", "/incidents");
   assert.equal(managerList.data.find((row) => row.id === reported.data.id).injuriesSustained, "Fractured wrist");
+  // Viewers see only their own training records.
+  assert.equal((await viewer.request("GET", "/incidents")).status, 403);
   for (const reader of [staff, viewer]) {
-    const list = await reader.request("GET", "/incidents");
-    assert.equal(list.status, 200);
-    assert.equal(list.data.find((row) => row.id === reported.data.id).injuriesSustained, null);
+    if (reader === staff) {
+      const list = await reader.request("GET", "/incidents");
+      assert.equal(list.status, 200);
+      assert.equal(list.data.find((row) => row.id === reported.data.id).injuriesSustained, null);
+    }
     // Exports carry the unredacted incident rows (incidents/records.csv) and
     // audit history, so they stay limited to roles that can read injuries.
     assert.equal((await reader.request("GET", "/export")).status, 403, "full data export is management-only");

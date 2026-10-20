@@ -205,7 +205,7 @@ async function main() {
   // Present (header-only CSVs are empty files) and not in export-errors.csv,
   // so each query runs against the real schema.
   const addedFiles = [
-    "kitchen/cleaning-tasks.csv", "kitchen/cleaning-logs.csv",
+    "kitchen/cleaning-tasks.csv", "kitchen/cleaning-logs.csv", "kitchen/closed-days.csv",
     "room-track/rooms.csv", "room-track/checks.csv",
     "swim-track/first-aid-checks.csv",
     "green-track/puwer-inspections.csv", "green-track/service-records.csv", "green-track/defects.csv",

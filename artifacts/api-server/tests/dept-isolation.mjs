@@ -10,11 +10,19 @@
 //   3. Admin creates staff and viewer users assigned to Department Alpha.
 //   4. Staff and viewer log in; tests confirm they see only Alpha resources.
 //   5. Admin confirms unrestricted access to both departments.
+//   6. A staff member moves from Alpha to Beta: department reports keep each
+//      record with the department recorded when it was created (cookie and
+//      bearer submissions), across sites and tenants, and older records with
+//      no recorded department are listed apart rather than reassigned.
 //
 // Usage: node tests/dept-isolation.mjs  (API must be running on API_BASE)
 // Exits 0 when every check passes, 1 otherwise.
 
+import { createRequire } from "node:module";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
+// pg comes from @workspace/db; used only for the legacy-row and trigger checks.
+const pg = createRequire(new URL("../../../lib/db/package.json", import.meta.url))("pg");
 
 let passed = 0;
 const failures = [];
@@ -40,14 +48,29 @@ function expectOk(name, status, allowed = [200, 201]) {
   check(name, allowed.includes(status), `expected ${allowed.join("/")}, got ${status}`);
 }
 
+// Mobile app requests: Authorization: Bearer <token from /auth/mobile-login>.
+function makeBearerSession(token) {
+  return async function request(method, path, body) {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", authorization: `Bearer ${token}` },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const ct = res.headers.get("content-type") ?? "";
+    const data = ct.includes("application/json") ? await res.json().catch(() => null) : (await res.text().catch(() => null), null);
+    return { status: res.status, data };
+  };
+}
+
 function makeSession() {
   let cookie = "";
-  return async function request(method, path, body) {
+  return async function request(method, path, body, extraHeaders = {}) {
     const res = await fetch(`${BASE}${path}`, {
       method,
       headers: {
         "Content-Type": "application/json",
         ...(cookie ? { cookie } : {}),
+        ...extraHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -134,14 +157,13 @@ async function main() {
   check("admin: found beta item", betaItem != null, "no item for beta site");
 
   // Add fire-safety and legionella checks on both sites via admin
-  const uniqueDate = (offset = 0) => {
-    const d = new Date();
-    d.setDate(d.getDate() - offset);
-    return d.toISOString().slice(0, 10);
-  };
+  // The account's own day (Europe/London), which the record lock compares
+  // against; a UTC date is a day behind between 23:00 and 00:00 UTC in BST.
+  const uniqueDate = (offset = 0) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" })
+    .format(new Date(Date.now() - offset * 86400000));
 
   const fireAlpha = await admin("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(1),
     result: "pass",
     siteId: siteAlphaId,
@@ -150,7 +172,7 @@ async function main() {
   const fireAlphaId = fireAlpha.status === 201 ? fireAlpha.data?.id : null;
 
   const fireBeta = await admin("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(0),
     result: "pass",
     siteId: siteBetaId,
@@ -205,25 +227,85 @@ async function main() {
     outletId: outletBetaId, notes: `Beta reading ${ts}`,
   });
   expectOk("admin: record beta sentinel reading", betaReading.status, [201]);
-  // A historically mismatched outlet reference must not expose a Beta check
-  // through an otherwise accessible Alpha outlet.
+  // New readings can only link to an active outlet of this business at the
+  // reading's own site that takes the reading's check type.
+  const outletLinkRejections = [
+    ["another site's outlet", { siteId: siteBetaId, outletId: outletAlphaId }],
+    ["a site outlet without a site", { siteId: null, outletId: outletAlphaId }],
+    ["an incompatible check type", { siteId: siteAlphaId, outletId: outletAlphaId, checkType: "cold_sentinel_temp", temperature: 12 }],
+    ["an unknown outlet", { siteId: siteAlphaId, outletId: 2147480000 }],
+  ];
+  for (const [label, link] of outletLinkRejections) {
+    expectBlocked(`admin: reading cannot link to ${label}`, (await admin("POST", "/legionella", {
+      checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass", temperature: 54,
+      performedBy: "Dept Test Admin", notes: `Rejected outlet link ${ts}`, ...link,
+    })).status);
+  }
+  const retiredOutlet = await admin("POST", "/legionella/outlets", {
+    name: `Retired alpha sentinel ${ts}`, type: "hot", siteId: siteAlphaId,
+  });
+  expectOk("admin: retire an alpha outlet", (await admin("DELETE", `/legionella/outlets/${retiredOutlet.data?.id}`)).status, [204]);
+  expectBlocked("admin: reading cannot link to a removed outlet", (await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass", temperature: 54,
+    siteId: siteAlphaId, outletId: retiredOutlet.data?.id,
+  })).status);
+  // Edits keep the same rules: a linked reading cannot move to another site,
+  // and cannot be relinked to another site's outlet.
+  expectBlocked("admin: linked reading cannot move to another site", (await admin("PUT", `/legionella/${alphaReading.data?.id}`, {
+    siteId: siteBetaId,
+  })).status);
+  expectBlocked("admin: reading cannot be relinked to another site's outlet", (await admin("PUT", `/legionella/${alphaReading.data?.id}`, {
+    outletId: outletBetaId,
+  })).status);
+  // Valid monthly history: two readings this month and one last month on the
+  // same outlet; only this month's readings count towards its monthly test.
+  const secondAlphaReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
+    temperature: 51, performedBy: "Dept Test Admin", siteId: siteAlphaId, outletId: outletAlphaId,
+  });
+  expectOk("admin: second alpha sentinel reading this month", secondAlphaReading.status, [201]);
+  const lastMonthAlphaReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp",
+    checkDate: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15)).toISOString().slice(0, 10),
+    result: "pass", temperature: 53, performedBy: "Dept Test Admin", siteId: siteAlphaId, outletId: outletAlphaId,
+  }, { "X-Override-Reason": encodeURIComponent("Dept isolation fixture: prior-month reading") });
+  expectOk("admin: last month's alpha sentinel reading", lastMonthAlphaReading.status, [201]);
+  const alphaHistory = (await admin("GET", "/legionella/outlet-status")).data?.find?.(row => row.id === outletAlphaId);
+  const historyIds = new Set((alphaHistory?.thisMonthChecks ?? []).map(reading => reading.id));
+  check("admin: alpha outlet keeps this month's readings and leaves out last month's",
+    historyIds.has(alphaReading.data?.id) && historyIds.has(secondAlphaReading.data?.id) &&
+      !historyIds.has(lastMonthAlphaReading.data?.id), `monthly checks=${[...historyIds]}`);
+  check("admin: alpha outlet's readings stayed linked after refused edits",
+    [alphaReading.data?.id, secondAlphaReading.data?.id].every(id => historyIds.has(id)), "reading unlinked");
+
+  // A historically mismatched outlet reference (an outlet moved to another
+  // site after it was tested) must not expose a Beta check through an
+  // otherwise accessible Alpha outlet.
+  const movedOutlet = await admin("POST", "/legionella/outlets", {
+    name: `Moved sentinel ${ts}`, type: "hot", siteId: siteBetaId,
+  });
+  expectOk("admin: create beta outlet to move", movedOutlet.status, [201]);
   const crossSiteReading = await admin("POST", "/legionella", {
     checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
     temperature: 54, performedBy: "Dept Test Admin", siteId: siteBetaId,
-    outletId: outletAlphaId, notes: `Beta linked to Alpha outlet ${ts}`,
+    outletId: movedOutlet.data?.id, notes: `Beta linked to Alpha outlet ${ts}`,
   });
-  expectOk("admin: record mismatched outlet reference", crossSiteReading.status, [201]);
+  expectOk("admin: record beta reading before the outlet moves", crossSiteReading.status, [201]);
+  expectOk("admin: move tested outlet to alpha site", (await admin("PUT", `/legionella/outlets/${movedOutlet.data?.id}`, {
+    siteId: siteAlphaId,
+  })).status);
 
   // Put one module record in the most recently completed month. A trend must
   // return its count without leaking the record to another department.
   const lastMonthDate = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15))
     .toISOString().slice(0, 10);
+  // Backfilling a past record needs an owner's reason.
   const priorMonthCheck = await admin("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: lastMonthDate,
     result: "pass",
     siteId: siteAlphaId,
-  });
+  }, { "X-Override-Reason": encodeURIComponent("Dept isolation fixture: prior-month record") });
   expectOk("admin: create prior-month module record", priorMonthCheck.status, [200, 201]);
 
   // ── 4. Create staff user assigned to Dept Alpha ──────────────────────────────
@@ -281,8 +363,8 @@ async function main() {
       (pm?.health === "clear") === (completedPm === expectedSites),
       `totals=${JSON.stringify(totals)} card=${JSON.stringify(pm)}`);
   };
-  const today = new Date().toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const today = uniqueDate(0);
+  const yesterday = uniqueDate(1);
   const draft = await admin("POST", "/daily-track-am", {
     siteId: siteAlphaId, checklistType: "premises_opening", checkDate: today, items: [],
   });
@@ -292,14 +374,14 @@ async function main() {
     ["/daily-track-pm", "kitchen_closing"],
   ]) {
     const prior = await admin("POST", path, {
-      siteId: siteBetaId, checklistType, checkDate: yesterday, items: [],
+      siteId: siteBetaId, checklistType, checkDate: yesterday, items: [{ label: "Checked", checked: true, result: "pass" }],
       submittedAt: new Date().toISOString(),
     });
     expectOk("prior-day checklist does not count today", prior.status, [201]);
   }
   assertDashboardChecklists("before submissions", await admin("GET", "/dashboard/summary"), 2, 0, 0);
   const submitChecklist = (siteId, path, checklistType) => admin("POST", path, {
-    siteId, checklistType, checkDate: today, items: [], submittedAt: new Date().toISOString(),
+    siteId, checklistType, checkDate: today, items: [{ label: "Checked", checked: true, result: "pass" }], submittedAt: new Date().toISOString(),
   });
   const alphaAm = await submitChecklist(siteAlphaId, "/daily-track-am", "kitchen_opening");
   const alphaPm = await submitChecklist(siteAlphaId, "/daily-track-pm", "kitchen_closing");
@@ -396,7 +478,7 @@ async function main() {
   })).status);
 
   const staffFire = await staff("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(0),
     result: "pass",
     siteId: siteAlphaId,
@@ -422,7 +504,7 @@ async function main() {
     replayed.data?.id === firstSend.data?.id && replayed.data?.submittedById === firstSend.data?.submittedById,
     `first=${firstSend.data?.id} replay=${replayed.data?.id}`);
   expectOk("staff: reused device entry with different answers is rejected", (await staff("POST", replayPath, {
-    ...replayBody, answers: [{ question: "Closing check", checked: false }],
+    ...replayBody, answers: [{ question: "Closing check", checked: false, result: "fail", notes: "Doors open" }],
   })).status, [409]);
   expectOk("staff: another device entry for a submitted checklist is rejected", (await staff("POST", replayPath, {
     ...replayBody, clientEntryId: `daily-${Date.now().toString(36)}-other-entry`,
@@ -433,7 +515,7 @@ async function main() {
     siteId: siteAlphaId,
     checklistType: "kitchen_opening",
     checkDate: uniqueDate(1),
-    items: [],
+    items: [{ label: "Checked", checked: true, result: "pass" }],
     submittedAt: new Date().toISOString(),
   });
   expectOk("staff: submit legacy AM checklist", staffLegacyDaily.status, [201]);
@@ -688,6 +770,51 @@ async function main() {
           reading.id === betaReading.data?.id || reading.id === crossSiteReading.data?.id)),
     "alpha reading missing or beta outlet/reading visible");
 
+  // ── 8b-ii. Outlet create/edit/delete need access to the outlet's site ─────────
+  const betaStaffEmail = `dept-staff-beta-${ts}@test.local`;
+  expectOk("admin: create beta staff user", (await admin("POST", "/users", {
+    name: "Staff Beta", email: betaStaffEmail, password: staffPassword,
+    role: "client_staff", clientId, departmentId: deptBetaId,
+  })).status, [200, 201]);
+  const betaStaff = makeSession();
+  expectOk("beta staff: login", (await betaStaff("POST", "/auth/login", {
+    email: betaStaffEmail, password: staffPassword,
+  })).status, [200, 201]);
+  for (const [who, session, ownSiteId, otherSiteId, otherOutletId] of [
+    ["alpha staff", staff, siteAlphaId, siteBetaId, outletBetaId],
+    ["beta staff", betaStaff, siteBetaId, siteAlphaId, outletAlphaId],
+  ]) {
+    expectForbidden(`${who}: cannot add an outlet at the other department's site`,
+      (await session("POST", "/legionella/outlets", { name: `${who} cross outlet ${ts}`, type: "hot", siteId: otherSiteId })).status);
+    expectBlocked(`${who}: cannot add an outlet at an unknown site`,
+      (await session("POST", "/legionella/outlets", { name: `${who} unknown-site outlet ${ts}`, type: "hot", siteId: 2147480000 })).status);
+    expectForbidden(`${who}: cannot edit the other department's outlet`,
+      (await session("PUT", `/legionella/outlets/${otherOutletId}`, { name: `${who} renamed ${ts}` })).status);
+    expectForbidden(`${who}: cannot remove the other department's outlet`,
+      (await session("DELETE", `/legionella/outlets/${otherOutletId}`)).status);
+    const own = await session("POST", "/legionella/outlets", { name: `${who} outlet ${ts}`, type: "cold", siteId: ownSiteId });
+    expectOk(`${who}: can add an outlet at own site`, own.status, [201]);
+    expectOk(`${who}: can rename own outlet`,
+      (await session("PUT", `/legionella/outlets/${own.data?.id}`, { name: `${who} outlet renamed ${ts}` })).status);
+    expectForbidden(`${who}: cannot move own outlet to the other department's site`,
+      (await session("PUT", `/legionella/outlets/${own.data?.id}`, { siteId: otherSiteId })).status);
+    expectOk(`${who}: can remove own outlet`, (await session("DELETE", `/legionella/outlets/${own.data?.id}`)).status, [204]);
+  }
+  const outletsAfterStaff = await admin("GET", "/legionella/outlets");
+  check("admin: refused staff changes left both department outlets as they were",
+    [[outletAlphaId, siteAlphaId, `Alpha sentinel ${ts}`], [outletBetaId, siteBetaId, `Beta sentinel ${ts}`]].every(([id, site, name]) =>
+      outletsAfterStaff.data?.some?.(row => row.id === id && row.site_id === site && row.name === name)),
+    "a department outlet was renamed, moved or removed");
+  // Account-wide admins manage outlets at every site.
+  for (const [label, siteId] of [["alpha", siteAlphaId], ["beta", siteBetaId]]) {
+    const created = await admin("POST", "/legionella/outlets", { name: `Admin ${label} outlet ${ts}`, type: "hot", siteId });
+    expectOk(`admin: add outlet at ${label} site`, created.status, [201]);
+    expectOk(`admin: edit outlet at ${label} site`,
+      (await admin("PUT", `/legionella/outlets/${created.data?.id}`, { siteId: label === "alpha" ? siteBetaId : siteAlphaId })).status);
+    expectOk(`admin: remove outlet moved from ${label} site`,
+      (await admin("DELETE", `/legionella/outlets/${created.data?.id}`)).status, [204]);
+  }
+
   // ── 8c. Viewer (read-only) department scoping ─────────────────────────────────
   const viewerEmail = `dept-viewer-alpha-${ts}@test.local`;
   const viewerPassword = "password-789";
@@ -708,57 +835,18 @@ async function main() {
   });
   expectOk("viewer: login", viewerLogin.status, [200, 201]);
 
-  const viewerSiteList = await viewer("GET", "/sites");
-  expectOk("viewer: GET /sites", viewerSiteList.status);
-  const viewerSites = Array.isArray(viewerSiteList.data) ? viewerSiteList.data : [];
-  check(
-    "viewer: /sites includes alpha site",
-    viewerSites.some((s) => s.id === siteAlphaId),
-    "alpha site missing from viewer list",
-  );
-  check(
-    "viewer: /sites excludes beta site",
-    !viewerSites.some((s) => s.id === siteBetaId),
-    "beta site visible in viewer list",
-  );
-  expectOk(
-    "viewer: GET /sites/:id (own dept)",
-    (await viewer("GET", `/sites/${siteAlphaId}`)).status,
-  );
-  expectForbidden(
-    "viewer: GET /sites/:id (other dept)",
-    (await viewer("GET", `/sites/${siteBetaId}`)).status,
-  );
-
-  const viewerItemList = await viewer("GET", "/compliance-items");
-  expectOk("viewer: GET /compliance-items", viewerItemList.status);
-  const viewerItems = Array.isArray(viewerItemList.data)
-    ? viewerItemList.data
-    : viewerItemList.data?.items ?? [];
-  if (alphaItem) {
-    check(
-      "viewer: /compliance-items includes alpha item",
-      viewerItems.some((i) => i.id === alphaItem.id),
-      "alpha item missing from viewer list",
-    );
-  }
-  if (betaItem) {
-    check(
-      "viewer: /compliance-items excludes beta item",
-      !viewerItems.some((i) => i.id === betaItem.id),
-      "beta dept item visible in viewer list",
-    );
-    expectForbidden(
-      "viewer: GET /compliance-items/:id (other dept)",
-      (await viewer("GET", `/compliance-items/${betaItem.id}`)).status,
-    );
+  // Viewers see only their own training records, so even their own
+  // department's sites and items are closed to them.
+  for (const path of ["/sites", `/sites/${siteAlphaId}`, `/sites/${siteBetaId}`, "/compliance-items",
+    ...(betaItem ? [`/compliance-items/${betaItem.id}`] : [])]) {
+    expectForbidden(`viewer: GET ${path} refused`, (await viewer("GET", path)).status);
   }
 
-  // Viewers are read-only: all mutations must be rejected, even in their own dept.
+  // All viewer mutations must be rejected, even in their own dept.
   expectForbidden(
     "viewer: POST /fire-safety rejected",
     (await viewer("POST", "/fire-safety", {
-      checkType: "alarm",
+      checkType: "alarm", callPoint: "CP1",
       checkDate: uniqueDate(0),
       result: "pass",
       siteId: siteAlphaId,
@@ -778,6 +866,10 @@ async function main() {
       email, password: "password-000",
     })).status, [200, 201]);
     const scopedSites = await session("GET", "/sites");
+    if (role === "client_viewer") {
+      expectForbidden(`unassigned ${role}: GET /sites refused`, scopedSites.status);
+      continue;
+    }
     expectOk(`unassigned ${role}: GET /sites`, scopedSites.status);
     const rows = Array.isArray(scopedSites.data) ? scopedSites.data : [];
     check(`unassigned ${role}: excludes alpha department`, !rows.some(s => s.id === siteAlphaId), "alpha site visible");
@@ -899,6 +991,198 @@ async function main() {
     adminSites.some((s) => s.id === siteBetaId),
     "beta site missing from admin list",
   );
+
+  // ── 10. Department moves keep past report totals fixed ─────────────────────
+  // Records keep the department their author belonged to when each was
+  // created; a later move, an edit or the author's other sites never move them.
+  const annexAlpha = await admin("POST", "/sites", { name: `Alpha Annex ${ts}`, departmentId: deptAlphaId });
+  const annexBeta = await admin("POST", "/sites", { name: `Beta Annex ${ts}`, departmentId: deptBetaId });
+  expectOk("transfer: create Alpha Annex", annexAlpha.status, [200, 201]);
+  expectOk("transfer: create Beta Annex", annexBeta.status, [200, 201]);
+  const annexAlphaId = annexAlpha.data?.id;
+  const annexBetaId = annexBeta.data?.id;
+  const moverEmail = `dept-mover-${ts}@test.local`;
+  const moverPassword = "password-789";
+  const moverRes = await admin("POST", "/users", {
+    name: "Moving Staff", email: moverEmail, password: moverPassword,
+    role: "client_staff", clientId, departmentId: deptAlphaId,
+  });
+  expectOk("transfer: create staff in Alpha", moverRes.status, [200, 201]);
+  const moverId = moverRes.data?.id;
+  const mover = makeSession();
+  expectOk("transfer: staff web login", (await mover("POST", "/auth/login", {
+    email: moverEmail, password: moverPassword,
+  })).status, [200, 201]);
+  const mobileLogin = await makeSession()("POST", "/auth/mobile-login", { email: moverEmail, password: moverPassword });
+  expectOk("transfer: staff mobile login", mobileLogin.status);
+  check("transfer: mobile login returns a bearer token", typeof mobileLogin.data?.token === "string",
+    JSON.stringify(mobileLogin.data));
+  const moverMobile = makeBearerSession(mobileLogin.data?.token ?? "missing");
+
+  const today10 = uniqueDate(0);
+  const range = `from=${uniqueDate(1)}&to=${today10}`;
+  const fireAt = (session, siteId) => session("POST", "/fire-safety", {
+    checkType: "alarm", callPoint: "CP1", checkDate: today10, result: "pass", siteId,
+  });
+  const webFire = await fireAt(mover, annexAlphaId);
+  expectOk("transfer: web fire check while in Alpha", webFire.status, [200, 201]);
+  expectOk("transfer: mobile fire check while in Alpha", (await fireAt(moverMobile, annexAlphaId)).status, [200, 201]);
+  expectOk("transfer: mobile AM checklist while in Alpha", (await moverMobile("POST",
+    `/daily-checklists/${annexAlphaId}/${today10}/am`, {
+      answers: [{ question: "Opening check", checked: true }],
+    })).status, [201]);
+
+  const report = async (deptId, siteId) => {
+    const res = await admin("GET", `/reports/compliance?${range}&departmentId=${deptId}${siteId ? `&siteId=${siteId}` : ""}`);
+    expectOk(`transfer: department ${deptId} report${siteId ? ` at site ${siteId}` : ""}`, res.status);
+    return res.data ?? {};
+  };
+  const fireCount = (data, siteId) =>
+    data.moduleActivity?.find(row => row.module === "FireTrack" && row.siteId === siteId)?.count ?? 0;
+  const amDays = (data, siteId) =>
+    data.dailyChecklists?.find(row => row.siteId === siteId && row.type === "am")?.submitted ?? 0;
+
+  const alphaBefore = await report(deptAlphaId, annexAlphaId);
+  check("transfer: Alpha counts web and mobile fire checks", fireCount(alphaBefore, annexAlphaId) === 2,
+    JSON.stringify(alphaBefore.moduleActivity));
+  check("transfer: Alpha counts the mobile AM checklist", amDays(alphaBefore, annexAlphaId) === 1,
+    JSON.stringify(alphaBefore.dailyChecklists));
+  check("transfer: report says how departments are attributed",
+    alphaBefore.attribution === "recorded_at_submission"
+      && alphaBefore.departmentNotRecorded?.label === "Department not recorded",
+    JSON.stringify({ attribution: alphaBefore.attribution, notRecorded: alphaBefore.departmentNotRecorded }));
+
+  expectOk("transfer: move staff to Beta", (await admin("PUT", `/users/${moverId}`, { departmentId: deptBetaId })).status);
+  expectOk("transfer: web fire check after moving to Beta", (await fireAt(mover, annexBetaId)).status, [200, 201]);
+  expectOk("transfer: mobile AM checklist after moving to Beta", (await moverMobile("POST",
+    `/daily-checklists/${annexBetaId}/${today10}/am`, {
+      answers: [{ question: "Opening check", checked: true }],
+    })).status, [201]);
+  expectOk("transfer: admin edits a pre-move record", (await admin("PUT", `/fire-safety/${webFire.data?.id}`, {
+    notes: `Edited after the move ${ts}`,
+  })).status);
+
+  const alphaAfter = await report(deptAlphaId, annexAlphaId);
+  check("transfer: Alpha's past fire total is unchanged", fireCount(alphaAfter, annexAlphaId) === 2,
+    JSON.stringify(alphaAfter.moduleActivity));
+  check("transfer: Alpha's past AM total is unchanged", amDays(alphaAfter, annexAlphaId) === 1,
+    JSON.stringify(alphaAfter.dailyChecklists));
+  const alphaAll = await report(deptAlphaId);
+  check("transfer: post-move Beta work is not counted for Alpha",
+    fireCount(alphaAll, annexBetaId) === 0 && !alphaAll.sites?.some(site => site.id === annexBetaId),
+    JSON.stringify(alphaAll.moduleActivity));
+  const betaAtAlphaAnnex = await report(deptBetaId, annexAlphaId);
+  check("transfer: pre-move Alpha work does not follow the staff member to Beta",
+    fireCount(betaAtAlphaAnnex, annexAlphaId) === 0 && amDays(betaAtAlphaAnnex, annexAlphaId) === 0,
+    JSON.stringify(betaAtAlphaAnnex));
+  const betaAnnexReport = await report(deptBetaId, annexBetaId);
+  check("transfer: Beta counts post-move web and mobile work",
+    fireCount(betaAnnexReport, annexBetaId) === 1 && amDays(betaAnnexReport, annexBetaId) === 1,
+    JSON.stringify(betaAnnexReport));
+  const alphaAtBetaAnnex = await report(deptAlphaId, annexBetaId);
+  check("transfer: Alpha filtered to a Beta site shows none of the post-move work",
+    (alphaAtBetaAnnex.moduleActivity?.length ?? -1) === 0 && amDays(alphaAtBetaAnnex, annexBetaId) === 0,
+    JSON.stringify(alphaAtBetaAnnex));
+
+  // Database checks: what was stored, that it can't be rewritten, cross-tenant
+  // authors, and rows from before departments were recorded.
+  const outsiderEmail = `dept-outsider-${ts}@test.local`;
+  const outsider = makeSession();
+  const outsiderReg = await outsider("POST", "/auth/register", {
+    name: "Other Tenant Admin", email: outsiderEmail, password: "password-123",
+  });
+  expectOk("cross-tenant: register another business", outsiderReg.status, [200, 201]);
+  if (outsiderReg.data?.verificationToken) {
+    await outsider("GET", `/auth/verify-email?token=${encodeURIComponent(outsiderReg.data.verificationToken)}`);
+    await outsider("POST", "/auth/login", { email: outsiderEmail, password: "password-123" });
+  }
+  const outsiderMe = await outsider("GET", "/auth/me");
+  const outsiderClientId = (outsiderMe.data?.user ?? outsiderMe.data)?.clientId;
+  const outsiderDept = await outsider("POST", "/departments", { name: "Other Tenant Dept" });
+  expectOk("cross-tenant: create department in the other business", outsiderDept.status, [200, 201]);
+  const outsiderStaff = await outsider("POST", "/users", {
+    name: "Other Tenant Staff", email: `dept-outsider-staff-${ts}@test.local`, password: "password-456",
+    role: "client_staff", clientId: outsiderClientId, departmentId: outsiderDept.data?.id,
+  });
+  expectOk("cross-tenant: create staff in the other business", outsiderStaff.status, [200, 201]);
+
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  try {
+    const stored = await client.query(
+      `SELECT site_id, submitter_department_id, submitter_department_source FROM fire_safety_checks
+       WHERE client_id = $1 AND created_by = $2 ORDER BY id`, [clientId, moverId]);
+    check("db: each fire check stores the department at creation",
+      JSON.stringify(stored.rows.map(r => [r.site_id, r.submitter_department_id, r.submitter_department_source]))
+        === JSON.stringify([[annexAlphaId, deptAlphaId, "recorded"], [annexAlphaId, deptAlphaId, "recorded"], [annexBetaId, deptBetaId, "recorded"]]),
+      JSON.stringify(stored.rows));
+    const mobileDaily = await client.query(
+      `SELECT site_id, submitter_department_id FROM daily_checklist_submissions
+       WHERE client_id = $1 AND submitted_by_id = $2 ORDER BY id`, [clientId, moverId]);
+    check("db: bearer daily submissions store the department at creation",
+      JSON.stringify(mobileDaily.rows.map(r => [r.site_id, r.submitter_department_id]))
+        === JSON.stringify([[annexAlphaId, deptAlphaId], [annexBetaId, deptBetaId]]),
+      JSON.stringify(mobileDaily.rows));
+
+    await client.query(
+      `UPDATE fire_safety_checks SET submitter_department_id = $1, submitter_department_source = 'not_recorded'
+       WHERE id = $2`, [deptBetaId, webFire.data?.id]);
+    const pinned = await client.query(
+      `SELECT submitter_department_id, submitter_department_source FROM fire_safety_checks WHERE id = $1`, [webFire.data?.id]);
+    check("db: a recorded department can't be rewritten",
+      pinned.rows[0]?.submitter_department_id === deptAlphaId && pinned.rows[0]?.submitter_department_source === "recorded",
+      JSON.stringify(pinned.rows));
+
+    const forged = await client.query(
+      `INSERT INTO fire_safety_checks (client_id, site_id, check_type, check_date, result, created_by,
+         submitter_department_id, submitter_department_source)
+       VALUES ($1, $2, 'alarm', $3, 'pass', $4, $5, 'not_recorded')
+       RETURNING submitter_department_id, submitter_department_source`,
+      [clientId, annexAlphaId, today10, outsiderStaff.data?.id, deptAlphaId]);
+    check("db: another business's account records no department here",
+      forged.rows[0]?.submitter_department_id === null && forged.rows[0]?.submitter_department_source === "recorded",
+      JSON.stringify(forged.rows));
+
+    // Rows written before capture began (simulated with the trigger off, inside
+    // one transaction so nothing else sees it disabled).
+    await client.query("BEGIN");
+    for (const table of ["fire_safety_checks", "daily_checklist_submissions"]) {
+      await client.query(`ALTER TABLE ${table} DISABLE TRIGGER record_submitter_department`);
+    }
+    await client.query(
+      `INSERT INTO fire_safety_checks (client_id, site_id, check_type, check_date, result, created_by,
+         submitter_department_id, submitter_department_source)
+       VALUES ($1, $2, 'alarm', $3, 'pass', $4, NULL, 'not_recorded')`,
+      [clientId, annexAlphaId, uniqueDate(1), moverId]);
+    await client.query(
+      `INSERT INTO daily_checklist_submissions (client_id, site_id, checklist_date, type, answers,
+         submitted_by_id, submitted_at, submitter_department_id, submitter_department_source)
+       VALUES ($1, $2, $3, 'pm', '[]'::jsonb, $4, now(), NULL, 'not_recorded')`,
+      [clientId, annexAlphaId, uniqueDate(1), moverId]);
+    for (const table of ["fire_safety_checks", "daily_checklist_submissions"]) {
+      await client.query(`ALTER TABLE ${table} ENABLE TRIGGER record_submitter_department`);
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    check("db: attribution checks ran", false, String(err?.message ?? err));
+  } finally {
+    await client.end();
+  }
+
+  for (const [label, deptId] of [["Alpha", deptAlphaId], ["Beta", deptBetaId]]) {
+    const data = await report(deptId, annexAlphaId);
+    const notRecorded = data.departmentNotRecorded ?? {};
+    check(`legacy: ${label} report lists older records under "Department not recorded"`,
+      notRecorded.moduleActivity?.find(row => row.module === "FireTrack" && row.siteId === annexAlphaId)?.count === 1
+        && notRecorded.dailyChecklists?.find(row => row.siteId === annexAlphaId && row.type === "pm")?.submitted === 1
+        && notRecorded.records === 2,
+      JSON.stringify(notRecorded));
+    check(`legacy: ${label} totals don't absorb older records`,
+      fireCount(data, annexAlphaId) === (label === "Alpha" ? 2 : 0)
+        && (data.dailyChecklists?.find(row => row.siteId === annexAlphaId && row.type === "pm")?.submitted ?? 0) === 0,
+      JSON.stringify({ moduleActivity: data.moduleActivity, dailyChecklists: data.dailyChecklists }));
+  }
 
   // ── Summary ───────────────────────────────────────────────────────────────────
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);

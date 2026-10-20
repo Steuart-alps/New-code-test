@@ -3,9 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "codegen": "node ./node_modules/orval/dist/bin/orval.mjs --config ./orval.config.ts"
+    "codegen": "node ./node_modules/orval/dist/bin/orval.mjs --config ./orval.config.ts && node ./scripts/check-contract.mjs --record",
+    "check:contract": "node ./scripts/check-contract.mjs",
+    "contract:accept": "node ./scripts/check-contract.mjs --accept",
+    "test:contract": "node ./tests/contract-diff.test.mjs"
   },
   "devDependencies": {
-    "orval": "8.22.0"
+    "orval": "8.22.0",
+    "yaml": "2.8.3"
   }
 }

@@ -32,7 +32,7 @@ import { format, parseISO, isValid, differenceInDays } from "date-fns";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ const SEVERITY_LABELS: Record<string, string> = {
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const mutationSucceeded = beginApiMutation(opts?.method, `/pest-track${path}`);
-  const res = await fetch(withActiveClient(`${baseUrl}/api/pest-track${path}`, opts?.body), await withCsrfToken({
+  const res = await fetchWithOverrideReason(withActiveClient(`${baseUrl}/api/pest-track${path}`, opts?.body), await withCsrfToken({
     ...opts,
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     credentials: "include",
@@ -105,36 +105,38 @@ function SeverityBadge({ severity }: { severity: string }) {
 
 interface PestVisit {
   id: number;
-  client_id: number;
-  site_id: number | null;
-  visit_date: string;
-  contractor_name: string | null;
-  contractor_company: string | null;
-  areas_inspected: string | null;
+  clientId: number;
+  siteId: number | null;
+  visitDate: string;
+  contractorName: string | null;
+  contractorCompany: string | null;
+  areasInspected: string | null;
   findings: string | null;
-  treatments_applied: string | null;
+  treatmentsApplied: string | null;
   recommendations: string | null;
-  next_visit_date: string | null;
-  signed_off_by: string | null;
+  nextVisitDate: string | null;
+  signedOffBy: string | null;
+  signedOffByRosterId: number | null;
   notes: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 interface PestActivity {
   id: number;
-  client_id: number;
-  site_id: number | null;
-  recorded_date: string;
-  pest_type: string;
-  evidence_type: string;
+  clientId: number;
+  siteId: number | null;
+  recordedDate: string;
+  pestType: string;
+  evidenceType: string;
   location: string | null;
   severity: string;
-  action_taken: string | null;
-  recorded_by: string | null;
+  actionTaken: string | null;
+  recordedBy: string | null;
+  recordedByRosterId: number | null;
   resolved: boolean;
-  resolved_at: string | null;
+  resolvedAt: string | null;
   notes: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 interface PestStatus {
@@ -167,18 +169,18 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
   const isEdit = !!visit;
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => ({
-    visitDate:          visit?.visit_date ?? new Date().toISOString().slice(0, 10),
-    contractorName:     visit?.contractor_name ?? config.pest_contractor_name ?? "",
-    contractorCompany:  visit?.contractor_company ?? config.pest_contractor_company ?? "",
-    areasInspected:     visit?.areas_inspected ?? "",
+    visitDate:          visit?.visitDate ?? new Date().toISOString().slice(0, 10),
+    contractorName:     visit?.contractorName ?? config.pest_contractor_name ?? "",
+    contractorCompany:  visit?.contractorCompany ?? config.pest_contractor_company ?? "",
+    areasInspected:     visit?.areasInspected ?? "",
     findings:           visit?.findings ?? "",
-    treatmentsApplied:  visit?.treatments_applied ?? "",
+    treatmentsApplied:  visit?.treatmentsApplied ?? "",
     recommendations:    visit?.recommendations ?? "",
-    nextVisitDate:      visit?.next_visit_date ?? "",
-    signedOffBy:        visit?.signed_off_by ?? "",
-     signedOffByRosterId: (visit as any)?.signed_off_by_roster_id ?? null,
+    nextVisitDate:      visit?.nextVisitDate ?? "",
+    signedOffBy:        visit?.signedOffBy ?? "",
+     signedOffByRosterId: visit?.signedOffByRosterId ?? null,
     notes:              visit?.notes ?? "",
-    siteId:             String(visit?.site_id ?? ""),
+    siteId:             String(visit?.siteId ?? ""),
   }));
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -302,19 +304,19 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
   const { data: formOptions } = useFormOptions();
   // Effective (custom or default) lists; include the record's stored value even
   // if it was removed from the list, so editing an old record still works.
-  const pestTypeOpts = withValue(pickOptions(formOptions, "pest_types"), activity?.pest_type);
-  const evidenceTypeOpts = withValue(pickOptions(formOptions, "pest_evidence_types"), activity?.evidence_type);
+  const pestTypeOpts = withValue(pickOptions(formOptions, "pest_types"), activity?.pestType);
+  const evidenceTypeOpts = withValue(pickOptions(formOptions, "pest_evidence_types"), activity?.evidenceType);
   const [form, setForm] = useState(() => ({
-    recordedDate: activity?.recorded_date ?? new Date().toISOString().slice(0, 10),
-    pestType:     activity?.pest_type ?? "rodent",
-    evidenceType: activity?.evidence_type ?? "live_sighting",
+    recordedDate: activity?.recordedDate ?? new Date().toISOString().slice(0, 10),
+    pestType:     activity?.pestType ?? "rodent",
+    evidenceType: activity?.evidenceType ?? "live_sighting",
     location:     activity?.location ?? "",
     severity:     activity?.severity ?? "low",
-    actionTaken:  activity?.action_taken ?? "",
-    recordedBy:   activity?.recorded_by ?? "", recordedByRosterId: (activity as any)?.recorded_by_roster_id ?? null,
+    actionTaken:  activity?.actionTaken ?? "",
+    recordedBy:   activity?.recordedBy ?? "", recordedByRosterId: activity?.recordedByRosterId ?? null,
     resolved:     activity?.resolved ?? false,
     notes:        activity?.notes ?? "",
-    siteId:       String(activity?.site_id ?? ""),
+    siteId:       String(activity?.siteId ?? ""),
   }));
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -585,12 +587,12 @@ export default function PestTrackPage() {
   // ── Filtered lists ─────────────────────────────────────────────────────────
 
   const filteredVisits = visits.filter(v =>
-    !q || [v.contractor_name, v.contractor_company, v.areas_inspected, v.findings]
+    !q || [v.contractorName, v.contractorCompany, v.areasInspected, v.findings]
       .some(s => s?.toLowerCase().includes(q.toLowerCase()))
   );
 
   const filteredActivity = activity.filter(a =>
-    !q || [a.pest_type, a.evidence_type, a.location, a.action_taken, a.recorded_by]
+    !q || [a.pestType, a.evidenceType, a.location, a.actionTaken, a.recordedBy]
       .some(s => s?.toLowerCase().includes(q.toLowerCase()))
   );
 
@@ -812,16 +814,16 @@ export default function PestTrackPage() {
                   </thead>
                   <tbody>
                     {filteredVisits.map((v, i) => {
-                      const isNextOverdue = v.next_visit_date && v.next_visit_date < today;
+                      const isNextOverdue = v.nextVisitDate && v.nextVisitDate < today;
                       return (
                         <tr key={v.id} className={cn("group border-t border-border hover:bg-muted/20", i === 0 && "border-t-0")}>
                           <td className="px-4 py-3">
-                            <p className="text-sm font-medium">{fmt(v.visit_date)}</p>
-                            {v.areas_inspected && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[120px]">{v.areas_inspected}</p>}
+                            <p className="text-sm font-medium">{fmt(v.visitDate)}</p>
+                            {v.areasInspected && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[120px]">{v.areasInspected}</p>}
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
-                            <p className="text-sm">{v.contractor_name ?? <span className="text-muted-foreground/40">—</span>}</p>
-                            {v.contractor_company && <p className="text-xs text-muted-foreground">{v.contractor_company}</p>}
+                            <p className="text-sm">{v.contractorName ?? <span className="text-muted-foreground/40">—</span>}</p>
+                            {v.contractorCompany && <p className="text-xs text-muted-foreground">{v.contractorCompany}</p>}
                           </td>
                           <td className="px-4 py-3 hidden md:table-cell">
                             <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">
@@ -829,9 +831,9 @@ export default function PestTrackPage() {
                             </p>
                           </td>
                           <td className="px-4 py-3 hidden lg:table-cell">
-                            {v.next_visit_date ? (
+                            {v.nextVisitDate ? (
                               <p className={cn("text-xs", isNextOverdue ? "text-red-600 font-medium" : "text-muted-foreground")}>
-                                {fmt(v.next_visit_date)}
+                                {fmt(v.nextVisitDate)}
                                 {isNextOverdue && <span className="ml-1 font-bold">Overdue</span>}
                               </p>
                             ) : <span className="text-muted-foreground/40">—</span>}
@@ -899,10 +901,10 @@ export default function PestTrackPage() {
                   <tbody>
                     {filteredActivity.map((a, i) => (
                       <tr key={a.id} className={cn("group border-t border-border hover:bg-muted/20", i === 0 && "border-t-0")}>
-                        <td className="px-4 py-3 text-sm">{fmt(a.recorded_date)}</td>
+                        <td className="px-4 py-3 text-sm">{fmt(a.recordedDate)}</td>
                         <td className="px-4 py-3">
-                          <p className="text-sm font-medium">{PEST_TYPE_LABELS[a.pest_type] ?? a.pest_type}</p>
-                          <p className="text-xs text-muted-foreground">{EVIDENCE_LABELS[a.evidence_type] ?? a.evidence_type}</p>
+                          <p className="text-sm font-medium">{PEST_TYPE_LABELS[a.pestType] ?? a.pestType}</p>
+                          <p className="text-xs text-muted-foreground">{EVIDENCE_LABELS[a.evidenceType] ?? a.evidenceType}</p>
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell text-xs text-muted-foreground">
                           {a.location ?? <span className="text-muted-foreground/40">—</span>}
