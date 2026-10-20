@@ -2,7 +2,7 @@ import { LegalLayout } from "./legal-layout";
 
 export default function TermsPage() {
   return (
-    <LegalLayout title="Terms of Service" updated="17 July 2026">
+    <LegalLayout title="Terms of Service" updated="26 October 2026">
       <section>
         <h2>1. Who we are</h2>
         <p>
@@ -24,7 +24,7 @@ export default function TermsPage() {
         <ul>
           <li>New accounts receive a 14-day free trial. No payment details are required to start a trial.</li>
           <li>When the trial ends, continued use requires an active paid subscription, billed monthly per site through our payment provider, Stripe.</li>
-          <li>Adding a site during a billing period does not change that period's charge; your subscription quantity is updated for the next billing period.</li>
+          <li>Each site you add is charged straight away for one full month at your per-site price, and is then included in your monthly bill. Removing a site lowers your next bill; no refund or credit is given for the current period.</li>
           <li>You can cancel at any time. Cancellation takes effect at the end of the current billing period; no partial refunds are given for unused time.</li>
           <li>Prices are displayed before purchase and may change with at least 30 days' notice.</li>
         </ul>
@@ -38,7 +38,26 @@ export default function TermsPage() {
         </p>
       </section>
       <section>
-        <h2>5. Acceptable use</h2>
+        <h2>5. Data processing</h2>
+        <p>
+          For the personal data in the records you and your team keep in ComplyTrack (for example staff names, training
+          records and incident reports), your business is the controller and we are your processor. Our{" "}
+          <a href="/privacy" className="text-primary underline underline-offset-2">Privacy Policy</a> describes the
+          data involved. As your processor we:
+        </p>
+        <ul>
+          <li>process that data only to provide ComplyTrack and on your documented instructions, which are these terms and the way you use the service, unless the law requires otherwise (in which case we will tell you first, where allowed);</li>
+          <li>make sure everyone at ALPS who can access it is bound by confidentiality;</li>
+          <li>keep it secure, including encryption in transit, separation from other customers' data, restricted access to production systems and backups;</li>
+          <li>use the sub-processors named in our Privacy Policy, under written terms that protect the data in the same way; you authorise these, and we will tell you before adding or replacing one so you can object;</li>
+          <li>help you respond to requests from people exercising their data protection rights, and with security, breach notification and data protection impact assessments, as far as the service allows;</li>
+          <li>tell you without undue delay after becoming aware of a personal data breach affecting your data;</li>
+          <li>at the end of your subscription, let you export your data and then delete it as described in section 10, unless the law requires us to keep it;</li>
+          <li>give you the information you reasonably need to show these obligations are met, and allow reasonable audits on notice.</li>
+        </ul>
+      </section>
+      <section>
+        <h2>6. Acceptable use</h2>
         <p>You must not:</p>
         <ul>
           <li>use the service for unlawful purposes or to store unlawful content;</li>
@@ -48,7 +67,7 @@ export default function TermsPage() {
         </ul>
       </section>
       <section>
-        <h2>6. Important: not professional advice</h2>
+        <h2>7. Important: not professional advice</h2>
         <p>
           ComplyTrack is a record-keeping and reminder tool. It does not provide legal, regulatory, or health &amp;
           safety advice, and using it does not by itself make your business compliant with any law or regulation.
@@ -57,7 +76,7 @@ export default function TermsPage() {
         </p>
       </section>
       <section>
-        <h2>7. Availability and changes</h2>
+        <h2>8. Availability and changes</h2>
         <p>
           We aim to keep ComplyTrack available at all times but do not guarantee uninterrupted service. We may modify,
           add, or remove features. If we discontinue the service entirely, we will give reasonable notice and an
@@ -65,7 +84,7 @@ export default function TermsPage() {
         </p>
       </section>
       <section>
-        <h2>8. Liability</h2>
+        <h2>9. Liability</h2>
         <p>
           To the maximum extent permitted by law, we are not liable for indirect or consequential losses, loss of
           profits, or loss of data arising from your use of the service. Our total liability in any 12-month period is
@@ -74,15 +93,17 @@ export default function TermsPage() {
         </p>
       </section>
       <section>
-        <h2>9. Termination</h2>
+        <h2>10. Termination</h2>
         <p>
           You may stop using the service and cancel your subscription at any time. We may suspend or terminate accounts
-          that breach these terms or remain unpaid. After termination, we may delete your data following a reasonable
-          retention period; you can request an export before then.
+          that breach these terms or remain unpaid. After your subscription ends, your records are kept for 12 months
+          so you can come back or download a full export; we email the Owner 30 days before they are deleted. The
+          Owner can ask for earlier deletion after cancelling. Some records are kept longer where the law or a
+          dispute needs them, such as the audit trail and RIDDOR reports.
         </p>
       </section>
       <section>
-        <h2>10. General</h2>
+        <h2>11. General</h2>
         <p>
           These terms are governed by the laws of England and Wales, and the courts of England and Wales have exclusive
           jurisdiction. If any provision is found unenforceable, the rest remain in effect. We may update these terms
@@ -90,7 +111,7 @@ export default function TermsPage() {
         </p>
       </section>
       <section>
-        <h2>11. Contact</h2>
+        <h2>12. Contact</h2>
         <p>
           Questions about these terms? Contact ALPS Consulting Ltd via{" "}
           <a href="https://www.alpsconsultancy.co.uk" className="text-primary underline underline-offset-2" target="_blank" rel="noopener noreferrer">

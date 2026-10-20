@@ -56,6 +56,7 @@ run_case() {
     TEST_EMAIL_CAPTURE_PATH="$capture_file" \
     TEST_EMAIL_BEHAVIOR="$behavior" \
     TEST_EMAIL_DELAY_MS="$TEST_EMAIL_DELAY_MS" \
+    ADMIN_EMAIL="alps-admin@test.local" \
     PORT="$port" \
     node --enable-source-maps ./dist/index.mjs >"$LOG_FILE" 2>&1 &
   SERVER_PID=$!
@@ -83,7 +84,7 @@ run_case() {
   # promise catch, so allow the logger one tick before checking its output.
   if [ "$behavior" = "reject" ]; then
     sleep 1
-    for expected in "Failed to send welcome email" "Failed to resend verification email"; do
+    for expected in "Failed to send welcome email" "Failed to send new sign-up alert" "Failed to resend verification email"; do
       if ! grep -q "$expected" "$LOG_FILE"; then
         echo "Welcome email (reject): the API log has no \"${expected}\" entry" >&2
         exit 1

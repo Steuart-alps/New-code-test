@@ -2,7 +2,7 @@ import { LegalLayout } from "./legal-layout";
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="15 October 2026">
+    <LegalLayout title="Privacy Policy" updated="26 October 2026">
       <section>
         <h2>1. Who we are</h2>
         <p>
@@ -48,13 +48,21 @@ export default function PrivacyPage() {
           safeguards (such as standard contractual clauses) are in place. We may also disclose information if required
           by law.
         </p>
+        <p>
+          Our hosting provider is Render (servers and database in Frankfurt, Germany) and our email provider is Resend.
+          For the compliance records your business keeps, these providers are our sub-processors; section 5 of our{" "}
+          <a href="/terms" className="text-primary underline underline-offset-2">Terms of Service</a> sets out how we
+          act as your processor.
+        </p>
       </section>
       <section>
         <h2>5. How long we keep it</h2>
         <p>
-          We keep your data while your account is active. If your account is closed or your trial lapses, we retain
-          data for a reasonable period so you can return or request an export, after which it is deleted. You can ask
-          us to delete your account and data at any time.
+          We keep your data while your account is active, including a 5-year history of changes so records can be
+          audited. If your subscription ends or your trial lapses, we keep your data for 12 months so you can return
+          or download a full export, and we email the Owner 30 days before it is deleted. The Owner can ask for
+          earlier deletion after cancelling. Some records are kept longer where the law requires, such as the audit
+          trail and RIDDOR reports (3 years).
         </p>
       </section>
       <section>
