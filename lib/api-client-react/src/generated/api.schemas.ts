@@ -5,6 +5,53 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export type TodayByDepartmentRowKind = typeof TodayByDepartmentRowKind[keyof typeof TodayByDepartmentRowKind];
+
+
+export const TodayByDepartmentRowKind = {
+  whole_site: 'whole_site',
+  department: 'department',
+} as const;
+
+export type TodayByDepartmentItemStatus = typeof TodayByDepartmentItemStatus[keyof typeof TodayByDepartmentItemStatus];
+
+
+export const TodayByDepartmentItemStatus = {
+  todo: 'todo',
+  failed: 'failed',
+} as const;
+
+export interface TodayByDepartmentItem {
+  status: TodayByDepartmentItemStatus;
+  label: string;
+  detail: string;
+  path: string;
+}
+
+export interface TodayByDepartmentRow {
+  key: string;
+  kind: TodayByDepartmentRowKind;
+  departmentId: number | null;
+  name: string;
+  done: number;
+  todo: number;
+  failed: number;
+  items: TodayByDepartmentItem[];
+  moreItems: number;
+}
+
+export interface TodayByDepartmentGroup {
+  /** null for work not tied to one site ("All sites") */
+  siteId: number | null;
+  siteName: string;
+  rows: TodayByDepartmentRow[];
+}
+
+export interface TodayByDepartment {
+  date: string;
+  groups: TodayByDepartmentGroup[];
+}
+
 export type DailyTrackRequirement = typeof DailyTrackRequirement[keyof typeof DailyTrackRequirement];
 
 
@@ -3147,6 +3194,10 @@ export const ListComplianceItemsPriority = {
   high: 'high',
   critical: 'critical',
 } as const;
+
+export type GetTodayByDepartmentParams = {
+siteId?: number;
+};
 
 export type GetPrivacyGovernanceParams = {
 clientId?: number;

@@ -242,6 +242,9 @@ jobs:
       - name: Departments under sites tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:departments-under-sites
 
+      - name: Today by department dashboard card tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:today-by-department
+
       - name: Hot tub registry search tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:hot-tub-registry:pushed
 

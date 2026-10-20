@@ -97,6 +97,7 @@ import type {
   GetPATPresetTemplates200,
   GetPoolMonitoringPlanParams,
   GetPrivacyGovernanceParams,
+  GetTodayByDepartmentParams,
   GreenTrackCertificateDownload,
   GreenTrackConfig,
   HealthStatus,
@@ -172,6 +173,7 @@ import type {
   StorageUsage,
   TestEmailRequest,
   TestEmailResponse,
+  TodayByDepartment,
   UpdateCategoryRequest,
   UpdateCertificateDefectRequest,
   UpdateComplianceItemRequest,
@@ -3677,6 +3679,91 @@ export function useGetDashboardStats<TData = Awaited<ReturnType<typeof getDashbo
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetDashboardStatsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetTodayByDepartmentUrl = (params?: GetTodayByDepartmentParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/dashboard/today-by-department?${stringifiedParams}` : `/api/dashboard/today-by-department`
+}
+
+/**
+ * For each site, one bar per department (and one for the whole site) with today's checks done, not done yet and failed, and what is outstanding. Owners see every department, Managers the departments they cover, others their own. Owners choose which roles see it (setting todayByDepartmentRoles).
+ * @summary Today's checks per site and department
+ */
+export const getTodayByDepartment = async (params?: GetTodayByDepartmentParams, options?: RequestInit): Promise<TodayByDepartment> => {
+
+  return customFetch<TodayByDepartment>(getGetTodayByDepartmentUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTodayByDepartmentQueryKey = (params?: GetTodayByDepartmentParams,) => {
+    return [
+    `/api/dashboard/today-by-department`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTodayByDepartmentQueryOptions = <TData = Awaited<ReturnType<typeof getTodayByDepartment>>, TError = ErrorType<ErrorResponse>>(params?: GetTodayByDepartmentParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTodayByDepartment>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTodayByDepartmentQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTodayByDepartment>>> = ({ signal }) => getTodayByDepartment(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTodayByDepartment>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTodayByDepartmentQueryResult = NonNullable<Awaited<ReturnType<typeof getTodayByDepartment>>>
+export type GetTodayByDepartmentQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Today's checks per site and department
+ */
+
+export function useGetTodayByDepartment<TData = Awaited<ReturnType<typeof getTodayByDepartment>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetTodayByDepartmentParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTodayByDepartment>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTodayByDepartmentQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
