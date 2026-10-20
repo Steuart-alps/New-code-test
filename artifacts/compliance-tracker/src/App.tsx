@@ -2,6 +2,7 @@ import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { lazy, Suspense, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
+import { OverrideReasonDialog } from "@/components/override-reason-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/auth-context";
 
@@ -10,6 +11,7 @@ import { trackModuleFirstUse } from "@/lib/analytics";
 // Each page is its own chunk so the landing and sign-in pages stay small and a
 // page's code is only downloaded when someone opens it.
 const Dashboard = lazy(() => import("@/pages/dashboard"));
+const MyTrainingPage = lazy(() => import("@/pages/my-training"));
 const ContractorsPage = lazy(() => import("@/pages/contractors"));
 const ContractorDetailPage = lazy(() => import("@/pages/contractor-detail"));
 const ExternalChecksPage = lazy(() => import("@/pages/external-checks"));
@@ -53,6 +55,7 @@ const DailyTrackPmPage = lazy(() => import("@/pages/daily-track-pm"));
 const DailyTrackStatusPage = lazy(() => import("@/pages/daily-track-status"));
 const StaffRosterPage = lazy(() => import("@/pages/staff-roster"));
 const SignOffPage = lazy(() => import("@/pages/sign-off"));
+const PrivacyRequestPage = lazy(() => import("@/pages/privacy-request"));
 const ContractorPortalPage = lazy(() => import("@/pages/contractor-portal"));
 const ContractorApprovalsPage = lazy(() => import("@/pages/contractor-approvals"));
 const ContractorQuotePage = lazy(() => import("@/pages/contractor-quote"));
@@ -148,6 +151,7 @@ function ProtectedRoutes() {
   if (location.startsWith("/verify-email")) return <VerifyEmailPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
+  if (location.startsWith("/privacy-request/")) return <PrivacyRequestPage />;
   if (location.startsWith("/contractor-portal/")) return <Route path="/contractor-portal/:token" component={ContractorPortalPage} />;
   if (location.startsWith("/contractor-quote/")) return <ContractorQuotePage />;
   if (location === "/kiosk") return <KioskPage />;
@@ -185,6 +189,12 @@ function ProtectedRoutes() {
     return <TrialEndedPage />;
   }
 
+  // A Viewer only ever sees their own training records.
+  if (user.role === "client_viewer") {
+    if (location !== "/my-training") return <Redirect to="/my-training" />;
+    return <MyTrainingPage />;
+  }
+
   // Logged in — redirect away from public pages
   if (location === "/login" || location === "/") {
     // Consultants land on their portfolio, which forwards to the dashboard
@@ -193,7 +203,8 @@ function ProtectedRoutes() {
   }
 
   const canAdmin = user.role === "consultant" || user.role === "client_admin";
-  const canManageContractorEmails = canAdmin || user.isMaintenanceManager === true;
+  const canManageUsers = canAdmin || user.role === "client_manager";
+  const canManageContractorEmails = canAdmin || user.isMaintenanceManager === true || user.role === "client_manager";
   const isConsultant = user.role === "consultant";
 
   return (
@@ -241,7 +252,7 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/sites" component={SitesPage} />}
       {canAdmin && <Route path="/categories/:id" component={CategoryDetailPage} />}
       {canAdmin && <Route path="/categories" component={CategoriesPage} />}
-      {canAdmin && <Route path="/users" component={UsersPage} />}
+      {canManageUsers && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
       {canAdmin && <Route path="/feedback" component={FeedbackInboxPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
@@ -272,6 +283,7 @@ function App() {
               <ProtectedRoutes />
             </Suspense>
           </WouterRouter>
+          <OverrideReasonDialog />
           <Toaster />
         </AuthProvider>
       </TooltipProvider>

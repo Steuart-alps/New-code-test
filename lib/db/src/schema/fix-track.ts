@@ -23,6 +23,8 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   resolvedByName: text("resolved_by_name"),
   resolverSignature: text("resolver_signature"),
   solutionNotes: text("solution_notes"),
+  // Uploaded by the contractor with the "completed" email link.
+  completionDocumentPath: text("completion_document_path"),
   // Pending contractor-email approval request ("assign" | "quote")
   emailRequestMode: text("email_request_mode"),
   emailRequestedBy: integer("email_requested_by").references(() => usersTable.id, { onDelete: "set null" }),
@@ -38,6 +40,10 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   emailSentAt: timestamp("email_sent_at"),
   mediaUrls: jsonb("media_urls").default([]).$type<string[]>(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Submitter's department when the row was created, set by a database
+  // trigger and never changed (submitterDepartmentMigration.ts).
+  submitterDepartmentId: integer("submitter_department_id"),
+  submitterDepartmentSource: text("submitter_department_source").notNull().default("recorded"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [

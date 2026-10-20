@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
+import { DepartmentSwitcher } from "@/components/department-switcher";
 import { Link, useLocation } from "wouter";
 import {
   ShieldCheck,
@@ -12,12 +13,13 @@ import {
   Menu,
   ChevronRight,
   MessageSquareWarning,
+  GraduationCap,
   X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { useAuth, useIsConsultant, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useIsConsultant, useCanAdmin, useCanManageUsers } from "@/context/auth-context";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -26,7 +28,10 @@ import alpsLogo from "@/assets/alps-logo.png";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { CancellationBanner } from "@/components/cancellation-banner";
+import { StorageLimitBanner } from "@/components/storage-limit-banner";
 import { ManagedByBadge } from "@/components/managed-by-badge";
+import { NotificationBell } from "@/components/notification-bell";
+import { QuickTutorial, openQuickTutorial } from "@/components/quick-tutorial";
 
 const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/daily-track-am", moduleKey: "daily_am" },
@@ -88,7 +93,8 @@ function useTrackGuidanceDismissed(userId: number | undefined): [boolean, () => 
 function useNavGroups(): NavGroup[] {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
-  return getNavGroups({ isConsultant, canAdmin });
+  const canManageUsers = useCanManageUsers();
+  return getNavGroups({ isConsultant, canAdmin, canManageUsers });
 }
 
 function NavSidebarGroup({ group, location, hasService, primaryColor, onNavigate, layoutIdPrefix, storageScope }: { group: NavGroup; location: string; hasService: (s: string) => boolean; primaryColor: string; onNavigate?: () => void; layoutIdPrefix: string; storageScope: string }) {
@@ -234,13 +240,23 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         </nav>
 
         <div className="p-4 border-t border-sidebar-border bg-sidebar/50 flex flex-col gap-4">
-          <button
-            onClick={() => setShowFeedbackDialog(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-sm text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-          >
-            <MessageSquareWarning className="h-4 w-4" />
-            Submit feedback
-          </button>
+          <div className="flex flex-col gap-1">
+            <button
+              onClick={openQuickTutorial}
+              className="flex items-center gap-2 px-3 py-2 rounded-sm text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+              data-testid="button-quick-tutorial"
+            >
+              <GraduationCap className="h-4 w-4" />
+              Quick tutorial
+            </button>
+            <button
+              onClick={() => setShowFeedbackDialog(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-sm text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+            >
+              <MessageSquareWarning className="h-4 w-4" />
+              Submit feedback
+            </button>
+          </div>
           <div className="flex items-center justify-center gap-2 opacity-40">
             <span className="text-xs font-display italic">by</span>
             <img src={alpsLogo} alt="ALPS Consultancy" className="h-4 grayscale invert" />
@@ -337,6 +353,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         </DialogContent>
       </Dialog>
       <FeedbackDialog open={showFeedbackDialog} onOpenChange={setShowFeedbackDialog} />
+      <QuickTutorial />
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white">
@@ -387,6 +404,16 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                     <button
                       onClick={() => {
                         setMobileMenuOpen(false);
+                        openQuickTutorial();
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 rounded-sm text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+                    >
+                      <GraduationCap className="h-4 w-4" />
+                      Quick tutorial
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMobileMenuOpen(false);
                         setShowFeedbackDialog(true);
                       }}
                       className="flex w-full items-center gap-2 px-3 py-2 rounded-sm text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
@@ -414,6 +441,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <DepartmentSwitcher />
             <Link
               href="/account-security"
               className="hidden md:flex items-center gap-2 px-2 py-2 rounded-sm text-sm text-[#162D42] hover:bg-muted transition-colors"
@@ -430,6 +458,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                 <span className="font-medium uppercase tracking-wider">Owner</span>
               </div>
             )}
+            <NotificationBell />
             {/* On phones, account actions live in the avatar menu so the header fits. */}
             <div className="md:hidden">
               <DropdownMenu>
@@ -493,6 +522,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           >
             <ManagedByBadge />
             <CancellationBanner />
+            <StorageLimitBanner />
             {isTrackPage && !trackGuidanceDismissed && (
               <div className="flex items-center justify-between gap-3 rounded-sm border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-950">
                 <span>Track records support your site-specific controls; review the applicable UK sources, appointments and corrective actions.</span>

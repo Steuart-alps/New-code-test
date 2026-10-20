@@ -151,7 +151,7 @@ try {
 
   const alert = page.getByRole("alert").filter({ hasText: `${viewerName}'s department wasn't changed.` });
   await alert.waitFor({ state: "visible" });
-  assert.match(await alert.innerText(), /isn't part of this user's business/,
+  assert.match(await alert.innerText(), /Department not found/,
     "the error must carry the API's reason");
   await selector().getByText(keptName, { exact: true }).waitFor({ state: "visible" });
   assert.equal(await selector().getByText(removedName, { exact: true }).count(), 0,
@@ -167,7 +167,7 @@ try {
       ? route.fulfill({ status: 502, contentType: "text/html", body: "<html>Bad gateway</html>" })
       : route.fallback());
   await selector().click();
-  await page.getByRole("option", { name: "All departments" }).click();
+  await page.getByRole("option", { name: "No department" }).click();
   await page.getByRole("alert").filter({ hasText: "The server rejected the change (502)." }).waitFor({ state: "visible" });
   await selector().getByText(keptName, { exact: true }).waitFor({ state: "visible" });
   assert.equal(await storedDepartment(), departmentId, "a failed change must leave the saved department");
@@ -175,12 +175,12 @@ try {
 
   // A change the API accepts saves, clears the error and survives a reload.
   await selector().click();
-  await page.getByRole("option", { name: "All departments" }).click();
-  await selector().getByText("All departments", { exact: true }).waitFor({ state: "visible" });
+  await page.getByRole("option", { name: "No department" }).click();
+  await selector().getByText("No department", { exact: true }).waitFor({ state: "visible" });
   await page.getByRole("alert").waitFor({ state: "detached" });
   assert.equal(await storedDepartment(), null, "an accepted change must be saved");
   await page.reload();
-  await selector().getByText("All departments", { exact: true }).waitFor({ state: "visible" });
+  await selector().getByText("No department", { exact: true }).waitFor({ state: "visible" });
   console.log("Inline department rejection, restore and save browser test passed.");
 } finally {
   await browser?.close();

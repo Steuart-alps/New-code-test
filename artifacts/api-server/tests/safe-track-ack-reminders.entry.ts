@@ -1,6 +1,7 @@
 export {
   runSafeTrackAckReminderJob,
   getOutstandingSafeTrackAcknowledgements,
+  getSafeTrackReminderLastSentAt,
   parseSafeTrackReminderSettings,
   isSafeTrackReminderDue,
   MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES,

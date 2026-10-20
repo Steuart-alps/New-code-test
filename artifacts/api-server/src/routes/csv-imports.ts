@@ -2,10 +2,11 @@ import { Router, type Request, type RequestHandler } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId, isDepartmentLead } from "../middleware/requireAuth";
 import { requireService } from "../lib/services";
 import { filterName } from "../lib/contentFilter";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { siteVisibleSql } from "../lib/departmentSites";
 import {
   CSV_IMPORT_MAX_CELL_LENGTH,
   CSV_IMPORT_MAX_COLUMNS,
@@ -44,24 +45,24 @@ const importBody = z.object({
 // registers, exactly as their single-record routes are.
 const requirePatImporter: RequestHandler = (req, res, next) => {
   const user = req.currentUser;
-  if (user && (user.role === "client_admin" || user.role === "consultant"
-    || (user.role === "client_staff" && user.isDepartmentManager === true))) return next();
+  if (user && (user.role === "client_admin" || user.role === "consultant" || isDepartmentLead(user))) return next();
   res.status(403).json({ error: "Manager access required" });
 };
 
 const rowsOf = (result: unknown) => ((result as { rows?: unknown[] }).rows ?? []) as any[];
 const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
 
-interface SiteRef { id: number; name: string; department_id: number | null }
+interface SiteRef { id: number; name: string; visible: boolean }
 async function siteResolver(tx: Tx, clientId: number, departmentId: number | null) {
-  const sites = rowsOf(await tx.execute(sql`SELECT id, name, department_id FROM sites WHERE client_id = ${clientId}`)) as SiteRef[];
+  const visible = departmentId === null ? sql`TRUE` : siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId);
+  const sites = rowsOf(await tx.execute(sql`SELECT s.id, s.name, ${visible} AS visible FROM sites s WHERE s.client_id = ${clientId}`)) as SiteRef[];
   return (name: string | null): { siteId: number | null; error?: string } => {
     if (!name) return { siteId: null };
     const matches = sites.filter((site) => normaliseKey(site.name) === normaliseKey(name));
     if (!matches.length) return { siteId: null, error: `Site "${name}" was not found in this business` };
     if (matches.length > 1) return { siteId: null, error: `More than one site is called "${name}"; rename one before importing` };
     const site = matches[0];
-    if (departmentId !== null && site.department_id !== null && site.department_id !== departmentId) {
+    if (!site.visible) {
       return { siteId: null, error: `Site "${name}" is outside your department` };
     }
     return { siteId: Number(site.id) };
@@ -70,7 +71,7 @@ async function siteResolver(tx: Tx, clientId: number, departmentId: number | nul
 async function departmentSiteCheck(tx: Tx, clientId: number, departmentId: number | null) {
   if (departmentId === null) return () => true;
   const blocked = new Set(rowsOf(await tx.execute(sql`
-    SELECT id FROM sites WHERE client_id = ${clientId} AND department_id IS NOT NULL AND department_id <> ${departmentId}
+    SELECT s.id FROM sites s WHERE s.client_id = ${clientId} AND NOT ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)}
   `)).map((row) => Number(row.id)));
   return (siteId: number | null) => siteId === null || !blocked.has(siteId);
 }

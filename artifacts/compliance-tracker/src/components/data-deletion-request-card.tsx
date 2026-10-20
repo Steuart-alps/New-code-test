@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 type DeletionStatus = {
   eligible: boolean;
+  // Only the business's own owner can ask for deletion.
+  owner?: boolean;
   request: {
     id: number;
     requested_at: string;
@@ -22,7 +24,7 @@ const formatDate = (date: string) => new Date(date).toLocaleDateString("en-GB", 
 });
 
 export function DataDeletionRequestCard() {
-  const { user, activeClientId, billingLocked } = useAuth();
+  const { activeClientId, billingLocked } = useAuth();
   const canAdmin = useCanAdmin();
   const [status, setStatus] = useState<{ clientId: number; value: DeletionStatus } | null>(null);
   const [error, setError] = useState("");
@@ -53,6 +55,11 @@ export function DataDeletionRequestCard() {
 
   if (!canAdmin || clientId === null || status?.clientId !== clientId) return null;
   if (!status.value.eligible && !status.value.request) {
+    if (status.value.owner === false) {
+      return billingLocked ? (
+        <Card><CardContent className="p-6 text-sm">Only the business's owner can request data deletion.</CardContent></Card>
+      ) : null;
+    }
     return billingLocked ? (
       <Card><CardContent className="p-6 text-sm">Data deletion requests become available after a subscription is cancelled. Contact support if you need help with your account.</CardContent></Card>
     ) : null;
@@ -95,6 +102,7 @@ export function DataDeletionRequestCard() {
           </div>
         ) : (
           <>
+            <p>We recommend keeping your records for the 12 months after cancellation, which happens automatically. You may need them for inspections, insurance claims or legal enquiries. If you still want them deleted sooner, <a href="#data-export" className="font-medium underline underline-offset-2">download your data</a> first.</p>
             <p>No data will be deleted when you submit. We retain records for at least 30 days while an administrator reviews your request and any legal obligations. If deletion is approved after that window, it cannot be undone.</p>
             <Button type="button" variant="outline" onClick={() => setConfirmOpen(true)}>
               Request data deletion
@@ -108,8 +116,7 @@ export function DataDeletionRequestCard() {
           <DialogHeader>
             <DialogTitle>Request permanent data deletion?</DialogTitle>
             <DialogDescription>
-              This requests manual review; it does not delete anything now. Your records remain available for at least 30 days after the request, subject to account access and legal retention requirements. If deletion is approved and carried out, it is irreversible.
-              {user?.role === "consultant" ? " You are submitting this on behalf of the selected client." : ""}
+              We recommend keeping your records for the full 12 months and downloading a copy before asking for deletion. This requests manual review; it does not delete anything now. Your records remain available for at least 30 days after the request, subject to account access and legal retention requirements. If deletion is approved and carried out, it is irreversible.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

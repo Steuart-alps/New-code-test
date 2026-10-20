@@ -5,6 +5,28 @@ import { sitesTable } from "./sites";
 import { usersTable } from "./users";
 import { staffMembersTable } from "./staff-members";
 
+/**
+ * A site's manual call points (break-glass units). Managers list them once and
+ * each weekly alarm test names the one it used, so rotation shows over time.
+ * Call points are archived, never deleted, so old tests keep their link.
+ */
+export const fireCallPointsTable = pgTable("fire_call_points", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id")
+    .notNull()
+    .references(() => clientsTable.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  archivedAt: timestamp("archived_at"),
+  createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("IDX_fire_call_points_client_site").on(table.clientId, table.siteId),
+]);
+
+export type FireCallPoint = typeof fireCallPointsTable.$inferSelect;
+
 export const fireSafetyChecksTable = pgTable("fire_safety_checks", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id")
@@ -18,7 +40,17 @@ export const fireSafetyChecksTable = pgTable("fire_safety_checks", {
   notes: text("notes"),
   performedBy: text("performed_by"),
   staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
+  // Weekly alarm tests: the call point used. The name is copied onto the test
+  // so a later rename or archive never changes what the record says.
+  callPointId: integer("call_point_id").references(() => fireCallPointsTable.id, { onDelete: "set null" }),
+  callPoint: text("call_point"),
+  // Fire drills: "included", "not_included" or "no_night_staff".
+  nightStaff: text("night_staff"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Submitter's department when the row was created, set by a database
+  // trigger and never changed (submitterDepartmentMigration.ts).
+  submitterDepartmentId: integer("submitter_department_id"),
+  submitterDepartmentSource: text("submitter_department_source").notNull().default("recorded"),
   // Mobile outbox entry ID and payload fingerprint: a replay of an applied
   // submission is recognised instead of creating a duplicate. Not a credential.
   clientEntryId: text("client_entry_id"),

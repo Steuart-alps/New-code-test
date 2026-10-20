@@ -9,6 +9,7 @@ import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStore
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 import { PER_TUB_CHECK_TYPES, sitesWithUnreadHotTubs } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
+import { sitesTableVisibleTo, siteVisibleToDepartment, visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -69,23 +70,30 @@ router.get("/tubs", requireAuth, async (req, res) => {
         ? false
         : null;
   if (activeFilter === null) return res.status(400).json({ error: "Invalid active filter" });
+  // Optional case-insensitive match on the tub's name or its site's name.
+  const searchParam = req.query.search;
+  if (searchParam !== undefined && (typeof searchParam !== "string" || searchParam.length > 200)) {
+    return res.status(400).json({ error: "Invalid search" });
+  }
+  const search = searchParam?.trim() ?? "";
+  const searchPattern = `%${search.replace(/[\\%_]/g, ch => `\\${ch}`)}%`;
   const departmentId = getActiveDepartmentId(req);
   const rows = await db.execute(sql`
-    SELECT ht.id, ht.client_id, ht.site_id, ht.name, ht.description, ht.active,
-           ht.created_at, ht.updated_at,
-           s.name AS site_name
+    SELECT ht.id, ht.client_id AS "clientId", ht.site_id AS "siteId", ht.name, ht.description, ht.active,
+           ht.created_at AS "createdAt", ht.updated_at AS "updatedAt",
+           s.name AS "siteName"
     FROM hot_tubs ht
     LEFT JOIN sites s ON s.id = ht.site_id
     WHERE ht.client_id = ${clientId}
       ${departmentId !== null ? sql`AND (
         ht.site_id IS NULL
-        OR ht.site_id IN (
-          SELECT id FROM sites
-          WHERE client_id = ${clientId}
-            AND (department_id IS NULL OR department_id = ${departmentId})
-        )
+        OR ht.site_id IN (${visibleSiteIdsSql(clientId, departmentId)})
       )` : sql``}
       ${activeFilter !== undefined ? sql`AND ht.active = ${activeFilter}` : sql``}
+      ${search ? sql`AND (
+        ht.name ILIKE ${searchPattern} ESCAPE '\\'
+        OR s.name ILIKE ${searchPattern} ESCAPE '\\'
+      )` : sql``}
     ORDER BY ht.active DESC, ht.name
   `);
   res.json(rows.rows ?? rows);
@@ -187,7 +195,7 @@ async function checkSiteAccess(
   if (siteId == null) return null;
   const site = await fetchClientSite(siteId, clientId);
   if (!site) return "not_found";
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return "forbidden";
+  if (!(await siteVisibleToDepartment(site, deptId))) return "forbidden";
   return "ok";
 }
 
@@ -197,7 +205,7 @@ function allowedSitesSubquery(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
@@ -346,7 +354,7 @@ router.get("/status", requireAuth, async (req, res) => {
       AND check_date = ${todayIso}
       AND check_type IN ('water_chemistry', 'temperature')
       AND site_id = ${selectedSiteId}
-      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))` : sql``}
+      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))` : sql``}
   `);
   const unitsByType = new Map<string, Set<number>>();
   const sessionsByType = new Map<string, Map<number, Set<string>>>();
@@ -355,7 +363,7 @@ router.get("/status", requireAuth, async (req, res) => {
     FROM hot_tubs
     WHERE client_id = ${clientId} AND active = true
       AND site_id = ${selectedSiteId}
-      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))` : sql``}
+      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))` : sql``}
   `);
   const expectedUnitIds = (expectedUnits.rows ?? []).map((row: any) => Number(row.unit_id));
   for (const checkType of DAILY_SESSION_TYPES) unitsByType.set(checkType, new Set(expectedUnitIds));
@@ -455,7 +463,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         clientEntryId: entry?.id ?? null,
         clientEntryHash: entry?.hash ?? null,
       }).returning();
-      if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
+      if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, req.currentUser?.id ?? null, performer.performedBy);
       return row;
     });
   } catch (err) {
@@ -538,7 +546,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(hotTubChecksTable).set(updateData)
       .where(and(eq(hotTubChecksTable.id, id), eq(hotTubChecksTable.clientId, clientId))).returning();
-    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, id, breach, (req.session as any).userId ?? null, performer.performedBy);
+    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, id, breach, req.currentUser?.id ?? null, performer.performedBy);
     return row;
   });
 

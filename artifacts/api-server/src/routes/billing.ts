@@ -39,13 +39,35 @@ import {
   verifyClientDiscountCode,
 } from "../lib/alpsDiscount";
 import { logger } from "../lib/logger";
+import {
+  checkStorageAddonPrice,
+  isWholeStoragePacks,
+  roundUpToStoragePacks,
+  STORAGE_PACK_GIB,
+} from "../lib/storagePricing";
 import { BILLING_UNVERIFIED_ERROR, getBillingReadiness, isBillingActivationAllowed } from "../lib/stripeStartup";
 import { getPublicAppUrl } from "../lib/email";
 import { z } from "zod";
 import { requireAuth, getClientId, requireRole, requireClientAdmin, denyViewers, requirePlatformOperator } from "../middleware/requireAuth";
 import { syncClientSubscriptionState } from "../lib/subscriptionState";
+import { readStorageUsageSnapshot } from "../lib/storageUsageSnapshot";
+import { addStorageCapacity } from "../lib/storagePurchase";
+import { clearStorageCapacityCache, setStorageTopUpBuyer, STORAGE_CAPACITY_LOCK_NS } from "../lib/storageLimit";
+import {
+  isStorageSubscriptionItem,
+  listScheduledStorageReductions,
+  minimumPaidStorageGib,
+  planIncludedStorageGib,
+  renewingStorageGib,
+  stillPaidReducedGib,
+} from "../lib/storageCapacity";
+import { SUBSCRIPTION_ACCESS_ENDS_AT } from "../lib/offboarding";
 
 const router = Router();
+
+// Automatic storage top-ups (lib/storageLimit.ts) charge through the same path
+// as a Settings purchase.
+setStorageTopUpBuyer(addStorageCapacity);
 
 // Keep this lightweight for the app-wide offboarding banner. Read the synced
 // Stripe state on each request so reversing a cancellation hides the warning.
@@ -57,19 +79,19 @@ router.get("/cancellation-status", requireAuth, async (req, res) => {
       .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
     if (!client?.customerId) return res.json({ accessEndsAt: null });
     const result = await db.execute(sql`
-      SELECT COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+      SELECT to_timestamp(${SUBSCRIPTION_ACCESS_ENDS_AT}) AS access_ends_at
       FROM stripe.subscriptions s
       WHERE s.customer = ${client.customerId}
         AND s.cancel_at_period_end = true
         AND s.status IN ('active', 'trialing', 'past_due')
-        AND COALESCE(s.cancel_at, s.current_period_end) > now()
+        AND ${SUBSCRIPTION_ACCESS_ENDS_AT} > extract(epoch from now())
         AND NOT EXISTS (
           SELECT 1 FROM stripe.subscriptions live
           WHERE live.customer = s.customer
             AND live.status IN ('active', 'trialing', 'past_due')
             AND COALESCE(live.cancel_at_period_end, false) = false
         )
-      ORDER BY s.current_period_end DESC NULLS LAST
+      ORDER BY ${SUBSCRIPTION_ACCESS_ENDS_AT} DESC NULLS LAST
       LIMIT 1
     `);
     res.json({ accessEndsAt: (result.rows[0] as { access_ends_at: Date | string } | undefined)?.access_ends_at ?? null });
@@ -137,6 +159,8 @@ router.get("/config", requireAuth, async (req, res) => {
             };
             perSiteRate = 0;
             for (const item of live.items.data) {
+              // Extra storage is per GiB, not a per-site service.
+              if (isStorageSubscriptionItem(item)) continue;
               const key = item.price?.metadata?.service_key;
               if (key === BUNDLE_KEY) hasBundle = true;
               if (key && key !== BUNDLE_KEY && key !== "core") activeAddons.push(key);
@@ -182,6 +206,18 @@ router.get("/config", requireAuth, async (req, res) => {
       }
     }
 
+    const storagePrice = publishableKey && isBillingActivationAllowed()
+      ? await checkStorageAddonPrice().catch(() => null)
+      : null;
+    const storageAddon = storagePrice?.status === "ok"
+      ? {
+          unitAmount: storagePrice.configuredUnitAmount,
+          currency: storagePrice.currency,
+          minimumGib: storagePrice.minimumPurchaseGib,
+          packGib: storagePrice.packGib,
+        }
+      : null;
+
     res.json({
       publishableKey,
       subscription,
@@ -195,7 +231,10 @@ router.get("/config", requireAuth, async (req, res) => {
       // Checkout and add-ons are unavailable while Stripe is unconfigured or
       // its catalogue unverified; a lapsed trial keeps access meanwhile.
       billingAvailable: Boolean(publishableKey) && isBillingActivationAllowed(),
-      storageAddonAvailable: Boolean(process.env.STORAGE_ADDON_PRICE_ID?.trim()),
+      // Offered only while the Stripe price is the £1 per 10 GiB storage price
+      // and still covers costs; the price and step are shown before buying.
+      storageAddonAvailable: storageAddon !== null,
+      storageAddon,
       services: {
         entitled,
         addons: activeAddons,
@@ -667,114 +706,210 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
 // may only request a validated quantity of GiB.
 router.post("/storage", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const parsed = z.object({
-    gib: z.number().int().min(1).max(100_000),
+    gib: z.number().int().min(STORAGE_PACK_GIB).max(100_000).refine(isWholeStoragePacks),
     requestId: z.string().uuid(),
   }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "gib must be a whole number between 1 and 100000 and requestId must be a UUID" });
+  if (!parsed.success) return res.status(400).json({ error: `gib must be a multiple of ${STORAGE_PACK_GIB} up to 100000 and requestId must be a UUID` });
 
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "clientId required" });
-  const priceId = process.env.STORAGE_ADDON_PRICE_ID?.trim();
-  if (!priceId) return res.status(503).json({ error: "Storage add-on billing is not configured" });
-
-  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
-  if (!client?.stripeCustomerId) return res.status(400).json({ error: "No Stripe customer for this client" });
 
   try {
-    const stripe = await getUncachableStripeClient();
-    const subscription = await findLiveSubscription(client.stripeCustomerId);
-    if (!subscription) return res.status(400).json({ error: "No active subscription — subscribe first" });
-
-    const price = await stripe.prices.retrieve(priceId);
-    const unitAmount = Number(price.unit_amount);
-    const subscriptionCurrency = subscription.items.data.find((item) => item.price?.currency)?.price?.currency;
-    if (
-      !price.active
-      || price.type !== "recurring"
-      || price.recurring?.interval !== "month"
-      || !subscriptionCurrency
-      || price.currency !== subscriptionCurrency
-      || !Number.isSafeInteger(unitAmount)
-      || unitAmount < 1
-    ) {
-      return res.status(503).json({ error: "Storage add-on price must be an active monthly price in the subscription currency" });
+    // Same lock as automatic top-ups and reductions, so two changes never
+    // both start from the same subscription quantity.
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${STORAGE_CAPACITY_LOCK_NS}, ${clientId})`);
+      return addStorageCapacity({ clientId, gib: parsed.data.gib, requestId: parsed.data.requestId, log: req.log });
+    });
+    if (!result.ok) {
+      return res.status(result.status).json(result.code ? { error: result.error, code: result.code } : { error: result.error });
     }
-
-    const existingItem = subscription.items.data.find(
-      (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
-    );
-    const oldQuantity = existingItem?.quantity ?? 0;
-    const desiredQuantity = oldQuantity + parsed.data.gib;
-    const periodStart = subscription.items.data[0]?.current_period_start ?? subscription.created;
-    const idempotencyPrefix = `storage-add-${subscription.id}-${parsed.data.requestId}`;
-
-    await stripe.subscriptions.update(
-      subscription.id,
-      {
-        items: [existingItem
-          ? { id: existingItem.id, price: priceId, quantity: desiredQuantity }
-          : { price: priceId, quantity: desiredQuantity }],
-        proration_behavior: "none",
-      },
-      { idempotencyKey: `${idempotencyPrefix}-subscription` },
-    );
-
-    try {
-      const payment = await collectAddonFirstMonthInvoice(stripe, {
-        customerId: client.stripeCustomerId,
-        amount: unitAmount * parsed.data.gib,
-        currency: price.currency,
-        description: `Additional storage — ${parsed.data.gib} GiB per month`,
-        metadata: {
-          addon_service: "storage",
-          client_id: String(clientId),
-          gib_added: String(parsed.data.gib),
-          period_start: String(periodStart),
-        },
-        idempotencyPrefix,
-      });
-      if (payment === "unknown") {
-        invalidateEntitlements(clientId);
-        return res.status(502).json({
-          error: "We couldn't confirm the payment outcome. Storage access was kept while Stripe confirms it; please contact support before retrying.",
-        });
-      }
-      if (payment !== "paid") throw new Error("Storage add-on invoice was not collected");
-    } catch (error) {
-      try {
-        const fresh = await findLiveSubscription(client.stripeCustomerId);
-        const added = fresh?.items.data.find(
-          (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
-        );
-        if (added) {
-          if (oldQuantity > 0 && existingItem?.price?.id) {
-            await stripe.subscriptionItems.update(added.id, {
-              price: existingItem.price.id,
-              quantity: oldQuantity,
-              proration_behavior: "none",
-            });
-          } else {
-            await stripe.subscriptionItems.del(added.id, { proration_behavior: "none" });
-          }
-        }
-      } catch (rollbackError) {
-        req.log.error({ err: rollbackError, clientId }, "Storage add-on rollback failed");
-      }
-      invalidateEntitlements(clientId);
-      req.log.error({ err: error, clientId }, "Storage add-on payment failed");
-      return res.status(502).json({ error: "We couldn't complete the storage charge, so the add-on was not enabled. Please try again." });
-    }
-
-    invalidateEntitlements(clientId);
+    clearStorageCapacityCache(clientId);
     res.status(201).json({
-      gibAdded: parsed.data.gib,
-      monthlyGib: desiredQuantity,
-      unitAmount,
-      currency: price.currency,
+      gibAdded: result.gibAdded,
+      monthlyGib: result.monthlyGib,
+      unitAmount: result.unitAmount,
+      currency: result.currency,
     });
   } catch (err: any) {
     req.log.error({ err, clientId }, "Storage add-on failed");
     res.status(500).json({ error: err?.message ?? "Could not add storage" });
+  }
+});
+
+// Serialises storage reductions per client across API instances.
+
+type LiveSubscription = NonNullable<Awaited<ReturnType<typeof findLiveSubscription>>>;
+
+/**
+ * Paid extra storage for Settings: what renews, what is still paid for this
+ * period, and the least the retained files need. Reductions are allowed only
+ * down to that minimum, from checked usage, on a single storage item.
+ */
+async function describeStorageCapacity(clientId: number, subscription: LiveSubscription) {
+  const items = subscription.items.data;
+  const storageItems = items.filter(isStorageSubscriptionItem);
+  const item = storageItems[0];
+  const snapshot = await readStorageUsageSnapshot(clientId);
+  const planIncludedGib = planIncludedStorageGib(items);
+  const scheduled = await listScheduledStorageReductions(clientId, subscription.id);
+  const renewingGib = renewingStorageGib(items);
+  // Storage is sold in whole steps, so the least the files need rounds up to one.
+  const minimumGib = planIncludedGib === null
+    ? null
+    : roundUpToStoragePacks(minimumPaidStorageGib(snapshot.usedBytes, planIncludedGib));
+  const periodEnd = item?.current_period_end ?? items[0]?.current_period_end;
+  const usageChecked = snapshot.reconciledAt !== null && !snapshot.interruptedChanges;
+  let reduceUnavailableReason: string | null = null;
+  if (renewingGib === 0) reduceUnavailableReason = "no_extra_storage";
+  else if (storageItems.length !== 1) reduceUnavailableReason = "needs_support";
+  else if (minimumGib === null || !periodEnd) reduceUnavailableReason = "pricing_unavailable";
+  else if (!usageChecked) reduceUnavailableReason = "usage_unchecked";
+  else if (renewingGib <= minimumGib) reduceUnavailableReason = "needed_by_files";
+  return {
+    subscribed: true as const,
+    usedBytes: snapshot.usedBytes,
+    usageCheckedAt: snapshot.reconciledAt?.toISOString() ?? null,
+    planIncludedGib,
+    renewingGib,
+    paidGibThisPeriod: renewingGib + stillPaidReducedGib(scheduled),
+    minimumGib,
+    periodEndsAt: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+    unitAmount: item?.price?.unit_amount ?? null,
+    currency: item?.price?.currency ?? null,
+    scheduled: scheduled.map(({ fromGib, toGib, effectiveAt, requestedAt }) => ({ fromGib, toGib, effectiveAt, requestedAt })),
+    canReduce: reduceUnavailableReason === null,
+    reduceUnavailableReason,
+  };
+}
+
+// GET /api/billing/storage — paid extra storage and how far it can be reduced.
+router.get("/storage", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "clientId required" });
+  try {
+    const [client] = await db.select({ stripeCustomerId: clientsTable.stripeCustomerId })
+      .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+    if (!client?.stripeCustomerId) return res.json({ subscribed: false });
+    const subscription = await findLiveSubscription(client.stripeCustomerId);
+    if (!subscription) return res.json({ subscribed: false });
+    res.json(await describeStorageCapacity(clientId, subscription));
+  } catch (err: any) {
+    req.log.error({ err, clientId }, "Storage capacity lookup failed");
+    res.status(503).json({ error: "Paid storage details are unavailable right now. Please try again later." });
+  }
+});
+
+const STORAGE_REDUCE_REFUSALS: Record<string, string> = {
+  no_extra_storage: "There is no extra storage on your subscription to reduce.",
+  needs_support: "Your subscription has more than one storage line. Please contact support to reduce it.",
+  pricing_unavailable: "Storage pricing is unavailable for this subscription, so it can't be reduced right now.",
+  usage_unchecked: "We're still checking how much storage your files use. Please try again in a few minutes.",
+  needed_by_files: "Your retained files need all of your current extra storage, so it can't be reduced.",
+};
+
+// POST /api/billing/storage/reduce — lower paid extra storage from the next
+// renewal. Stripe's quantity changes now with no proration (no refund, nothing
+// charged); the GiB already paid for stay available until the period ends.
+// Files are never touched and uploads are never limited by this.
+router.post("/storage/reduce", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
+  const parsed = z.object({
+    targetGib: z.number().int().min(0).max(100_000).refine(isWholeStoragePacks),
+    requestId: z.string().uuid(),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: `targetGib must be a multiple of ${STORAGE_PACK_GIB} up to 100000 and requestId must be a UUID` });
+  const { targetGib, requestId } = parsed.data;
+
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "clientId required" });
+  const [client] = await db.select({ stripeCustomerId: clientsTable.stripeCustomerId })
+    .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  if (!client?.stripeCustomerId) return res.status(400).json({ error: "No Stripe customer for this client" });
+  const customerId = client.stripeCustomerId;
+
+  const replayed = async () => {
+    const rows = await db.execute(sql`
+      SELECT client_id, from_gib, to_gib, effective_at FROM storage_capacity_reductions
+       WHERE request_id = ${requestId}
+    `);
+    return rows.rows[0] as { client_id: number; from_gib: number; to_gib: number; effective_at: string } | undefined;
+  };
+  const replayResponse = (row: { client_id: number; from_gib: number; to_gib: number; effective_at: string }) =>
+    Number(row.client_id) !== clientId
+      ? res.status(409).json({ error: "This request was already used" })
+      : res.json({ fromGib: Number(row.from_gib), toGib: Number(row.to_gib), effectiveAt: new Date(row.effective_at).toISOString(), replayed: true });
+
+  try {
+    const earlier = await replayed();
+    if (earlier) return replayResponse(earlier);
+    const stripe = await getUncachableStripeClient();
+    const outcome = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${STORAGE_CAPACITY_LOCK_NS}, ${clientId})`);
+      const raced = await replayed();
+      if (raced) return { replay: raced } as const;
+      const subscription = await findLiveSubscription(customerId);
+      if (!subscription) return { status: 400, error: "No active subscription" } as const;
+      const capacity = await describeStorageCapacity(clientId, subscription);
+      if (!capacity.canReduce) {
+        return { status: 409, error: STORAGE_REDUCE_REFUSALS[capacity.reduceUnavailableReason ?? ""] ?? "Storage can't be reduced right now." } as const;
+      }
+      const minimumGib = capacity.minimumGib!;
+      if (targetGib >= capacity.renewingGib) {
+        return { status: 409, error: `Choose less than your current ${capacity.renewingGib} GB of extra storage.` } as const;
+      }
+      if (targetGib < minimumGib) {
+        return { status: 409, error: `Your retained files need at least ${minimumGib} GB of extra storage.` } as const;
+      }
+      const item = subscription.items.data.find(isStorageSubscriptionItem)!;
+      const effectiveAt = new Date(capacity.periodEndsAt!);
+      const idempotencyKey = `storage-reduce-${subscription.id}-${requestId}`;
+      try {
+        if (targetGib === 0) {
+          await stripe.subscriptionItems.del(item.id, { proration_behavior: "none" }, { idempotencyKey });
+        } else {
+          await stripe.subscriptions.update(
+            subscription.id,
+            { items: [{ id: item.id, quantity: targetGib }], proration_behavior: "none" },
+            { idempotencyKey },
+          );
+        }
+      } catch (error) {
+        // A lost response may still have applied: only record what Stripe holds.
+        const fresh = await findLiveSubscription(customerId).catch(() => null);
+        if (fresh?.id !== subscription.id || renewingStorageGib(fresh.items.data) !== targetGib) throw error;
+        req.log.warn({ err: error, clientId }, "Storage reduction response lost; Stripe shows it applied");
+      }
+      // The record that keeps the paid GiB available until the period ends.
+      await tx.execute(sql`
+        INSERT INTO storage_capacity_reductions
+          (client_id, request_id, subscription_id, subscription_item_id, from_gib, to_gib,
+           minimum_gib, used_bytes, effective_at, requested_by)
+        VALUES (${clientId}, ${requestId}, ${subscription.id}, ${item.id}, ${capacity.renewingGib}, ${targetGib},
+          ${minimumGib}, ${capacity.usedBytes}, ${effectiveAt.toISOString()}, ${req.currentUser?.id ?? null})
+      `);
+      req.log.info(
+        { clientId, subscriptionId: subscription.id, fromGib: capacity.renewingGib, toGib: targetGib, effectiveAt },
+        "Extra storage reduced from the next renewal",
+      );
+      return {
+        status: 201,
+        body: {
+          fromGib: capacity.renewingGib,
+          toGib: targetGib,
+          effectiveAt: effectiveAt.toISOString(),
+          paidGibThisPeriod: capacity.paidGibThisPeriod,
+          unitAmount: capacity.unitAmount,
+          currency: capacity.currency,
+        },
+      } as const;
+    });
+    if ("replay" in outcome) return replayResponse(outcome.replay!);
+    if ("error" in outcome) return res.status(outcome.status).json({ error: outcome.error });
+    clearStorageCapacityCache(clientId);
+    res.status(outcome.status).json(outcome.body);
+  } catch (err: any) {
+    req.log.error({ err, clientId }, "Storage reduction failed");
+    res.status(502).json({ error: "We couldn't change your storage in Stripe, so nothing was changed. Please try again." });
   }
 });
 

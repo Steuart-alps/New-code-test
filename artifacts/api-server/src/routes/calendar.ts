@@ -5,6 +5,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { requireAuth, getClientId } from "../middleware/requireAuth";
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { ukToday } from "../lib/riddor";
+import { actionStateLabel, itemActionStates } from "../lib/certificateOutcomes";
 import { inclusiveDays, isCalendarDate, resolveSiteAccessScope, siteScopeSql } from "../lib/siteAccessScope";
 
 /**
@@ -167,13 +168,17 @@ router.get("/calendar", requireAuth, async (req, res) => {
     `),
   ]);
 
+  // An unsatisfactory newest certificate or open remedial defects show the
+  // check as needing action (red) whatever its date.
+  const actionStates = await itemActionStates(clientId, items.map((row) => Number(row.id)));
   const entries: CalendarEntry[] = [];
   for (const row of items) {
+    const action = actionStates.get(Number(row.id));
     entries.push({
       id: `compliance-${row.id}`, date: row.date, kind: "compliance_due", title: row.title,
-      detail: [row.category, row.contractor_name].filter(Boolean).join(" · ") || null,
+      detail: [action?.needsAction ? actionStateLabel(action) : null, row.category, row.contractor_name].filter(Boolean).join(" · ") || null,
       siteName: row.site_name ?? null, href: `/items/${row.id}`,
-      status: state(row.date, row.status === "completed"),
+      status: action?.needsAction ? "overdue" : state(row.date, row.status === "completed"),
     });
   }
   for (const row of visits) {

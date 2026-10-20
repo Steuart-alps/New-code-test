@@ -40,6 +40,7 @@ async function ensureProductWithPrice(
       unit_amount: svc.amount,
       currency: "gbp",
       recurring: { interval: "month" },
+      tax_behavior: "exclusive",
       metadata: { per_site: "true", service_key: svc.key },
     });
     console.log(`✓ Created price for ${svc.name} (£${svc.amount / 100}/site/month)`);

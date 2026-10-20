@@ -699,7 +699,7 @@ export default function TreeTrackPage() {
                   {w3wLoading ? "Getting location…" : "Use my location"}
                 </button>
               </div>
-              <Input id="location" placeholder="e.g. Car park perimeter, East boundary, or ///word.word.word"
+              <Input id="location" dictation placeholder="e.g. Car park perimeter, East boundary, or ///word.word.word"
                 value={form.location}
                 onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
                 className="rounded-sm" />
@@ -729,10 +729,10 @@ export default function TreeTrackPage() {
             {sites.length > 0 && (
               <div>
                 <Label>Site</Label>
-                <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+                <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No specific site</SelectItem>
+                    <SelectItem value="none">No specific site</SelectItem>
                     {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>

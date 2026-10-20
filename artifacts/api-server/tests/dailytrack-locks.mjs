@@ -25,7 +25,7 @@ function check(name, condition, detail = "") {
   }
 }
 
-function makeSession() {
+function makeSession(defaultHeaders = {}) {
   let cookie = "";
   return async function request(method, path, body) {
     const res = await fetch(`${BASE}${path}`, {
@@ -33,6 +33,7 @@ function makeSession() {
       headers: {
         "Content-Type": "application/json",
         ...(cookie ? { cookie } : {}),
+        ...defaultHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -81,6 +82,7 @@ async function testAmLocks(req) {
   // 3. Submit the checklist
   const submittedAt = new Date().toISOString();
   const submitRes = await req("PUT", `/daily-track-am/${draftId}`, {
+    items: [{ label: "Hands washed", checked: true, result: "pass" }],
     submittedAt,
     completedBy: "Final Staff",
   });
@@ -148,7 +150,7 @@ async function testPmChecklistLocks(req) {
 
   // 3. Submit
   const submittedAt = new Date().toISOString();
-  const submitRes = await req("PUT", `/daily-track-pm/${draftId}`, { submittedAt, completedBy: "Final PM Staff" });
+  const submitRes = await req("PUT", `/daily-track-pm/${draftId}`, { items: [{ label: "Ovens off", checked: true, result: "pass" }], submittedAt, completedBy: "Final PM Staff" });
   check("pm-checklist: PUT to submit → 200", submitRes.status === 200, `status=${submitRes.status}`);
   check("pm-checklist: submitted record has submittedAt", submitRes.data?.submittedAt != null, `submittedAt=${submitRes.data?.submittedAt}`);
 
@@ -302,7 +304,9 @@ async function testSignoffIdempotent(req) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const req = makeSession();
+  // The owner deliberately works on past dates (so each test gets its own
+  // day); owners may change records past the correction window with a reason.
+  const req = makeSession({ "X-Override-Reason": encodeURIComponent("DailyTrack lock fixture: past-dated record") });
 
   // Register a fresh account for isolation
   const email = `dailytrack-locks-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`;

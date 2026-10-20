@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { apiFetch } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +31,7 @@ const NEW_SECTION = "__new__";
 export function ChecklistTemplateEditor({
   open, onOpenChange, type, typeLabel, siteId, siteName, defaultItems, onSaved,
 }: Props) {
+  const { toast } = useToast();
   const [items, setItems] = useState<TemplateItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -92,7 +94,7 @@ export function ChecklistTemplateEditor({
     if (!label) return;
     const section = newSection === NEW_SECTION
       ? newSectionCustom.trim() || undefined
-      : newSection || undefined;
+      : newSection === "__none__" ? undefined : newSection || undefined;
     setItems(prev => [...prev, { label, section, checked: false }]);
     setNewLabel("");
   };
@@ -113,7 +115,12 @@ export function ChecklistTemplateEditor({
         const data = await r.json();
         onSaved(data.items ?? items);
         onOpenChange(false);
+      } else {
+        const data = await r.json().catch(() => ({}));
+        toast({ title: "Could not save checklist", description: data.error ?? `Error ${r.status}`, variant: "destructive" });
       }
+    } catch (err: any) {
+      toast({ title: "Could not save checklist", description: err?.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -128,7 +135,12 @@ export function ChecklistTemplateEditor({
       if (r.ok) {
         onSaved(defaultItems);
         onOpenChange(false);
+      } else {
+        const data = await r.json().catch(() => ({}));
+        toast({ title: "Could not reset checklist", description: data.error ?? `Error ${r.status}`, variant: "destructive" });
       }
+    } catch (err: any) {
+      toast({ title: "Could not reset checklist", description: err?.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }

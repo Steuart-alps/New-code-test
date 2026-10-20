@@ -12,6 +12,7 @@
 // http://localhost:8080/api, override with API_BASE env var)
 // Exits 0 when every check passes, 1 otherwise.
 
+import { promoteToConsultant } from "./consultant-account.mjs";
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
 let passed = 0;
@@ -58,10 +59,11 @@ function expectOk(name, status, allowed = [200, 201]) {
 }
 
 // Unique date string to avoid food-safety recordDate collisions between tenants
+// in the account's own day (Europe/London), which the record lock compares
+// against; a UTC date is a day behind between 23:00 and 00:00 UTC in BST.
 function uniqueDate(offset = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() - offset);
-  return d.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" })
+    .format(new Date(Date.now() - offset * 86400000));
 }
 
 async function setupTenant(label) {
@@ -85,6 +87,9 @@ async function setupTenant(label) {
   expectOk(`${label}: verify email`, verified.status);
   const login = await req("POST", "/auth/login", { email, password: "password-123" });
   expectOk(`${label}: login after verification`, login.status);
+  // Both tenants are consultants, the role with the widest reach (business
+  // lists and ?clientId switching), so isolation is checked where it matters most.
+  promoteToConsultant(email);
 
   const me = await req("GET", "/auth/me");
   expectOk(`${label}: /auth/me`, me.status);
@@ -114,7 +119,7 @@ async function setupTenant(label) {
   // ── Fire-safety module ───────────────────────────────────────────────────────
   // Trial accounts have "all" entitlements so module routes are always open.
   const fireSafetyCheck = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(),
     result: "pass",
   });
@@ -311,7 +316,7 @@ async function attack(attacker, victim) {
   expectBlocked(
     `${tag}: POST /fire-safety body clientId`,
     (await req("POST", "/fire-safety", {
-      checkType: "alarm",
+      checkType: "alarm", callPoint: "CP1",
       checkDate: uniqueDate(2),
       result: "pass",
       clientId: victim.clientId,
@@ -498,8 +503,9 @@ async function consultantDepartmentChecks(owner) {
   check(`${tag}: viewer department stays saved after edit`, viewerRename.data?.departmentId === secondDept.data?.id,
     JSON.stringify(viewerRename.data));
 
-  const otherDept = await req("POST", "/departments", { name: `${owner.label} Bar` });
-  expectOk(`${tag}: create another own department`, otherDept.status, [201]);
+  // Departments can sit under a site; one at the user's own site is valid.
+  const otherDept = await req("POST", "/departments", { name: `${owner.label} Bar`, siteId: owner.siteId });
+  expectOk(`${tag}: create another own department at a site`, otherDept.status, [201]);
   const moved = await req("PUT", `/users/${owner.staffUserId}`, { departmentId: otherDept.data?.id });
   expectOk(`${tag}: PUT staff to another own department`, moved.status);
   check(`${tag}: staff moved to own department`, moved.data?.departmentId === otherDept.data?.id, JSON.stringify(moved.data));

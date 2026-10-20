@@ -182,8 +182,21 @@ async function routeApi(route, url) {
   if (pathname === "/api/billing/cancellation-status" && method === "GET") {
     return jsonResponse(route, { accessEndsAt: null });
   }
+  // Settings also loads track owners (#92) and paid storage (#100).
+  if (pathname === "/api/track-owners" && method === "GET") {
+    return jsonResponse(route, { modules: [], owners: [], sites: [], users: [], defaultRecipients: [] });
+  }
+  if (pathname === "/api/billing/storage" && method === "GET") return jsonResponse(route, { subscribed: false });
+  // The header's notification bell (#92).
+  if (pathname === "/api/notifications" && method === "GET") {
+    return jsonResponse(route, { notifications: [], unreadCount: 0 });
+  }
   if (pathname === "/api/billing/invoices" && method === "GET") {
     return jsonResponse(route, { invoices: [] });
+  }
+  // The app-wide storage limit banner (#156).
+  if (pathname === "/api/storage/status" && method === "GET") {
+    return jsonResponse(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
   }
   if (pathname === "/api/storage/usage" && method === "GET") {
     return jsonResponse(route, {
@@ -191,6 +204,9 @@ async function routeApi(route, url) {
       objectCount: 0,
       warningThresholdBytes: 5 * 1024 ** 3,
       warning: false,
+      capacityBytes: null,
+      limitState: "not_limited",
+      autoTopUp: false,
       monthlyDownloadBytes: 0,
       monthlyDownloadTrackingAvailable: true,
       month: "2026-09",

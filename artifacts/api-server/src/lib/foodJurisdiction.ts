@@ -6,7 +6,8 @@ type Executor = Pick<typeof db, "execute">;
 /**
  * KitchenTrack jurisdiction used when no food_jurisdiction setting is saved:
  * the nation in the Compliance Hub profile when it is Scotland or Northern
- * Ireland, otherwise England/Wales (also for multi-nation profiles).
+ * Ireland, otherwise England/Wales (also for multi-nation profiles). Other
+ * countries are only ever chosen in the KitchenTrack template.
  */
 export async function defaultFoodJurisdiction(
   clientId: number,

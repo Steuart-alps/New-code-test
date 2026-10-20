@@ -80,6 +80,7 @@ try {
   const foreign = await createTenant('cleaning-export-foreign');
   // A consultant from another account, explicitly linked to the owner's business.
   const consultant = await createTenant('cleaning-export-consultant');
+  await pool.query("UPDATE users SET role = 'consultant' WHERE id = $1", [consultant.userId]);
   await pool.query('INSERT INTO consultant_clients (user_id, client_id) VALUES ($1, $2)', [consultant.userId, owner.clientId]);
 
   const admin = await createUser(owner, { role: 'client_admin' });

@@ -62,6 +62,8 @@ import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { SignaturePad } from "@/components/signature-pad";
 import { buildTrainingMatrix, certificateStatus, normaliseStaffName, trainingMatrixToCsv } from "@/lib/training-matrix";
+import { getTrainingExpiry } from "@/lib/training-expiry";
+import { useLocalToday } from "@/hooks/use-local-today";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -126,9 +128,9 @@ const STATUS_CFG = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function getCertStatus(expiryDate: string | null): CertStatus {
+function getCertStatus(expiryDate: string | null, today = new Date()): CertStatus {
   if (!expiryDate) return "no_expiry";
-  const status = certificateStatus(expiryDate);
+  const status = certificateStatus(expiryDate, today);
   return status === "Expired" ? "expired" : status === "Expiring Soon" ? "expiring_soon" : "valid";
 }
 
@@ -137,14 +139,14 @@ function formatDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function daysUntil(d: string | null) {
-  if (!d) return null;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return Math.ceil((new Date(d).getTime() - today.getTime()) / 86400000);
+// Calendar days, not elapsed hours: parsing "YYYY-MM-DD" as UTC midnight put
+// every label a day out during British Summer Time.
+function daysUntil(d: string | null, today = new Date()) {
+  return getTrainingExpiry(d?.slice(0, 10), today).days;
 }
 
-function getSignoffStatus(expiryDate: string | null): "acknowledged" | "expired" {
-  return expiryDate && getCertStatus(expiryDate) === "expired" ? "expired" : "acknowledged";
+function getSignoffStatus(expiryDate: string | null, today = new Date()): "acknowledged" | "expired" {
+  return expiryDate && getCertStatus(expiryDate, today) === "expired" ? "expired" : "acknowledged";
 }
 
 // Route every request through the shared apiFetch and attach the consultant's
@@ -249,6 +251,8 @@ export default function TrainTrackPage() {
   const { toast } = useToast();
   const { activeClientId, client, user } = useAuth();
   const canMutate = user?.role !== "client_viewer";
+  // Expiry states, counts and ordering roll over at local midnight while open.
+  const today = useLocalToday();
   const qc = useQueryClient();
   const apiFetch = useTrainTrackApi();
 
@@ -311,11 +315,11 @@ export default function TrainTrackPage() {
 
   // cert expiry counts
   const certCounts = useMemo(() => ({
-    expired:       certs.filter(r => getCertStatus(r.expiry_date) === "expired").length,
-    expiring_soon: certs.filter(r => getCertStatus(r.expiry_date) === "expiring_soon").length,
-    valid:         certs.filter(r => getCertStatus(r.expiry_date) === "valid").length,
-    no_expiry:     certs.filter(r => getCertStatus(r.expiry_date) === "no_expiry").length,
-  }), [certs]);
+    expired:       certs.filter(r => getCertStatus(r.expiry_date, today) === "expired").length,
+    expiring_soon: certs.filter(r => getCertStatus(r.expiry_date, today) === "expiring_soon").length,
+    valid:         certs.filter(r => getCertStatus(r.expiry_date, today) === "valid").length,
+    no_expiry:     certs.filter(r => getCertStatus(r.expiry_date, today) === "no_expiry").length,
+  }), [certs, today]);
 
   function applyCommonFilters(rows: TrainingRecord[]) {
     let r = rows;
@@ -335,17 +339,17 @@ export default function TrainTrackPage() {
 
   const filteredCerts     = useMemo(() => {
     let rows = applyCommonFilters(certs);
-    if (certStatus !== "all") rows = rows.filter(r => getCertStatus(r.expiry_date) === certStatus);
+    if (certStatus !== "all") rows = rows.filter(r => getCertStatus(r.expiry_date, today) === certStatus);
     // Sort urgent records to the top: expired first, then expiring soon, each by soonest expiry.
     const rank: Record<CertStatus, number> = { expired: 0, expiring_soon: 1, valid: 2, no_expiry: 3 };
     return [...rows].sort((a, b) => {
-      const ra = rank[getCertStatus(a.expiry_date)];
-      const rb = rank[getCertStatus(b.expiry_date)];
+      const ra = rank[getCertStatus(a.expiry_date, today)];
+      const rb = rank[getCertStatus(b.expiry_date, today)];
       if (ra !== rb) return ra - rb;
       if (a.expiry_date && b.expiry_date) return a.expiry_date.localeCompare(b.expiry_date);
       return 0;
     });
-  }, [certs, siteFilter, search, certStatus]);
+  }, [certs, siteFilter, search, certStatus, today]);
 
   const filteredSignoffs  = useMemo(() => applyCommonFilters(signoffs),  [signoffs,  siteFilter, search]);
   const filteredInternals = useMemo(() => applyCommonFilters(internals), [internals, siteFilter, search]);
@@ -819,10 +823,10 @@ ${rows.map(r => `<tr>
               footer={`Showing ${filteredCerts.length} of ${certs.length} certificate${certs.length !== 1 ? "s" : ""}`}
             >
               {filteredCerts.map(r => {
-                const status = getCertStatus(r.expiry_date);
+                const status = getCertStatus(r.expiry_date, today);
                 const cfg = STATUS_CFG[status];
                 const Icon = cfg.icon;
-                const days = daysUntil(r.expiry_date);
+                const days = daysUntil(r.expiry_date, today);
                 return (
                   <tr key={r.id} className={cn(
                     "hover:bg-muted/20 transition-colors group",
@@ -925,7 +929,7 @@ ${rows.map(r => `<tr>
                   </td>
                   <td className="px-4 py-3">
                     {(() => {
-                      const status = getSignoffStatus(r.expiry_date);
+                      const status = getSignoffStatus(r.expiry_date, today);
                       const expired = status === "expired";
                       return (
                         <div>
@@ -1125,10 +1129,10 @@ ${rows.map(r => `<tr>
                 {sites.length > 0 && (
                   <div>
                     <Label>Site</Label>
-                    <Select value={certForm.siteId} onValueChange={v => setCertForm(f => ({ ...f, siteId: v }))}>
+                    <Select value={certForm.siteId || "none"} onValueChange={v => setCertForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No site</SelectItem>
+                        <SelectItem value="none">No site</SelectItem>
                         {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
@@ -1181,10 +1185,10 @@ ${rows.map(r => `<tr>
                 </div>
                 <div>
                   <Label>Document Type</Label>
-                  <Select value={signoffForm.documentType} onValueChange={v => setSignoffForm(f => ({ ...f, documentType: v }))}>
+                  <Select value={signoffForm.documentType || "none"} onValueChange={v => setSignoffForm(f => ({ ...f, documentType: v === "none" ? "" : v }))}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select type (optional)" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Not specified</SelectItem>
+                      <SelectItem value="none">Not specified</SelectItem>
                       {Object.entries(DOCUMENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -1192,10 +1196,10 @@ ${rows.map(r => `<tr>
                 {sites.length > 0 && (
                   <div>
                     <Label>Site</Label>
-                    <Select value={signoffForm.siteId} onValueChange={v => setSignoffForm(f => ({ ...f, siteId: v }))}>
+                    <Select value={signoffForm.siteId || "none"} onValueChange={v => setSignoffForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No site</SelectItem>
+                        <SelectItem value="none">No site</SelectItem>
                         {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
@@ -1251,10 +1255,10 @@ ${rows.map(r => `<tr>
                 {sites.length > 0 && (
                   <div>
                     <Label>Site</Label>
-                    <Select value={internalForm.siteId} onValueChange={v => setInternalForm(f => ({ ...f, siteId: v }))}>
+                    <Select value={internalForm.siteId || "none"} onValueChange={v => setInternalForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">No site</SelectItem>
+                        <SelectItem value="none">No site</SelectItem>
                         {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>

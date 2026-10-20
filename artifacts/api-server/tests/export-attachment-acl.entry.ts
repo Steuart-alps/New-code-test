@@ -2,6 +2,7 @@ export {
   getAttachmentOmissionReason,
   getAttachmentZipPath,
   fitsAttachmentExportCap,
+  planExportParts,
   isExportAttachmentAuthorized,
   rawToCsv,
   attachmentCap,

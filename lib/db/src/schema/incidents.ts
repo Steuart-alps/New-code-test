@@ -54,6 +54,10 @@ export const incidentsTable = pgTable("incidents", {
   correctiveActions: text("corrective_actions"),
   reportedBy: text("reported_by").notNull(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Submitter's department when the row was created, set by a database
+  // trigger and never changed (submitterDepartmentMigration.ts).
+  submitterDepartmentId: integer("submitter_department_id"),
+  submitterDepartmentSource: text("submitter_department_source").notNull().default("recorded"),
   // Mobile outbox entry ID and payload fingerprint: a replay of an applied
   // submission is recognised instead of creating a duplicate. Not a credential.
   clientEntryId: text("client_entry_id"),
@@ -90,5 +94,12 @@ export const incidentRiddorEventsTable = pgTable("incident_riddor_events", {
   hseReportDate: date("hse_report_date"),
   submittedAt: timestamp("submitted_at"),
   submissionEvidence: text("submission_evidence"),
+  // HSE receipt bound to this submission event. Written once with the event
+  // (the table is append-only), so the file can't be swapped or detached.
+  receiptObjectPath: text("receipt_object_path"),
+  receiptFileName: text("receipt_file_name"),
+  receiptContentType: text("receipt_content_type"),
+  /** upload | incident_attachment (picked from the incident's photos). */
+  receiptSource: text("receipt_source"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

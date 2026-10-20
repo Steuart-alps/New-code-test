@@ -15,7 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { printHtmlDocument } from "@/lib/download";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
-import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 const types = ["Class I", "Class II", "Class III", "Extension Lead", "IT Equipment", "Portable Tool", "Cleaning Equipment", "AV Equipment", "Kitchen Appliance", "Other"];
@@ -41,7 +41,7 @@ type View = "appliances" | "tests";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const mutationSucceeded = beginApiMutation(init?.method, `/pat-track${path}`);
-  const response = await fetch(withActiveClient(`${baseUrl}/api/pat-track${path}`, init?.body), await withCsrfToken({ credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } }));
+  const response = await fetchWithOverrideReason(withActiveClient(`${baseUrl}/api/pat-track${path}`, init?.body), await withCsrfToken({ credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } }));
   notifyAuthStatus(response);
   if (!response.ok) {
     const body = await response.json().catch(() => null);

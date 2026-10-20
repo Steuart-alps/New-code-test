@@ -4,8 +4,9 @@ import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   GetStorageUsageResponse,
+  GetStorageStatusResponse,
 } from "@workspace/api-zod";
-import { ObjectStorageService, ObjectNotFoundError, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, UploadTooLargeError, maxUploadBytes, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
 import {
   readStorageUsageSnapshot,
   reconcileStorageUsage,
@@ -14,14 +15,25 @@ import {
   storageUsageSnapshotIsStale,
 } from "../lib/storageUsageSnapshot";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity, isStorageAutoTopUpOn, readStorageCapacity, storageLimitState, STORAGE_NEARLY_FULL_RATIO } from "../lib/storageLimit";
 import { ObjectPermission } from "../lib/objectAcl";
 import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
 import { objectPathTenantMismatch, patPhotoObjectAccess } from "../lib/patLegacyHistoryScope";
+import { canReadHealthData, riddorReceiptObjectAccess } from "../lib/riddorReceipts";
 import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
 import { findLiveSubscription } from "../lib/billing";
+import { readStorageRateConfig } from "../lib/storagePricing";
+import {
+  GIB,
+  listScheduledStorageReductions,
+  planIncludedStorageGib,
+  renewingStorageGib,
+  stillPaidReducedGib,
+} from "../lib/storageCapacity";
+import { storageWarningThresholdBytes } from "../lib/storageWarningEmails";
 import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
@@ -34,14 +46,6 @@ const objectStorageService = new ObjectStorageService();
 // Every ObjectStorageService instance reports tenant uploads and deletions to
 // the usage ledger once this router is loaded.
 setStorageUsageRecorder(storageUsageLedger);
-const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
-const GIB = 1024 ** 3;
-const DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH = 0.015;
-const DEFAULT_ALPS_STORAGE_MARKUP_PERCENT = 20;
-const DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE: Record<string, number> = {
-  core: 1,
-  bundle: 1,
-};
 
 storageDownloadRouter.get("/storage/download/:token", async (req: Request, res: Response) => {
   let resolved: Awaited<ReturnType<typeof resolveDownloadToken>> = null;
@@ -76,40 +80,23 @@ storageDownloadRouter.get("/storage/download/:token", async (req: Request, res: 
 });
 
 async function estimateStorageCost(clientId: number, usedBytes: number, monthlyDownloadBytes: number) {
-  const rawRate = process.env.STORAGE_PROVIDER_USD_PER_GIB_MONTH?.trim();
-  const providerRate = rawRate ? Number(rawRate) : DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH;
-  const rawMarkup = process.env.STORAGE_ALPS_MARKUP_PERCENT?.trim();
-  const markupPercent = rawMarkup ? Number(rawMarkup) : DEFAULT_ALPS_STORAGE_MARKUP_PERCENT;
-  if (!Number.isFinite(providerRate) || providerRate < 0 || !Number.isFinite(markupPercent) || markupPercent < 0) return null;
-  const rawAllowances = process.env.STORAGE_INCLUDED_GIB_BY_SERVICE;
-  let allowanceMap: Record<string, unknown>;
-  try {
-    allowanceMap = rawAllowances ? JSON.parse(rawAllowances) : DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE;
-  } catch {
-    return null;
-  }
-  if (!allowanceMap || typeof allowanceMap !== "object" || Array.isArray(allowanceMap)) return null;
-  const configuredValues = Object.values(allowanceMap);
-  if (!configuredValues.length || configuredValues.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER / GIB)) return null;
+  // Same rate source as the Stripe price check (storagePricing.ts), so the
+  // estimate and the add-on price are judged against one calculation.
+  const rates = readStorageRateConfig();
+  if (!rates) return null;
+  const { providerUsdPerGibMonth: providerRate, markupPercent } = rates;
   const [client] = await db.select({ stripeCustomerId: clientsTable.stripeCustomerId })
     .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client?.stripeCustomerId) return null;
   const subscription = await findLiveSubscription(client.stripeCustomerId).catch(() => null);
   if (!subscription) return null;
-  const storagePriceId = process.env.STORAGE_ADDON_PRICE_ID?.trim();
-  const isStorageItem = (item: (typeof subscription.items.data)[number]) =>
-    item.price?.metadata?.service_key === "storage" || (Boolean(storagePriceId) && item.price?.id === storagePriceId);
-  const allowances = subscription.items.data
-    .filter((item) => !isStorageItem(item))
-    .map((item) => String(item.price?.metadata?.service_key ?? ""))
-    .map((key) => Number(allowanceMap[key]))
-    .filter((value) => Number.isFinite(value) && value >= 0);
-  if (!allowances.length) return null;
-  // Storage bought as an add-on (one unit per GiB) adds to the plan allowance.
-  const purchasedGib = subscription.items.data
-    .filter(isStorageItem)
-    .reduce((sum, item) => sum + Math.max(0, Number(item.quantity ?? 0) || 0), 0);
-  const includedBytes = (Math.max(...allowances) + purchasedGib) * GIB;
+  const planGib = planIncludedStorageGib(subscription.items.data);
+  if (planGib === null) return null;
+  // Storage bought as an add-on (one unit per GiB) adds to the plan allowance,
+  // including GiB already reduced for the next renewal but paid until then.
+  const purchasedGib = renewingStorageGib(subscription.items.data)
+    + stillPaidReducedGib(await listScheduledStorageReductions(clientId, subscription.id));
+  const includedBytes = (planGib + purchasedGib) * GIB;
   const excess = Math.max(0, usedBytes - includedBytes);
   const providerMinorUnits = Math.round(providerRate * 100 * excess / GIB);
   const storageMinorUnits = Math.round(
@@ -128,6 +115,38 @@ async function estimateStorageCost(clientId: number, usedBytes: number, monthlyD
     markupPercent,
   };
 }
+
+/**
+ * GET /storage/status — nearly full / full for the in-app banner, readable by
+ * everyone signed in to the business (staff need to know why uploads stopped).
+ * Only owners and consultants see the figures. Usage is the ledger total;
+ * capacity is cached for a few minutes (storageLimit.ts).
+ */
+router.get("/storage/status", requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
+  try {
+    const { usedBytes } = await readStorageUsageSnapshot(clientId);
+    const capacityBytes = await readStorageCapacity(clientId).then((capacity) => capacity?.capacityBytes ?? null, (err) => {
+      req.log.warn({ err, clientId }, "Storage capacity unavailable; banner hidden");
+      return null;
+    });
+    const canManage = ["consultant", "client_admin"].includes(req.currentUser?.role ?? "");
+    res.json(GetStorageStatusResponse.parse({
+      state: storageLimitState(usedBytes, capacityBytes),
+      canManage,
+      autoTopUp: await isStorageAutoTopUpOn(clientId),
+      usedBytes: canManage ? usedBytes : null,
+      capacityBytes: canManage ? capacityBytes : null,
+    }));
+  } catch (error) {
+    req.log.error({ err: error, clientId }, "Storage status unavailable");
+    res.status(503).json({ error: "Storage status is temporarily unavailable." });
+  }
+});
 
 router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Request, res: Response): Promise<void> => {
   const clientId = getClientId(req);
@@ -170,16 +189,22 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
     const month = utcMonth();
     const monthlyDownloadBytes = await getMonthlyDownloadBytes(clientId, month);
     const estimatedCost = await estimateStorageCost(clientId, usedBytes, monthlyDownloadBytes);
-    const configuredThreshold = Number(thresholdSetting?.value);
-    const warningThresholdBytes = Number.isSafeInteger(configuredThreshold) && configuredThreshold > 0
-      ? configuredThreshold
-      : DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES;
+    const capacityBytes = await readStorageCapacity(clientId).then((capacity) => capacity?.capacityBytes ?? null, (err) => {
+      req.log.warn({ err, clientId }, "Storage capacity unavailable; not showing the limit");
+      return null;
+    });
+    // The Settings level; the email goes at it or at 80% of the paid
+    // storage, whichever is lower (storageWarningEmails.ts).
+    const warningThresholdBytes = storageWarningThresholdBytes(thresholdSetting?.value);
+    const emailLevelBytes = capacityBytes === null
+      ? warningThresholdBytes
+      : Math.min(warningThresholdBytes, Math.floor(capacityBytes * STORAGE_NEARLY_FULL_RATIO));
 
     res.json(GetStorageUsageResponse.parse({
       usedBytes,
       objectCount,
       warningThresholdBytes,
-      warning: usedBytes >= warningThresholdBytes,
+      warning: usedBytes >= emailLevelBytes,
       monthlyDownloadBytes,
       monthlyDownloadTrackingAvailable: true,
       month,
@@ -187,6 +212,9 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
       usageCheckedAt: snapshot.reconciledAt,
       usageAgeSeconds: snapshot.ageSeconds,
       usageRefreshing: snapshot.refreshing,
+      capacityBytes,
+      limitState: storageLimitState(usedBytes, capacityBytes),
+      autoTopUp: await isStorageAutoTopUpOn(clientId),
     }));
   } catch (error) {
     req.log.error({ err: error, operation: "account storage usage" }, "Object storage usage unavailable");
@@ -218,7 +246,13 @@ router.post("/storage/uploads/request-url", requireAuth, denyViewers, async (req
       res.status(400).json({ error: "No client context" });
       return;
     }
+    // Refuse early; finalisation checks the stored size as well.
+    if (size > maxUploadBytes()) {
+      res.status(400).json({ error: new UploadTooLargeError().message });
+      return;
+    }
 
+    await ensureUploadCapacity(clientId, req.log);
     const uploadURL = await objectStorageService.getObjectEntityUploadURL(clientId);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
@@ -285,9 +319,12 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
     const clientId = getClientId(req);
     // The tenant ACL below is per client. A retained PAT test photo is also
     // limited to the department/site recorded with its test, so another
-    // department cannot fetch it by path. Checked before touching storage.
+    // department cannot fetch it by path. An HSE receipt bound to a RIDDOR
+    // submission keeps its incident's department and manager-only rule too.
+    // Checked before touching storage.
     if (!clientId || objectPathTenantMismatch(objectPath, clientId)
-      || !await patPhotoObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req))) {
+      || !await patPhotoObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req))
+      || !await riddorReceiptObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req), canReadHealthData(req))) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }

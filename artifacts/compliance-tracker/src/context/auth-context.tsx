@@ -10,8 +10,10 @@ import {
 } from "@/lib/api";
 import { setClientIdGetter, setUnauthorizedHandler, setPaymentRequiredHandler, setMutationObserver } from "@workspace/api-client-react";
 import { createCompletedWorkObserver } from "@/lib/analytics";
+import { clearApprovalRefreshStateForUser } from "@/lib/contractor-approval-refresh-state";
+import { installTransferTracking, transfersInFlight } from "@/lib/transfer-activity";
 
-export type UserRole = "consultant" | "client_admin" | "client_staff" | "client_viewer";
+export type UserRole = "consultant" | "client_admin" | "client_manager" | "client_staff" | "client_viewer";
 
 export interface AuthUser {
   id: number;
@@ -24,6 +26,12 @@ export interface AuthUser {
   totpEnabled?: boolean;
   isMaintenanceManager?: boolean;
   isDepartmentManager?: boolean;
+  /** A Manager given every department rather than their own. */
+  allDepartments?: boolean;
+  /** A Manager's departments, main first; departmentId is the one they're working in. */
+  departmentIds?: number[];
+  /** A Viewer's staff roster entry. */
+  staffRosterId?: number | null;
   /** Named in PLATFORM_ADMIN_EMAILS: may issue ALPS discount codes. */
   platformOperator?: boolean;
 }
@@ -115,6 +123,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /** Signs the tab out locally and forgets everything loaded for that user. */
   function clearSession() {
+    // Only the signed-out user's Contractor Approvals acknowledgments go;
+    // another account's state in this browser is left alone.
+    clearApprovalRefreshStateForUser(window, userRef.current?.id ?? null);
     userRef.current = null;
     setUser(null);
     setClient(null);
@@ -185,12 +196,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // session expiry. The last-activity timestamp is shared across tabs via
   // localStorage so an idle background tab never logs out a user who is
   // actively working in another tab — logout fires only once EVERY tab has
-  // been idle for 30 minutes. The server session (rolling 30-min expiry) is
-  // the source of truth; this timer just brings idle tabs to the login page
-  // promptly and best-effort destroys the by-then-idle server session.
+  // been idle for 30 minutes. The server session (rolling 30-minute expiry)
+  // is the source of truth; this timer just brings idle tabs to the login
+  // page promptly and best-effort destroys the by-then-idle server session.
+  // An upload or download in progress counts as activity, and keeps the
+  // server session alive too, however long it takes.
   const lastActivityRef = useRef<number>(Date.now());
   useEffect(() => {
     const IDLE_LIMIT_MS = 30 * 60 * 1000;
+    const KEEP_ALIVE_MS = 5 * 60 * 1000;
+    installTransferTracking();
+    let lastKeepAlive = Date.now();
     const STORAGE_KEY = "complytrack:lastActivity";
     const WRITE_THROTTLE_MS = 15_000;
 
@@ -221,6 +237,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const interval = window.setInterval(() => {
       if (!userRef.current) return;
+      if (transfersInFlight() > 0) {
+        markActivity();
+        if (Date.now() - lastKeepAlive >= KEEP_ALIVE_MS) {
+          lastKeepAlive = Date.now();
+          apiFetch("/auth/me").catch(() => {});
+        }
+        return;
+      }
       const lastAnywhere = Math.max(lastActivityRef.current, readShared());
       if (Date.now() - lastAnywhere >= IDLE_LIMIT_MS) {
         apiFetch("/auth/logout", { method: "POST" }).catch(() => {}).finally(clearCsrfToken);
@@ -339,13 +363,25 @@ export function useAuth() {
 export function useCanEdit() {
   const { user } = useAuth();
   if (!user) return false;
-  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_staff";
+  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff";
 }
 
 export function useCanAdmin() {
   const { user } = useAuth();
   if (!user) return false;
   return user.role === "consultant" || user.role === "client_admin";
+}
+
+/** Owners and consultants manage every user; Managers manage their own Staff and Viewers. */
+export function useCanManageUsers() {
+  const { user } = useAuth();
+  if (!user) return false;
+  return user.role === "consultant" || user.role === "client_admin" || user.role === "client_manager";
+}
+
+export function useIsManager() {
+  const { user } = useAuth();
+  return user?.role === "client_manager";
 }
 
 export function useIsConsultant() {
@@ -355,5 +391,7 @@ export function useIsConsultant() {
 
 export function useIsMaintenanceManager() {
   const { user } = useAuth();
-  return user?.isMaintenanceManager === true;
+  // Managers (heads of department) also run FixTrack and contractor emails,
+  // so a business without a maintenance manager is still covered.
+  return user?.isMaintenanceManager === true || user?.role === "client_manager";
 }

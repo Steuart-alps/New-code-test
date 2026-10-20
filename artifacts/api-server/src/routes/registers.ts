@@ -30,6 +30,7 @@ import {
 import { and, asc, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { requireService } from "../lib/services";
 import {
   ObjectStorageService,
@@ -40,6 +41,7 @@ import {
   type AllowedUploadType,
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 
 const router = Router();
 
@@ -106,7 +108,7 @@ function siteScope(req: Request, clientId: number, column: PgColumn): SQL | unde
   const deptId = getActiveDepartmentId(req);
   if (deptId === null) return undefined;
   const visibleSites = db.select({ id: sitesTable.id }).from(sitesTable)
-    .where(and(eq(sitesTable.clientId, clientId), or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId))));
+    .where(and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(deptId)));
   return or(isNull(column), inArray(column, visibleSites));
 }
 
@@ -117,7 +119,7 @@ async function canUseSite(req: Request, clientId: number, siteId: number): Promi
     .where(and(
       eq(sitesTable.id, siteId),
       eq(sitesTable.clientId, clientId),
-      deptId === null ? undefined : or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      deptId === null ? undefined : sitesTableVisibleTo(deptId),
     ))
     .limit(1);
   return !!site;
@@ -184,6 +186,7 @@ router.post("/uploads/request-url", requireAuth, denyViewers, async (req, res) =
     return res.status(400).json({ error: "Upload a PDF, JPEG or PNG file" });
   }
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, contentType);
     res.json({ uploadUrl, objectPath: storage.normalizeObjectEntityPath(uploadUrl) });
   } catch (err) {

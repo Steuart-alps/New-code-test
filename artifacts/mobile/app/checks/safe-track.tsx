@@ -59,6 +59,8 @@ interface Handbook {
 
 interface Ack {
   acknowledged_by: number | null;
+  /** True for the signed-in user's own acknowledgement (by roster entry or account). */
+  acknowledged_by_me?: boolean;
   staff_name: string;
 }
 
@@ -111,7 +113,7 @@ function DocCard({
   });
 
   const alreadyAcked = userId != null
-    ? acks.some((a) => a.acknowledged_by === userId)
+    ? acks.some((a) => a.acknowledged_by_me ?? a.acknowledged_by === userId)
     : false;
 
   const { mutate: acknowledge, isPending } = useMutation({

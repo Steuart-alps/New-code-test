@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { db } from "@workspace/db";
 import { sql, type SQL } from "drizzle-orm";
 import { getActiveDepartmentId } from "../middleware/requireAuth";
+import { siteVisibleSql } from "./departmentSites";
 
 export type ScopedSite = { id: number; name: string };
 
@@ -9,7 +10,8 @@ export type ScopedSite = { id: number; name: string };
  * The sites one request may read, resolved from the authenticated tenant and
  * the user's department (never from client-supplied ids). Matches GET /sites:
  * department-restricted staff and viewers see their department's sites and
- * sites without a department; admins and consultants see every site.
+ * sites without a department (only their department's site when it sits under
+ * one); admins and consultants see every site.
  */
 export type SiteAccessScope = {
   clientId: number;
@@ -34,17 +36,18 @@ export async function resolveSiteAccessScope(
 ): Promise<SiteAccessScope | null> {
   const departmentId = getActiveDepartmentId(req);
   const result = await db.execute(sql`
-    SELECT id, name, department_id FROM sites
-    WHERE client_id = ${clientId}
-    ORDER BY name, id
+    SELECT s.id, s.name,
+      ${departmentId === null ? sql`true` : siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)} AS visible
+    FROM sites s
+    WHERE s.client_id = ${clientId}
+    ORDER BY s.name, s.id
   `);
-  const all = (result.rows as Array<{ id: number; name: string; department_id: number | null }>).map(row => ({
+  const all = (result.rows as Array<{ id: number; name: string; visible: boolean }>).map(row => ({
     id: Number(row.id),
     name: row.name,
-    departmentId: row.department_id === null ? null : Number(row.department_id),
+    visible: row.visible === true,
   }));
-  const accessible = all.filter(site =>
-    departmentId === null || site.departmentId === null || site.departmentId === departmentId);
+  const accessible = all.filter(site => site.visible);
 
   if (requestedSiteId !== undefined) {
     if (!all.some(site => site.id === requestedSiteId)) {

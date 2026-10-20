@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { FireCheckType } from './fireCheckType';
+import type { FireSafetyCheckNightStaff } from './fireSafetyCheckNightStaff';
 import type { FireSafetyCheckResult } from './fireSafetyCheckResult';
 
 export interface FireSafetyCheck {
@@ -18,6 +19,12 @@ export interface FireSafetyCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: FireSafetyCheckNightStaff;
   createdAt: Date;
   updatedAt: Date;
 }
