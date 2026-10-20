@@ -6203,6 +6203,10 @@ components:
         performedBy:
           type: string
           nullable: true
+        equipmentId:
+          type: integer
+          nullable: true
+          description: A cold water tank or calorifier on the equipment list (its site must match siteId).
       required:
         - checkType
         - checkDate

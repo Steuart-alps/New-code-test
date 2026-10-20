@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
+import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -797,12 +798,14 @@ const CHECK_ITEMS = [
 type CheckItemKey = typeof CHECK_ITEMS[number]["key"];
 
 function PreUseDialog({
-  open, onClose, check, machines, onSaved,
+  open, onClose, check, machines, onSaved, presetMachineId,
 }: {
   open: boolean; onClose: () => void;
   check?: PreUseCheck | null;
   machines: Machine[];
   onSaved: () => void;
+  /** A new record for this machine (opened from a scanned QR label). */
+  presetMachineId?: string;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -832,7 +835,7 @@ function PreUseDialog({
       bladesOk: check.bladesOk, guardsOk: check.guardsOk,
       controlsOk: check.controlsOk, lightsOk: check.lightsOk,
       cleanlinessOk: check.cleanlinessOk, notes: check.notes ?? "",
-    } : blank);
+    } : { ...blank, machineId: presetMachineId ?? "" });
   };
 
   // N/A is represented at checklist-item level; the completed observation is
@@ -953,12 +956,14 @@ function PreUseDialog({
 // ─── Service record dialog ────────────────────────────────────────────────────
 
 function ServiceDialog({
-  open, onClose, record, machines, onSaved,
+  open, onClose, record, machines, onSaved, presetMachineId,
 }: {
   open: boolean; onClose: () => void;
   record?: ServiceRecord | null;
   machines: Machine[];
   onSaved: () => void;
+  /** A new record for this machine (opened from a scanned QR label). */
+  presetMachineId?: string;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -986,7 +991,7 @@ function ServiceDialog({
       servicedBy: record.servicedBy ?? "", servicedByRosterId: (record as any).servicedByRosterId ?? (record as any).serviced_by_roster_id ?? null,
       costPounds: record.costPence ? (record.costPence / 100).toFixed(2) : "",
       notes: record.notes ?? "",
-    } : blank);
+    } : { ...blank, machineId: presetMachineId ?? "" });
   };
 
   const handleSave = async () => {
@@ -1110,12 +1115,14 @@ function ServiceDialog({
 // ─── Defect dialog ────────────────────────────────────────────────────────────
 
 function DefectDialog({
-  open, onClose, defect, machines, onSaved,
+  open, onClose, defect, machines, onSaved, presetMachineId,
 }: {
   open: boolean; onClose: () => void;
   defect?: Defect | null;
   machines: Machine[];
   onSaved: () => void;
+  /** A new record for this machine (opened from a scanned QR label). */
+  presetMachineId?: string;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -1141,7 +1148,7 @@ function DefectDialog({
       severity: defect.severity, outOfService: defect.outOfService,
       status: defect.status, resolution: defect.resolution ?? "",
       resolvedDate: defect.resolvedDate ?? "", notes: defect.notes ?? "",
-    } : blank);
+    } : { ...blank, machineId: presetMachineId ?? "" });
   };
 
   const handleSave = async () => {
@@ -1285,12 +1292,14 @@ function DefectDialog({
 // ─── PUWER inspection dialog ──────────────────────────────────────────────────
 
 function PuwerDialog({
-  open, onClose, inspection, machines, onSaved,
+  open, onClose, inspection, machines, onSaved, presetMachineId,
 }: {
   open: boolean; onClose: () => void;
   inspection?: PuwerInspection | null;
   machines: Machine[];
   onSaved: () => void;
+  /** A new record for this machine (opened from a scanned QR label). */
+  presetMachineId?: string;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -1310,7 +1319,7 @@ function PuwerDialog({
     inspectorCompany: inspection.inspectorCompany ?? "", certRef: inspection.certRef ?? "",
     safeToOperate: inspection.safeToOperate, defectsFound: inspection.defectsFound ?? "",
     result: inspection.result, notes: inspection.notes ?? "",
-  } : blank);
+  } : { ...blank, machineId: presetMachineId ?? "" });
 
   const handleSave = async () => {
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
@@ -1428,12 +1437,14 @@ function PuwerDialog({
 // ─── Fuel log dialog ──────────────────────────────────────────────────────────
 
 function FuelLogDialog({
-  open, onClose, log, machines, onSaved,
+  open, onClose, log, machines, onSaved, presetMachineId,
 }: {
   open: boolean; onClose: () => void;
   log?: FuelLog | null;
   machines: Machine[];
   onSaved: () => void;
+  /** A new record for this machine (opened from a scanned QR label). */
+  presetMachineId?: string;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -1451,7 +1462,7 @@ function FuelLogDialog({
     engineHours: log.engineHours != null ? String(log.engineHours) : "",
     costPounds: log.costPence != null ? (log.costPence / 100).toFixed(2) : "",
     filledBy: log.filledBy ?? "", filledByRosterId: (log as any).filledByRosterId ?? (log as any).filled_by_roster_id ?? null, notes: log.notes ?? "",
-  } : blank);
+  } : { ...blank, machineId: presetMachineId ?? "" });
 
   const handleSave = async () => {
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
@@ -1576,6 +1587,22 @@ export default function GreenTrackPage() {
   const [fuelDialog, setFuelDialog] = useState(false);
   const [editFuel, setEditFuel] = useState<FuelLog | null>(null);
   const [deleteId, setDeleteId] = useState<{ type: string; id: number } | null>(null);
+  // A machine chosen by a scanned QR label, for the form the label opened.
+  const [scanMachineId, setScanMachineId] = useState<string | undefined>();
+
+  useEffect(() => {
+    const link = takeLinkParams(["machine", "open"] as const);
+    if (!link?.machine || !/^\d+$/.test(link.machine)) return;
+    const machineId = link.machine;
+    setScanMachineId(machineId);
+    setFilterMachine(machineId);
+    const open = link.open ?? "pre-use";
+    if (open === "pre-use") { setActiveTab("pre-use"); setEditPreUse(null); setPreUseDialog(true); }
+    else if (open === "defect") { setActiveTab("defects"); setEditDefect(null); setDefectDialog(true); }
+    else if (open === "fuel") { setActiveTab("fuel"); setEditFuel(null); setFuelDialog(true); }
+    else if (open === "service" && canAdmin) { setActiveTab("services"); setEditService(null); setServiceDialog(true); }
+    else if (open === "inspection" && canAdmin) { setActiveTab("puwer"); setEditPuwer(null); setPuwerDialog(true); }
+  }, []);
 
   // Queries
   const { data: sites = [] } = useQuery({
@@ -2419,19 +2446,24 @@ export default function GreenTrackPage() {
       <MachineDialog open={machineDialog} onClose={() => { setMachineDialog(false); setEditMachine(null); }}
         machine={editMachine} sites={sites} onSaved={invalidate} />
 
-      <PreUseDialog open={preUseDialog} onClose={() => { setPreUseDialog(false); setEditPreUse(null); }}
+      <PreUseDialog open={preUseDialog} onClose={() => { setPreUseDialog(false); setEditPreUse(null); setScanMachineId(undefined); }}
+        presetMachineId={scanMachineId}
         check={editPreUse} machines={activeMachines} onSaved={invalidate} />
 
-      <ServiceDialog open={serviceDialog} onClose={() => { setServiceDialog(false); setEditService(null); }}
+      <ServiceDialog open={serviceDialog} onClose={() => { setServiceDialog(false); setEditService(null); setScanMachineId(undefined); }}
+        presetMachineId={scanMachineId}
         record={editService} machines={machines} onSaved={invalidate} />
 
-      <DefectDialog open={defectDialog} onClose={() => { setDefectDialog(false); setEditDefect(null); }}
+      <DefectDialog open={defectDialog} onClose={() => { setDefectDialog(false); setEditDefect(null); setScanMachineId(undefined); }}
+        presetMachineId={scanMachineId}
         defect={editDefect} machines={machines} onSaved={invalidate} />
 
-      <PuwerDialog open={puwerDialog} onClose={() => { setPuwerDialog(false); setEditPuwer(null); }}
+      <PuwerDialog open={puwerDialog} onClose={() => { setPuwerDialog(false); setEditPuwer(null); setScanMachineId(undefined); }}
+        presetMachineId={scanMachineId}
         inspection={editPuwer} machines={machines} onSaved={invalidate} />
 
-      <FuelLogDialog open={fuelDialog} onClose={() => { setFuelDialog(false); setEditFuel(null); }}
+      <FuelLogDialog open={fuelDialog} onClose={() => { setFuelDialog(false); setEditFuel(null); setScanMachineId(undefined); }}
+        presetMachineId={scanMachineId}
         log={editFuel} machines={machines} onSaved={invalidate} />
 
       <AlertDialog open={!!deleteId} onOpenChange={v => { if (!v) setDeleteId(null); }}>

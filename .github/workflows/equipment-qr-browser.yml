@@ -1,0 +1,81 @@
+name: Equipment QR label browser checks
+
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/pages/scan.tsx"
+      - "artifacts/compliance-tracker/src/pages/equipment.tsx"
+      - "artifacts/compliance-tracker/src/lib/scan-return.ts"
+      - "artifacts/compliance-tracker/src/lib/deep-link.ts"
+      - "artifacts/compliance-tracker/src/App.tsx"
+      - "artifacts/compliance-tracker/src/pages/green-track.tsx"
+      - "artifacts/compliance-tracker/src/pages/legionella.tsx"
+      - "artifacts/compliance-tracker/src/pages/fix-track.tsx"
+      - "artifacts/compliance-tracker/tests/equipment-qr-browser.test.mjs"
+      - "artifacts/api-server/src/routes/equipment.ts"
+      - "artifacts/api-server/src/lib/equipmentLabels.ts"
+      - "artifacts/api-server/src/lib/equipmentLabelPdf.ts"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/equipment-qr-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/pages/scan.tsx"
+      - "artifacts/compliance-tracker/src/pages/equipment.tsx"
+      - "artifacts/compliance-tracker/src/lib/scan-return.ts"
+      - "artifacts/compliance-tracker/src/lib/deep-link.ts"
+      - "artifacts/compliance-tracker/src/App.tsx"
+      - "artifacts/compliance-tracker/src/pages/green-track.tsx"
+      - "artifacts/compliance-tracker/src/pages/legionella.tsx"
+      - "artifacts/compliance-tracker/src/pages/fix-track.tsx"
+      - "artifacts/compliance-tracker/tests/equipment-qr-browser.test.mjs"
+      - "artifacts/api-server/src/routes/equipment.ts"
+      - "artifacts/api-server/src/lib/equipmentLabels.ts"
+      - "artifacts/api-server/src/lib/equipmentLabelPdf.ts"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/equipment-qr-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  equipment-qr:
+    name: Print, scan and open the right form
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # The checks boot the API on a private PostgreSQL cluster (initdb/pg_ctl
+      # ship with ubuntu-latest but not on PATH).
+      - name: Put PostgreSQL server tools on PATH
+        run: |
+          bin="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$bin" ] || [ ! -x "$bin/initdb" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql
+            bin="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)"
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Run equipment QR label scan checks
+        run: pnpm --filter @workspace/api-server run test:equipment-qr-browser

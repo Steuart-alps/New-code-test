@@ -2222,6 +2222,8 @@ export type CreateLegionellaCheckRequest = unknown & ({
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** A cold water tank or calorifier on the equipment list (its site must match siteId). */
+  equipmentId?: number | null;
 });
 
 export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckRequestResult[keyof typeof UpdateLegionellaCheckRequestResult];

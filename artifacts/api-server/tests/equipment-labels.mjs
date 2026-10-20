@@ -182,7 +182,14 @@ try {
   assert.deepEqual(extinguishers.map(i => i.name).sort(), ['Kitchen wet chemical', 'Reception CO2']);
   console.log('ok - FireTrack extinguisher points copy onto the equipment list once');
 
-  // ── Archiving keeps the item and its links ───────────────────────────────
+  // ── A department's manager cannot move plant to another department's site ─
+  const courseManager = await createUser(owner, { role: 'client_manager', departmentId: courseTeam.id });
+  const hoist = ok(await courseManager.request('POST', '/equipment', { name: 'Course hoist', type: 'hoist', siteId: siteB.id }), 201);
+  const moved = await courseManager.request('PUT', `/equipment/${hoist.id}`, { siteId: siteA.id });
+  assert.ok([400, 403, 404].includes(moved.status), JSON.stringify(moved.data));
+  assert.equal(ok(await owner.request('GET', `/equipment?siteId=${siteB.id}`)).find(i => i.id === hoist.id)?.siteId, siteB.id);
+  console.log("ok - " + "scoped manager cannot move equipment to another department's site");
+
   const archived = ok(await owner.request('PUT', `/equipment/${tank.id}`, { active: false }));
   assert.equal(archived.active, false);
   assert.equal(ok(await owner.request('GET', `/equipment?siteId=${siteA.id}`)).some(i => i.id === tank.id), false);

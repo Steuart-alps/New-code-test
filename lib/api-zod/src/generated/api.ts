@@ -4069,7 +4069,8 @@ export const CreateLegionellaCheckBody = zod.unknown().and(zod.object({
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "performedBy": zod.string().nullish()
+  "performedBy": zod.string().nullish(),
+  "equipmentId": zod.number().nullish().describe('A cold water tank or calorifier on the equipment list (its site must match siteId).')
 })).describe('temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.')
 
 export const CreateLegionellaCheckResponse = zod.object({

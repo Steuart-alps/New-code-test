@@ -58,8 +58,9 @@ export async function createEquipmentLabelPdf(labels: PrintableLabel[], size: La
     const pad = layout.pad * MM;
     const height = layout.height * MM;
     const width = layout.width * MM;
-    const qrSize = height - 2 * pad;
-    drawQr(doc, label.url, x + pad, y + pad, qrSize);
+    // Under half the label's width, so the name has room; vertically centred.
+    const qrSize = Math.min(height - 2 * pad, width * 0.45);
+    drawQr(doc, label.url, x + pad, y + (height - qrSize) / 2, qrSize);
 
     const textX = x + pad + qrSize + pad * 1.2;
     const textWidth = width - (textX - x) - pad;
@@ -68,7 +69,7 @@ export async function createEquipmentLabelPdf(labels: PrintableLabel[], size: La
       .text("COMPLYTRACK", textX, textY, { width: textWidth, characterSpacing: 0.4, lineBreak: false });
     textY += layout.smallSize * 1.4;
     doc.font(PDF_BOLD_FONT).fontSize(layout.nameSize).fillColor("#111111")
-      .text(label.name, textX, textY, { width: textWidth, height: layout.nameSize * 2.5, ellipsis: true, lineGap: -1 });
+      .text(label.name, textX, textY, { width: textWidth, height: layout.nameSize * 3.4, ellipsis: true, lineGap: -1 });
     textY = doc.y + 2;
     doc.font(PDF_REGULAR_FONT).fontSize(layout.smallSize).fillColor("#333333")
       .text([label.track, label.siteName].filter(Boolean).join("\n"), textX, textY, { width: textWidth, height: layout.smallSize * 2.6, ellipsis: true });

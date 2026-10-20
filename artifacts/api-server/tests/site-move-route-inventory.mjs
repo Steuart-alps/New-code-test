@@ -42,6 +42,7 @@ const INVENTORY = {
   "daily-track-pm.ts PUT /:id": siteMove("DailyTrack PM checklist"),
   "daily-track-pm.ts PUT /signoffs/:id": siteMove("DailyTrack PM sign-off"),
   "doc-track.ts PATCH /documents/:id": covered("scoped staff cannot PATCH DocTrack site", "doc-track-signoff-status.mjs"),
+  "equipment.ts PUT /equipment/:id": covered("scoped manager cannot move equipment to another department's site", "equipment-labels.mjs"),
   "fire-safety.ts PUT /:id": siteMove("Fire check"),
   "fire-safety.ts PUT /call-points/:id": notAMove("renames or archives; the call point keeps its site"),
   "fire-safety.ts PUT /config": notAMove("per-site settings selected by query"),

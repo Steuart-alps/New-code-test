@@ -32,7 +32,8 @@ import {
   FlaskConical,
   ShieldAlert,
   LayoutGrid,
-  CalendarDays
+  CalendarDays,
+  QrCode
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -142,6 +143,11 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
     if (adminGroup) {
       adminGroup.items.push({ href: "/sites", label: "Sites", icon: Building2 });
     }
+  }
+
+  if (canManageUsers) {
+    // Managers keep the equipment list and print its QR labels.
+    groups.find(g => g.id === "core")?.items.push({ href: "/equipment", label: "Equipment & QR labels", icon: QrCode });
   }
 
   if (canManageUsers && !canAdmin) {

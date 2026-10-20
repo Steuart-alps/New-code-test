@@ -20,7 +20,7 @@ import { getFireSiteStatuses } from "./checkReminders";
 export const KIND_INFO: Record<EquipmentLabelKind, { track: string; service: ServiceKey | null }> = {
   green_machine: { track: "GreenTrack", service: "greentrack" },
   pat_appliance: { track: "PATtrack", service: "pattrack" },
-  hot_tub: { track: "HotTubTrack", service: "hottubtrack" },
+  hot_tub: { track: "TubTrack", service: "hottubtrack" },
   fire_call_point: { track: "FireTrack", service: "firetrack" },
   water_outlet: { track: "LegionellaTrack", service: "legionellatrack" },
   bike: { track: "BikeTrack", service: "biketrack" },
@@ -525,7 +525,10 @@ export async function buildScanSummary(code: string, clientId: number, target: L
         ? { label: "Last safety check", state: last.overall_result === "fail" ? "problem" : "info", text: `${formatDay(isoDay(last.check_date)!)}: ${last.overall_result ?? "recorded"}` }
         : { label: "Last safety check", state: "never", text: "No check recorded yet" });
       for (const c of checks) history.push({ date: isoDay(c.check_date)!, state: c.overall_result === "fail" ? "problem" : "ok", text: `${humanise(c.check_type ?? "check")}: ${c.overall_result ?? "recorded"}` });
-      if (record) actions.push({ label: "Open this bike", href: `/bike-track?${query({ bike: id })}`, primary: true });
+      if (record) {
+        const label = bikeStatus === "hired" ? "Record the return" : bikeStatus === "available" ? "Start a hire (with safety check)" : "Open this bike";
+        actions.push({ label, href: `/bike-track?${query({ bike: id })}`, primary: true });
+      }
       actions.push(...faultAction(target, viewer));
       break;
     }
