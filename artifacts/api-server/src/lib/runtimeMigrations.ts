@@ -2249,11 +2249,18 @@ async function migrateCoshhTrack() {
       "checked_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
       "checked_by_name" text,
       "checked_at" timestamp,
+      "revision" integer NOT NULL DEFAULT 1,
+      "sign_off_departments" jsonb NOT NULL DEFAULT '[]'::jsonb,
       "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
       "created_at" timestamp NOT NULL DEFAULT now(),
       "updated_at" timestamp NOT NULL DEFAULT now(),
       "deleted_at" timestamp
     )
+  `);
+  await db.execute(sql`
+    ALTER TABLE "coshh_assessments"
+      ADD COLUMN IF NOT EXISTS "revision" integer NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS "sign_off_departments" jsonb NOT NULL DEFAULT '[]'::jsonb
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "coshh_assessments_client_site_idx" ON "coshh_assessments" ("client_id", "site_id")`);
   await db.execute(sql`
@@ -2289,6 +2296,25 @@ async function migrateCoshhTrack() {
     CREATE TRIGGER sync_track_action_on_result
     AFTER INSERT OR UPDATE OF "result" ON "coshh_checks"
     FOR EACH ROW EXECUTE FUNCTION sync_track_action_from_source('coshh', 'result', 'coshh_checks')
+  `);
+  // Staff read-and-sign records; each also writes a TrainTrack sign-off.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "coshh_acknowledgements" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "assessment_id" integer NOT NULL REFERENCES "coshh_assessments"("id") ON DELETE CASCADE,
+      "revision" integer NOT NULL,
+      "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "staff_name" text NOT NULL,
+      "signature" text,
+      "acknowledged_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "train_track_record_id" integer REFERENCES "train_track_records"("id") ON DELETE SET NULL,
+      "acknowledged_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "coshh_acknowledgements_person_revision_idx"
+    ON "coshh_acknowledgements" ("assessment_id", "revision", "staff_roster_id")
   `);
 }
 

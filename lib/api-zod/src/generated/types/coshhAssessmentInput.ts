@@ -67,6 +67,8 @@ export interface CoshhAssessmentInput {
   draftedAt?: Date | null;
   /** Required (true) to save an AI draft; the saver is recorded as having checked it. */
   checkedAgainstSds?: boolean;
+  /** Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site. */
+  signOffDepartments?: string[];
   /**
      * A fresh upload from POST /registers/uploads/request-url, null to detach, omitted to keep.
      * @nullable

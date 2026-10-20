@@ -57,6 +57,7 @@ import {
   FileText,
   Printer,
   Download,
+  Beaker,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
@@ -65,6 +66,7 @@ import { buildTrainingMatrix, certificateStatus, normaliseStaffName, trainingMat
 import { getTrainingExpiry } from "@/lib/training-expiry";
 import { useLocalToday } from "@/hooks/use-local-today";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
+import { CoshhSignOffSection } from "@/components/coshh-sign-offs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -249,14 +251,16 @@ function ActionsCell({ onEdit, onDelete, onPrint }: { onEdit?: () => void; onDel
 export default function TrainTrackPage() {
   const canAdmin = useCanAdmin();
   const { toast } = useToast();
-  const { activeClientId, client, user } = useAuth();
+  const { activeClientId, client, user, hasService } = useAuth();
   const canMutate = user?.role !== "client_viewer";
+  // COSHH assessments to read and sign come from COSHHTrack.
+  const showCoshh = hasService("coshhtrack");
   // Expiry states, counts and ordering roll over at local midnight while open.
   const today = useLocalToday();
   const qc = useQueryClient();
   const apiFetch = useTrainTrackApi();
 
-  const [tab, setTab]           = useState<RecordType | "audit">("certificate");
+  const [tab, setTab]           = useState<RecordType | "audit" | "coshh">("certificate");
   const [siteFilter, setSite]   = useState("all");
   const [search, setSearch]     = useState("");
   const [certStatus, setCertStatus] = useState<"all" | CertStatus>("all");
@@ -725,7 +729,7 @@ ${rows.map(r => `<tr>
           >
             <Download className="w-4 h-4" /> Download Matrix
           </Button>
-          {canMutate && (
+          {canMutate && tab !== "coshh" && (
             <Button onClick={openAdd} className="gap-2 rounded-sm">
               <Plus className="w-4 h-4" /> Add Record
             </Button>
@@ -754,9 +758,29 @@ ${rows.map(r => `<tr>
             )}>{count}</span>
           </button>
         ))}
+        {showCoshh && (
+          <button
+            type="button"
+            data-testid="tab-train-coshh"
+            onClick={() => setTab("coshh")}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px",
+              tab === "coshh" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Beaker className="w-4 h-4" />
+            COSHH
+          </button>
+        )}
         {canAdmin && <button type="button" data-testid="tab-train-audit" onClick={() => setTab("audit")} className={cn("flex items-center px-5 py-3 text-sm font-medium border-b-2 -mb-px", tab === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
       </div>
       {canAdmin && tab === "audit" && <AuditLog module="train" />}
+      {showCoshh && tab === "coshh" && (
+        <>
+          {SiteFilter && <div className="flex flex-wrap gap-3">{SiteFilter}</div>}
+          <CoshhSignOffSection siteFilter={siteFilter} canSign={canMutate} />
+        </>
+      )}
 
       {/* ── CERTIFICATES TAB ── */}
       {tab === "certificate" && (

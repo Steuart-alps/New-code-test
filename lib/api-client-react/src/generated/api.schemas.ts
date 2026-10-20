@@ -1779,6 +1779,8 @@ export interface CoshhAssessmentInput {
   draftedAt?: string | null;
   /** Required (true) to save an AI draft; the saver is recorded as having checked it. */
   checkedAgainstSds?: boolean;
+  /** Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site. */
+  signOffDepartments?: string[];
   /**
      * A fresh upload from POST /registers/uploads/request-url, null to detach, omitted to keep.
      * @nullable
@@ -1852,6 +1854,9 @@ export interface CoshhAssessment {
   checkedByName?: string | null;
   /** @nullable */
   checkedAt?: string | null;
+  /** Goes up when a change alters what staff read, so they sign the assessment again. */
+  revision: number;
+  signOffDepartments: string[];
   /** @nullable */
   createdBy?: number | null;
   createdAt?: string;
@@ -1859,6 +1864,104 @@ export interface CoshhAssessment {
   /** @nullable */
   deletedAt?: string | null;
   reviewOverdue: boolean;
+}
+
+/**
+ * The parts of a current COSHH assessment a person reads before signing.
+ */
+export interface CoshhSignOffSummary {
+  id: number;
+  siteId: number;
+  /** @nullable */
+  siteName?: string | null;
+  task: string;
+  /** @nullable */
+  productName?: string | null;
+  /** @nullable */
+  substanceId?: number | null;
+  hasSafetyDataSheet: boolean;
+  hasDocument: boolean;
+  revision: number;
+  signOffDepartments: string[];
+  /** @nullable */
+  assessmentDate?: string | null;
+  /** @nullable */
+  assessor?: string | null;
+  riskLevel: string;
+  /** @nullable */
+  hazardStatements?: string | null;
+  /** @nullable */
+  signalWord?: string | null;
+  /** @nullable */
+  healthEffects?: string | null;
+  exposureRoutes: string[];
+  /** @nullable */
+  controls?: string | null;
+  ppe: string[];
+  /** @nullable */
+  ppeDetails?: string | null;
+  /** @nullable */
+  storage?: string | null;
+  /** @nullable */
+  spillProcedure?: string | null;
+  /** @nullable */
+  firstAid?: string | null;
+  /** @nullable */
+  disposal?: string | null;
+}
+
+export type CoshhSignOffStatusSignedItem = {
+  staffRosterId: number;
+  name: string;
+  /** @nullable */
+  department?: string | null;
+  signedAt: string;
+  hasSignature: boolean;
+  /** @nullable */
+  trainTrackRecordId?: number | null;
+};
+
+export type CoshhSignOffStatusOutstandingItem = {
+  staffRosterId: number;
+  name: string;
+  /** @nullable */
+  department?: string | null;
+  /** They signed an earlier revision, so this is a re-sign after a change. */
+  resign: boolean;
+};
+
+export type CoshhSignOffStatus = CoshhSignOffSummary & {
+  staffTotal: number;
+  signedCount: number;
+  signed: CoshhSignOffStatusSignedItem[];
+  outstanding: CoshhSignOffStatusOutstandingItem[];
+};
+
+export type CoshhSignOffRequestSignOffsItem = {
+  staffRosterId: number;
+  /**
+     * The person's signature drawn on this device (base64 PNG).
+     * @nullable
+     */
+  signature?: string | null;
+};
+
+export interface CoshhSignOffRequest {
+  /**
+     * @minItems 1
+     * @maxItems 200
+     */
+  signOffs: CoshhSignOffRequestSignOffsItem[];
+}
+
+export type MyCoshhSignOffsSignedItem = CoshhSignOffSummary & {
+  signedAt: string;
+};
+
+export interface MyCoshhSignOffs {
+  linked: boolean;
+  pending: CoshhSignOffSummary[];
+  signed: MyCoshhSignOffsSignedItem[];
 }
 
 export type CoshhCheckInputResult = typeof CoshhCheckInputResult[keyof typeof CoshhCheckInputResult];
@@ -2939,5 +3042,18 @@ export type ListCoshhChecksParams = {
 siteId?: number;
 checkType?: CoshhCheckType;
 assessmentId?: number;
+};
+
+export type ListCoshhSignOffsParams = {
+siteId?: number;
+};
+
+export type ListCoshhSignOffs200 = {
+  assessments: CoshhSignOffStatus[];
+};
+
+export type RecordCoshhSignOffs200 = {
+  signed: number;
+  assessment: CoshhSignOffStatus | null;
 };
 

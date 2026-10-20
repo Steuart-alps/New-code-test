@@ -70,6 +70,9 @@ export interface CoshhAssessment {
   checkedByName?: string | null;
   /** @nullable */
   checkedAt?: string | null;
+  /** Goes up when a change alters what staff read, so they sign the assessment again. */
+  revision: number;
+  signOffDepartments: string[];
   /** @nullable */
   createdBy?: number | null;
   createdAt?: string;

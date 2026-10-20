@@ -4,7 +4,9 @@
 // assessment site matching, default review/next-due dates, the AI-draft
 // "checked against the safety data sheet" stamp, the status list (review,
 // next due, missing health checks), failed checks opening a track action,
-// and soft delete.
+// soft delete, and staff reading and signing assessments in TrainTrack (who
+// must sign, the TrainTrack record written, Viewers signing their own,
+// signing again after a revision, department-limited sign-off).
 // Run: pnpm --filter @workspace/api-server run test:coshh-track
 import assert from "node:assert/strict";
 import { createTenant, createUser, isoDay, pool } from "./approval-workflow-fixtures.mjs";
@@ -149,6 +151,92 @@ await ok(staff.request("PUT", `/coshh-track/checks/${failed.id}`, { siteId: site
 assert.equal((await ok(foreign.request("GET", "/coshh-track/checks"), 200, "foreign checks")).length, 0);
 await ok(foreign.request("DELETE", `/coshh-track/checks/${check.id}`), 404, "foreign delete check");
 await ok(foreign.request("GET", `/coshh-track/checks/${check.id}/report-url`), 404, "foreign report link");
+
+// ── Read and sign in TrainTrack ──────────────────────────────────────────────
+const signature = "data:image/png;base64,iVBORw0KGgo=";
+const cook = await ok(owner.request("POST", "/staff-roster", { name: "Casey Cook", siteId: siteA.id, department: "Kitchen" }), 201, "roster cook");
+const porter = await ok(owner.request("POST", "/staff-roster", { name: "Pat Porter", siteId: siteA.id, department: "Porters" }), 201, "roster porter");
+const fitter = await ok(owner.request("POST", "/staff-roster", { name: "Fran Fitter", siteId: siteB.id, department: "Workshop" }), 201, "roster other site");
+const leaver = await ok(owner.request("POST", "/staff-roster", { name: "Lee Leaver", siteId: siteA.id, department: "Kitchen", active: false }), 201, "inactive roster");
+const cookViewer = await createUser(owner, { role: "client_viewer", departmentId: kitchen.id });
+await ok(owner.request("PUT", `/users/${cookViewer.userId}`, { staffRosterId: cook.id }), 200, "link the cook's Viewer account");
+
+const signOffsFor = async (who, id, label) => {
+  const list = await ok(who.request("GET", `/coshh-track/sign-offs`), 200, label);
+  return list.assessments.find((a) => a.id === id);
+};
+let signOff = await signOffsFor(owner, assessment.id, "sign-off overview");
+assert.equal(signOff.revision, 1);
+assert.deepEqual(signOff.outstanding.map((m) => m.staffRosterId).sort(), [cook.id, porter.id].sort(), "everyone active at the site must sign");
+assert.ok(!signOff.outstanding.some((m) => m.staffRosterId === fitter.id || m.staffRosterId === leaver.id), "other site and inactive staff left out");
+assert.ok(signOff.controls === null && signOff.hazardStatements.startsWith("H314"), "reading summary included");
+
+const recorded = await ok(owner.request("POST", `/coshh-track/assessments/${assessment.id}/sign-offs`, {
+  signOffs: [{ staffRosterId: porter.id, signature }, { staffRosterId: fitter.id, signature }],
+}), 200, "owner records a sign-off");
+assert.equal(recorded.signed, 1, "the other site's member is skipped");
+assert.deepEqual(recorded.assessment.signed.map((m) => m.staffRosterId), [porter.id]);
+const trainRecord = await pool.query(
+  "SELECT record_type, document_title, document_type, signature, site_id FROM train_track_records WHERE client_id = $1 AND staff_roster_id = $2",
+  [owner.clientId, porter.id],
+);
+assert.equal(trainRecord.rows.length, 1, "one TrainTrack record written");
+assert.equal(trainRecord.rows[0].record_type, "signoff");
+assert.equal(trainRecord.rows[0].document_type, "risk_assessment");
+assert.match(trainRecord.rows[0].document_title, /^COSHH assessment: Deep cleaning ovens \(Oven degreaser\)$/);
+assert.equal(trainRecord.rows[0].signature, signature);
+assert.equal(trainRecord.rows[0].site_id, siteA.id);
+assert.equal((await ok(owner.request("POST", `/coshh-track/assessments/${assessment.id}/sign-offs`, {
+  signOffs: [{ staffRosterId: porter.id, signature }],
+}), 200, "repeat sign-off")).signed, 0, "already signed is left as it is");
+assert.equal((await pool.query("SELECT count(*)::int AS n FROM train_track_records WHERE staff_roster_id = $1", [porter.id])).rows[0].n, 1);
+
+await ok(foreign.request("POST", `/coshh-track/assessments/${assessment.id}/sign-offs`, { signOffs: [{ staffRosterId: porter.id }] }), 404, "foreign sign-off");
+await ok(viewer.request("GET", "/coshh-track/sign-offs"), 403, "viewer can't see everyone's sign-offs");
+await ok(staff.request("GET", "/coshh-track/sign-offs"), 200, "staff see the sign-off list");
+
+// The cook signs their own from My training.
+let mine = await ok(cookViewer.request("GET", "/train-track/my-coshh"), 200, "viewer's COSHH list");
+assert.equal(mine.linked, true);
+assert.ok(mine.pending.some((a) => a.id === assessment.id), "assessment waiting for the cook");
+assert.ok(!mine.pending.some((a) => a.siteId === siteB.id), "only their site");
+await ok(cookViewer.request("POST", `/train-track/my-coshh/${assessment.id}/sign`, {}), 400, "signature required");
+mine = await ok(cookViewer.request("POST", `/train-track/my-coshh/${assessment.id}/sign`, { signature }), 200, "viewer signs");
+assert.ok(mine.signed.some((a) => a.id === assessment.id) && !mine.pending.some((a) => a.id === assessment.id));
+assert.ok(!Number.isNaN(Date.parse(mine.signed.find((a) => a.id === assessment.id).signedAt)), "signedAt is a timestamp");
+await ok(cookViewer.request("POST", `/train-track/my-coshh/${assessment.id}/sign`, { signature }), 409, "viewer signs twice");
+const workshopAssessment = await ok(owner.request("POST", "/coshh-track/assessments", {
+  ...base, siteId: siteB.id, substanceId: solvent.id, task: "Degreasing parts",
+}), 201, "assessment at the other site");
+await ok(cookViewer.request("POST", `/train-track/my-coshh/${workshopAssessment.id}/sign`, { signature }), 404, "not an assessment for them");
+const ownRecords = await ok(cookViewer.request("GET", "/train-track/my-records"), 200, "viewer's training records");
+assert.ok(ownRecords.records.some((r) => r.record_type === "signoff" && r.signed && /Deep cleaning ovens/.test(r.document_title)), "sign-off in their training record");
+signOff = await signOffsFor(owner, assessment.id, "overview after both signed");
+assert.equal(signOff.signedCount, 2);
+assert.equal(signOff.outstanding.length, 0);
+
+// A change to what staff read asks them to sign again; a note doesn't.
+const noted = await ok(owner.request("PUT", `/coshh-track/assessments/${assessment.id}`, { ...base, notes: "Checked the dispenser" }), 200, "notes only");
+assert.equal(noted.revision, 1, "a note is not a new revision");
+const revised = await ok(owner.request("PUT", `/coshh-track/assessments/${assessment.id}`, { ...base, controls: "Use the closed dispenser only" }), 200, "controls changed");
+assert.equal(revised.revision, 2, "changed controls are a new revision");
+signOff = await signOffsFor(owner, assessment.id, "overview after revision");
+assert.equal(signOff.signedCount, 0);
+assert.ok(signOff.outstanding.every((m) => m.resign), "both asked to sign again");
+mine = await ok(cookViewer.request("GET", "/train-track/my-coshh"), 200, "viewer after revision");
+assert.ok(mine.pending.some((a) => a.id === assessment.id && a.revision === 2), "the cook is asked again");
+
+// Only the Kitchen department signs once the assessment names it.
+const kitchenOnly = await ok(owner.request("PUT", `/coshh-track/assessments/${assessment.id}`, {
+  ...base, controls: "Use the closed dispenser only", signOffDepartments: ["Kitchen", "Kitchen"],
+}), 200, "kitchen only");
+assert.deepEqual(kitchenOnly.signOffDepartments, ["Kitchen"]);
+assert.equal(kitchenOnly.revision, 2, "who signs is not a new revision");
+signOff = await signOffsFor(owner, assessment.id, "overview kitchen only");
+assert.deepEqual(signOff.outstanding.map((m) => m.staffRosterId), [cook.id]);
+assert.equal((await ok(owner.request("POST", `/coshh-track/assessments/${assessment.id}/sign-offs`, {
+  signOffs: [{ staffRosterId: porter.id, signature }],
+}), 200, "porter no longer needs to sign")).signed, 0);
 
 // Archived assessments are no longer chased.
 await ok(owner.request("PUT", `/coshh-track/assessments/${assessment.id}`, { ...base, status: "archived" }), 200, "archive assessment");

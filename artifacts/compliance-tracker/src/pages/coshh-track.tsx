@@ -89,6 +89,8 @@ interface Assessment {
   draftSource: string | null;
   checkedByName: string | null;
   checkedAt: string | null;
+  revision: number;
+  signOffDepartments: string[];
   reviewOverdue: boolean;
 }
 
@@ -130,7 +132,7 @@ type AssessmentForm = {
   storage: string; spillProcedure: string; firstAid: string; disposal: string;
   assessor: string; assessmentDate: string; reviewDue: string; reviewDueTouched: boolean;
   status: "current" | "archived"; notes: string; document: DocumentValue;
-  draftSource: string | null; checkedAgainstSds: boolean;
+  draftSource: string | null; checkedAgainstSds: boolean; signOffDepartments: string[];
 };
 
 type CheckForm = {
@@ -227,6 +229,16 @@ export default function CoshhTrackPage() {
   const { data: assessments = [], isLoading: assessmentsLoading, error: assessmentsError } = useRegisterList<Assessment>(ASSESSMENTS);
   const { data: checks = [], isLoading: checksLoading, error: checksError } = useRegisterList<Check>(CHECKS);
   const { data: substances = [] } = useRegisterList<Substance>("/registers/coshh");
+  const { data: departments = [] } = useQuery<{ id: number; name: string; siteId?: number | null }[]>({
+    queryKey: ["/api/departments", activeClientId],
+    queryFn: async () => (await ensureOk(await api("/departments"), "Could not load departments")).json(),
+  });
+  // Read-and-sign progress, shown on each assessment (the signing is in TrainTrack).
+  const { data: signOffs } = useQuery<{ assessments: { id: number; staffTotal: number; signedCount: number }[] }>({
+    queryKey: ["/api/coshh-track/sign-offs", activeClientId, "all"],
+    queryFn: async () => (await ensureOk(await api("/coshh-track/sign-offs"), "Could not load sign-offs")).json(),
+  });
+  const signOffById = new Map((signOffs?.assessments ?? []).map((a) => [a.id, a]));
 
   const substanceName = (id: number | null) => (id == null ? null : substances.find((s) => s.id === id)?.productName ?? "Removed substance");
   const assessmentName = (id: number | null) => (id == null ? null : assessments.find((a) => a.id === id)?.task ?? "Removed assessment");
@@ -246,6 +258,7 @@ export default function CoshhTrackPage() {
       queryClient.invalidateQueries({ queryKey: [`/api${ASSESSMENTS}`] }),
       queryClient.invalidateQueries({ queryKey: [`/api${CHECKS}`] }),
       queryClient.invalidateQueries({ queryKey: ["/api/coshh-track/status"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/coshh-track/sign-offs"] }),
     ]);
   }
 
@@ -262,7 +275,7 @@ export default function CoshhTrackPage() {
       storage: "", spillProcedure: "", firstAid: "", disposal: "", assessor: user?.name ?? "",
       assessmentDate: today, reviewDue: addMonthsIso(today, 12), reviewDueTouched: false,
       status: "current", notes: "", document: { objectPath: null, fileName: null },
-      draftSource: null, checkedAgainstSds: false,
+      draftSource: null, checkedAgainstSds: false, signOffDepartments: [],
     });
   }
 
@@ -279,7 +292,7 @@ export default function CoshhTrackPage() {
       storage: item.storage ?? "", spillProcedure: item.spillProcedure ?? "", firstAid: item.firstAid ?? "", disposal: item.disposal ?? "",
       assessor: item.assessor ?? "", assessmentDate: item.assessmentDate, reviewDue: item.reviewDue ?? "", reviewDueTouched: true,
       status: item.status, notes: item.notes ?? "", document: { objectPath: item.documentObjectPath, fileName: item.documentFileName },
-      draftSource: item.draftSource, checkedAgainstSds: false,
+      draftSource: item.draftSource, checkedAgainstSds: false, signOffDepartments: [...(item.signOffDepartments ?? [])],
     });
   }
 
@@ -308,7 +321,7 @@ export default function CoshhTrackPage() {
           healthSurveillanceRequired: f.healthSurveillanceRequired, monitoringRequired: f.monitoringRequired, levRequired: f.levRequired,
           storage: text(f.storage), spillProcedure: text(f.spillProcedure), firstAid: text(f.firstAid), disposal: text(f.disposal),
           assessor: text(f.assessor), assessmentDate: f.assessmentDate, reviewDue: f.reviewDue || null,
-          status: f.status, notes: text(f.notes),
+          status: f.status, notes: text(f.notes), signOffDepartments: f.signOffDepartments,
           objectPath: f.document.objectPath, fileName: f.document.fileName,
           ...(f.draftSource === "ai" ? { draftSource: "ai", checkedAgainstSds: f.checkedAgainstSds } : {}),
         }),
@@ -445,6 +458,14 @@ export default function CoshhTrackPage() {
     ? assessments.filter((a) => String(a.siteId) === checkForm.siteId && (a.status === "current" || String(a.id) === checkForm.assessmentId))
     : [];
   const checkInfo = checkForm ? CHECK_INFO[checkForm.checkType] : null;
+  // Departments whose staff can be asked to sign: those at the chosen site or
+  // spanning every site, plus any already chosen.
+  const siteDepartments = assessmentForm
+    ? [...new Set([
+      ...departments.filter((d) => d.siteId == null || String(d.siteId) === assessmentForm.siteId).map((d) => d.name),
+      ...assessmentForm.signOffDepartments,
+    ])].sort((a, b) => a.localeCompare(b)).map((name) => ({ key: name, label: name }))
+    : [];
   const substancesWithoutAssessment = substances.filter((s) => s.status === "in_use" && inSite(s.siteId)
     && !assessments.some((a) => a.substanceId === s.id && a.status === "current"));
 
@@ -613,6 +634,17 @@ export default function CoshhTrackPage() {
                   {a.healthSurveillanceRequired && <Badge variant="outline" className="text-[11px]">Health checks needed</Badge>}
                   {a.monitoringRequired && <Badge variant="outline" className="text-[11px]">Monitoring needed</Badge>}
                   {a.levRequired && <Badge variant="outline" className="text-[11px]">Uses extraction (LEV)</Badge>}
+                  {a.status === "current" && signOffById.has(a.id) && (() => {
+                    const progress = signOffById.get(a.id)!;
+                    const done = progress.staffTotal > 0 && progress.signedCount === progress.staffTotal;
+                    return (
+                      <Link href="/train-track" className="inline-flex">
+                        <Badge variant="outline" className={cn("text-[11px] cursor-pointer", done ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-amber-300 bg-amber-50 text-amber-800")}>
+                          {progress.staffTotal === 0 ? "No staff to sign" : `${progress.signedCount} of ${progress.staffTotal} staff signed`}
+                        </Badge>
+                      </Link>
+                    );
+                  })()}
                   {a.draftSource === "ai" && (
                     <Badge variant="outline" className="text-[11px] border-violet-200 bg-violet-50 text-violet-800">
                       AI draft{a.checkedByName ? `, checked by ${a.checkedByName}` : ""}
@@ -810,6 +842,18 @@ export default function CoshhTrackPage() {
                     </Select>
                   </div>
                 </div>
+                {siteDepartments.length > 0 ? (
+                  <div className="space-y-1">
+                    <TickList legend="Who must read and sign it in TrainTrack" options={siteDepartments} value={f.signOffDepartments}
+                      onChange={(signOffDepartments) => set({ signOffDepartments })} />
+                    <p className="text-[11px] text-muted-foreground">Leave all unticked for everyone on the staff list at this site.</p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Everyone on the staff list at this site will be asked to read and sign it in TrainTrack.</p>
+                )}
+                {editingAssessment && (
+                  <p className="text-xs text-muted-foreground">If you change the hazards, controls, PPE or emergency steps, staff are asked to sign it again.</p>
+                )}
                 <DocumentField label="Signed assessment or supporting document" value={f.document} onChange={(document) => set({ document })} />
                 <TextField id="coshh-notes" label="Notes" value={f.notes} max={4000} onChange={(notes) => set({ notes })} />
               </div>

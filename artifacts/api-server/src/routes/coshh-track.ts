@@ -13,6 +13,9 @@
  * consultants and managers; checks by anyone but viewers, under the shared
  * record lock (dailyEntryCutoff covers /coshh-track/checks). Deletes are soft
  * (deleted_at) so nothing is lost, and every change is in the audit log.
+ *
+ * Staff read and sign current assessments from TrainTrack's COSHH section
+ * (GET /sign-offs, POST /assessments/:id/sign-offs; see lib/coshhSignOffs.ts).
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
@@ -42,6 +45,12 @@ import {
   COSHH_DUE_SOON_DAYS,
   getCoshhDueItems,
 } from "../lib/coshhTrack";
+import {
+  findSignOffAssessment,
+  getCoshhSignOffOverview,
+  recordCoshhSignOffs,
+  signOffContentChanged,
+} from "../lib/coshhSignOffs";
 
 const router = Router();
 
@@ -165,6 +174,9 @@ const AssessmentBody = z.object({
   draftSource: z.enum(["ai"]).nullish(),
   draftedAt: z.string().datetime({ offset: true }).nullish(),
   checkedAgainstSds: z.boolean().optional().default(false),
+  // Who reads and signs it in TrainTrack: everyone on the staff list at the
+  // site (empty), or only these departments.
+  signOffDepartments: z.array(TEXT(200).min(1)).max(50).optional().default([]),
   ...documentFields,
 });
 
@@ -275,6 +287,7 @@ router.post("/assessments", requireAuth, denyViewers, assessmentWriters, async (
     documentFileSize: document.fileSize,
     documentMimeType: document.mimeType,
     notes: d.notes,
+    signOffDepartments: [...new Set(d.signOffDepartments)],
     ...checkedStamp(req, d.draftSource, d.draftedAt ?? new Date().toISOString()),
     createdBy: req.currentUser!.id,
   }).returning();
@@ -301,7 +314,7 @@ router.put("/assessments/:id", requireAuth, denyViewers, assessmentWriters, asyn
     fileSize: existing.documentFileSize, mimeType: existing.documentMimeType,
   });
   if (!document) return;
-  const [row] = await db.update(coshhAssessmentsTable).set({
+  const content = {
     siteId: d.siteId,
     substanceId: d.substanceId ?? null,
     task: d.task,
@@ -316,13 +329,19 @@ router.put("/assessments/:id", requireAuth, denyViewers, assessmentWriters, asyn
     ppe: canonical(d.ppe, COSHH_PPE),
     ppeDetails: d.ppeDetails,
     riskLevel: d.riskLevel,
-    healthSurveillanceRequired: d.healthSurveillanceRequired,
-    monitoringRequired: d.monitoringRequired,
-    levRequired: d.levRequired,
     storage: d.storage,
     spillProcedure: d.spillProcedure,
     firstAid: d.firstAid,
     disposal: d.disposal,
+  };
+  const [row] = await db.update(coshhAssessmentsTable).set({
+    // Staff sign again when what they read has changed.
+    revision: signOffContentChanged(existing, content) ? existing.revision + 1 : existing.revision,
+    signOffDepartments: [...new Set(d.signOffDepartments)],
+    ...content,
+    healthSurveillanceRequired: d.healthSurveillanceRequired,
+    monitoringRequired: d.monitoringRequired,
+    levRequired: d.levRequired,
     assessor: d.assessor,
     assessmentDate: d.assessmentDate,
     ...(d.reviewDue !== undefined ? { reviewDue: d.reviewDue } : {}),
@@ -352,6 +371,49 @@ router.delete("/assessments/:id", requireAuth, denyViewers, assessmentWriters, a
   await db.update(coshhAssessmentsTable).set({ deletedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(coshhAssessmentsTable.id, id), eq(coshhAssessmentsTable.clientId, clientId)));
   res.status(204).end();
+});
+
+// ── Staff sign-offs (shown in TrainTrack) ─────────────────────────────────────
+
+router.get("/sign-offs", requireAuth, async (req, res) => {
+  const clientId = requireClient(req, res);
+  if (!clientId) return;
+  let siteId: number | null = null;
+  if (req.query.siteId !== undefined && req.query.siteId !== "") {
+    siteId = parseId(req.query.siteId);
+    if (siteId === null) return res.status(400).json({ error: "Invalid site" });
+  }
+  res.json({ assessments: await getCoshhSignOffOverview(clientId, getActiveDepartmentId(req), siteId) });
+});
+
+const SignOffBody = z.object({
+  signOffs: z.array(z.object({
+    staffRosterId: z.number().int().positive(),
+    // The person's own signature, drawn on this device (a base64 PNG).
+    signature: z.string().min(1).max(500_000).nullish(),
+  })).min(1).max(200),
+});
+
+router.post("/assessments/:id/sign-offs", requireAuth, denyViewers, async (req, res) => {
+  const clientId = requireClient(req, res);
+  if (!clientId) return;
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  const parsed = SignOffBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid data" });
+  const departmentId = getActiveDepartmentId(req);
+  const assessment = await findSignOffAssessment(clientId, id, departmentId);
+  if (!assessment) return res.status(404).json({ error: "Not found" });
+  const signed = await recordCoshhSignOffs({
+    clientId,
+    assessment,
+    entries: parsed.data.signOffs.map((entry) => ({ staffRosterId: entry.staffRosterId, signature: entry.signature ?? null })),
+    userId: req.currentUser!.id,
+    today: await getAccountToday(clientId),
+    callerDepartmentId: departmentId,
+  });
+  const [overview] = (await getCoshhSignOffOverview(clientId, departmentId, assessment.site_id)).filter((a) => a.id === id);
+  res.json({ signed: signed.length, assessment: overview ?? null });
 });
 
 router.get("/assessments/:id/document-url", requireAuth, async (req, res) => {

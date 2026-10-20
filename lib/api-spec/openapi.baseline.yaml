@@ -185,6 +185,48 @@ paths:
           description: Not one of this Viewer's records
         "409":
           description: Already signed
+  /train-track/my-coshh:
+    get:
+      operationId: listMyCoshhSignOffs
+      tags: [train-track]
+      summary: Current COSHH assessments the signed-in Viewer must read and sign, and those already signed
+      responses:
+        "200":
+          description: Assessments for the Viewer's site (and department, where the assessment names departments)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyCoshhSignOffs" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-coshh/{id}/sign:
+    post:
+      operationId: signMyCoshhAssessment
+      tags: [train-track]
+      summary: Sign that the signed-in Viewer has read a current COSHH assessment (writes a TrainTrack sign-off)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The Viewer's assessments after signing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyCoshhSignOffs" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not an assessment this Viewer must sign
+        "409":
+          description: Already signed this revision
   /users/me/active-department:
     put:
       operationId: setActiveDepartment
@@ -2998,6 +3040,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CoshhDocumentUrl"
+  /coshh-track/sign-offs:
+    get:
+      operationId: listCoshhSignOffs
+      tags: [coshh-track]
+      summary: Current COSHH assessments with who has read and signed them and who still needs to (TrainTrack's COSHH section)
+      parameters:
+        - in: query
+          name: siteId
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Assessments the caller can see, with sign-off status for their current revision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assessments:
+                    type: array
+                    items: { $ref: "#/components/schemas/CoshhSignOffStatus" }
+                required: [assessments]
+  /coshh-track/assessments/{id}/sign-offs:
+    post:
+      operationId: recordCoshhSignOffs
+      tags: [coshh-track]
+      summary: Record staff signing that they have read a current COSHH assessment; each writes a TrainTrack sign-off
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CoshhSignOffRequest" }
+      responses:
+        "200":
+          description: How many were newly signed (people who need not sign, or already have, are skipped) and the assessment's status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signed: { type: integer }
+                  assessment:
+                    oneOf:
+                      - $ref: "#/components/schemas/CoshhSignOffStatus"
+                      - type: "null"
+                required: [signed, assessment]
+        "404":
+          description: Not a current assessment the caller can see
 
 components:
   schemas:
@@ -5195,6 +5289,10 @@ components:
         checkedAgainstSds:
           type: boolean
           description: Required (true) to save an AI draft; the saver is recorded as having checked it.
+        signOffDepartments:
+          type: array
+          items: { type: string }
+          description: Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site.
         objectPath:
           type: ["string", "null"]
           description: A fresh upload from POST /registers/uploads/request-url, null to detach, omitted to keep.
@@ -5283,6 +5381,12 @@ components:
           type: ["string", "null"]
         checkedAt:
           type: ["string", "null"]
+        revision:
+          type: integer
+          description: Goes up when a change alters what staff read, so they sign the assessment again.
+        signOffDepartments:
+          type: array
+          items: { type: string }
         createdBy:
           type: ["integer", "null"]
         createdAt:
@@ -5293,7 +5397,111 @@ components:
           type: ["string", "null"]
         reviewOverdue:
           type: boolean
-      required: [id, clientId, task, exposureRoutes, ppe, riskLevel, healthSurveillanceRequired, monitoringRequired, levRequired, assessmentDate, status, reviewOverdue]
+      required: [id, clientId, task, exposureRoutes, ppe, riskLevel, healthSurveillanceRequired, monitoringRequired, levRequired, assessmentDate, status, reviewOverdue, revision, signOffDepartments]
+
+    CoshhSignOffSummary:
+      type: object
+      description: The parts of a current COSHH assessment a person reads before signing.
+      properties:
+        id: { type: integer }
+        siteId: { type: integer }
+        siteName: { type: ["string", "null"] }
+        task: { type: string }
+        productName: { type: ["string", "null"] }
+        substanceId: { type: ["integer", "null"] }
+        hasSafetyDataSheet: { type: boolean }
+        hasDocument: { type: boolean }
+        revision: { type: integer }
+        signOffDepartments:
+          type: array
+          items: { type: string }
+        assessmentDate: { type: ["string", "null"], format: date }
+        assessor: { type: ["string", "null"] }
+        riskLevel: { type: string }
+        hazardStatements: { type: ["string", "null"] }
+        signalWord: { type: ["string", "null"] }
+        healthEffects: { type: ["string", "null"] }
+        exposureRoutes:
+          type: array
+          items: { type: string }
+        controls: { type: ["string", "null"] }
+        ppe:
+          type: array
+          items: { type: string }
+        ppeDetails: { type: ["string", "null"] }
+        storage: { type: ["string", "null"] }
+        spillProcedure: { type: ["string", "null"] }
+        firstAid: { type: ["string", "null"] }
+        disposal: { type: ["string", "null"] }
+      required: [id, siteId, task, revision, signOffDepartments, riskLevel, exposureRoutes, ppe, hasSafetyDataSheet, hasDocument]
+
+    CoshhSignOffStatus:
+      allOf:
+        - $ref: "#/components/schemas/CoshhSignOffSummary"
+        - type: object
+          properties:
+            staffTotal: { type: integer }
+            signedCount: { type: integer }
+            signed:
+              type: array
+              items:
+                type: object
+                properties:
+                  staffRosterId: { type: integer }
+                  name: { type: string }
+                  department: { type: ["string", "null"] }
+                  signedAt: { type: string, format: date-time }
+                  hasSignature: { type: boolean }
+                  trainTrackRecordId: { type: ["integer", "null"] }
+                required: [staffRosterId, name, signedAt, hasSignature]
+            outstanding:
+              type: array
+              items:
+                type: object
+                properties:
+                  staffRosterId: { type: integer }
+                  name: { type: string }
+                  department: { type: ["string", "null"] }
+                  resign:
+                    type: boolean
+                    description: They signed an earlier revision, so this is a re-sign after a change.
+                required: [staffRosterId, name, resign]
+          required: [staffTotal, signedCount, signed, outstanding]
+
+    CoshhSignOffRequest:
+      type: object
+      properties:
+        signOffs:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              staffRosterId: { type: integer }
+              signature:
+                type: ["string", "null"]
+                description: The person's signature drawn on this device (base64 PNG).
+            required: [staffRosterId]
+      required: [signOffs]
+
+    MyCoshhSignOffs:
+      type: object
+      properties:
+        linked: { type: boolean }
+        pending:
+          type: array
+          items: { $ref: "#/components/schemas/CoshhSignOffSummary" }
+        signed:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/CoshhSignOffSummary"
+              - type: object
+                properties:
+                  signedAt: { type: string, format: date-time }
+                required: [signedAt]
+      required: [linked, pending, signed]
 
     CoshhCheckInput:
       type: object

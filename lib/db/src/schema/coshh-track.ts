@@ -1,8 +1,10 @@
-import { pgTable, serial, integer, text, date, timestamp, boolean, bigint, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, date, timestamp, boolean, bigint, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
 import { coshhSubstancesTable } from "./registers";
+import { staffMembersTable } from "./staff-members";
+import { trainTrackRecordsTable } from "./train-track";
 
 // COSHHTrack: COSHH assessments per substance or task, and the dated checks
 // that follow from them (LEV thorough examinations, health surveillance,
@@ -71,6 +73,12 @@ export const coshhAssessmentsTable = pgTable("coshh_assessments", {
   checkedBy: integer("checked_by").references(() => usersTable.id, { onDelete: "set null" }),
   checkedByName: text("checked_by_name"),
   checkedAt: timestamp("checked_at"),
+  // Bumped when a saved change alters what staff were asked to read, so
+  // everyone signs the revised assessment again (coshh_acknowledgements).
+  revision: integer("revision").notNull().default(1),
+  // Staff who must read and sign it: everyone on the staff list at the site,
+  // or only these departments (department names, as on staff_roster).
+  signOffDepartments: jsonb("sign_off_departments").$type<string[]>().notNull().default([]),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -105,5 +113,24 @@ export const coshhChecksTable = pgTable("coshh_checks", {
   deletedAt: timestamp("deleted_at"),
 });
 
+// One person's signature that they have read one revision of an assessment.
+// Each sign-off also writes a TrainTrack "signoff" record, which is what the
+// staff member's training history shows.
+export const coshhAcknowledgementsTable = pgTable("coshh_acknowledgements", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  assessmentId: integer("assessment_id").notNull().references(() => coshhAssessmentsTable.id, { onDelete: "cascade" }),
+  revision: integer("revision").notNull(),
+  staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
+  staffName: text("staff_name").notNull(),
+  signature: text("signature"),
+  acknowledgedBy: integer("acknowledged_by").references(() => usersTable.id, { onDelete: "set null" }),
+  trainTrackRecordId: integer("train_track_record_id").references(() => trainTrackRecordsTable.id, { onDelete: "set null" }),
+  acknowledgedAt: timestamp("acknowledged_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("coshh_acknowledgements_person_revision_idx").on(table.assessmentId, table.revision, table.staffRosterId),
+]);
+
 export type CoshhAssessment = typeof coshhAssessmentsTable.$inferSelect;
 export type CoshhCheck = typeof coshhChecksTable.$inferSelect;
+export type CoshhAcknowledgement = typeof coshhAcknowledgementsTable.$inferSelect;

@@ -35,6 +35,7 @@ import type {
   CoshhCheck,
   CoshhCheckInput,
   CoshhDocumentUrl,
+  CoshhSignOffRequest,
   CoshhTrackStatus,
   CreateCategoryRequest,
   CreateCertificateDefectRequest,
@@ -104,6 +105,8 @@ import type {
   ListComplianceItemsParams,
   ListCoshhAssessmentsParams,
   ListCoshhChecksParams,
+  ListCoshhSignOffs200,
+  ListCoshhSignOffsParams,
   ListFeedbackReportHistoryParams,
   ListFeedbackReportsParams,
   ListFireCallPointsParams,
@@ -116,6 +119,7 @@ import type {
   ListPATTestsParams,
   ListPremisesInspectionsParams,
   ListPublicLinkAccessParams,
+  MyCoshhSignOffs,
   OkResponse,
   OwnTrainingRecord,
   PATAppliance,
@@ -133,6 +137,7 @@ import type {
   PrivacyRetentionVerification,
   PrivacyRetentionVerificationInput,
   PublicLinkAccessPage,
+  RecordCoshhSignOffs200,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
@@ -598,6 +603,155 @@ export const useSignMyTrainingRecord = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSignMyTrainingRecordMutationOptions(options));
+    }
+
+export const getListMyCoshhSignOffsUrl = () => {
+
+
+
+
+  return `/api/train-track/my-coshh`
+}
+
+/**
+ * @summary Current COSHH assessments the signed-in Viewer must read and sign, and those already signed
+ */
+export const listMyCoshhSignOffs = async ( options?: RequestInit): Promise<MyCoshhSignOffs> => {
+
+  return customFetch<MyCoshhSignOffs>(getListMyCoshhSignOffsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMyCoshhSignOffsQueryKey = () => {
+    return [
+    `/api/train-track/my-coshh`
+    ] as const;
+    }
+
+
+export const getListMyCoshhSignOffsQueryOptions = <TData = Awaited<ReturnType<typeof listMyCoshhSignOffs>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyCoshhSignOffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMyCoshhSignOffsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyCoshhSignOffs>>> = ({ signal }) => listMyCoshhSignOffs({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMyCoshhSignOffs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMyCoshhSignOffsQueryResult = NonNullable<Awaited<ReturnType<typeof listMyCoshhSignOffs>>>
+export type ListMyCoshhSignOffsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Current COSHH assessments the signed-in Viewer must read and sign, and those already signed
+ */
+
+export function useListMyCoshhSignOffs<TData = Awaited<ReturnType<typeof listMyCoshhSignOffs>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyCoshhSignOffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMyCoshhSignOffsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSignMyCoshhAssessmentUrl = (id: number,) => {
+
+
+
+
+  return `/api/train-track/my-coshh/${id}/sign`
+}
+
+/**
+ * @summary Sign that the signed-in Viewer has read a current COSHH assessment (writes a TrainTrack sign-off)
+ */
+export const signMyCoshhAssessment = async (id: number,
+    signTrainingRecordRequest: SignTrainingRecordRequest, options?: RequestInit): Promise<MyCoshhSignOffs> => {
+
+  return customFetch<MyCoshhSignOffs>(getSignMyCoshhAssessmentUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(signTrainingRecordRequest)
+  }
+);}
+
+
+
+
+
+export const getSignMyCoshhAssessmentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyCoshhAssessment>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signMyCoshhAssessment>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext> => {
+
+const mutationKey = ['signMyCoshhAssessment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signMyCoshhAssessment>>, {id: number;data: BodyType<SignTrainingRecordRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  signMyCoshhAssessment(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignMyCoshhAssessmentMutationResult = NonNullable<Awaited<ReturnType<typeof signMyCoshhAssessment>>>
+    export type SignMyCoshhAssessmentMutationBody = BodyType<SignTrainingRecordRequest>
+    export type SignMyCoshhAssessmentMutationError = ErrorType<void>
+
+    /**
+ * @summary Sign that the signed-in Viewer has read a current COSHH assessment (writes a TrainTrack sign-off)
+ */
+export const useSignMyCoshhAssessment = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyCoshhAssessment>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signMyCoshhAssessment>>,
+        TError,
+        {id: number;data: BodyType<SignTrainingRecordRequest>},
+        TContext
+      > => {
+      return useMutation(getSignMyCoshhAssessmentMutationOptions(options));
     }
 
 export const getSetActiveDepartmentUrl = () => {
@@ -10434,4 +10588,160 @@ export function useGetCoshhCheckReportUrl<TData = Awaited<ReturnType<typeof getC
 
 
 
+
+export const getListCoshhSignOffsUrl = (params?: ListCoshhSignOffsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/coshh-track/sign-offs?${stringifiedParams}` : `/api/coshh-track/sign-offs`
+}
+
+/**
+ * @summary Current COSHH assessments with who has read and signed them and who still needs to (TrainTrack's COSHH section)
+ */
+export const listCoshhSignOffs = async (params?: ListCoshhSignOffsParams, options?: RequestInit): Promise<ListCoshhSignOffs200> => {
+
+  return customFetch<ListCoshhSignOffs200>(getListCoshhSignOffsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCoshhSignOffsQueryKey = (params?: ListCoshhSignOffsParams,) => {
+    return [
+    `/api/coshh-track/sign-offs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCoshhSignOffsQueryOptions = <TData = Awaited<ReturnType<typeof listCoshhSignOffs>>, TError = ErrorType<unknown>>(params?: ListCoshhSignOffsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCoshhSignOffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCoshhSignOffsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCoshhSignOffs>>> = ({ signal }) => listCoshhSignOffs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCoshhSignOffs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCoshhSignOffsQueryResult = NonNullable<Awaited<ReturnType<typeof listCoshhSignOffs>>>
+export type ListCoshhSignOffsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Current COSHH assessments with who has read and signed them and who still needs to (TrainTrack's COSHH section)
+ */
+
+export function useListCoshhSignOffs<TData = Awaited<ReturnType<typeof listCoshhSignOffs>>, TError = ErrorType<unknown>>(
+ params?: ListCoshhSignOffsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCoshhSignOffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCoshhSignOffsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRecordCoshhSignOffsUrl = (id: number,) => {
+
+
+
+
+  return `/api/coshh-track/assessments/${id}/sign-offs`
+}
+
+/**
+ * @summary Record staff signing that they have read a current COSHH assessment; each writes a TrainTrack sign-off
+ */
+export const recordCoshhSignOffs = async (id: number,
+    coshhSignOffRequest: CoshhSignOffRequest, options?: RequestInit): Promise<RecordCoshhSignOffs200> => {
+
+  return customFetch<RecordCoshhSignOffs200>(getRecordCoshhSignOffsUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(coshhSignOffRequest)
+  }
+);}
+
+
+
+
+
+export const getRecordCoshhSignOffsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordCoshhSignOffs>>, TError,{id: number;data: BodyType<CoshhSignOffRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordCoshhSignOffs>>, TError,{id: number;data: BodyType<CoshhSignOffRequest>}, TContext> => {
+
+const mutationKey = ['recordCoshhSignOffs'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordCoshhSignOffs>>, {id: number;data: BodyType<CoshhSignOffRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  recordCoshhSignOffs(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordCoshhSignOffsMutationResult = NonNullable<Awaited<ReturnType<typeof recordCoshhSignOffs>>>
+    export type RecordCoshhSignOffsMutationBody = BodyType<CoshhSignOffRequest>
+    export type RecordCoshhSignOffsMutationError = ErrorType<void>
+
+    /**
+ * @summary Record staff signing that they have read a current COSHH assessment; each writes a TrainTrack sign-off
+ */
+export const useRecordCoshhSignOffs = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordCoshhSignOffs>>, TError,{id: number;data: BodyType<CoshhSignOffRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof recordCoshhSignOffs>>,
+        TError,
+        {id: number;data: BodyType<CoshhSignOffRequest>},
+        TContext
+      > => {
+      return useMutation(getRecordCoshhSignOffsMutationOptions(options));
+    }
 

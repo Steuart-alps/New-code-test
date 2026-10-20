@@ -167,6 +167,138 @@ export const SignMyTrainingRecordResponse = zod.object({
 
 
 /**
+ * @summary Current COSHH assessments the signed-in Viewer must read and sign, and those already signed
+ */
+export const ListMyCoshhSignOffsResponse = zod.object({
+  "linked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.')),
+  "signed": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.').and(zod.object({
+  "signedAt": zod.date()
+})))
+})
+
+
+/**
+ * @summary Sign that the signed-in Viewer has read a current COSHH assessment (writes a TrainTrack sign-off)
+ */
+export const SignMyCoshhAssessmentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignMyCoshhAssessmentBody = zod.object({
+  "signature": zod.string().describe('Signature image as a data URL')
+})
+
+export const SignMyCoshhAssessmentResponse = zod.object({
+  "linked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.')),
+  "signed": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.').and(zod.object({
+  "signedAt": zod.date()
+})))
+})
+
+
+/**
  * @summary Choose which of their departments a Manager with several is working in (kept for the session)
  */
 export const SetActiveDepartmentBody = zod.object({
@@ -4155,6 +4287,8 @@ export const ListCoshhAssessmentsResponseItem = zod.object({
   "checkedBy": zod.number().nullish(),
   "checkedByName": zod.string().nullish(),
   "checkedAt": zod.string().nullish(),
+  "revision": zod.number().describe('Goes up when a change alters what staff read, so they sign the assessment again.'),
+  "signOffDepartments": zod.array(zod.string()),
   "createdBy": zod.number().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional(),
@@ -4197,6 +4331,7 @@ export const CreateCoshhAssessmentBody = zod.object({
   "draftSource": zod.union([zod.literal('ai'),zod.literal(null)]).nullish().describe('Set to ai when the form was pre-filled from a safety data sheet.'),
   "draftedAt": zod.date().nullish(),
   "checkedAgainstSds": zod.boolean().optional().describe('Required (true) to save an AI draft; the saver is recorded as having checked it.'),
+  "signOffDepartments": zod.array(zod.string()).optional().describe('Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site.'),
   "objectPath": zod.string().nullish().describe('A fresh upload from POST \/registers\/uploads\/request-url, null to detach, omitted to keep.'),
   "fileName": zod.string().nullish()
 })
@@ -4239,6 +4374,8 @@ export const CreateCoshhAssessmentResponse = zod.object({
   "checkedBy": zod.number().nullish(),
   "checkedByName": zod.string().nullish(),
   "checkedAt": zod.string().nullish(),
+  "revision": zod.number().describe('Goes up when a change alters what staff read, so they sign the assessment again.'),
+  "signOffDepartments": zod.array(zod.string()),
   "createdBy": zod.number().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional(),
@@ -4284,6 +4421,7 @@ export const UpdateCoshhAssessmentBody = zod.object({
   "draftSource": zod.union([zod.literal('ai'),zod.literal(null)]).nullish().describe('Set to ai when the form was pre-filled from a safety data sheet.'),
   "draftedAt": zod.date().nullish(),
   "checkedAgainstSds": zod.boolean().optional().describe('Required (true) to save an AI draft; the saver is recorded as having checked it.'),
+  "signOffDepartments": zod.array(zod.string()).optional().describe('Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site.'),
   "objectPath": zod.string().nullish().describe('A fresh upload from POST \/registers\/uploads\/request-url, null to detach, omitted to keep.'),
   "fileName": zod.string().nullish()
 })
@@ -4326,6 +4464,8 @@ export const UpdateCoshhAssessmentResponse = zod.object({
   "checkedBy": zod.number().nullish(),
   "checkedByName": zod.string().nullish(),
   "checkedAt": zod.string().nullish(),
+  "revision": zod.number().describe('Goes up when a change alters what staff read, so they sign the assessment again.'),
+  "signOffDepartments": zod.array(zod.string()),
   "createdBy": zod.number().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional(),
@@ -4499,6 +4639,126 @@ export const GetCoshhCheckReportUrlParams = zod.object({
 export const GetCoshhCheckReportUrlResponse = zod.object({
   "downloadUrl": zod.string(),
   "fileName": zod.string().nullish()
+})
+
+
+/**
+ * @summary Current COSHH assessments with who has read and signed them and who still needs to (TrainTrack's COSHH section)
+ */
+export const ListCoshhSignOffsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListCoshhSignOffsResponse = zod.object({
+  "assessments": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.').and(zod.object({
+  "staffTotal": zod.number(),
+  "signedCount": zod.number(),
+  "signed": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "department": zod.string().nullish(),
+  "signedAt": zod.date(),
+  "hasSignature": zod.boolean(),
+  "trainTrackRecordId": zod.number().nullish()
+})),
+  "outstanding": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "department": zod.string().nullish(),
+  "resign": zod.boolean().describe('They signed an earlier revision, so this is a re-sign after a change.')
+}))
+})))
+})
+
+
+/**
+ * @summary Record staff signing that they have read a current COSHH assessment; each writes a TrainTrack sign-off
+ */
+export const RecordCoshhSignOffsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const recordCoshhSignOffsBodySignOffsMax = 200;
+
+
+
+export const RecordCoshhSignOffsBody = zod.object({
+  "signOffs": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "signature": zod.string().nullish().describe('The person\'s signature drawn on this device (base64 PNG).')
+})).min(1).max(recordCoshhSignOffsBodySignOffsMax)
+})
+
+export const RecordCoshhSignOffsResponse = zod.object({
+  "signed": zod.number(),
+  "assessment": zod.union([zod.object({
+  "id": zod.number(),
+  "siteId": zod.number(),
+  "siteName": zod.string().nullish(),
+  "task": zod.string(),
+  "productName": zod.string().nullish(),
+  "substanceId": zod.number().nullish(),
+  "hasSafetyDataSheet": zod.boolean(),
+  "hasDocument": zod.boolean(),
+  "revision": zod.number(),
+  "signOffDepartments": zod.array(zod.string()),
+  "assessmentDate": zod.date().nullish(),
+  "assessor": zod.string().nullish(),
+  "riskLevel": zod.string(),
+  "hazardStatements": zod.string().nullish(),
+  "signalWord": zod.string().nullish(),
+  "healthEffects": zod.string().nullish(),
+  "exposureRoutes": zod.array(zod.string()),
+  "controls": zod.string().nullish(),
+  "ppe": zod.array(zod.string()),
+  "ppeDetails": zod.string().nullish(),
+  "storage": zod.string().nullish(),
+  "spillProcedure": zod.string().nullish(),
+  "firstAid": zod.string().nullish(),
+  "disposal": zod.string().nullish()
+}).describe('The parts of a current COSHH assessment a person reads before signing.').and(zod.object({
+  "staffTotal": zod.number(),
+  "signedCount": zod.number(),
+  "signed": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "department": zod.string().nullish(),
+  "signedAt": zod.date(),
+  "hasSignature": zod.boolean(),
+  "trainTrackRecordId": zod.number().nullish()
+})),
+  "outstanding": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "department": zod.string().nullish(),
+  "resign": zod.boolean().describe('They signed an earlier revision, so this is a re-sign after a change.')
+}))
+})),zod.null()])
 })
 
 

@@ -296,8 +296,9 @@ async function main() {
   const placeholder = "2000000000";
   let notFound = 0;
   for (const route of routes) {
-    // The one write a viewer makes, checked above.
-    if (route.path === "/train-track/my-records/:id/sign") continue;
+    // The writes a viewer makes: signing their own records, checked above, and
+    // signing a COSHH assessment for their site (tests/coshh-track.mjs).
+    if (route.path === "/train-track/my-records/:id/sign" || route.path === "/train-track/my-coshh/:id/sign") continue;
     let usedPlaceholder = false;
     const collection = route.path.replace(/\/:[^/]+.*$/, "");
     const path = route.path.replace(/:(\w+)(\([^)]*\))?\??/g, (_match, param) => {

@@ -354,6 +354,7 @@ registers/
 coshh-track/
   assessments.csv                — COSHH assessments (removed ones included, with deleted_at)
   checks.csv                     — LEV examinations, health checks, monitoring and briefings
+  sign-offs.csv                  — staff who read and signed each assessment revision
   asbestos-records.csv           — asbestos survey and management plan per site
   asbestos-register-entries.csv  — asbestos register entries
   asbestos-survey-history.csv    — earlier asbestos surveys whose report was replaced
@@ -782,6 +783,7 @@ router.get(
         await out.csv("registers/coshh-substances.csv", async () => (await db.execute(sql`SELECT * FROM coshh_substances WHERE client_id = ${cid} ORDER BY id`)).rows);
         await out.csv("coshh-track/assessments.csv", async () => (await db.execute(sql`SELECT * FROM coshh_assessments WHERE client_id = ${cid} ORDER BY id`)).rows);
         await out.csv("coshh-track/checks.csv", async () => (await db.execute(sql`SELECT * FROM coshh_checks WHERE client_id = ${cid} ORDER BY check_date DESC, id`)).rows);
+        await out.csv("coshh-track/sign-offs.csv", async () => (await db.execute(sql`SELECT * FROM coshh_acknowledgements WHERE client_id = ${cid} ORDER BY acknowledged_at, id`)).rows);
         await out.csv("registers/asbestos-records.csv", async () => (await db.execute(sql`SELECT * FROM asbestos_records WHERE client_id = ${cid} ORDER BY id`)).rows);
         await out.csv("registers/asbestos-register-entries.csv", async () => (await db.execute(sql`SELECT * FROM asbestos_register_entries WHERE client_id = ${cid} ORDER BY record_id, id`)).rows);
         await out.csv("registers/asbestos-survey-history.csv", async () => (await db.execute(sql`SELECT * FROM asbestos_survey_history WHERE client_id = ${cid} ORDER BY record_id, id`)).rows);

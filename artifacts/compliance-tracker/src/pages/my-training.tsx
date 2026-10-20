@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SignaturePad } from "@/components/signature-pad";
+import { MyCoshhSignOffs } from "@/components/coshh-sign-offs";
 
 interface OwnRecord {
   id: number;
@@ -132,10 +133,10 @@ export default function MyTrainingPage() {
             <GraduationCap className="mx-auto mb-2 h-6 w-6" />
             Your account isn't linked to your name on the staff roster yet. Ask your manager to link it.
           </Card>
-        ) : records.length === 0 ? (
-          <Card className="rounded-sm p-6 text-center text-sm text-muted-foreground">No training records yet.</Card>
         ) : (
           <>
+            <MyCoshhSignOffs />
+            {records.length === 0 && <Card className="rounded-sm p-6 text-center text-sm text-muted-foreground">No training records yet.</Card>}
             {toSign > 0 && <p className="text-sm font-medium">{toSign === 1 ? "1 record is" : `${toSign} records are`} waiting for your signature.</p>}
             {records.map(record => <RecordCard key={record.id} record={record} />)}
           </>
