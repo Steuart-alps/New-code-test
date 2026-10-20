@@ -13,6 +13,7 @@
     "test:signup-pesttrack-browser": "node tests/signup-pesttrack-browser.test.mjs",
     "test:nav-groups": "node tests/nav-groups.test.mjs",
     "test:select-item-values": "node tests/select-item-values.test.mjs",
+    "test:sidebar-browser": "node tests/sidebar-browser.test.mjs",
     "test:client-scope": "node tests/client-scope.test.mjs",
     "test:pat-legacy-register-browser": "node tests/pat-legacy-register-browser.test.mjs",
     "test:pat-failure-location": "node tests/pat-failure-location.test.mjs",

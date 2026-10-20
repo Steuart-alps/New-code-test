@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { getNavGroups } from "../src/lib/nav-groups.ts";
+import {
+  getNavGroups,
+  isNavGroupInitiallyOpen,
+  isNavItemPinnable,
+  MAX_PINNED_NAV_ITEMS,
+  navGroupStorageKey,
+  parsePinnedHrefs,
+  pinnedNavStorageKey,
+  resolvePinnedNavItems,
+  togglePinnedHref,
+} from "../src/lib/nav-groups.ts";
 
 function flattenGroups(groups) {
   return groups.flatMap(g => g.items.map(i => i.label));
@@ -58,5 +68,105 @@ assert.ok(!userItems.includes("Equipment & QR labels"), "Staff should not see th
 assert.equal(guardedRoutes.get("/equipment"), "canManageUsers", "App.tsx should register /equipment for managers and admins");
 
 assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Everyone should see the Calendar");
+
+// Section membership: a nav edit that moves, drops or duplicates a link fails here.
+const membership = groups => Object.fromEntries(groups.map(g => [g.id, g.items.map(i => i.href)]));
+assert.deepEqual(membership(adminGroups), {
+  core: ["/dashboard", "/portfolio", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors", "/categories"],
+  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh", "/asbestos"],
+  "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
+  operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
+  "people-training": ["/doc-track", "/train-track", "/users", "/staff-roster"],
+  reporting: ["/reports"],
+  admin: ["/sites", "/clients", "/feedback", "/privacy-governance", "/settings"],
+}, "Consultant admin sections");
+assert.deepEqual(membership(userGroups), {
+  core: ["/dashboard", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors"],
+  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh", "/asbestos"],
+  "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
+  operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
+  "people-training": ["/doc-track", "/train-track"],
+  reporting: ["/reports"],
+}, "Staff and viewer sections (no empty Administration section)");
+assert.deepEqual(membership(getNavGroups({ isConsultant: false, canAdmin: true })).admin,
+  ["/sites", "/feedback", "/privacy-governance", "/settings"], "Client admin Administration section");
+
+for (const [label, groups] of [["consultant", adminGroups], ["staff", userGroups]]) {
+  const all = hrefs(groups);
+  assert.equal(new Set(all).size, all.length, `No link appears twice in the ${label} sidebar`);
+  assert.ok(groups.every(g => g.items.length > 0), `No empty section in the ${label} sidebar`);
+}
+
+// Every link leads to a route App.tsx registers.
+const routePaths = new Set([...appSource.matchAll(/<Route path="([^"]+)"/g)].map(m => m[1]));
+for (const href of hrefs(adminGroups)) {
+  assert.ok(routePaths.has(href), `Nav links to ${href}, but App.tsx has no route for it`);
+}
+
+// Every service key is one the API actually grants (ADDON_KEYS in api-server).
+const servicesSource = readFileSync(new URL("../../api-server/src/lib/services.ts", import.meta.url), "utf8");
+const addonKeys = new Set(JSON.parse(servicesSource.match(/export const ADDON_KEYS = (\[[^\]]*\])/)[1]));
+assert.ok(addonKeys.has("firetrack") && addonKeys.size > 10, "Read ADDON_KEYS from api-server");
+for (const item of adminGroups.flatMap(g => g.items)) {
+  for (const key of item.serviceKeys ?? (item.serviceKey ? [item.serviceKey] : [])) {
+    assert.ok(addonKeys.has(key), `${item.label} is gated on "${key}", which the API never grants`);
+  }
+}
+
+// Which sections start open.
+const groupById = id => userGroups.find(g => g.id === id);
+const kitchenOnly = key => key === "kitchentrack";
+const opensWith = (id, opts) => isNavGroupInitiallyOpen(groupById(id), { location: "/account-security", hasService: kitchenOnly, saved: null, ...opts });
+assert.equal(opensWith("core"), true, "Core Work starts open");
+assert.equal(opensWith("safety"), false, "Other sections start closed");
+assert.equal(opensWith("core", { saved: "false" }), false, "A saved close is kept");
+assert.equal(opensWith("safety", { saved: "true" }), true, "A saved open is kept");
+assert.equal(opensWith("people-training", { saved: "true" }), false,
+  "A section whose links are all locked stays closed, even if it was saved open");
+assert.equal(opensWith("people-training", { saved: "true", hasService: () => true }), true,
+  "It opens again once a module in it is unlocked");
+assert.equal(opensWith("food-water", { location: "/kitchen", saved: "false" }), true, "The current page's section opens despite a saved close");
+assert.equal(opensWith("food-water", { location: "/kitchen/extra", saved: "false" }), true, "Sub-pages count as the current page");
+assert.equal(opensWith("people-training", { location: "/doc-track", saved: "false" }), true,
+  "The current page's section opens even when its links are locked");
+assert.equal(opensWith("food-water", { location: "/kitchenette", saved: "false" }), false, "A page that only shares a prefix doesn't count");
+
+// Saved state is per user, per business and per section.
+const keys = [navGroupStorageKey("7:1", "core"), navGroupStorageKey("7:2", "core"), navGroupStorageKey("8:1", "core"), navGroupStorageKey("7:1", "safety")];
+assert.equal(new Set(keys).size, keys.length, "Section state keys differ by user, business and section");
+assert.ok(!keys.includes(pinnedNavStorageKey("7:1")), "Pins and section state never share a key");
+
+// Pinned links: per user and business, only links the user can open now.
+assert.notEqual(pinnedNavStorageKey("7:1"), pinnedNavStorageKey("7:2"), "Pins are kept per business");
+assert.notEqual(pinnedNavStorageKey("7:1"), pinnedNavStorageKey("8:1"), "Pins are kept per user");
+
+const onlyFire = (key) => key === "firetrack";
+const allItems = adminGroups.flatMap(g => g.items);
+const fireItem = allItems.find(i => i.href === "/fire-safety");
+const kitchenItem = allItems.find(i => i.href === "/kitchen");
+assert.ok(isNavItemPinnable(fireItem, onlyFire), "An entitled module can be pinned");
+assert.ok(!isNavItemPinnable(kitchenItem, onlyFire), "A locked module can't be pinned");
+assert.ok(!isNavItemPinnable({ ...fireItem, comingSoon: true }, () => true), "A coming-soon link can't be pinned");
+assert.ok(isNavItemPinnable(allItems.find(i => i.href === "/dashboard"), onlyFire), "Links without a service key can be pinned");
+
+const resolved = resolvePinnedNavItems(["/kitchen", "/fire-safety", "/settings", "/no-such-page", "/dashboard"], userGroups, onlyFire);
+assert.deepEqual(resolved.hrefs, ["/fire-safety", "/dashboard"],
+  "Stale pins drop out: a module the business lost, an admin link the role no longer shows, and a removed page");
+assert.deepEqual(resolved.items.map(i => i.label), ["FireTrack", "Dashboard"], "Pins keep their order");
+assert.deepEqual(resolvePinnedNavItems(["/kitchen"], userGroups, () => true).hrefs, ["/kitchen"],
+  "A pin survives while the business keeps the module");
+
+assert.deepEqual(parsePinnedHrefs(null), []);
+assert.deepEqual(parsePinnedHrefs("not json"), [], "A corrupt value is ignored");
+assert.deepEqual(parsePinnedHrefs('{"href":"/x"}'), [], "Only a list is read");
+assert.deepEqual(parsePinnedHrefs('["/a", 3, "/a", "javascript:alert(1)", "/b"]'), ["/a", "/b"],
+  "Non-strings, duplicates and non-path values are dropped");
+assert.equal(parsePinnedHrefs(JSON.stringify(["/1", "/2", "/3", "/4", "/5", "/6", "/7"])).length, MAX_PINNED_NAV_ITEMS);
+
+assert.deepEqual(togglePinnedHref(["/a"], "/b"), ["/a", "/b"], "A new pin goes last");
+assert.deepEqual(togglePinnedHref(["/a", "/b"], "/a"), ["/b"], "Pinning again unpins");
+const full = Array.from({ length: MAX_PINNED_NAV_ITEMS }, (_, i) => `/${i}`);
+assert.deepEqual(togglePinnedHref(full, "/extra"), full, "A full list refuses another pin");
+assert.deepEqual(togglePinnedHref(full, "/0"), full.slice(1), "A full list can still unpin");
 
 console.log("Nav groups visibility regression tests passed.");
