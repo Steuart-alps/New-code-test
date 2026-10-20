@@ -5,6 +5,7 @@ import { requireAuth, requireConsultant, requirePlatformOperator } from "../midd
 import { isPlatformAdmin } from "../lib/platformAdmin";
 import { getClientId, requireClientAdmin } from "../middleware/requireAuth";
 import { logger } from "../lib/logger";
+import { sendTestErrorReport } from "../lib/sentry";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { escapeHtml, sendSystemEmail } from "../lib/email";
@@ -280,6 +281,17 @@ router.get("/admin/storage-price-check", requireAuth, requireConsultant, require
   const result = await checkStorageAddonPrice({ maxAgeMs: 0 });
   const status = result.status === "ok" ? 200 : result.status === "not_configured" ? 404 : 503;
   res.status(status).json(result);
+});
+
+// Sends one deliberate error report to Sentry and returns Sentry's answer
+// (accepted, rejected with a status code, failed, or not configured), so the
+// operator can confirm SENTRY_DSN and the environment tag without breaking
+// anything. Platform operators only (PLATFORM_ADMIN_EMAILS).
+// POST /api/admin/error-reports/test
+router.post("/admin/error-reports/test", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
+  const result = await sendTestErrorReport();
+  logger.info({ configured: result.configured, eventId: result.eventId, delivery: result.delivery }, "Test error report requested");
+  res.json(result);
 });
 
 // One-shot demo seed endpoint, gated by a secret token.

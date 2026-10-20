@@ -83,6 +83,7 @@
     "test:viewer-read-only": "bash tests/run-viewer-read-only.sh",
     "test:config": "bash tests/run-db-workflow.sh tests/config-endpoints.mjs",
     "test:config:ci": "bash tests/run-config-endpoints.sh",
+    "test:error-reports:ci": "bash tests/run-error-reports.sh",
     "test:fixture-cleanup-isolation": "bash tests/run-fresh-schema.sh tests/fixture-cleanup-isolation.mjs",
     "test:privacy-governance:ci": "bash tests/run-privacy-governance.sh",
     "test:training-expiry": "bash tests/run-db-workflow.sh tests/training-expiry-reminders.mjs",

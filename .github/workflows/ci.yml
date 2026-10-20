@@ -196,6 +196,12 @@ jobs:
 
       - name: Viewer read-only tests
         run: pnpm --filter @workspace/api-server run test:viewer-read-only
+      # Sentry reports against a fake ingest: environment/release tags, nothing
+      # secret sent, and a clean production start without SENTRY_DSN.
+      - name: Error report tests
+        run: |
+          pnpm --filter @workspace/api-zod run test:error-report-scrub
+          pnpm --filter @workspace/api-server run test:error-reports:ci
 
       # The schema-shape suites start their own private cluster with initdb and
       # pg_ctl, which ubuntu-latest ships (PostgreSQL 16, service disabled) but
