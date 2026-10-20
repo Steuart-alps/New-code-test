@@ -16,6 +16,7 @@ import {
   isTenantReservedObjectPath,
 } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload, decryptTokenPayload, TokenPayloadError, isDamagedTokenPayload } from "../lib/bearerTokens";
@@ -1033,6 +1034,7 @@ router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, 
   }
 
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, contentType, extension);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });

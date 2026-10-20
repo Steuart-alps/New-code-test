@@ -17,6 +17,7 @@ import {
   isTenantReservedObjectPath,
 } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { hasTenantAttachmentReference } from "../lib/attachmentReferences";
 import {
   isStagedPhotoEntityType,
@@ -214,6 +215,7 @@ router.post(
     }
 
     try {
+      await ensureUploadCapacity(clientId, req.log);
       const uploadUrl = await storage.getObjectEntityUploadURL(clientId, body.contentType);
       const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
       if (!isTenantReservedObjectPath(objectPath, clientId)) {
@@ -321,6 +323,7 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
   if (await rejectUnownedPhotoEntity(res, body.entityType, body.entityId, clientId, getActiveDepartmentId(req))) return;
 
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, body.contentType);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });

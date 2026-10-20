@@ -9,6 +9,7 @@
 export * from './activeDepartmentRequest';
 export * from './addPrivacyRetentionVerificationParams';
 export * from './appSettings';
+export * from './appSettingsStorageAutoTopUp';
 export * from './auditFieldChange';
 export * from './auditLogEntry';
 export * from './auditLogEntryAction';
@@ -246,6 +247,8 @@ export * from './setActiveDepartment200';
 export * from './setPrivacyIntakeAssigneeParams';
 export * from './signTrainingRecordRequest';
 export * from './site';
+export * from './storageLimitState';
+export * from './storageStatus';
 export * from './storageUsage';
 export * from './storageUsageEstimatedCost';
 export * from './storageUsageEstimatedCostCurrency';

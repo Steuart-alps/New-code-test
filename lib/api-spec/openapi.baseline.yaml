@@ -1319,6 +1319,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/StorageUsage"
 
+  /storage/status:
+    get:
+      operationId: getStorageStatus
+      tags: [storage]
+      summary: Whether this business's storage is nearly full or full, for the in-app banner
+      responses:
+        "200":
+          description: Storage limit state for the signed-in user's business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageStatus"
+
   /notifications/send-reminders:
     post:
       operationId: sendReminders
@@ -1388,6 +1401,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RequestUploadUrlResponse"
+        "409":
+          description: The business's paid storage is full (code STORAGE_FULL) and automatic top-up is off or failed. Every upload-link route answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /fix-track/issues/{id}/media/delete:
     post:
@@ -4529,6 +4548,36 @@ components:
           type: string
           pattern: "^[0-9]+$"
           nullable: true
+        storageAutoTopUp:
+          type: string
+          enum: ["true", "false"]
+          nullable: true
+          description: '"true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'
+
+    StorageLimitState:
+      type: string
+      enum: [ok, nearly_full, full, not_limited]
+      description: Usage against the storage the business pays for. nearly_full is 80% or more; full stops new uploads unless automatic top-up adds storage; not_limited means no paid limit applies (no live subscription, or it couldn't be read).
+
+    StorageStatus:
+      type: object
+      required: [state, canManage, autoTopUp, usedBytes, capacityBytes]
+      properties:
+        state:
+          $ref: "#/components/schemas/StorageLimitState"
+        canManage:
+          type: boolean
+          description: Whether this user can add storage or change automatic top-up.
+        autoTopUp:
+          type: boolean
+        usedBytes:
+          type: ["integer", "null"]
+          minimum: 0
+          description: Only for users who can manage storage.
+        capacityBytes:
+          type: ["integer", "null"]
+          minimum: 0
+          description: Only for users who can manage storage, and null when not limited.
 
     StorageUsage:
       type: object
@@ -4544,10 +4593,22 @@ components:
         - usageCheckedAt
         - usageAgeSeconds
         - usageRefreshing
+        - capacityBytes
+        - limitState
+        - autoTopUp
       properties:
         usedBytes:
           type: integer
           minimum: 0
+        capacityBytes:
+          type: ["integer", "null"]
+          minimum: 0
+          description: The storage the business pays for (plan allowance plus extra storage); null when uploads aren't limited.
+        limitState:
+          $ref: "#/components/schemas/StorageLimitState"
+        autoTopUp:
+          type: boolean
+          description: Whether automatic 10 GB top-up is switched on.
         usageCheckedAt:
           type: ["string", "null"]
           format: date-time

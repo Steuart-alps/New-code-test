@@ -69,6 +69,18 @@ try {
   assert.doesNotMatch(preview.html, /Sam <b>/);
   assert.match(preview.text, /Fish & Chips is now storing about 5\.3 GB of files in ComplyTrack, past the warning level of 5 GB/);
   assert.match(preview.text, /Nothing has been deleted and uploads carry on as normal\./);
+  // With a paid limit the email says what happens when storage is full.
+  const limited = lib.buildStorageWarningEmail({
+    recipientName: "Sam", companyName: "Fish & Chips", usedBytes: 9 * GIB, thresholdBytes: 8.8 * GIB,
+    storageUrl: "https://app.example/settings#storage", capacityBytes: 11 * GIB, autoTopUp: false,
+  });
+  assert.match(limited.text, /Your storage is 11 GB; when it is full, new uploads will stop until more storage is added\./);
+  assert.doesNotMatch(limited.text, /uploads carry on/);
+  const topUp = lib.buildStorageWarningEmail({
+    recipientName: "Sam", companyName: "Fish & Chips", usedBytes: 9 * GIB, thresholdBytes: 8.8 * GIB,
+    storageUrl: "https://app.example/settings#storage", capacityBytes: 11 * GIB, autoTopUp: true,
+  });
+  assert.match(topUp.text, /we will add 10 GB automatically \(£1 a month\)/);
 
   const over = await createTenant("storage-warning-over");
   const under = await createTenant("storage-warning-under");

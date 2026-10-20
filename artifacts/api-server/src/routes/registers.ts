@@ -41,6 +41,7 @@ import {
   type AllowedUploadType,
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 
 const router = Router();
 
@@ -185,6 +186,7 @@ router.post("/uploads/request-url", requireAuth, denyViewers, async (req, res) =
     return res.status(400).json({ error: "Upload a PDF, JPEG or PNG file" });
   }
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, contentType);
     res.json({ uploadUrl, objectPath: storage.normalizeObjectEntityPath(uploadUrl) });
   } catch (err) {

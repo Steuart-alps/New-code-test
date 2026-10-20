@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectContentError, ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import {
   createAcknowledgementRegisterPdf,
@@ -866,6 +867,7 @@ router.post("/documents/request-upload", requireAuth, denyViewers, async (req, r
   }).parse(req.body); // validate — name/contentType not used server-side
 
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
