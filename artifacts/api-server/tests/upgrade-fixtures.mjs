@@ -44,7 +44,8 @@ let cookie = "";
 async function request(method, path, body) {
   const response = await fetch(`${BASE}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+    // Older records are past the edit cutoff: the owner gives a reason, as the app asks.
+    headers: { "Content-Type": "application/json", "x-override-reason": "Upgrade-path check", ...(cookie ? { cookie } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const setCookie = response.headers.get("set-cookie");

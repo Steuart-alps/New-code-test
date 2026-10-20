@@ -35,6 +35,7 @@ import kitchenWeeklyRouter from "./kitchen-weekly";
 import kitchenCleaningRouter from "./kitchen-cleaning";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
+import dailyTrackStatusRouter from "./daily-track-status";
 import checklistTemplatesRouter from "./checklist-templates";
 import checkRemindersRouter from "./check-reminders";
 import w3wRouter from "./w3w";
@@ -58,8 +59,11 @@ import trackActionsRouter from "./track-actions";
 import trackEvidenceRouter from "./track-evidence";
 import auditEventsRouter from "./audit-events";
 import auditLogRouter from "./audit-log";
+import publicLinkAccessRouter from "./public-link-access";
 import analyticsRouter from "./analytics";
 import registersRouter from "./registers";
+import trackOwnersRouter from "./track-owners";
+import userNotificationsRouter from "./user-notifications";
 
 import csvImportsRouter from "./csv-imports";
 import consultantPortfolioRouter from "./consultant-portfolio";
@@ -67,12 +71,13 @@ import consultantPortfolioRouter from "./consultant-portfolio";
 import setupRouter from "./setup";
 import tasksRouter from "./tasks";
 import { requireAuth } from "../middleware/requireAuth";
+import { limitViewers } from "../middleware/viewerScope";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
 import { staffTrainingRouter } from "./staff-training";
 import dailyChecklistsRouter from "./daily-checklists";
 import feedbackRouter from "./feedback";
-import { publicLinkRateLimit, publicLinkTokenRateLimit } from "../lib/loginRateLimit";
+import { publicLinkRateLimits } from "../lib/loginRateLimit";
 
 const router: IRouter = Router();
 
@@ -80,19 +85,21 @@ router.use(healthRouter);
 router.use(authRouter);
 // First-party analytics ingest; does its own session check (before root-level auth routers).
 router.use(analyticsRouter);
+// Viewers reach only their own training records past this point.
+router.use(limitViewers);
 router.use("/billing", billingRouter);
 // Signed file download links (bearer tokens; opened without a session).
 router.use(storageDownloadRouter);
 // Public contractor self-service portal — token-protected, not login-protected.
 // Mount before root-level routers that install requireAuth for all later paths.
-router.use("/contractor-portal", publicLinkRateLimit, publicLinkTokenRateLimit, contractorPortalRouter);
+router.use("/contractor-portal", publicLinkRateLimits, contractorPortalRouter);
 // Public FixTrack token links must also precede routers with root-level auth.
-router.use("/fix-track/action", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackPublicRouter);
-router.use("/fix-track/quotes/public", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackQuoteRouter);
+router.use("/fix-track/action", publicLinkRateLimits, fixTrackPublicRouter);
+router.use("/fix-track/quotes/public", publicLinkRateLimits, fixTrackQuoteRouter);
 // Contractor visit-scheduling links (token-protected).
-router.use("/notifications/public/schedule", publicLinkRateLimit, publicLinkTokenRateLimit, notificationsPublicRouter);
+router.use("/notifications/public/schedule", publicLinkRateLimits, notificationsPublicRouter);
 // Staff document sign-off link (token-protected).
-router.use("/sign-off", publicLinkRateLimit, publicLinkTokenRateLimit, signOffRouter);
+router.use("/sign-off", publicLinkRateLimits, signOffRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
@@ -106,6 +113,9 @@ router.use(certificatesRouter);
 router.use(settingsRouter);
 router.use(privacyGovernanceRouter);
 router.use(notificationsRouter);
+// In-app notifications (header bell) and track owners; per-route requireAuth.
+router.use(userNotificationsRouter);
+router.use(trackOwnersRouter);
 router.use(storageRouter);
 router.use("/food-safety", requireAuth, requireService("kitchentrack"), foodSafetyRouter);
 router.use(dailyChecklistsRouter);
@@ -137,6 +147,9 @@ router.use("/kitchen-cleaning", requireAuth, requireService("kitchentrack"), kit
 // service that matches the checklistType being read/written.
 router.use("/daily-track-am", requireAuth, requireAnyService("dailytrack_am", "kitchentrack", "premisestrack"), dailyTrackAmRouter);
 router.use("/daily-track-pm", requireAuth, requireAnyService("dailytrack_pm", "kitchentrack", "premisestrack"), dailyTrackPmRouter);
+// The status page covers both periods, so any AM or PM service opens it; the
+// route itself reports which checks those services make the client responsible for.
+router.use("/daily-track-status", requireAuth, requireAnyService("dailytrack_am", "dailytrack_pm", "kitchentrack", "premisestrack"), dailyTrackStatusRouter);
 router.use(checklistTemplatesRouter);
 router.use(checkRemindersRouter);
 router.use(w3wRouter);
@@ -160,6 +173,7 @@ router.use(csvImportsRouter);
 router.use(consultantPortfolioRouter);
 router.use("/audit-events", auditEventsRouter);
 router.use("/audit-log", auditLogRouter);
+router.use("/public-link-access", publicLinkAccessRouter);
 router.use("/track-actions", trackActionsRouter);
 router.use("/track-evidence", trackEvidenceRouter);
 router.use(setupRouter, tasksRouter);

@@ -5,6 +5,7 @@ import { getUnscopedComplianceReport } from "./unscopedComplianceReport";
 import { approvedFrequencies } from "./waterMonitoringPlan";
 import { riddorDeadline, ukToday, type RiddorDeadlineState } from "./riddor";
 import { addCalendarDays, addCalendarMonths, siteScopeSql, type SiteAccessScope } from "./siteAccessScope";
+import { actionStateLabel, itemActionStates } from "./certificateOutcomes";
 
 /**
  * Data for the one-click inspection pack (GET /reports/inspection-pack): a
@@ -34,8 +35,10 @@ export type SummaryRow = {
 export type ComplianceCheckRow = {
   title: string; category: string | null; siteName: string | null;
   lastCompleted: string | null; nextDue: string | null;
-  status: "Overdue" | "Due soon" | "Scheduled" | "Completed" | "No due date";
+  status: "Action required" | "Overdue" | "Due soon" | "Scheduled" | "Completed" | "No due date";
   certificates: string[];
+  /** Set when the newest certificate is unsatisfactory or has open remedial defects. */
+  actionNote?: string | null;
 };
 
 export type CheckTypeRow = {
@@ -120,12 +123,15 @@ const any = (services: Entitlements, ...keys: ServiceKey[]) => keys.some(key => 
 
 const FIRE_TYPES: Record<string, { label: string; days: number }> = {
   alarm: { label: "Weekly fire alarm test", days: 7 },
-  emergency_lights: { label: "Monthly emergency lighting test", days: 30 },
+  emergency_lights: { label: "Monthly emergency lighting flick test", days: 30 },
   extinguishers: { label: "Weekly extinguisher visual check", days: 7 },
   fire_doors: { label: "Fire door check", days: 90 },
-  fire_drill: { label: "Fire drill / evacuation", days: 180 },
+  fire_drill: { label: "Fire drill (6-monthly, with night staff)", days: 180 },
   fire_walk: { label: "Fire walk — escape route sign-off", days: 7 },
   alarm_panel: { label: "Alarm panel check", days: 7 },
+  emergency_lights_annual: { label: "Annual 3-hour emergency lighting discharge test", days: 365 },
+  alarm_service: { label: "6-monthly fire alarm service", days: 180 },
+  extinguisher_service: { label: "Annual fire extinguisher service", days: 365 },
 };
 
 const LEGIONELLA_TYPES: Record<string, string> = {
@@ -237,13 +243,17 @@ async function complianceSection(scope: SiteAccessScope, from: string, to: strin
     WHERE item_id IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})
     ORDER BY created_at, id
   `) : [];
+  const actionStates = await itemActionStates(scope.clientId, ids);
   const soon = addCalendarDays(today, 30);
   let overdue = 0;
+  let actionRequired = 0;
   const rows: ComplianceCheckRow[] = items.map(item => {
     const nextDue = text(item.due_date);
     const completed = item.status === "completed";
+    const action = actionStates.get(Number(item.id));
     let status: ComplianceCheckRow["status"];
-    if (!completed && nextDue && nextDue < today) { status = "Overdue"; overdue++; }
+    if (action?.needsAction) { status = "Action required"; actionRequired++; }
+    else if (!completed && nextDue && nextDue < today) { status = "Overdue"; overdue++; }
     else if (!completed && nextDue && nextDue <= soon) status = "Due soon";
     else if (!completed && nextDue) status = "Scheduled";
     else if (completed) status = "Completed";
@@ -252,10 +262,11 @@ async function complianceSection(scope: SiteAccessScope, from: string, to: strin
       title: item.title, category: text(item.category), siteName: text(item.site_name),
       lastCompleted: text(item.completed_at), nextDue, status,
       certificates: certificates.filter(cert => Number(cert.item_id) === Number(item.id)).map(cert => String(cert.name)),
+      actionNote: action?.needsAction ? actionStateLabel(action) : null,
     };
   });
-  // Overdue first, then due soon: the exceptions lead the list.
-  const rank = { Overdue: 0, "Due soon": 1, Scheduled: 2, "No due date": 3, Completed: 4 } as const;
+  // Action required and overdue first, then due soon: the exceptions lead the list.
+  const rank = { "Action required": 0, Overdue: 1, "Due soon": 2, Scheduled: 3, "No due date": 4, Completed: 5 } as const;
   rows.sort((a, b) => rank[a.status] - rank[b.status]);
   const summary: SummaryRow = {
     module: "Compliance checks",
@@ -263,7 +274,8 @@ async function complianceSection(scope: SiteAccessScope, from: string, to: strin
     recorded: items.filter(item => item.completed_at && item.completed_at >= from && item.completed_at <= to).length,
     exceptions: null,
     overdue,
-    openActions: null,
+    // Checks whose newest certificate is unsatisfactory or has open defects.
+    openActions: actionRequired,
   };
   // Checks never scheduled or completed (e.g. unused starter checks) are
   // counted, not listed, so the dated checks stay readable.
@@ -281,7 +293,7 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
       GROUP BY check_type
     `),
     rowsOf(sql`
-      SELECT f.check_date::text AS check_date, f.check_type, f.location, f.notes, s.name AS site_name
+      SELECT f.check_date::text AS check_date, f.check_type, f.location, f.call_point, f.notes, s.name AS site_name
       FROM fire_safety_checks f
       LEFT JOIN sites s ON s.id = f.site_id AND s.client_id = f.client_id
       WHERE f.client_id = ${scope.clientId} AND f.check_date BETWEEN ${from} AND ${to}
@@ -314,7 +326,7 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
   const exceptions = failures.map(row => ({
     date: row.check_date, siteName: text(row.site_name),
     check: FIRE_TYPES[row.check_type]?.label ?? row.check_type,
-    reading: null, location: text(row.location), notes: text(row.notes),
+    reading: null, location: text(row.call_point) ? `Call point: ${row.call_point}` : text(row.location), notes: text(row.notes),
   }));
   return {
     section: { types: result.types, exceptions: capped(exceptions) },

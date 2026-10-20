@@ -23,7 +23,13 @@ interface Department {
   id: number;
   name: string;
   clientId: number;
+  siteId?: number | null;
 }
+
+// A site can be given to one department: one that spans every site, or one
+// of its own (a department under another site never sees this one).
+const departmentsFor = (departments: Department[], siteId: number | null) =>
+  departments.filter(d => d.siteId == null || d.siteId === siteId);
 
 interface FormState {
   name: string;
@@ -180,7 +186,7 @@ export default function SitesPage() {
                         <SelectItem value={NO_DEPT} className="text-xs text-muted-foreground">
                           All departments
                         </SelectItem>
-                        {departments.map(d => (
+                        {departmentsFor(departments, site.id).map(d => (
                           <SelectItem key={d.id} value={d.id.toString()} className="text-xs">
                             {d.name}
                           </SelectItem>
@@ -235,7 +241,7 @@ export default function SitesPage() {
               <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 0161 496 1234" />
             </div>
 
-            {departments.length > 0 && (
+            {departmentsFor(departments, editingId).length > 0 && (
               <div className="space-y-1.5">
                 <Label>Department</Label>
                 <Select
@@ -247,7 +253,7 @@ export default function SitesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NO_DEPT}>All departments</SelectItem>
-                    {departments.map(d => (
+                    {departmentsFor(departments, editingId).map(d => (
                       <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
                     ))}
                   </SelectContent>

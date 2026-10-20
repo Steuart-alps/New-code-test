@@ -12,8 +12,10 @@ import { createDownloadToken } from "./downloadUsage";
 import {
   MAX_RESTRICTED_UPLOAD_BYTES,
   ObjectContentError,
+  UploadTooLargeError,
   detectIssueVideoType,
   detectUploadType,
+  maxUploadBytes,
   validateUploadContent,
 } from "./uploadValidation";
 import type {
@@ -24,6 +26,8 @@ import type {
 
 export {
   ObjectContentError,
+  UploadTooLargeError,
+  maxUploadBytes,
   detectIssueVideoType,
   detectUploadType,
   validatePdfInWorker,
@@ -79,7 +83,6 @@ export class ObjectGenerationError extends Error {
   }
 }
 
-const MAX_ISSUE_VIDEO_UPLOAD_BYTES = 250 * 1024 * 1024;
 /** The reservation namespace is part of the upload security boundary. */
 export function isTenantReservedObjectPath(objectPath: string, tenantId: number | string): boolean {
   return objectPath.startsWith(`/objects/uploads/tenant-${tenantId}/`);
@@ -392,6 +395,17 @@ export class ObjectStorageService {
       }
       return [{ objectPath: `/objects/test-fake-usage/tenant-${tenantId}`, sizeBytes: syntheticBytes }];
     }
+    return listOwnedObjectMetadata(await this.tenantObjectCandidates(tenantId, referencedPaths), tenantId);
+  }
+
+  /**
+   * The tenant's own provider prefixes plus its legacy references outside
+   * them. Ownership is not checked here: callers filter by the ACL owner.
+   */
+  private async tenantObjectCandidates(
+    tenantId: number | string,
+    referencedPaths: string[],
+  ): Promise<Array<{ objectPath: string; file: File }>> {
     const { bucketName, objectName: privatePrefix } = parseObjectPath(this.getPrivateObjectDir());
     const root = privatePrefix.replace(/\/$/, "");
     const bucket = objectStorageClient.bucket(bucketName);
@@ -410,8 +424,50 @@ export class ObjectStorageService {
       .filter((objectPath) => !tenantPrefixes.some((prefix) => objectPath.startsWith(`/objects/${prefix}`)))
       .map((objectPath) => ({ objectPath, file: this.objectEntityFileRef(objectPath) }))
       .filter((object): object is { objectPath: string; file: File } => object.file !== null);
+    return [...new Map([...tenantObjects, ...legacyObjects].map((object) => [object.objectPath, object])).values()];
+  }
 
-    return listOwnedObjectMetadata([...tenantObjects, ...legacyObjects], tenantId);
+  /**
+   * Move every object this tenant owns (private ACL, same set as
+   * listTenantStorageObjects) to a provider storage class. Objects already in
+   * that class are not rewritten: a rewrite of a cold object counts as an early
+   * deletion. The rewrite keeps the object's path, content and ACL metadata, and
+   * every class stays readable by the same code.
+   */
+  async setTenantObjectsStorageClass(
+    tenantId: number | string,
+    referencedPaths: string[],
+    storageClass: string,
+  ): Promise<{ changed: number; unchanged: number }> {
+    const owner = String(tenantId);
+    let changed = 0;
+    let unchanged = 0;
+    for (const { file } of await this.tenantObjectCandidates(tenantId, referencedPaths)) {
+      let metadata = file.metadata?.size !== undefined ? file.metadata : undefined;
+      if (!metadata) {
+        try {
+          [metadata] = await file.getMetadata();
+        } catch (error) {
+          if (isProviderNotFound(error)) continue;
+          throw error;
+        }
+      }
+      let policy: ObjectAclPolicy | null = null;
+      try {
+        const raw = metadata.metadata?.["custom:aclPolicy"];
+        policy = raw ? JSON.parse(String(raw)) as ObjectAclPolicy : null;
+      } catch {
+        policy = null;
+      }
+      if (policy?.owner !== owner || policy.visibility !== "private") continue;
+      if (String(metadata.storageClass ?? "").toUpperCase() === storageClass) {
+        unchanged++;
+        continue;
+      }
+      await file.setStorageClass(storageClass);
+      changed++;
+    }
+    return { changed, unchanged };
   }
 
   async getObjectEntityUploadURL(
@@ -530,7 +586,26 @@ export class ObjectStorageService {
     if (!isTenantReservedObjectPath(normalizedPath, tenantId)) {
       throw new ObjectOwnershipError("Upload was not reserved for this tenant");
     }
+    await this.enforceUploadSizeLimit(normalizedPath, tenantId);
     return this.setTenantObjectAcl(normalizedPath, tenantId);
+  }
+
+  /**
+   * Refuse a new upload over maxUploadBytes() before it becomes a record. The
+   * rejected bytes were never attached to anything, so they are dropped rather
+   * than left in the bucket costing money. Objects already finalised (outside
+   * this tenant's upload reservation) are never touched.
+   */
+  async enforceUploadSizeLimit(objectPath: string, tenantId: number | string): Promise<void> {
+    const normalizedPath = this.normalizeObjectEntityPath(objectPath);
+    if (!isTenantReservedObjectPath(normalizedPath, tenantId)) return;
+    const file = await this.getObjectEntityFile(normalizedPath);
+    const [metadata] = await file.getMetadata();
+    const limit = maxUploadBytes();
+    if (Number(metadata.size) > limit) {
+      await this.discardTenantUpload(normalizedPath, tenantId).catch(() => {});
+      throw new UploadTooLargeError(limit);
+    }
   }
 
   /** Delete an unfinalised reserved upload after content inspection rejects it. */
@@ -713,8 +788,9 @@ export class ObjectStorageService {
     const generation = String(metadata.generation ?? "");
     const metageneration = String(metadata.metageneration ?? "");
     const size = Number(metadata.size);
-    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0 || size > MAX_ISSUE_VIDEO_UPLOAD_BYTES) {
-      throw new ObjectContentError(`Video must be between 1 byte and ${MAX_ISSUE_VIDEO_UPLOAD_BYTES} bytes`);
+    if (Number.isSafeInteger(size) && size > maxUploadBytes()) throw new UploadTooLargeError();
+    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0) {
+      throw new ObjectContentError("Video must not be empty");
     }
 
     const pinned = staging.bucket.file(staging.name, {

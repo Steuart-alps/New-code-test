@@ -41,11 +41,11 @@ export default function LoginPage() {
         setView("passkey");
       }
       if (result.requiresEmailVerification) {
-        navigate("/verify-email");
+        navigate(`/verify-email?email=${encodeURIComponent(email)}`);
       }
     } catch (err: unknown) {
       if (err instanceof Error && (err as Error & { requiresEmailVerification?: boolean }).requiresEmailVerification) {
-        navigate("/verify-email");
+        navigate(`/verify-email?email=${encodeURIComponent(email)}`);
       } else {
         setError(err instanceof Error ? err.message : "Login failed");
       }

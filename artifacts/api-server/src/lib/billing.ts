@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { getUncachableStripeClient } from "./stripeClient";
 import { logger } from "./logger";
 import { isCoveredByMinimumQuantity } from "./siteChargeCoverage";
+import { isStorageSubscriptionItem } from "./storageCapacity";
 
 export const PER_SITE_UNIT_AMOUNT = 1000; // £10.00 in pence
 export const PER_SITE_CURRENCY = "gbp";
@@ -371,8 +372,10 @@ async function syncWithStripe(
     // metadata). Subscriptions with no per-site item (e.g. legacy tiers) are
     // left untouched.
     const perSite = await getPerSitePrice();
+    // Extra storage is billed per GiB, not per site: never resize it here.
     const perSiteItems = active.items.data.filter(
-      (i) => i.price?.metadata?.service_key || (perSite && i.price?.id === perSite.priceId),
+      (i) => !isStorageSubscriptionItem(i)
+        && (i.price?.metadata?.service_key || (perSite && i.price?.id === perSite.priceId)),
     );
     if (perSiteItems.length === 0) {
       logger.info(
@@ -511,7 +514,8 @@ export async function processPendingCharges(clientId: number): Promise<void> {
       // service items (core + add-ons, or the bundle), so an added site is
       // charged for every service they subscribe to.
       const perSiteServiceItems = (active?.items.data ?? []).filter(
-        (i) => i.price?.metadata?.service_key || (perSite && i.price?.id === perSite.priceId),
+        (i) => !isStorageSubscriptionItem(i)
+          && (i.price?.metadata?.service_key || (perSite && i.price?.id === perSite.priceId)),
       );
       const perSiteRate = perSiteServiceItems.reduce(
         (sum, i) => sum + (i.price?.unit_amount ?? 0),

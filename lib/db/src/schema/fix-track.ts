@@ -23,6 +23,8 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   resolvedByName: text("resolved_by_name"),
   resolverSignature: text("resolver_signature"),
   solutionNotes: text("solution_notes"),
+  // Uploaded by the contractor with the "completed" email link.
+  completionDocumentPath: text("completion_document_path"),
   // Pending contractor-email approval request ("assign" | "quote")
   emailRequestMode: text("email_request_mode"),
   emailRequestedBy: integer("email_requested_by").references(() => usersTable.id, { onDelete: "set null" }),

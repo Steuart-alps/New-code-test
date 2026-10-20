@@ -201,8 +201,8 @@ export function writeInspectionPackPdf(pack: InspectionPackData, output: Writabl
       { header: "Certificates", width: 160 },
     ], pack.compliance.rows.map(row => [
       row.title, row.category ?? "—", row.siteName ?? "All sites", ukDate(row.lastCompleted), ukDate(row.nextDue),
-      row.status === "Overdue" ? { text: row.status, alert: true } : row.status,
-      row.certificates.length ? row.certificates.join(", ") : "None uploaded",
+      row.status === "Overdue" || row.status === "Action required" ? { text: row.status, alert: true } : row.status,
+      [row.actionNote, row.certificates.length ? row.certificates.join(", ") : "None uploaded"].filter(Boolean).join(" — "),
     ]));
     moreNote(doc, pack.compliance);
   }

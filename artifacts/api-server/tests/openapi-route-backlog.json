@@ -1,0 +1,584 @@
+{
+  "routes/admin.ts": [
+    "GET /api/admin/data-deletion-requests",
+    "GET /api/admin/service-price-preflight",
+    "GET /api/admin/storage-price-check",
+    "GET /api/data-deletion/request",
+    "PATCH /api/admin/data-deletion-requests/:id/review",
+    "POST /api/admin/ensure-service-prices",
+    "POST /api/data-deletion/request"
+  ],
+  "routes/analytics.ts": [
+    "POST /api/analytics/events"
+  ],
+  "routes/audit-events.ts": [
+    "GET /api/audit-events"
+  ],
+  "routes/auth.ts": [
+    "DELETE /api/auth/passkeys/:id",
+    "GET /api/auth/2fa/setup",
+    "GET /api/auth/csrf-token",
+    "GET /api/auth/me",
+    "GET /api/auth/passkeys",
+    "GET /api/auth/verify-email",
+    "POST /api/auth/2fa/disable",
+    "POST /api/auth/2fa/enable",
+    "POST /api/auth/2fa/recover",
+    "POST /api/auth/2fa/recovery-codes/regenerate",
+    "POST /api/auth/2fa/verify",
+    "POST /api/auth/forgot-password",
+    "POST /api/auth/login",
+    "POST /api/auth/logout",
+    "POST /api/auth/mobile-login",
+    "POST /api/auth/mobile-login/verify-totp",
+    "POST /api/auth/mobile-logout",
+    "POST /api/auth/mobile-refresh",
+    "POST /api/auth/passkeys/authenticate",
+    "POST /api/auth/passkeys/registration/options",
+    "POST /api/auth/passkeys/registration/verify",
+    "POST /api/auth/register",
+    "POST /api/auth/resend-verification",
+    "POST /api/auth/reset-password"
+  ],
+  "routes/bike-track.ts": [
+    "DELETE /api/bike-track/bikes/:id",
+    "DELETE /api/bike-track/hires/:id",
+    "DELETE /api/bike-track/services/:id",
+    "GET /api/bike-track/bikes",
+    "GET /api/bike-track/checks",
+    "GET /api/bike-track/hires",
+    "GET /api/bike-track/hires/export",
+    "GET /api/bike-track/services",
+    "GET /api/bike-track/services/latest",
+    "GET /api/bike-track/summary",
+    "POST /api/bike-track/bikes",
+    "POST /api/bike-track/hires",
+    "POST /api/bike-track/hires/:id/return",
+    "POST /api/bike-track/services",
+    "PUT /api/bike-track/bikes/:id",
+    "PUT /api/bike-track/hires/:id",
+    "PUT /api/bike-track/services/:id"
+  ],
+  "routes/billing.ts": [
+    "GET /api/billing/cancellation-status",
+    "GET /api/billing/config",
+    "GET /api/billing/discount-code",
+    "GET /api/billing/invoices",
+    "GET /api/billing/modules",
+    "GET /api/billing/plans",
+    "GET /api/billing/storage",
+    "POST /api/billing/checkout",
+    "POST /api/billing/discount-code",
+    "POST /api/billing/discount-code/redeem",
+    "POST /api/billing/modules/:module",
+    "POST /api/billing/portal",
+    "POST /api/billing/refresh-access",
+    "POST /api/billing/services",
+    "POST /api/billing/storage",
+    "POST /api/billing/storage/reduce"
+  ],
+  "routes/calendar.ts": [
+    "GET /api/calendar"
+  ],
+  "routes/check-reminders.ts": [
+    "GET /api/check-reminders"
+  ],
+  "routes/checklist-templates.ts": [
+    "DELETE /api/checklist-templates",
+    "GET /api/checklist-templates",
+    "PUT /api/checklist-templates"
+  ],
+  "routes/clients.ts": [
+    "DELETE /api/clients/:id",
+    "GET /api/clients",
+    "GET /api/clients/:id",
+    "POST /api/clients",
+    "POST /api/starter-pack/load",
+    "PUT /api/clients/:id"
+  ],
+  "routes/compliance-hub.ts": [
+    "GET /api/compliance-hub/actions",
+    "GET /api/compliance-hub/guidance",
+    "GET /api/compliance-hub/profile",
+    "PATCH /api/compliance-hub/actions/:id",
+    "POST /api/compliance-hub/actions",
+    "POST /api/compliance-hub/actions/:id/fix-track",
+    "PUT /api/compliance-hub/profile"
+  ],
+  "routes/consultant-portfolio.ts": [
+    "DELETE /api/consultant-branding/logo",
+    "GET /api/consultant-branding",
+    "GET /api/consultant-branding/logo",
+    "GET /api/managed-by",
+    "GET /api/managed-by/logo",
+    "GET /api/portfolio",
+    "POST /api/consultant-branding/logo",
+    "POST /api/consultant-branding/logo/request-url",
+    "PUT /api/consultant-branding"
+  ],
+  "routes/contractors.ts": [
+    "DELETE /api/contractors/:id/portal-link",
+    "POST /api/contractors/:id/portal-link",
+    "POST /api/contractors/:id/reminders/:itemId/resend",
+    "POST /api/contractors/:id/send-reminder"
+  ],
+  "routes/csv-imports.ts": [
+    "GET /api/imports/contractors/template",
+    "GET /api/imports/pat-appliances/template",
+    "GET /api/imports/room-track-rooms/template",
+    "POST /api/imports/contractors",
+    "POST /api/imports/pat-appliances",
+    "POST /api/imports/room-track-rooms"
+  ],
+  "routes/daily-checklists.ts": [
+    "GET /api/daily-checklists/:siteId/:date/:type",
+    "GET /api/daily-checklists/history",
+    "GET /api/daily-checklists/overview",
+    "POST /api/daily-checklists/:siteId/:date/:type",
+    "POST /api/daily-checklists/:siteId/:date/pm/sign-off"
+  ],
+  "routes/daily-track-am.ts": [
+    "DELETE /api/daily-track-am/:id",
+    "GET /api/daily-track-am",
+    "GET /api/daily-track-am/:id",
+    "POST /api/daily-track-am",
+    "PUT /api/daily-track-am/:id"
+  ],
+  "routes/daily-track-pm.ts": [
+    "DELETE /api/daily-track-pm/:id",
+    "DELETE /api/daily-track-pm/signoffs/:id",
+    "GET /api/daily-track-pm",
+    "GET /api/daily-track-pm/:id",
+    "GET /api/daily-track-pm/signoffs",
+    "POST /api/daily-track-pm",
+    "POST /api/daily-track-pm/signoffs",
+    "PUT /api/daily-track-pm/:id",
+    "PUT /api/daily-track-pm/signoffs/:id"
+  ],
+  "routes/dashboard-summary.ts": [
+    "GET /api/dashboard/summary"
+  ],
+  "routes/departments.ts": [
+    "DELETE /api/departments/:id",
+    "GET /api/departments",
+    "POST /api/departments",
+    "PUT /api/departments/:id"
+  ],
+  "routes/doc-track.ts": [
+    "DELETE /api/doc-track/documents/:id",
+    "DELETE /api/doc-track/sign-off-info",
+    "GET /api/doc-track/acknowledgements/export",
+    "GET /api/doc-track/acknowledgements/my",
+    "GET /api/doc-track/acknowledgements/outstanding",
+    "GET /api/doc-track/documents",
+    "GET /api/doc-track/documents/:id/acknowledgements",
+    "GET /api/doc-track/documents/:id/acknowledgements/export",
+    "GET /api/doc-track/documents/:id/download-url",
+    "GET /api/doc-track/sign-off-info",
+    "PATCH /api/doc-track/documents/:id",
+    "POST /api/doc-track/documents",
+    "POST /api/doc-track/documents/:id/acknowledge",
+    "POST /api/doc-track/documents/request-upload",
+    "POST /api/doc-track/sign-off-info"
+  ],
+  "routes/documents.ts": [
+    "DELETE /api/documents/:id",
+    "GET /api/documents",
+    "GET /api/documents/:id/download",
+    "PATCH /api/documents/:id",
+    "POST /api/documents"
+  ],
+  "routes/emailDomain.ts": [
+    "DELETE /api/email-domain",
+    "GET /api/email-domain",
+    "POST /api/email-domain",
+    "POST /api/email-domain/verify"
+  ],
+  "routes/export.ts": [
+    "GET /api/export"
+  ],
+  "routes/feedback.ts": [
+    "POST /api/feedback"
+  ],
+  "routes/fix-track.ts": [
+    "DELETE /api/fix-track/issues/:id",
+    "GET /api/fix-track/alert-settings",
+    "GET /api/fix-track/calendar-cancellations",
+    "GET /api/fix-track/contractor-email-queue",
+    "GET /api/fix-track/contractor-email-queue/count",
+    "GET /api/fix-track/contractors/suggest",
+    "GET /api/fix-track/issues",
+    "GET /api/fix-track/issues/:id",
+    "GET /api/fix-track/summary",
+    "POST /api/fix-track/contractor-email-queue/:queueId/approve-and-send",
+    "POST /api/fix-track/contractor-email-queue/:queueId/cancel",
+    "POST /api/fix-track/contractor-email-queue/:queueId/decline",
+    "POST /api/fix-track/contractor-email-queue/:queueId/edit-and-send",
+    "POST /api/fix-track/issues",
+    "POST /api/fix-track/issues/:id/approve-send",
+    "POST /api/fix-track/issues/:id/media",
+    "POST /api/fix-track/issues/:id/notes",
+    "POST /api/fix-track/issues/:id/reject-send",
+    "POST /api/fix-track/issues/:id/request-cancellation",
+    "POST /api/fix-track/issues/:id/request-send",
+    "POST /api/fix-track/issues/:id/request-upload",
+    "POST /api/fix-track/issues/:id/send-to-contractor",
+    "POST /api/fix-track/quotes/:quoteId/accept",
+    "POST /api/fix-track/quotes/:quoteId/decline",
+    "PUT /api/fix-track/alert-settings",
+    "PUT /api/fix-track/contractor-email-queue/:queueId",
+    "PUT /api/fix-track/issues/:id"
+  ],
+  "routes/food-safety.ts": [
+    "GET /api/food-safety/mobile-entries/:entryId",
+    "GET /api/food-safety/status",
+    "POST /api/food-safety/append"
+  ],
+  "routes/form-options.ts": [
+    "DELETE /api/form-options/:key",
+    "GET /api/form-options",
+    "PUT /api/form-options/:key"
+  ],
+  "routes/green-track.ts": [
+    "DELETE /api/green-track/defects/:id",
+    "DELETE /api/green-track/fuel-logs/:id",
+    "DELETE /api/green-track/machines/:id",
+    "DELETE /api/green-track/pre-use-checks/:id",
+    "DELETE /api/green-track/puwer-inspections/:id",
+    "DELETE /api/green-track/service-records/:id",
+    "GET /api/green-track/defects",
+    "GET /api/green-track/fuel-logs",
+    "GET /api/green-track/machines",
+    "GET /api/green-track/pre-use-checks",
+    "GET /api/green-track/puwer-inspections",
+    "GET /api/green-track/service-records",
+    "GET /api/green-track/status",
+    "POST /api/green-track/defects",
+    "POST /api/green-track/fuel-logs",
+    "POST /api/green-track/machines",
+    "POST /api/green-track/machines/import",
+    "POST /api/green-track/pre-use-checks",
+    "POST /api/green-track/puwer-inspections",
+    "POST /api/green-track/service-records",
+    "PUT /api/green-track/defects/:id",
+    "PUT /api/green-track/fuel-logs/:id",
+    "PUT /api/green-track/machines/:id",
+    "PUT /api/green-track/pre-use-checks/:id",
+    "PUT /api/green-track/puwer-inspections/:id",
+    "PUT /api/green-track/service-records/:id"
+  ],
+  "routes/hot-tub.ts": [
+    "DELETE /api/hot-tub/:id",
+    "DELETE /api/hot-tub/tubs/:id",
+    "GET /api/hot-tub/status",
+    "GET /api/hot-tub/tubs",
+    "POST /api/hot-tub/tubs",
+    "PUT /api/hot-tub/tubs/:id"
+  ],
+  "routes/incidents.ts": [
+    "DELETE /api/incidents/:id",
+    "GET /api/incidents",
+    "GET /api/incidents/:id/actions",
+    "GET /api/incidents/:id/riddor-history",
+    "GET /api/incidents/:id/riddor-history/:eventId/receipt",
+    "GET /api/incidents/summary",
+    "POST /api/incidents",
+    "POST /api/incidents/riddor-receipts/request-upload",
+    "PUT /api/incidents/:id"
+  ],
+  "routes/inspection-pack.ts": [
+    "GET /api/reports/inspection-pack"
+  ],
+  "routes/kitchen-cleaning.ts": [
+    "DELETE /api/kitchen-cleaning/tasks/:id",
+    "GET /api/kitchen-cleaning/export",
+    "GET /api/kitchen-cleaning/logs",
+    "GET /api/kitchen-cleaning/logs/history",
+    "GET /api/kitchen-cleaning/tasks",
+    "POST /api/kitchen-cleaning/logs",
+    "POST /api/kitchen-cleaning/tasks",
+    "PUT /api/kitchen-cleaning/tasks/:id"
+  ],
+  "routes/kitchen-inspection-export.ts": [
+    "GET /api/export/kitchen-register"
+  ],
+  "routes/kitchen-weekly.ts": [
+    "GET /api/kitchen-weekly/probe",
+    "GET /api/kitchen-weekly/probe/by-date/:date",
+    "GET /api/kitchen-weekly/weekly",
+    "GET /api/kitchen-weekly/weekly/by-date/:date",
+    "POST /api/kitchen-weekly/probe",
+    "POST /api/kitchen-weekly/weekly",
+    "PUT /api/kitchen-weekly/probe/:id",
+    "PUT /api/kitchen-weekly/weekly/:id"
+  ],
+  "routes/legionella.ts": [
+    "DELETE /api/legionella/outlets/:id",
+    "GET /api/legionella/outlet-status",
+    "GET /api/legionella/outlets",
+    "POST /api/legionella/outlets",
+    "PUT /api/legionella/outlets/:id"
+  ],
+  "routes/mobile.ts": [
+    "DELETE /api/mobile/push-token",
+    "POST /api/mobile/push-token"
+  ],
+  "routes/pat-track.ts": [
+    "DELETE /api/pat-track/certificates/:id",
+    "DELETE /api/pat-track/equipment-templates/:id",
+    "DELETE /api/pat-track/failures/:id",
+    "DELETE /api/pat-track/replacements/:id",
+    "DELETE /api/pat-track/rooms/:id",
+    "GET /api/pat-track/certificates",
+    "GET /api/pat-track/equipment-templates",
+    "GET /api/pat-track/failures",
+    "GET /api/pat-track/failures/:id/location-corrections",
+    "GET /api/pat-track/overdue-by-room-area",
+    "GET /api/pat-track/register",
+    "GET /api/pat-track/replacements",
+    "GET /api/pat-track/rooms",
+    "POST /api/pat-track/certificates",
+    "POST /api/pat-track/equipment-templates",
+    "POST /api/pat-track/failures",
+    "POST /api/pat-track/failures/:id/location-corrections",
+    "POST /api/pat-track/replacements",
+    "POST /api/pat-track/rooms",
+    "PUT /api/pat-track/certificates/:id",
+    "PUT /api/pat-track/equipment-templates/:id",
+    "PUT /api/pat-track/failures/:id",
+    "PUT /api/pat-track/replacements/:id",
+    "PUT /api/pat-track/rooms/:id"
+  ],
+  "routes/pest-track.ts": [
+    "DELETE /api/pest-track/activity/:id",
+    "DELETE /api/pest-track/visits/:id",
+    "GET /api/pest-track/activity",
+    "GET /api/pest-track/config",
+    "GET /api/pest-track/register.pdf",
+    "GET /api/pest-track/status",
+    "GET /api/pest-track/visits",
+    "POST /api/pest-track/activity",
+    "POST /api/pest-track/visits",
+    "PUT /api/pest-track/activity/:id",
+    "PUT /api/pest-track/config",
+    "PUT /api/pest-track/visits/:id"
+  ],
+  "routes/photos.ts": [
+    "DELETE /api/photos/:id",
+    "DELETE /api/photos/staged/:id",
+    "GET /api/photos",
+    "GET /api/photos/requirements",
+    "POST /api/photos",
+    "POST /api/photos/request-staged-upload",
+    "POST /api/photos/request-upload",
+    "POST /api/photos/staged",
+    "PUT /api/photos/requirements"
+  ],
+  "routes/pool-track.ts": [
+    "DELETE /api/pool-track/:id",
+    "GET /api/pool-track",
+    "GET /api/pool-track/status",
+    "GET /api/pool-track/summary",
+    "POST /api/pool-track",
+    "PUT /api/pool-track/:id"
+  ],
+  "routes/registers.ts": [
+    "DELETE /api/registers/allergens/:id",
+    "DELETE /api/registers/asbestos/:id",
+    "DELETE /api/registers/asbestos/entries/:entryId",
+    "DELETE /api/registers/coshh/:id",
+    "GET /api/registers/allergens",
+    "GET /api/registers/allergens/:id/changes",
+    "GET /api/registers/asbestos",
+    "GET /api/registers/asbestos/:id/history/:historyId/report-url",
+    "GET /api/registers/asbestos/:id/report-url",
+    "GET /api/registers/coshh",
+    "GET /api/registers/coshh/:id/sds-url",
+    "POST /api/registers/allergens",
+    "POST /api/registers/asbestos",
+    "POST /api/registers/asbestos/:id/entries",
+    "POST /api/registers/coshh",
+    "POST /api/registers/uploads/request-url",
+    "PUT /api/registers/allergens/:id",
+    "PUT /api/registers/asbestos/:id",
+    "PUT /api/registers/asbestos/entries/:entryId",
+    "PUT /api/registers/coshh/:id"
+  ],
+  "routes/reports.ts": [
+    "GET /api/reports/compliance",
+    "GET /api/reports/compliance-trend",
+    "GET /api/reports/risk-acknowledgements"
+  ],
+  "routes/room-track.ts": [
+    "DELETE /api/room-track/rooms/:id",
+    "GET /api/room-track/checks",
+    "GET /api/room-track/checks/:id",
+    "GET /api/room-track/daily",
+    "GET /api/room-track/daily/summary",
+    "GET /api/room-track/rooms",
+    "GET /api/room-track/rooms/:id",
+    "POST /api/room-track/checks",
+    "POST /api/room-track/rooms",
+    "PUT /api/room-track/checks/:id",
+    "PUT /api/room-track/rooms/:id"
+  ],
+  "routes/safe-track.ts": [
+    "DELETE /api/safe-track/competency/:id",
+    "DELETE /api/safe-track/handbook/:id",
+    "DELETE /api/safe-track/inductions/:id",
+    "DELETE /api/safe-track/risk-assessments/:id",
+    "DELETE /api/safe-track/sops/:id",
+    "DELETE /api/safe-track/training-records/:id",
+    "GET /api/safe-track/competency",
+    "GET /api/safe-track/handbook",
+    "GET /api/safe-track/handbook/:id/acknowledgements",
+    "GET /api/safe-track/handbook/:id/download-url",
+    "GET /api/safe-track/inductions",
+    "GET /api/safe-track/risk-assessments",
+    "GET /api/safe-track/risk-assessments/:id/acknowledgements",
+    "GET /api/safe-track/risk-assessments/:id/download-url",
+    "GET /api/safe-track/sops",
+    "GET /api/safe-track/sops/:id/acknowledgements",
+    "GET /api/safe-track/sops/:id/download-url",
+    "GET /api/safe-track/training-records",
+    "POST /api/safe-track/competency",
+    "POST /api/safe-track/handbook",
+    "POST /api/safe-track/handbook/:id/acknowledge",
+    "POST /api/safe-track/handbook/:id/self-acknowledge",
+    "POST /api/safe-track/inductions",
+    "POST /api/safe-track/request-upload",
+    "POST /api/safe-track/risk-assessments",
+    "POST /api/safe-track/risk-assessments/:id/acknowledge",
+    "POST /api/safe-track/risk-assessments/:id/self-acknowledge",
+    "POST /api/safe-track/sops",
+    "POST /api/safe-track/sops/:id/acknowledge",
+    "POST /api/safe-track/sops/:id/self-acknowledge",
+    "POST /api/safe-track/training-records",
+    "PUT /api/safe-track/competency/:id",
+    "PUT /api/safe-track/handbook/:id",
+    "PUT /api/safe-track/inductions/:id",
+    "PUT /api/safe-track/risk-assessments/:id",
+    "PUT /api/safe-track/sops/:id",
+    "PUT /api/safe-track/training-records/:id"
+  ],
+  "routes/setup.ts": [
+    "GET /api/setup/state",
+    "POST /api/setup/complete",
+    "POST /api/setup/defer",
+    "POST /api/setup/starter-checks",
+    "PUT /api/setup/business",
+    "PUT /api/setup/modules"
+  ],
+  "routes/sites.ts": [
+    "DELETE /api/sites/:id/documents/:docId",
+    "GET /api/sites/:id/documents",
+    "POST /api/sites/:id/documents",
+    "POST /api/sites/:id/documents/request-upload"
+  ],
+  "routes/staff-roster.ts": [
+    "DELETE /api/staff-roster/:id",
+    "DELETE /api/staff/:id",
+    "GET /api/staff",
+    "GET /api/staff-roster",
+    "GET /api/staff/public",
+    "PATCH /api/staff-roster/:id",
+    "POST /api/staff",
+    "POST /api/staff-roster",
+    "POST /api/staff-roster/bulk",
+    "POST /api/staff-roster/reconcile",
+    "POST /api/staff/:id/pin-enrollment",
+    "POST /api/staff/:id/reset-pin",
+    "POST /api/staff/:id/set-pin",
+    "POST /api/staff/kiosk-action",
+    "POST /api/staff/kiosk-token",
+    "POST /api/staff/verify-pin",
+    "PUT /api/staff/:id"
+  ],
+  "routes/staff-training.ts": [
+    "DELETE /api/staff-training/:id",
+    "GET /api/staff-training",
+    "GET /api/staff-training/expiring",
+    "PATCH /api/staff-training/:id",
+    "POST /api/staff-training"
+  ],
+  "routes/swim-track.ts": [
+    "DELETE /api/swim-track/first-aid/:id",
+    "DELETE /api/swim-track/incidents/:id",
+    "DELETE /api/swim-track/sessions/:id",
+    "DELETE /api/swim-track/surveillance/:id",
+    "GET /api/swim-track/first-aid",
+    "GET /api/swim-track/incidents",
+    "GET /api/swim-track/sessions",
+    "GET /api/swim-track/status",
+    "GET /api/swim-track/surveillance",
+    "POST /api/swim-track/first-aid",
+    "POST /api/swim-track/incidents",
+    "POST /api/swim-track/sessions",
+    "POST /api/swim-track/surveillance",
+    "PUT /api/swim-track/first-aid/:id",
+    "PUT /api/swim-track/incidents/:id",
+    "PUT /api/swim-track/sessions/:id",
+    "PUT /api/swim-track/surveillance/:id"
+  ],
+  "routes/tasks.ts": [
+    "DELETE /api/tasks/:id/complete",
+    "GET /api/tasks",
+    "GET /api/tasks/assignees",
+    "PATCH /api/tasks/:id",
+    "POST /api/tasks",
+    "POST /api/tasks/:id/complete"
+  ],
+  "routes/track-actions.ts": [
+    "DELETE /api/track-actions/templates/:id",
+    "GET /api/track-actions",
+    "GET /api/track-actions/templates",
+    "GET /api/track-actions/templates/matching",
+    "PATCH /api/track-actions/:id",
+    "PATCH /api/track-actions/templates/:id",
+    "POST /api/track-actions",
+    "POST /api/track-actions/:id/fix-track",
+    "POST /api/track-actions/templates",
+    "POST /api/track-actions/templates/reorder"
+  ],
+  "routes/track-evidence.ts": [
+    "GET /api/track-evidence",
+    "GET /api/track-evidence/requirements",
+    "POST /api/track-evidence",
+    "POST /api/track-evidence/:id/review"
+  ],
+  "routes/track-owners.ts": [
+    "DELETE /api/track-owners/:id",
+    "GET /api/track-owners",
+    "PUT /api/track-owners"
+  ],
+  "routes/train-track.ts": [
+    "DELETE /api/train-track/records/:id",
+    "GET /api/train-track/records",
+    "PATCH /api/train-track/records/:id",
+    "POST /api/train-track/records"
+  ],
+  "routes/tree-track.ts": [
+    "DELETE /api/tree-track/:id",
+    "GET /api/tree-track",
+    "GET /api/tree-track/status",
+    "POST /api/tree-track",
+    "PUT /api/tree-track/:id"
+  ],
+  "routes/user-notifications.ts": [
+    "GET /api/notifications",
+    "POST /api/notifications/:id/read",
+    "POST /api/notifications/read-all"
+  ],
+  "routes/users.ts": [
+    "DELETE /api/users/:id",
+    "GET /api/users",
+    "POST /api/users",
+    "POST /api/users/:id/resend-invite",
+    "POST /api/users/:id/reset-2fa",
+    "POST /api/users/:id/revoke-invite",
+    "PUT /api/users/:id"
+  ],
+  "routes/w3w.ts": [
+    "GET /api/w3w/convert"
+  ]
+}

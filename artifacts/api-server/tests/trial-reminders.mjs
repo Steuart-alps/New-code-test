@@ -3,7 +3,8 @@
 // Seeds clients in the dev database at various trial states, runs the real
 // runTrialReminderJob with a fake email sender injected, and verifies:
 //   - a client whose trial ends in 2 days gets exactly one reminder per
-//     active consultant user (and nobody else)
+//     active owner: its Owners (client_admin) and its own consultants, and
+//     nobody else
 //   - clients ending far in the future, already reminded, expired, or already
 //     subscribed are skipped
 //   - the sent flag is set, so a second run sends nothing
@@ -126,6 +127,7 @@ async function main() {
     const consultant2 = await seedUser(clientSend.id, "c2", "consultant");
     const inactiveConsultant = await seedUser(clientSend.id, "c3-inactive", "consultant", false);
     const admin = await seedUser(clientSend.id, "admin", "client_admin");
+    const staff = await seedUser(clientSend.id, "staff", "client_staff");
     // Consultants for clients that must NOT be emailed.
     await seedUser(clientFar.id, "far-c", "consultant");
     await seedUser(clientDone.id, "done-c", "consultant");
@@ -147,18 +149,18 @@ async function main() {
     const result1 = await runTrialReminderJob({ sendEmail: fakeSend, clientIds: jobClientIds });
 
     check("run1: one client notified", result1.clientsNotified === 1, `got ${result1.clientsNotified}`);
-    check("run1: two emails sent", result1.emailsSent === 2 && sent.length === 2, `emailsSent=${result1.emailsSent}, captured=${sent.length}`);
+    check("run1: three emails sent", result1.emailsSent === 3 && sent.length === 3, `emailsSent=${result1.emailsSent}, captured=${sent.length}`);
 
     const recipients = sent.map((s) => s.to).sort();
-    const expected = [consultant1.email, consultant2.email].sort();
+    const expected = [admin.email, consultant1.email, consultant2.email].sort();
     check(
-      "run1: only active consultants of the 2-day client emailed",
+      "run1: only active owners and consultants of the 2-day client emailed",
       JSON.stringify(recipients) === JSON.stringify(expected),
       `got ${JSON.stringify(recipients)}, expected ${JSON.stringify(expected)}`,
     );
     check(
-      "run1: inactive consultant and admin not emailed",
-      !recipients.includes(inactiveConsultant.email) && !recipients.includes(admin.email),
+      "run1: inactive consultant and staff not emailed",
+      !recipients.includes(inactiveConsultant.email) && !recipients.includes(staff.email),
       `recipients=${JSON.stringify(recipients)}`,
     );
     check(
@@ -207,7 +209,7 @@ async function main() {
     // --- And the retry then succeeds ---
     sent.length = 0;
     const result4 = await runTrialReminderJob({ sendEmail: fakeSend, clientIds: jobClientIds });
-    check("run4: retry after outage sends again", result4.clientsNotified === 1 && sent.length === 2, `clientsNotified=${result4.clientsNotified}, captured=${sent.length}`);
+    check("run4: retry after outage sends again", result4.clientsNotified === 1 && sent.length === 3, `clientsNotified=${result4.clientsNotified}, captured=${sent.length}`);
 
     const [outsideRow] = await db.select().from(clientsTable).where(eq(clientsTable.id, outsideClient.id));
     check("another run's eligible client remains untouched", outsideRow?.trialReminderSentAt == null);

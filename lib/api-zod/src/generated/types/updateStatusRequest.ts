@@ -9,4 +9,9 @@ import type { UpdateStatusRequestStatus } from './updateStatusRequestStatus';
 
 export interface UpdateStatusRequest {
   status: UpdateStatusRequestStatus;
+  /**
+     * Date the check was done (YYYY-MM-DD), only with status completed. Not in the future in the account's timezone; defaults to today. The next due date is counted from it.
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  completedAt?: string | null;
 }
