@@ -57,12 +57,13 @@ assert.equal(lib.applyEmailLayout(wrapped), wrapped, "already branded HTML is no
 
 // Emails built with the layout directly keep their subtitle and footer note.
 const reminder = lib.buildCheckReminderEmailHtml(
-  [{ module: "fire", moduleLabel: "Fire", modulePath: "/fire", checkType: "alarm", checkLabel: "Fire alarm test", status: "overdue", lastDate: null, dueDate: "2026-10-17", daysUntilDue: 2, frequencyLabel: "Weekly", siteId: null, siteName: null }],
+  [{ module: "fire", moduleLabel: "Fire", modulePath: "/fire", checkType: "alarm", checkLabel: "Fire alarm test", status: "overdue", lastDate: null, dueDate: "2026-10-17", daysUntilDue: -2, frequencyLabel: "Weekly", siteId: null, siteName: null }],
   "https://app.example.test",
 );
 assertBranded(reminder, "check reminder");
 assert.equal(lib.applyEmailLayout(reminder), reminder, "check reminder sent as built");
 assert.match(reminder, /Safety Check Reminders/);
+assert.match(reminder, /2 days overdue/, "an overdue check reads as overdue, not as due later");
 assert.match(reminder, /You are receiving this as an account manager\./);
 assert.match(reminder, /<a href="https:\/\/app\.example\.test" style="display:inline-block;background:#2563eb;/, "blue button");
 
