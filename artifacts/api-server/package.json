@@ -138,6 +138,7 @@
     "test:storage-price-check": "node tests/storage-price-check.mjs",
     "test:storage-price-audit": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/storage-price-audit.mjs",
     "test:stripe-startup-readiness": "node tests/stripe-startup-readiness.mjs",
+    "test:stripe-tax-check": "node tests/stripe-tax-check.mjs",
     "test:biketrack-billing": "node tests/biketrack-billing.mjs",
     "test:bike-overdue-reminders": "bash tests/run-fresh-schema.sh tests/bike-overdue-reminders.mjs",
     "test:two-factor-reset-alerts": "bash tests/run-fresh-schema.sh tests/two-factor-reset-alerts.mjs",
