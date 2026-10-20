@@ -117,6 +117,18 @@ export function parseEmailList(raw: string | null | undefined): string[] {
 export interface EmailAttachment {
   filename: string;
   content: Buffer;
+  contentType?: string;
+}
+
+/**
+ * MIME type for an invite attachment. Naming the iTIP method lets mail clients
+ * such as Outlook and Gmail handle the part as an invitation, so a revision or
+ * cancellation with the same UID updates the existing event rather than
+ * arriving as a plain file; the charset keeps accented names and emoji intact.
+ */
+export function calendarAttachmentContentType(ics: string): string {
+  const method = ics.match(/^METHOD:([A-Z-]+)\r?$/m)?.[1] ?? "REQUEST";
+  return `text/calendar; charset=UTF-8; method=${method}`;
 }
 
 export async function sendEmail(opts: {
@@ -137,7 +149,11 @@ export async function sendEmail(opts: {
   const from = buildFrom(settings);
 
   const icsEntry: EmailAttachment | undefined = opts.icsAttachment
-    ? { filename: opts.icsFilename ?? "invite.ics", content: Buffer.from(opts.icsAttachment) }
+    ? {
+        filename: opts.icsFilename ?? "invite.ics",
+        content: Buffer.from(opts.icsAttachment, "utf8"),
+        contentType: calendarAttachmentContentType(opts.icsAttachment),
+      }
     : undefined;
 
   const attachments =

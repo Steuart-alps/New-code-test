@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { buildCalendarInvite } from "../src/lib/email";
+import { buildCalendarInvite, calendarAttachmentContentType } from "../src/lib/email";
 
 const FIXTURE_DIR = resolve(process.cwd(), "tests/fixtures/calendar");
 
@@ -165,6 +165,10 @@ for (const fixture of cases) {
   assert.ok(lines.some((line) => line.startsWith("ORGANIZER;CN=") && line.includes(":MAILTO:")));
   assert.ok(lines.some((line) => line.startsWith("ATTENDEE;ROLE=REQ-PARTICIPANT;")));
   assert.equal(lines.at(-1), "END:VCALENDAR");
+  assert.equal(
+    calendarAttachmentContentType(fixture.invite),
+    `text/calendar; charset=UTF-8; method=${fixture.expectedMethod ?? "REQUEST"}`,
+  );
 }
 
 console.log(`${cases.length} calendar compatibility fixtures passed`);
