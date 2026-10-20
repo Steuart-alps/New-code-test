@@ -1499,7 +1499,7 @@ ${rows.map(r => `<tr>
               <Link href="/compliance-hub"><Button variant="outline" size="sm">Review and verify actions in Compliance Hub</Button></Link>
               {canAdmin && <div className="space-y-2 border-t pt-3">
                 <h4 className="font-medium">Add a linked action</h4>
-                <Input aria-label="Action title" placeholder="Action title" value={actionDraft.title} onChange={e => setActionDraft(d => ({ ...d, title: e.target.value }))} />
+                <Input aria-label="Action title" dictation placeholder="Action title" value={actionDraft.title} onChange={e => setActionDraft(d => ({ ...d, title: e.target.value }))} />
                 <Input aria-label="Action owner" placeholder="Action owner" value={actionDraft.ownerName} onChange={e => setActionDraft(d => ({ ...d, ownerName: e.target.value }))} />
                 <Textarea aria-label="Corrective action" placeholder="Corrective action to complete" value={actionDraft.correctiveAction} onChange={e => setActionDraft(d => ({ ...d, correctiveAction: e.target.value }))} />
                 <Button size="sm" disabled={savingAction} onClick={createIncidentAction}>Link corrective action</Button>

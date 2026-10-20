@@ -699,7 +699,7 @@ export default function TreeTrackPage() {
                   {w3wLoading ? "Getting location…" : "Use my location"}
                 </button>
               </div>
-              <Input id="location" placeholder="e.g. Car park perimeter, East boundary, or ///word.word.word"
+              <Input id="location" dictation placeholder="e.g. Car park perimeter, East boundary, or ///word.word.word"
                 value={form.location}
                 onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
                 className="rounded-sm" />

@@ -73,7 +73,7 @@ export function FeedbackDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           </div>
           <div className="space-y-2">
             <Label htmlFor="feedback-summary">Summary</Label>
-            <Input id="feedback-summary" value={summary} onChange={(event) => setSummary(event.target.value)} maxLength={160} placeholder="What would you like us to know?" />
+            <Input id="feedback-summary" dictation value={summary} onChange={(event) => setSummary(event.target.value)} maxLength={160} placeholder="What would you like us to know?" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="feedback-details">Details</Label>

@@ -248,7 +248,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
   return (
     <div className="space-y-4">
       <F label="Title *">
-        <Input value={form.title ?? ""} onChange={e => setForm({ ...form, title: e.target.value })}
+        <Input dictation value={form.title ?? ""} onChange={e => setForm({ ...form, title: e.target.value })}
           placeholder="e.g. Leaking pipe in kitchen, Broken window latch" autoFocus />
       </F>
 
