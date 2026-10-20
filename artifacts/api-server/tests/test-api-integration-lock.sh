@@ -83,6 +83,7 @@ const directLocked = new Set([
   "test:water-dept-isolation",
 ]);
 const runnerLocked = new Set([
+  "test:error-reports:ci", "test:manager-role", // boots its own API instances against a fake Sentry ingest
   "test:two-factor-policy", "test:passkey-webauthn",
   "test:safe-track-ack-refresh", "test:sign-off-access",
   "test:photo-storage-roundtrip", "test:photo-storage-roundtrip:fake", // runner sources the lock after its config gate
@@ -117,7 +118,7 @@ const freshSchema = new Set([
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
   "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
   "test:owner-late-edit-reason",
-  "test:kitchen-cleaning-export", "test:pat-register-access", "test:green-nsts",
+  "test:kitchen-cleaning-export", "test:pat-register-access", "test:green-nsts", "test:safe-track-induction-browser", "test:equipment-qr-browser", "test:daily-track-month-history:pushed", "test:approved-account-deletion", "test:deletion-reminder", "test:export-parts", "test:cancelled-storage-class", "test:today-by-department", "test:equipment-labels",
   "test:storage-metering", "test:storage-usage-snapshot", "test:storage-capacity-reduction", "test:storage-warning-emails",
   "test:content-filter",
   "test:feedback-triage", "test:contractor-token-security",
@@ -145,6 +146,7 @@ const freshSchema = new Set([
   "test:safe-track-ack-reminders:fresh", "test:storage-price-audit",
 ]);
 const pure = new Set([
+  "test:stripe-tax-check", // bundles the Stripe Tax check into a mkdtemp dir; never contacts Stripe
   "test:upload-size-limit", // ObjectStorageService against an in-memory bucket
   "test:api-runner-lock", // validates this lock without application resources
   "test:staged-photo-creation", // real routes/helper with in-memory transaction/storage fakes
