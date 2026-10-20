@@ -146,6 +146,9 @@ jobs:
       - name: Stripe start-up copies Stripe data into the database
         run: pnpm --filter @workspace/api-server run test:stripe-backfill-scope
 
+      - name: Stripe Tax settings check
+        run: pnpm --filter @workspace/api-server run test:stripe-tax-check
+
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
       - name: Create base database schema

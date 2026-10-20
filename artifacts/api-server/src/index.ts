@@ -53,6 +53,7 @@ import { runTrackActionReminderJob } from "./lib/trackActionReminders";
 import { runTrackReminderJob } from "./lib/trackReminders";
 import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
+import { runStripeTaxCheck, STRIPE_TAX_CHECK_CRON } from "./lib/stripeTaxCheck";
 import { runScheduledStoragePriceAudit, STORAGE_PRICE_AUDIT_CRON } from "./lib/storagePriceAudit";
 import { cleanupStagedPhotoUploads } from "./lib/stagedPhotoCleanup";
 import { purgeExpiredAnalyticsEvents } from "./lib/analytics";
@@ -148,6 +149,11 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
   } catch (err) {
     logger.error({ err }, "ensureStoragePrice failed — extra storage stays unavailable until the next start");
   }
+
+  // Report Stripe Tax settings that would stop VAT being charged correctly.
+  // Read-only and informational, so it runs alongside start-up rather than
+  // holding up readiness.
+  void runStripeTaxCheck().catch((err) => logger.warn({ err }, "Stripe Tax settings could not be checked"));
 
   // Confirm the repair result before the application becomes ready. This is
   // read-only and cannot grant a client an entitlement.
@@ -453,6 +459,10 @@ function startScheduler() {
   // changes prices, products, subscriptions or charges.
   schedule(SERVICE_PRICE_AUDIT_CRON, "service-price-audit", () => runScheduledServicePriceAudit());
   logger.info("Stripe service-price audit scheduler started (hourly at :25)");
+
+  // Re-check Stripe Tax settings hourly so the /readyz note clears soon after
+  // they are fixed in the Stripe dashboard. Read-only.
+  schedule(STRIPE_TAX_CHECK_CRON, "stripe-tax-check", () => runStripeTaxCheck());
 
   // In-app reminders (bell + mobile push, never email) to each track's owner
   // for unsubmitted AM/PM checklists and kitchen diaries and overdue checks.
