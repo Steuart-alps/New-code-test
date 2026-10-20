@@ -82,6 +82,7 @@ import type {
   GetPATPresetTemplates200,
   GetPoolMonitoringPlanParams,
   GetPrivacyGovernanceParams,
+  GreenTrackCertificateDownload,
   GreenTrackConfig,
   HealthStatus,
   HotTubCheck,
@@ -6597,6 +6598,84 @@ export const useUpdateGreenTrackConfig = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getUpdateGreenTrackConfigMutationOptions(options));
     }
+
+export const getGetGreenTrackInspectionCertificateUrlUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/puwer-inspections/${id}/certificate-url`
+}
+
+/**
+ * Covers PUWER and LOLER examinations and NSTS sprayer tests. The link expires after 15 minutes.
+ * @summary Get a short-lived download link for an inspection's uploaded certificate
+ */
+export const getGreenTrackInspectionCertificateUrl = async (id: number, options?: RequestInit): Promise<GreenTrackCertificateDownload> => {
+
+  return customFetch<GreenTrackCertificateDownload>(getGetGreenTrackInspectionCertificateUrlUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGreenTrackInspectionCertificateUrlQueryKey = (id: number,) => {
+    return [
+    `/api/green-track/puwer-inspections/${id}/certificate-url`
+    ] as const;
+    }
+
+
+export const getGetGreenTrackInspectionCertificateUrlQueryOptions = <TData = Awaited<ReturnType<typeof getGreenTrackInspectionCertificateUrl>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGreenTrackInspectionCertificateUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGreenTrackInspectionCertificateUrlQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGreenTrackInspectionCertificateUrl>>> = ({ signal }) => getGreenTrackInspectionCertificateUrl(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGreenTrackInspectionCertificateUrl>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGreenTrackInspectionCertificateUrlQueryResult = NonNullable<Awaited<ReturnType<typeof getGreenTrackInspectionCertificateUrl>>>
+export type GetGreenTrackInspectionCertificateUrlQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get a short-lived download link for an inspection's uploaded certificate
+ */
+
+export function useGetGreenTrackInspectionCertificateUrl<TData = Awaited<ReturnType<typeof getGreenTrackInspectionCertificateUrl>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGreenTrackInspectionCertificateUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGreenTrackInspectionCertificateUrlQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetIncidentConfigUrl = () => {
 

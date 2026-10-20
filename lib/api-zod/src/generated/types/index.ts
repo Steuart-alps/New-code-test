@@ -105,6 +105,7 @@ export * from './getLegionellaStatusParams';
 export * from './getPATPresetTemplates200';
 export * from './getPoolMonitoringPlanParams';
 export * from './getPrivacyGovernanceParams';
+export * from './greenTrackCertificateDownload';
 export * from './greenTrackConfig';
 export * from './healthStatus';
 export * from './hotTubCheck';

@@ -1936,6 +1936,40 @@ paths:
               schema:
                 $ref: "#/components/schemas/GreenTrackConfig"
 
+  /green-track/puwer-inspections/{id}/certificate-url:
+    get:
+      operationId: getGreenTrackInspectionCertificateUrl
+      tags: [green-track]
+      summary: Get a short-lived download link for an inspection's uploaded certificate
+      description: >
+        Covers PUWER and LOLER examinations and NSTS sprayer tests. The link
+        expires after 15 minutes.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Download link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackCertificateDownload"
+        "404":
+          description: Inspection or certificate not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: File storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /incidents/config:
     get:
       operationId: getIncidentConfig
@@ -3113,6 +3147,16 @@ components:
           type: array
           items:
             type: string
+    GreenTrackCertificateDownload:
+      type: object
+      required: [downloadUrl]
+      properties:
+        downloadUrl:
+          type: string
+        fileName:
+          type: string
+          nullable: true
+
     ErrorResponse:
       type: object
       properties:

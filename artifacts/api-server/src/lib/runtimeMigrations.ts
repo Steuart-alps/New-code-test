@@ -3839,6 +3839,19 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_puwer_client_machine"
     ON "green_puwer_inspections" ("client_id", "machine_id")
   `);
+  // NSTS sprayer tests: a sprayer's category and purchase date set when its
+  // tests are due, and any inspection can carry its certificate (PDF or image).
+  await db.execute(sql`
+    ALTER TABLE "green_machines"
+      ADD COLUMN IF NOT EXISTS "sprayer_category" text,
+      ADD COLUMN IF NOT EXISTS "purchase_date" date
+  `);
+  await db.execute(sql`
+    ALTER TABLE "green_puwer_inspections"
+      ADD COLUMN IF NOT EXISTS "certificate_object_path" text,
+      ADD COLUMN IF NOT EXISTS "certificate_file_name" text,
+      ADD COLUMN IF NOT EXISTS "certificate_mime_type" text
+  `);
 
   // Fuel & oil usage logs
   await db.execute(sql`

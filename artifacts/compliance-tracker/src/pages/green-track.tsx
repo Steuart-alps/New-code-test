@@ -25,6 +25,12 @@ import {
   useGetGreenTrackConfig,
   getGetGreenTrackConfigQueryKey,
   useUpdateGreenTrackConfig,
+  NSTS_SPRAYER_CATEGORIES,
+  NSTS_TEST_INSPECTION_TYPE,
+  isNstsSprayerCategory,
+  nstsNextTestDate,
+  nstsStatus,
+  type NstsStatus,
 } from "@workspace/api-client-react";
 import {
   Tractor, Plus, AlertTriangle, CheckCircle2, Clock, Wrench,
@@ -40,6 +46,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
 import { getApiErrorMessage } from "@/lib/api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
+import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -57,6 +64,20 @@ function useGreenTrackApi() {
 function fmt(d: string | null | undefined) {
   if (!d) return "—";
   try { return format(new Date(d), "dd/MM/yyyy"); } catch { return d; }
+}
+
+/** The calendar day (YYYY-MM-DD) of a date or timestamp from the API. */
+function isoDay(d: string | null | undefined): string | null {
+  if (!d) return null;
+  // The API sends dates as UTC midnight, so the first ten characters are the day.
+  return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null;
+}
+
+function nstsIntervalText(category: string): string {
+  if (!isNstsSprayerCategory(category)) return "";
+  const c = NSTS_SPRAYER_CATEGORIES[category];
+  if (!c.formalTest) return "competent-person check, yearly suggested";
+  return `NSTS test before 5 years old, then every ${c.retestYears} years`;
 }
 
 function daysUntil(d: string | null | undefined): number | null {
@@ -206,6 +227,7 @@ const PUWER_INSPECTION_TYPE_LABELS: Record<string, string> = {
   loler_examination:    "Thorough examination (LOLER)",
   annual_inspection:    "Annual inspection",
   periodic_inspection:  "Periodic inspection",
+  [NSTS_TEST_INSPECTION_TYPE]: "NSTS sprayer test",
   other:                "Other",
 };
 
@@ -233,6 +255,9 @@ interface Machine {
   regNo: string | null;
   active: boolean;
   notes: string | null;
+  /** NSTS category; only sprayers have one. */
+  sprayerCategory: string | null;
+  purchaseDate: string | null;
 }
 
 interface PreUseCheck {
@@ -313,6 +338,8 @@ interface PuwerInspection {
   defectsFound: string | null;
   result: string;
   notes: string | null;
+  certificateObjectPath: string | null;
+  certificateFileName: string | null;
 }
 
 interface FuelLog {
@@ -338,6 +365,17 @@ interface StatusData {
   criticalDefects: number;
   checkedTodayCount: number;
   overdueService: number;
+  /** Active sprayers with an NSTS sprayer type, and when each is next due. */
+  nstsSprayers?: NstsSprayerRow[];
+  nstsOverdue?: number;
+}
+
+interface NstsSprayerRow extends NstsStatus {
+  machineId: number;
+  machineName: string;
+  sprayerCategory: string;
+  lastTestDate: string | null;
+  lastTestId: number | null;
 }
 
 // ─── Tri-state check cell ─────────────────────────────────────────────────────
@@ -416,7 +454,7 @@ function MachineDialog({
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
   const isEdit = !!machine;
-  const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: "", active: true, notes: "" };
+  const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: "", active: true, notes: "", sprayerCategory: "", purchaseDate: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
 
@@ -426,6 +464,7 @@ function MachineDialog({
     year: machine.year ? String(machine.year) : "", regNo: machine.regNo ?? "",
     siteId: machine.siteId ? String(machine.siteId) : "",
     active: machine.active, notes: machine.notes ?? "",
+    sprayerCategory: machine.sprayerCategory ?? "", purchaseDate: isoDay(machine.purchaseDate) ?? "",
   } : blank);
 
   const handleSave = async () => {
@@ -438,6 +477,8 @@ function MachineDialog({
         serialNo: form.serialNo.trim() || null, year: form.year ? parseInt(form.year, 10) : null,
         regNo: form.regNo.trim() || null, siteId: form.siteId ? parseInt(form.siteId, 10) : null,
         active: form.active, notes: form.notes.trim() || null,
+        sprayerCategory: form.type === "sprayer_spreader" ? form.sprayerCategory || null : null,
+        purchaseDate: form.purchaseDate || null,
       };
       if (isEdit) {
         await apiFetch(`/green-track/machines/${machine!.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -480,6 +521,25 @@ function MachineDialog({
               <Label>Year <span className="text-muted-foreground text-xs">optional</span></Label>
               <Input className="mt-1 rounded-sm" value={form.year} type="number" min={1980} max={2040}
                 onChange={e => setForm(f => ({ ...f, year: e.target.value }))} placeholder="e.g. 2019" />
+            </div>
+            {form.type === "sprayer_spreader" && (
+              <div className="col-span-2">
+                <Label>Sprayer type (sets the NSTS test interval)</Label>
+                <Select value={form.sprayerCategory || "_none"} onValueChange={v => setForm(f => ({ ...f, sprayerCategory: v === "_none" ? "" : v }))}>
+                  <SelectTrigger className="mt-1 rounded-sm" data-testid="select-sprayer-category"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">— Not a pesticide sprayer / not set —</SelectItem>
+                    {Object.entries(NSTS_SPRAYER_CATEGORIES).map(([key, c]) => (
+                      <SelectItem key={key} value={key}>{c.label} · {nstsIntervalText(key)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div>
+              <Label>Purchase date <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Input className="mt-1 rounded-sm" type="date" value={form.purchaseDate} data-testid="input-purchase-date"
+                onChange={e => setForm(f => ({ ...f, purchaseDate: e.target.value }))} />
             </div>
             <div>
               <Label>Make <span className="text-muted-foreground text-xs">optional</span></Label>
@@ -1285,12 +1345,14 @@ function DefectDialog({
 // ─── PUWER inspection dialog ──────────────────────────────────────────────────
 
 function PuwerDialog({
-  open, onClose, inspection, machines, onSaved,
+  open, onClose, inspection, machines, onSaved, defaults,
 }: {
   open: boolean; onClose: () => void;
   inspection?: PuwerInspection | null;
   machines: Machine[];
   onSaved: () => void;
+  /** Starting machine and type for a new record (for example an NSTS test). */
+  defaults?: { machineId: number; inspectionType: string } | null;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -1299,18 +1361,33 @@ function PuwerDialog({
     machineId: "", inspectionDate: today, nextInspectionDate: "",
     inspectionType: "thorough_examination", inspectorName: "", inspectorRosterId: null, inspectorCompany: "",
     certRef: "", safeToOperate: true, defectsFound: "", result: "pass", notes: "",
+    certificate: { objectPath: null, fileName: null } as DocumentValue,
   };
   const [form, setForm] = useState({ ...blank, inspectorRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
+  // Until the next date is typed, an NSTS test's next date follows the sprayer type.
+  const [nextTouched, setNextTouched] = useState(false);
+  const selectedMachine = machines.find(m => String(m.id) === form.machineId) ?? null;
+  const isNsts = form.inspectionType === NSTS_TEST_INSPECTION_TYPE;
+  const autoNextDate = isNsts && form.inspectionDate
+    ? nstsNextTestDate(selectedMachine?.sprayerCategory, form.inspectionDate)
+    : null;
+  useEffect(() => {
+    if (isNsts && !nextTouched) setForm(f => ({ ...f, nextInspectionDate: autoNextDate ?? "" }));
+  }, [isNsts, nextTouched, autoNextDate]);
 
-  const reset = () => setForm(inspection ? {
-    machineId: String(inspection.machineId), inspectionDate: inspection.inspectionDate,
-    nextInspectionDate: inspection.nextInspectionDate ?? "",
-    inspectionType: inspection.inspectionType, inspectorName: inspection.inspectorName ?? "", inspectorRosterId: (inspection as any).inspectorRosterId ?? (inspection as any).inspector_roster_id ?? null,
-    inspectorCompany: inspection.inspectorCompany ?? "", certRef: inspection.certRef ?? "",
-    safeToOperate: inspection.safeToOperate, defectsFound: inspection.defectsFound ?? "",
-    result: inspection.result, notes: inspection.notes ?? "",
-  } : blank);
+  const reset = () => {
+    setNextTouched(!!inspection);
+    setForm(inspection ? {
+      machineId: String(inspection.machineId), inspectionDate: isoDay(inspection.inspectionDate) ?? "",
+      nextInspectionDate: isoDay(inspection.nextInspectionDate) ?? "",
+      inspectionType: inspection.inspectionType, inspectorName: inspection.inspectorName ?? "", inspectorRosterId: (inspection as any).inspectorRosterId ?? (inspection as any).inspector_roster_id ?? null,
+      inspectorCompany: inspection.inspectorCompany ?? "", certRef: inspection.certRef ?? "",
+      safeToOperate: inspection.safeToOperate, defectsFound: inspection.defectsFound ?? "",
+      result: inspection.result, notes: inspection.notes ?? "",
+      certificate: { objectPath: inspection.certificateObjectPath ?? null, fileName: inspection.certificateFileName ?? null },
+    } : defaults ? { ...blank, machineId: String(defaults.machineId), inspectionType: defaults.inspectionType } : blank);
+  };
 
   const handleSave = async () => {
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
@@ -1328,6 +1405,8 @@ function PuwerDialog({
         defectsFound: form.defectsFound.trim() || null,
         result: form.safeToOperate ? (form.defectsFound.trim() ? "advisory" : "pass") : "fail",
         notes: form.notes.trim() || null,
+        certificateObjectPath: form.certificate.objectPath,
+        certificateFileName: form.certificate.fileName,
       };
       if (inspection) {
         await apiFetch(`/green-track/puwer-inspections/${inspection.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -1345,7 +1424,7 @@ function PuwerDialog({
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
       <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
         <DialogHeader>
-          <DialogTitle>{inspection ? "Edit Inspection Record" : "Log PUWER Inspection"}</DialogTitle>
+          <DialogTitle>{inspection ? "Edit Inspection Record" : "Log Inspection or NSTS Test"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div>
@@ -1364,20 +1443,27 @@ function PuwerDialog({
                 onChange={e => setForm(f => ({ ...f, inspectionDate: e.target.value }))} />
             </div>
             <div>
-              <Label>Next inspection due</Label>
-              <Input type="date" className="mt-1 rounded-sm" value={form.nextInspectionDate}
-                onChange={e => setForm(f => ({ ...f, nextInspectionDate: e.target.value }))} />
+              <Label>{isNsts ? "Next test due" : "Next inspection due"}</Label>
+              <Input type="date" className="mt-1 rounded-sm" value={form.nextInspectionDate} data-testid="input-next-inspection-date"
+                onChange={e => { setNextTouched(true); setForm(f => ({ ...f, nextInspectionDate: e.target.value })); }} />
             </div>
             <div className="col-span-2">
               <Label>Inspection type</Label>
               <Select value={form.inspectionType} onValueChange={v => setForm(f => ({ ...f, inspectionType: v }))}>
-                <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="mt-1 rounded-sm" data-testid="select-inspection-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {Object.entries(PUWER_INSPECTION_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {isNsts && (
+                <p className="text-xs text-muted-foreground mt-1.5" data-testid="text-nsts-next-hint">
+                  {selectedMachine && isNstsSprayerCategory(selectedMachine.sprayerCategory)
+                    ? `${NSTS_SPRAYER_CATEGORIES[selectedMachine.sprayerCategory].label}: ${nstsIntervalText(selectedMachine.sprayerCategory)}. The next date is filled in for you; change it if your tester or assurance scheme (for example Red Tractor, yearly) gives a different one.`
+                    : "Set the sprayer type on this machine (Fleet, Edit) and the next test date is worked out for you. You can also type it."}
+                </p>
+              )}
             </div>
             <div>
               <Label>Inspector name <span className="text-muted-foreground text-xs">optional</span></Label>
@@ -1413,6 +1499,8 @@ function PuwerDialog({
             <Textarea className="mt-1 rounded-sm" value={form.notes} rows={2}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
+          <DocumentField label="Certificate or report (optional)" value={form.certificate} disabled={saving}
+            onChange={certificate => setForm(f => ({ ...f, certificate }))} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -1422,6 +1510,81 @@ function PuwerDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── NSTS sprayer tests ───────────────────────────────────────────────────────
+
+const NSTS_STATE_STYLES: Record<string, string> = {
+  overdue:  "text-destructive font-medium",
+  due_soon: "text-amber-600 dark:text-amber-400 font-medium",
+  ok:       "text-emerald-600 dark:text-emerald-400",
+  unknown:  "text-muted-foreground",
+};
+
+function NstsSprayerPanel({ sprayers, hasSprayers, canAdmin, onLogTest }: {
+  sprayers: NstsSprayerRow[];
+  hasSprayers: boolean;
+  canAdmin: boolean;
+  onLogTest: (machineId: number) => void;
+}) {
+  if (sprayers.length === 0) {
+    if (!hasSprayers) return null;
+    return (
+      <div className="text-xs text-muted-foreground border border-dashed rounded-sm px-3 py-2" data-testid="nsts-panel-empty">
+        NSTS sprayer tests: set the sprayer type on your sprayers (Fleet, Edit) to see when each test is due.
+      </div>
+    );
+  }
+  return (
+    <Card className="border-border/50 shadow-sm" data-testid="nsts-panel">
+      <CardContent className="p-4 space-y-3">
+        <div>
+          <p className="text-sm font-semibold">NSTS sprayer tests</p>
+          <p className="text-xs text-muted-foreground">
+            Pesticide sprayers need an NSTS test before they are 5 years old, then every 3 years (booms wider than 3 m and
+            air-assisted sprayers) or every 6 years (other equipment). Knapsacks need a recorded competent-person check.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-muted-foreground text-xs">
+                <th className="text-left font-medium py-1.5 pr-4">Sprayer</th>
+                <th className="text-left font-medium py-1.5 pr-4 hidden sm:table-cell">Type</th>
+                <th className="text-left font-medium py-1.5 pr-4">Last test</th>
+                <th className="text-left font-medium py-1.5 pr-4">Next due</th>
+                {canAdmin && <th className="w-24" />}
+              </tr>
+            </thead>
+            <tbody>
+              {sprayers.map(s => (
+                <tr key={s.machineId} className="border-b last:border-0" data-testid={`nsts-row-${s.machineId}`}>
+                  <td className="py-1.5 pr-4 font-medium">{s.machineName}</td>
+                  <td className="py-1.5 pr-4 text-xs text-muted-foreground hidden sm:table-cell">
+                    {isNstsSprayerCategory(s.sprayerCategory) ? NSTS_SPRAYER_CATEGORIES[s.sprayerCategory].label : s.sprayerCategory}
+                  </td>
+                  <td className="py-1.5 pr-4 tabular-nums">{s.lastTestDate ? fmt(s.lastTestDate) : "Never tested"}</td>
+                  <td className={cn("py-1.5 pr-4 tabular-nums", NSTS_STATE_STYLES[s.state])} data-testid={`nsts-due-${s.machineId}`}>
+                    {s.state === "overdue" && <AlertTriangle className="inline w-3 h-3 mr-1" />}
+                    {s.dueDate
+                      ? `${s.state === "overdue" ? "Overdue since " : ""}${fmt(s.dueDate)}${s.basis === "first_test" ? " (first test)" : ""}`
+                      : "Add the purchase date or year"}
+                  </td>
+                  {canAdmin && (
+                    <td className="py-1.5 text-right">
+                      <Button size="sm" variant="outline" className="h-7 text-xs rounded-sm" onClick={() => onLogTest(s.machineId)}>
+                        Log test
+                      </Button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1555,6 +1718,7 @@ export default function GreenTrackPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
+  const clientApi = useActiveClientApi();
   const photoRequirements = usePhotoRequirements();
 
   const [activeTab, setActiveTab] = useState<Tab>("fleet");
@@ -1573,6 +1737,7 @@ export default function GreenTrackPage() {
   const [editDefect, setEditDefect] = useState<Defect | null>(null);
   const [puwerDialog, setPuwerDialog] = useState(false);
   const [editPuwer, setEditPuwer] = useState<PuwerInspection | null>(null);
+  const [puwerDefaults, setPuwerDefaults] = useState<{ machineId: number; inspectionType: string } | null>(null);
   const [fuelDialog, setFuelDialog] = useState(false);
   const [editFuel, setEditFuel] = useState<FuelLog | null>(null);
   const [deleteId, setDeleteId] = useState<{ type: string; id: number } | null>(null);
@@ -1695,7 +1860,7 @@ export default function GreenTrackPage() {
     { key: "pre-use",  label: "Pre-use",     icon: CheckCheck,     count: status?.checkedTodayCount },
     { key: "services", label: "Services",    icon: Wrench },
     { key: "defects",  label: "Defects",     icon: ShieldAlert,    count: status?.openDefects || undefined },
-    { key: "puwer",    label: "Inspections", icon: ClipboardCheck },
+    { key: "puwer",    label: "Inspections", icon: ClipboardCheck, count: status?.nstsOverdue || undefined },
     { key: "actions",  label: "Actions",     icon: CheckCircle2 },
     ...(showFuelTab ? [{ key: "fuel" as Tab, label: "Fuel / Oil", icon: Fuel }] : []),
   ];
@@ -1718,6 +1883,19 @@ export default function GreenTrackPage() {
         )}
         {photoRequirements.isLoading && !photoRequirements.error && (
           <p role="status" className="text-xs text-muted-foreground">Loading GreenTrack photo requirements…</p>
+        )}
+
+        {(status?.nstsOverdue ?? 0) > 0 && (
+          <div role="alert" data-testid="banner-nsts-overdue"
+            className="flex items-center justify-between gap-3 rounded-sm border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
+            <span className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              {status!.nstsOverdue === 1 ? "1 sprayer is" : `${status!.nstsOverdue} sprayers are`} overdue for an NSTS test.
+            </span>
+            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setActiveTab("puwer")}>
+              View sprayers
+            </Button>
+          </div>
         )}
 
         {/* ── Status strip ──────────────────────────────────────────────── */}
@@ -2247,6 +2425,12 @@ export default function GreenTrackPage() {
               <ClipboardCheck className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <span>PUWER thorough examinations must be carried out by a competent person at least every 12 months (or as specified by risk assessment). Records must be retained and available for inspection.</span>
             </div>
+            <NstsSprayerPanel
+              sprayers={(status?.nstsSprayers ?? []).filter(s => !filterMachine || String(s.machineId) === filterMachine)}
+              hasSprayers={machines.some(m => m.active && m.type === "sprayer_spreader")}
+              canAdmin={canAdmin}
+              onLogTest={(machineId) => { setEditPuwer(null); setPuwerDefaults({ machineId, inspectionType: NSTS_TEST_INSPECTION_TYPE }); setPuwerDialog(true); }}
+            />
             {puwerLoading ? (
               <div className="py-10 text-center text-sm text-muted-foreground animate-pulse">Loading inspections…</div>
             ) : filteredPuwer.length === 0 ? (
@@ -2272,13 +2456,15 @@ export default function GreenTrackPage() {
                       <th className="text-left font-medium py-2 pr-4 hidden lg:table-cell">Inspector</th>
                       <th className="text-left font-medium py-2 pr-4">Result</th>
                       <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Safe to op?</th>
+                      <th className="text-left font-medium py-2 pr-4">Certificate</th>
                       {canAdmin && <th className="w-16" />}
                     </tr>
                   </thead>
                   <tbody>
                     {filteredPuwer.map(p => {
                       const today = new Date().toISOString().split("T")[0];
-                      const overdue = p.nextInspectionDate && p.nextInspectionDate < today;
+                      const nextDay = isoDay(p.nextInspectionDate);
+                      const overdue = nextDay && nextDay < today;
                       const due30 = p.nextInspectionDate && !overdue &&
                         new Date(p.nextInspectionDate) <= new Date(Date.now() + 30 * 86400000);
                       return (
@@ -2287,12 +2473,12 @@ export default function GreenTrackPage() {
                           <td className="py-2 pr-4 text-muted-foreground text-xs hidden sm:table-cell">
                             {PUWER_INSPECTION_TYPE_LABELS[p.inspectionType] ?? p.inspectionType}
                           </td>
-                          <td className="py-2 pr-4 tabular-nums">{p.inspectionDate}</td>
+                          <td className="py-2 pr-4 tabular-nums">{fmt(isoDay(p.inspectionDate))}</td>
                           <td className="py-2 pr-4 hidden md:table-cell">
                             {p.nextInspectionDate ? (
                               <span className={`tabular-nums ${overdue ? "text-destructive font-medium" : due30 ? "text-yellow-600 dark:text-yellow-400" : ""}`}>
                                 {overdue && <AlertTriangle className="inline w-3 h-3 mr-1" />}
-                                {p.nextInspectionDate}
+                                {fmt(nextDay)}
                               </span>
                             ) : <span className="text-muted-foreground">—</span>}
                           </td>
@@ -2315,6 +2501,15 @@ export default function GreenTrackPage() {
                             {p.safeToOperate
                               ? <CheckCircle2 className="w-4 h-4 text-green-500" />
                               : <XCircle className="w-4 h-4 text-destructive" />}
+                          </td>
+                          <td className="py-2 pr-4">
+                            {p.certificateObjectPath ? (
+                              <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" data-testid={`button-certificate-${p.id}`}
+                                onClick={() => downloadRegisterDocument(clientApi, `/green-track/puwer-inspections/${p.id}/certificate-url`, `inspection-certificate-${p.id}`)
+                                  .catch((err: Error) => toast({ title: "Download failed", description: err.message, variant: "destructive" }))}>
+                                <Download className="w-3.5 h-3.5" /> View
+                              </Button>
+                            ) : <span className="text-muted-foreground">—</span>}
                           </td>
                           {canAdmin && (
                             <td className="py-2 text-right">
@@ -2428,8 +2623,8 @@ export default function GreenTrackPage() {
       <DefectDialog open={defectDialog} onClose={() => { setDefectDialog(false); setEditDefect(null); }}
         defect={editDefect} machines={machines} onSaved={invalidate} />
 
-      <PuwerDialog open={puwerDialog} onClose={() => { setPuwerDialog(false); setEditPuwer(null); }}
-        inspection={editPuwer} machines={machines} onSaved={invalidate} />
+      <PuwerDialog open={puwerDialog} onClose={() => { setPuwerDialog(false); setEditPuwer(null); setPuwerDefaults(null); }}
+        inspection={editPuwer} defaults={puwerDefaults} machines={machines} onSaved={invalidate} />
 
       <FuelLogDialog open={fuelDialog} onClose={() => { setFuelDialog(false); setEditFuel(null); }}
         log={editFuel} machines={machines} onSaved={invalidate} />

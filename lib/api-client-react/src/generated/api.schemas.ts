@@ -254,6 +254,11 @@ export interface FixTrackIssueMediaList {
   mediaUrls: string[];
 }
 
+export interface GreenTrackCertificateDownload {
+  downloadUrl: string;
+  fileName?: string | null;
+}
+
 export interface ErrorResponse {
   error: string;
 }
