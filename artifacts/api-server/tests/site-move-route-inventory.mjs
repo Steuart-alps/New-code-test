@@ -39,6 +39,8 @@ const INVENTORY = {
   "contractor-visits.ts PUT /contractor-visits": adminOnly("chooses the contractor reminded about a visit at a site"),
   "daily-checklists.ts POST /daily-checklists/:siteId/:date/:type": notAMove("site is addressed in the path and access-checked"),
   "daily-checklists.ts POST /daily-checklists/:siteId/:date/pm/sign-off": notAMove("site is addressed in the path and access-checked"),
+  "coshh-track.ts PUT /assessments/:id": siteMove("COSHH assessment"),
+  "coshh-track.ts PUT /checks/:id": siteMove("COSHH check"),
   "daily-track-am.ts PUT /:id": siteMove("DailyTrack AM checklist"),
   "daily-track-pm.ts PUT /:id": siteMove("DailyTrack PM checklist"),
   "daily-track-pm.ts PUT /signoffs/:id": siteMove("DailyTrack PM sign-off"),

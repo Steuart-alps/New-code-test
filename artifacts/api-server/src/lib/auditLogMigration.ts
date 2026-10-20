@@ -22,6 +22,7 @@ export const EXTENDED_AUDITED_TABLES = [
   "categories", "certificate_defects", "check_photos", "checklist_templates", "client_documents",
   "compliance_actions", "compliance_items", "contractor_certificates",
   "contractor_email_queue", "contractors",
+  "coshh_acknowledgements", "coshh_assessments", "coshh_checks",
   "coshh_substances", "daily_checklist_submissions", "daily_checklists",
   "daily_manager_signoffs", "departments", "doc_acknowledgements",
   "fire_call_points", "fix_track_email_dispatches", "fix_track_issue_activity", "fix_track_quote_submissions",

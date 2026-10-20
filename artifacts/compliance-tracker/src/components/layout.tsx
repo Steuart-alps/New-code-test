@@ -53,6 +53,7 @@ const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/bike-track", moduleKey: "bike" },
   { prefix: "/hot-tub", moduleKey: "hot_tub" },
   { prefix: "/tree-track", moduleKey: "tree" },
+  { prefix: "/coshh-track", moduleKey: "coshh" },
   // GreenTrack renders its module actions in its own "Actions" tab.
   { prefix: "/swim-track", moduleKey: "swim" },
   { prefix: "/incidents", moduleKey: "incident" },

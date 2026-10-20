@@ -43,6 +43,8 @@ tags:
     description: DailyTrack daily checklist status (AM/PM checklists and manager sign-offs)
   - name: pat-track
     description: PAT testing register operations (appliance inventory and test results)
+  - name: coshh-track
+    description: COSHHTrack assessments, LEV examinations, health surveillance, monitoring and briefings
   - name: premises-track
     description: PremisesTrack premises safety inspection operations
   - name: privacy-governance
@@ -185,6 +187,48 @@ paths:
           description: Not one of this Viewer's records
         "409":
           description: Already signed
+  /train-track/my-coshh:
+    get:
+      operationId: listMyCoshhSignOffs
+      tags: [train-track]
+      summary: Current COSHH assessments the signed-in Viewer must read and sign, and those already signed
+      responses:
+        "200":
+          description: Assessments for the Viewer's site (and department, where the assessment names departments)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyCoshhSignOffs" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-coshh/{id}/sign:
+    post:
+      operationId: signMyCoshhAssessment
+      tags: [train-track]
+      summary: Sign that the signed-in Viewer has read a current COSHH assessment (writes a TrainTrack sign-off)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The Viewer's assessments after signing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyCoshhSignOffs" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not an assessment this Viewer must sign
+        "409":
+          description: Already signed this revision
   /users/me/active-department:
     put:
       operationId: setActiveDepartment
@@ -3160,6 +3204,272 @@ paths:
         "404":
           description: The label is not available to this person (also for unknown codes)
 
+  /coshh-track/status:
+    get:
+      operationId: getCoshhTrackStatus
+      tags: [coshh-track]
+      summary: COSHHTrack assessment reviews and checks that are due, overdue or not yet recorded
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Due items, soonest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhTrackStatus"
+
+  /coshh-track/assessments:
+    get:
+      operationId: listCoshhAssessments
+      tags: [coshh-track]
+      summary: List COSHH assessments
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: COSHH assessments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CoshhAssessment"
+    post:
+      operationId: createCoshhAssessment
+      tags: [coshh-track]
+      summary: Record a COSHH assessment (owners, consultants and managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhAssessmentInput"
+      responses:
+        "201":
+          description: Created assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhAssessment"
+
+  /coshh-track/assessments/{id}:
+    put:
+      operationId: updateCoshhAssessment
+      tags: [coshh-track]
+      summary: Update a COSHH assessment (owners, consultants and managers)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhAssessmentInput"
+      responses:
+        "200":
+          description: Updated assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhAssessment"
+    delete:
+      operationId: deleteCoshhAssessment
+      tags: [coshh-track]
+      summary: Remove a COSHH assessment (kept in the audit trail and export)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+
+  /coshh-track/assessments/{id}/document-url:
+    get:
+      operationId: getCoshhAssessmentDocumentUrl
+      tags: [coshh-track]
+      summary: Short-lived download link for an assessment's attached document
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Download link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhDocumentUrl"
+
+  /coshh-track/checks:
+    get:
+      operationId: listCoshhChecks
+      tags: [coshh-track]
+      summary: List LEV examinations, health checks, exposure monitoring and staff briefings
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/CoshhCheckType"
+        - in: query
+          name: assessmentId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: COSHH checks, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CoshhCheck"
+    post:
+      operationId: createCoshhCheck
+      tags: [coshh-track]
+      summary: Record a COSHH check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhCheckInput"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhCheck"
+
+  /coshh-track/checks/{id}:
+    put:
+      operationId: updateCoshhCheck
+      tags: [coshh-track]
+      summary: Update a COSHH check
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhCheckInput"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhCheck"
+    delete:
+      operationId: deleteCoshhCheck
+      tags: [coshh-track]
+      summary: Remove a COSHH check (kept in the audit trail and export)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+
+  /coshh-track/checks/{id}/report-url:
+    get:
+      operationId: getCoshhCheckReportUrl
+      tags: [coshh-track]
+      summary: Short-lived download link for a check's attached report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Download link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhDocumentUrl"
+  /coshh-track/sign-offs:
+    get:
+      operationId: listCoshhSignOffs
+      tags: [coshh-track]
+      summary: Current COSHH assessments with who has read and signed them and who still needs to (TrainTrack's COSHH section)
+      parameters:
+        - in: query
+          name: siteId
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Assessments the caller can see, with sign-off status for their current revision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assessments:
+                    type: array
+                    items: { $ref: "#/components/schemas/CoshhSignOffStatus" }
+                required: [assessments]
+  /coshh-track/assessments/{id}/sign-offs:
+    post:
+      operationId: recordCoshhSignOffs
+      tags: [coshh-track]
+      summary: Record staff signing that they have read a current COSHH assessment; each writes a TrainTrack sign-off
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CoshhSignOffRequest" }
+      responses:
+        "200":
+          description: How many were newly signed (people who need not sign, or already have, are skipped) and the assessment's status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signed: { type: integer }
+                  assessment:
+                    oneOf:
+                      - $ref: "#/components/schemas/CoshhSignOffStatus"
+                      - type: "null"
+                required: [signed, assessment]
+        "404":
+          description: Not a current assessment the caller can see
+
 components:
   schemas:
     DailyTrackRequirement:
@@ -5475,6 +5785,437 @@ components:
           type: string
         incident_locations:
           type: string
+
+    CoshhCheckType:
+      type: string
+      enum: [lev_examination, health_surveillance, exposure_monitoring, staff_briefing]
+
+    CoshhExposureRoute:
+      type: string
+      enum: [inhalation, skin, eyes, ingestion, injection]
+
+    CoshhPpe:
+      type: string
+      enum: [gloves, eye_protection, face_shield, respirator, apron_overalls, footwear]
+
+    CoshhAssessmentInput:
+      type: object
+      properties:
+        siteId:
+          type: integer
+        substanceId:
+          type: ["integer", "null"]
+        task:
+          type: string
+        whoAtRisk:
+          type: ["string", "null"]
+        exposureRoutes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoshhExposureRoute"
+        howOften:
+          type: ["string", "null"]
+        hazardStatements:
+          type: ["string", "null"]
+        signalWord:
+          type: ["string", "null"]
+          enum: [danger, warning, none, null]
+        healthEffects:
+          type: ["string", "null"]
+        exposureLimits:
+          type: ["string", "null"]
+        controls:
+          type: ["string", "null"]
+        ppe:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoshhPpe"
+        ppeDetails:
+          type: ["string", "null"]
+        riskLevel:
+          type: string
+          enum: [low, medium, high]
+        healthSurveillanceRequired:
+          type: boolean
+        monitoringRequired:
+          type: boolean
+        levRequired:
+          type: boolean
+        storage:
+          type: ["string", "null"]
+        spillProcedure:
+          type: ["string", "null"]
+        firstAid:
+          type: ["string", "null"]
+        disposal:
+          type: ["string", "null"]
+        assessor:
+          type: ["string", "null"]
+        assessmentDate:
+          type: string
+        reviewDue:
+          type: ["string", "null"]
+          description: Omitted on create = 12 months after the assessment date.
+        status:
+          type: string
+          enum: [current, archived]
+        notes:
+          type: ["string", "null"]
+        draftSource:
+          type: ["string", "null"]
+          enum: [ai, null]
+          description: Set to ai when the form was pre-filled from a safety data sheet.
+        draftedAt:
+          type: ["string", "null"]
+          format: date-time
+        checkedAgainstSds:
+          type: boolean
+          description: Required (true) to save an AI draft; the saver is recorded as having checked it.
+        signOffDepartments:
+          type: array
+          items: { type: string }
+          description: Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site.
+        objectPath:
+          type: ["string", "null"]
+          description: A fresh upload from POST /registers/uploads/request-url, null to detach, omitted to keep.
+        fileName:
+          type: ["string", "null"]
+      required: [siteId, task, riskLevel, assessmentDate]
+
+    CoshhAssessment:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: ["integer", "null"]
+        substanceId:
+          type: ["integer", "null"]
+        task:
+          type: string
+        whoAtRisk:
+          type: ["string", "null"]
+        exposureRoutes:
+          type: array
+          items:
+            type: string
+        howOften:
+          type: ["string", "null"]
+        hazardStatements:
+          type: ["string", "null"]
+        signalWord:
+          type: ["string", "null"]
+        healthEffects:
+          type: ["string", "null"]
+        exposureLimits:
+          type: ["string", "null"]
+        controls:
+          type: ["string", "null"]
+        ppe:
+          type: array
+          items:
+            type: string
+        ppeDetails:
+          type: ["string", "null"]
+        riskLevel:
+          type: string
+        healthSurveillanceRequired:
+          type: boolean
+        monitoringRequired:
+          type: boolean
+        levRequired:
+          type: boolean
+        storage:
+          type: ["string", "null"]
+        spillProcedure:
+          type: ["string", "null"]
+        firstAid:
+          type: ["string", "null"]
+        disposal:
+          type: ["string", "null"]
+        assessor:
+          type: ["string", "null"]
+        assessmentDate:
+          type: string
+        reviewDue:
+          type: ["string", "null"]
+        status:
+          type: string
+        documentObjectPath:
+          type: ["string", "null"]
+        documentFileName:
+          type: ["string", "null"]
+        documentFileSize:
+          type: ["integer", "null"]
+        documentMimeType:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        draftSource:
+          type: ["string", "null"]
+        draftedAt:
+          type: ["string", "null"]
+        checkedBy:
+          type: ["integer", "null"]
+        checkedByName:
+          type: ["string", "null"]
+        checkedAt:
+          type: ["string", "null"]
+        revision:
+          type: integer
+          description: Goes up when a change alters what staff read, so they sign the assessment again.
+        signOffDepartments:
+          type: array
+          items: { type: string }
+        createdBy:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        deletedAt:
+          type: ["string", "null"]
+        reviewOverdue:
+          type: boolean
+      required: [id, clientId, task, exposureRoutes, ppe, riskLevel, healthSurveillanceRequired, monitoringRequired, levRequired, assessmentDate, status, reviewOverdue, revision, signOffDepartments]
+
+    CoshhSignOffSummary:
+      type: object
+      description: The parts of a current COSHH assessment a person reads before signing.
+      properties:
+        id: { type: integer }
+        siteId: { type: integer }
+        siteName: { type: ["string", "null"] }
+        task: { type: string }
+        productName: { type: ["string", "null"] }
+        substanceId: { type: ["integer", "null"] }
+        hasSafetyDataSheet: { type: boolean }
+        hasDocument: { type: boolean }
+        revision: { type: integer }
+        signOffDepartments:
+          type: array
+          items: { type: string }
+        assessmentDate: { type: ["string", "null"], format: date }
+        assessor: { type: ["string", "null"] }
+        riskLevel: { type: string }
+        hazardStatements: { type: ["string", "null"] }
+        signalWord: { type: ["string", "null"] }
+        healthEffects: { type: ["string", "null"] }
+        exposureRoutes:
+          type: array
+          items: { type: string }
+        controls: { type: ["string", "null"] }
+        ppe:
+          type: array
+          items: { type: string }
+        ppeDetails: { type: ["string", "null"] }
+        storage: { type: ["string", "null"] }
+        spillProcedure: { type: ["string", "null"] }
+        firstAid: { type: ["string", "null"] }
+        disposal: { type: ["string", "null"] }
+      required: [id, siteId, task, revision, signOffDepartments, riskLevel, exposureRoutes, ppe, hasSafetyDataSheet, hasDocument]
+
+    CoshhSignOffStatus:
+      allOf:
+        - $ref: "#/components/schemas/CoshhSignOffSummary"
+        - type: object
+          properties:
+            staffTotal: { type: integer }
+            signedCount: { type: integer }
+            signed:
+              type: array
+              items:
+                type: object
+                properties:
+                  staffRosterId: { type: integer }
+                  name: { type: string }
+                  department: { type: ["string", "null"] }
+                  signedAt: { type: string, format: date-time }
+                  hasSignature: { type: boolean }
+                  trainTrackRecordId: { type: ["integer", "null"] }
+                required: [staffRosterId, name, signedAt, hasSignature]
+            outstanding:
+              type: array
+              items:
+                type: object
+                properties:
+                  staffRosterId: { type: integer }
+                  name: { type: string }
+                  department: { type: ["string", "null"] }
+                  resign:
+                    type: boolean
+                    description: They signed an earlier revision, so this is a re-sign after a change.
+                required: [staffRosterId, name, resign]
+          required: [staffTotal, signedCount, signed, outstanding]
+
+    CoshhSignOffRequest:
+      type: object
+      properties:
+        signOffs:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              staffRosterId: { type: integer }
+              signature:
+                type: ["string", "null"]
+                description: The person's signature drawn on this device (base64 PNG).
+            required: [staffRosterId]
+      required: [signOffs]
+
+    MyCoshhSignOffs:
+      type: object
+      properties:
+        linked: { type: boolean }
+        pending:
+          type: array
+          items: { $ref: "#/components/schemas/CoshhSignOffSummary" }
+        signed:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/CoshhSignOffSummary"
+              - type: object
+                properties:
+                  signedAt: { type: string, format: date-time }
+                required: [signedAt]
+      required: [linked, pending, signed]
+
+    CoshhCheckInput:
+      type: object
+      properties:
+        siteId:
+          type: integer
+        assessmentId:
+          type: ["integer", "null"]
+        checkType:
+          $ref: "#/components/schemas/CoshhCheckType"
+        checkDate:
+          type: string
+        subject:
+          type: ["string", "null"]
+          description: The extraction system, the person checked or briefed, or the area monitored.
+        carriedOutBy:
+          type: ["string", "null"]
+        result:
+          type: string
+          enum: [pass, fail]
+        actionRequired:
+          type: ["string", "null"]
+          description: Required when the result is fail.
+        nextDueDate:
+          type: ["string", "null"]
+          description: Omitted on create = the suggested interval (LEV 14 months, others 12).
+        notes:
+          type: ["string", "null"]
+        objectPath:
+          type: ["string", "null"]
+        fileName:
+          type: ["string", "null"]
+      required: [siteId, checkType, checkDate]
+
+    CoshhCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: ["integer", "null"]
+        assessmentId:
+          type: ["integer", "null"]
+        checkType:
+          type: string
+        checkDate:
+          type: string
+        subject:
+          type: ["string", "null"]
+        carriedOutBy:
+          type: ["string", "null"]
+        result:
+          type: string
+        actionRequired:
+          type: ["string", "null"]
+        nextDueDate:
+          type: ["string", "null"]
+        reportObjectPath:
+          type: ["string", "null"]
+        reportFileName:
+          type: ["string", "null"]
+        reportFileSize:
+          type: ["integer", "null"]
+        reportMimeType:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdBy:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        deletedAt:
+          type: ["string", "null"]
+      required: [id, clientId, checkType, checkDate, result]
+
+    CoshhDueItem:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [assessment_review, lev_examination, health_surveillance, exposure_monitoring, staff_briefing]
+        recordId:
+          type: integer
+        assessmentId:
+          type: ["integer", "null"]
+        label:
+          type: string
+        siteId:
+          type: ["integer", "null"]
+        siteName:
+          type: ["string", "null"]
+        dueDate:
+          type: ["string", "null"]
+        daysUntilDue:
+          type: ["integer", "null"]
+          description: Negative = overdue by that many days; null for items not recorded yet.
+        status:
+          type: string
+          enum: [overdue, due_soon, ok, missing]
+      required: [kind, recordId, assessmentId, label, siteId, siteName, dueDate, daysUntilDue, status]
+
+    CoshhTrackStatus:
+      type: object
+      properties:
+        today:
+          type: string
+        dueSoonDays:
+          type: integer
+        overdue:
+          type: integer
+        dueSoon:
+          type: integer
+        missing:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoshhDueItem"
+      required: [today, dueSoonDays, overdue, dueSoon, missing, items]
+
+    CoshhDocumentUrl:
+      type: object
+      properties:
+        downloadUrl:
+          type: string
+        fileName:
+          type: ["string", "null"]
+      required: [downloadUrl]
 
     OkResponse:
       type: object

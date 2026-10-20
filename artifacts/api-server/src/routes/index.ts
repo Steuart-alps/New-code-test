@@ -25,6 +25,7 @@ import docTrackRouter from "./doc-track";
 import trainTrackRouter from "./train-track";
 import hotTubRouter from "./hot-tub";
 import treeTrackRouter from "./tree-track";
+import coshhTrackRouter from "./coshh-track";
 import bikeTrackRouter from "./bike-track";
 import poolTrackRouter from "./pool-track";
 import greenTrackRouter from "./green-track";
@@ -166,6 +167,7 @@ router.use("/premises-track", requireAuth, requireService("premisestrack"), prem
 router.use("/room-track", requireAuth, requireService("roomtrack"), roomTrackRouter);
 // Allergen (KitchenTrack-gated inside), COSHH and asbestos registers.
 router.use("/registers", requireAuth, registersRouter);
+router.use("/coshh-track", requireAuth, requireService("coshhtrack"), coshhTrackRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
 router.use(exportRouter);

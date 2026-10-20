@@ -351,6 +351,10 @@ registers/
                                    (removed items included, with deleted_at)
   allergen-item-changes.csv      — allergen tick change log
   coshh-substances.csv           — COSHH register
+coshh-track/
+  assessments.csv                — COSHH assessments (removed ones included, with deleted_at)
+  checks.csv                     — LEV examinations, health checks, monitoring and briefings
+  sign-offs.csv                  — staff who read and signed each assessment revision
   asbestos-records.csv           — asbestos survey and management plan per site
   asbestos-register-entries.csv  — asbestos register entries
   asbestos-survey-history.csv    — earlier asbestos surveys whose report was replaced
@@ -431,6 +435,8 @@ async function bundleAttachments(cid: number, archive: ZipArchive, maxBytes: num
     { files: "files/contractors/certificates (register)", load: () => db.execute(sql`SELECT 'contractors/certificates' AS module, cert.id::text AS record_id, cert.name AS label, cert.name AS file_name, NULL::bigint AS file_size, cert.file_url AS object_path FROM certificates cert JOIN contractors c ON c.id = cert.contractor_id WHERE c.client_id = ${cid} AND cert.file_url LIKE '/objects/%'`) },
     { files: "files/compliance/certificates", load: () => db.execute(sql`SELECT 'compliance/certificates' AS module, cert.id::text AS record_id, cert.name AS label, cert.name AS file_name, NULL::bigint AS file_size, cert.file_url AS object_path FROM certificates cert JOIN compliance_items ci ON ci.id = cert.item_id WHERE ci.client_id = ${cid} AND cert.file_url LIKE '/objects/%'`) },
     { files: "files/registers/coshh-safety-data-sheets", optional: true, load: () => db.execute(sql`SELECT 'registers/coshh' AS module, id::text AS record_id, product_name AS label, sds_file_name AS file_name, NULL::bigint AS file_size, sds_object_path AS object_path FROM coshh_substances WHERE client_id = ${cid} AND sds_object_path IS NOT NULL AND sds_object_path != ''`) },
+    { files: "files/coshh-track/assessments", optional: true, load: () => db.execute(sql`SELECT 'coshh-track/assessments' AS module, id::text AS record_id, task AS label, document_file_name AS file_name, NULL::bigint AS file_size, document_object_path AS object_path FROM coshh_assessments WHERE client_id = ${cid} AND document_object_path IS NOT NULL AND document_object_path != ''`) },
+    { files: "files/coshh-track/check-reports", optional: true, load: () => db.execute(sql`SELECT 'coshh-track/checks' AS module, id::text AS record_id, check_type || COALESCE(' ' || subject, '') AS label, report_file_name AS file_name, NULL::bigint AS file_size, report_object_path AS object_path FROM coshh_checks WHERE client_id = ${cid} AND report_object_path IS NOT NULL AND report_object_path != ''`) },
     { files: "files/registers/asbestos-survey-reports", optional: true, load: () => db.execute(sql`SELECT 'registers/asbestos' AS module, id::text AS record_id, COALESCE(report_file_name, 'asbestos-survey-' || id::text) AS label, report_file_name AS file_name, NULL::bigint AS file_size, report_object_path AS object_path FROM asbestos_records WHERE client_id = ${cid} AND report_object_path IS NOT NULL AND report_object_path != ''`) },
     { files: "files/registers/asbestos-survey-history", optional: true, load: () => db.execute(sql`SELECT 'registers/asbestos-history' AS module, id::text AS record_id, COALESCE(report_file_name, 'asbestos-survey-history-' || id::text) AS label, report_file_name AS file_name, NULL::bigint AS file_size, report_object_path AS object_path FROM asbestos_survey_history WHERE client_id = ${cid} AND report_object_path != ''`) },
     { files: "files/incidents/hse-receipts", optional: true, load: () => db.execute(sql`SELECT 'incidents/hse-receipts' AS module, id::text AS record_id, COALESCE(hse_reference, 'riddor-submission-' || id::text) AS label, receipt_file_name AS file_name, NULL::bigint AS file_size, receipt_object_path AS object_path FROM incident_riddor_events WHERE client_id = ${cid} AND receipt_object_path IS NOT NULL AND receipt_object_path != ''`) },
@@ -776,6 +782,9 @@ router.get(
         await out.csv("registers/allergen-items.csv", async () => (await db.execute(sql`SELECT * FROM allergen_items WHERE client_id = ${cid} ORDER BY id`)).rows);
         await out.csv("registers/allergen-item-changes.csv", async () => (await db.execute(sql`SELECT * FROM allergen_item_changes WHERE client_id = ${cid} ORDER BY item_id, id`)).rows);
         await out.csv("registers/coshh-substances.csv", async () => (await db.execute(sql`SELECT * FROM coshh_substances WHERE client_id = ${cid} ORDER BY id`)).rows);
+        await out.csv("coshh-track/assessments.csv", async () => (await db.execute(sql`SELECT * FROM coshh_assessments WHERE client_id = ${cid} ORDER BY id`)).rows);
+        await out.csv("coshh-track/checks.csv", async () => (await db.execute(sql`SELECT * FROM coshh_checks WHERE client_id = ${cid} ORDER BY check_date DESC, id`)).rows);
+        await out.csv("coshh-track/sign-offs.csv", async () => (await db.execute(sql`SELECT * FROM coshh_acknowledgements WHERE client_id = ${cid} ORDER BY acknowledged_at, id`)).rows);
         await out.csv("registers/asbestos-records.csv", async () => (await db.execute(sql`SELECT * FROM asbestos_records WHERE client_id = ${cid} ORDER BY id`)).rows);
         await out.csv("registers/asbestos-register-entries.csv", async () => (await db.execute(sql`SELECT * FROM asbestos_register_entries WHERE client_id = ${cid} ORDER BY record_id, id`)).rows);
         await out.csv("registers/asbestos-survey-history.csv", async () => (await db.execute(sql`SELECT * FROM asbestos_survey_history WHERE client_id = ${cid} ORDER BY record_id, id`)).rows);

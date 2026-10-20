@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { AlertOctagon, Bike, BookOpen, Bug, Building2, CheckCircle2, Droplets, Flame, Leaf, PlugZap, ShieldCheck, Sunrise, Sunset, TreePine, UtensilsCrossed, Waves, Wrench } from "lucide-react";
+import { AlertOctagon, Beaker, Bike, BookOpen, Bug, Building2, CheckCircle2, Droplets, Flame, Leaf, PlugZap, ShieldCheck, Sunrise, Sunset, TreePine, UtensilsCrossed, Waves, Wrench } from "lucide-react";
 
 /**
  * Add-on modules offered at checkout (trial-ended page and Settings). Keys match
@@ -147,6 +147,13 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     desc: "Pest control monitoring & treatment log",
     icon: Bug,
     iconColor: "text-stone-700",
+  },
+  {
+    key: "coshhtrack",
+    label: "COSHHTrack",
+    desc: "COSHH assessments, LEV tests, health checks & briefings",
+    icon: Beaker,
+    iconColor: "text-orange-700",
   },
   {
     key: "dailytrack_am",

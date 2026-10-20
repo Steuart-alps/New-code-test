@@ -29,7 +29,7 @@ const AUTO_COMPLETE_NOTE = { am: "Done automatically: AM checklist submitted", p
 export const TASK_MODULES = [
   "compliance", "firetrack", "kitchentrack", "legionellatrack", "doctrack", "fixtrack", "traintrack",
   "hottubtrack", "treetrack", "biketrack", "aquatrack", "greentrack", "incidenttrack", "pattrack",
-  "pesttrack", "premisestrack", "roomtrack", "dailytrack_am", "dailytrack_pm",
+  "pesttrack", "premisestrack", "roomtrack", "coshhtrack", "dailytrack_am", "dailytrack_pm",
 ] as const;
 
 const day = z.string().refine(isCalendarDay, "Use a YYYY-MM-DD date");

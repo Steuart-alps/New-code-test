@@ -12,6 +12,7 @@ import { db } from "@workspace/db";
 import { sql, type SQL } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId } from "../middleware/requireAuth";
 import { getCheckAlerts, type CheckAlert } from "../lib/checkReminders";
+import { getCoshhDueItems } from "../lib/coshhTrack";
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { addCalendarDays, getAccountToday } from "../lib/accountClock";
 import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
@@ -75,6 +76,7 @@ const TRACK_PICK_KEYS: Record<string, readonly string[]> = {
   bike: ["biketrack"],
   green: ["greentrack"],
   incident: ["incidenttrack"],
+  coshh: ["coshhtrack"],
 };
 
 export interface ChecklistTotals {
@@ -1023,6 +1025,38 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     return { trackId: "tree", label: "TreeTrack", path: "/tree-track", enabled, status, badge, items };
   };
 
+  // ── COSHHTrack ────────────────────────────────────────────────────────────────
+  const coshhTrack = async (): Promise<TrackDraft> => {
+    const enabled = entitled("coshhtrack");
+    const items: TrackItem[] = [];
+    let status: TrackStatus = "no_data";
+    let badge = "No records";
+
+    if (enabled) {
+      try {
+        const due = await getCoshhDueItems(clientId, { siteId, accessibleSiteIds }, today);
+        const overdue = due.filter((item) => item.status === "overdue");
+        const soon = due.filter((item) => item.status === "due_soon");
+        const missing = due.filter((item) => item.status === "missing");
+        for (const item of overdue) {
+          items.push({ label: item.label, detail: `Overdue by ${plural(Math.abs(item.daysUntilDue ?? 0), "day")}`, path: "/coshh-track" });
+        }
+        for (const item of missing) items.push({ label: item.label, detail: "Not recorded yet", path: "/coshh-track" });
+        for (const item of soon) {
+          items.push({ label: item.label, detail: item.daysUntilDue === 0 ? "Due today" : `Due in ${plural(item.daysUntilDue ?? 0, "day")}`, path: "/coshh-track" });
+        }
+        if (overdue.length > 0) { status = "overdue"; badge = `${overdue.length} overdue`; }
+        else if (soon.length + missing.length > 0) { status = "attention"; badge = soon.length ? `${soon.length} due soon` : `${missing.length} to record`; }
+        else if (due.length === 0) { status = "no_data"; badge = "No assessments yet"; }
+        else { status = "ok"; badge = "All reviews and checks up to date"; }
+      } catch (error) {
+        ({ status, badge } = unavailable("coshh", error));
+      }
+    }
+
+    return { trackId: "coshh", label: "COSHHTrack", path: "/coshh-track", enabled, status, badge, items };
+  };
+
   // ── BikeTrack ─────────────────────────────────────────────────────────────────
   const bikeTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("biketrack");
@@ -1318,6 +1352,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     checkAlertTrack({ trackId: "hot_tub", module: "hot_tub", label: "TubTrack", path: "/hot-tub",
       enabled: entitled("hottubtrack"), daysDetail: true }),
     treeTrack(),
+    coshhTrack(),
     bikeTrack(),
     greenTrack(),
     swimTrack(),
@@ -1359,6 +1394,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     train: ["train", "traintrack"],
     hot_tub: ["hottub", "hottubtrack", "tub", "tubtrack"],
     tree: ["tree", "treetrack"],
+    coshh: ["coshh", "coshhtrack"],
     bike: ["bike", "biketrack"],
     green: ["green", "greentrack"],
     swim: ["swim", "swimtrack"],
