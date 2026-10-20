@@ -987,7 +987,7 @@ export default function HotTubPage() {
               {activeTubs.length > 0 && (
                 <div className="mt-2">
                   <Label htmlFor="location" className="text-xs text-muted-foreground">Specific area / notes (optional)</Label>
-                  <Input id="location" placeholder="e.g. poolside, indoors…"
+                  <Input id="location" dictation placeholder="e.g. poolside, indoors…"
                     value={form.location}
                     onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
                     className="mt-1 rounded-sm" />

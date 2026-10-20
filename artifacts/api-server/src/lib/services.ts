@@ -45,8 +45,9 @@ export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safe
  * Services listed in the catalogue whose module is not available yet (its page
  * shows "Coming soon"). They cannot be bought on their own: checkout and
  * add-on activation refuse them. Bundle customers get them when they launch.
+ * Empty while every module is live (GreenTrack launched 2026-10-19).
  */
-export const COMING_SOON_SERVICE_KEYS: readonly string[] = ["greentrack"];
+export const COMING_SOON_SERVICE_KEYS: readonly string[] = [];
 export const PURCHASABLE_ADDON_KEYS: readonly ServiceKey[] = ADDON_KEYS.filter(
   (key) => !COMING_SOON_SERVICE_KEYS.includes(key),
 );

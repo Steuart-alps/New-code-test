@@ -50,6 +50,9 @@ try {
   await build({
     entryPoints: [path.join(dir, "private-file-acl.entry.ts")],
     bundle: true, platform: "node", format: "esm", outfile: output, logLevel: "silent",
+    // Load drizzle from node_modules: bundled, its pg-core modules can be
+    // initialised in an order that leaves a column builder undefined.
+    external: ["drizzle-orm", "drizzle-orm/*"],
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
     plugins: [{
       name: "isolated-acl-dependencies",

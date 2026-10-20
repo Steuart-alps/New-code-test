@@ -7,6 +7,7 @@
     "test:schema:fresh": "bash tests/run-fresh-schema.sh",
     "test:schema:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh",
     "test:schema:parity": "bash tests/run-schema-parity.sh",
+    "test:schema:upgrade": "FRESH_SCHEMA_UPGRADE_FIXTURE=replit-runtime bash tests/run-fresh-schema.sh tests/upgrade-fixtures.mjs && FRESH_SCHEMA_UPGRADE_FIXTURE=replit-push bash tests/run-fresh-schema.sh tests/upgrade-fixtures.mjs",
     "test:train-track-roster-identity": "bash tests/run-fresh-schema.sh tests/train-track-roster-identity.mjs",
     "test:kitchen-mobile-replay": "bash tests/run-fresh-schema.sh tests/kitchen-mobile-replay.mjs",
     "test:mobile-check-replay": "bash tests/run-fresh-schema.sh tests/mobile-check-replay.mjs",

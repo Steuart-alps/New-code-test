@@ -111,6 +111,11 @@ jobs:
       - name: Email design test
         run: pnpm --filter @workspace/api-server run test:email-layout
 
+      # Real DocTrack and /documents routes against an in-memory storage and
+      # database double, including a failed ACL write during registration.
+      - name: Private file ACL checks
+        run: pnpm --filter @workspace/api-server run test:private-file-acl
+
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
 
@@ -204,6 +209,11 @@ jobs:
 
       - name: SafeTrack reminder job tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:safe-track-ack-reminders:fresh
+
+      # Older, populated databases (Replit-era table layouts) must keep every
+      # record through the runtime migrations, readable through today's routes.
+      - name: Upgrade-path fixture tests
+        run: pnpm --filter @workspace/api-server run test:schema:upgrade
 
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed

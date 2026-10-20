@@ -100,6 +100,11 @@ export const db = {
     if (/^SELECT \(SELECT count\(\*\) FROM check_photos\b/.test(text)) {
       return { rows: [{ pat_refs: 0, visible_refs: 0 }] };
     }
+    // Every read runs the RIDDOR receipt boundary check; no incident in this
+    // fixture references a receipt.
+    if (/^SELECT \(SELECT count\(\*\) FROM incident_riddor_events\b/.test(text)) {
+      return { rows: [{ refs: 0, visible_refs: 0, attachment: false }] };
+    }
     throw new Error(`Unexpected fixture query: ${text.slice(0, 80)}`);
   },
   insert() {

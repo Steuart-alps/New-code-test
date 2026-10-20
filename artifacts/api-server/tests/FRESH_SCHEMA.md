@@ -22,3 +22,17 @@ Add representative create/list assertions when introducing another module.
 
 The core runtime baseline is fixed SQL, not derived from the current ORM schema.
 Generating it automatically during tests would hide missing migration coverage.
+## Upgrade paths
+
+`pnpm --filter @workspace/api-server run test:schema:upgrade` starts the same
+private cluster from two older, populated layouts instead of an empty database
+(`tests/upgrade-fixtures/legacy-shapes.ts`, copied from the September 2026
+code): `replit-runtime` (tables made by that era's runtime CREATE TABLE text:
+BikeTrack's first column names, Legionella and hot tub `temperature_c`, the
+fixed-column kitchen diary with its whole-table unique constraint) and
+`replit-push` (the same tables as drizzle-kit push built them, with the old
+`UQ_food_safety_client_date` index). After the migrations run twice,
+`tests/upgrade-fixtures.mjs` checks every row is still there with its original
+columns unchanged, readable through today's routes, audited where copied, and
+that the diary still holds one record per business, site and day. Add a shape
+there when a migration renames or moves a column that may already hold data.

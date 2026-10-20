@@ -174,7 +174,7 @@ export function ItemFormDialog({
           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
             <div className="col-span-2 space-y-1">
               <Label htmlFor="title" className="text-xs font-medium">Title *</Label>
-              <Input id="title" {...form.register("title")} className="bg-background h-9" />
+              <Input id="title" dictation {...form.register("title")} className="bg-background h-9" />
               {form.formState.errors.title && (
                 <p className="text-xs text-destructive">{form.formState.errors.title.message}</p>
               )}
