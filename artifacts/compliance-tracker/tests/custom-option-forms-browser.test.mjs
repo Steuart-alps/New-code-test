@@ -235,6 +235,10 @@ async function routeApi(route) {
     return write(200, { ok: true });
   }
   if (method === "POST" && path === "/api/analytics/events") return route.fulfill({ status: 204 });
+  // The app-wide storage limit banner (#156).
+  if (method === "GET" && path === "/api/storage/status") {
+    return json(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
+  }
   unexpectedRequests.push(`${method} ${path}${url.search}`);
   return json(route, { error: "Not in the custom option forms fixture" }, 404);
 }
