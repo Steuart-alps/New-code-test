@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
+import { DepartmentSwitcher } from "@/components/department-switcher";
 import { Link, useLocation } from "wouter";
 import {
   ShieldCheck,
@@ -18,7 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { useAuth, useIsConsultant, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useIsConsultant, useCanAdmin, useCanManageUsers } from "@/context/auth-context";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -91,7 +92,8 @@ function useTrackGuidanceDismissed(userId: number | undefined): [boolean, () => 
 function useNavGroups(): NavGroup[] {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
-  return getNavGroups({ isConsultant, canAdmin });
+  const canManageUsers = useCanManageUsers();
+  return getNavGroups({ isConsultant, canAdmin, canManageUsers });
 }
 
 function NavSidebarGroup({ group, location, hasService, primaryColor, onNavigate, layoutIdPrefix, storageScope }: { group: NavGroup; location: string; hasService: (s: string) => boolean; primaryColor: string; onNavigate?: () => void; layoutIdPrefix: string; storageScope: string }) {
@@ -438,6 +440,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <DepartmentSwitcher />
             <Link
               href="/account-security"
               className="hidden md:flex items-center gap-2 px-2 py-2 rounded-sm text-sm text-[#162D42] hover:bg-muted transition-colors"

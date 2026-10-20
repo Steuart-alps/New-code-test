@@ -813,53 +813,14 @@ async function main() {
   });
   expectOk("viewer: login", viewerLogin.status, [200, 201]);
 
-  const viewerSiteList = await viewer("GET", "/sites");
-  expectOk("viewer: GET /sites", viewerSiteList.status);
-  const viewerSites = Array.isArray(viewerSiteList.data) ? viewerSiteList.data : [];
-  check(
-    "viewer: /sites includes alpha site",
-    viewerSites.some((s) => s.id === siteAlphaId),
-    "alpha site missing from viewer list",
-  );
-  check(
-    "viewer: /sites excludes beta site",
-    !viewerSites.some((s) => s.id === siteBetaId),
-    "beta site visible in viewer list",
-  );
-  expectOk(
-    "viewer: GET /sites/:id (own dept)",
-    (await viewer("GET", `/sites/${siteAlphaId}`)).status,
-  );
-  expectForbidden(
-    "viewer: GET /sites/:id (other dept)",
-    (await viewer("GET", `/sites/${siteBetaId}`)).status,
-  );
-
-  const viewerItemList = await viewer("GET", "/compliance-items");
-  expectOk("viewer: GET /compliance-items", viewerItemList.status);
-  const viewerItems = Array.isArray(viewerItemList.data)
-    ? viewerItemList.data
-    : viewerItemList.data?.items ?? [];
-  if (alphaItem) {
-    check(
-      "viewer: /compliance-items includes alpha item",
-      viewerItems.some((i) => i.id === alphaItem.id),
-      "alpha item missing from viewer list",
-    );
-  }
-  if (betaItem) {
-    check(
-      "viewer: /compliance-items excludes beta item",
-      !viewerItems.some((i) => i.id === betaItem.id),
-      "beta dept item visible in viewer list",
-    );
-    expectForbidden(
-      "viewer: GET /compliance-items/:id (other dept)",
-      (await viewer("GET", `/compliance-items/${betaItem.id}`)).status,
-    );
+  // Viewers see only their own training records, so even their own
+  // department's sites and items are closed to them.
+  for (const path of ["/sites", `/sites/${siteAlphaId}`, `/sites/${siteBetaId}`, "/compliance-items",
+    ...(betaItem ? [`/compliance-items/${betaItem.id}`] : [])]) {
+    expectForbidden(`viewer: GET ${path} refused`, (await viewer("GET", path)).status);
   }
 
-  // Viewers are read-only: all mutations must be rejected, even in their own dept.
+  // All viewer mutations must be rejected, even in their own dept.
   expectForbidden(
     "viewer: POST /fire-safety rejected",
     (await viewer("POST", "/fire-safety", {
@@ -883,6 +844,10 @@ async function main() {
       email, password: "password-000",
     })).status, [200, 201]);
     const scopedSites = await session("GET", "/sites");
+    if (role === "client_viewer") {
+      expectForbidden(`unassigned ${role}: GET /sites refused`, scopedSites.status);
+      continue;
+    }
     expectOk(`unassigned ${role}: GET /sites`, scopedSites.status);
     const rows = Array.isArray(scopedSites.data) ? scopedSites.data : [];
     check(`unassigned ${role}: excludes alpha department`, !rows.some(s => s.id === siteAlphaId), "alpha site visible");

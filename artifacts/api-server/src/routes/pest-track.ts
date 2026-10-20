@@ -7,6 +7,7 @@ import { getEffectiveOptionList } from "../lib/formOptions";
 import { createPestControlRegisterPdf } from "../lib/pestControlRegisterPdf";
 import { z } from "zod";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -17,7 +18,7 @@ const router = Router();
 function departmentSiteIds(clientId: number, departmentId: number) {
   return db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.clientId, clientId),
-    or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+    sitesTableVisibleTo(departmentId),
   ));
 }
 
@@ -32,7 +33,7 @@ async function siteInDepartment(siteId: unknown, clientId: number, departmentId:
   const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.id, siteId),
     eq(sitesTable.clientId, clientId),
-    or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+    sitesTableVisibleTo(departmentId),
   )).limit(1);
   return !!site;
 }

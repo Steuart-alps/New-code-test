@@ -1,42 +1,45 @@
 /**
- * One source for the storage add-on's price, so the estimate shown in
- * Settings and the recurring Stripe price that is actually charged cannot
- * drift apart unnoticed.
+ * The storage add-on's price, and the check that it still covers ALPS's costs.
  *
- * The estimate is the storage provider's USD rate plus the ALPS margin. The
- * add-on is billed from the Stripe price in STORAGE_ADDON_PRICE_ID (per GiB,
- * monthly, normally GBP). This module turns the provider rate into the price
- * Stripe should carry, compares it with the configured price, and reports any
- * difference. Rules, all explicit:
+ * Extra storage is sold at a fixed £1 per 10 GiB per month (Steuart,
+ * 2026-10-19), in 10 GiB steps. In Stripe it is one monthly GBP price of 10p
+ * per GiB tagged service_key=storage, which the app creates itself at start-up
+ * (ensureStoragePrice in services.ts); STORAGE_ADDON_PRICE_ID can name another
+ * price instead. The check, all explicit:
  *
- * - Currency: the provider rate is in USD. A non-USD Stripe price needs
- *   STORAGE_USD_EXCHANGE_RATE (units of that currency per 1 USD). There is no
- *   default and no live exchange-rate lookup: a guessed rate would be exactly
- *   the silent drift this check exists to catch.
- * - Rounding: Stripe charges whole minor units (pence), so the expected price
- *   is the exact figure rounded UP, and never below 1. ALPS never sells below
- *   provider cost plus margin because of rounding.
- * - Tolerance: the configured price may sit within
- *   STORAGE_PRICE_TOLERANCE_PERCENT (default 5) of the exact figure, measured
- *   after the same rounding up. Anything outside is drift.
- * - Minimum charge: the first month is collected up front as one invoice, and
- *   Stripe will not charge a card below its minimum (GBP 0.30, USD/EUR 0.50).
- *   Purchases must be at least enough GiB to reach it.
+ * - Price: the Stripe price must be active, monthly, GBP and exactly
+ *   STORAGE_UNIT_AMOUNT_PENCE per GiB, so customers pay what the app shows.
+ * - Cost: the storage provider's USD rate per GiB-month
+ *   (STORAGE_PROVIDER_USD_PER_GIB_MONTH) plus the ALPS margin
+ *   (STORAGE_ALPS_MARKUP_PERCENT), converted at STORAGE_USD_EXCHANGE_RATE
+ *   (pounds per 1 USD) and rounded up to whole pence, must not exceed the
+ *   price. Without an exchange rate the check assumes 1 USD = £1, which
+ *   overstates the cost in pounds, so it can only pause sales too early.
+ * - Stripe's minimum charge (30p) is always met: one 10 GiB step is £1.
  *
- * Drift or a configuration the check cannot evaluate pauses new storage
- * purchases (existing subscriptions are never changed) and alerts operators.
+ * A wrong price, or costs rising above it, pauses new storage purchases
+ * (existing subscriptions are never changed) and alerts operators.
  */
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 
-export const DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH = 0.015;
+/** Storage is sold in steps of this many GiB. */
+export const STORAGE_PACK_GIB = 10;
+/** Price of one step, in pence per month (£1 per 10 GiB). */
+export const STORAGE_PACK_PRICE_PENCE = 100;
+/** The Stripe price is per GiB: 10p, so a 10 GiB step costs £1. */
+export const STORAGE_UNIT_AMOUNT_PENCE = STORAGE_PACK_PRICE_PENCE / STORAGE_PACK_GIB;
+export const STORAGE_PRICE_CURRENCY = "gbp";
+/** Google Cloud Storage Standard, the dearest European single region or multi-region rate. */
+export const DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH = 0.026;
 export const DEFAULT_ALPS_STORAGE_MARKUP_PERCENT = 20;
-export const DEFAULT_STORAGE_PRICE_TOLERANCE_PERCENT = 5;
+/** Used only when STORAGE_USD_EXCHANGE_RATE is unset: overstates the cost in pounds. */
+export const FALLBACK_USD_EXCHANGE_RATE = 1;
 
 /**
  * Stripe's minimum amount per charge, in minor units
  * (https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts).
- * Only two-decimal currencies are listed; any other currency is reported as
- * unsupported rather than guessed.
  */
 export const STRIPE_MINIMUM_CHARGE_MINOR_UNITS: Readonly<Record<string, number>> = {
   gbp: 30,
@@ -74,36 +77,37 @@ export interface StoragePriceInput {
 
 export type StoragePriceIssue =
   | "rate_config_invalid"
-  | "tolerance_invalid"
   | "currency_unsupported"
-  | "exchange_rate_missing"
   | "exchange_rate_invalid"
   | "price_inactive"
   | "price_not_monthly"
-  | "price_not_whole_minor_units"
-  | "price_below_expected"
-  | "price_above_expected";
+  | "price_not_storage_rate"
+  | "price_below_cost";
 
 export interface StoragePriceCheck {
-  /** ok: purchases allowed. drift: the price is outside the allowed range. misconfigured: the check cannot be evaluated. */
+  /** ok: purchases allowed. drift: costs now exceed the price. misconfigured: the price is not the storage price. */
   status: "ok" | "drift" | "misconfigured";
   issues: StoragePriceIssue[];
   priceId: string;
   currency: string;
   /** Per-GiB monthly price configured in Stripe, minor units. */
   configuredUnitAmount: number | null;
-  /** Provider rate × (1 + margin) × exchange rate, minor units, before rounding. */
+  /** The per-GiB price the app sells at (STORAGE_UNIT_AMOUNT_PENCE). */
+  expectedUnitAmount: number;
+  /** Provider rate × (1 + margin) × exchange rate, pence per GiB, before rounding. */
   exactUnitAmount: number | null;
-  /** exactUnitAmount rounded up to a whole minor unit (at least 1). */
-  expectedUnitAmount: number | null;
-  allowedUnitAmount: { min: number; max: number } | null;
+  /** exactUnitAmount rounded up to a whole penny: the least the price may be. */
+  costUnitAmount: number | null;
   providerUsdPerGibMonth: number | null;
   markupPercent: number | null;
   usdExchangeRate: number | null;
-  tolerancePercent: number | null;
+  /** True when STORAGE_USD_EXCHANGE_RATE is unset and the cautious fallback was used. */
+  exchangeRateAssumed: boolean;
   stripeMinimumChargeMinorUnits: number | null;
-  /** Smallest purchase whose first-month charge reaches Stripe's minimum. */
-  minimumPurchaseGib: number | null;
+  /** Purchases and reductions move in steps of this many GiB. */
+  packGib: number;
+  /** Smallest purchase: one step. */
+  minimumPurchaseGib: number;
   /** One operator-facing sentence. */
   message: string;
 }
@@ -113,19 +117,22 @@ function roundUpMinorUnits(value: number): number {
   return Math.max(1, Math.ceil(Number(value.toFixed(6))));
 }
 
-/** Smallest whole GiB whose charge at `unitAmount` reaches Stripe's minimum for `currency`. */
-export function minimumStoragePurchaseGib(unitAmount: number, currency: string): number | null {
-  const minimum = STRIPE_MINIMUM_CHARGE_MINOR_UNITS[currency.toLowerCase()];
-  if (!minimum || !Number.isSafeInteger(unitAmount) || unitAmount < 1) return null;
-  return Math.max(1, Math.ceil(minimum / unitAmount));
+/** Whether a GiB amount is a whole number of storage steps. */
+export function isWholeStoragePacks(gib: number): boolean {
+  return Number.isSafeInteger(gib) && gib >= 0 && gib % STORAGE_PACK_GIB === 0;
 }
 
-function money(minorUnits: number | null, currency: string): string {
+/** Round a GiB amount up to whole storage steps. */
+export function roundUpToStoragePacks(gib: number): number {
+  return Math.ceil(Math.max(0, gib) / STORAGE_PACK_GIB) * STORAGE_PACK_GIB;
+}
+
+function money(minorUnits: number | null): string {
   if (minorUnits === null) return "unknown";
-  return `${(minorUnits / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  return `£${(minorUnits / 100).toFixed(2)}`;
 }
 
-/** Pure comparison of a Stripe storage price with the provider-rate calculation. */
+/** Pure check of a Stripe price against the fixed storage price and the provider's cost. */
 export function evaluateStorageAddonPrice(price: StoragePriceInput, env: Env = process.env): StoragePriceCheck {
   const currency = String(price.currency ?? "").toLowerCase();
   const configured = Number.isSafeInteger(price.unit_amount) ? Number(price.unit_amount) : null;
@@ -133,57 +140,40 @@ export function evaluateStorageAddonPrice(price: StoragePriceInput, env: Env = p
 
   if (!price.active) issues.push("price_inactive");
   if (price.type !== "recurring" || price.recurring?.interval !== "month") issues.push("price_not_monthly");
-  if (configured === null || configured < 1) issues.push("price_not_whole_minor_units");
+  if (currency !== STORAGE_PRICE_CURRENCY) issues.push("currency_unsupported");
+  else if (configured !== STORAGE_UNIT_AMOUNT_PENCE) issues.push("price_not_storage_rate");
 
   const rates = readStorageRateConfig(env);
   if (!rates) issues.push("rate_config_invalid");
 
-  const rawTolerance = env.STORAGE_PRICE_TOLERANCE_PERCENT?.trim();
-  const tolerancePercent = rawTolerance ? Number(rawTolerance) : DEFAULT_STORAGE_PRICE_TOLERANCE_PERCENT;
-  const toleranceValid = Number.isFinite(tolerancePercent) && tolerancePercent >= 0 && tolerancePercent < 100;
-  if (!toleranceValid) issues.push("tolerance_invalid");
-
-  const stripeMinimum = STRIPE_MINIMUM_CHARGE_MINOR_UNITS[currency] ?? null;
-  if (stripeMinimum === null) issues.push("currency_unsupported");
-
-  let usdExchangeRate: number | null = null;
-  if (currency === "usd") {
-    usdExchangeRate = 1;
-  } else {
-    const rawFx = env.STORAGE_USD_EXCHANGE_RATE?.trim();
-    if (!rawFx) issues.push("exchange_rate_missing");
-    else if (!Number.isFinite(Number(rawFx)) || Number(rawFx) <= 0) issues.push("exchange_rate_invalid");
-    else usdExchangeRate = Number(rawFx);
-  }
-
-  let exact: number | null = null;
-  let expected: number | null = null;
-  let allowed: StoragePriceCheck["allowedUnitAmount"] = null;
-  if (rates && usdExchangeRate !== null) {
-    exact = rates.providerUsdPerGibMonth * (1 + rates.markupPercent / 100) * usdExchangeRate * 100;
-    expected = roundUpMinorUnits(exact);
-    if (toleranceValid) {
-      allowed = {
-        min: roundUpMinorUnits(exact * (1 - tolerancePercent / 100)),
-        max: roundUpMinorUnits(exact * (1 + tolerancePercent / 100)),
-      };
+  const rawFx = env.STORAGE_USD_EXCHANGE_RATE?.trim();
+  let usdExchangeRate: number | null = FALLBACK_USD_EXCHANGE_RATE;
+  if (rawFx) {
+    usdExchangeRate = Number(rawFx);
+    if (!Number.isFinite(usdExchangeRate) || usdExchangeRate <= 0) {
+      issues.push("exchange_rate_invalid");
+      usdExchangeRate = null;
     }
   }
 
-  const misconfigured = issues.length > 0;
-  if (!misconfigured && allowed && configured !== null) {
-    if (configured < allowed.min) issues.push("price_below_expected");
-    if (configured > allowed.max) issues.push("price_above_expected");
+  let exact: number | null = null;
+  let cost: number | null = null;
+  if (rates && usdExchangeRate !== null) {
+    exact = rates.providerUsdPerGibMonth * (1 + rates.markupPercent / 100) * usdExchangeRate * 100;
+    cost = roundUpMinorUnits(exact);
   }
+
+  const misconfigured = issues.length > 0;
+  if (!misconfigured && cost !== null && cost > STORAGE_UNIT_AMOUNT_PENCE) issues.push("price_below_cost");
   const status: StoragePriceCheck["status"] = misconfigured ? "misconfigured" : issues.length ? "drift" : "ok";
 
   let message: string;
   if (status === "ok") {
-    message = `Storage add-on price ${money(configured, currency)} per GiB-month matches the provider rate plus margin (expected ${money(expected, currency)}).`;
+    message = `Storage add-on price ${money(configured)} per GiB-month (£1 per 10 GiB) covers the provider rate plus margin (${money(cost)}).`;
   } else if (status === "drift") {
-    message = `Storage add-on price ${money(configured, currency)} per GiB-month no longer matches the provider rate plus margin: expected ${money(expected, currency)} (allowed ${money(allowed!.min, currency)} to ${money(allowed!.max, currency)}). Create a new Stripe price at ${money(expected, currency)} and point STORAGE_ADDON_PRICE_ID at it, or correct the rate settings.`;
+    message = `Storage add-on price ${money(configured)} per GiB-month no longer covers the provider rate plus margin (${money(cost)}). Raise STORAGE_PACK_PRICE_PENCE in the code, or correct the rate settings.`;
   } else {
-    message = `Storage add-on price check cannot be evaluated: ${issues.join(", ")}.`;
+    message = `Storage add-on price ${price.id} is not the £1 per 10 GiB storage price: ${issues.join(", ")}.`;
   }
 
   return {
@@ -192,22 +182,48 @@ export function evaluateStorageAddonPrice(price: StoragePriceInput, env: Env = p
     priceId: price.id,
     currency,
     configuredUnitAmount: configured,
+    expectedUnitAmount: STORAGE_UNIT_AMOUNT_PENCE,
     exactUnitAmount: exact === null ? null : Number(exact.toFixed(6)),
-    expectedUnitAmount: expected,
-    allowedUnitAmount: allowed,
+    costUnitAmount: cost,
     providerUsdPerGibMonth: rates?.providerUsdPerGibMonth ?? null,
     markupPercent: rates?.markupPercent ?? null,
     usdExchangeRate,
-    tolerancePercent: toleranceValid ? tolerancePercent : null,
-    stripeMinimumChargeMinorUnits: stripeMinimum,
-    minimumPurchaseGib: configured === null ? null : minimumStoragePurchaseGib(configured, currency),
+    exchangeRateAssumed: !rawFx,
+    stripeMinimumChargeMinorUnits: STRIPE_MINIMUM_CHARGE_MINOR_UNITS[currency] ?? null,
+    packGib: STORAGE_PACK_GIB,
+    minimumPurchaseGib: STORAGE_PACK_GIB,
     message,
   };
 }
 
+/**
+ * The Stripe price storage is sold at: STORAGE_ADDON_PRICE_ID when set, else
+ * the live monthly GBP price tagged service_key=storage that the app created.
+ */
+export async function findStoragePriceId(env: Env = process.env): Promise<string | null> {
+  const configured = env.STORAGE_ADDON_PRICE_ID?.trim();
+  if (configured) return configured;
+  const rows = await db.execute(sql`
+    SELECT pr.id
+      FROM stripe.prices pr
+      JOIN stripe.products p ON p.id = pr.product
+     WHERE p.active = true
+       AND pr.active = true
+       AND (pr.recurring->>'interval') = 'month'
+       AND COALESCE(pr.recurring->>'interval_count', '1') = '1'
+       AND pr.currency = ${STORAGE_PRICE_CURRENCY}
+       AND pr.unit_amount = ${STORAGE_UNIT_AMOUNT_PENCE}
+       AND pr.metadata->>'service_key' = 'storage'
+     ORDER BY pr.created DESC
+     LIMIT 1
+  `);
+  const row = (rows.rows ?? [])[0] as { id?: string } | undefined;
+  return row?.id ?? null;
+}
+
 export type StoragePriceCheckResult =
   | StoragePriceCheck
-  /** STORAGE_ADDON_PRICE_ID is unset: the add-on is simply not offered. */
+  /** No storage price exists (or is configured): the add-on is simply not offered. */
   | { status: "not_configured"; message: string }
   /** Stripe could not be read; nothing is known about the price. */
   | { status: "unavailable"; message: string };
@@ -220,7 +236,7 @@ let lastLoggedFingerprint: string | null = null;
 
 export function storagePriceFingerprint(result: StoragePriceCheckResult): string {
   if (result.status !== "ok" && result.status !== "drift" && result.status !== "misconfigured") return result.status;
-  return [result.status, result.priceId, result.issues.join("+"), result.configuredUnitAmount, result.expectedUnitAmount].join(":");
+  return [result.status, result.priceId, result.issues.join("+"), result.configuredUnitAmount, result.costUnitAmount].join(":");
 }
 
 /**
@@ -242,13 +258,20 @@ export function rememberStoragePriceCheck(result: StoragePriceCheckResult, now =
  */
 export async function checkStorageAddonPrice(options: {
   retrievePrice?: StoragePriceRetriever;
+  findPriceId?: (env: Env) => Promise<string | null>;
   maxAgeMs?: number;
   env?: Env;
   now?: number;
 } = {}): Promise<StoragePriceCheckResult> {
   const env = options.env ?? process.env;
-  const priceId = env.STORAGE_ADDON_PRICE_ID?.trim();
-  if (!priceId) return { status: "not_configured", message: "STORAGE_ADDON_PRICE_ID is not set; the storage add-on is not offered." };
+  let priceId: string | null;
+  try {
+    priceId = await (options.findPriceId ?? findStoragePriceId)(env);
+  } catch (err) {
+    logger.warn({ err }, "Storage add-on price check could not look up the storage price");
+    return { status: "unavailable", message: "The storage price could not be looked up." };
+  }
+  if (!priceId) return { status: "not_configured", message: "No storage price exists yet; the storage add-on is not offered." };
   const now = options.now ?? Date.now();
   const maxAgeMs = options.maxAgeMs ?? DEFAULT_CACHE_MS;
   if (cached && cached.priceId === priceId && now - cached.at < maxAgeMs) return cached.result;

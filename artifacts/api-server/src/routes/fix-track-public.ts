@@ -7,7 +7,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sendEmail } from "../lib/email";
 import { getPublicAppUrl } from "../lib/email";
-import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { ObjectContentError, ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { digestBearerToken } from "../lib/bearerTokens";
 import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
@@ -393,6 +393,7 @@ router.post("/:token", async (req, res) => {
     try {
       await storage.finalizeTenantUpload(completionObjectPath, t.client_id);
     } catch (err) {
+      if (err instanceof ObjectContentError) return res.status(400).json({ error: err.message });
       const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
         : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
       return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });

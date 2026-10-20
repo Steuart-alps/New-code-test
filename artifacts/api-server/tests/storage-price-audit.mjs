@@ -36,7 +36,7 @@ try {
 const { db, sql, pool, evaluateStorageAddonPrice, runStoragePriceAudit, runScheduledStoragePriceAudit, STORAGE_PRICE_AUDIT_KEY } = lib;
 after(() => pool.end());
 
-const GBP = { STORAGE_USD_EXCHANGE_RATE: "0.79" };
+const GBP = { STORAGE_USD_EXCHANGE_RATE: "0.76" };
 const price = (unit_amount) => ({ id: "price_storage", active: true, type: "recurring", currency: "gbp", unit_amount, recurring: { interval: "month" } });
 const checked = (unitAmount, env = GBP) => async () => evaluateStorageAddonPrice(price(unitAmount), env);
 const notConfigured = async () => ({ status: "not_configured", message: "unset" });
@@ -64,30 +64,30 @@ test("alerts once per finding, re-alerts a change and reports recovery once", as
   let now = new Date("2026-10-15T09:35:00Z");
   const run = (check, extra = {}) => runStoragePriceAudit({ check, now: () => now, ...extra });
 
-  assert.equal((await run(checked(2))).status, "healthy");
+  assert.equal((await run(checked(10))).status, "healthy");
   assert.equal((await run(notConfigured)).status, "healthy", "an add-on that is not offered is not an incident");
   assert.equal((await mail()).length, 0);
 
-  // The provider rate rises: 2p no longer covers cost plus margin.
-  const risen = { ...GBP, STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.023" };
-  const opened = await run(checked(2, risen));
+  // The provider rate rises: 10p no longer covers cost plus margin.
+  const risen = { ...GBP, STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.11" };
+  const opened = await run(checked(10, risen));
   assert.equal(opened.status, "alert");
   assert.equal(opened.delivered, "emailed");
   let sent = await mail();
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, "operators@test.local");
-  assert.equal(sent[0].subject, "[ComplyTrack] Storage add-on price out of line: purchases paused");
-  assert.match(sent[0].text, /expected 0\.03 GBP/);
-  assert.match(sent[0].text, /0\.023 USD provider rate × \(1 \+ 20% margin\) × 0\.79 GBP\/USD = 2\.1804, rounded up to 3/);
+  assert.equal(sent[0].subject, "[ComplyTrack] Storage add-on price no longer covers costs: purchases paused");
+  assert.match(sent[0].text, /£0\.10 per GiB-month no longer covers the provider rate plus margin \(£0\.11\)/);
+  assert.match(sent[0].text, /0\.11 USD provider rate × \(1 \+ 20% margin\) × 0\.76 GBP\/USD = 10\.032, rounded up to 11 pence/);
   assert.match(sent[0].text, /Existing storage subscriptions are unchanged/);
 
   // Same finding later, and after a restart (state is in the database): quiet.
   now = new Date("2026-10-15T10:35:00Z");
-  assert.equal((await run(checked(2, risen))).status, "ongoing");
+  assert.equal((await run(checked(10, risen))).status, "ongoing");
   assert.equal((await mail()).length, 1);
   const [row] = await state();
   assert.equal(new Date(row.incident_opened_at).toISOString(), "2026-10-15T09:35:00.000Z");
-  assert.equal(row.incident_issues.expectedUnitAmount, 3);
+  assert.equal(row.incident_issues.costUnitAmount, 11);
 
   // Stripe unreadable: neither recovery nor a new incident.
   assert.equal((await run(unreadable)).status, "unavailable");
@@ -98,16 +98,16 @@ test("alerts once per finding, re-alerts a change and reports recovery once", as
   assert.equal(changed.status, "alert");
   sent = await mail();
   assert.equal(sent.length, 2);
-  assert.match(sent[1].text, /0\.09 GBP per GiB-month no longer matches/);
+  assert.match(sent[1].text, /is not the £1 per 10 GiB storage price: price_not_storage_rate/);
 
-  // Fixed at 3p.
-  const recovered = await run(checked(3, risen));
+  // The rate setting is corrected and the storage price is back.
+  const recovered = await run(checked(10));
   assert.equal(recovered.status, "recovered");
   sent = await mail();
   assert.equal(sent.length, 3);
   assert.equal(sent[2].subject, "[ComplyTrack] Storage add-on price back in line");
   assert.equal((await state())[0].incident_fingerprint, null);
-  assert.equal((await run(checked(3, risen))).status, "healthy");
+  assert.equal((await run(checked(10))).status, "healthy");
   assert.equal((await mail()).length, 3, "recovery is reported once");
 });
 
@@ -123,7 +123,7 @@ test("a misconfigured check alerts too, and a failed email is retried", async ()
   const sent = await mail();
   assert.equal(sent.length, 1);
   assert.match(sent[0].subject, /misconfigured: purchases paused/);
-  assert.match(sent[0].text, /exchange_rate_missing/);
+  assert.match(sent[0].text, /price_not_storage_rate/);
   assert.equal((await runStoragePriceAudit({ check: checked(2, {}) })).status, "ongoing");
 });
 

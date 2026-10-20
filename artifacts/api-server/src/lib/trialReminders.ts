@@ -10,9 +10,9 @@ import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } 
 
 /**
  * How many days before trial end the reminder fires.
- * 14-day trial → reminder sent on day 10 (≤4 days remaining).
+ * 14-day trial → reminder sent on day 7 (one week remaining).
  */
-export const TRIAL_REMINDER_LEAD_DAYS = 4;
+export const TRIAL_REMINDER_LEAD_DAYS = 7;
 
 function daysUntil(date: Date): number {
   return Math.max(1, Math.ceil((date.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
@@ -130,6 +130,10 @@ async function isPayingCustomer(client: ClientRow, findLive: typeof findLiveSubs
   return true;
 }
 
+/**
+ * The business's own owners: its Owners (client_admin) and, for accounts
+ * signed up before sign-up created Owners, its own consultant.
+ */
 async function activeConsultants(clientId: number) {
   return db
     .select()
@@ -137,7 +141,7 @@ async function activeConsultants(clientId: number) {
     .where(
       and(
         eq(usersTable.clientId, clientId),
-        eq(usersTable.role, "consultant"),
+        inArray(usersTable.role, ["consultant", "client_admin"]),
         eq(usersTable.active, true),
       ),
     );

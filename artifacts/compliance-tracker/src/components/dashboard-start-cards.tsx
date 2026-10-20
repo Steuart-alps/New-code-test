@@ -13,19 +13,20 @@ type SetupSummary = { needsSetup: boolean; canManage: boolean; deferredAt?: stri
 /**
  * Top-of-dashboard cards: the setup wizard banner for admins of a business
  * that has not finished setup (sending them to /setup once per session until
- * they choose "Finish later"), and "My tasks today" for staff. Everyone gets
- * the quick tutorial on their first dashboard visit; managers once the setup
- * wizard is finished or put off, so it doesn't open just before the redirect.
+ * they choose "Finish later"), and "My tasks today" for staff and Managers.
+ * Everyone gets the quick tutorial on their first dashboard visit; Owners
+ * once the setup wizard is finished or put off, so it doesn't open just
+ * before the redirect.
  */
 export function DashboardStartCards() {
   const { user } = useAuth();
-  const isManager = user?.role === "consultant" || user?.role === "client_admin";
+  const isOwner = user?.role === "consultant" || user?.role === "client_admin";
   useEffect(() => {
-    if (user && !isManager) showQuickTutorialIfNew(user.id);
-  }, [user?.id, isManager]);
+    if (user && !isOwner) showQuickTutorialIfNew(user.id);
+  }, [user?.id, isOwner]);
   if (!user) return null;
   if (user.role === "consultant" || user.role === "client_admin") return <SetupBanner />;
-  if (user.role === "client_staff") return <MyTasksTodayCard />;
+  if (user.role === "client_staff" || user.role === "client_manager") return <MyTasksTodayCard />;
   return null;
 }
 

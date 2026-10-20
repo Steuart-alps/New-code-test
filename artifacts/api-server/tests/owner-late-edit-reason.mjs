@@ -28,6 +28,7 @@ async function overrideEvents(clientId) {
 try {
   const owner = await createTenant('late-edit-owner');
   const staff = await createUser(owner, { role: 'client_staff' });
+  const manager = await createUser(owner, { role: 'client_manager' });
   const site = await owner.request('POST', '/sites', { name: 'Late edit site', seedStarterChecks: false });
   assert.equal(site.status, 201, JSON.stringify(site.data));
   const siteId = site.data.id;
@@ -59,7 +60,7 @@ try {
   assert.equal(events[0].entity_id, oldId);
   assert.equal(events[0].actor_id, owner.userId);
   assert.deepEqual(events[0].metadata, {
-    method: 'PUT', path: `/fire-safety/${oldId}`, entryDate: oldDate, reason, role: 'consultant',
+    method: 'PUT', path: `/fire-safety/${oldId}`, entryDate: oldDate, reason, role: 'client_admin',
   });
 
   // Moving a current record onto an older day needs a reason too.
@@ -102,7 +103,11 @@ try {
   const staffBackfill = await staff.request('POST', '/fire-safety', backfill, 'json', reasonHeader('Please let me in'));
   assert.equal(staffBackfill.status, 423, JSON.stringify(staffBackfill.data));
   assert.equal(staffBackfill.data.code, 'TRACK_RECORD_LOCKED');
-  assert.equal((await overrideEvents(owner.clientId)).length, 3, 'staff attempts are not audited as overrides');
+  // Only Owners and consultants change locked records: Managers are locked out too.
+  const managerEdit = await manager.request('PUT', `/fire-safety/${oldId}`, { notes: 'Manager edit' }, 'json', reasonHeader('Please let me in'));
+  assert.equal(managerEdit.status, 423, JSON.stringify(managerEdit.data));
+  assert.equal(managerEdit.data.code, 'TRACK_RECORD_LOCKED');
+  assert.equal((await overrideEvents(owner.clientId)).length, 3, 'staff and manager attempts are not audited as overrides');
 
   // Another business cannot use a reason to reach this record, and nothing is
   // written to either business's audit trail.

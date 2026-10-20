@@ -28,8 +28,8 @@ One after another, each against a freshly started test API:
 - The data export bundles DocTrack documents, SafeTrack risk assessments, contractor-portal
   certificates, compliance-item certificates and photos with identical bytes, and each CSV points
   at the archived file. Another tenant's file and a missing file are left out with a reason in
-  `attachment-manifest.csv`. With a small `EXPORT_ATTACHMENT_MAX_BYTES`, files over the cap are
-  left out and the README carries a warning.
+  `attachment-manifest.csv`. With a small `EXPORT_ATTACHMENT_MAX_BYTES`, the files are split into
+  numbered parts (`?part=N`); part 1 holds what fits and the manifest and README name the later parts.
 - FixTrack issue media: an iPhone-style JPEG (with a rotation tag) and an AVIF become upright JPEGs
   and show after a reload. A real HEIC photo, a cut-off JPEG, a GIF and text posing as MP4 are
   refused with a message and never attached. MP4, MOV and WebM clips are stored unchanged, served

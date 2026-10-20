@@ -114,6 +114,72 @@ export const ListFeedbackReportHistoryResponse = zod.array(ListFeedbackReportHis
 
 
 /**
+ * @summary The signed-in Viewer's own training records (their linked staff roster entry)
+ */
+export const ListMyTrainingRecordsResponse = zod.object({
+  "linked": zod.boolean(),
+  "records": zod.array(zod.object({
+  "id": zod.number(),
+  "record_type": zod.enum(['certificate', 'signoff', 'internal']),
+  "staff_name": zod.string(),
+  "training_type": zod.string().nullish(),
+  "document_title": zod.string().nullish(),
+  "document_type": zod.string().nullish(),
+  "provider": zod.string().nullish(),
+  "trainer": zod.string().nullish(),
+  "completed_date": zod.string(),
+  "expiry_date": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "signed": zod.boolean(),
+  "updated_at": zod.string().optional(),
+  "site_name": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Add the signed-in Viewer's signature to one of their own unsigned training records
+ */
+export const SignMyTrainingRecordParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignMyTrainingRecordBody = zod.object({
+  "signature": zod.string().describe('Signature image as a data URL')
+})
+
+export const SignMyTrainingRecordResponse = zod.object({
+  "id": zod.number(),
+  "record_type": zod.enum(['certificate', 'signoff', 'internal']),
+  "staff_name": zod.string(),
+  "training_type": zod.string().nullish(),
+  "document_title": zod.string().nullish(),
+  "document_type": zod.string().nullish(),
+  "provider": zod.string().nullish(),
+  "trainer": zod.string().nullish(),
+  "completed_date": zod.string(),
+  "expiry_date": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "signed": zod.boolean(),
+  "updated_at": zod.string().optional(),
+  "site_name": zod.string().nullish()
+})
+
+
+/**
+ * @summary Choose which of their departments a Manager with several is working in (kept for the session)
+ */
+export const SetActiveDepartmentBody = zod.object({
+  "departmentId": zod.number()
+})
+
+export const SetActiveDepartmentResponse = zod.object({
+  "departmentId": zod.number(),
+  "departmentIds": zod.array(zod.number())
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -2199,6 +2265,27 @@ export const RequestUploadUrlResponse = zod.object({
 
 
 /**
+ * Frees storage once an issue is finished. The issue, its notes and its history stay; the history records who deleted which file and when.
+ * @summary Delete a photo or video from a resolved or closed issue (owners and admins)
+ */
+export const DeleteFixTrackIssueMediaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const deleteFixTrackIssueMediaBodyObjectPathMax = 1000;
+
+
+
+export const DeleteFixTrackIssueMediaBody = zod.object({
+  "objectPath": zod.string().min(1).max(deleteFixTrackIssueMediaBodyObjectPathMax)
+})
+
+export const DeleteFixTrackIssueMediaResponse = zod.object({
+  "mediaUrls": zod.array(zod.string())
+})
+
+
+/**
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
@@ -3295,6 +3382,31 @@ export const DeletePATPresetTemplateParams = zod.object({
 
 export const DeletePATPresetTemplateResponse = zod.object({
   "ok": zod.boolean()
+})
+
+
+/**
+ * The daily checks the client's services make each site responsible for, with the AM/PM checklists and manager sign-offs dated in the range (department-scoped users see their department's and shared sites).
+ * @summary Daily checklist and sign-off history for the status page
+ */
+export const GetDailyTrackHistoryQueryParams = zod.object({
+  "from": zod.date(),
+  "to": zod.date()
+})
+
+export const GetDailyTrackHistoryResponse = zod.object({
+  "requirements": zod.array(zod.enum(['kitchen_opening', 'premises_opening', 'kitchen_closing', 'premises_closing', 'signoff'])).describe('The checks each site is expected to complete per day, in display order'),
+  "checklists": zod.array(zod.object({
+  "checkDate": zod.date(),
+  "siteId": zod.number().nullable(),
+  "checklistType": zod.string(),
+  "submittedAt": zod.date().nullable()
+})),
+  "signoffs": zod.array(zod.object({
+  "signoffDate": zod.date(),
+  "siteId": zod.number().nullable(),
+  "submittedAt": zod.date().nullable()
+}))
 })
 
 

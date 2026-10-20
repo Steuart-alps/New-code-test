@@ -5,6 +5,72 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export type DailyTrackRequirement = typeof DailyTrackRequirement[keyof typeof DailyTrackRequirement];
+
+
+export const DailyTrackRequirement = {
+  kitchen_opening: 'kitchen_opening',
+  premises_opening: 'premises_opening',
+  kitchen_closing: 'kitchen_closing',
+  premises_closing: 'premises_closing',
+  signoff: 'signoff',
+} as const;
+
+export interface DailyTrackHistoryChecklist {
+  checkDate: string;
+  siteId: number | null;
+  checklistType: string;
+  submittedAt: string | null;
+}
+
+export interface DailyTrackHistorySignoff {
+  signoffDate: string;
+  siteId: number | null;
+  submittedAt: string | null;
+}
+
+export interface DailyTrackHistory {
+  /** The checks each site is expected to complete per day, in display order */
+  requirements: DailyTrackRequirement[];
+  checklists: DailyTrackHistoryChecklist[];
+  signoffs: DailyTrackHistorySignoff[];
+}
+
+export interface SignTrainingRecordRequest {
+  /** Signature image as a data URL */
+  signature: string;
+}
+
+export interface ActiveDepartmentRequest {
+  departmentId: number;
+}
+
+export type OwnTrainingRecordRecordType = typeof OwnTrainingRecordRecordType[keyof typeof OwnTrainingRecordRecordType];
+
+
+export const OwnTrainingRecordRecordType = {
+  certificate: 'certificate',
+  signoff: 'signoff',
+  internal: 'internal',
+} as const;
+
+export interface OwnTrainingRecord {
+  id: number;
+  record_type: OwnTrainingRecordRecordType;
+  staff_name: string;
+  training_type?: string | null;
+  document_title?: string | null;
+  document_type?: string | null;
+  provider?: string | null;
+  trainer?: string | null;
+  completed_date: string;
+  expiry_date?: string | null;
+  notes?: string | null;
+  signed: boolean;
+  updated_at?: string;
+  site_name?: string | null;
+}
+
 export type FeedbackReportCategory = typeof FeedbackReportCategory[keyof typeof FeedbackReportCategory];
 
 
@@ -174,6 +240,18 @@ export interface AuditLogEntry {
   diff: AuditLogEntryDiff;
   /** @nullable */
   actorName: string | null;
+}
+
+export interface FixTrackMediaDeleteRequest {
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  objectPath: string;
+}
+
+export interface FixTrackIssueMediaList {
+  mediaUrls: string[];
 }
 
 export interface ErrorResponse {
@@ -2166,6 +2244,16 @@ export type ListFeedbackReportHistoryParams = {
 clientId?: number;
 };
 
+export type ListMyTrainingRecords200 = {
+  linked: boolean;
+  records: OwnTrainingRecord[];
+};
+
+export type SetActiveDepartment200 = {
+  departmentId: number;
+  departmentIds: number[];
+};
+
 export type ListAuditLogParams = {
 module: ListAuditLogModule;
 };
@@ -2382,6 +2470,11 @@ export type GetPATPresetTemplates200 = {[key: string]: PATPresetItem[]};
 
 export type SavePATPresetTemplateBody = {
   items: PATPresetItem[];
+};
+
+export type GetDailyTrackHistoryParams = {
+from: string;
+to: string;
 };
 
 export type ListPremisesInspectionsParams = {

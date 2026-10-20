@@ -23,8 +23,8 @@ type SetupState = {
   modules?: { available: string[]; picked: string[] }; starterChecks?: StarterCheck[];
 };
 type Choice = { ticked: boolean; date: string };
-/** `siteId` is present once departments belong to a site; until then they span the business. */
-type Department = { id: number; name: string; siteId?: number | null };
+/** A department sits under one site; `siteId` null means it spans every site. */
+type Department = { id: number; name: string; siteId: number | null };
 
 const STEPS = [
   { label: "Your business", icon: Building2 },
@@ -62,8 +62,6 @@ export default function SetupPage() {
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [removeUnticked, setRemoveUnticked] = useState(false);
   const [departments, setDepartments] = useState<Department[]>([]);
-  // null until we know whether departments are per site (see Department).
-  const [perSiteDepartments, setPerSiteDepartments] = useState<boolean | null>(null);
   const [deptSiteId, setDeptSiteId] = useState<number | null>(null);
   const [deptInput, setDeptInput] = useState("");
   const [newDepartments, setNewDepartments] = useState<string[]>([]);
@@ -92,7 +90,6 @@ export default function SetupPage() {
     try {
       const rows = await onboardingRequest<Department[]>("/departments", clientId);
       setDepartments(rows);
-      if (rows.length > 0) setPerSiteDepartments("siteId" in rows[0]);
     } catch {
       // The departments step still lets admins add new ones.
     }
@@ -136,13 +133,13 @@ export default function SetupPage() {
   const sites = state?.sites ?? [];
   const activeDeptSiteId = deptSiteId ?? sites[0]?.id ?? null;
   const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  // A department with no site (made before departments moved under sites) counts at every site.
   const departmentsAt = (site: number | null) =>
-    perSiteDepartments ? departments.filter((d) => d.siteId === site) : departments;
+    departments.filter((d) => d.siteId == null || d.siteId === site);
   const shownDepartments = departmentsAt(activeDeptSiteId);
   const departmentSuggestions = DEPARTMENT_SUGGESTIONS[businessType || "other"] ?? DEPARTMENT_SUGGESTIONS.other;
   const businessTypeLabel = BUSINESS_TYPE_OPTIONS.find((o) => o.value === businessType)?.label;
-  // "Copy to every site" only means something once departments belong to a site.
-  const showCopyDepartments = perSiteDepartments === true && sites.length > 1;
+  const showCopyDepartments = sites.length > 1;
 
   // First visit to the step with no departments yet: pre-tick the usual names.
   useEffect(() => {
@@ -162,25 +159,20 @@ export default function SetupPage() {
 
   // Creates the new names at the chosen site, and with "copy" ticked at every
   // other site too (names only; a site that already has a name is skipped).
-  // While departments still span the business, one set covers every site.
   const saveDepartments = () => run(async () => {
     const names = deptInput.trim() ? [...newDepartments, deptInput.trim()] : newDepartments;
     const targets = copyDepartments && showCopyDepartments
       ? [activeDeptSiteId, ...sites.map((s) => s.id).filter((id) => id !== activeDeptSiteId)]
       : [activeDeptSiteId];
-    let perSite = perSiteDepartments;
     let created = 0;
     for (const target of targets) {
-      const existing = perSite === false ? departments : departments.filter((d) => perSite === null || d.siteId === target);
+      const existing = departmentsAt(target);
       for (const name of names) {
         if (existing.some((d) => sameName(d.name, name))) continue;
-        const row = await post("/departments", target ? { name, siteId: target } : { name }) as Department;
-        if (perSite === null) perSite = "siteId" in row;
+        await post("/departments", target ? { name, siteId: target } : { name });
         created += 1;
       }
-      if (perSite === false) break;
     }
-    setPerSiteDepartments(perSite);
     setNewDepartments([]);
     setDeptInput("");
     toast({ title: "Departments saved", description: `${created} added.` });
@@ -325,11 +317,11 @@ export default function SetupPage() {
                   <h2 className="text-lg font-semibold">Departments</h2>
                   <p className="text-sm text-muted-foreground">Departments split a site into areas such as Kitchen or Housekeeping, so staff see the records for their own area. Skip this if you don't need them.</p>
                 </div>
-                {perSiteDepartments && sites.length > 1 && (
+                {sites.length > 1 && (
                   <div className="space-y-1.5">
                     <Label htmlFor="setup-dept-site">Departments at</Label>
                     <select id="setup-dept-site" className={selectClass} value={activeDeptSiteId ?? ""}
-                      onChange={(e) => { setDeptSiteId(Number(e.target.value)); setNewDepartments([]); }}>
+                      onChange={(e) => setDeptSiteId(Number(e.target.value))}>
                       {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   </div>
@@ -392,13 +384,10 @@ export default function SetupPage() {
                   <label className="flex items-start gap-2 rounded-lg border p-3 text-sm cursor-pointer">
                     <input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={copyDepartments} onChange={(e) => setCopyDepartments(e.target.checked)} />
                     <span>
-                      <span className="block font-medium">Use these department names at all {sites.length} sites</span>
+                      <span className="block font-medium">Use these department names at {sites.length === 2 ? "both sites" : `all ${sites.length} sites`}</span>
                       <span className="block text-xs text-muted-foreground">Only the names are copied. Staff, checks and other settings are set up separately at each site.</span>
                     </span>
                   </label>
-                )}
-                {sites.length > 1 && !showCopyDepartments && (
-                  <p className="text-xs text-muted-foreground">These departments are shared by all your sites.</p>
                 )}
                 <StepActions busy={busy} onSave={saveDepartments} onSkip={() => setStep(3)}
                   disabled={newDepartments.length === 0 && !deptInput.trim()} saveLabel="Save departments" />

@@ -27,6 +27,8 @@ tags:
     description: App settings
   - name: notifications
     description: Notification operations
+  - name: fix-track
+    description: FixTrack issue operations
   - name: storage
     description: File storage operations
   - name: fire-safety
@@ -35,6 +37,8 @@ tags:
     description: Kitchen / food safety diary operations
   - name: legionella
     description: Legionella water safety logbook operations (L8/HSG274)
+  - name: daily-track
+    description: DailyTrack daily checklist status (AM/PM checklists and manager sign-offs)
   - name: pat-track
     description: PAT testing register operations (appliance inventory and test results)
   - name: premises-track
@@ -130,6 +134,84 @@ paths:
           description: Not an administrator or not authorised for this client
         "404":
           description: Report not found in the selected client
+  /train-track/my-records:
+    get:
+      operationId: listMyTrainingRecords
+      tags: [train-track]
+      summary: The signed-in Viewer's own training records (their linked staff roster entry)
+      responses:
+        "200":
+          description: Whether the account is linked to the roster, and that person's records, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [linked, records]
+                properties:
+                  linked: { type: boolean }
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-records/{id}/sign:
+    post:
+      operationId: signMyTrainingRecord
+      tags: [train-track]
+      summary: Add the signed-in Viewer's signature to one of their own unsigned training records
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The signed record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not one of this Viewer's records
+        "409":
+          description: Already signed
+  /users/me/active-department:
+    put:
+      operationId: setActiveDepartment
+      tags: [users]
+      summary: Choose which of their departments a Manager with several is working in (kept for the session)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActiveDepartmentRequest" }
+      responses:
+        "200":
+          description: The chosen department and all of the Manager's departments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [departmentId, departmentIds]
+                properties:
+                  departmentId: { type: integer }
+                  departmentIds:
+                    type: array
+                    items: { type: integer }
+        "400":
+          description: No department given
+        "403":
+          description: Not a Manager
+        "404":
+          description: Not one of the Manager's departments
   /healthz:
     get:
       operationId: healthCheck
@@ -1197,6 +1279,52 @@ paths:
               schema:
                 $ref: "#/components/schemas/RequestUploadUrlResponse"
 
+  /fix-track/issues/{id}/media/delete:
+    post:
+      operationId: deleteFixTrackIssueMedia
+      tags: [fix-track]
+      summary: Delete a photo or video from a resolved or closed issue (owners and admins)
+      description: >
+        Frees storage once an issue is finished. The issue, its notes and its
+        history stay; the history records who deleted which file and when.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FixTrackMediaDeleteRequest"
+      responses:
+        "200":
+          description: The issue's remaining photos and videos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FixTrackIssueMediaList"
+        "403":
+          description: Not an owner or admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue or file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The issue is not resolved or closed yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /fire-safety:
     get:
       operationId: listFireSafetyChecks
@@ -1989,6 +2117,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/OkResponse"
 
+  /daily-track-status/history:
+    get:
+      operationId: getDailyTrackHistory
+      tags: [daily-track]
+      summary: Daily checklist and sign-off history for the status page
+      description: >
+        The daily checks the client's services make each site responsible for,
+        with the AM/PM checklists and manager sign-offs dated in the range
+        (department-scoped users see their department's and shared sites).
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Requirements and history rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyTrackHistory"
+        "400":
+          description: from or to is missing or not YYYY-MM-DD
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: No daily checklist service is enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /premises-track:
     get:
       operationId: listPremisesInspections
@@ -2615,6 +2785,84 @@ paths:
 
 components:
   schemas:
+    DailyTrackRequirement:
+      type: string
+      enum: [kitchen_opening, premises_opening, kitchen_closing, premises_closing, signoff]
+    DailyTrackHistoryChecklist:
+      type: object
+      required: [checkDate, siteId, checklistType, submittedAt]
+      properties:
+        checkDate:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        checklistType:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DailyTrackHistorySignoff:
+      type: object
+      required: [signoffDate, siteId, submittedAt]
+      properties:
+        signoffDate:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DailyTrackHistory:
+      type: object
+      required: [requirements, checklists, signoffs]
+      properties:
+        requirements:
+          type: array
+          description: The checks each site is expected to complete per day, in display order
+          items:
+            $ref: "#/components/schemas/DailyTrackRequirement"
+        checklists:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyTrackHistoryChecklist"
+        signoffs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyTrackHistorySignoff"
+    SignTrainingRecordRequest:
+      type: object
+      required: [signature]
+      properties:
+        signature: { type: string, description: Signature image as a data URL }
+    ActiveDepartmentRequest:
+      type: object
+      required: [departmentId]
+      properties:
+        departmentId: { type: integer }
+    OwnTrainingRecord:
+      type: object
+      required: [id, record_type, staff_name, completed_date, signed]
+      properties:
+        id: { type: integer }
+        record_type: { type: string, enum: [certificate, signoff, internal] }
+        staff_name: { type: string }
+        training_type: { type: string, nullable: true }
+        document_title: { type: string, nullable: true }
+        document_type: { type: string, nullable: true }
+        provider: { type: string, nullable: true }
+        trainer: { type: string, nullable: true }
+        completed_date: { type: string }
+        expiry_date: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        signed: { type: boolean }
+        updated_at: { type: string }
+        site_name: { type: string, nullable: true }
     FeedbackReport:
       type: object
       required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, updatedByName, revision, submitterName]
@@ -2739,6 +2987,22 @@ components:
         before: {}
         after: {}
 
+    FixTrackMediaDeleteRequest:
+      type: object
+      required: [objectPath]
+      properties:
+        objectPath:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    FixTrackIssueMediaList:
+      type: object
+      required: [mediaUrls]
+      properties:
+        mediaUrls:
+          type: array
+          items:
+            type: string
     ErrorResponse:
       type: object
       properties:

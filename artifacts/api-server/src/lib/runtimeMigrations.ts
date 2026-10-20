@@ -611,6 +611,43 @@ async function runRuntimeMigrationsOnce() {
       CREATE UNIQUE INDEX IF NOT EXISTS "UIDX_client_data_deletion_active"
         ON "client_data_deletion_requests" ("client_id") WHERE "status" IN ('pending','approved')
     `);
+    // Durable outcome of each executed account deletion (see runDataDeletionJob).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "client_data_deletion_outcomes" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE RESTRICT,
+        "request_id" integer REFERENCES "client_data_deletion_requests"("id") ON DELETE RESTRICT,
+        "reason" text NOT NULL,
+        "approved_by" integer,
+        "outcome" text NOT NULL,
+        "started_at" timestamptz NOT NULL,
+        "finished_at" timestamptz NOT NULL DEFAULT now(),
+        "rows_deleted" integer NOT NULL DEFAULT 0,
+        "objects_deleted" integer NOT NULL DEFAULT 0,
+        "objects_skipped" integer NOT NULL DEFAULT 0,
+        "error" text
+      )
+    `);
+    // Separate from CREATE TABLE so a drizzle-pushed table (production) gets them too.
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome_reason"`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome_reason" CHECK ("reason" IN ('approved_request','retention_schedule'))`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome"`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome" CHECK ("outcome" IN ('completed','failed'))`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_client_data_deletion_outcomes_client" ON "client_data_deletion_outcomes" ("client_id", "finished_at")`);
+    await db.execute(sql`
+      CREATE OR REPLACE FUNCTION "prevent_client_deletion_outcome_mutation"()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'Account deletion outcomes are append-only';
+      END;
+      $$
+    `);
+    await db.execute(sql`DROP TRIGGER IF EXISTS "client_data_deletion_outcomes_immutable" ON "client_data_deletion_outcomes"`);
+    await db.execute(sql`
+      CREATE TRIGGER "client_data_deletion_outcomes_immutable"
+      BEFORE UPDATE OR DELETE ON "client_data_deletion_outcomes"
+      FOR EACH ROW EXECUTE FUNCTION "prevent_client_deletion_outcome_mutation"()
+    `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "privacy_retention_schedules" (
         "id" serial PRIMARY KEY,
@@ -887,6 +924,20 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_capacity_reductions_request" ON "storage_capacity_reductions" ("request_id")`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_capacity_reductions_tenant" ON "storage_capacity_reductions" ("client_id", "subscription_id", "effective_at")`);
+    // Storage warning level emails to managers (lib/storageWarningEmails.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_warning_notices" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "threshold_bytes" bigint NOT NULL,
+        "used_bytes" bigint NOT NULL,
+        "recipient_count" integer NOT NULL,
+        "sent_at" timestamptz NOT NULL DEFAULT now(),
+        "cleared_at" timestamptz
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_warning_notices_open" ON "storage_warning_notices" ("client_id") WHERE "cleared_at" IS NULL`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_warning_notices_tenant" ON "storage_warning_notices" ("client_id", "sent_at")`);
     // Bound the immutable response ledger and remove spent opaque credentials.
     await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
     await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);
@@ -3947,7 +3998,8 @@ async function migrateFixTrackV2() {
     ON "fix_track_issue_activity" ("issue_id", "created_at")
   `);
   // Earlier installs constrained activity to status/note. The contractor mail
-  // workflow is also an audit trail, so replace that generated constraint
+  // workflow, and deleting a photo or video from a finished issue, are also
+  // part of the audit trail, so replace that generated constraint
   // explicitly rather than relying on CREATE TABLE IF NOT EXISTS.
   await db.execute(sql`
     ALTER TABLE "fix_track_issue_activity"
@@ -3959,7 +4011,8 @@ async function migrateFixTrackV2() {
       CHECK ("event_type" IN (
         'status', 'note',
         'email_requested', 'email_approved', 'email_rejected',
-        'email_invalidated', 'email_sent', 'email_failed'
+        'email_invalidated', 'email_sent', 'email_failed',
+        'media_deleted'
       ))
   `);
   await db.execute(sql`
@@ -4896,6 +4949,28 @@ async function migrateMaintenanceManager() {
     ALTER TABLE "users"
       ADD COLUMN IF NOT EXISTS "is_department_manager" boolean NOT NULL DEFAULT false
   `);
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "all_departments" boolean NOT NULL DEFAULT false
+  `);
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "user_departments" (
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "department_id" integer NOT NULL REFERENCES "departments"("id") ON DELETE CASCADE,
+      PRIMARY KEY ("user_id", "department_id")
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_user_departments_department" ON "user_departments" ("department_id")`);
+  // Departments sit under a site; existing ones keep spanning every site.
+  await db.execute(sql`
+    ALTER TABLE "departments"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_departments_site" ON "departments" ("site_id")`);
 }
 
 async function migrateMobileSessions() {
@@ -5064,7 +5139,9 @@ async function migrateOffboardingColumns() {
       ADD COLUMN IF NOT EXISTS "cancellation_warning_sent_at" timestamptz,
       ADD COLUMN IF NOT EXISTS "offboarding_email_sent_at"  timestamptz,
       ADD COLUMN IF NOT EXISTS "data_deletion_scheduled_at" timestamptz,
-      ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz
+      ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz,
+      ADD COLUMN IF NOT EXISTS "files_archived_at"          timestamptz,
+      ADD COLUMN IF NOT EXISTS "deletion_reminder_sent_at"  timestamptz
   `);
   // Per-recipient delivery state permits failed addresses to retry without
   // re-emailing successful recipients, unlike a single client-level marker.

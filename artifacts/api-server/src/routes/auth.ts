@@ -27,7 +27,7 @@ import {
 } from "../lib/sessionRevocation";
 import { createDatabaseLoginRateLimitStore } from "../lib/loginRateLimitStore";
 import { db } from "@workspace/db";
-import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
+import { usersTable, passwordResetTokensTable, clientsTable } from "@workspace/db/schema";
 import { passkeysTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
 import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "../lib/email";
@@ -680,7 +680,11 @@ router.get("/auth/me", async (req, res) => {
     }
   }
 
-  const { totpSecret: _s, ...safeUser } = user;
+  const { totpSecret: _s, ...stored } = user;
+  // A Manager with several departments: the one they're working in, and all of them.
+  const safeUser = req.departmentIds
+    ? { ...stored, departmentId: req.currentUser.departmentId, departmentIds: req.departmentIds }
+    : stored;
   const passkeys = await getUserPasskeys(user.id);
   const twoFactorRequired = await isTwoFactorRequired(user);
   if (!user.totpEnabled) {
@@ -900,7 +904,9 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
 
   const [user] = await db
     .insert(usersTable)
-    .values({ name, email, passwordHash, role: "consultant", clientId, subscriptionStatus: "trial" })
+    // The person signing up is the business's Owner. The consultant role is
+    // for advisers who look after several businesses.
+    .values({ name, email, passwordHash, role: "client_admin", clientId, subscriptionStatus: "trial" })
     .returning();
 
   // New self-registrations must confirm control of their email address before
@@ -915,15 +921,6 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
         email_verification_expires_at = ${new Date(Date.now() + 24 * 60 * 60 * 1000)}
     WHERE id = ${user.id}
   `);
-
-  // Link the new owner to their auto-provisioned business so tenant access
-  // checks (consultant_clients membership) recognise it.
-  if (clientId !== null) {
-    await db
-      .insert(consultantClientsTable)
-      .values({ userId: user.id, clientId })
-      .onConflictDoNothing();
-  }
 
   // Pre-populate the new business with starter categories and example
   // compliance checks so the dashboard isn't empty on first login. All seeded
@@ -1052,12 +1049,26 @@ router.post("/auth/resend-verification", resendVerificationRateLimit, resendVeri
             email_verification_expires_at = ${new Date(Date.now() + 24 * 60 * 60 * 1000)}
         WHERE id = ${user.id}
       `);
-      const verifyUrl = `${getPublicAppUrl().replace(/\/$/, "")}/verify-email?token=${verificationToken}`;
+      const appUrl = getPublicAppUrl().replace(/\/$/, "");
+      const verifyUrl = `${appUrl}/verify-email?token=${verificationToken}`;
+      // Same look as the welcome email it replaces.
       void sendSystemEmail({
         to: user.email,
         subject: "Verify your ComplyTrack email address",
-        html: `<p>Hi ${escapeHtml(user.name)},</p><p><a href="${verifyUrl}">Verify your email address</a></p><p>This link expires in 24 hours. It replaces any earlier verification link.</p>`,
-        text: `Verify your ComplyTrack email address: ${verifyUrl}\n\nThis link expires in 24 hours. It replaces any earlier verification link.`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #1e293b;">Verify your ComplyTrack email address</h2>
+            <p>Hi ${escapeHtml(user.name)},</p>
+            <p>Here is a new link to confirm your email address and activate your ComplyTrack account.</p>
+            <p style="margin: 24px 0;">
+              <a href="${verifyUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Verify email address</a>
+            </p>
+            <p>You can access ComplyTrack at <a href="${appUrl}">${appUrl}</a>.</p>
+            <p>This link expires in 24 hours and replaces any earlier verification link. If you did not ask for it, you can ignore this email.</p>
+            <p>Best regards,<br><strong>ComplyTrack</strong></p>
+          </div>
+        `,
+        text: `Hi ${user.name},\n\nHere is a new link to confirm your email address and activate your ComplyTrack account:\n${verifyUrl}\n\nOpen ComplyTrack: ${appUrl}\n\nThis link expires in 24 hours and replaces any earlier verification link. If you did not ask for it, you can ignore this email.\n\nBest regards,\nComplyTrack`,
       }).catch((err) => {
         req.log.warn({ err }, "Failed to resend verification email");
       });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import test from "node:test";
 import { promisify } from "node:util";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const execFile = promisify(execFileCallback);
 
@@ -43,7 +44,7 @@ async function revisionOf(request, id, query = "") {
 
 const password = "feedback-fixture-password-123";
 const stamp = Date.now();
-async function tenant(label) {
+async function tenant(label, { consultant = false } = {}) {
   const request = session();
   const email = `feedback-${label}-${stamp}@test.local`;
   const registered = await request("POST", "/auth/register", { name: `Feedback ${label}`, email, password });
@@ -51,6 +52,7 @@ async function tenant(label) {
   assert.equal(typeof registered.data.verificationToken, "string");
   assert.equal((await request("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`)).status, 200);
   assert.equal((await request("POST", "/auth/login", { email, password })).status, 200);
+  if (consultant) promoteToConsultant(email);
   const me = await request("GET", "/auth/me");
   const user = me.data.user ?? me.data;
   assert.ok(Number.isInteger(user.clientId));
@@ -61,7 +63,8 @@ test("feedback triage persists filtered reports and enforces role and selected-c
   const anonymous = session();
   assert.equal((await anonymous("GET", "/feedback")).status, 401);
   assert.equal((await anonymous("PATCH", "/feedback/1", { status: "resolved" })).status, 401);
-  const a = await tenant("A");
+  // A is a consultant so it can add and switch to a linked business.
+  const a = await tenant("A", { consultant: true });
   const b = await tenant("B");
   const reports = [];
   for (const category of ["bug", "feature", "feedback"]) {

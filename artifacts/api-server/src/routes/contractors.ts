@@ -16,6 +16,7 @@ import { getEffectiveOptionList } from "../lib/formOptions";
 import { getPublicAppUrl } from "../lib/email";
 import { cancelUnsentPortalDrafts, lockPortalLinkAndDrafts, relinkUnsentPortalDrafts } from "../lib/contractorPortalDrafts";
 import { CONTRACTOR_DBS_TYPES, normalizeContractorDbsType } from "../lib/contractorDbsTypes";
+import { siteVisibleSql } from "../lib/departmentSites";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
@@ -440,7 +441,8 @@ router.post("/contractors/:id/reminders/:itemId/resend", requireAuth, requireCli
       WHERE ci.id=${itemId} AND ci.client_id=${clientId} AND ci.contractor_id=${contractorId}
         AND ci.status <> 'completed'
         AND (${departmentId}::integer IS NULL OR ci.department_id IS NULL OR ci.department_id=${departmentId})
-        AND (${departmentId}::integer IS NULL OR s.department_id IS NULL OR s.department_id=${departmentId})
+        AND (${departmentId}::integer IS NULL OR ci.site_id IS NULL
+          OR ${departmentId === null ? sql`TRUE` : siteVisibleSql(sql`ci.site_id`, sql`s.department_id`, departmentId)})
       FOR UPDATE OF ci`);
     if (!items.rows.length) return { status: 404, error: "Active requirement not found" };
     const pending = await tx.execute(sql`SELECT id FROM contractor_email_queue

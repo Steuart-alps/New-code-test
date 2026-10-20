@@ -12,6 +12,7 @@
 // http://localhost:8080/api, override with API_BASE env var)
 // Exits 0 when every check passes, 1 otherwise.
 
+import { promoteToConsultant } from "./consultant-account.mjs";
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
 let passed = 0;
@@ -86,6 +87,9 @@ async function setupTenant(label) {
   expectOk(`${label}: verify email`, verified.status);
   const login = await req("POST", "/auth/login", { email, password: "password-123" });
   expectOk(`${label}: login after verification`, login.status);
+  // Both tenants are consultants, the role with the widest reach (business
+  // lists and ?clientId switching), so isolation is checked where it matters most.
+  promoteToConsultant(email);
 
   const me = await req("GET", "/auth/me");
   expectOk(`${label}: /auth/me`, me.status);

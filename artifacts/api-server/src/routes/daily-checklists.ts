@@ -3,10 +3,11 @@ import { z } from "zod";
 import { checklistIncompleteReason, createFailedItemActions } from "../lib/dailyChecklistItems";
 import { db } from "@workspace/db";
 import { dailyChecklistSubmissionsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, or, isNull, inArray, gte, lte, desc } from "drizzle-orm";
+import { eq, and, isNull, inArray, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEntitledServices, isEntitled, requireAnyEntitlement, SERVICES } from "../lib/services";
 import { addCalendarDays, getAccountToday } from "../lib/accountClock";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -73,7 +74,7 @@ async function requireDailyService(
 function departmentSiteCondition(clientId: number, departmentId: number | null) {
   const conditions = [eq(sitesTable.clientId, clientId)];
   if (departmentId !== null) {
-    conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)) as any);
+    conditions.push(sitesTableVisibleTo(departmentId) as any);
   }
   return and(...conditions);
 }

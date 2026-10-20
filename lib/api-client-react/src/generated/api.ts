@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ActiveDepartmentRequest,
   AddPrivacyRetentionVerificationParams,
   AppSettings,
   AuditLogEntry,
@@ -47,6 +48,7 @@ import type {
   CreatePremisesInspectionRequest,
   CreatePrivacyRecordParams,
   CreateSiteRequest,
+  DailyTrackHistory,
   DashboardStats,
   ErrorResponse,
   FeedbackReport,
@@ -57,11 +59,14 @@ import type {
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
+  FixTrackIssueMediaList,
+  FixTrackMediaDeleteRequest,
   FoodSafetyConfig,
   FoodSafetyMissingDatesResponse,
   FoodSafetyMonthlySummary,
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
+  GetDailyTrackHistoryParams,
   GetFireSafetyConfigParams,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
@@ -98,10 +103,12 @@ import type {
   ListHotTubChecksParams,
   ListKitchenClosedDaysParams,
   ListLegionellaChecksParams,
+  ListMyTrainingRecords200,
   ListPATTestsParams,
   ListPremisesInspectionsParams,
   ListPublicLinkAccessParams,
   OkResponse,
+  OwnTrainingRecord,
   PATAppliance,
   PATTest,
   PATTrackConfig,
@@ -123,6 +130,8 @@ import type {
   SavePATPresetTemplateBody,
   SavePrivacyProgramParams,
   SendRemindersResponse,
+  SetActiveDepartment200,
+  SignTrainingRecordRequest,
   Site,
   StorageUsage,
   TestEmailRequest,
@@ -432,6 +441,226 @@ export function useListFeedbackReportHistory<TData = Awaited<ReturnType<typeof l
 
 
 
+
+export const getListMyTrainingRecordsUrl = () => {
+
+
+
+
+  return `/api/train-track/my-records`
+}
+
+/**
+ * @summary The signed-in Viewer's own training records (their linked staff roster entry)
+ */
+export const listMyTrainingRecords = async ( options?: RequestInit): Promise<ListMyTrainingRecords200> => {
+
+  return customFetch<ListMyTrainingRecords200>(getListMyTrainingRecordsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMyTrainingRecordsQueryKey = () => {
+    return [
+    `/api/train-track/my-records`
+    ] as const;
+    }
+
+
+export const getListMyTrainingRecordsQueryOptions = <TData = Awaited<ReturnType<typeof listMyTrainingRecords>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyTrainingRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMyTrainingRecordsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyTrainingRecords>>> = ({ signal }) => listMyTrainingRecords({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMyTrainingRecords>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMyTrainingRecordsQueryResult = NonNullable<Awaited<ReturnType<typeof listMyTrainingRecords>>>
+export type ListMyTrainingRecordsQueryError = ErrorType<void>
+
+
+/**
+ * @summary The signed-in Viewer's own training records (their linked staff roster entry)
+ */
+
+export function useListMyTrainingRecords<TData = Awaited<ReturnType<typeof listMyTrainingRecords>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyTrainingRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMyTrainingRecordsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSignMyTrainingRecordUrl = (id: number,) => {
+
+
+
+
+  return `/api/train-track/my-records/${id}/sign`
+}
+
+/**
+ * @summary Add the signed-in Viewer's signature to one of their own unsigned training records
+ */
+export const signMyTrainingRecord = async (id: number,
+    signTrainingRecordRequest: SignTrainingRecordRequest, options?: RequestInit): Promise<OwnTrainingRecord> => {
+
+  return customFetch<OwnTrainingRecord>(getSignMyTrainingRecordUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(signTrainingRecordRequest)
+  }
+);}
+
+
+
+
+
+export const getSignMyTrainingRecordMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyTrainingRecord>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signMyTrainingRecord>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext> => {
+
+const mutationKey = ['signMyTrainingRecord'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signMyTrainingRecord>>, {id: number;data: BodyType<SignTrainingRecordRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  signMyTrainingRecord(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignMyTrainingRecordMutationResult = NonNullable<Awaited<ReturnType<typeof signMyTrainingRecord>>>
+    export type SignMyTrainingRecordMutationBody = BodyType<SignTrainingRecordRequest>
+    export type SignMyTrainingRecordMutationError = ErrorType<void>
+
+    /**
+ * @summary Add the signed-in Viewer's signature to one of their own unsigned training records
+ */
+export const useSignMyTrainingRecord = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyTrainingRecord>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signMyTrainingRecord>>,
+        TError,
+        {id: number;data: BodyType<SignTrainingRecordRequest>},
+        TContext
+      > => {
+      return useMutation(getSignMyTrainingRecordMutationOptions(options));
+    }
+
+export const getSetActiveDepartmentUrl = () => {
+
+
+
+
+  return `/api/users/me/active-department`
+}
+
+/**
+ * @summary Choose which of their departments a Manager with several is working in (kept for the session)
+ */
+export const setActiveDepartment = async (activeDepartmentRequest: ActiveDepartmentRequest, options?: RequestInit): Promise<SetActiveDepartment200> => {
+
+  return customFetch<SetActiveDepartment200>(getSetActiveDepartmentUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(activeDepartmentRequest)
+  }
+);}
+
+
+
+
+
+export const getSetActiveDepartmentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setActiveDepartment>>, TError,{data: BodyType<ActiveDepartmentRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setActiveDepartment>>, TError,{data: BodyType<ActiveDepartmentRequest>}, TContext> => {
+
+const mutationKey = ['setActiveDepartment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setActiveDepartment>>, {data: BodyType<ActiveDepartmentRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setActiveDepartment(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetActiveDepartmentMutationResult = NonNullable<Awaited<ReturnType<typeof setActiveDepartment>>>
+    export type SetActiveDepartmentMutationBody = BodyType<ActiveDepartmentRequest>
+    export type SetActiveDepartmentMutationError = ErrorType<void>
+
+    /**
+ * @summary Choose which of their departments a Manager with several is working in (kept for the session)
+ */
+export const useSetActiveDepartment = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setActiveDepartment>>, TError,{data: BodyType<ActiveDepartmentRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setActiveDepartment>>,
+        TError,
+        {data: BodyType<ActiveDepartmentRequest>},
+        TContext
+      > => {
+      return useMutation(getSetActiveDepartmentMutationOptions(options));
+    }
 
 export const getHealthCheckUrl = () => {
 
@@ -4040,6 +4269,79 @@ export const useRequestUploadUrl = <TError = ErrorType<unknown>,
       return useMutation(getRequestUploadUrlMutationOptions(options));
     }
 
+export const getDeleteFixTrackIssueMediaUrl = (id: number,) => {
+
+
+
+
+  return `/api/fix-track/issues/${id}/media/delete`
+}
+
+/**
+ * Frees storage once an issue is finished. The issue, its notes and its history stay; the history records who deleted which file and when.
+ * @summary Delete a photo or video from a resolved or closed issue (owners and admins)
+ */
+export const deleteFixTrackIssueMedia = async (id: number,
+    fixTrackMediaDeleteRequest: FixTrackMediaDeleteRequest, options?: RequestInit): Promise<FixTrackIssueMediaList> => {
+
+  return customFetch<FixTrackIssueMediaList>(getDeleteFixTrackIssueMediaUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fixTrackMediaDeleteRequest)
+  }
+);}
+
+
+
+
+
+export const getDeleteFixTrackIssueMediaMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>, TError,{id: number;data: BodyType<FixTrackMediaDeleteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>, TError,{id: number;data: BodyType<FixTrackMediaDeleteRequest>}, TContext> => {
+
+const mutationKey = ['deleteFixTrackIssueMedia'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>, {id: number;data: BodyType<FixTrackMediaDeleteRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  deleteFixTrackIssueMedia(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteFixTrackIssueMediaMutationResult = NonNullable<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>>
+    export type DeleteFixTrackIssueMediaMutationBody = BodyType<FixTrackMediaDeleteRequest>
+    export type DeleteFixTrackIssueMediaMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete a photo or video from a resolved or closed issue (owners and admins)
+ */
+export const useDeleteFixTrackIssueMedia = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>, TError,{id: number;data: BodyType<FixTrackMediaDeleteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>,
+        TError,
+        {id: number;data: BodyType<FixTrackMediaDeleteRequest>},
+        TContext
+      > => {
+      return useMutation(getDeleteFixTrackIssueMediaMutationOptions(options));
+    }
+
 export const getListFireSafetyChecksUrl = (params?: ListFireSafetyChecksParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -7084,6 +7386,91 @@ export const useDeletePATPresetTemplate = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getDeletePATPresetTemplateMutationOptions(options));
     }
+
+export const getGetDailyTrackHistoryUrl = (params: GetDailyTrackHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/daily-track-status/history?${stringifiedParams}` : `/api/daily-track-status/history`
+}
+
+/**
+ * The daily checks the client's services make each site responsible for, with the AM/PM checklists and manager sign-offs dated in the range (department-scoped users see their department's and shared sites).
+ * @summary Daily checklist and sign-off history for the status page
+ */
+export const getDailyTrackHistory = async (params: GetDailyTrackHistoryParams, options?: RequestInit): Promise<DailyTrackHistory> => {
+
+  return customFetch<DailyTrackHistory>(getGetDailyTrackHistoryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDailyTrackHistoryQueryKey = (params?: GetDailyTrackHistoryParams,) => {
+    return [
+    `/api/daily-track-status/history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetDailyTrackHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getDailyTrackHistory>>, TError = ErrorType<ErrorResponse>>(params: GetDailyTrackHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDailyTrackHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDailyTrackHistoryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDailyTrackHistory>>> = ({ signal }) => getDailyTrackHistory(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDailyTrackHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDailyTrackHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getDailyTrackHistory>>>
+export type GetDailyTrackHistoryQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Daily checklist and sign-off history for the status page
+ */
+
+export function useGetDailyTrackHistory<TData = Awaited<ReturnType<typeof getDailyTrackHistory>>, TError = ErrorType<ErrorResponse>>(
+ params: GetDailyTrackHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDailyTrackHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDailyTrackHistoryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getListPremisesInspectionsUrl = (params?: ListPremisesInspectionsParams,) => {
   const normalizedParams = new URLSearchParams();

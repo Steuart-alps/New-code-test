@@ -35,6 +35,7 @@ import kitchenWeeklyRouter from "./kitchen-weekly";
 import kitchenCleaningRouter from "./kitchen-cleaning";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
+import dailyTrackStatusRouter from "./daily-track-status";
 import checklistTemplatesRouter from "./checklist-templates";
 import checkRemindersRouter from "./check-reminders";
 import w3wRouter from "./w3w";
@@ -70,6 +71,7 @@ import consultantPortfolioRouter from "./consultant-portfolio";
 import setupRouter from "./setup";
 import tasksRouter from "./tasks";
 import { requireAuth } from "../middleware/requireAuth";
+import { limitViewers } from "../middleware/viewerScope";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
 import { staffTrainingRouter } from "./staff-training";
@@ -83,6 +85,8 @@ router.use(healthRouter);
 router.use(authRouter);
 // First-party analytics ingest; does its own session check (before root-level auth routers).
 router.use(analyticsRouter);
+// Viewers reach only their own training records past this point.
+router.use(limitViewers);
 router.use("/billing", billingRouter);
 // Signed file download links (bearer tokens; opened without a session).
 router.use(storageDownloadRouter);
@@ -143,6 +147,9 @@ router.use("/kitchen-cleaning", requireAuth, requireService("kitchentrack"), kit
 // service that matches the checklistType being read/written.
 router.use("/daily-track-am", requireAuth, requireAnyService("dailytrack_am", "kitchentrack", "premisestrack"), dailyTrackAmRouter);
 router.use("/daily-track-pm", requireAuth, requireAnyService("dailytrack_pm", "kitchentrack", "premisestrack"), dailyTrackPmRouter);
+// The status page covers both periods, so any AM or PM service opens it; the
+// route itself reports which checks those services make the client responsible for.
+router.use("/daily-track-status", requireAuth, requireAnyService("dailytrack_am", "dailytrack_pm", "kitchentrack", "premisestrack"), dailyTrackStatusRouter);
 router.use(checklistTemplatesRouter);
 router.use(checkRemindersRouter);
 router.use(w3wRouter);

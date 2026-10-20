@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry";
 import { useLocalToday } from "@/hooks/use-local-today";
 import { INDUCTION_SECTIONS, parseChecklist, renderInductionHtml, type InductionChecklist, type SectionKey, type ChecklistItem } from "@/lib/induction-print";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -319,6 +320,7 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
   async function handleFile(file: File) {
     setUploading(true);
     try {
+      assertWithinUploadLimit(file);
       const urlRes = await apiFetch("/safe-track/request-upload", { method: "POST" });
       if (!urlRes.ok) {
         throw new Error(await getApiErrorMessage(urlRes, "Could not get upload URL"));
@@ -412,12 +414,12 @@ function ListTable({ headers, rows, photoEntityType, onEdit, onDelete, onDownloa
                     </Button>
                   )}
                   {canAdmin && onEdit && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(r.id)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Edit" title="Edit" onClick={() => onEdit(r.id)}>
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
                   )}
                   {canAdmin && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => onDelete(r.id)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" aria-label="Delete" title="Delete" onClick={() => onDelete(r.id)}>
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   )}
@@ -535,11 +537,16 @@ export default function SafeTrackPage() {
       const res = editing
         ? await apiFetch(`${base}/${sub}/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) })
         : await apiFetch(`${base}/${sub}`, { method: "POST", body: JSON.stringify(payload) });
-      if (!res.ok) throw new Error(await getApiErrorMessage(res, "Could not save this record"));
+      // A rejected save keeps the dialog open: closing it would discard the
+      // entries with no sign anything went wrong.
+      if (!res.ok) {
+        toast({ title: "Could not save", description: await getApiErrorMessage(res, `Error ${res.status}`), variant: "destructive" });
+        return;
+      }
       setDialogOpen(false);
       load();
     } catch (err: any) {
-      toast({ title: "Save failed", description: err.message, variant: "destructive" });
+      toast({ title: "Could not save", description: err?.message ?? "Network error", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
@@ -949,21 +956,25 @@ function TrainingForm({ form, setForm }: { form: any; setForm: any }) {
   </>;
 }
 
-function InductionForm({ form, setForm }: { form: any; setForm: any }) {
+// Every edit is applied to the latest form inside the state setter: edits made
+// before React re-renders (fast clicks, autofill) must build on each other,
+// not on the checklist this render happened to see.
+export function InductionForm({ form, setForm }: { form: any; setForm: any }) {
   const checklist = parseChecklist(form.checklist);
-  function updateChecklist(next: InductionChecklist) {
-    setForm((current: any) => ({ ...current, checklist: JSON.stringify(next) }));
+  const setField = (field: string, value: unknown) => setForm((current: any) => ({ ...current, [field]: value }));
+  function updateChecklist(change: (latest: InductionChecklist) => InductionChecklist) {
+    setForm((current: any) => ({ ...current, checklist: JSON.stringify(change(parseChecklist(current.checklist))) }));
   }
-  function updateItem(key: SectionKey, patch: Partial<ChecklistItem>) {
-    updateChecklist({ ...checklist, items: checklist.items.map(item => item.key === key ? { ...item, ...patch } : item) });
+  function updateItem(key: SectionKey, patch: (item: ChecklistItem) => Partial<ChecklistItem>) {
+    updateChecklist(latest => ({ ...latest, items: latest.items.map(item => item.key === key ? { ...item, ...patch(item) } : item) }));
   }
   return <>
-    <F label="Staff Name *"><Input value={form.staffName ?? ""} onChange={e => setForm({ ...form, staffName: e.target.value })} placeholder="Full name" autoFocus /></F>
+    <F label="Staff Name *"><Input value={form.staffName ?? ""} onChange={e => setField("staffName", e.target.value)} placeholder="Full name" autoFocus /></F>
     <div className="grid grid-cols-2 gap-4">
-      <F label="Job Title"><Input value={checklist.jobTitle} onChange={e => updateChecklist({ ...checklist, jobTitle: e.target.value })} /></F>
-      <F label="Department"><Input value={checklist.department} onChange={e => updateChecklist({ ...checklist, department: e.target.value })} /></F>
-      <F label="Start Date *"><Input type="date" value={form.startDate ?? ""} onChange={e => setForm({ ...form, startDate: e.target.value })} /></F>
-      <F label="Completed Date"><Input type="date" value={form.completedAt ?? ""} onChange={e => setForm({ ...form, completedAt: e.target.value || null })} /></F>
+      <F label="Job Title"><Input value={checklist.jobTitle} onChange={e => { const jobTitle = e.target.value; updateChecklist(latest => ({ ...latest, jobTitle })); }} /></F>
+      <F label="Department"><Input value={checklist.department} onChange={e => { const department = e.target.value; updateChecklist(latest => ({ ...latest, department })); }} /></F>
+      <F label="Start Date *"><Input type="date" value={form.startDate ?? ""} onChange={e => setField("startDate", e.target.value)} /></F>
+      <F label="Completed Date"><Input type="date" value={form.completedAt ?? ""} onChange={e => setField("completedAt", e.target.value || null)} /></F>
     </div>
     <div className="space-y-2">
       <Label>H&amp;S Induction Checklist</Label>
@@ -974,17 +985,17 @@ function InductionForm({ form, setForm }: { form: any; setForm: any }) {
               <span className="text-sm font-medium">{index + 1}. {INDUCTION_SECTIONS[index].label}</span>
               <div className="flex gap-1">
                 {(["yes", "no", "na"] as const).map(status => (
-                  <Button key={status} type="button" size="sm" variant={item.status === status ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => updateItem(item.key, { status: item.status === status ? "" : status })}>
+                  <Button key={status} type="button" size="sm" variant={item.status === status ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => updateItem(item.key, latest => ({ status: latest.status === status ? "" : status }))}>
                     {status === "na" ? "N/A" : status === "yes" ? "Yes" : "No"}
                   </Button>
                 ))}
               </div>
             </div>
-            <Input className="h-8 text-xs" placeholder="Comments…" value={item.comments} onChange={e => updateItem(item.key, { comments: e.target.value })} />
+            <Input className="h-8 text-xs" placeholder="Comments…" value={item.comments} onChange={e => { const comments = e.target.value; updateItem(item.key, () => ({ comments })); }} />
           </div>
         ))}
       </div>
     </div>
-    <F label="Notes / Sign-off Comments"><Textarea value={form.notes ?? ""} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3} /></F>
+    <F label="Notes / Sign-off Comments"><Textarea value={form.notes ?? ""} onChange={e => setField("notes", e.target.value)} rows={3} /></F>
   </>;
 }

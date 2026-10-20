@@ -118,7 +118,7 @@ const freshSchema = new Set([
   "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
   "test:owner-late-edit-reason",
   "test:kitchen-cleaning-export", "test:pat-register-access",
-  "test:storage-metering", "test:storage-usage-snapshot", "test:storage-capacity-reduction",
+  "test:storage-metering", "test:storage-usage-snapshot", "test:storage-capacity-reduction", "test:storage-warning-emails",
   "test:content-filter",
   "test:feedback-triage", "test:contractor-token-security",
   "test:contractor-key-rotation",
@@ -144,6 +144,7 @@ const freshSchema = new Set([
   "test:safe-track-ack-reminders:fresh", "test:storage-price-audit",
 ]);
 const pure = new Set([
+  "test:upload-size-limit", // ObjectStorageService against an in-memory bucket
   "test:api-runner-lock", // validates this lock without application resources
   "test:staged-photo-creation", // real routes/helper with in-memory transaction/storage fakes
   "test:login-rate-limit", // isolated temp bundle and in-process Express fixture
@@ -274,7 +275,7 @@ const pureEntrypoints = new Set([
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",
   "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "storage-happy-path-config.test.mjs", "upload-pixel-cap.mjs",
-  "trial-lock-allowlist.mjs", "storage-price-check.mjs", "openapi-route-inventory.mjs", "site-move-route-inventory.mjs",
+  "trial-lock-allowlist.mjs", "storage-price-check.mjs", "openapi-route-inventory.mjs", "site-move-route-inventory.mjs", "upload-size-limit.mjs",
 ]);
 const helperModules = new Set([
   "pdf-text.mjs",

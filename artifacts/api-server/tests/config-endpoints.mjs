@@ -60,6 +60,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const runId = resolveRunId();
 const fixtures = createFixtureOwnership({ runId, suite: "config-endpoints" });
@@ -123,8 +124,9 @@ function isoDate(daysOffset = 0) {
   return d.toISOString().slice(0, 10);
 }
 
-// Register a fresh self-service account (role "consultant" linked to a single
-// auto-provisioned client). Returns { session, clientId, email }.
+// Register a fresh self-service account and make it a consultant linked to its
+// auto-provisioned client, so it can add and switch to a second client.
+// Returns { session, clientId, email }.
 async function registerAccount(label, ts) {
   // Account owners deliberately write past-dated records here, which needs a reason.
   const session = makeSession({ "X-Override-Reason": encodeURIComponent("Config fixture: past-dated record") });
@@ -150,6 +152,7 @@ async function registerAccount(label, ts) {
       throw new Error(`FATAL: login after verification failed for ${label} (${login.status})`);
     }
   }
+  promoteToConsultant(email);
   const me = await session("GET", "/auth/me");
   const user = me.data?.user ?? me.data;
   const clientId = user?.clientId;
@@ -1668,8 +1671,10 @@ async function testKitchenClosedDays(admin, viewer, staff, ts) {
   // ── Closures added after the day are flagged for inspectors ──
   const pastDay = isoDate(-40);
   expectStatus("closed-days: retroactive closure → 201", (await close(admin, c, { from: pastDay, to: pastDay, reason: "Power cut" })).status, 201);
-  const pastList = await viewer("GET", `/food-safety/closed-days?from=${pastDay}&to=${pastDay}&siteId=${c}`);
-  expectOk("closed-days: viewer can list closures", pastList.status);
+  const pastList = await admin("GET", `/food-safety/closed-days?from=${pastDay}&to=${pastDay}&siteId=${c}`);
+  expectOk("closed-days: owner can list closures", pastList.status);
+  // Viewers see only their own training records.
+  expectStatus("closed-days: viewer list → 403", (await viewer("GET", `/food-safety/closed-days?from=${pastDay}&to=${pastDay}&siteId=${c}`)).status, 403);
   check("closed-days: retroactive closure flagged added afterwards", pastList.data?.closedDays?.[0]?.addedAfterDay === true, JSON.stringify(pastList.data));
 
   // ── Removing a closure brings the day back as missing ──

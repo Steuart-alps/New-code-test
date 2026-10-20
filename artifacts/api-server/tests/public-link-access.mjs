@@ -190,6 +190,7 @@ test("public-link access history is manager-only, tenant-scoped, paginated and t
   await t.test("a consultant linked to both businesses reads each one only when selected", async () => {
     const consultant = await account("consultant", async email => {
       const userId = await psql(`SELECT id FROM users WHERE email='${email}'`);
+      await psql(`UPDATE users SET role = 'consultant' WHERE id = ${userId}`);
       await psql(`INSERT INTO consultant_clients (user_id, client_id) VALUES (${userId}, ${a.clientId}), (${userId}, ${b.clientId})`);
     });
     const forA = await allPages(consultant.request, `clientId=${a.clientId}`);
