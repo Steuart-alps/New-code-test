@@ -54,6 +54,7 @@ import type {
   CreatePremisesInspectionRequest,
   CreatePrivacyRecordParams,
   CreateSiteRequest,
+  DailyTrackHistory,
   DashboardStats,
   ErrorResponse,
   FeedbackReport,
@@ -72,6 +73,7 @@ import type {
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
   GetCoshhTrackStatusParams,
+  GetDailyTrackHistoryParams,
   GetFireSafetyConfigParams,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
@@ -7393,6 +7395,91 @@ export const useDeletePATPresetTemplate = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getDeletePATPresetTemplateMutationOptions(options));
     }
+
+export const getGetDailyTrackHistoryUrl = (params: GetDailyTrackHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/daily-track-status/history?${stringifiedParams}` : `/api/daily-track-status/history`
+}
+
+/**
+ * The daily checks the client's services make each site responsible for, with the AM/PM checklists and manager sign-offs dated in the range (department-scoped users see their department's and shared sites).
+ * @summary Daily checklist and sign-off history for the status page
+ */
+export const getDailyTrackHistory = async (params: GetDailyTrackHistoryParams, options?: RequestInit): Promise<DailyTrackHistory> => {
+
+  return customFetch<DailyTrackHistory>(getGetDailyTrackHistoryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDailyTrackHistoryQueryKey = (params?: GetDailyTrackHistoryParams,) => {
+    return [
+    `/api/daily-track-status/history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetDailyTrackHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getDailyTrackHistory>>, TError = ErrorType<ErrorResponse>>(params: GetDailyTrackHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDailyTrackHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDailyTrackHistoryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDailyTrackHistory>>> = ({ signal }) => getDailyTrackHistory(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDailyTrackHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDailyTrackHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getDailyTrackHistory>>>
+export type GetDailyTrackHistoryQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Daily checklist and sign-off history for the status page
+ */
+
+export function useGetDailyTrackHistory<TData = Awaited<ReturnType<typeof getDailyTrackHistory>>, TError = ErrorType<ErrorResponse>>(
+ params: GetDailyTrackHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDailyTrackHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDailyTrackHistoryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getListPremisesInspectionsUrl = (params?: ListPremisesInspectionsParams,) => {
   const normalizedParams = new URLSearchParams();

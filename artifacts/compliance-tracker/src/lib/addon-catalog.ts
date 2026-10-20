@@ -131,7 +131,6 @@ export const CHECKOUT_ADDONS: CheckoutAddon[] = [
     key: "greentrack",
     label: "GreenTrack",
     desc: "Grounds & landscaping maintenance records",
-    comingSoon: true,
     icon: Leaf,
     iconColor: "text-green-600",
   },

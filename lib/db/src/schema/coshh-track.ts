@@ -96,6 +96,10 @@ export const coshhChecksTable = pgTable("coshh_checks", {
   reportMimeType: text("report_mime_type"),
   notes: text("notes"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Submitter's department when the row was created, set by a database
+  // trigger and never changed (submitterDepartmentMigration.ts).
+  submitterDepartmentId: integer("submitter_department_id"),
+  submitterDepartmentSource: text("submitter_department_source").notNull().default("recorded"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   deletedAt: timestamp("deleted_at"),

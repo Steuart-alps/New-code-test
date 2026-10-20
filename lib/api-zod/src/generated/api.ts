@@ -3386,6 +3386,31 @@ export const DeletePATPresetTemplateResponse = zod.object({
 
 
 /**
+ * The daily checks the client's services make each site responsible for, with the AM/PM checklists and manager sign-offs dated in the range (department-scoped users see their department's and shared sites).
+ * @summary Daily checklist and sign-off history for the status page
+ */
+export const GetDailyTrackHistoryQueryParams = zod.object({
+  "from": zod.date(),
+  "to": zod.date()
+})
+
+export const GetDailyTrackHistoryResponse = zod.object({
+  "requirements": zod.array(zod.enum(['kitchen_opening', 'premises_opening', 'kitchen_closing', 'premises_closing', 'signoff'])).describe('The checks each site is expected to complete per day, in display order'),
+  "checklists": zod.array(zod.object({
+  "checkDate": zod.date(),
+  "siteId": zod.number().nullable(),
+  "checklistType": zod.string(),
+  "submittedAt": zod.date().nullable()
+})),
+  "signoffs": zod.array(zod.object({
+  "signoffDate": zod.date(),
+  "siteId": zod.number().nullable(),
+  "submittedAt": zod.date().nullable()
+}))
+})
+
+
+/**
  * @summary List premises inspections
  */
 export const ListPremisesInspectionsQueryParams = zod.object({

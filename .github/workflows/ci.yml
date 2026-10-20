@@ -102,6 +102,9 @@ jobs:
       - name: Public page SEO test
         run: pnpm --filter @workspace/compliance-tracker run test:seo-pages
 
+      - name: Training matrix and CSV formula safety test
+        run: pnpm --filter @workspace/compliance-tracker run test:training-matrix
+
       - name: Storage test-bucket safety checks
         run: pnpm --filter @workspace/api-server run test:storage-happy-path-config
 
@@ -201,6 +204,11 @@ jobs:
 
       - name: COSHHTrack tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:coshh-track
+
+      # Older, populated databases (Replit-era table layouts) must keep every
+      # record through the runtime migrations, readable through today's routes.
+      - name: Upgrade-path fixture tests
+        run: pnpm --filter @workspace/api-server run test:schema:upgrade
 
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed

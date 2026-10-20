@@ -4,6 +4,7 @@ import { logger } from "./logger";
 import { ensureRuntimeBaseline } from "./runtimeBaseline";
 import { migrateAuditLog, migrateExtendedAuditLog } from "./auditLogMigration";
 import { migrateLegacyPatHistory } from "./patLegacyHistoryMigration";
+import { migrateSubmitterDepartments } from "./submitterDepartmentMigration";
 import { migratePatRoomHistory } from "./patRoomHistoryMigration";
 import { migratePatFailureHistory } from "./patFailureHistoryMigration";
 import { migratePatReplacementHistory } from "./patReplacementHistoryMigration";
@@ -2117,7 +2118,8 @@ async function runRuntimeMigrationsOnce() {
     // older column set instead and lacked the columns the routes write
     // (hot_tubs.description, hot_tub_checks.ph_value, SafeTrack description,
     // scope, version...). Add them so both paths end with the Drizzle columns.
-    // The older runtime-only columns are left in place; no code reads them.
+    // The older runtime-only columns are left in place; migrateLegacyColumnLayouts
+    // copies any values they hold into these columns once.
     await db.execute(sql`
       ALTER TABLE "hot_tubs"
         ADD COLUMN IF NOT EXISTS "description" text
@@ -2189,8 +2191,15 @@ async function runRuntimeMigrationsOnce() {
     await migrateCertificateOutcomes();
     await migrateFireCallPoints();
 
+    // ---- Department recorded with each submission (Oct 2026) ----
+    // After every reported table exists; see submitterDepartmentMigration.ts.
+    await migrateSubmitterDepartments();
+
     // Last: every audited table must exist by now (see auditLogMigration.ts).
     await migrateExtendedAuditLog();
+
+    // Last, so every current column exists and audited tables log the copies.
+    await migrateLegacyColumnLayouts();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -3084,6 +3093,15 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bikes_client" ON "bikes" ("client_id")`);
+  // The first BikeTrack tables (Replit, before September 2026) used other
+  // column names, so CREATE TABLE IF NOT EXISTS kept them. Add today's columns
+  // (nullable where the old rows have no value yet); migrateLegacyColumnLayouts
+  // copies the old values across. Nothing here changes a current database.
+  await db.execute(sql`
+    ALTER TABLE "bikes"
+      ADD COLUMN IF NOT EXISTS "ref" text,
+      ADD COLUMN IF NOT EXISTS "type" text NOT NULL DEFAULT 'hybrid'
+  `);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "bike_hire_records" (
@@ -3109,6 +3127,18 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_hire_client" ON "bike_hire_records" ("client_id")`);
+  await db.execute(sql`
+    ALTER TABLE "bike_hire_records"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS "guest_name" text,
+      ADD COLUMN IF NOT EXISTS "guest_contact" text,
+      ADD COLUMN IF NOT EXISTS "hire_date" date,
+      ADD COLUMN IF NOT EXISTS "return_date_expected" date,
+      ADD COLUMN IF NOT EXISTS "return_date_actual" date,
+      ADD COLUMN IF NOT EXISTS "deposit_pence" integer,
+      ADD COLUMN IF NOT EXISTS "deposit_returned" boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+  `);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notified_at" timestamp`);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notification_claim_token" text`);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notification_claimed_at" timestamp`);
@@ -3175,6 +3205,24 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_checks_bike" ON "bike_checks" ("bike_id")`);
+  await db.execute(sql`
+    ALTER TABLE "bike_checks"
+      ADD COLUMN IF NOT EXISTS "overall_result" text NOT NULL DEFAULT 'pass',
+      ADD COLUMN IF NOT EXISTS "brakes_front" text,
+      ADD COLUMN IF NOT EXISTS "brakes_rear" text,
+      ADD COLUMN IF NOT EXISTS "tyre_front" text,
+      ADD COLUMN IF NOT EXISTS "tyre_rear" text,
+      ADD COLUMN IF NOT EXISTS "chain_gears" text,
+      ADD COLUMN IF NOT EXISTS "lights_front" text,
+      ADD COLUMN IF NOT EXISTS "lights_rear" text,
+      ADD COLUMN IF NOT EXISTS "frame" text,
+      ADD COLUMN IF NOT EXISTS "saddle_seatpost" text,
+      ADD COLUMN IF NOT EXISTS "handlebars" text,
+      ADD COLUMN IF NOT EXISTS "pedals" text,
+      ADD COLUMN IF NOT EXISTS "helmet_provided" text,
+      ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()
+  `);
 }
 
 async function migrateBikeServices() {
@@ -3196,6 +3244,114 @@ async function migrateBikeServices() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_services_bike" ON "bike_services" ("bike_id")`);
+}
+
+// ---- Older column layouts (Replit era) ----
+// Some installs still hold records in columns from the first table layouts
+// (see tests/upgrade-fixtures/legacy-shapes.ts). Routes read only today's
+// columns, so those records looked empty or missing. Copy each old value into
+// its current column once, without changing or removing the old column: the
+// original stays as recorded (5-year audit), and on audited tables each copy
+// is logged with its before and after values.
+//
+// Each copy runs once per database: a comment on the old column records that
+// it was done, so a value someone clears afterwards is not copied back on the
+// next start. Databases that never had the old layout (including production,
+// built by drizzle-kit push) skip every block.
+const LEGACY_COPY_MARK = "Retired column: copied into the current column by runtime migrations";
+
+function copyLegacyColumnsOnce(table: string, oldColumns: string[], statements: string[]) {
+  const [marker] = oldColumns;
+  const present = oldColumns
+    .map((column) => `EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('public.${table}') AND attname = '${column}' AND NOT attisdropped)`)
+    .join("\n      AND ");
+  return sql.raw(`
+    DO $legacy_copy$ BEGIN
+      IF ${present}
+      AND col_description(to_regclass('public.${table}'),
+        (SELECT attnum FROM pg_attribute WHERE attrelid = to_regclass('public.${table}') AND attname = '${marker}'))
+        IS DISTINCT FROM '${LEGACY_COPY_MARK}' THEN
+        ${statements.map((statement) => `EXECUTE $stmt$${statement}$stmt$;`).join("\n        ")}
+        EXECUTE $stmt$COMMENT ON COLUMN "${table}"."${marker}" IS '${LEGACY_COPY_MARK}'$stmt$;
+      END IF;
+    END $legacy_copy$
+  `);
+}
+
+async function migrateLegacyColumnLayouts() {
+  // LegionellaTrack: temperature_c (one decimal place) became temperature.
+  await db.execute(copyLegacyColumnsOnce("legionella_checks", ["temperature_c"], [
+    `UPDATE legionella_checks SET temperature = temperature_c WHERE temperature IS NULL AND temperature_c IS NOT NULL`,
+  ]));
+  // Hot tubs: temperature_c, ph_level and a chlorine or bromine level became
+  // temperature, ph_value and sanitiser_level.
+  await db.execute(copyLegacyColumnsOnce("hot_tub_checks", ["temperature_c", "ph_level", "chlorine_level", "bromine_level"], [
+    `UPDATE hot_tub_checks SET
+       temperature = coalesce(temperature, temperature_c),
+       ph_value = coalesce(ph_value, ph_level),
+       sanitiser_level = coalesce(sanitiser_level, chlorine_level, bromine_level)
+     WHERE (temperature IS NULL AND temperature_c IS NOT NULL)
+        OR (ph_value IS NULL AND ph_level IS NOT NULL)
+        OR (sanitiser_level IS NULL AND coalesce(chlorine_level, bromine_level) IS NOT NULL)`,
+  ]));
+  // BikeTrack services: performed_by and cost (pounds) became serviced_by and
+  // cost_pence. work_carried_out and parts_replaced have no current column and
+  // stay where they are.
+  await db.execute(copyLegacyColumnsOnce("bike_services", ["performed_by", "cost"], [
+    `UPDATE bike_services SET
+       serviced_by = coalesce(serviced_by, performed_by),
+       cost_pence = coalesce(cost_pence, round(cost * 100)::integer)
+     WHERE (serviced_by IS NULL AND performed_by IS NOT NULL) OR (cost_pence IS NULL AND cost IS NOT NULL)`,
+  ]));
+  // BikeTrack bikes: the old name was the bike's label (now ref) and
+  // bike_type its type. serial_number, colour and size stay where they are.
+  await db.execute(copyLegacyColumnsOnce("bikes", ["bike_type", "name"], [
+    `ALTER TABLE bikes ALTER COLUMN name DROP NOT NULL`,
+    `UPDATE bikes SET ref = coalesce(ref, nullif(name, ''), 'Bike ' || id), type = bike_type WHERE ref IS NULL`,
+  ]));
+  // BikeTrack hires: hirer_* and the hire_start/expected_return/actual_return
+  // timestamps became guest_* and dates; deposit_taken (pounds) became pence.
+  // hire_fee and the pre/post check flags stay where they are.
+  await db.execute(copyLegacyColumnsOnce("bike_hire_records",
+    ["hirer_name", "hirer_contact", "hire_start", "expected_return", "actual_return", "deposit_taken"], [
+    `ALTER TABLE bike_hire_records ALTER COLUMN hirer_name DROP NOT NULL`,
+    `UPDATE bike_hire_records SET
+       guest_name = coalesce(guest_name, hirer_name),
+       guest_contact = coalesce(guest_contact, hirer_contact),
+       hire_date = coalesce(hire_date, hire_start::date),
+       return_date_expected = coalesce(return_date_expected, expected_return::date),
+       return_date_actual = coalesce(return_date_actual, actual_return::date),
+       deposit_pence = coalesce(deposit_pence, round(deposit_taken * 100)::integer)
+     WHERE guest_name IS NULL`,
+  ]));
+  // BikeTrack checks: result became overall_result (added with a 'pass'
+  // default above, so copy every row once). items_checked stays where it is.
+  await db.execute(copyLegacyColumnsOnce("bike_checks", ["result"], [
+    `UPDATE bike_checks SET overall_result = result WHERE overall_result IS DISTINCT FROM result`,
+  ]));
+  // KitchenTrack: the first diary held one reading per appliance per day in
+  // fixed columns. Each becomes a row in today's sections (the single daily
+  // reading shows in the AM column, tagged with its old column), and the old
+  // notes and probe-cleaned answer join the day's notes.
+  await db.execute(copyLegacyColumnsOnce("food_safety_records",
+    ["fridge1_temp", "fridge2_temp", "fridge3_temp", "freezer1_temp", "freezer2_temp", "hot_holding_temp", "probe_cleaned", "notes"], [
+    `UPDATE food_safety_records f SET
+       cold_food = f.cold_food || coalesce((
+         SELECT jsonb_agg(jsonb_build_object('unit', r.unit, 'tempAm', r.reading::text, 'tempPm', '',
+           'correctiveAction', '', '_legacyColumn', r.col) ORDER BY r.ord)
+         FROM (VALUES (1, 'Fridge 1', f.fridge1_temp, 'fridge1_temp'), (2, 'Fridge 2', f.fridge2_temp, 'fridge2_temp'),
+           (3, 'Fridge 3', f.fridge3_temp, 'fridge3_temp'), (4, 'Freezer 1', f.freezer1_temp, 'freezer1_temp'),
+           (5, 'Freezer 2', f.freezer2_temp, 'freezer2_temp')) AS r(ord, unit, reading, col)
+         WHERE r.reading IS NOT NULL), '[]'::jsonb),
+       hot_holding = f.hot_holding || CASE WHEN f.hot_holding_temp IS NULL THEN '[]'::jsonb
+         ELSE jsonb_build_array(jsonb_build_object('item', 'Hot holding', 'coreTemp', f.hot_holding_temp::text,
+           'timeOfCheck', '', '_legacyColumn', 'hot_holding_temp')) END,
+       correctives = nullif(concat_ws(E'\n', nullif(f.correctives, ''),
+         CASE WHEN nullif(f.notes, '') IS NOT NULL THEN 'Diary notes: ' || f.notes END,
+         CASE f.probe_cleaned WHEN true THEN 'Probe cleaned: yes' WHEN false THEN 'Probe cleaned: no' END), '')
+     WHERE coalesce(f.fridge1_temp, f.fridge2_temp, f.fridge3_temp, f.freezer1_temp, f.freezer2_temp, f.hot_holding_temp) IS NOT NULL
+        OR nullif(f.notes, '') IS NOT NULL OR f.probe_cleaned IS NOT NULL`,
+  ]));
 }
 
 // ---- Two-factor authentication ----
