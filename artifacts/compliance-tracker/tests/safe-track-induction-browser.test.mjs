@@ -40,12 +40,19 @@ const answers = SECTIONS.map((label, index) => ({
   status: ["yes", "no", "na"][index % 3],
   comments: `Topic ${index + 1}: covered with <b>${label}</b> & "notes"`,
 }));
+// Dates sit inside the one-day correction window on the account's calendar
+// (Europe/London by default): older dates need an owner's reason, which the
+// app's reason prompt supplies and this page-only harness does not mount.
+const londonDay = offsetDays => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" })
+  .format(new Date(Date.now() + offsetDays * 86_400_000));
+const today = londonDay(0);
+const yesterday = londonDay(-1);
 const record = {
   staffName: "Jamie O'Neill",
   jobTitle: "Chef de partie",
   department: "Kitchen & Bar",
-  startDate: "2026-10-05",
-  completedAt: "2026-10-12",
+  startDate: yesterday,
+  completedAt: yesterday,
   notes: "Signed off by the head chef; refresher booked <in 6 months>.",
 };
 
@@ -193,7 +200,7 @@ test("every topic, comment and sign-off field saves, reloads and prints", async 
   // Edit two topics and the sign-off, save, reload and reopen again.
   answers[2] = { status: "yes", comments: "COSHH sheets read and signed" };
   answers[23] = { status: "", comments: "" };
-  record.completedAt = "2026-10-14";
+  record.completedAt = today;
   const edited = await sections();
   await edited[2].getByRole("button", { name: "Yes", exact: true }).click();
   await edited[2].locator("input").fill(answers[2].comments);
@@ -232,16 +239,18 @@ test("a save the API rejects keeps the form open with every entry", async () => 
   await openInductions();
   await page.getByRole("button", { name: "Add Record" }).click();
   await dialog().getByPlaceholder("Full name").fill("Robin Overlong");
-  await fieldInput("Start Date").fill("2026-10-06");
+  await fieldInput("Start Date").fill(today);
   const [first] = await sections();
   await first.getByRole("button", { name: "Yes", exact: true }).click();
-  // The API caps the stored checklist at 10,000 characters.
-  await first.locator("input").fill("x".repeat(10_050));
+  await first.locator("input").fill("Fire exits shown");
+  // The API caps sign-off notes at 2,000 characters.
+  await fieldInput("Notes / Sign-off Comments").fill("x".repeat(2_050));
   await dialog().getByRole("button", { name: "Create" }).click();
   await page.getByText("Could not save").first().waitFor();
   assert.ok(await dialog().isVisible(), "the form stays open");
   assert.equal(await dialog().getByPlaceholder("Full name").inputValue(), "Robin Overlong");
-  assert.equal((await first.locator("input").inputValue()).length, 10_050, "nothing typed is lost");
+  assert.equal(await first.locator("input").inputValue(), "Fire exits shown", "topic entries are kept");
+  assert.equal((await fieldInput("Notes / Sign-off Comments").inputValue()).length, 2_050, "nothing typed is lost");
   const { data } = await owner.request("GET", "/safe-track/inductions");
   assert.equal(data.some(item => item.staffName === "Robin Overlong"), false);
 });
