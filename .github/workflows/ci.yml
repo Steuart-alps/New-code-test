@@ -202,6 +202,11 @@ jobs:
       - name: SafeTrack reminder job tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:safe-track-ack-reminders:fresh
 
+      # Older, populated databases (Replit-era table layouts) must keep every
+      # record through the runtime migrations, readable through today's routes.
+      - name: Upgrade-path fixture tests
+        run: pnpm --filter @workspace/api-server run test:schema:upgrade
+
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
 

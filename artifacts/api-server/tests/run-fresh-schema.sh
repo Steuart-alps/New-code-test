@@ -69,9 +69,18 @@ port="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()
 # serves the web build, so same-origin browser requests pass CORS and CSRF.
 server_policy=()
 suite_browser=()
+# FRESH_SCHEMA_UPGRADE_FIXTURE=<shape> seeds an older, populated schema
+# (tests/upgrade-fixtures/legacy-shapes.ts) before the migrations run, so the
+# suite can prove an upgrade keeps every record. The shape name only.
+if [ -n "${FRESH_SCHEMA_UPGRADE_FIXTURE:-}" ]; then
+  [ "${FRESH_SCHEMA_BASE:-}" != "push" ] || { echo "Upgrade fixtures build their own base; unset FRESH_SCHEMA_BASE" >&2; exit 1; }
+  server_policy+=(FRESH_SCHEMA_UPGRADE_FIXTURE="$FRESH_SCHEMA_UPGRADE_FIXTURE")
+  suite_browser+=(FRESH_SCHEMA_UPGRADE_FIXTURE="$FRESH_SCHEMA_UPGRADE_FIXTURE")
+  schema_base="older populated schema ($FRESH_SCHEMA_UPGRADE_FIXTURE), then runtime migrations"
+fi
 if [ "${FRESH_SCHEMA_BROWSER_POLICY:-}" = "1" ]; then
-  server_policy=(ENFORCE_CSRF=1 ENFORCE_MANDATORY_2FA=1 PUBLIC_APP_URL="http://127.0.0.1:$port")
-  suite_browser=(FRESH_SCHEMA_BROWSER_POLICY=1)
+  server_policy+=(ENFORCE_CSRF=1 ENFORCE_MANDATORY_2FA=1 PUBLIC_APP_URL="http://127.0.0.1:$port")
+  suite_browser+=(FRESH_SCHEMA_BROWSER_POLICY=1)
   # Browser binary locations only; never credentials.
   [ -z "${CHROMIUM_PATH:-}" ] || suite_browser+=(CHROMIUM_PATH="$CHROMIUM_PATH")
   [ -z "${PLAYWRIGHT_BROWSERS_PATH:-}" ] || suite_browser+=(PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH")
