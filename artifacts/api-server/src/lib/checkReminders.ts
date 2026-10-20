@@ -20,7 +20,7 @@ export interface CheckAlert {
   status: "overdue" | "due_soon" | "never" | "action_required" | "plan_required";
   lastDate: string | null;
   dueDate: string | null;
-  /** Positive = overdue by N days. Zero = due today. Negative = N days remaining. */
+  /** Days from today to the due date: negative = overdue by that many days, zero = due today, positive = days remaining. */
   daysUntilDue: number | null;
   frequencyLabel: string;
   /** The site the alert belongs to (null for a business without sites). */
