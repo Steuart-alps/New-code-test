@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
 import { getClientId, requireClientAdmin, requireAuth, denyViewers } from "../middleware/requireAuth";
@@ -8,6 +8,14 @@ import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/s
 import {
   findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, stagedPhotoEntry,
 } from "../lib/clientEntryReplay";
+import {
+  ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError, ObjectContentError, ObjectGenerationError,
+  type AllowedUploadType,
+} from "../lib/objectStorage";
+import { respondObjectStorageDownloadUnavailable } from "../lib/objectStorageUnavailable";
+import {
+  NSTS_TEST_INSPECTION_TYPE, isNstsSprayerCategory, nstsNextTestDate, nstsStatus,
+} from "@workspace/api-zod/nsts-sprayer-tests";
 
 const router = Router();
 
@@ -77,6 +85,30 @@ function camelRows(result: any): Record<string, unknown>[] {
   ));
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A sprayer's NSTS category and purchase date. Only sprayers keep a category;
+ * `undefined` leaves a stored value as it is. Returns an error message when a
+ * value is not allowed.
+ */
+function sprayerFields(type: unknown, sprayerCategory: unknown, purchaseDate: unknown):
+  { sprayerCategory?: string | null; purchaseDate?: string | null } | string {
+  const out: { sprayerCategory?: string | null; purchaseDate?: string | null } = {};
+  if (sprayerCategory !== undefined) {
+    if (sprayerCategory !== null && sprayerCategory !== "" && !isNstsSprayerCategory(sprayerCategory)) return "Invalid sprayer type";
+    out.sprayerCategory = isNstsSprayerCategory(sprayerCategory) ? sprayerCategory : null;
+  }
+  if (type !== undefined && type !== "sprayer_spreader") out.sprayerCategory = null;
+  if (purchaseDate !== undefined) {
+    if (purchaseDate !== null && purchaseDate !== "" && !(typeof purchaseDate === "string" && ISO_DATE.test(purchaseDate))) {
+      return "Purchase date must be a date (YYYY-MM-DD)";
+    }
+    out.purchaseDate = typeof purchaseDate === "string" && purchaseDate ? purchaseDate : null;
+  }
+  return out;
+}
+
 // A supplied siteId must name one of the caller's own sites.
 async function siteBelongsToClient(siteId: unknown, clientId: number | null): Promise<boolean> {
   if (siteId == null) return true;
@@ -109,16 +141,19 @@ router.get("/machines", async (req, res) => {
 router.post("/machines", requireClientAdmin, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { name, type, make, model, serialNo, year, regNo, siteId, notes } = req.body;
+    const { name, type, make, model, serialNo, year, regNo, siteId, notes, sprayerCategory, purchaseDate } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: "Machine name is required" });
     if (!type) return res.status(400).json({ error: "Machine type is required" });
     if (!(MACHINE_TYPES as readonly string[]).includes(type)) return res.status(400).json({ error: "Invalid machine type" });
     if (!(await siteBelongsToClient(siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
+    const sprayer = sprayerFields(type, sprayerCategory, purchaseDate);
+    if (typeof sprayer === "string") return res.status(400).json({ error: sprayer });
     const result = await db.execute(sql`
-      INSERT INTO green_machines (client_id, site_id, name, type, make, model, serial_no, year, reg_no, notes)
+      INSERT INTO green_machines (client_id, site_id, name, type, make, model, serial_no, year, reg_no, notes, sprayer_category, purchase_date)
       VALUES (${clientId}, ${siteId ?? null}, ${name.trim()}, ${type},
               ${make?.trim() ?? null}, ${model?.trim() ?? null}, ${serialNo?.trim() ?? null},
-              ${year ?? null}, ${regNo?.trim() ?? null}, ${notes?.trim() ?? null})
+              ${year ?? null}, ${regNo?.trim() ?? null}, ${notes?.trim() ?? null},
+              ${sprayer.sprayerCategory ?? null}, ${sprayer.purchaseDate ?? null})
       RETURNING *
     `);
     res.status(201).json(rows(result)[0]);
@@ -246,14 +281,22 @@ router.put("/machines/:id", requireClientAdmin, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const { id } = req.params;
-    const { name, type, make, model, serialNo, year, regNo, siteId, active, notes } = req.body;
+    const { name, type, make, model, serialNo, year, regNo, siteId, active, notes, sprayerCategory, purchaseDate } = req.body;
     if (!(await siteBelongsToClient(siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
+    const sprayer = sprayerFields(type, sprayerCategory, purchaseDate);
+    if (typeof sprayer === "string") return res.status(400).json({ error: sprayer });
+    // Clients that don't send the sprayer fields (older phone apps, the roster
+    // import) leave them as they are.
+    const keepCategory = sprayer.sprayerCategory === undefined;
+    const keepPurchase = sprayer.purchaseDate === undefined;
     const result = await db.execute(sql`
       UPDATE green_machines
       SET name = ${name?.trim()}, type = ${type}, make = ${make?.trim() ?? null},
           model = ${model?.trim() ?? null}, serial_no = ${serialNo?.trim() ?? null},
           year = ${year ?? null}, reg_no = ${regNo?.trim() ?? null},
           site_id = ${siteId ?? null}, active = ${active ?? true},
+          sprayer_category = CASE WHEN ${keepCategory} THEN sprayer_category ELSE ${sprayer.sprayerCategory ?? null} END,
+          purchase_date = CASE WHEN ${keepPurchase} THEN purchase_date ELSE ${sprayer.purchaseDate ?? null}::date END,
           notes = ${notes?.trim() ?? null}, updated_at = now()
       WHERE id = ${id} AND client_id = ${clientId}
       RETURNING *
@@ -687,8 +730,68 @@ router.delete("/defects/:id", requireClientAdmin, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PUWER STATUTORY INSPECTIONS
+// PUWER STATUTORY INSPECTIONS (including NSTS sprayer tests)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// An inspection certificate is a PDF or photo uploaded through
+// POST /registers/uploads/request-url and finalised here, as for register
+// documents. Replacing or removing it keeps the stored file (the data export
+// and the cancellation erasure still find it by the tenant's storage prefix).
+const CERTIFICATE_TYPES: ReadonlySet<AllowedUploadType> = new Set(["application/pdf", "image/jpeg", "image/png"]);
+const storage = new ObjectStorageService();
+
+type CertificateFields = { objectPath: string | null; fileName: string | null; mimeType: string | null };
+
+/**
+ * The certificate columns for a create/update: "kept" when the stored file is
+ * unchanged, the new fields otherwise, or null after sending an error.
+ */
+async function resolveCertificate(
+  req: Request,
+  res: Response,
+  clientId: number,
+  objectPath: unknown,
+  fileName: unknown,
+  existing: CertificateFields | null,
+): Promise<CertificateFields | "kept" | null> {
+  if (objectPath === undefined) return existing ? "kept" : { objectPath: null, fileName: null, mimeType: null };
+  if (objectPath === null || objectPath === "") return { objectPath: null, fileName: null, mimeType: null };
+  if (typeof objectPath !== "string" || objectPath.length > 2000) {
+    res.status(400).json({ error: "Invalid certificate file" });
+    return null;
+  }
+  if (existing && objectPath === existing.objectPath) return "kept";
+  const name = typeof fileName === "string" && fileName.trim() ? fileName.trim().slice(0, 500) : null;
+  try {
+    const finalized = await storage.finalizeVerifiedTenantUpload(objectPath, clientId, CERTIFICATE_TYPES);
+    return { objectPath: finalized.objectPath, fileName: name, mimeType: finalized.contentType };
+  } catch (err) {
+    await storage.discardTenantUpload(objectPath, clientId).catch(() => {});
+    if (!(err instanceof ObjectNotFoundError || err instanceof ObjectOwnershipError
+      || err instanceof ObjectContentError || err instanceof ObjectGenerationError)) {
+      req.log.error({ err }, "Could not finalise GreenTrack inspection certificate upload");
+    }
+    const error = err instanceof ObjectNotFoundError ? "Uploaded file not found"
+      : err instanceof ObjectContentError ? "The certificate must be a PDF, JPEG or PNG"
+      : err instanceof ObjectGenerationError ? err.message
+      : err instanceof ObjectOwnershipError ? err.message : "Could not secure the uploaded file";
+    res.status(err instanceof ObjectNotFoundError ? 404
+      : err instanceof ObjectContentError ? 400
+      : err instanceof ObjectGenerationError ? 409 : 403).json({ error });
+    return null;
+  }
+}
+
+/** An NSTS test with no next date gets one from the sprayer's category. */
+function nstsDefaultNextDate(inspectionType: unknown, inspectionDate: unknown, nextInspectionDate: unknown, sprayerCategory: unknown) {
+  if (nextInspectionDate) return nextInspectionDate;
+  if (inspectionType !== NSTS_TEST_INSPECTION_TYPE || !inspectionDate) return null;
+  // pg reads a stored date as local midnight, so take the local calendar day.
+  const day = inspectionDate instanceof Date
+    ? `${inspectionDate.getFullYear()}-${String(inspectionDate.getMonth() + 1).padStart(2, "0")}-${String(inspectionDate.getDate()).padStart(2, "0")}`
+    : String(inspectionDate);
+  return nstsNextTestDate(sprayerCategory, day);
+}
 
 router.get("/puwer-inspections", async (req, res) => {
   try {
@@ -715,28 +818,35 @@ router.post("/puwer-inspections", requireClientAdmin, async (req, res) => {
     const {
       machineId, inspectionDate, nextInspectionDate, inspectionType,
       inspectorName, inspectorRosterId, inspectorCompany, certRef, safeToOperate, defectsFound, notes,
+      certificateObjectPath, certificateFileName,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!inspectionDate) return res.status(400).json({ error: "inspectionDate is required" });
 
-    const machineCheck = await db.execute(sql`
-      SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
-    `);
-    if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const machine = rows<{ id: number; sprayer_category: string | null }>(await db.execute(sql`
+      SELECT id, sprayer_category FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
+    `))[0];
+    if (!machine) return res.status(404).json({ error: "Machine not found" });
     const performer = await resolveStaffRoster(clientId, inspectorRosterId, inspectorName);
     if (inspectorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    const type = inspectionType ?? "thorough_examination";
+    const certificate = await resolveCertificate(req, res, clientId!, certificateObjectPath, certificateFileName, null);
+    if (!certificate || certificate === "kept") return;
 
     const canonicalResult = safeToOperate === false ? "fail" : "pass";
     const result = await db.execute(sql`
       INSERT INTO green_puwer_inspections (
         client_id, machine_id, inspection_date, next_inspection_date, inspection_type,
-        inspector_name, inspector_roster_id, inspector_company, cert_ref, safe_to_operate, defects_found, result, notes
+        inspector_name, inspector_roster_id, inspector_company, cert_ref, safe_to_operate, defects_found, result, notes,
+        certificate_object_path, certificate_file_name, certificate_mime_type
       ) VALUES (
-        ${clientId}, ${machineId}, ${inspectionDate}, ${nextInspectionDate ?? null},
-        ${inspectionType ?? "thorough_examination"},
+        ${clientId}, ${machineId}, ${inspectionDate},
+        ${nstsDefaultNextDate(type, inspectionDate, nextInspectionDate, machine.sprayer_category)},
+        ${type},
         ${performer?.performedBy ?? inspectorName?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${inspectorCompany?.trim() ?? null},
         ${certRef?.trim() ?? null}, ${safeToOperate ?? true},
-        ${defectsFound?.trim() ?? null}, ${canonicalResult}, ${notes?.trim() ?? null}
+        ${defectsFound?.trim() ?? null}, ${canonicalResult}, ${notes?.trim() ?? null},
+        ${certificate.objectPath}, ${certificate.fileName}, ${certificate.mimeType}
       )
       RETURNING *
     `);
@@ -752,18 +862,37 @@ router.put("/puwer-inspections/:id", requireClientAdmin, async (req, res) => {
     const {
       inspectionDate, nextInspectionDate, inspectionType,
       inspectorName, inspectorRosterId, inspectorCompany, certRef, safeToOperate, defectsFound, notes,
+      certificateObjectPath, certificateFileName,
     } = req.body;
-    const existing = (await db.execute(sql`SELECT * FROM green_puwer_inspections WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
+    const existing = (await db.execute(sql`
+      SELECT p.*, m.sprayer_category FROM green_puwer_inspections p
+      JOIN green_machines m ON m.id = p.machine_id
+      WHERE p.id=${req.params.id} AND p.client_id=${clientId}
+    `)).rows[0] as any;
     if (!existing) return res.status(404).json({ error: "Inspection not found" });
     const performer = await resolveStaffPerformerUpdate(clientId, inspectorRosterId, inspectorName, existing.inspector_roster_id, existing.inspector_name);
     if (inspectorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     const mergedSafeToOperate = safeToOperate === undefined ? existing.safe_to_operate : safeToOperate;
     const canonicalResult = mergedSafeToOperate === false ? "fail" : "pass";
     const value = (input: any, stored: any) => input === undefined ? stored : input;
+    const certificate = await resolveCertificate(req, res, clientId!, certificateObjectPath, certificateFileName, {
+      objectPath: existing.certificate_object_path ?? null,
+      fileName: existing.certificate_file_name ?? null,
+      mimeType: existing.certificate_mime_type ?? null,
+    });
+    if (!certificate) return;
+    const keepCertificate = certificate === "kept";
+    const newCertificate = keepCertificate ? null : certificate;
+    const mergedType = value(inspectionType, existing.inspection_type);
+    const mergedDate = value(inspectionDate, existing.inspection_date);
+    const mergedNext = nstsDefaultNextDate(mergedType, mergedDate, value(nextInspectionDate, existing.next_inspection_date), existing.sprayer_category);
     const result = await db.execute(sql`
       UPDATE green_puwer_inspections
-      SET inspection_date = ${value(inspectionDate, existing.inspection_date)}, next_inspection_date = ${value(nextInspectionDate, existing.next_inspection_date)},
-          inspection_type = ${value(inspectionType, existing.inspection_type)},
+      SET inspection_date = ${mergedDate}, next_inspection_date = ${mergedNext},
+          inspection_type = ${mergedType},
+          certificate_object_path = CASE WHEN ${keepCertificate} THEN certificate_object_path ELSE ${newCertificate?.objectPath ?? null} END,
+          certificate_file_name = CASE WHEN ${keepCertificate} THEN certificate_file_name ELSE ${newCertificate?.fileName ?? null} END,
+          certificate_mime_type = CASE WHEN ${keepCertificate} THEN certificate_mime_type ELSE ${newCertificate?.mimeType ?? null} END,
           inspector_name = ${performer?.performedBy ?? null}, inspector_roster_id = ${performer?.staffRosterId ?? null}, inspector_company = ${inspectorCompany === undefined ? existing.inspector_company : inspectorCompany?.trim() ?? null},
           cert_ref = ${certRef === undefined ? existing.cert_ref : certRef?.trim() ?? null}, safe_to_operate = ${mergedSafeToOperate},
           defects_found = ${defectsFound === undefined ? existing.defects_found : defectsFound?.trim() ?? null}, result = ${canonicalResult},
@@ -776,6 +905,33 @@ router.put("/puwer-inspections/:id", requireClientAdmin, async (req, res) => {
     res.json(row);
   } catch (err) {
     res.status(500).json({ error: "Failed to update PUWER inspection" });
+  }
+});
+
+// A short-lived link to an inspection's uploaded certificate.
+router.get("/puwer-inspections/:id/certificate-url", async (req, res) => {
+  const clientId = getClientId(req);
+  const id = Number(req.params.id);
+  if (!clientId || !Number.isInteger(id) || id <= 0) return res.status(404).json({ error: "Inspection not found" });
+  let row: { certificate_object_path: string | null; certificate_file_name: string | null } | undefined;
+  try {
+    row = rows(await db.execute(sql`
+      SELECT certificate_object_path, certificate_file_name FROM green_puwer_inspections
+      WHERE id = ${id} AND client_id = ${clientId}
+    `))[0];
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to fetch the certificate" });
+  }
+  if (!row) return res.status(404).json({ error: "Inspection not found" });
+  if (!row.certificate_object_path) return res.status(404).json({ error: "No certificate attached" });
+  try {
+    const downloadUrl = await storage.getSignedDownloadURL(row.certificate_object_path, 900, CERTIFICATE_TYPES, clientId);
+    return res.json({ downloadUrl, fileName: row.certificate_file_name });
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "File not found" });
+    if (err instanceof ObjectOwnershipError) return res.status(403).json({ error: "File is not available for this account" });
+    if (err instanceof ObjectContentError) return res.status(409).json({ error: "File failed its content check" });
+    return respondObjectStorageDownloadUnavailable(req, res, err, "GreenTrack inspection certificate download", { recordId: id, clientId });
   }
 });
 
@@ -890,7 +1046,7 @@ router.get("/status", async (req, res) => {
     const clientId = getClientId(req);
     const today = new Date().toISOString().split("T")[0];
 
-    const [machinesResult, defectsResult, preUseResult, serviceResult] = await Promise.all([
+    const [machinesResult, defectsResult, preUseResult, serviceResult, sprayersResult] = await Promise.all([
       db.execute(sql`
         SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE active) AS active
         FROM green_machines WHERE client_id = ${clientId}
@@ -919,12 +1075,39 @@ router.get("/status", async (req, res) => {
         ) latest
         WHERE next_service_date < ${today}
       `),
+      // Active sprayers with an NSTS category and their latest NSTS test.
+      db.execute(sql`
+        SELECT m.id, m.name, m.sprayer_category, to_char(m.purchase_date, 'YYYY-MM-DD') AS purchase_date, m.year,
+               to_char(t.inspection_date, 'YYYY-MM-DD') AS last_test_date,
+               to_char(t.next_inspection_date, 'YYYY-MM-DD') AS next_test_date,
+               t.id AS last_test_id
+        FROM green_machines m
+        LEFT JOIN LATERAL (
+          SELECT id, inspection_date, next_inspection_date FROM green_puwer_inspections
+          WHERE machine_id = m.id AND client_id = m.client_id AND inspection_type = ${NSTS_TEST_INSPECTION_TYPE}
+          ORDER BY inspection_date DESC, id DESC LIMIT 1
+        ) t ON true
+        WHERE m.client_id = ${clientId} AND m.active AND m.sprayer_category IS NOT NULL
+        ORDER BY m.name
+      `),
     ]);
 
     const machines = rows(machinesResult)[0] as any;
     const defects = rows(defectsResult)[0] as any;
     const preUse = rows(preUseResult)[0] as any;
     const service = rows(serviceResult)[0] as any;
+    const nstsSprayers = rows(sprayersResult).map((m: any) => {
+      const status = nstsStatus(
+        m.sprayer_category,
+        { purchaseDate: m.purchase_date, year: m.year },
+        m.last_test_date ? { inspectionDate: m.last_test_date, nextInspectionDate: m.next_test_date } : null,
+        today,
+      );
+      return {
+        machineId: m.id, machineName: m.name, sprayerCategory: m.sprayer_category,
+        lastTestDate: m.last_test_date ?? null, lastTestId: m.last_test_id ?? null, ...status,
+      };
+    });
 
     res.json({
       totalMachines: Number(machines?.total ?? 0),
@@ -934,6 +1117,8 @@ router.get("/status", async (req, res) => {
       criticalDefects: Number(defects?.critical_count ?? 0),
       checkedTodayCount: Number(preUse?.checked_today ?? 0),
       overdueService: Number(service?.overdue_service ?? 0),
+      nstsSprayers,
+      nstsOverdue: nstsSprayers.filter((s) => s.state === "overdue").length,
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch status" });

@@ -3296,6 +3296,20 @@ export const UpdateGreenTrackConfigResponse = zod.object({
 
 
 /**
+ * Covers PUWER and LOLER examinations and NSTS sprayer tests. The link expires after 15 minutes.
+ * @summary Get a short-lived download link for an inspection's uploaded certificate
+ */
+export const GetGreenTrackInspectionCertificateUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGreenTrackInspectionCertificateUrlResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string().nullish()
+})
+
+
+/**
  * @summary Get Incident configuration
  */
 export const GetIncidentConfigResponse = zod.object({
