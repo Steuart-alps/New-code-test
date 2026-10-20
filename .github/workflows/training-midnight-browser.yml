@@ -1,4 +1,4 @@
-name: Training certificates across midnight
+name: Training pages browser checks
 
 on:
   pull_request:
@@ -8,6 +8,11 @@ on:
       - "artifacts/compliance-tracker/src/lib/training-expiry.ts"
       - "artifacts/compliance-tracker/src/lib/training-matrix.ts"
       - "artifacts/compliance-tracker/tests/training-midnight-*"
+      - "artifacts/compliance-tracker/src/pages/safe-track.tsx"
+      - "artifacts/compliance-tracker/src/lib/induction-print.ts"
+      - "artifacts/compliance-tracker/tests/induction-form-*"
+      - "artifacts/compliance-tracker/tests/safe-track-induction-*"
+      - "artifacts/api-server/src/routes/safe-track.ts"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -20,6 +25,11 @@ on:
       - "artifacts/compliance-tracker/src/lib/training-expiry.ts"
       - "artifacts/compliance-tracker/src/lib/training-matrix.ts"
       - "artifacts/compliance-tracker/tests/training-midnight-*"
+      - "artifacts/compliance-tracker/src/pages/safe-track.tsx"
+      - "artifacts/compliance-tracker/src/lib/induction-print.ts"
+      - "artifacts/compliance-tracker/tests/induction-form-*"
+      - "artifacts/compliance-tracker/tests/safe-track-induction-*"
+      - "artifacts/api-server/src/routes/safe-track.ts"
       - "artifacts/compliance-tracker/package.json"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -28,7 +38,7 @@ on:
 
 jobs:
   training-midnight:
-    name: TrainTrack expiry rolls over at local midnight
+    name: Training expiry at midnight and induction forms
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -53,3 +63,21 @@ jobs:
 
       - name: Run training midnight checks
         run: pnpm --filter @workspace/compliance-tracker run test:training-midnight-browser
+
+      - name: Run induction form checks
+        run: pnpm --filter @workspace/compliance-tracker run test:induction-form-browser
+
+      # The save-and-reload check boots the API on a private PostgreSQL
+      # cluster (initdb/pg_ctl ship with ubuntu-latest but not on PATH).
+      - name: Put PostgreSQL server tools on PATH
+        run: |
+          bin="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$bin" ] || [ ! -x "$bin/initdb" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql
+            bin="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)"
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Run induction save, reload and print checks
+        run: pnpm --filter @workspace/api-server run test:safe-track-induction-browser

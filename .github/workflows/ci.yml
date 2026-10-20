@@ -102,6 +102,9 @@ jobs:
       - name: Public page SEO test
         run: pnpm --filter @workspace/compliance-tracker run test:seo-pages
 
+      - name: Training matrix and CSV formula safety test
+        run: pnpm --filter @workspace/compliance-tracker run test:training-matrix
+
       - name: Storage test-bucket safety checks
         run: pnpm --filter @workspace/api-server run test:storage-happy-path-config
 
