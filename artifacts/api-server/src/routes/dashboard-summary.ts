@@ -13,6 +13,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId } from "../middleware/requireAuth";
 import { getCheckAlerts, type CheckAlert } from "../lib/checkReminders";
 import { getCoshhDueItems } from "../lib/coshhTrack";
+import { NSTS_TEST_INSPECTION_TYPE, nstsStatus } from "@workspace/api-zod/nsts-sprayer-tests";
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { addCalendarDays, getAccountToday } from "../lib/accountClock";
 import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
@@ -1176,7 +1177,18 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             AND p.next_inspection_date IS NOT NULL AND p.next_inspection_date < ${today}
           ORDER BY p.next_inspection_date ASC
         `;
-        const [machines, checkedTodayRows, overdueService, overdueServiceCountRows, overdueExaminations] = await Promise.all([
+        // Sprayers never NSTS tested: the first test is due by a set age.
+        const untestedSprayers = sql`
+          SELECT m.id, m.name, m.sprayer_category, to_char(m.purchase_date, 'YYYY-MM-DD') AS purchase_date, m.year
+          FROM green_machines m
+          WHERE m.client_id = ${clientId} AND m.active = true AND m.sprayer_category IS NOT NULL ${siteClause}
+            AND NOT EXISTS (
+              SELECT 1 FROM green_puwer_inspections t
+              WHERE t.machine_id = m.id AND t.client_id = m.client_id AND t.inspection_type = ${NSTS_TEST_INSPECTION_TYPE}
+            )
+          ORDER BY m.name
+        `;
+        const [machines, checkedTodayRows, overdueService, overdueServiceCountRows, overdueExaminations, untestedSprayerRows] = await Promise.all([
           // Machines with no pre-use check today
           db.execute(sql`
             SELECT m.id, m.name, m.type FROM green_machines m
@@ -1192,6 +1204,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           db.execute(sql`SELECT m.id, m.name ${overdueServiceFrom} ORDER BY s.next_service_date ASC LIMIT 10`),
           db.execute(sql`SELECT count(*)::int AS overdue ${overdueServiceFrom}`),
           db.execute(overdueExamination),
+          db.execute(untestedSprayers),
         ]);
         const checkedTodayIds = new Set(rows(checkedTodayRows).map((r: any) => r.machine_id));
         const uncheckedToday = rows(machines).filter((m: any) => !checkedTodayIds.has(m.id));
@@ -1200,20 +1213,29 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         const uncheckedCount = uncheckedToday.length;
         const totalMachines = rows(machines).length;
 
-        const overdueExaminationCount = rows(overdueExaminations).length;
+        const isNsts = (m: any) => m.inspection_type === NSTS_TEST_INSPECTION_TYPE;
+        const overdueExaminationCount = rows(overdueExaminations).filter((m: any) => !isNsts(m)).length;
+        const overdueFirstTests = rows(untestedSprayerRows)
+          .map((m: any) => ({ ...m, nsts: nstsStatus(m.sprayer_category, { purchaseDate: m.purchase_date, year: m.year }, null, today) }))
+          .filter((m: any) => m.nsts.state === "overdue");
+        const overdueNstsCount = rows(overdueExaminations).filter(isNsts).length + overdueFirstTests.length;
 
-        if (overdueServiceCount > 0 || overdueExaminationCount > 0) {
+        if (overdueServiceCount > 0 || overdueExaminationCount > 0 || overdueNstsCount > 0) {
           status = "overdue";
           badge = [
             overdueServiceCount > 0 ? `${plural(overdueServiceCount, "machine")} service overdue` : null,
             overdueExaminationCount > 0 ? `${plural(overdueExaminationCount, "examination")} overdue` : null,
+            overdueNstsCount > 0 ? `${plural(overdueNstsCount, "NSTS test")} overdue` : null,
           ].filter(Boolean).join(", ");
           for (const m of rows(overdueService)) {
             items.push({ label: m.name, detail: "Service overdue", path: "/green-track" });
           }
           for (const m of rows(overdueExaminations).slice(0, 10)) {
-            const kind = /examination/.test(String(m.inspection_type)) ? "Thorough examination" : "Inspection";
+            const kind = isNsts(m) ? "NSTS test" : /examination/.test(String(m.inspection_type)) ? "Thorough examination" : "Inspection";
             items.push({ label: m.name, detail: `${kind} overdue since ${m.next_inspection_date}`, path: "/green-track" });
+          }
+          for (const m of overdueFirstTests.slice(0, 10)) {
+            items.push({ label: m.name, detail: `NSTS test overdue since ${m.nsts.dueDate} (never tested)`, path: "/green-track" });
           }
         } else if (uncheckedCount > 0 && totalMachines > 0) {
           status = "attention";

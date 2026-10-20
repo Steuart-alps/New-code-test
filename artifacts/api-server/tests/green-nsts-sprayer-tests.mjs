@@ -83,6 +83,12 @@ async function main() {
   check("overdue count", status.data?.nstsOverdue === 1, JSON.stringify(status.data?.nstsOverdue));
   check("mowers are not listed", !status.data?.nstsSprayers?.some((s) => s.machineId === mower.data.id));
 
+  // The dashboard's GreenTrack card says an NSTS test is overdue, including never-tested sprayers.
+  const greenCard = async () => (await owner("GET", "/dashboard/summary")).data?.tracks?.find((t) => t.trackId === "green");
+  let green = await greenCard();
+  check("dashboard: never-tested sprayer makes GreenTrack overdue", green?.status === "overdue" && /1 NSTS test overdue/.test(green?.badge ?? ""), JSON.stringify(green));
+  check("dashboard: never-tested sprayer listed", green?.items?.some((i) => i.label === "Boom sprayer (24 m)" && /NSTS test overdue since 2023-03-01 \(never tested\)/.test(i.detail)), JSON.stringify(green?.items));
+
   // ── An NSTS test gets its next date from the sprayer type ──────────────────
   const test = await owner("POST", "/green-track/puwer-inspections", {
     machineId: boom.data.id, inspectionType: "nsts_test", inspectionDate: "2024-05-10", inspectorCompany: "Sprayer Testing Ltd",
@@ -99,6 +105,11 @@ async function main() {
   check("tested sprayer follows its latest test", boomStatus?.lastTestDate === "2024-05-10" && boomStatus?.dueDate === "2027-05-10" && boomStatus?.basis === "latest_test", JSON.stringify(boomStatus));
   const knapsackStatus = status.data?.nstsSprayers?.find((s) => s.machineId === knapsack.data.id);
   check("a typed next date wins", knapsackStatus?.dueDate === "2026-07-15", JSON.stringify(knapsackStatus));
+  green = await greenCard();
+  const knapsackOverdue = knapsackStatus?.state === "overdue";
+  check("dashboard: tested sprayer no longer listed as never tested", !green?.items?.some((i) => /never tested/.test(i.detail)), JSON.stringify(green?.items));
+  check("dashboard: an overdue NSTS test is named as one", !knapsackOverdue || green?.items?.some((i) => i.label === "Knapsack 15 L" && /^NSTS test overdue since 2026-07-15$/.test(i.detail)), JSON.stringify(green?.items));
+  check("dashboard: NSTS tests are not counted as examinations", !/examination/.test(green?.badge ?? ""), JSON.stringify(green?.badge));
 
   // Changing the test date with the next date cleared works it out again.
   const edited = await owner("PUT", `/green-track/puwer-inspections/${test.data.id}`, { inspectionDate: "2025-06-01", nextInspectionDate: null });
