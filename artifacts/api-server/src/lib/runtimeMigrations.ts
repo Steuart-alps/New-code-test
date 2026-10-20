@@ -939,6 +939,23 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_warning_notices_open" ON "storage_warning_notices" ("client_id") WHERE "cleared_at" IS NULL`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_warning_notices_tenant" ON "storage_warning_notices" ("client_id", "sent_at")`);
+    // Storage full / automatic top-up events (lib/storageLimit.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_limit_events" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "kind" text NOT NULL,
+        "used_bytes" bigint NOT NULL,
+        "capacity_bytes" bigint NOT NULL,
+        "gib_added" integer,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "cleared_at" timestamptz,
+        "emailed_at" timestamptz,
+        CONSTRAINT "ck_storage_limit_events_kind" CHECK ("kind" IN ('full', 'topped_up', 'top_up_failed'))
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_limit_events_open_full" ON "storage_limit_events" ("client_id") WHERE "kind" = 'full' AND "cleared_at" IS NULL`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_limit_events_tenant" ON "storage_limit_events" ("client_id", "created_at")`);
     // Bound the immutable response ledger and remove spent opaque credentials.
     await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
     await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);

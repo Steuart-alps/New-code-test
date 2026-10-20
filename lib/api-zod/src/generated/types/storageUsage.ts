@@ -5,11 +5,21 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { StorageLimitState } from './storageLimitState';
 import type { StorageUsageEstimatedCost } from './storageUsageEstimatedCost';
 
 export interface StorageUsage {
   /** @minimum 0 */
   usedBytes: number;
+  /**
+     * The storage the business pays for (plan allowance plus extra storage); null when uploads aren't limited.
+     * @minimum 0
+     * @nullable
+     */
+  capacityBytes: number | null;
+  limitState: StorageLimitState;
+  /** Whether automatic 10 GB top-up is switched on. */
+  autoTopUp: boolean;
   /**
      * When the totals were last reconciled with the storage provider; null before the first check.
      * @nullable

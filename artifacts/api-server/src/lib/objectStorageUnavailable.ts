@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { STORAGE_FULL_CODE, STORAGE_FULL_EXTERNAL_MESSAGE, STORAGE_FULL_MESSAGE, StorageFullError } from "./storageFull";
 
 export const OBJECT_STORAGE_UNAVAILABLE_CODE = "OBJECT_STORAGE_UNAVAILABLE";
 export const OBJECT_STORAGE_UNAVAILABLE_MESSAGE = "File uploads are temporarily unavailable. Please try again later.";
@@ -9,7 +10,15 @@ export function respondObjectStorageUnavailable(
   res: Response,
   error: unknown,
   operation: string,
+  options: { external?: boolean } = {},
 ) {
+  if (error instanceof StorageFullError) {
+    // Not an outage: the business has used the storage it pays for.
+    return res.status(409).json({
+      error: options.external ? STORAGE_FULL_EXTERNAL_MESSAGE : STORAGE_FULL_MESSAGE,
+      code: STORAGE_FULL_CODE,
+    });
+  }
   req.log.error({ err: error, operation }, "Object storage upload signing unavailable");
   return res.status(503).json({
     error: OBJECT_STORAGE_UNAVAILABLE_MESSAGE,

@@ -314,6 +314,7 @@ function StorageUsageCard() {
   const [thresholdGb, setThresholdGb] = useState("5");
   const [saving, setSaving] = useState(false);
   const [storagePurchaseBusy, setStoragePurchaseBusy] = useState(false);
+  const [autoTopUpSaving, setAutoTopUpSaving] = useState(false);
   const usageQuery = useGetStorageUsage({
     query: {
       queryKey: ["/api/storage/usage", activeClientId],
@@ -366,6 +367,32 @@ function StorageUsageCard() {
     }
   };
 
+  const saveAutoTopUp = async (on: boolean) => {
+    setAutoTopUpSaving(true);
+    try {
+      const response = await authenticatedApiFetch(`/settings?clientId=${activeClientId}`, {
+        method: "PUT",
+        body: JSON.stringify({ storageAutoTopUp: on ? "true" : "false" }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? `Request failed (${response.status})`);
+      }
+      await usageQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["/api/storage/status", activeClientId] });
+      toast({
+        title: on ? "Automatic top-up switched on" : "Automatic top-up switched off",
+        description: on
+          ? "When storage is full we'll add 10 GB (£1 a month) and email you."
+          : "When storage is full, new uploads will stop until storage is added.",
+      });
+    } catch (err: any) {
+      toast({ title: "Couldn't change automatic top-up", description: err.message, variant: "destructive" });
+    } finally {
+      setAutoTopUpSaving(false);
+    }
+  };
+
   // Only offer to buy storage when the storage add-on is configured and its
   // Stripe price is the £1 per 10 GB storage price (checked server-side).
   const [storageAddon, setStorageAddon] = useState<StorageAddonOffer | null>(null);
@@ -405,6 +432,7 @@ function StorageUsageCard() {
       });
       await usageQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["/api/billing/storage", activeClientId] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/storage/status", activeClientId] });
     } catch (err: any) {
       toast({ title: "Couldn't add storage", description: err.message, variant: "destructive" });
     } finally {
@@ -412,9 +440,14 @@ function StorageUsageCard() {
     }
   };
 
-  const percent = usage
-    ? Math.min(100, Math.round((usage.usedBytes / usage.warningThresholdBytes) * 100))
+  // Measure against the storage the business pays for when there is a limit.
+  const meterBytes = usage ? usage.capacityBytes ?? usage.warningThresholdBytes : 1;
+  const percent = usage && meterBytes > 0
+    ? Math.min(100, Math.round((usage.usedBytes / meterBytes) * 100))
     : 0;
+  const meterTone = usage?.limitState === "full"
+    ? "bg-red-600"
+    : usage?.limitState === "nearly_full" || usage?.warning ? "bg-amber-500" : "bg-sky-600";
 
   return (
     <Card id="storage" className="scroll-mt-6 shadow-lg border-border/50 bg-card">
@@ -424,7 +457,7 @@ function StorageUsageCard() {
           <CardTitle className="font-display">File Storage</CardTitle>
         </div>
         <CardDescription>
-          Monitor retained documents and evidence for this account. When usage passes the warning level, the account's owners and admins get one email; it never blocks or deletes files.
+          Retained documents and evidence for this account. When files reach the storage you pay for, new uploads stop unless automatic top-up is on. Nothing is ever deleted. Owners and admins get one email at 80% (or your warning level, if lower) and one when storage is full.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -434,12 +467,30 @@ function StorageUsageCard() {
           </div>
         ) : usage ? (
           <>
-            {usage.warning && (
+            {usage.limitState === "full" ? (
+              <div className="flex gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-900" data-testid="storage-full-notice">
+                <AlertTriangle className="h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-medium">Storage full: new uploads have stopped</p>
+                  <p className="text-sm">
+                    {usage.autoTopUp
+                      ? "Automatic top-up is on, so the next upload adds 10 GB. If that charge fails, check your payment details and add storage below."
+                      : "Nothing has been deleted. Add storage below, or switch on automatic top-up, to start uploading again."}
+                  </p>
+                </div>
+              </div>
+            ) : (usage.limitState === "nearly_full" || usage.warning) && (
               <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
                 <AlertTriangle className="h-5 w-5 shrink-0" />
                 <div>
-                  <p className="font-medium">Storage warning threshold reached</p>
-                  <p className="text-sm">Buy extra storage, review retained files or raise the warning level. Uploads will continue normally.</p>
+                  <p className="font-medium">Storage nearly full</p>
+                  <p className="text-sm">
+                    {usage.capacityBytes === null
+                      ? "Buy extra storage, review retained files or raise the warning level."
+                      : usage.autoTopUp
+                        ? "When it is full we'll add 10 GB automatically (£1 a month) and email you."
+                        : "When it is full, new uploads will stop. Add storage or switch on automatic top-up below."}
+                  </p>
                 </div>
               </div>
             )}
@@ -477,7 +528,7 @@ function StorageUsageCard() {
                 </p>
                 {usage.estimatedCost && (usage.estimatedCost.excessStorageBytes ?? 0) > 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Nothing extra is charged automatically and uploads carry on. Extra storage is £1 per 10 GB a month.
+                    Extra storage is £1 per 10 GB a month.
                   </p>
                 )}
                 {storageAddon && (
@@ -503,12 +554,26 @@ function StorageUsageCard() {
             <PaidStorageSection activeClientId={activeClientId} onChanged={() => { void usageQuery.refetch(); }} />
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span>{percent}% of warning level</span>
-                <span className="text-muted-foreground">{formatBytes(usage.warningThresholdBytes)}</span>
+                <span>{usage.capacityBytes === null ? `${percent}% of warning level` : `${percent}% of your storage used`}</span>
+                <span className="text-muted-foreground">{formatBytes(meterBytes)}</span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div className={`h-full rounded-full ${usage.warning ? "bg-amber-500" : "bg-sky-600"}`} style={{ width: `${percent}%` }} />
+                <div className={`h-full rounded-full ${meterTone}`} style={{ width: `${percent}%` }} />
               </div>
+            </div>
+            <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+              <div className="space-y-1">
+                <Label htmlFor="storage-auto-top-up" className="font-medium">Add 10 GB automatically when storage is full</Label>
+                <p className="text-sm text-muted-foreground">
+                  Off: new uploads stop when storage is full, until an owner adds more. On: we add 10 GB for £1 a month (before any VAT), charge the first month straight away and email you each time.
+                </p>
+              </div>
+              <Switch
+                id="storage-auto-top-up"
+                checked={usage.autoTopUp}
+                disabled={autoTopUpSaving || activeClientId === null}
+                onCheckedChange={(checked) => { void saveAutoTopUp(checked); }}
+              />
             </div>
           </>
         ) : (

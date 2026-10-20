@@ -1064,6 +1064,17 @@ export interface PrivacyGovernanceResponse {
   breaches: PrivacyBreach[];
 }
 
+/**
+ * "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.
+ */
+export type AppSettingsStorageAutoTopUp = typeof AppSettingsStorageAutoTopUp[keyof typeof AppSettingsStorageAutoTopUp] | null;
+
+
+export const AppSettingsStorageAutoTopUp = {
+  true: 'true',
+  false: 'false',
+} as const;
+
 export interface AppSettings {
   smtpHost?: string | null;
   smtpPort?: string | null;
@@ -1077,6 +1088,40 @@ export interface AppSettings {
   accountTimezone?: string | null;
   /** @pattern ^[0-9]+$ */
   storageWarningThresholdBytes?: string | null;
+  /** "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there. */
+  storageAutoTopUp?: AppSettingsStorageAutoTopUp;
+}
+
+/**
+ * Usage against the storage the business pays for. nearly_full is 80% or more; full stops new uploads unless automatic top-up adds storage; not_limited means no paid limit applies (no live subscription, or it couldn't be read).
+ */
+export type StorageLimitState = typeof StorageLimitState[keyof typeof StorageLimitState];
+
+
+export const StorageLimitState = {
+  ok: 'ok',
+  nearly_full: 'nearly_full',
+  full: 'full',
+  not_limited: 'not_limited',
+} as const;
+
+export interface StorageStatus {
+  state: StorageLimitState;
+  /** Whether this user can add storage or change automatic top-up. */
+  canManage: boolean;
+  autoTopUp: boolean;
+  /**
+     * Only for users who can manage storage.
+     * @minimum 0
+     * @nullable
+     */
+  usedBytes: number | null;
+  /**
+     * Only for users who can manage storage, and null when not limited.
+     * @minimum 0
+     * @nullable
+     */
+  capacityBytes: number | null;
 }
 
 export type StorageUsageEstimatedCostCurrency = typeof StorageUsageEstimatedCostCurrency[keyof typeof StorageUsageEstimatedCostCurrency];
@@ -1109,6 +1154,15 @@ export type StorageUsageEstimatedCost = {
 export interface StorageUsage {
   /** @minimum 0 */
   usedBytes: number;
+  /**
+     * The storage the business pays for (plan allowance plus extra storage); null when uploads aren't limited.
+     * @minimum 0
+     * @nullable
+     */
+  capacityBytes: number | null;
+  limitState: StorageLimitState;
+  /** Whether automatic 10 GB top-up is switched on. */
+  autoTopUp: boolean;
   /**
      * When the totals were last reconciled with the storage provider; null before the first check.
      * @nullable
