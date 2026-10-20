@@ -162,7 +162,7 @@ export default function TasksPage() {
             <h2 className="text-lg font-semibold">{draft.id ? "Edit task" : "New task"}</h2>
             <div className="space-y-1.5">
               <Label htmlFor="task-title">Task</Label>
-              <Input id="task-title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="e.g. Kitchen opening checklist" />
+              <Input id="task-title" dictation value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="e.g. Kitchen opening checklist" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="task-instruction">Instructions (optional)</Label>

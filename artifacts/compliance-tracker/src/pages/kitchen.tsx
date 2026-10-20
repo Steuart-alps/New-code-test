@@ -653,7 +653,7 @@ function MarkClosedDaysDialog({ siteId, defaultDate, onSaved }: { siteId: number
         </div>
         <div className="space-y-1">
           <Label htmlFor="closed-reason">Reason</Label>
-          <Input id="closed-reason" value={reason} maxLength={200} placeholder="e.g. Closed for refurbishment" onChange={(e) => setReason(e.target.value)} />
+          <Input id="closed-reason" dictation value={reason} maxLength={200} placeholder="e.g. Closed for refurbishment" onChange={(e) => setReason(e.target.value)} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
