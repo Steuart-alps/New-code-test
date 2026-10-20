@@ -9,7 +9,8 @@
  *   shows a banner while it lasts.
  * - When an owner switches on automatic top-up (app setting
  *   storageAutoTopUp = "true"), reaching capacity instead buys enough 10 GiB
- *   packs to make room, through the same charging path as a Settings purchase,
+ *   packs to make room, through the same path as a Settings purchase (first month on the next
+ *   monthly bill),
  *   and emails the owners what was added. A failed charge is emailed too, and
  *   is not retried automatically for STORAGE_TOP_UP_RETRY_HOURS, so uploads
  *   stop meanwhile.
@@ -282,7 +283,7 @@ export function buildStorageLimitEmail(opts: {
       heading: `${opts.gibAdded} GB of storage added`,
       lines: [
         `<strong>${company}</strong> reached its storage limit, so we added <strong>${opts.gibAdded} GB</strong> automatically, as set in Settings.`,
-        `Your storage is now <strong>${capacity}</strong>, with <strong>${used}</strong> in use. The extra storage costs <strong>${monthly} a month</strong>; this month's charge has been taken and it renews with your subscription.`,
+        `Your storage is now <strong>${capacity}</strong>, with <strong>${used}</strong> in use. The extra storage costs <strong>${monthly} a month</strong>. The first month is added to your next monthly bill, and it renews with your subscription after that.`,
         "You can reduce it, or switch automatic top-up off, in Settings under File storage.",
       ],
       button: "Manage storage",
@@ -291,9 +292,9 @@ export function buildStorageLimitEmail(opts: {
       subject: `${opts.companyName}: ComplyTrack storage is full and the automatic top-up failed`,
       heading: "Storage full: we couldn't add more",
       lines: [
-        `<strong>${company}</strong> reached its storage limit of <strong>${capacity}</strong>. Automatic top-up is on, but the charge for ${opts.gibAdded} GB (${monthly} a month) didn't go through, so nothing was added and you have not been charged.`,
+        `<strong>${company}</strong> reached its storage limit of <strong>${capacity}</strong>. Automatic top-up is on, but we couldn't add ${opts.gibAdded} GB (${monthly} a month), so nothing was added and you have not been charged.`,
         "New uploads have stopped until storage is added. Nothing has been deleted.",
-        "Please check your payment details, then add storage in Settings under File storage.",
+        "We'll try again on the first upload after 24 hours. To start uploading sooner, add storage in Settings under File storage, or contact ALPS Consultancy if it keeps happening.",
       ],
       button: "Add storage",
     },

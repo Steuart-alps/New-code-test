@@ -474,7 +474,7 @@ function StorageUsageCard() {
                   <p className="font-medium">Storage full: new uploads have stopped</p>
                   <p className="text-sm">
                     {usage.autoTopUp
-                      ? "Automatic top-up is on, so the next upload adds 10 GB. If that charge fails, check your payment details and add storage below."
+                      ? "Automatic top-up is on, so the next upload adds 10 GB. If that fails, add storage below."
                       : "Nothing has been deleted. Add storage below, or switch on automatic top-up, to start uploading again."}
                   </p>
                 </div>
@@ -485,7 +485,7 @@ function StorageUsageCard() {
                 <div>
                   <p className="font-medium">Storage nearly full</p>
                   <p className="text-sm">
-                    {usage.capacityBytes === null
+                    {usage.capacityBytes == null
                       ? "Buy extra storage, review retained files or raise the warning level."
                       : usage.autoTopUp
                         ? "When it is full we'll add 10 GB automatically (£1 a month) and email you."
@@ -545,7 +545,7 @@ function StorageUsageCard() {
                     {storagePurchaseBusy ? "Adding storage to Stripe…" : storagePurchaseLabel}
                   </Button>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {formatMinorUnits(storageAddon.unitAmount * storagePackGib, storageAddon.currency)} per {storagePackGib} GB each month, before any VAT. The first month is charged now.
+                    {formatMinorUnits(storageAddon.unitAmount * storagePackGib, storageAddon.currency)} per {storagePackGib} GB each month, before any VAT. The first month is added to your next monthly bill.
                   </p>
                   </>
                 )}
@@ -554,7 +554,7 @@ function StorageUsageCard() {
             <PaidStorageSection activeClientId={activeClientId} onChanged={() => { void usageQuery.refetch(); }} />
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span>{usage.capacityBytes === null ? `${percent}% of warning level` : `${percent}% of your storage used`}</span>
+                <span>{usage.capacityBytes == null ? `${percent}% of warning level` : `${percent}% of your storage used`}</span>
                 <span className="text-muted-foreground">{formatBytes(meterBytes)}</span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -565,7 +565,7 @@ function StorageUsageCard() {
               <div className="space-y-1">
                 <Label htmlFor="storage-auto-top-up" className="font-medium">Add 10 GB automatically when storage is full</Label>
                 <p className="text-sm text-muted-foreground">
-                  Off: new uploads stop when storage is full, until an owner adds more. On: we add 10 GB for £1 a month (before any VAT), charge the first month straight away and email you each time.
+                  Off: new uploads stop when storage is full, until an owner adds more. On: we add 10 GB for £1 a month (before any VAT), put the first month on your next monthly bill and email you each time.
                 </p>
               </div>
               <Switch

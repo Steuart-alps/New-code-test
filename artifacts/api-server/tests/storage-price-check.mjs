@@ -54,6 +54,7 @@ const stubs = {
         };
       },
       async execute() { return { rows: [] }; },
+      async transaction(fn) { return fn(this); },
     };
   `,
   stripe: `
@@ -320,11 +321,32 @@ try {
 
   fresh(storagePrice());
   response = await buy(20);
-  check("buying 20 GiB charges £2 and adds 20 GiB to the subscription", () => {
+  check("buying 20 GiB adds 20 GiB and puts £2 for the first month on the next bill", () => {
     assert.equal(response.status, 201, JSON.stringify(response.data));
     assert.deepEqual(response.data, { gibAdded: 20, monthlyGib: 20, unitAmount: 10, currency: "gbp" });
     assert.equal(state.stripe.calls.subscriptionUpdate[0].params.items[0].quantity, 20);
+    assert.equal(state.stripe.calls.subscriptionUpdate[0].params.proration_behavior, "none");
     assert.equal(state.stripe.calls.invoiceItemCreate[0].amount, 200);
+    // Pending on the subscription's next invoice, not a separate card payment.
+    assert.equal(state.stripe.calls.invoiceItemCreate[0].subscription, "sub_storage");
+    assert.equal(state.stripe.calls.invoiceItemCreate[0].invoice, undefined);
+    assert.deepEqual(state.stripe.calls.invoiceCreate, []);
+  });
+
+  fresh(storagePrice());
+  state.stripe.invoiceItems.create = async () => { throw new Error("Stripe down"); };
+  state.stripe.invoiceItems.list = async () => ({ data: [] });
+  const deleted = [];
+  state.stripe.subscriptionItems.del = async (id) => { deleted.push(id); return {}; };
+  state.stripe.subscriptions.update = async () => {
+    state.subscription.items.data.push({ id: "si_storage", quantity: 20, price: { id: "price_storage", metadata: { service_key: "storage" } } });
+    return state.subscription;
+  };
+  response = await buy(20);
+  check("if the first month can't be added, the storage is taken off again and nothing is charged", () => {
+    assert.equal(response.status, 502);
+    assert.match(response.data.error, /not been charged/);
+    assert.deepEqual(deleted, ["si_storage"]);
   });
 
   console.log(`\n${passed} storage price checks passed`);

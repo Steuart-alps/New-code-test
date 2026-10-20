@@ -2,7 +2,7 @@ import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { getUncachableStripeClient } from "./stripeClient";
-import { collectAddonFirstMonthInvoice, findLiveSubscription } from "./billing";
+import { findLiveSubscription } from "./billing";
 import { invalidateEntitlements } from "./services";
 import {
   evaluateStorageAddonPrice,
@@ -12,18 +12,21 @@ import {
 } from "./storagePricing";
 import { logger as defaultLogger } from "./logger";
 
-type Log = Pick<typeof defaultLogger, "error">;
+type Log = Pick<typeof defaultLogger, "error" | "warn">;
 
 export type StoragePurchaseResult =
   | { ok: true; gibAdded: number; monthlyGib: number; unitAmount: number; currency: string }
   | { ok: false; status: number; error: string; code?: string };
 
 /**
- * Add recurring storage to a client's subscription and collect the first
- * month at once (no proration), or roll the item back. The one charging path
- * for extra storage: Settings purchases and the automatic top-up both use it.
- * `requestId` makes a retry resume the same Stripe calls instead of charging
- * twice. The price is server-resolved and must be the £1 per 10 GiB price.
+ * Add recurring storage to a client's subscription, with the first full month
+ * (no proration) as a pending invoice item that Stripe adds to the
+ * subscription's next invoice, so a £1 pack never pays a separate card fee
+ * (Steuart, 2026-10-20). If the item can't be created the subscription change
+ * is rolled back. The one charging path for extra storage: Settings purchases
+ * and the automatic top-up both use it. `requestId` makes a retry resume the
+ * same Stripe calls instead of charging twice. The price is server-resolved
+ * and must be the £1 per 10 GiB price.
  */
 export async function addStorageCapacity(input: {
   clientId: number;
@@ -90,52 +93,54 @@ export async function addStorageCapacity(input: {
     { idempotencyKey: `${idempotencyPrefix}-subscription` },
   );
 
+  const firstMonth = {
+    customer: client.stripeCustomerId,
+    subscription: subscription.id,
+    amount: unitAmount * gib,
+    currency: price.currency,
+    description: `Additional storage — ${gib} GB, first month`,
+    metadata: {
+      addon_service: "storage",
+      client_id: String(clientId),
+      gib_added: String(gib),
+      period_start: String(periodStart),
+      request_key: idempotencyPrefix,
+    },
+  };
   try {
-    const payment = await collectAddonFirstMonthInvoice(stripe, {
-      customerId: client.stripeCustomerId,
-      amount: unitAmount * gib,
-      currency: price.currency,
-      description: `Additional storage — ${gib} GB per month`,
-      metadata: {
-        addon_service: "storage",
-        client_id: String(clientId),
-        gib_added: String(gib),
-        period_start: String(periodStart),
-      },
-      idempotencyPrefix,
-    });
-    if (payment === "unknown") {
-      invalidateEntitlements(clientId);
-      return {
-        ok: false,
-        status: 502,
-        error: "We couldn't confirm the payment outcome. Storage access was kept while Stripe confirms it; please contact support before retrying.",
-      };
-    }
-    if (payment !== "paid") throw new Error("Storage add-on invoice was not collected");
+    await stripe.invoiceItems.create(firstMonth, { idempotencyKey: `${idempotencyPrefix}-first-month` });
   } catch (error) {
-    try {
-      const fresh = await findLiveSubscription(client.stripeCustomerId);
-      const added = fresh?.items.data.find(
-        (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
-      );
-      if (added) {
-        if (oldQuantity > 0 && existingItem?.price?.id) {
-          await stripe.subscriptionItems.update(added.id, {
-            price: existingItem.price.id,
-            quantity: oldQuantity,
-            proration_behavior: "none",
-          });
-        } else {
-          await stripe.subscriptionItems.del(added.id, { proration_behavior: "none" });
+    // A lost response may still have created the item: keep the storage then.
+    const created = await stripe.invoiceItems
+      .list({ customer: client.stripeCustomerId, pending: true, limit: 100 })
+      .then((items: { data: Array<{ metadata?: Record<string, string> | null }> }) =>
+        items.data.some((item) => item.metadata?.request_key === idempotencyPrefix))
+      .catch(() => false);
+    if (!created) {
+      try {
+        const fresh = await findLiveSubscription(client.stripeCustomerId);
+        const added = fresh?.items.data.find(
+          (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
+        );
+        if (added) {
+          if (oldQuantity > 0 && existingItem?.price?.id) {
+            await stripe.subscriptionItems.update(added.id, {
+              price: existingItem.price.id,
+              quantity: oldQuantity,
+              proration_behavior: "none",
+            });
+          } else {
+            await stripe.subscriptionItems.del(added.id, { proration_behavior: "none" });
+          }
         }
+      } catch (rollbackError) {
+        log.error({ err: rollbackError, clientId }, "Storage add-on rollback failed");
       }
-    } catch (rollbackError) {
-      log.error({ err: rollbackError, clientId }, "Storage add-on rollback failed");
+      invalidateEntitlements(clientId);
+      log.error({ err: error, clientId }, "Storage add-on first-month charge could not be added");
+      return { ok: false, status: 502, error: "We couldn't add the storage, so nothing was changed and you have not been charged. Please try again." };
     }
-    invalidateEntitlements(clientId);
-    log.error({ err: error, clientId }, "Storage add-on payment failed");
-    return { ok: false, status: 502, error: "We couldn't complete the storage charge, so the add-on was not enabled. Please try again." };
+    log.warn({ err: error, clientId }, "Storage first-month item response lost; Stripe shows it was added");
   }
 
   invalidateEntitlements(clientId);
