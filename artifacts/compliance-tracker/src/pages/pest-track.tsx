@@ -233,6 +233,11 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
           <div className="space-y-1.5">
             <Label>Next scheduled visit</Label>
             <Input type="date" value={form.nextVisitDate} onChange={set("nextVisitDate")} className="rounded-sm" />
+            {!isEdit && !form.nextVisitDate && (
+              <p className="text-xs text-muted-foreground">
+                Leave blank to use your visit frequency (every {config.pest_visit_frequency_months || "3"} months).
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label>Contractor name</Label>

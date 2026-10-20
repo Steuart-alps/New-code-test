@@ -8,6 +8,7 @@ import { createPestControlRegisterPdf } from "../lib/pestControlRegisterPdf";
 import { z } from "zod";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { sitesTableVisibleTo } from "../lib/departmentSites";
+import { addMonthsUtc } from "../lib/complianceCompletion";
 
 const router = Router();
 
@@ -99,8 +100,10 @@ router.get("/status", requireAuth, async (req, res) => {
   const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
   const today = new Date().toISOString().slice(0, 10);
 
-  const [visits, openActivity, visitsThisYear] = await Promise.all([
-    db.select({
+  // Each site's latest visit sets that site's next due visit, as on the
+  // dashboard; the earliest of those is the business's next visit.
+  const [siteLatestVisits, openActivity, visitsThisYear] = await Promise.all([
+    db.selectDistinctOn([pestVisitsTable.siteId], {
       id:              pestVisitsTable.id,
       visit_date:      pestVisitsTable.visitDate,
       next_visit_date: pestVisitsTable.nextVisitDate,
@@ -108,8 +111,7 @@ router.get("/status", requireAuth, async (req, res) => {
     })
       .from(pestVisitsTable)
       .where(and(eq(pestVisitsTable.clientId, clientId), departmentScope(req, clientId, pestVisitsTable.siteId)))
-      .orderBy(desc(pestVisitsTable.visitDate))
-      .limit(1),
+      .orderBy(pestVisitsTable.siteId, desc(pestVisitsTable.visitDate), desc(pestVisitsTable.id)),
     db.select({ count: sql<number>`count(*)::int` })
       .from(pestActivityTable)
       .where(and(
@@ -126,13 +128,19 @@ router.get("/status", requireAuth, async (req, res) => {
       )),
   ]);
 
-  const lastVisit = visits[0] ?? null;
+  const byNewest = (a: { visit_date: string; id: number }, b: { visit_date: string; id: number }) =>
+    b.visit_date.localeCompare(a.visit_date) || b.id - a.id;
+  const lastVisit = [...siteLatestVisits].sort(byNewest)[0] ?? null;
+  const nextVisitDate = siteLatestVisits
+    .map((visit) => visit.next_visit_date)
+    .filter((date): date is string => !!date)
+    .sort()[0] ?? null;
 
   res.json({
     last_visit_date:      lastVisit?.visit_date ?? null,
     last_contractor_name: lastVisit?.contractor_name ?? null,
-    next_visit_date:      lastVisit?.next_visit_date ?? null,
-    next_visit_overdue:   lastVisit?.next_visit_date ? lastVisit.next_visit_date < today : false,
+    next_visit_date:      nextVisitDate,
+    next_visit_overdue:   nextVisitDate ? nextVisitDate < today : false,
     open_activity_count:  openActivity[0]?.count ?? 0,
     visits_this_year:     visitsThisYear[0]?.count ?? 0,
   });
@@ -213,6 +221,26 @@ const VisitBody = z.object({
   siteId:             z.number().int().optional().nullable(),
 });
 
+/** Matches the default shown on the PestTrack settings form. */
+const DEFAULT_VISIT_FREQUENCY_MONTHS = 3;
+
+/**
+ * A new visit saved without a next visit date is due again after the
+ * business's visit frequency (PestTrack settings), so every site keeps a due
+ * date and an overdue visit shows up.
+ */
+async function defaultNextVisitDate(clientId: number, visitDate: string): Promise<string | null> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(visitDate)) return null;
+  const [setting] = await db.select({ value: appSettingsTable.value }).from(appSettingsTable)
+    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "pest_visit_frequency_months")))
+    .limit(1);
+  const stored = Number(setting?.value);
+  const months = Number.isInteger(stored) && stored >= 1 && stored <= 24 ? stored : DEFAULT_VISIT_FREQUENCY_MONTHS;
+  const visit = new Date(`${visitDate}T00:00:00Z`);
+  if (Number.isNaN(visit.getTime())) return null;
+  return addMonthsUtc(visit, months).toISOString().slice(0, 10);
+}
+
 router.get("/visits", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -233,6 +261,7 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
   if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
    const performer = await resolveStaffRoster(clientId, d.signedOffByRosterId, d.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+  const nextVisitDate = d.nextVisitDate || await defaultNextVisitDate(clientId, d.visitDate);
   const [row] = await db.insert(pestVisitsTable).values({
     clientId,
     siteId:            d.siteId ?? null,
@@ -243,7 +272,7 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
     findings:          d.findings ?? null,
     treatmentsApplied: d.treatmentsApplied ?? null,
     recommendations:   d.recommendations ?? null,
-    nextVisitDate:     d.nextVisitDate ?? null,
+    nextVisitDate,
      signedOffBy:       performer?.performedBy ?? null,
      signedOffByRosterId: performer?.staffRosterId ?? null,
     notes:             d.notes ?? null,

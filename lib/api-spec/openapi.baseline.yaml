@@ -5147,6 +5147,12 @@ components:
         updatedAt:
           type: string
           format: date-time
+        superseded:
+          type: boolean
+          description: >-
+            True when a later inspection of the same type and area at the same
+            site exists, so this one's next inspection date no longer applies.
+            Returned by the list.
       required:
         - id
         - clientId

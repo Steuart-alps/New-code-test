@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { premisesInspectionsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, or, isNull, inArray, desc, gte, lte, lt, sql } from "drizzle-orm";
+import { eq, and, or, isNull, inArray, desc, gte, lte, sql, getTableColumns } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { sitesTableVisibleTo } from "../lib/departmentSites";
@@ -48,6 +48,9 @@ function addDepartmentScope(conditions: any[], clientId: number, departmentId: n
   }
 }
 
+// Inspections of the same type follow each other per site and area.
+const PREMISES_AREA_KEY = sql`lower(trim(coalesce(${premisesInspectionsTable.area}, '')))`;
+
 // ── Summary ─────────────────────────────────────────────────────────────────
 
 router.get("/summary", requireAuth, async (req, res) => {
@@ -58,7 +61,7 @@ router.get("/summary", requireAuth, async (req, res) => {
 
   const conditions = [eq(premisesInspectionsTable.clientId, clientId)];
   addDepartmentScope(conditions, clientId, getActiveDepartmentId(req));
-  const [counts, overdue] = await Promise.all([
+  const [counts, latest] = await Promise.all([
     db.select({
       status: premisesInspectionsTable.status,
       count:  sql<number>`count(*)::int`,
@@ -66,14 +69,21 @@ router.get("/summary", requireAuth, async (req, res) => {
       .from(premisesInspectionsTable)
       .where(and(...conditions))
       .groupBy(premisesInspectionsTable.status),
-    db.select({ count: sql<number>`count(*)::int` })
+    // The latest inspection of each type and area at a site sets when the
+    // next one is due, whatever its action status: closing an inspection's
+    // actions doesn't stop the next inspection falling due, and an older
+    // inspection's date is superseded by the newer one.
+    db.selectDistinctOn([premisesInspectionsTable.siteId, premisesInspectionsTable.inspectionType, PREMISES_AREA_KEY], {
+      nextInspectionDate: premisesInspectionsTable.nextInspectionDate,
+    })
       .from(premisesInspectionsTable)
-      .where(and(
-        inArray(premisesInspectionsTable.status, ["open", "actioned"]),
-        ...conditions,
-        lt(premisesInspectionsTable.nextInspectionDate, today),
-      )),
+      .where(and(...conditions))
+      .orderBy(
+        premisesInspectionsTable.siteId, premisesInspectionsTable.inspectionType, PREMISES_AREA_KEY,
+        desc(premisesInspectionsTable.inspectionDate), desc(premisesInspectionsTable.id),
+      ),
   ]);
+  const overdue = latest.filter((row) => !!row.nextInspectionDate && row.nextInspectionDate < today).length;
 
   const byStatus: Record<string, number> = { open: 0, actioned: 0, closed: 0 };
   for (const row of counts) byStatus[row.status] = row.count;
@@ -82,7 +92,7 @@ router.get("/summary", requireAuth, async (req, res) => {
     open:     byStatus.open ?? 0,
     actioned: byStatus.actioned ?? 0,
     closed:   byStatus.closed ?? 0,
-    overdue:  overdue[0]?.count ?? 0,
+    overdue,
     total:    (byStatus.open ?? 0) + (byStatus.actioned ?? 0) + (byStatus.closed ?? 0),
   });
 });
@@ -144,7 +154,21 @@ router.get("/", requireAuth, async (req, res) => {
   if (type)   conds.push(eq(premisesInspectionsTable.inspectionType, type));
   if (status) conds.push(eq(premisesInspectionsTable.status, status));
 
-  const rows = await db.select().from(premisesInspectionsTable)
+  const rows = await db.select({
+    ...getTableColumns(premisesInspectionsTable),
+    // A later inspection of the same type and area at the site supersedes
+    // this one's next inspection date (see the summary).
+    // Outer columns are spelled out: Drizzle leaves a single-table select's
+    // columns unqualified, which would resolve to the inner table here.
+    superseded: sql<boolean>`EXISTS (
+      SELECT 1 FROM premises_inspections later
+      WHERE later.client_id = premises_inspections.client_id
+        AND later.site_id IS NOT DISTINCT FROM premises_inspections.site_id
+        AND later.inspection_type = premises_inspections.inspection_type
+        AND lower(trim(coalesce(later.area, ''))) = lower(trim(coalesce(premises_inspections.area, '')))
+        AND (later.inspection_date, later.id) > (premises_inspections.inspection_date, premises_inspections.id)
+    )`,
+  }).from(premisesInspectionsTable)
     .where(and(...conds))
     .orderBy(desc(premisesInspectionsTable.inspectionDate));
   res.json(rows);

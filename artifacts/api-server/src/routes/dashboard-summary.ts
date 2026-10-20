@@ -644,31 +644,43 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        const [openInspections, activeCounts] = await Promise.all([
+        const [overdueInspections, openInspections, activeCounts] = await Promise.all([
+          // The latest inspection of each type and area at a site sets when
+          // the next one is due, whatever its action status (as on the
+          // PremisesTrack page).
+          db.execute(sql`
+            SELECT id, inspection_type, next_inspection_date FROM (
+              SELECT DISTINCT ON (site_id, inspection_type, lower(trim(coalesce(area, ''))))
+                id, inspection_type, next_inspection_date
+              FROM premises_inspections
+              WHERE client_id = ${clientId} ${siteClause}
+              ORDER BY site_id, inspection_type, lower(trim(coalesce(area, ''))), inspection_date DESC, id DESC
+            ) latest
+            WHERE next_inspection_date IS NOT NULL AND next_inspection_date < ${today}
+            ORDER BY next_inspection_date ASC
+          `),
           db.execute(sql`
             SELECT id, inspection_type, inspection_date, next_inspection_date, status, site_id
             FROM premises_inspections
             WHERE client_id = ${clientId}
               AND status IN ('open', 'actioned')
               ${siteClause}
-            ORDER BY
-              CASE WHEN next_inspection_date < ${today} THEN 0 ELSE 1 END,
-              next_inspection_date ASC NULLS LAST
+            ORDER BY next_inspection_date ASC NULLS LAST
             LIMIT 10
           `),
           db.execute(sql`
-            SELECT
-              count(*)::int AS total,
-              count(*) FILTER (WHERE next_inspection_date < ${today})::int AS overdue
+            SELECT count(*)::int AS total
             FROM premises_inspections
             WHERE client_id = ${clientId}
               AND status IN ('open', 'actioned')
               ${siteClause}
           `),
         ]);
-        const countRow = rows(activeCounts)[0] ?? {};
-        const overdueCount = Number(countRow.overdue ?? 0);
-        const total = Number(countRow.total ?? 0);
+        const overdueCount = rows(overdueInspections).length;
+        const total = Number(rows(activeCounts)[0]?.total ?? 0);
+        const typeLabel = (type: string) => type
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (c: string) => c.toUpperCase());
 
         if (overdueCount > 0) {
           status = "overdue";
@@ -684,16 +696,17 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           badge = rows(anyRows).length > 0 ? "No open inspections" : "No records yet";
         }
 
+        const overdueIds = new Set(rows(overdueInspections).map((i: any) => i.id));
+        for (const i of rows(overdueInspections).slice(0, 10)) {
+          items.push({ label: typeLabel(i.inspection_type as string), detail: `Overdue since ${i.next_inspection_date}`, path: "/premises-track" });
+        }
         for (const i of rows(openInspections)) {
-          const inspType = (i.inspection_type as string)
-            .replace(/_/g, " ")
-            .replace(/\b\w/g, (c: string) => c.toUpperCase());
-          const detail = i.next_inspection_date
-            ? i.next_inspection_date < today
-              ? `Overdue since ${i.next_inspection_date}`
-              : `Due ${i.next_inspection_date}`
+          if (items.length >= 10) break;
+          if (overdueIds.has(i.id)) continue;
+          const detail = i.next_inspection_date && i.next_inspection_date >= today
+            ? `Due ${i.next_inspection_date}`
             : `Status: ${i.status}`;
-          items.push({ label: inspType, detail, path: "/premises-track" });
+          items.push({ label: typeLabel(i.inspection_type as string), detail, path: "/premises-track" });
         }
       } catch (error) {
         ({ status, badge } = unavailable("premises", error));
@@ -1114,7 +1127,22 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           WHERE m.client_id = ${clientId} AND m.active = true ${siteClause}
             AND s.next_service_date IS NOT NULL AND s.next_service_date < ${today}
         `;
-        const [machines, checkedTodayRows, overdueService, overdueServiceCountRows] = await Promise.all([
+        // Statutory (PUWER / LOLER) examinations: a machine's latest one of
+        // each kind sets when the next of that kind is due.
+        const overdueExamination = sql`
+          SELECT m.id, m.name, p.inspection_type, p.next_inspection_date
+          FROM green_machines m
+          JOIN (
+            SELECT DISTINCT ON (machine_id, inspection_type) machine_id, inspection_type, next_inspection_date
+            FROM green_puwer_inspections
+            WHERE client_id = ${clientId}
+            ORDER BY machine_id, inspection_type, inspection_date DESC, id DESC
+          ) p ON p.machine_id = m.id
+          WHERE m.client_id = ${clientId} AND m.active = true ${siteClause}
+            AND p.next_inspection_date IS NOT NULL AND p.next_inspection_date < ${today}
+          ORDER BY p.next_inspection_date ASC
+        `;
+        const [machines, checkedTodayRows, overdueService, overdueServiceCountRows, overdueExaminations] = await Promise.all([
           // Machines with no pre-use check today
           db.execute(sql`
             SELECT m.id, m.name, m.type FROM green_machines m
@@ -1129,6 +1157,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           // Machines with overdue service
           db.execute(sql`SELECT m.id, m.name ${overdueServiceFrom} ORDER BY s.next_service_date ASC LIMIT 10`),
           db.execute(sql`SELECT count(*)::int AS overdue ${overdueServiceFrom}`),
+          db.execute(overdueExamination),
         ]);
         const checkedTodayIds = new Set(rows(checkedTodayRows).map((r: any) => r.machine_id));
         const uncheckedToday = rows(machines).filter((m: any) => !checkedTodayIds.has(m.id));
@@ -1137,11 +1166,20 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         const uncheckedCount = uncheckedToday.length;
         const totalMachines = rows(machines).length;
 
-        if (overdueServiceCount > 0) {
+        const overdueExaminationCount = rows(overdueExaminations).length;
+
+        if (overdueServiceCount > 0 || overdueExaminationCount > 0) {
           status = "overdue";
-          badge = `${plural(overdueServiceCount, "machine")} service overdue`;
+          badge = [
+            overdueServiceCount > 0 ? `${plural(overdueServiceCount, "machine")} service overdue` : null,
+            overdueExaminationCount > 0 ? `${plural(overdueExaminationCount, "examination")} overdue` : null,
+          ].filter(Boolean).join(", ");
           for (const m of rows(overdueService)) {
             items.push({ label: m.name, detail: "Service overdue", path: "/green-track" });
+          }
+          for (const m of rows(overdueExaminations).slice(0, 10)) {
+            const kind = /examination/.test(String(m.inspection_type)) ? "Thorough examination" : "Inspection";
+            items.push({ label: m.name, detail: `${kind} overdue since ${m.next_inspection_date}`, path: "/green-track" });
           }
         } else if (uncheckedCount > 0 && totalMachines > 0) {
           status = "attention";

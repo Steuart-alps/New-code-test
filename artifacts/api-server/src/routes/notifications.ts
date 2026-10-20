@@ -167,21 +167,25 @@ export async function runReminderJob(): Promise<{ queued: number; sent: number; 
   let errors = 0;
 
   for (const { item, contractor, siteDepartmentId } of items) {
-    if (!contractor?.email || !item.dueDate || item.status === "completed") { skipped++; continue; }
-
-    const leadTimeDays = item.leadTimeDays ?? 30;
-    const dueDate = new Date(item.dueDate);
-    const notifyDate = new Date(dueDate.getTime() - leadTimeDays * 24 * 60 * 60 * 1000);
-
-    if (now < notifyDate || item.notificationSentAt) { skipped++; continue; }
+    if (!contractor?.email || !item.dueDate || item.status === "completed" || item.notificationSentAt) { skipped++; continue; }
 
     if (!settingsCache[item.clientId]) {
       settingsCache[item.clientId] = await getClientSettings(item.clientId);
     }
     const settings = settingsCache[item.clientId];
+    const parsedLeadTime = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
+    const defaultLeadTimeDays = Number.isFinite(parsedLeadTime) && parsedLeadTime >= 0 ? parsedLeadTime : 30;
+
+    // A check without its own lead time uses the business's default, as the
+    // manual send and the email text do.
+    const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
+    const dueDate = new Date(item.dueDate);
+    const notifyDate = new Date(dueDate.getTime() - leadTimeDays * 24 * 60 * 60 * 1000);
+
+    if (now < notifyDate) { skipped++; continue; }
+
     const companyName = settings["companyName"] ?? "ComplyTrack";
     const fromEmail = getSenderEmail(settings);
-    const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
     const ccList = await buildReminderCcList({
       clientId: item.clientId,
       settings,

@@ -3437,7 +3437,8 @@ export const ListPremisesInspectionsResponseItem = zod.object({
   "inspectedBy": zod.string().nullish(),
   "createdBy": zod.number().nullish(),
   "createdAt": zod.date().optional(),
-  "updatedAt": zod.date().optional()
+  "updatedAt": zod.date().optional(),
+  "superseded": zod.boolean().optional().describe('True when a later inspection of the same type and area at the same site exists, so this one\'s next inspection date no longer applies. Returned by the list.')
 })
 export const ListPremisesInspectionsResponse = zod.array(ListPremisesInspectionsResponseItem)
 
@@ -3475,7 +3476,8 @@ export const CreatePremisesInspectionResponse = zod.object({
   "inspectedBy": zod.string().nullish(),
   "createdBy": zod.number().nullish(),
   "createdAt": zod.date().optional(),
-  "updatedAt": zod.date().optional()
+  "updatedAt": zod.date().optional(),
+  "superseded": zod.boolean().optional().describe('True when a later inspection of the same type and area at the same site exists, so this one\'s next inspection date no longer applies. Returned by the list.')
 })
 
 
