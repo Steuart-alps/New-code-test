@@ -31,6 +31,7 @@ export * from "./app-settings"
 ;
 
 export * from "./food-safety-records"
+export * from "./kitchen-closed-days"
 ;
 
 export * from "./fire-safety-checks"
@@ -120,3 +121,12 @@ export * from "./service-price-audit";
 export * from "./two-factor-reset-notifications";
 export * from "./train-track";
 export * from "./analytics-events";
+export * from "./scheduled-jobs";
+
+export * from "./registers";
+
+export * from "./consultant-branding";
+
+export * from "./tasks";
+
+export * from "./track-notifications";

@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { beginApiMutation } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,11 +145,12 @@ const CHECK_ITEMS: { key: string; label: string; icon?: string }[] = [
 const baseUrl = `${import.meta.env.BASE_URL?.replace(/\/$/, "") ?? ""}/api`;
 async function apiFetch(path: string, opts?: RequestInit) {
   const mutationSucceeded = beginApiMutation(opts?.method, path);
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetchWithOverrideReason(withActiveClient(`${baseUrl}${path}`, opts?.body), await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     ...opts,
-  });
+  }));
+  notifyAuthStatus(res);
   if (res.ok) mutationSucceeded();
   if (res.status === 204) return null;
   const body = await res.json().catch(() => ({}));
@@ -864,10 +865,10 @@ function BikeFormDialog({
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Select value={siteId} onValueChange={setSiteId}>
+              <Select value={siteId || "none"} onValueChange={v => setSiteId(v === "none" ? "" : v)}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="No specific site" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No specific site</SelectItem>
+                  <SelectItem value="none">No specific site</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -1177,7 +1178,7 @@ export default function BikeTrackPage() {
     setExporting(true);
     try {
       const params = new URLSearchParams({ from: exportFrom, to: exportTo, format: exportFormat });
-      const response = await fetch(`${baseUrl}/bike-track/hires/export?${params}`, { credentials: "include" });
+      const response = await fetch(withActiveClient(`${baseUrl}/bike-track/hires/export?${params}`), { credentials: "include" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body?.error ?? "The register could not be downloaded");

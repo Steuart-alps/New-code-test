@@ -6,16 +6,28 @@ import { generateSecret, generateToken, verifyToken, keyUri } from "../lib/totp"
 import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, isPlatformOperator } from "../middleware/requireAuth";
 import {
   configureProductionLoginRateLimitStore,
+  forgotPasswordEmailRateLimit,
+  forgotPasswordRateLimit,
   loginRateLimit,
   registrationRateLimit,
+  resendVerificationEmailRateLimit,
+  resendVerificationRateLimit,
   resetPasswordRateLimit,
+  totpAccountRateLimit,
 } from "../lib/loginRateLimit";
+import {
+  hashStoredCredential,
+  regenerateSession,
+  revokeUserSessions,
+  startAuthenticatedSession,
+  storedCredentialCandidates,
+} from "../lib/sessionRevocation";
 import { createDatabaseLoginRateLimitStore } from "../lib/loginRateLimitStore";
 import { db } from "@workspace/db";
-import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
+import { usersTable, passwordResetTokensTable, clientsTable } from "@workspace/db/schema";
 import { passkeysTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
 import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "../lib/email";
@@ -37,6 +49,7 @@ import {
 } from "../lib/passkeys";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 import { getCsrfToken } from "../middleware/csrf";
+import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
 
 const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
@@ -196,9 +209,16 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
   // modules. Production and the dedicated mandatory-2FA suite use the policy;
   // legacy test fixtures retain their original login contract.
   if (process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1") {
-    req.session.userId = result.user.id;
+    await startAuthenticatedSession(req, result.user.id);
     const { passwordHash: _, totpSecret: __, totpRecoveryHash: ___, ...safeUser } = result.user;
     res.json({ user: safeUser, client: result.client, billingLocked: false, services: "all" });
+    return;
+  }
+
+  // A manager may have made the authenticator optional for their business.
+  if (!(await isTwoFactorRequired(result.user))) {
+    await startAuthenticatedSession(req, result.user.id);
+    res.json(await signedInResponse(result.user, result.client));
     return;
   }
 
@@ -269,6 +289,13 @@ router.post("/auth/passkeys/authenticate", loginRateLimit, async (req, res) => {
     if (user.totpEnabled && user.totpSecret) {
       (req.session as any).pending2faUserId = user.id;
       res.json({ requires2fa: true, user: safeUser });
+    } else if (!(await isTwoFactorRequired(user))) {
+      // Password plus passkey is enough where the business has made the
+      // authenticator optional. The new session id carries none of the
+      // pending sign-in state.
+      await regenerateSession(req);
+      req.session.userId = user.id;
+      res.json({ user: safeUser });
     } else {
       delete (req.session as any).pending2faUserId;
       (req.session as any).pending2faSetupUserId = user.id;
@@ -280,7 +307,19 @@ router.post("/auth/passkeys/authenticate", loginRateLimit, async (req, res) => {
 });
 
 // POST /auth/2fa/verify — complete a pending 2FA login by supplying a TOTP code
-router.post("/auth/2fa/verify", loginRateLimit, async (req, res) => {
+// Six-digit authenticator codes are guessable, so wrong ones are also capped
+// per account across source IPs. Recovery codes (about 60 bits each) stay
+// under the per-IP limit only.
+function limitTotpGuessesPerAccount(req: any, res: any, next: any) {
+  const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+  if (!/^\d{6}$/.test(code)) {
+    next();
+    return;
+  }
+  totpAccountRateLimit(req, res, next);
+}
+
+router.post("/auth/2fa/verify", loginRateLimit, limitTotpGuessesPerAccount, async (req, res) => {
   const pendingUserId = (req.session as any).pending2faUserId;
   if (!pendingUserId) { res.status(400).json({ error: "No pending 2FA session" }); return; }
 
@@ -306,11 +345,8 @@ router.post("/auth/2fa/verify", loginRateLimit, async (req, res) => {
     }
   }
 
-  delete (req.session as any).pending2faUserId;
-  delete (req.session as any).pendingPasskeyUserId;
-  delete (req.session as any).pendingPasskeyChallenge;
-  delete (req.session as any).pendingPasskeyChallengeCreatedAt;
-  req.session.userId = user.id;
+  // A fresh session id (no pending sign-in state carried over).
+  await startAuthenticatedSession(req, user.id);
 
   const withClient = await getUserWithClientByEmail(user.email);
   const { passwordHash: _p, totpSecret: _t, totpRecoveryHash: _r, ...safeUser } = user;
@@ -336,6 +372,23 @@ function getTwoFactorSetupUserId(req: any): number | undefined {
 
 function getPasskeySetupUserId(req: any): number | undefined {
   return req.currentUser?.id ?? req.session?.pending2faSetupUserId;
+}
+
+// Body returned when password login completes without a second factor.
+async function signedInResponse(
+  user: typeof usersTable.$inferSelect,
+  client: unknown,
+) {
+  const { passwordHash: _p, totpSecret: _t, totpRecoveryHash: _r, ...safeUser } = user;
+  let billingLocked = false;
+  let services: "all" | string[] = "all";
+  if (user.clientId != null) {
+    try {
+      billingLocked = await isClientBillingLocked(user.clientId);
+      services = await getEntitledServices(user.clientId);
+    } catch {}
+  }
+  return { user: safeUser, client: client ?? null, billingLocked, services, twoFactorRequired: false };
 }
 
 router.post("/auth/passkeys/registration/options", async (req, res) => {
@@ -396,7 +449,7 @@ router.post("/auth/passkeys/registration/verify", async (req, res) => {
     }
     res.json({ ok: true });
   } catch (error: any) {
-    if (error?.code === "23505") {
+    if ((error?.code ?? error?.cause?.code) === "23505") {
       res.status(409).json({ error: "That passkey is already registered" });
       return;
     }
@@ -423,7 +476,8 @@ router.delete("/auth/passkeys/:id", requireAuth, async (req, res) => {
   const [credential] = await db.select().from(passkeysTable)
     .where(and(eq(passkeysTable.id, passkeyId), eq(passkeysTable.userId, req.currentUser!.id))).limit(1);
   if (!credential) { res.status(404).json({ error: "Passkey not found" }); return; }
-  if (!req.currentUser!.totpEnabled && (await getUserPasskeys(req.currentUser!.id)).length <= 1) {
+  if (!req.currentUser!.totpEnabled && (await getUserPasskeys(req.currentUser!.id)).length <= 1
+    && await isTwoFactorRequired(req.currentUser!)) {
     res.status(400).json({ error: "Add another security method before removing your only passkey" });
     return;
   }
@@ -463,17 +517,40 @@ router.post("/auth/2fa/enable", async (req, res) => {
   if (!verifyToken(code.trim(), pendingSecret)) {
     res.status(401).json({ error: "Incorrect code — please check your authenticator app." }); return;
   }
-   const recoveryCodes = await replaceRecoveryCodes(userId);
+  // Replacing an authenticator that is already enrolled needs proof from the
+  // account holder (current password or a code from the current
+  // authenticator), so a borrowed or hijacked session cannot swap it.
+  const [existing] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!existing) { res.status(404).json({ error: "User not found" }); return; }
+  if (existing.totpEnabled && existing.totpSecret) {
+    const { currentPassword, currentCode } = req.body as { currentPassword?: string; currentCode?: string };
+    const proven = (typeof currentCode === "string" && /^\d{6}$/.test(currentCode.trim())
+        && verifyToken(currentCode.trim(), existing.totpSecret))
+      || (typeof currentPassword === "string" && currentPassword.length > 0
+        && await verifyPassword(currentPassword, existing.passwordHash));
+    if (!proven) {
+      res.status(403).json({
+        error: "Enter your current password or a code from your current authenticator to replace it.",
+        requiresReauthentication: true,
+      });
+      return;
+    }
+  }
+  const recoveryCodes = await replaceRecoveryCodes(userId);
   await db.update(usersTable)
     .set({
       totpSecret: pendingSecret,
       totpEnabled: true,
       updatedAt: new Date(),
     })
-     .where(eq(usersTable.id, userId));
-  delete (req.session as any).pendingTotpSecret;
-   delete (req.session as any).pending2faSetupUserId;
-   req.session.userId = userId;
+    .where(eq(usersTable.id, userId));
+  if (req.currentUser) {
+    delete (req.session as any).pendingTotpSecret;
+  } else {
+    // Completing enrolment from a setup-only session signs the user in, so
+    // issue a fresh session id rather than promoting the setup session.
+    await startAuthenticatedSession(req, userId);
+  }
   // Plaintext codes are returned exactly once — only their hashes are stored.
   res.json({ ok: true, recoveryCodes });
 });
@@ -523,15 +600,43 @@ router.post("/auth/2fa/recover", loginRateLimit, async (req, res) => {
     .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
     .where(eq(usersTable.id, result.user.id));
   await db.execute(sql`DELETE FROM totp_recovery_codes WHERE user_id = ${result.user.id}`);
-  delete (req.session as any).userId;
+  // The lost authenticator may be in someone else's hands: sign the account
+  // out of every other web session and phone.
+  await revokeUserSessions(result.user.id, { exceptSessionId: req.sessionID });
+  if (!(await isTwoFactorRequired(result.user))) {
+    // The business has made the authenticator optional, so sign in now; the
+    // user can enrol a new authenticator from Settings whenever they like.
+    await startAuthenticatedSession(req, result.user.id);
+    res.json({ ok: true });
+    return;
+  }
+  await regenerateSession(req);
   (req.session as any).pending2faSetupUserId = result.user.id;
   res.json({ requires2faSetup: true });
 });
 
-// POST /auth/2fa/disable — verify the user's password then clear TOTP
+// POST /auth/2fa/disable — verify the user's password then clear TOTP. Only
+// allowed where the user's business has made two-factor authentication optional.
 router.post("/auth/2fa/disable", requireAuth, async (req, res) => {
-  res.status(403).json({ error: "Two-factor authentication is required for all user accounts" });
-  return;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.currentUser!.id)).limit(1);
+  if (!user) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (await isTwoFactorRequired(user)) {
+    res.status(403).json({ error: "Your organisation requires two-factor authentication" });
+    return;
+  }
+  if (!user.totpEnabled) { res.status(400).json({ error: "Two-factor authentication is not enabled" }); return; }
+  const { password } = req.body as { password?: string };
+  if (!password) { res.status(400).json({ error: "Password required" }); return; }
+  if (!await verifyPassword(password, user.passwordHash)) {
+    res.status(401).json({ error: "Incorrect password" }); return;
+  }
+  await db.transaction(async (tx) => {
+    await tx.update(usersTable)
+      .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
+      .where(eq(usersTable.id, user.id));
+    await tx.execute(sql`DELETE FROM totp_recovery_codes WHERE user_id = ${user.id}`);
+  });
+  res.json({ ok: true });
 });
 
 router.post("/auth/logout", (req, res) => {
@@ -575,10 +680,22 @@ router.get("/auth/me", async (req, res) => {
     }
   }
 
-  const { totpSecret: _s, ...safeUser } = user;
+  const { totpSecret: _s, ...stored } = user;
+  // A Manager with several departments: the one they're working in, and all of them.
+  const safeUser = req.departmentIds
+    ? { ...stored, departmentId: req.currentUser.departmentId, departmentIds: req.departmentIds }
+    : stored;
   const passkeys = await getUserPasskeys(user.id);
+  const twoFactorRequired = await isTwoFactorRequired(user);
   if (!user.totpEnabled) {
-    res.json({ requires2faSetup: true, user: safeUser });
+    if (twoFactorRequired) {
+      res.json({ requires2faSetup: true, user: { ...safeUser, platformOperator: isPlatformOperator(user) } });
+      return;
+    }
+    res.json({
+      user: { ...safeUser, recoveryCodesRemaining: 0, platformOperator: isPlatformOperator(user) },
+      client, billingLocked, services, passkeyCount: passkeys.length, twoFactorRequired,
+    });
     return;
   }
   const recoveryCount = await db.execute(sql`
@@ -591,8 +708,8 @@ router.get("/auth/me", async (req, res) => {
     throw new Error("Could not determine remaining recovery codes");
   }
   res.json({
-    user: { ...safeUser, recoveryCodesRemaining },
-    client, billingLocked, services, passkeyCount: passkeys.length,
+    user: { ...safeUser, recoveryCodesRemaining, platformOperator: isPlatformOperator(user) },
+    client, billingLocked, services, passkeyCount: passkeys.length, twoFactorRequired,
   });
 });
 
@@ -600,7 +717,9 @@ const ForgotPasswordBody = z.object({
   email: z.string().email(),
 });
 
-router.post("/auth/forgot-password", async (req, res) => {
+// Limited per source IP and per requested address, so the endpoint cannot be
+// used to flood one inbox or to spray reset emails across many accounts.
+router.post("/auth/forgot-password", forgotPasswordRateLimit, forgotPasswordEmailRateLimit, async (req, res) => {
   const body = ForgotPasswordBody.safeParse(req.body);
   if (!body.success) {
     res.json({ ok: true });
@@ -613,14 +732,16 @@ router.post("/auth/forgot-password", async (req, res) => {
     const token = randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60);
 
+    // Only a digest is stored; the link in the email is the credential.
     await db.insert(passwordResetTokensTable).values({
       userId: result.user.id,
-      token,
+      token: hashStoredCredential(token),
       expiresAt,
     });
 
     const appUrl = getPublicAppUrl();
     const resetUrl = `${appUrl}/reset-password?token=${token}`;
+    const safeName = escapeHtml(result.user.name);
 
     try {
       await sendSystemEmail({
@@ -629,7 +750,7 @@ router.post("/auth/forgot-password", async (req, res) => {
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #1e293b;">Password Reset Request</h2>
-            <p>Hi ${result.user.name},</p>
+            <p>Hi ${safeName},</p>
             <p>We received a request to reset the password for your account. Click the button below to choose a new password. This link will expire in <strong>1 hour</strong>.</p>
             <p style="margin: 24px 0;">
               <a href="${resetUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Reset Password</a>
@@ -665,39 +786,45 @@ router.post("/auth/reset-password", resetPasswordRateLimit, async (req, res) => 
     return;
   }
 
-  const [tokenRow] = await db
-    .select()
-    .from(passwordResetTokensTable)
-    .where(
-      and(
-        eq(passwordResetTokensTable.token, body.data.token),
-        gt(passwordResetTokensTable.expiresAt, new Date()),
-        isNull(passwordResetTokensTable.usedAt),
-      ),
-    )
-    .limit(1);
+  const passwordHash = await hashPassword(body.data.password);
+  const [hashed, legacy = hashed] = storedCredentialCandidates(body.data.token);
 
-  if (!tokenRow) {
+  // Consume the link and set the password in one transaction: the conditional
+  // UPDATE lets exactly one concurrent request use a link.
+  const userId = await db.transaction(async (tx) => {
+    const consumed = await tx.execute(sql`
+      UPDATE password_reset_tokens
+      SET used_at = now()
+      WHERE token IN (${hashed}, ${legacy})
+        AND expires_at > now()
+        AND used_at IS NULL
+      RETURNING user_id
+    `);
+    const row = consumed.rows?.[0] as { user_id: number } | undefined;
+    if (!row) return null;
+    await tx.update(usersTable)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(eq(usersTable.id, row.user_id));
+    // Any other outstanding reset or set-up link stops working too.
+    await tx.execute(sql`
+      UPDATE password_reset_tokens SET used_at = now()
+      WHERE user_id = ${row.user_id} AND used_at IS NULL
+    `);
+    return row.user_id;
+  });
+
+  if (userId === null) {
     res.status(400).json({ error: "This reset link is invalid or has expired." });
     return;
   }
 
-  const passwordHash = await hashPassword(body.data.password);
-
-  await db
-    .update(usersTable)
-    .set({ passwordHash, updatedAt: new Date() })
-    .where(eq(usersTable.id, tokenRow.userId));
-
-  await db
-    .update(passwordResetTokensTable)
-    .set({ usedAt: new Date() })
-    .where(eq(passwordResetTokensTable.id, tokenRow.id));
+  // Whoever knew the old password is signed out of every browser and phone.
+  await revokeUserSessions(userId);
 
   res.json({ ok: true });
 });
 
-const BUSINESS_TYPES = [
+export const BUSINESS_TYPES = [
   "hotel_accommodation",
   "holiday_park_campsite",
   "leisure_sports_centre",
@@ -707,6 +834,7 @@ const BUSINESS_TYPES = [
   "offices_commercial",
   "retail",
   "pest_control",
+  "golf_club",
   "other",
 ] as const;
 
@@ -729,7 +857,9 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
     return;
   }
 
-  const { name, orgName, email, password, businessType, promoCode, services: requestedServices, bundle } = body.data;
+  const { name, orgName, email: rawEmail, password, businessType, promoCode, services: requestedServices, bundle } = body.data;
+  // Store addresses in lower case so sign-in and duplicate checks match.
+  const email = rawEmail.trim().toLowerCase();
   // Use the explicitly provided organisation name for the client record; fall
   // back to the user's own name if omitted (e.g. API callers / older clients).
   const clientName = (orgName ?? "").trim() || name;
@@ -774,7 +904,9 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
 
   const [user] = await db
     .insert(usersTable)
-    .values({ name, email, passwordHash, role: "consultant", clientId, subscriptionStatus: "trial" })
+    // The person signing up is the business's Owner. The consultant role is
+    // for advisers who look after several businesses.
+    .values({ name, email, passwordHash, role: "client_admin", clientId, subscriptionStatus: "trial" })
     .returning();
 
   // New self-registrations must confirm control of their email address before
@@ -789,15 +921,6 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
         email_verification_expires_at = ${new Date(Date.now() + 24 * 60 * 60 * 1000)}
     WHERE id = ${user.id}
   `);
-
-  // Link the new owner to their auto-provisioned business so tenant access
-  // checks (consultant_clients membership) recognise it.
-  if (clientId !== null) {
-    await db
-      .insert(consultantClientsTable)
-      .values({ userId: user.id, clientId })
-      .onConflictDoNothing();
-  }
 
   // Pre-populate the new business with starter categories and example
   // compliance checks so the dashboard isn't empty on first login. All seeded
@@ -897,8 +1020,11 @@ router.get("/auth/verify-email", async (req, res) => {
   res.json({ verified: true });
 });
 
-// POST /auth/resend-verification — generic response prevents email enumeration.
-router.post("/auth/resend-verification", registrationRateLimit, async (req, res) => {
+// POST /auth/resend-verification — the same response whatever the address,
+// so it can't be used to find out who has an account. The email goes out in
+// the background (like the welcome email) so response time doesn't reveal it
+// either, and a provider failure is only logged.
+router.post("/auth/resend-verification", resendVerificationRateLimit, resendVerificationEmailRateLimit, async (req, res) => {
   const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
   if (email) {
     const result = await db.execute(sql`
@@ -923,17 +1049,29 @@ router.post("/auth/resend-verification", registrationRateLimit, async (req, res)
             email_verification_expires_at = ${new Date(Date.now() + 24 * 60 * 60 * 1000)}
         WHERE id = ${user.id}
       `);
-      try {
-        const verifyUrl = `${getPublicAppUrl().replace(/\/$/, "")}/verify-email?token=${verificationToken}`;
-        await sendSystemEmail({
-          to: user.email,
-          subject: "Verify your ComplyTrack email address",
-          html: `<p>Hi ${user.name},</p><p><a href="${verifyUrl}">Verify your email address</a></p><p>This link expires in 24 hours.</p>`,
-          text: `Verify your ComplyTrack email address: ${verifyUrl}\n\nThis link expires in 24 hours.`,
-        });
-      } catch (err) {
-        logger.warn({ err }, "Failed to resend verification email");
-      }
+      const appUrl = getPublicAppUrl().replace(/\/$/, "");
+      const verifyUrl = `${appUrl}/verify-email?token=${verificationToken}`;
+      // Same look as the welcome email it replaces.
+      void sendSystemEmail({
+        to: user.email,
+        subject: "Verify your ComplyTrack email address",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #1e293b;">Verify your ComplyTrack email address</h2>
+            <p>Hi ${escapeHtml(user.name)},</p>
+            <p>Here is a new link to confirm your email address and activate your ComplyTrack account.</p>
+            <p style="margin: 24px 0;">
+              <a href="${verifyUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Verify email address</a>
+            </p>
+            <p>You can access ComplyTrack at <a href="${appUrl}">${appUrl}</a>.</p>
+            <p>This link expires in 24 hours and replaces any earlier verification link. If you did not ask for it, you can ignore this email.</p>
+            <p>Best regards,<br><strong>ComplyTrack</strong></p>
+          </div>
+        `,
+        text: `Hi ${user.name},\n\nHere is a new link to confirm your email address and activate your ComplyTrack account:\n${verifyUrl}\n\nOpen ComplyTrack: ${appUrl}\n\nThis link expires in 24 hours and replaces any earlier verification link. If you did not ask for it, you can ignore this email.\n\nBest regards,\nComplyTrack`,
+      }).catch((err) => {
+        req.log.warn({ err }, "Failed to resend verification email");
+      });
     }
   }
   res.json({ sent: true });
@@ -954,6 +1092,9 @@ const MobileTotpVerificationBody = z.object({
 const MOBILE_LOGIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const MOBILE_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MOBILE_SESSION_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+// Refreshing never keeps a phone signed in longer than this after the password
+// (and second factor) were last entered.
+const MOBILE_SESSION_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const MOBILE_LOGIN_CHALLENGE_INVALID_CODE = "MOBILE_LOGIN_CHALLENGE_INVALID";
 
 function hashMobileLoginChallenge(token: string): string {
@@ -972,8 +1113,8 @@ async function issueMobileSession(user: {
   const expiresAt = new Date(Date.now() + MOBILE_SESSION_TTL_MS);
 
   await db.execute(sql`
-    INSERT INTO mobile_sessions (user_id, token, expires_at)
-    VALUES (${user.id}, ${token}, ${expiresAt})
+    INSERT INTO mobile_sessions (user_id, token, expires_at, authenticated_at)
+    VALUES (${user.id}, ${hashStoredCredential(token)}, ${expiresAt}, now())
   `);
 
   return {
@@ -1040,7 +1181,8 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  if (!(process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1")) {
+  if (!(process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1")
+    && await isTwoFactorRequired(result.user)) {
     res.json({ requires2faSetup: true, setupUrl: `${getPublicAppUrl().replace(/\/$/, "")}/settings` });
     return;
   }
@@ -1052,7 +1194,28 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
  * POST /api/auth/mobile-login/verify-totp
  * Exchanges a valid five-minute login challenge and 2FA code for a bearer token.
  */
-router.post("/auth/mobile-login/verify-totp", loginRateLimit, async (req, res) => {
+// The account behind a pending mobile challenge, so wrong codes are also
+// capped per account (totpAccountRateLimit), not only per source IP.
+async function resolveMobileChallengeAccount(req: any, _res: any, next: any) {
+  const pendingToken = typeof req.body?.pendingToken === "string" ? req.body.pendingToken : "";
+  if (pendingToken) {
+    try {
+      const result = await db.execute(sql`
+        SELECT user_id FROM mobile_login_challenges
+        WHERE token_hash = ${hashMobileLoginChallenge(pendingToken)}
+        LIMIT 1
+      `);
+      const row = result.rows?.[0] as { user_id: number } | undefined;
+      if (row) req.totpAccountId = row.user_id;
+    } catch (err) {
+      next(err);
+      return;
+    }
+  }
+  next();
+}
+
+router.post("/auth/mobile-login/verify-totp", loginRateLimit, resolveMobileChallengeAccount, limitTotpGuessesPerAccount, async (req, res) => {
   const body = MobileTotpVerificationBody.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: "Pending token and verification code are required" });
@@ -1130,8 +1293,8 @@ router.post("/auth/mobile-login/verify-totp", loginRateLimit, async (req, res) =
     const token = randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + MOBILE_SESSION_TTL_MS);
     await tx.execute(sql`
-      INSERT INTO mobile_sessions (user_id, token, expires_at)
-      VALUES (${user.id}, ${token}, ${expiresAt})
+      INSERT INTO mobile_sessions (user_id, token, expires_at, authenticated_at)
+      VALUES (${user.id}, ${hashStoredCredential(token)}, ${expiresAt}, now())
     `);
 
     return {
@@ -1179,11 +1342,12 @@ router.post("/auth/mobile-refresh", requireAuth, async (req, res) => {
   }
 
   const currentToken = auth.slice(7);
+  const [hashed, legacy = hashed] = storedCredentialCandidates(currentToken);
   const refreshed = await db.transaction(async (tx) => {
     const result = await tx.execute(sql`
-      SELECT id, user_id, expires_at
+      SELECT id, user_id, expires_at, COALESCE(authenticated_at, created_at) AS authenticated_at
       FROM mobile_sessions
-      WHERE token = ${currentToken}
+      WHERE token IN (${hashed}, ${legacy})
       LIMIT 1
       FOR UPDATE
     `);
@@ -1191,6 +1355,7 @@ router.post("/auth/mobile-refresh", requireAuth, async (req, res) => {
       id: number;
       user_id: number;
       expires_at: Date | string;
+      authenticated_at: Date | string;
     } | undefined;
     const currentExpiresAt = session ? new Date(session.expires_at) : null;
 
@@ -1202,15 +1367,25 @@ router.post("/auth/mobile-refresh", requireAuth, async (req, res) => {
       return { token: currentToken, expiresAt: currentExpiresAt.toISOString() };
     }
 
+    // Renewal is capped from the original sign-in; past that point the token
+    // simply runs out and the user signs in again.
+    const authenticatedAt = new Date(session.authenticated_at);
+    const expiresAt = new Date(Math.min(
+      Date.now() + MOBILE_SESSION_TTL_MS,
+      authenticatedAt.getTime() + MOBILE_SESSION_MAX_AGE_MS,
+    ));
+    if (expiresAt.getTime() <= currentExpiresAt.getTime()) {
+      return { token: currentToken, expiresAt: currentExpiresAt.toISOString() };
+    }
+
     const token = randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + MOBILE_SESSION_TTL_MS);
     await tx.execute(sql`
       DELETE FROM mobile_sessions
       WHERE id = ${session.id}
     `);
     await tx.execute(sql`
-      INSERT INTO mobile_sessions (user_id, token, expires_at)
-      VALUES (${session.user_id}, ${token}, ${expiresAt})
+      INSERT INTO mobile_sessions (user_id, token, expires_at, authenticated_at)
+      VALUES (${session.user_id}, ${hashStoredCredential(token)}, ${expiresAt}, ${authenticatedAt})
     `);
     return { token, expiresAt: expiresAt.toISOString() };
   });
@@ -1229,8 +1404,8 @@ router.post("/auth/mobile-refresh", requireAuth, async (req, res) => {
 router.post("/auth/mobile-logout", requireAuth, async (req, res) => {
   const auth = req.headers.authorization;
   if (auth?.startsWith("Bearer ")) {
-    const token = auth.slice(7);
-    await db.execute(sql`DELETE FROM mobile_sessions WHERE token = ${token}`).catch(() => {});
+    const [hashed, legacy = hashed] = storedCredentialCandidates(auth.slice(7));
+    await db.execute(sql`DELETE FROM mobile_sessions WHERE token IN (${hashed}, ${legacy})`).catch(() => {});
   }
   res.status(204).send();
 });

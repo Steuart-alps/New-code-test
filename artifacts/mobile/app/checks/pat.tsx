@@ -23,10 +23,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { useUnsentSubmissions } from '@/hooks/useUnsentSubmissions';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { PatTagScanner } from '@/components/PatTagScanner';
+import { UnsentSubmissions } from '@/components/UnsentSubmissions';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { useRecordOutbox } from '@/hooks/useRecordOutbox';
 
 const MODULE_COLOR = '#6366f1';
 
@@ -133,13 +137,23 @@ export default function PatScreen() {
     enabled: serviceEnabled,
   });
 
+  // Tests that could not be sent (e.g. no signal) are kept on the device.
+  const unsent = useUnsentSubmissions('pat-test');
+  const applianceName = (id: unknown) =>
+    appliances.find((appliance) => appliance.id === id)?.name ?? `Appliance ${String(id)}`;
+
+  // Saved on the device first, then sent; resent automatically under the
+  // same entry ID after a lost connection (the server never duplicates it).
+  const outbox = useRecordOutbox('pat-test');
   const { mutate, isPending } = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      apiFetch('/api/pat-track/tests', { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: async () => {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      qc.invalidateQueries({ queryKey: ['pat-tests'] });
-      qc.invalidateQueries({ queryKey: ['pat-appliances'] });
+      outbox.send(body, `PAT test · ${applianceName(body.applianceId)} · ${String(body.testDate)}`),
+    onSuccess: async (outcome) => {
+      if (outcome.state === 'rejected') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Not accepted', outcome.error);
+        return;
+      }
       // Reset form
       setApplianceId(null);
       setResult('pass');
@@ -148,11 +162,19 @@ export default function PatScreen() {
       setTestedBy(user?.name ?? '');
       setNotes('');
       setShowForm(false);
+      if (outcome.state === 'queued') {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert('Saved on this device', 'No connection right now. The PAT test is saved on this device and will be sent automatically when you are back online.');
+        return;
+      }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      qc.invalidateQueries({ queryKey: ['pat-tests'] });
+      qc.invalidateQueries({ queryKey: ['pat-appliances'] });
       Alert.alert('Logged', 'PAT test recorded successfully.');
     },
     onError: (err: Error) => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', err.message || 'Something went wrong.');
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Not saved', err.message || 'Something went wrong.');
     },
   });
 
@@ -241,7 +263,7 @@ export default function PatScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.navy, paddingTop: topPad + 16 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
             <Feather name="arrow-left" size={22} color="#ffffff" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
@@ -254,6 +276,20 @@ export default function PatScreen() {
           <View style={{ width: 22 }} />
         </View>
       </View>
+
+      <OutboxEntries entries={outbox.entries} readError={outbox.readError} />
+      {/* Copies saved by earlier app versions move into the outbox once. */}
+      <UnsentSubmissions
+        drafts={unsent.drafts}
+        disabled={isPending}
+        primaryLabel="Send"
+        onRetry={(draft) => {
+          outbox.adoptLegacy(draft, unsent.discard).catch((err: unknown) =>
+            Alert.alert('Not saved', err instanceof Error ? err.message : 'Try again.'));
+        }}
+        onDiscard={(draft) => { void unsent.discard(draft.id); }}
+        note="Sends the test exactly as it was saved, with its original date."
+      />
 
       {/* Appliance status list */}
       <View style={styles.section}>
@@ -343,7 +379,7 @@ export default function PatScreen() {
                 {appliances.find((item) => item.id === applianceId)?.name}
               </Text>
             </View>
-            <TouchableOpacity testID="pat-close-form" onPress={() => setShowForm(false)}>
+            <TouchableOpacity testID="pat-close-form" accessibilityRole="button" accessibilityLabel="Close test form" onPress={() => setShowForm(false)}>
               <Feather name="x" size={22} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>
@@ -380,6 +416,7 @@ export default function PatScreen() {
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.foreground }]}>Test date</Text>
             <TextInput
+              testID="pat-test-date"
               style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
               value={testDate}
               onChangeText={setTestDate}
@@ -394,6 +431,7 @@ export default function PatScreen() {
               Next due date
             </Text>
             <TextInput
+              testID="pat-next-test-date"
               style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
               value={nextTestDate}
               onChangeText={setNextTestDate}
@@ -408,6 +446,7 @@ export default function PatScreen() {
               Tested by
             </Text>
             <TextInput
+              testID="pat-tested-by"
               style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
               value={testedBy}
               onChangeText={setTestedBy}
@@ -422,6 +461,7 @@ export default function PatScreen() {
               Notes <Text style={{ color: colors.mutedForeground }}>(optional)</Text>
             </Text>
             <TextInput
+              testID="pat-notes"
               style={[styles.input, styles.textArea, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
               value={notes}
               onChangeText={setNotes}
@@ -634,7 +674,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 48,
+    minHeight: 48,
     borderRadius: 6,
     gap: 8,
   },
@@ -690,14 +730,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   input: {
-    height: 46,
+    minHeight: 46,
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 14,
     fontSize: 15,
     fontFamily: 'Inter_400Regular',
   },
-  textArea: { height: 88, paddingTop: 12 },
+  textArea: { minHeight: 88, paddingTop: 12 },
   resultBtn: {
     flex: 1,
     paddingVertical: 12,
@@ -707,7 +747,7 @@ const styles = StyleSheet.create({
   },
   resultBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   submitBtn: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 6,
     flexDirection: 'row',
     alignItems: 'center',

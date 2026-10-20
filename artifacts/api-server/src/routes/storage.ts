@@ -1,55 +1,62 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { Readable } from "stream";
+import { Readable, pipeline } from "stream";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   GetStorageUsageResponse,
 } from "@workspace/api-zod";
-import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ObjectStorageService, ObjectNotFoundError, UploadTooLargeError, maxUploadBytes, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
+import {
+  readStorageUsageSnapshot,
+  reconcileStorageUsage,
+  refreshStorageUsageInBackground,
+  storageUsageLedger,
+  storageUsageSnapshotIsStale,
+} from "../lib/storageUsageSnapshot";
+import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { ObjectPermission } from "../lib/objectAcl";
 import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
 import { objectPathTenantMismatch, patPhotoObjectAccess } from "../lib/patLegacyHistoryScope";
+import { canReadHealthData, riddorReceiptObjectAccess } from "../lib/riddorReceipts";
 import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
 import { findLiveSubscription } from "../lib/billing";
+import { readStorageRateConfig } from "../lib/storagePricing";
+import {
+  GIB,
+  listScheduledStorageReductions,
+  planIncludedStorageGib,
+  renewingStorageGib,
+  stillPaidReducedGib,
+} from "../lib/storageCapacity";
+import { storageWarningThresholdBytes } from "../lib/storageWarningEmails";
+import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
 const router: IRouter = Router();
+// Signed download links are bearer URLs opened by people without a session
+// (public sign-off and contractor portal), so they are mounted before any
+// router that installs root-level requireAuth.
+export const storageDownloadRouter: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
-const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
-const GIB = 1024 ** 3;
-const DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH = 0.015;
-const DEFAULT_ALPS_STORAGE_MARKUP_PERCENT = 20;
-const DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE: Record<string, number> = {
-  core: 1,
-  bundle: 1,
-};
+// Every ObjectStorageService instance reports tenant uploads and deletions to
+// the usage ledger once this router is loaded.
+setStorageUsageRecorder(storageUsageLedger);
 
-function requestRange(raw: string | undefined, size: number): { start: number; end: number } | "invalid" | undefined {
-  if (!raw) return undefined;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(raw.trim());
-  if (!match || (!match[1] && !match[2])) return "invalid";
-  let start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
-  let end = match[2] ? Number(match[2]) : size - 1;
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) return "invalid";
-  end = Math.min(end, size - 1);
-  return { start, end };
-}
-
-router.get("/storage/download/:token", async (req: Request, res: Response) => {
+storageDownloadRouter.get("/storage/download/:token", async (req: Request, res: Response) => {
+  let resolved: Awaited<ReturnType<typeof resolveDownloadToken>> = null;
   try {
     const rawToken = Array.isArray(req.params.token) ? req.params.token[0] : req.params.token;
-    const resolved = await resolveDownloadToken(rawToken);
+    resolved = await resolveDownloadToken(rawToken);
     if (!resolved) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
     const file = await objectStorageService.getObjectEntityFile(resolved.objectPath);
     const acl = await objectStorageService.canAccessObjectEntity({ userId: String(resolved.clientId), objectFile: file, requestedPermission: ObjectPermission.READ });
     if (!acl) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
     const [metadata] = await file.getMetadata();
     const size = Number(metadata.size);
-    const range = requestRange(req.header("range"), size);
+    const range = parseByteRange(req.header("range"), size);
     if (range === "invalid") { res.status(416).setHeader("Content-Range", `bytes */${size}`).end(); return; }
     const response = await objectStorageService.downloadObject(file, 0, range);
     res.status(response.status);
@@ -58,43 +65,36 @@ router.get("/storage/download/:token", async (req: Request, res: Response) => {
     const stream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
     const meter = createDownloadMeter(resolved.clientId);
     stream.on("data", (chunk) => meter.add(chunk));
-    const commit = () => { void meter.commit().catch((error) => req.log.error({ err: error }, "Could not record download usage")); };
-    stream.once("end", commit); stream.once("close", commit);
-    stream.pipe(res);
+    streamMetered(req, stream, res, meter);
   } catch (error) {
     if (error instanceof ObjectNotFoundError) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
+    if (resolved) {
+      respondObjectStorageDownloadUnavailable(req, res, error, "Signed token download", { clientId: resolved.clientId });
+      return;
+    }
     req.log.error({ err: error }, "Error serving token download");
     if (!res.headersSent) res.status(500).json({ error: "Failed to serve download" });
   }
 });
 
 async function estimateStorageCost(clientId: number, usedBytes: number, monthlyDownloadBytes: number) {
-  const rawRate = process.env.STORAGE_PROVIDER_USD_PER_GIB_MONTH?.trim();
-  const providerRate = rawRate ? Number(rawRate) : DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH;
-  const rawMarkup = process.env.STORAGE_ALPS_MARKUP_PERCENT;
-  const markupPercent = rawMarkup ? Number(rawMarkup) : DEFAULT_ALPS_STORAGE_MARKUP_PERCENT;
-  if (!Number.isFinite(providerRate) || providerRate < 0 || !Number.isFinite(markupPercent) || markupPercent < 0) return null;
-  const rawAllowances = process.env.STORAGE_INCLUDED_GIB_BY_SERVICE;
-  let allowanceMap: Record<string, unknown>;
-  try {
-    allowanceMap = rawAllowances ? JSON.parse(rawAllowances) : DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE;
-  } catch {
-    return null;
-  }
-  if (!allowanceMap || typeof allowanceMap !== "object" || Array.isArray(allowanceMap)) return null;
-  const configuredValues = Object.values(allowanceMap);
-  if (!configuredValues.length || configuredValues.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER / GIB)) return null;
+  // Same rate source as the Stripe price check (storagePricing.ts), so the
+  // estimate and the add-on price are judged against one calculation.
+  const rates = readStorageRateConfig();
+  if (!rates) return null;
+  const { providerUsdPerGibMonth: providerRate, markupPercent } = rates;
   const [client] = await db.select({ stripeCustomerId: clientsTable.stripeCustomerId })
     .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client?.stripeCustomerId) return null;
   const subscription = await findLiveSubscription(client.stripeCustomerId).catch(() => null);
   if (!subscription) return null;
-  const allowances = subscription.items.data
-    .map((item) => String(item.price?.metadata?.service_key ?? ""))
-    .map((key) => Number(allowanceMap[key]))
-    .filter((value) => Number.isFinite(value) && value >= 0);
-  if (!allowances.length) return null;
-  const includedBytes = Math.max(...allowances) * GIB;
+  const planGib = planIncludedStorageGib(subscription.items.data);
+  if (planGib === null) return null;
+  // Storage bought as an add-on (one unit per GiB) adds to the plan allowance,
+  // including GiB already reduced for the next renewal but paid until then.
+  const purchasedGib = renewingStorageGib(subscription.items.data)
+    + stillPaidReducedGib(await listScheduledStorageReductions(clientId, subscription.id));
+  const includedBytes = (planGib + purchasedGib) * GIB;
   const excess = Math.max(0, usedBytes - includedBytes);
   const providerMinorUnits = Math.round(providerRate * 100 * excess / GIB);
   const storageMinorUnits = Math.round(
@@ -122,23 +122,40 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
   }
 
   try {
-    const [referencedPaths, thresholdSetting] = await Promise.all([
-      listTenantAttachmentObjectPaths(db, clientId),
-      db.query.appSettingsTable.findFirst({
-        where: and(
-          eq(appSettingsTable.clientId, clientId),
-          eq(appSettingsTable.key, "storageWarningThresholdBytes"),
-        ),
-      }),
-    ]);
-    const { usedBytes, objectCount } = await objectStorageService.getTenantStorageUsage(clientId, referencedPaths);
+    const thresholdSetting = await db.query.appSettingsTable.findFirst({
+      where: and(
+        eq(appSettingsTable.clientId, clientId),
+        eq(appSettingsTable.key, "storageWarningThresholdBytes"),
+      ),
+    });
+    // Authoritative listing: the tenant's provider prefixes plus its bounded
+    // set of legacy references, filtered by ACL ownership.
+    const listObjects = async () => objectStorageService.listTenantStorageObjects(
+      clientId,
+      await listTenantAttachmentObjectPaths(db, clientId),
+    );
+    let snapshot = await readStorageUsageSnapshot(clientId);
+    let usedBytes = snapshot.usedBytes;
+    let objectCount = snapshot.objectCount;
+    if (snapshot.reconciledAt === null) {
+      // First view for this account: reconcile now so the totals are complete.
+      const reconciled = await reconcileStorageUsage(clientId, listObjects);
+      if (reconciled) {
+        snapshot = await readStorageUsageSnapshot(clientId);
+        ({ usedBytes, objectCount } = snapshot);
+      } else {
+        // Another request holds the first reconciliation; answer live meanwhile.
+        ({ usedBytes, objectCount } = sumStorageUsageEntries(await listObjects()));
+        snapshot = { ...snapshot, refreshing: true };
+      }
+    } else if (storageUsageSnapshotIsStale(snapshot)) {
+      refreshStorageUsageInBackground(clientId, listObjects);
+      snapshot = { ...snapshot, refreshing: true };
+    }
     const month = utcMonth();
     const monthlyDownloadBytes = await getMonthlyDownloadBytes(clientId, month);
     const estimatedCost = await estimateStorageCost(clientId, usedBytes, monthlyDownloadBytes);
-    const configuredThreshold = Number(thresholdSetting?.value);
-    const warningThresholdBytes = Number.isSafeInteger(configuredThreshold) && configuredThreshold > 0
-      ? configuredThreshold
-      : DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES;
+    const warningThresholdBytes = storageWarningThresholdBytes(thresholdSetting?.value);
 
     res.json(GetStorageUsageResponse.parse({
       usedBytes,
@@ -149,6 +166,9 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
       monthlyDownloadTrackingAvailable: true,
       month,
       estimatedCost,
+      usageCheckedAt: snapshot.reconciledAt,
+      usageAgeSeconds: snapshot.ageSeconds,
+      usageRefreshing: snapshot.refreshing,
     }));
   } catch (error) {
     req.log.error({ err: error, operation: "account storage usage" }, "Object storage usage unavailable");
@@ -178,6 +198,11 @@ router.post("/storage/uploads/request-url", requireAuth, denyViewers, async (req
     const clientId = getClientId(req);
     if (!clientId) {
       res.status(400).json({ error: "No client context" });
+      return;
+    }
+    // Refuse early; finalisation checks the stored size as well.
+    if (size > maxUploadBytes()) {
+      res.status(400).json({ error: new UploadTooLargeError().message });
       return;
     }
 
@@ -220,7 +245,9 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
 
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
-      nodeStream.pipe(res);
+      pipeline(nodeStream, res, (error) => {
+        if (error && error.code !== "ERR_STREAM_PREMATURE_CLOSE") req.log.warn({ err: error }, "Public object stream ended early");
+      });
     } else {
       res.end();
     }
@@ -245,9 +272,12 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
     const clientId = getClientId(req);
     // The tenant ACL below is per client. A retained PAT test photo is also
     // limited to the department/site recorded with its test, so another
-    // department cannot fetch it by path. Checked before touching storage.
+    // department cannot fetch it by path. An HSE receipt bound to a RIDDOR
+    // submission keeps its incident's department and manager-only rule too.
+    // Checked before touching storage.
     if (!clientId || objectPathTenantMismatch(objectPath, clientId)
-      || !await patPhotoObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req))) {
+      || !await patPhotoObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req))
+      || !await riddorReceiptObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req), canReadHealthData(req))) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
@@ -270,7 +300,7 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
     }
 
     const [metadata] = await objectFile.getMetadata();
-    const range = requestRange(req.header("range"), Number(metadata.size));
+    const range = parseByteRange(req.header("range"), Number(metadata.size));
     if (range === "invalid") { res.status(416).setHeader("Content-Range", `bytes */${metadata.size}`).end(); return; }
     const response = await objectStorageService.downloadObject(objectFile, 3600, range);
 
@@ -281,10 +311,7 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
       const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
       const meter = createDownloadMeter(clientId!);
       nodeStream.on("data", (chunk) => meter.add(chunk));
-      const commit = () => { void meter.commit().catch((error) => req.log.error({ err: error }, "Could not record download usage")); };
-      nodeStream.once("end", commit);
-      nodeStream.once("close", commit);
-      nodeStream.pipe(res);
+      streamMetered(req, nodeStream, res, meter);
     } else {
       res.end();
     }
@@ -298,5 +325,18 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
     res.status(500).json({ error: "Failed to serve object" });
   }
 });
+
+/**
+ * Streams a download and records the bytes it actually sent. pipeline() stops
+ * the provider read when the client disconnects and turns a provider stream
+ * error into a closed response (instead of an unhandled 'error' event), and its
+ * callback runs once in every case, so partial downloads are still metered.
+ */
+function streamMetered(req: Request, stream: Readable, res: Response, meter: ReturnType<typeof createDownloadMeter>): void {
+  pipeline(stream, res, (error) => {
+    if (error && error.code !== "ERR_STREAM_PREMATURE_CLOSE") req.log.warn({ err: error }, "Download stream ended early");
+    void meter.commit().catch((commitError) => req.log.error({ err: commitError }, "Could not record download usage"));
+  });
+}
 
 export default router;

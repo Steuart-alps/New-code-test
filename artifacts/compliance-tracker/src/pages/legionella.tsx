@@ -79,7 +79,7 @@ const CHECK_TYPE_HINTS: Record<LegionellaCheckType, string> = {
   cold_sentinel_temp:    "HSG274 benchmark: sentinel cold-water monitoring — set outlets and frequency in the written scheme.",
   cold_nonsent_temp:     "HSG274 benchmark: representative cold-outlet monitoring — set sampling and frequency from the risk assessment.",
   cold_tank_inspection:  "HSG274 benchmark: inspect tank condition — use the risk-assessed written scheme.",
-  cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment.",
+  cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment. A pass here also completes the \"Clean & Disinfect Water Tanks\" task in ComplyTrack, and completing that task records it here.",
   calorifier_inspection: "HSG274 benchmark: inspect calorifier condition — set the scope and interval with a competent person.",
   calorifier_clean:      "HSG274 benchmark: clean and recommission a calorifier — arrange when justified by the risk assessment.",
   shower_clean:          "HSG274 benchmark: shower-head and hose cleaning — set method and frequency in the written scheme.",
@@ -93,7 +93,7 @@ const TEMPERATURE_TYPES = new Set<LegionellaCheckType>([
 ]);
 
 const TEMP_PLACEHOLDER: Partial<Record<LegionellaCheckType, string>> = {
-  calorifier_temp:    "e.g. 62.0  (target ≥60°C)",
+  calorifier_temp:    "e.g. 62.0  (flow ≥60°C, return ≥50°C)",
   hot_sentinel_temp:  "e.g. 52.0  (target ≥50°C)",
   hot_nonsent_temp:   "e.g. 51.5  (target ≥50°C)",
   cold_tank_temp:     "e.g. 16.0  (target ≤20°C)",
@@ -219,7 +219,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
     setFrequencyDays(Object.fromEntries(Object.keys(DEFAULT_LEGIONELLA_FREQUENCIES).map(key => [key, String(savedProfile.frequencyDays?.[key] ?? saved[key] ?? DEFAULT_LEGIONELLA_FREQUENCIES[key])])));
     setProfile({
       systemInventoryReference: savedProfile.systemInventoryReference ?? "",
-      writtenControlSchemeReference: savedProfile.writtenControlSchemeReference ?? "",
+      writtenControlSchemeReference: savedProfile.writtenControlSchemeReference ?? savedProfile.writtenSchemeReference ?? "",
       riskAssessmentReference: savedProfile.riskAssessmentReference ?? "",
       riskAssessmentReviewDate: savedProfile.riskAssessmentReviewDate ?? "",
       competentPerson: savedProfile.competentPerson ?? "",
@@ -388,7 +388,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
 type OutletStatus = {
   id: number;
   name: string;
-  type: "hot" | "cold" | "calorifier";
+  type: OutletType;
   location: string | null;
   siteId: number | null;
   sortOrder: number;
@@ -404,25 +404,35 @@ type OutletStatus = {
   } | null;
 };
 
-const OUTLET_TYPE_LABEL: Record<string, string> = { hot: "Hot", cold: "Cold", calorifier: "Calorifier" };
+type OutletType = "hot" | "cold" | "calorifier" | "tmv";
+const OUTLET_TYPE_LABEL: Record<string, string> = { hot: "Hot", cold: "Cold", calorifier: "Calorifier", tmv: "TMV" };
+// TMV outlets (vulnerable users) are checked against a maximum, not the hot
+// minimum: HSG274 Part 2 / HTM 04-01. The server applies the same limit.
+const TMV_OUTLET_MAX_C = 44;
+
 const OUTLET_TYPE_CLS: Record<string, string> = {
   hot:        "bg-orange-100 text-orange-700 border-orange-200",
   cold:       "bg-sky-100 text-sky-700 border-sky-200",
   calorifier: "bg-amber-100 text-amber-700 border-amber-200",
+  tmv:        "bg-violet-100 text-violet-700 border-violet-200",
 };
 
 // ── Add Outlet Dialog ─────────────────────────────────────────────────────────
 
-function AddOutletDialog({ open, onClose, onSuccess }: {
+function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  /** The page's selected site; the outlet belongs to it. Without one, the dialog asks. */
+  siteId?: number;
 }) {
   const [name, setName] = useState("");
-  const [type, setType] = useState<"hot" | "cold" | "calorifier">("hot");
+  const [type, setType] = useState<OutletType>("hot");
   const [location, setLocation] = useState("");
+  const [outletSite, setOutletSite] = useState<number | undefined>(siteId);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
+  const { data: sites } = useListSites();
 
   const handleSave = async () => {
     if (!name.trim()) return;
@@ -430,7 +440,7 @@ function AddOutletDialog({ open, onClose, onSuccess }: {
     const r = await apiFetch("/legionella/outlets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), type, location: location.trim() || null }),
+      body: JSON.stringify({ name: name.trim(), type, location: location.trim() || null, siteId: siteId ?? outletSite ?? null }),
     });
     setBusy(false);
     if (r.ok) {
@@ -462,6 +472,7 @@ function AddOutletDialog({ open, onClose, onSuccess }: {
                 <SelectItem value="hot">Hot water</SelectItem>
                 <SelectItem value="cold">Cold water</SelectItem>
                 <SelectItem value="calorifier">Calorifier</SelectItem>
+                <SelectItem value="tmv">TMV / thermostatic mixing valve outlet</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -470,6 +481,18 @@ function AddOutletDialog({ open, onClose, onSuccess }: {
             <Input value={location} onChange={e => setLocation(e.target.value)}
               placeholder="e.g. Male toilets, ground floor" />
           </div>
+          {siteId == null && (sites?.length ?? 0) > 0 && (
+            <div className="space-y-1.5">
+              <Label>Site</Label>
+              <Select value={outletSite ? String(outletSite) : "none"} onValueChange={v => setOutletSite(v === "none" ? undefined : Number(v))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific site</SelectItem>
+                  {sites?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -508,6 +531,8 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
   }, [config, user]);
 
   const isTemperature = TEMPERATURE_TYPES.has(checkType);
+  const isTmv = outlet.type === "tmv";
+  const tmvTooHot = isTmv && temperature !== "" && parseFloat(temperature) > TMV_OUTLET_MAX_C;
   const locationStr = outlet.name + (outlet.location ? ` — ${outlet.location}` : "");
 
   const handleSubmit = async () => {
@@ -549,7 +574,9 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
         <div className="space-y-4 py-2">
           <div className="rounded-md bg-muted/50 px-3 py-2 space-y-0.5">
             <p className="text-sm font-medium">{CHECK_TYPE_LABELS[checkType]}</p>
-            <p className="text-xs text-muted-foreground italic">{CHECK_TYPE_HINTS[checkType]}</p>
+            <p className="text-xs text-muted-foreground italic">
+              {isTmv ? `TMV outlet: blended water must not exceed ${TMV_OUTLET_MAX_C}°C (HSG274 Part 2 / HTM 04-01)` : CHECK_TYPE_HINTS[checkType]}
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label>Date</Label>
@@ -573,9 +600,12 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
                 <ThermometerSun className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input type="number" step="0.1" value={temperature}
                   onChange={e => setTemperature(e.target.value)}
-                  placeholder={TEMP_PLACEHOLDER[checkType] ?? "°C"}
+                  placeholder={isTmv ? `≤ ${TMV_OUTLET_MAX_C}°C` : TEMP_PLACEHOLDER[checkType] ?? "°C"}
                   className="pl-9" />
               </div>
+              {tmvTooHot && (
+                <p className="text-xs text-red-700">Above {TMV_OUTLET_MAX_C}°C: scald risk. This will be recorded as a fail and open an action.</p>
+              )}
             </div>
           )}
           <div className="space-y-1.5">
@@ -599,7 +629,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
 
 // ── Sentinel Outlets Panel ─────────────────────────────────────────────────────
 
-function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
+function SentinelOutletsPanel({ canAdmin, siteId }: { canAdmin: boolean; siteId?: number }) {
   const [outlets, setOutlets] = useState<OutletStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [logOutlet, setLogOutlet] = useState<OutletStatus | null>(null);
@@ -763,6 +793,7 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
 
       {canAdmin && addOpen && (
         <AddOutletDialog
+          siteId={siteId}
           open={addOpen}
           onClose={() => setAddOpen(false)}
           onSuccess={() => { setAddOpen(false); refresh(); }}
@@ -1002,10 +1033,11 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
           checkDate,
           ...(resultChanged ? { result } : {}),
           temperature: isTemperatureCheck && temperature ? parseFloat(String(temperature)) : undefined,
-          siteId: selectedSite,
-          location: location || undefined,
+          // null (not undefined) so clearing a field on edit actually clears it
+          siteId: selectedSite ?? null,
+          location: location || null,
           performedBy: performedBy || null, staffRosterId: staffRosterId,
-          notes: notes || undefined,
+          notes: notes || null,
         } as any,
       },
       {
@@ -1294,7 +1326,7 @@ export default function LegionellaPage() {
         ))}
 
         {/* Sentinel Outlets — per-outlet monthly tracking */}
-        <SentinelOutletsPanel canAdmin={canAdmin} />
+        <SentinelOutletsPanel canAdmin={canAdmin} siteId={filterSite} />
 
         {(overdueStatuses.length > 0 || dueSoonStatuses.length > 0) && (
           <div className="space-y-3">

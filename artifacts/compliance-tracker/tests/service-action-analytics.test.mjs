@@ -53,10 +53,17 @@ try {
   // mounting the page or touching Stripe, subscriptions, or real clients.
   const page = await readFile(path.join(root, "src/pages/settings.tsx"), "utf8");
   const handler = page.slice(page.indexOf("const handleServiceAction ="), page.indexOf("const servicesConfig ="));
-  const source = `export function makeHandler(deps) {
+  // The handler scopes billing requests to the selected business through the
+  // page's real billingPath helper.
+  const billingClientHelper = page.slice(page.indexOf("function withBillingClient("), page.indexOf("function StatusBadge("));
+  const billingPathHelper = page.match(/const billingPath = \(path: string\) => withBillingClient\(path, activeClientId\);/)?.[0];
+  assert.ok(billingClientHelper.includes("clientId=") && billingPathHelper, "settings.tsx billing path helpers moved");
+  const source = `${billingClientHelper}
+  export function makeHandler(deps) {
     const {config,confirm,setActionBusy,apiFetch,authenticatedApiFetch,toast,trackServiceActionOutcome,
       trackModuleActivation,clearModuleActivation,activeClientId,fetchConfig,refreshAuth,
       serviceActionsInFlight,setServiceNotices,setUnconfirmedServices,classifyServiceActionResponse}=deps;
+    ${billingPathHelper}
     ${handler}
     return handleServiceAction;
   }`;
@@ -95,7 +102,10 @@ try {
     return calls;
   }
   events.length = 0;
-  assert.equal((await run()).activations, 1);
+  const firstRun = await run();
+  assert.equal(firstRun.activations, 1);
+  assert.deepEqual(firstRun.requests, ["/billing/services?clientId=999", "/billing/refresh-access?clientId=999"],
+    "billing requests are scoped to the selected business");
   assert.equal((await run({ result: { ok: true, entitled: ["core", "fixtrack"] } })).activations, 1,
     "the real API entitlement list confirms the add");
   assert.equal((await run({ action: "remove", result: { ok: true, entitled: ["core"] } })).removals, 1);

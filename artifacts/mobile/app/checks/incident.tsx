@@ -19,12 +19,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { useUnsentSubmissions } from '@/hooks/useUnsentSubmissions';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import { UnsentSubmissions } from '@/components/UnsentSubmissions';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { useRecordOutbox } from '@/hooks/useRecordOutbox';
+import { localIsoDate } from '@/components/date-stepper-logic';
 
 const MODULE_COLOR = '#ef4444';
 
@@ -80,7 +85,7 @@ function optionLabel(value: string): string {
 }
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localIsoDate();
 }
 
 function formatDate(dateStr: string): string {
@@ -97,7 +102,6 @@ export default function IncidentScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const qc = useQueryClient();
   const { hasService, user } = useAuth();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
@@ -164,12 +168,22 @@ export default function IncidentScreen() {
     ? severity
     : (severities[0] ?? 'minor');
 
+  // Reports that could not be sent (e.g. no signal) are kept on the device.
+  const unsent = useUnsentSubmissions('incident');
+
+  // Saved on the device first, then sent; resent automatically under the
+  // same entry ID after a lost connection (the server never duplicates it).
+  const outbox = useRecordOutbox('incident');
   const { mutate, isPending } = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      apiFetch('/api/incidents', { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: async () => {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      qc.invalidateQueries({ queryKey: ['incidents', user?.clientId] });
+      outbox.send(body, `Incident · ${optionLabel(String(body.incidentType ?? ''))} · ${String(body.location ?? '')} · ${String(body.incidentDate)}`),
+    onSuccess: async (outcome) => {
+      if (outcome.state === 'rejected') {
+        // Rejected data: the form keeps it so it can be corrected.
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Not accepted', outcome.error);
+        return;
+      }
       // Reset form
       setIncidentType(incidentTypes[0] ?? 'accident');
       setSeverity(severities[0] ?? 'minor');
@@ -190,11 +204,17 @@ export default function IncidentScreen() {
       setReportedBy('');
       setSiteId(null);
       setShowForm(false);
+      if (outcome.state === 'queued') {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert('Saved on this device', 'No connection right now. The report is saved on this device and will be sent automatically when you are back online.');
+        return;
+      }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('Logged', 'Incident recorded successfully.');
     },
     onError: (err: Error) => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', err.message || 'Something went wrong.');
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Not saved', err.message || 'Something went wrong.');
     },
   });
 
@@ -279,7 +299,7 @@ export default function IncidentScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.navy, paddingTop: topPad + 16 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
             <Feather name="arrow-left" size={22} color="#ffffff" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
@@ -292,6 +312,20 @@ export default function IncidentScreen() {
           <View style={{ width: 22 }} />
         </View>
       </View>
+
+      <OutboxEntries entries={outbox.entries} readError={outbox.readError} />
+      {/* Copies saved by earlier app versions move into the outbox once. */}
+      <UnsentSubmissions
+        drafts={unsent.drafts}
+        disabled={isPending}
+        primaryLabel="Send"
+        onRetry={(draft) => {
+          outbox.adoptLegacy(draft, unsent.discard).catch((err: unknown) =>
+            Alert.alert('Not saved', err instanceof Error ? err.message : 'Try again.'));
+        }}
+        onDiscard={(draft) => { void unsent.discard(draft.id); }}
+        note="Sends the report exactly as it was saved."
+      />
 
       {/* Log button */}
       <View style={styles.section}>
@@ -786,7 +820,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 48,
+    minHeight: 48,
     borderRadius: 6,
     gap: 8,
   },
@@ -848,14 +882,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   input: {
-    height: 46,
+    minHeight: 46,
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 14,
     fontSize: 15,
     fontFamily: 'Inter_400Regular',
   },
-  textArea: { height: 88, paddingTop: 12 },
+  textArea: { minHeight: 88, paddingTop: 12 },
   resultBtn: {
     flexGrow: 1,
     flexBasis: '22%',
@@ -866,7 +900,7 @@ const styles = StyleSheet.create({
   },
   resultBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   submitBtn: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 6,
     flexDirection: 'row',
     alignItems: 'center',

@@ -5,6 +5,8 @@ import { patAppliancesTable, patTestsTable, appSettingsTable } from "@workspace/
 import { eq, and, desc, sql, type SQL } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
 import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
+import { departmentSiteId, siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 
 const router = Router();
 
@@ -32,6 +34,8 @@ const testSchema = z.object({
   operatingCurrent:    z.string().max(50).nullable().optional(),
   notes:               z.string().max(2000).nullable().optional(),
 });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const testCreateSchema = testSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -109,7 +113,7 @@ router.get("/appliances", requireAuth, async (req, res) => {
     ) t ON true
     LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
     WHERE a.client_id = ${clientId}
-    ${departmentId !== null ? sql`AND (a.site_id IS NULL OR s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+    ${departmentId !== null ? sql`AND (a.site_id IS NULL OR ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)})` : sql``}
     ${siteId ? sql`AND a.site_id=${siteId}` : sql``}
     ORDER BY a.name ASC
   `);
@@ -158,7 +162,7 @@ router.get("/register", requireAuth, requireClientAdmin, async (req, res) => {
     ) latest ON true
     LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
     WHERE a.client_id=${clientId}
-      ${departmentId !== null ? sql`AND (a.site_id IS NULL OR s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+      ${departmentId !== null ? sql`AND (a.site_id IS NULL OR ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)})` : sql``}
       ${siteId !== undefined ? sql`AND a.site_id=${siteId}` : sql``}
       ${status === "overdue" ? sql`AND latest.next_test_date < ${today}::date` : sql``}
     ORDER BY a.name ASC, a.id ASC
@@ -325,35 +329,54 @@ router.get("/tests", requireAuth, async (req, res) => {
 router.post("/tests", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const parsed = testSchema.safeParse(req.body);
+  const parsed = testCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
   const applianceAccessResult = await applianceAccess(clientId, d.applianceId, getActiveDepartmentId(req));
   if (applianceAccessResult === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (applianceAccessResult === "missing") return res.status(400).json({ error: "Appliance not found" });
-  const response = await db.transaction(async (tx) => {
-    const locked = await lockLegacyAppliance(tx, clientId, d.applianceId);
-    if (!locked) return { status: 400, data: { error: "Appliance not found" } };
-    if (await siteAccess(clientId, locked.site_id, getActiveDepartmentId(req)) !== "allowed") {
-      return { status: 403, data: { error: "Forbidden" } };
-    }
-    if (!locked.active) return { status: 409, data: { error: "Retired appliances cannot receive new tests; reactivate the appliance first" } };
-    const [row] = await tx.insert(patTestsTable).values({
-    clientId,
-    applianceId:         d.applianceId,
-    testDate:            d.testDate,
-    result:              d.result,
-    nextTestDate:        d.nextTestDate ?? null,
-    testedBy:            d.testedBy ?? null,
-    visualInspection:    d.visualInspection ?? null,
-    earthContinuityOhms: d.earthContinuityOhms ?? null,
-    insulationMohms:     d.insulationMohms ?? null,
-    operatingCurrent:    d.operatingCurrent ?? null,
-    notes:               d.notes ?? null,
-    createdBy:            req.currentUser!.id,
-  }).returning();
-    return { status: 201, data: row };
-  });
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(d);
+  const storedEntry = async () => entry && (await db.select().from(patTestsTable)
+    .where(and(eq(patTestsTable.clientId, clientId), eq(patTestsTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  // Checked before the retired-appliance rule: a test applied before the
+  // appliance was retired is still recognised as already recorded.
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+  let response;
+  try {
+    response = await db.transaction(async (tx) => {
+      const locked = await lockLegacyAppliance(tx, clientId, d.applianceId);
+      if (!locked) return { status: 400, data: { error: "Appliance not found" } };
+      if (await siteAccess(clientId, locked.site_id, getActiveDepartmentId(req)) !== "allowed") {
+        return { status: 403, data: { error: "Forbidden" } };
+      }
+      if (!locked.active) return { status: 409, data: { error: "Retired appliances cannot receive new tests; reactivate the appliance first" } };
+      const [row] = await tx.insert(patTestsTable).values({
+      clientId,
+      applianceId:         d.applianceId,
+      testDate:            d.testDate,
+      result:              d.result,
+      nextTestDate:        d.nextTestDate ?? null,
+      testedBy:            d.testedBy ?? null,
+      visualInspection:    d.visualInspection ?? null,
+      earthContinuityOhms: d.earthContinuityOhms ?? null,
+      insulationMohms:     d.insulationMohms ?? null,
+      operatingCurrent:    d.operatingCurrent ?? null,
+      notes:               d.notes ?? null,
+      createdBy:            userId,
+      clientEntryId:        entry?.id ?? null,
+      clientEntryHash:      entry?.hash ?? null,
+    }).returning();
+      return { status: 201, data: row };
+    });
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
   res.status(response.status).json(response.data);
 });
 
@@ -435,7 +458,7 @@ router.get("/status", requireAuth, async (req, res) => {
     ) last ON true
     LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
     WHERE a.client_id = ${clientId} AND a.active = true
-    ${departmentId !== null ? sql`AND (a.site_id IS NULL OR s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+    ${departmentId !== null ? sql`AND (a.site_id IS NULL OR ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)})` : sql``}
   `);
 
   const row = (result.rows ?? result)[0] as any;
@@ -615,10 +638,10 @@ type AccessResult = "allowed" | "forbidden" | "missing";
 async function siteAccess(clientId: number, siteId: number | null | undefined, departmentId: number | null): Promise<AccessResult> {
   if (siteId == null) return "allowed";
   const row = resultRows(await db.execute(sql`
-    SELECT department_id FROM sites WHERE id=${siteId} AND client_id=${clientId} LIMIT 1
-  `))[0] as { department_id: number | null } | undefined;
+    SELECT id, department_id FROM sites WHERE id=${siteId} AND client_id=${clientId} LIMIT 1
+  `))[0] as { id: number; department_id: number | null } | undefined;
   if (!row) return "missing";
-  return departmentId !== null && row.department_id !== null && row.department_id !== departmentId ? "forbidden" : "allowed";
+  return await siteVisibleToDepartment({ id: row.id, departmentId: row.department_id }, departmentId) ? "allowed" : "forbidden";
 }
 async function applianceAccess(clientId: number, applianceId: number, departmentId: number | null): Promise<AccessResult> {
   const row = resultRows(await db.execute(sql`SELECT site_id FROM pat_appliances WHERE id=${applianceId} AND client_id=${clientId}`))[0] as { site_id: number | null } | undefined;
@@ -634,7 +657,10 @@ async function testAccess(clientId: number, testId: number, departmentId: number
   if (departmentId !== null && (row.snapshot_source === "legacy_unavailable"
     || (row.department_id_snapshot !== null && row.department_id_snapshot !== departmentId))) return "forbidden";
   const access = await siteAccess(clientId, row.site_id_snapshot, departmentId);
-  return access === "missing" ? "allowed" : access;
+  if (access !== "missing") return access;
+  // The recorded site is gone: a site-bound department still sees only its own.
+  const bound = await departmentSiteId(departmentId);
+  return bound === null || bound === row.site_id_snapshot ? "allowed" : "forbidden";
 }
 
 async function checkedSiteQuery(req: any, clientId: number, departmentId: number | null) {
@@ -692,7 +718,7 @@ router.get("/equipment-templates", requireAuth, async (req, res) => {
     SELECT t.*, COALESCE(json_agg(i ORDER BY i.sort_order, i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS items
     FROM pat_equipment_templates t LEFT JOIN pat_equipment_template_items i ON i.template_id=t.id AND i.client_id=t.client_id
     LEFT JOIN sites s ON s.id=t.site_id AND s.client_id=t.client_id
-    WHERE t.client_id=${clientId} ${departmentId !== null ? sql`AND (t.site_id IS NULL OR s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+    WHERE t.client_id=${clientId} ${departmentId !== null ? sql`AND (t.site_id IS NULL OR ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)})` : sql``}
     ${siteId ? sql`AND (t.site_id=${siteId} OR t.site_id IS NULL)` : sql``}
     GROUP BY t.id ORDER BY t.name`));
   res.json(rows);
@@ -738,7 +764,7 @@ router.put("/equipment-templates/:id", requireAuth, denyViewers, async (req, res
 });
 router.delete("/equipment-templates/:id", requireAuth, denyViewers, async (req,res) => { const clientId=getClientId(req),id=Number(req.params.id as string); if(!clientId||!Number.isInteger(id)) return res.status(400).json({error:"Invalid request"}); const access=await templateAccess(clientId,id,getActiveDepartmentId(req));if(access==="forbidden")return res.status(403).json({error:"Forbidden"});if(access==="missing")return res.status(404).json({error:"Not found"});const assigned=resultRows(await db.execute(sql`SELECT id FROM pat_rooms WHERE template_id=${id} AND client_id=${clientId} LIMIT 1`))[0]; if(assigned)return res.status(409).json({error:"Template is assigned to a room and cannot be deleted"}); await db.execute(sql`DELETE FROM pat_equipment_templates WHERE id=${id} AND client_id=${clientId}`); res.json({ok:true}); });
 
-router.get("/rooms", requireAuth, async (req,res) => { const clientId=getClientId(req); if(!clientId)return res.status(400).json({error:"No client context"});const departmentId=getActiveDepartmentId(req); const siteId=await checkedSiteQuery(req,clientId,departmentId); if(siteId===undefined)return res.status(400).json({error:"Invalid siteId for this client"});if(siteId==="forbidden")return res.status(403).json({error:"Forbidden"}); res.json(resultRows(await db.execute(sql`SELECT r.*,t.name AS template_name,s.name AS site_name FROM pat_rooms r LEFT JOIN pat_equipment_templates t ON t.id=r.template_id AND t.client_id=r.client_id JOIN sites s ON s.id=r.site_id AND s.client_id=r.client_id WHERE r.client_id=${clientId} ${departmentId!==null?sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})`:sql``} ${siteId?sql`AND r.site_id=${siteId}`:sql``} ORDER BY r.name`))); });
+router.get("/rooms", requireAuth, async (req,res) => { const clientId=getClientId(req); if(!clientId)return res.status(400).json({error:"No client context"});const departmentId=getActiveDepartmentId(req); const siteId=await checkedSiteQuery(req,clientId,departmentId); if(siteId===undefined)return res.status(400).json({error:"Invalid siteId for this client"});if(siteId==="forbidden")return res.status(403).json({error:"Forbidden"}); res.json(resultRows(await db.execute(sql`SELECT r.*,t.name AS template_name,s.name AS site_name FROM pat_rooms r LEFT JOIN pat_equipment_templates t ON t.id=r.template_id AND t.client_id=r.client_id JOIN sites s ON s.id=r.site_id AND s.client_id=r.client_id WHERE r.client_id=${clientId} ${departmentId!==null?sql`AND ${siteVisibleSql(sql`s.id`,sql`s.department_id`,departmentId)}`:sql``} ${siteId?sql`AND r.site_id=${siteId}`:sql``} ORDER BY r.name`))); });
 router.post("/rooms", requireAuth, denyViewers, async (req,res) => { const clientId=getClientId(req); const p=roomSchema.safeParse(req.body); if(!clientId||!p.success)return res.status(400).json({error:"Invalid data"});const d=p.data,departmentId=getActiveDepartmentId(req);const site=await siteAccess(clientId,d.siteId,departmentId),template=await templateAccess(clientId,d.templateId,departmentId,d.siteId);if(site==="forbidden"||template==="forbidden")return res.status(403).json({error:"Forbidden"});if(site==="missing"||template==="missing")return res.status(400).json({error:"Template must be global or belong to this room's site"});const row=resultRows(await db.execute(sql`INSERT INTO pat_rooms (client_id,site_id,name,area_type,template_id,test_interval_months,active,notes) VALUES (${clientId},${d.siteId},${d.name},${d.areaType??"room"},${d.templateId??null},${d.testIntervalMonths??12},${d.active??true},${d.notes??null}) RETURNING *`))[0];res.status(201).json(row); });
 router.put("/rooms/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req), id = Number(req.params.id as string), parsed = roomSchema.safeParse(req.body);
@@ -758,10 +784,10 @@ router.put("/rooms/:id", requireAuth, denyViewers, async (req, res) => {
     `))[0] as { id: number; site_id: number } | undefined;
     if (!current) return { status: 404, data: { error: "Not found" } };
     const currentSite = resultRows(await tx.execute(sql`
-      SELECT department_id FROM sites WHERE id=${current.site_id} AND client_id=${clientId}
-    `))[0] as { department_id: number | null } | undefined;
+      SELECT id, department_id FROM sites WHERE id=${current.site_id} AND client_id=${clientId}
+    `))[0] as { id: number; department_id: number | null } | undefined;
     if (!currentSite) return { status: 404, data: { error: "Not found" } };
-    if (departmentId !== null && currentSite.department_id !== null && currentSite.department_id !== departmentId) {
+    if (!(await siteVisibleToDepartment({ id: currentSite.id, departmentId: currentSite.department_id }, departmentId))) {
       return { status: 403, data: { error: "Forbidden" } };
     }
     if (current.site_id !== d.siteId) {
@@ -826,7 +852,7 @@ router.get("/certificates", requireAuth, async (req, res) => {
     LEFT JOIN pat_certificate_rooms cr ON cr.certificate_id=c.id AND cr.client_id=c.client_id
     LEFT JOIN pat_rooms r ON r.id=cr.room_id AND r.client_id=cr.client_id AND r.site_id=c.site_id
     WHERE c.client_id=${clientId}
-      ${departmentId !== null ? sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+      ${departmentId !== null ? sql`AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)}` : sql``}
       ${siteId ? sql`AND c.site_id=${siteId}` : sql``}
     GROUP BY c.id ORDER BY c.visit_date DESC,c.id DESC
   `));
@@ -882,10 +908,10 @@ router.put("/certificates/:id", requireAuth, denyViewers, async (req, res) => {
       `))[0] as { site_id: number } | undefined;
       if (!source) return { status: 404, data: { error: "Not found" } };
       const sourceSite = resultRows(await tx.execute(sql`
-        SELECT department_id FROM sites WHERE id=${source.site_id} AND client_id=${clientId}
-      `))[0] as { department_id: number | null } | undefined;
+        SELECT id, department_id FROM sites WHERE id=${source.site_id} AND client_id=${clientId}
+      `))[0] as { id: number; department_id: number | null } | undefined;
       if (!sourceSite) return { status: 404, data: { error: "Not found" } };
-      if (departmentId !== null && sourceSite.department_id !== null && sourceSite.department_id !== departmentId) {
+      if (!(await siteVisibleToDepartment({ id: sourceSite.id, departmentId: sourceSite.department_id }, departmentId))) {
         return { status: 403, data: { error: "Forbidden" } };
       }
       const crossSiteFailure = resultRows(await tx.execute(sql`
@@ -961,7 +987,7 @@ router.get("/replacements", requireAuth, async (req, res) => {
     JOIN pat_rooms r ON r.id=x.room_id AND r.client_id=x.client_id
     JOIN sites s ON s.id=COALESCE(x.site_id_snapshot, r.site_id) AND s.client_id=x.client_id
     WHERE x.client_id=${clientId}
-      ${departmentId !== null ? sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+      ${departmentId !== null ? sql`AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)}` : sql``}
       ${siteId ? sql`AND COALESCE(x.site_id_snapshot, r.site_id)=${siteId}` : sql``}
     ORDER BY x.replaced_on DESC, x.id DESC
   `)));
@@ -1050,7 +1076,7 @@ router.get("/failures", requireAuth, async (req, res) => {
       ORDER BY x.id DESC LIMIT 1
     ) lc ON true
     WHERE f.client_id=${clientId}
-      ${departmentId !== null ? sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+      ${departmentId !== null ? sql`AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)}` : sql``}
       ${siteId ? sql`AND c.site_id=${siteId}` : sql``}
     ORDER BY f.resolved_date NULLS FIRST, c.visit_date DESC
   `)));
@@ -1196,7 +1222,7 @@ router.get("/overdue-by-room-area",requireAuth,async(req,res)=>{const clientId=g
     JOIN pat_certificates c ON c.id=cr.certificate_id AND c.client_id=cr.client_id
     WHERE cr.room_id=r.id AND cr.client_id=r.client_id ORDER BY c.visit_date DESC,c.id DESC LIMIT 1
   ) latest ON true
-  WHERE r.client_id=${clientId} AND r.active=true ${departmentId!==null?sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})`:sql``} ${siteId?sql`AND r.site_id=${siteId}`:sql``}
+  WHERE r.client_id=${clientId} AND r.active=true ${departmentId!==null?sql`AND ${siteVisibleSql(sql`s.id`,sql`s.department_id`,departmentId)}`:sql``} ${siteId?sql`AND r.site_id=${siteId}`:sql``}
   AND (latest.visit_date IS NULL OR COALESCE(latest.next_test_due,latest.visit_date + make_interval(months => r.test_interval_months))::date < CURRENT_DATE)
   ORDER BY due_date NULLS FIRST,r.name`));res.json(rows);});
 

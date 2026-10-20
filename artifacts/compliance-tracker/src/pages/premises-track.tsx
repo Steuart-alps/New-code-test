@@ -131,9 +131,10 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
   // Keep the record's stored type selectable even if it was later removed from
   // the effective list, so editing other fields doesn't force a type change.
   const currentType = inspection?.inspectionType;
-  const formInspectionTypes = currentType && !inspectionTypes.includes(currentType)
-    ? [...inspectionTypes, currentType]
-    : inspectionTypes;
+  const currentTypeRetired = !!currentType && !inspectionTypes.includes(currentType);
+  const formInspectionTypes = currentTypeRetired ? [...inspectionTypes, currentType] : inspectionTypes;
+  const typeLabel = (t: string) =>
+    `${TYPE_LABELS[t] ?? t}${formOptions && currentTypeRetired && t === currentType ? " (disabled)" : ""}`;
   const [form, setForm] = useState(() => ({
     inspectionDate: inspection?.inspectionDate ?? new Date().toISOString().slice(0, 10),
     nextInspectionDate: inspection?.nextInspectionDate ?? "",
@@ -220,11 +221,11 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
             <Input type="date" value={form.nextInspectionDate} onChange={set("nextInspectionDate")} className="rounded-sm" />
           </div>
           <div className="space-y-1.5">
-            <Label>Type</Label>
+            <Label htmlFor="inspection-type">Type</Label>
             <Select value={form.inspectionType} onValueChange={v => setForm(f => ({ ...f, inspectionType: v }))}>
-              <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
+              <SelectTrigger id="inspection-type" className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {formInspectionTypes.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t] ?? t}</SelectItem>)}
+                {formInspectionTypes.map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

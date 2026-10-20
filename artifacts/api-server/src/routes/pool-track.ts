@@ -6,6 +6,11 @@ import { sitesTable, appSettingsTable, trackControlProfilesTable, auditEventsTab
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
+import { getAccountTimezone, zonedDateTimeToUtc } from "../lib/accountClock";
+import {
+  clientEntryFrom, clientEntryIdSchema, findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry,
+} from "../lib/clientEntryReplay";
+import { siteVisibleToDepartment, visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -36,11 +41,11 @@ const createSchema = z.object({
   airTempC: z.number().min(-20).max(60).optional().nullable(),
   turbidity: z.enum(["clear", "slightly_hazy", "hazy", "cloudy"]).optional().nullable(),
   poolOpen: z.boolean().default(true),
-  performedBy: z.string().max(200).optional(),
+  performedBy: z.string().max(200).optional().nullable(),
   staffRosterId: z.number().int().positive().nullable().optional(),
-  actionsTaken: z.string().max(2000).optional(),
+  actionsTaken: z.string().max(2000).optional().nullable(),
   result: z.enum(["pass", "fail"]).default("pass"),
-  notes: z.string().max(2000).optional(),
+  notes: z.string().max(2000).optional().nullable(),
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
@@ -62,12 +67,12 @@ async function checkSiteAccess(
   if (siteId == null) return departmentId === null ? null : "required";
   if (!Number.isSafeInteger(siteId) || siteId <= 0) return "invalid";
 
-  const [site] = await db.select({ departmentId: sitesTable.departmentId })
+  const [site] = await db.select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
     .from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)))
     .limit(1);
   if (!site) return "invalid";
-  if (departmentId !== null && site.departmentId !== null && site.departmentId !== departmentId) {
+  if (!(await siteVisibleToDepartment(site, departmentId))) {
     return "forbidden";
   }
   return null;
@@ -101,8 +106,7 @@ router.get("/", requireAuth, async (req, res) => {
     ${checkType ? sql`AND pc.check_type = ${String(checkType)}` : sql``}
     ${hasSiteFilter ? sql`AND pc.site_id = ${requestedSiteId}` : sql``}
     ${departmentId !== null ? sql`AND (pc.site_id IS NULL OR pc.site_id IN (
-      SELECT id FROM sites WHERE client_id = ${clientId}
-        AND (department_id IS NULL OR department_id = ${departmentId})
+      ${visibleSiteIdsSql(clientId, departmentId)}
     ))` : sql``}
     ORDER BY pc.check_date DESC, pc.check_time DESC
     LIMIT ${Number(limit)}
@@ -111,12 +115,16 @@ router.get("/", requireAuth, async (req, res) => {
   res.json((rows as any).rows);
 });
 
+// The phone sends a stable device entry ID so a resend after a lost
+// response returns the stored check instead of a duplicate.
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
+
 // POST /pool-track — create check
 router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const body = createSchema.parse(req.body);
+  const body = postSchema.parse(req.body);
   const siteAccess = await checkSiteAccess(body.siteId, clientId, getActiveDepartmentId(req));
   if (siteAccess === "required") return res.status(400).json({ error: "siteId is required" });
   if (siteAccess === "invalid") return res.status(400).json({ error: "Invalid site" });
@@ -125,33 +133,48 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const performer = await resolveStaffPerformer(clientId, body.staffRosterId, body.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-  const result = await db.execute(sql`
-    INSERT INTO pool_checks (
-       client_id, site_id, check_date, check_time, check_type, staff_roster_id,
-      ph_level, free_chlorine, combined_chlorine,
-      water_temp_c, air_temp_c, turbidity,
-      pool_open, performed_by, actions_taken, result, notes, created_by
-    ) VALUES (
-      ${clientId},
-      ${body.siteId ?? null},
-      ${body.checkDate},
-      ${body.checkTime ?? null},
-       ${body.checkType}, ${performer.staffRosterId},
-      ${body.phLevel ?? null},
-      ${body.freeChlorine ?? null},
-      ${body.combinedChlorine ?? null},
-      ${body.waterTempC ?? null},
-      ${body.airTempC ?? null},
-      ${body.turbidity ?? null},
-      ${body.poolOpen},
-       ${performer.performedBy},
-      ${body.actionsTaken ?? null},
-      ${body.result},
-      ${body.notes ?? null},
-      ${req.currentUser!.id}
-    )
-    RETURNING *
-  `);
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(body);
+  const prior = await findRawStoredEntry("pool_checks", clientId, entry);
+  if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
+
+  let result;
+  try {
+    result = await db.execute(sql`
+      INSERT INTO pool_checks (
+         client_id, site_id, check_date, check_time, check_type, staff_roster_id,
+        ph_level, free_chlorine, combined_chlorine,
+        water_temp_c, air_temp_c, turbidity,
+        pool_open, performed_by, actions_taken, result, notes, created_by,
+        client_entry_id, client_entry_hash
+      ) VALUES (
+        ${clientId},
+        ${body.siteId ?? null},
+        ${body.checkDate},
+        ${body.checkTime ?? null},
+         ${body.checkType}, ${performer.staffRosterId},
+        ${body.phLevel ?? null},
+        ${body.freeChlorine ?? null},
+        ${body.combinedChlorine ?? null},
+        ${body.waterTempC ?? null},
+        ${body.airTempC ?? null},
+        ${body.turbidity ?? null},
+        ${body.poolOpen},
+         ${performer.performedBy},
+        ${body.actionsTaken ?? null},
+        ${body.result},
+        ${body.notes ?? null},
+        ${userId},
+        ${entry?.id ?? null}, ${entry?.hash ?? null}
+      )
+      RETURNING *
+    `);
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await findRawStoredEntry("pool_checks", clientId, entry) : undefined;
+    if (entry && raced) return respondToRawStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
 
   res.status(201).json(result.rows[0]);
 });
@@ -169,6 +192,12 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   if (!existing) return res.status(404).json({ error: "Not found" });
 
   const body = updateSchema.parse(req.body);
+  if (body.siteId !== undefined) {
+    const siteAccess = await checkSiteAccess(body.siteId, clientId, getActiveDepartmentId(req));
+    if (siteAccess === "required") return res.status(400).json({ error: "siteId is required" });
+    if (siteAccess === "invalid") return res.status(400).json({ error: "Invalid site" });
+    if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const performer = await resolveStaffPerformerUpdate(clientId, body.staffRosterId, body.performedBy,
     existing.staff_roster_id ?? null, existing.performed_by ?? null);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
@@ -246,6 +275,7 @@ router.get("/status", requireAuth, async (req, res) => {
   `);
 
   const now = new Date();
+  const timeZone = await getAccountTimezone(clientId);
   const rowsArr: any[] = Array.isArray(rows) ? (rows as any) : ((rows as any).rows ?? []);
   const latestByType = Object.fromEntries(
     rowsArr.map((r: any) => [r.check_type, r])
@@ -261,10 +291,8 @@ router.get("/status", requireAuth, async (req, res) => {
       return { checkType: ct, frequencyHours, status: "never", lastDate: null, lastTime: null, result: null };
     }
 
-    // Parse last check datetime
-    const lastDt = latest.check_time
-      ? new Date(`${latest.check_date}T${latest.check_time}`)
-      : new Date(latest.check_date);
+    // Check times are recorded on the site's local clock, not the server's.
+    const lastDt = zonedDateTimeToUtc(String(latest.check_date), latest.check_time, timeZone);
     const hoursSince = (now.getTime() - lastDt.getTime()) / (1000 * 60 * 60);
     const dueDate = new Date(lastDt.getTime() + frequencyHours * 3600000).toISOString();
     const checkStatus = hoursSince > frequencyHours ? "overdue"
@@ -312,8 +340,8 @@ router.get("/summary", requireAuth, async (req, res) => {
     LIMIT 1
   `);
 
-  const today = (todayResult as any)[0];
-  const last = (lastResult as any)[0];
+  const today = todayResult.rows[0] as Record<string, any> | undefined;
+  const last = lastResult.rows[0] as Record<string, any> | undefined;
 
   res.json({
     totalToday: Number(today?.total_today ?? 0),

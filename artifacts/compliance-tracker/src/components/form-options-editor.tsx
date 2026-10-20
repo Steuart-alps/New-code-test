@@ -67,7 +67,11 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
       toast({ title: "Too many items", description: "Max 50 options", variant: "destructive" });
       return;
     }
-    setItems([...items, trimmed]);
+    // Typing a disabled value back in restores it (keeping the stored spelling
+    // existing records use) instead of listing it as both active and disabled.
+    const disabledMatch = disabledItems.find(item => item.toLowerCase() === trimmed.toLowerCase());
+    setItems([...items, disabledMatch ?? trimmed]);
+    if (disabledMatch) setDisabledItems(disabledItems.filter(item => item !== disabledMatch));
     setNewItem("");
   };
 

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
-import { downloadFile } from "@/lib/download";
+import { downloadFile, getDownloadErrorMessage } from "@/lib/download";
 import { useAuth } from "@/context/auth-context";
 import { AuditLog } from "@/components/audit-log";
+import { PublicLinkAccessHistory } from "@/components/public-link-access-history";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useLiveAcknowledgements } from "@/hooks/use-live-acknowledgements";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -25,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MyDocumentsView } from "@/components/my-documents-view";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +61,7 @@ interface StaffMember {
   name: string;
   job_title: string | null;
   department: string | null;
+  site_id: number | null;
   active: boolean;
 }
 
@@ -178,12 +182,21 @@ function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; o
       apiFetch("/staff-roster").then(r => r.ok ? r.json() : []),
       apiFetch(`/doc-track/documents/${doc.id}/acknowledgements`).then(r => r.ok ? r.json() : []),
     ]).then(([s, a]) => {
-      setStaff(s);
+      // Only staff the API will accept for this document (same rule as
+      // findEligibleRosterMember: active, and in its department and site when set).
+      setStaff((s as StaffMember[]).filter(m =>
+        m.active
+        && (!doc.department || m.department === doc.department)
+        && (doc.site_id == null || m.site_id === doc.site_id),
+      ));
       setAcks(a);
       setChecked({});
       setSigs({});
     }).finally(() => setLoading(false));
-  }, [open, doc.id]);
+  }, [open, doc.id, doc.department, doc.site_id]);
+
+  // Pick up signatures staff record on their own devices while this is open.
+  useLiveAcknowledgements(open && !loading ? `/doc-track/documents/${doc.id}/acknowledgements` : null, acks, setAcks);
 
   const ackedIds = new Set(acks.map((a: Acknowledgement) => a.staff_roster_id));
   const ackedMap = Object.fromEntries(acks.map(a => [a.staff_roster_id, a]));
@@ -197,7 +210,8 @@ function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; o
   // Counts across ALL staff (for the footer summary)
   const totalAcked = staff.filter(s => ackedIds.has(s.id)).length;
 
-  const anyChecked = Object.values(checked).some(Boolean);
+  // Someone ticked here may have since signed on their own device.
+  const anyChecked = staff.some(s => checked[s.id] && !ackedIds.has(s.id));
 
   async function handleSave() {
     const toSave = staff.filter(s => checked[s.id] && !ackedIds.has(s.id));
@@ -252,8 +266,8 @@ function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; o
         ) : staff.length === 0 ? (
           <div className="py-8 text-center text-muted-foreground">
             <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">No staff in roster</p>
-            <p className="text-sm mt-1">Add staff members in <strong>Staff Roster</strong> before recording acknowledgements.</p>
+            <p className="font-medium">No eligible staff in roster</p>
+            <p className="text-sm mt-1">Add active staff in this document's department and site in <strong>Staff Roster</strong> before recording acknowledgements.</p>
           </div>
         ) : (
           <>
@@ -339,7 +353,9 @@ function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; o
                             {(s.job_title || s.department) && (
                               <p className="text-xs text-muted-foreground">{[s.job_title, s.department].filter(Boolean).join(" · ")}</p>
                             )}
-                            {a?.signature && <p className="text-xs text-muted-foreground">Signed: {a.signature}</p>}
+                            {a?.signature && (a.signature.startsWith("data:image/")
+                              ? <img src={a.signature} alt={`Signature of ${s.name}`} className="h-8 mt-1 bg-white rounded border" />
+                              : <p className="text-xs text-muted-foreground">Signed: {a.signature}</p>)}
                           </div>
                           <span className="text-xs text-muted-foreground whitespace-nowrap flex items-center gap-1">
                             <Clock className="w-3 h-3" />
@@ -406,11 +422,11 @@ function DocCard({
     setDownloading(true);
     try {
       const res = await apiFetch(`/doc-track/documents/${doc.id}/download-url`);
-      if (!res.ok) throw new Error("Failed to get download URL");
+      if (!res.ok) throw new Error(await getDownloadErrorMessage(res, "Please try again."));
       const { downloadUrl } = await res.json();
       await downloadFile(downloadUrl, doc.file_name);
-    } catch {
-      toast({ title: "Download failed", description: "Please try again.", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Download failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     } finally {
       setDownloading(false);
     }
@@ -576,6 +592,7 @@ function UploadDialog({
     setUploading(true);
 
     try {
+      assertWithinUploadLimit(file);
       // 1. Request presigned PUT URL
       setProgress("requesting");
       const urlRes = await apiFetch("/doc-track/documents/request-upload", {
@@ -797,7 +814,7 @@ export default function DocTrackPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
-  const [pageView, setPageView] = useState<"library" | "my-docs" | "audit">(
+  const [pageView, setPageView] = useState<"library" | "my-docs" | "audit" | "link-access">(
     user?.role === "client_admin" || user?.role === "consultant" ? "library" : "my-docs",
   );
   const [search, setSearch] = useState("");
@@ -974,8 +991,10 @@ export default function DocTrackPage() {
             <BookOpen className="w-4 h-4" /> My Documents
           </button>
           {isManager && <button type="button" data-testid="tab-doc-audit" onClick={() => setPageView("audit")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
+          {isManager && <button type="button" data-testid="tab-doc-link-access" onClick={() => setPageView("link-access")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "link-access" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Sign-off link access</button>}
       </div>
       {isManager && pageView === "audit" && <AuditLog module="doc" />}
+      {isManager && pageView === "link-access" && <PublicLinkAccessHistory linkType="sign_off" />}
 
       {/* My Documents personal view */}
       {pageView === "my-docs" && (

@@ -11,6 +11,8 @@ import {
   CheckCircle2, Circle, Loader2, FileText, Upload, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 const STATUS_META: Record<string, { label: string; icon: any; className: string }> = {
   overdue:     { label: "Overdue",     icon: AlertTriangle,  className: "bg-rose-50 text-rose-700 border-rose-200" },
@@ -41,11 +43,12 @@ interface SiteDocument {
 }
 
 async function apiFetch(url: string, opts?: RequestInit) {
-  const res = await fetch(`/api${url}`, {
+  const res = await fetch(withActiveClient(`/api${url}`, opts?.body), await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     ...opts,
-  });
+  }));
+  notifyAuthStatus(res);
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error ?? `${res.status}`); }
   if (res.status === 204) return null;
   return res.json();
@@ -82,6 +85,7 @@ export default function SiteDetailPage() {
     e.target.value = "";
     setUploading(true);
     try {
+      assertWithinUploadLimit(file);
       const { uploadUrl, objectPath } = await apiFetch(`/sites/${id}/documents/request-upload`, { method: "POST" });
       await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
       await apiFetch(`/sites/${id}/documents`, {

@@ -1,75 +1,87 @@
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
+import { OverrideReasonDialog } from "@/components/override-reason-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/auth-context";
 
-import Dashboard from "@/pages/dashboard";
-import ContractorsPage from "@/pages/contractors";
-import ContractorDetailPage from "@/pages/contractor-detail";
-import ExternalChecksPage from "@/pages/external-checks";
-import CategoriesPage from "@/pages/categories";
-import CategoryDetailPage from "@/pages/category-detail";
-import SitesPage from "@/pages/sites";
-import SiteDetailPage from "@/pages/site-detail";
-import SettingsPage from "@/pages/settings";
-import AccountSecurityPage from "@/pages/account-security";
-import UsersPage from "@/pages/users";
-import ClientsPage, { LockedClientsPage } from "@/pages/clients";
-import LoginPage from "@/pages/login";
-import SignupPage from "@/pages/signup";
-import LandingPage from "@/pages/landing";
-import ResetPasswordPage from "@/pages/reset-password";
-import TwoFaRecoverPage from "@/pages/two-fa-recover";
-import MandatoryTwoFactorPage from "@/pages/mandatory-two-factor";
-import TrialEndedPage from "@/pages/trial-ended";
-import TermsPage from "@/pages/terms";
-import PrivacyPage from "@/pages/privacy";
-import PrivacyGovernancePage from "@/pages/privacy-governance";
-import VerifyEmailPage from "@/pages/verify-email";
-import SchedulePage from "@/pages/schedule";
-import ItemDetailPage from "@/pages/item-detail";
-import FireSafetyPage from "@/pages/fire-safety";
-import KitchenPage from "@/pages/kitchen";
-import LegionellaPage from "@/pages/legionella";
-import FixTrackPage from "@/pages/fix-track";
-import FixTrackDetailPage from "@/pages/fix-track-detail";
-import DocTrackPage from "@/pages/doc-track";
-import TrainTrackPage from "@/pages/train-track";
-import HotTubPage from "@/pages/hot-tub";
-import TreeTrackPage from "@/pages/tree-track";
-import BikeTrackPage from "@/pages/bike-track";
-import AquaTrackPage from "@/pages/aqua-track";
-import PoolTrackPage from "@/pages/pool-track";
-import GreenTrackPage from "@/pages/green-track";
-import SwimTrackPage from "@/pages/swim-track";
-import DailyTrackAmPage from "@/pages/daily-track-am";
-import DailyTrackPmPage from "@/pages/daily-track-pm";
-import DailyTrackStatusPage from "@/pages/daily-track-status";
-import StaffRosterPage from "@/pages/staff-roster";
-import SignOffPage from "@/pages/sign-off";
-import ContractorPortalPage from "@/pages/contractor-portal";
-import ContractorApprovalsPage from "@/pages/contractor-approvals";
-import ContractorQuotePage from "@/pages/contractor-quote";
-import IncidentsPage from "@/pages/incidents";
-import PATTrackPage  from "@/pages/pat-track";
-import PestTrackPage from "@/pages/pest-track";
-import PremisesTrackPage from "@/pages/premises-track";
-import RoomTrackPage from "@/pages/room-track";
-import ReportsPage from "@/pages/reports";
-import ComplianceHubPage from "@/pages/compliance-hub";
-import FeedbackInboxPage from "@/pages/feedback-inbox";
-import NotFound from "@/pages/not-found";
-import DailyOverviewPage from "@/pages/daily-overview";
-import DailyChecklistPage from "@/pages/daily-checklist";
-import DocumentsPage from "@/pages/documents";
-import FoodSafetyPage from "@/pages/food-safety";
-import DailyHistoryPage from "@/pages/daily-history";
-import StaffTrainingPage from "@/pages/staff-training";
-import { WaterSafetyPage } from "@/pages/safety-summary";
 import { trackModuleFirstUse } from "@/lib/analytics";
-import KioskPage, { StaffSetPinPage } from "@/pages/staff-kiosk";
+
+// Each page is its own chunk so the landing and sign-in pages stay small and a
+// page's code is only downloaded when someone opens it.
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const MyTrainingPage = lazy(() => import("@/pages/my-training"));
+const ContractorsPage = lazy(() => import("@/pages/contractors"));
+const ContractorDetailPage = lazy(() => import("@/pages/contractor-detail"));
+const ExternalChecksPage = lazy(() => import("@/pages/external-checks"));
+const CategoriesPage = lazy(() => import("@/pages/categories"));
+const CategoryDetailPage = lazy(() => import("@/pages/category-detail"));
+const SitesPage = lazy(() => import("@/pages/sites"));
+const SiteDetailPage = lazy(() => import("@/pages/site-detail"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
+const AccountSecurityPage = lazy(() => import("@/pages/account-security"));
+const UsersPage = lazy(() => import("@/pages/users"));
+const LoginPage = lazy(() => import("@/pages/login"));
+const SignupPage = lazy(() => import("@/pages/signup"));
+const LandingPage = lazy(() => import("@/pages/landing"));
+const ResetPasswordPage = lazy(() => import("@/pages/reset-password"));
+const TwoFaRecoverPage = lazy(() => import("@/pages/two-fa-recover"));
+const MandatoryTwoFactorPage = lazy(() => import("@/pages/mandatory-two-factor"));
+const TrialEndedPage = lazy(() => import("@/pages/trial-ended"));
+const TermsPage = lazy(() => import("@/pages/terms"));
+const PrivacyPage = lazy(() => import("@/pages/privacy"));
+const PrivacyGovernancePage = lazy(() => import("@/pages/privacy-governance"));
+const VerifyEmailPage = lazy(() => import("@/pages/verify-email"));
+const SchedulePage = lazy(() => import("@/pages/schedule"));
+const ItemDetailPage = lazy(() => import("@/pages/item-detail"));
+const FireSafetyPage = lazy(() => import("@/pages/fire-safety"));
+const KitchenPage = lazy(() => import("@/pages/kitchen"));
+const AllergensPage = lazy(() => import("@/pages/allergens"));
+const CoshhRegisterPage = lazy(() => import("@/pages/coshh-register"));
+const AsbestosRegisterPage = lazy(() => import("@/pages/asbestos-register"));
+const LegionellaPage = lazy(() => import("@/pages/legionella"));
+const FixTrackPage = lazy(() => import("@/pages/fix-track"));
+const FixTrackDetailPage = lazy(() => import("@/pages/fix-track-detail"));
+const DocTrackPage = lazy(() => import("@/pages/doc-track"));
+const TrainTrackPage = lazy(() => import("@/pages/train-track"));
+const HotTubPage = lazy(() => import("@/pages/hot-tub"));
+const TreeTrackPage = lazy(() => import("@/pages/tree-track"));
+const BikeTrackPage = lazy(() => import("@/pages/bike-track"));
+const AquaTrackPage = lazy(() => import("@/pages/aqua-track"));
+const GreenTrackPage = lazy(() => import("@/pages/green-track"));
+const DailyTrackAmPage = lazy(() => import("@/pages/daily-track-am"));
+const DailyTrackPmPage = lazy(() => import("@/pages/daily-track-pm"));
+const DailyTrackStatusPage = lazy(() => import("@/pages/daily-track-status"));
+const StaffRosterPage = lazy(() => import("@/pages/staff-roster"));
+const SignOffPage = lazy(() => import("@/pages/sign-off"));
+const ContractorPortalPage = lazy(() => import("@/pages/contractor-portal"));
+const ContractorApprovalsPage = lazy(() => import("@/pages/contractor-approvals"));
+const ContractorQuotePage = lazy(() => import("@/pages/contractor-quote"));
+const IncidentsPage = lazy(() => import("@/pages/incidents"));
+const PATTrackPage = lazy(() => import("@/pages/pat-track"));
+const PestTrackPage = lazy(() => import("@/pages/pest-track"));
+const PremisesTrackPage = lazy(() => import("@/pages/premises-track"));
+const RoomTrackPage = lazy(() => import("@/pages/room-track"));
+const ReportsPage = lazy(() => import("@/pages/reports"));
+const ComplianceHubPage = lazy(() => import("@/pages/compliance-hub"));
+const FeedbackInboxPage = lazy(() => import("@/pages/feedback-inbox"));
+const NotFound = lazy(() => import("@/pages/not-found"));
+const DailyOverviewPage = lazy(() => import("@/pages/daily-overview"));
+const DailyChecklistPage = lazy(() => import("@/pages/daily-checklist"));
+const DocumentsPage = lazy(() => import("@/pages/documents"));
+const FoodSafetyPage = lazy(() => import("@/pages/food-safety"));
+const DailyHistoryPage = lazy(() => import("@/pages/daily-history"));
+const StaffTrainingPage = lazy(() => import("@/pages/staff-training"));
+const ClientsPage = lazy(() => import("@/pages/clients"));
+const LockedClientsPage = lazy(() => import("@/pages/clients").then(m => ({ default: m.LockedClientsPage })));
+const PortfolioPage = lazy(() => import("@/pages/portfolio"));
+const SetupPage = lazy(() => import("@/pages/setup"));
+const TasksPage = lazy(() => import("@/pages/tasks"));
+const CalendarPage = lazy(() => import("@/pages/calendar"));
+const WaterSafetyPage = lazy(() => import("@/pages/safety-summary").then(m => ({ default: m.WaterSafetyPage })));
+const KioskPage = lazy(() => import("@/pages/staff-kiosk"));
+const StaffSetPinPage = lazy(() => import("@/pages/staff-kiosk").then(m => ({ default: m.StaffSetPinPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -83,8 +95,16 @@ const queryClient = new QueryClient({
 
 function Redirect({ to }: { to: string }) {
   const [, navigate] = useLocation();
-  useEffect(() => { navigate(to); }, [to]);
+  useEffect(() => { navigate(to, { replace: true }); }, [to]);
   return null;
+}
+
+function PageLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="text-muted-foreground text-sm animate-pulse">Loading...</div>
+    </div>
+  );
 }
 
 function ProtectedRoutes() {
@@ -135,13 +155,7 @@ function ProtectedRoutes() {
   if (location === "/kiosk") return <KioskPage />;
   if (location === "/staff/set-pin") return <StaffSetPinPage />;
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-muted-foreground text-sm animate-pulse">Loading...</div>
-      </div>
-    );
-  }
+  if (isLoading) return <PageLoading />;
 
   if (needsTwoFactorSetup) return <MandatoryTwoFactorPage />;
 
@@ -165,16 +179,30 @@ function ProtectedRoutes() {
     if (location === "/clients" && user.role === "consultant") {
       return <LockedClientsPage />;
     }
+    // The portfolio read stays open on the server so a consultant can still
+    // see and switch between the businesses they manage.
+    if (location === "/portfolio" && user.role === "consultant") {
+      return <PortfolioPage />;
+    }
     return <TrialEndedPage />;
+  }
+
+  // A Viewer only ever sees their own training records.
+  if (user.role === "client_viewer") {
+    if (location !== "/my-training") return <Redirect to="/my-training" />;
+    return <MyTrainingPage />;
   }
 
   // Logged in — redirect away from public pages
   if (location === "/login" || location === "/") {
-    return <Redirect to="/dashboard" />;
+    // Consultants land on their portfolio, which forwards to the dashboard
+    // unless they manage two or more businesses.
+    return <Redirect to={user.role === "consultant" ? "/portfolio?from=landing" : "/dashboard"} />;
   }
 
   const canAdmin = user.role === "consultant" || user.role === "client_admin";
-  const canManageContractorEmails = canAdmin || user.isMaintenanceManager === true;
+  const canManageUsers = canAdmin || user.role === "client_manager";
+  const canManageContractorEmails = canAdmin || user.isMaintenanceManager === true || user.role === "client_manager";
   const isConsultant = user.role === "consultant";
 
   return (
@@ -188,8 +216,11 @@ function ProtectedRoutes() {
       <Route path="/items/:id" component={ItemDetailPage} />
       <Route path="/fire-safety" component={FireSafetyPage} />
       <Route path="/kitchen" component={KitchenPage} />
+      <Route path="/allergens" component={AllergensPage} />
+      <Route path="/coshh" component={CoshhRegisterPage} />
+      <Route path="/asbestos" component={AsbestosRegisterPage} />
       <Route path="/legionella" component={LegionellaPage} />
-      <Route path="/safe-track" component={() => { window.location.replace("/doc-track"); return null; }} />
+      <Route path="/safe-track">{() => <Redirect to="/doc-track" />}</Route>
       <Route path="/fix-track" component={FixTrackPage} />
       <Route path="/fix-track/:id" component={FixTrackDetailPage} />
       <Route path="/doc-track" component={DocTrackPage} />
@@ -199,8 +230,8 @@ function ProtectedRoutes() {
       <Route path="/bike-track" component={BikeTrackPage} />
       <Route path="/aqua-track"  component={AquaTrackPage} />
       {/* Legacy URLs redirect to the combined AquaTrack page */}
-      <Route path="/pool-track"  component={() => { window.location.replace("/aqua-track"); return null; }} />
-      <Route path="/swim-track"  component={() => { window.location.replace("/aqua-track"); return null; }} />
+      <Route path="/pool-track">{() => <Redirect to="/aqua-track" />}</Route>
+      <Route path="/swim-track">{() => <Redirect to="/aqua-track" />}</Route>
       <Route path="/green-track" component={GreenTrackPage} />
       <Route path="/daily-track-am" component={DailyTrackAmPage} />
       <Route path="/daily-track-pm" component={DailyTrackPmPage} />
@@ -211,18 +242,22 @@ function ProtectedRoutes() {
       <Route path="/premises-track" component={PremisesTrackPage} />
       <Route path="/room-track" component={RoomTrackPage} />
       <Route path="/reports" component={ReportsPage} />
+      <Route path="/calendar" component={CalendarPage} />
       <Route path="/compliance-hub" component={ComplianceHubPage} />
+      {canAdmin && <Route path="/setup" component={SetupPage} />}
+      <Route path="/tasks" component={TasksPage} />
       {canAdmin && <Route path="/sites/:id" component={SiteDetailPage} />}
       {canAdmin && <Route path="/sites" component={SitesPage} />}
       {canAdmin && <Route path="/categories/:id" component={CategoryDetailPage} />}
       {canAdmin && <Route path="/categories" component={CategoriesPage} />}
-      {canAdmin && <Route path="/users" component={UsersPage} />}
+      {canManageUsers && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
       {canAdmin && <Route path="/feedback" component={FeedbackInboxPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
       <Route path="/account-security" component={AccountSecurityPage} />
       {canAdmin && <Route path="/privacy-governance" component={PrivacyGovernancePage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
+      {isConsultant && <Route path="/portfolio" component={PortfolioPage} />}
       {canAdmin && <Route path="/daily/overview" component={DailyOverviewPage} />}
       <Route path="/daily/am">{() => <DailyChecklistPage type="am" />}</Route>
       <Route path="/daily/pm">{() => <DailyChecklistPage type="pm" />}</Route>
@@ -242,8 +277,11 @@ function App() {
       <TooltipProvider>
         <AuthProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <ProtectedRoutes />
+            <Suspense fallback={<PageLoading />}>
+              <ProtectedRoutes />
+            </Suspense>
           </WouterRouter>
+          <OverrideReasonDialog />
           <Toaster />
         </AuthProvider>
       </TooltipProvider>

@@ -1,0 +1,59 @@
+name: Required track photo checks
+
+# Path-filtered so it only spends CI minutes when the photo-required record
+# forms (GreenTrack, SwimTrack, AquaTrack) or their shared pieces change.
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/pages/aqua-track.tsx"
+      - "artifacts/compliance-tracker/src/pages/swim-track.tsx"
+      - "artifacts/compliance-tracker/src/pages/green-track.tsx"
+      - "artifacts/compliance-tracker/src/components/required-record-photo-evidence.tsx"
+      - "artifacts/compliance-tracker/src/hooks/use-photo-requirements.ts"
+      - "artifacts/compliance-tracker/tests/required-track-photos-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/required-track-photos-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/pages/aqua-track.tsx"
+      - "artifacts/compliance-tracker/src/pages/swim-track.tsx"
+      - "artifacts/compliance-tracker/src/pages/green-track.tsx"
+      - "artifacts/compliance-tracker/src/components/required-record-photo-evidence.tsx"
+      - "artifacts/compliance-tracker/src/hooks/use-photo-requirements.ts"
+      - "artifacts/compliance-tracker/tests/required-track-photos-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/required-track-photos-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  required-track-photos:
+    name: New records stage required photos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run required track photo checks
+        run: pnpm --filter @workspace/compliance-tracker run test:required-track-photos-browser

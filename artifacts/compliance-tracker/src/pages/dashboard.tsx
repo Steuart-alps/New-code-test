@@ -2,12 +2,16 @@ import React, { useEffect, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { useListSites } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
-import { summarizeKitchenStatuses, type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
+import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
+import { KitchenStatusPill } from "@/components/kitchen-status-pill";
+import { ComplianceChecksDue } from "@/components/compliance-checks-due";
+import { RegisterReviewsDue } from "@/components/register-reviews-due";
+import { DashboardStartCards } from "@/components/dashboard-start-cards";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
-  CheckCircle2, MinusCircle, SlidersHorizontal,
+  CheckCircle2, Circle, MinusCircle, SlidersHorizontal,
   MapPin, UserPlus, Mail, Settings2, MailWarning,
 } from "lucide-react";
 import {
@@ -18,7 +22,14 @@ import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-co
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type TrackStatus = "ok" | "attention" | "overdue" | "no_data";
-type TrackHealth = "action_required" | "clear";
+// not_started: nothing recorded yet and nothing overdue — neutral, not a failure.
+type TrackHealth = "action_required" | "not_started" | "clear";
+
+const HEALTH_LABEL: Record<TrackHealth, string> = {
+  action_required: "action required",
+  not_started: "not started",
+  clear: "clear",
+};
 
 interface TrackItem {
   label: string;
@@ -35,6 +46,8 @@ interface TrackSummary {
   health: TrackHealth;
   badge: string;
   items: TrackItem[];
+  /** Not picked in the setup wizard and not started: listed under "Other modules". */
+  otherModule?: boolean;
 }
 
 interface ChecklistTotals {
@@ -72,6 +85,7 @@ const STATUS_BADGE: Record<TrackStatus, string> = {
 
 function StatusIcon({ status, health, className }: { status: TrackStatus; health: TrackHealth; className?: string }) {
   if (health === "action_required") return <AlertCircle className={cn("text-rose-500", className)} />;
+  if (health === "not_started") return <Circle className={cn("text-muted-foreground/60", className)} />;
   if (status === "attention") return <AlertTriangle className={cn("text-amber-500", className)} />;
   if (health === "clear") return <CheckCircle2 className={cn("text-emerald-500", className)} />;
   return                             <MinusCircle    className={cn("text-muted-foreground/50",    className)} />;
@@ -97,7 +111,7 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
         <Link
           href={track.path}
           className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-          aria-label={`Open ${track.label}: ${track.health === "action_required" ? "action required" : "clear"}`}
+          aria-label={`Open ${track.label}: ${HEALTH_LABEL[track.health] ?? "clear"}`}
         >
           <StatusIcon status={track.status} health={track.health} className="w-4 h-4 shrink-0" />
 
@@ -105,6 +119,8 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
             "font-medium text-sm flex-1",
             track.health === "action_required"
               ? "text-rose-700"
+              : track.health === "not_started"
+              ? "text-muted-foreground"
               : track.status === "attention"
               ? "text-amber-700"
               : track.status === "no_data"
@@ -142,7 +158,7 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
           <Link
             href={track.path}
             className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-            aria-label={`Open ${track.label}: ${track.health === "action_required" ? "action required" : "clear"}`}
+            aria-label={`Open ${track.label}: ${HEALTH_LABEL[track.health] ?? "clear"}`}
           >
             <ArrowRight className="w-4 h-4" />
           </Link>
@@ -198,11 +214,13 @@ function DisabledTrack({ track }: { track: TrackSummary }) {
 function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
   const enabled = tracks.filter((t) => t.enabled);
   // These buckets are deliberately ordered so every module is counted once:
-  // an overdue/no-data module is action-needed even when its status is not
+  // an overdue or failed module is action-needed even when its status is not
   // "attention", while future due items remain a separate, non-urgent state.
+  // Modules with nothing recorded yet are "not started", a neutral state.
   const actionRequired = enabled.filter((t) => t.health === "action_required").length;
-  const due = enabled.filter((t) => t.health !== "action_required" && t.status === "attention").length;
-  const complete = enabled.filter((t) => t.health !== "action_required" && t.status === "ok").length;
+  const due = enabled.filter((t) => t.health === "clear" && t.status === "attention").length;
+  const complete = enabled.filter((t) => t.health === "clear" && t.status === "ok").length;
+  const notStarted = enabled.filter((t) => t.health === "not_started").length;
   const notApplicable = tracks.filter((t) => !t.enabled).length;
 
   if (enabled.length === 0) return null;
@@ -225,6 +243,12 @@ function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
         <span className="flex items-center gap-1.5 text-emerald-600">
           <CheckCircle2 className="w-4 h-4" />
           {complete} complete
+        </span>
+      )}
+      {notStarted > 0 && (
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <Circle className="w-4 h-4" />
+          {notStarted} not started
         </span>
       )}
       {notApplicable > 0 && (
@@ -425,14 +449,15 @@ type KitchenCheckStatus = {
   status: KitchenCheckState;
 };
 
-function KitchenTrackStatusPill() {
+function KitchenTrackStatusPill({ siteId }: { siteId: string }) {
   const [statuses, setStatuses] = useState<KitchenCheckStatus[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setStatuses(null);
     (async () => {
       try {
-        const res = await apiFetch("/food-safety/status");
+        const res = await apiFetch(`/food-safety/status${siteId !== "all" ? `?siteId=${siteId}` : ""}`);
         if (!cancelled && res.ok) {
           const json: unknown = await res.json();
           setStatuses(Array.isArray(json) ? json as KitchenCheckStatus[] : []);
@@ -440,47 +465,17 @@ function KitchenTrackStatusPill() {
       } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [siteId]);
 
-  if (!statuses?.length) return null;
+  if (!statuses) return null;
 
-  const { overdue, dueSoon, ok, never, tone, label } = summarizeKitchenStatuses(
-    statuses.map(({ status }) => status),
-  );
-  const pillClass = tone === "overdue"
-    ? "bg-rose-100 text-rose-700"
-    : tone === "due_soon"
-    ? "bg-amber-100 text-amber-700"
-    : tone === "never"
-    ? "bg-muted text-muted-foreground"
-    : "bg-emerald-100 text-emerald-700";
-
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium shrink-0", pillClass)}>
-        {label}
-      </span>
-      <span
-        className="hidden text-xs text-muted-foreground tabular-nums shrink-0 md:inline"
-        aria-label={`${overdue} overdue, ${dueSoon} due soon, ${ok} clear, ${never} never recorded`}
-        title="Overdue / due soon / clear / never recorded"
-      >
-        <span className={overdue > 0 ? "font-semibold text-rose-700" : undefined}>{overdue}</span>
-        {" / "}
-        <span className={dueSoon > 0 ? "font-semibold text-amber-700" : undefined}>{dueSoon}</span>
-        {" / "}
-        <span className={ok > 0 ? "font-semibold text-emerald-700" : undefined}>{ok}</span>
-        {" / "}
-        <span>{never}</span>
-      </span>
-    </span>
-  );
+  return <KitchenStatusPill statuses={statuses.map(({ status }) => status)} />;
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { hasService, services } = useAuth();
+  const { hasService, services, user } = useAuth();
   const canAdmin = useCanAdmin();
   const canManageContractorEmails = canAdmin || useIsMaintenanceManager();
   const hasStandaloneDailytrackAm = hasService("dailytrack_am");
@@ -529,14 +524,17 @@ export default function Dashboard() {
     try {
       const params = siteId !== "all" ? `?siteId=${siteId}` : "";
       const res = await apiFetch(`/dashboard/summary${params}`, { signal });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: unknown } | null;
+        throw new Error(typeof body?.error === "string" ? body.error : `Request failed (${res.status})`);
+      }
       const json = await res.json();
       if (signal.aborted) return;
       setTracks(json.tracks ?? []);
       setChecklistTotals(json.checklistTotals ?? null);
     } catch (e) {
       if (signal.aborted) return;
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
       setChecklistTotals(null);
       setTracks([]);
     } finally {
@@ -553,16 +551,19 @@ export default function Dashboard() {
     return () => controller.abort();
   }, [load]);
 
-  const enabledTracks   = tracks.filter((t) => t.enabled);
+  const enabledTracks   = tracks.filter((t) => t.enabled && !t.otherModule);
+  const otherTracks     = tracks.filter((t) => t.enabled && t.otherModule);
   const disabledTracks  = tracks.filter((t) => !t.enabled);
 
-  // Put actionable modules first; due-soon modules stay visible but follow them.
+  // Put actionable modules first; due-soon modules stay visible but follow
+  // them, and modules not started yet come last.
   const statusOrder: Record<TrackStatus, number> = {
     overdue: 0, attention: 1, ok: 2, no_data: 3,
   };
+  const healthOrder: Record<TrackHealth, number> = { action_required: 0, clear: 1, not_started: 2 };
   const sorted = [...enabledTracks].sort(
     (a, b) =>
-      (a.health === "action_required" ? 0 : 1) - (b.health === "action_required" ? 0 : 1) ||
+      (healthOrder[a.health] ?? 1) - (healthOrder[b.health] ?? 1) ||
       statusOrder[a.status] - statusOrder[b.status],
   );
 
@@ -598,6 +599,10 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        <DashboardStartCards />
+        <ComplianceChecksDue siteId={siteId === "all" ? null : Number(siteId)} />
+        <RegisterReviewsDue siteId={siteId === "all" ? null : Number(siteId)} />
 
         {canAdmin && (
           <SetupChecklist
@@ -636,9 +641,19 @@ export default function Dashboard() {
         )}
 
         {/* Error */}
-        {!loading && error && (
-          <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            Failed to load dashboard: {error}
+        {!loading && error && user?.role === "consultant" && error === "No client context" ? (
+          <div className="rounded-md border border-border bg-muted/40 p-4 text-sm">
+            <p className="font-medium">Choose a business</p>
+            <p className="mt-1 text-muted-foreground">Pick the business you want to work in to see its dashboard.</p>
+            <Link href="/clients" className="mt-3 inline-flex items-center gap-1 font-medium text-primary underline underline-offset-2">
+              Choose a business <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        ) : !loading && error && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            <span>We couldn't load the dashboard: {error}</span>
+            <button type="button" className="rounded-sm border border-rose-300 bg-white px-3 py-1 font-medium hover:bg-rose-100"
+              onClick={() => void load(new AbortController().signal)}>Retry</button>
           </div>
         )}
 
@@ -647,7 +662,7 @@ export default function Dashboard() {
 
         {/* Summary bar */}
         {!loading && !error && tracks.length > 0 && (
-          <SummaryBar tracks={tracks} />
+          <SummaryBar tracks={tracks.filter((t) => !t.otherModule)} />
         )}
 
         {/* Track list */}
@@ -657,10 +672,25 @@ export default function Dashboard() {
               <TrackRow
                 key={track.trackId}
                 track={track}
-                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill /> : null}
+                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill siteId={siteId} /> : null}
               />
             ))}
           </div>
+        )}
+
+        {/* Modules not picked in setup and not started yet (collapsed section) */}
+        {!loading && !error && otherTracks.length > 0 && (
+          <details className="group">
+            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground select-none list-none flex items-center gap-1">
+              <ChevronRight className="w-3.5 h-3.5 group-open:rotate-90 transition-transform" />
+              Other modules ({otherTracks.length})
+            </summary>
+            <div className="mt-2 space-y-2">
+              {otherTracks.map((track) => (
+                <TrackRow key={track.trackId} track={track} />
+              ))}
+            </div>
+          </details>
         )}
 
         {/* Disabled tracks (collapsed section) */}

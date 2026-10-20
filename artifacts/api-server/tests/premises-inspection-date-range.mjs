@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
-function session() {
+function session(defaultHeaders = {}) {
   let cookie = "";
   return async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -17,7 +17,8 @@ function session() {
 }
 
 async function tenant(label) {
-  const request = session();
+  // The owner deliberately records past inspections, which needs a reason.
+  const request = session({ "X-Override-Reason": encodeURIComponent("Premises range fixture: past inspection") });
   const email = `premises-range-${label}-${Date.now()}@test.local`;
   const registration = await request("POST", "/auth/register", {
     name: `Premises range ${label}`, email, password: "password-123",
@@ -37,6 +38,9 @@ async function inspection(request, date, area) {
 
 const firstTenant = await tenant("first");
 const otherTenant = await tenant("other");
+// Intentionally historical: inclusive range boundaries (and the non-leap
+// 2026-02-29 rejection below) are the subject. Owners create these rows and
+// only read them back, so keep the dates fixed rather than relative to today.
 await inspection(firstTenant, "2026-01-31", "before range");
 await inspection(firstTenant, "2026-02-01", "inclusive first day");
 await inspection(firstTenant, "2026-02-28", "inclusive last day");

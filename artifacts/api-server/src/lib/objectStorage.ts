@@ -12,8 +12,10 @@ import { createDownloadToken } from "./downloadUsage";
 import {
   MAX_RESTRICTED_UPLOAD_BYTES,
   ObjectContentError,
+  UploadTooLargeError,
   detectIssueVideoType,
   detectUploadType,
+  maxUploadBytes,
   validateUploadContent,
 } from "./uploadValidation";
 import type {
@@ -24,6 +26,8 @@ import type {
 
 export {
   ObjectContentError,
+  UploadTooLargeError,
+  maxUploadBytes,
   detectIssueVideoType,
   detectUploadType,
   validatePdfInWorker,
@@ -79,53 +83,214 @@ export class ObjectGenerationError extends Error {
   }
 }
 
-const MAX_ISSUE_VIDEO_UPLOAD_BYTES = 250 * 1024 * 1024;
 /** The reservation namespace is part of the upload security boundary. */
 export function isTenantReservedObjectPath(objectPath: string, tenantId: number | string): boolean {
   return objectPath.startsWith(`/objects/uploads/tenant-${tenantId}/`);
 }
 
-type UsageMetadataFile = Pick<File, "name" | "getMetadata">;
+// Stored objects are served from the app's own origin, so their content type
+// decides what a browser does with them. Only these render inline; anything
+// else (HTML, SVG, XML, scripts, Office files, unknown bytes) is a download.
+const INLINE_IMAGE_TYPES = new Set([
+  "image/jpeg", "image/png", "image/gif", "image/webp", "image/avif", "image/heic", "image/heif",
+]);
+
+/**
+ * Security headers for serving a stored object. nosniff stops a browser from
+ * second-guessing the stored type; non-inline types are forced to download;
+ * and the sandboxing CSP keeps anything that is rendered from running script
+ * or loading content on the app origin. PDFs and videos are left without the
+ * CSP: browsers' built-in PDF viewers refuse to run in a sandboxed document,
+ * and neither type can execute script against the app.
+ */
+export function objectDownloadSecurityHeaders(contentType: string): Record<string, string> {
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  const headers: Record<string, string> = { "X-Content-Type-Options": "nosniff" };
+  const isPdf = type === "application/pdf";
+  const isVideo = type.startsWith("video/");
+  if (!isPdf && !isVideo && !INLINE_IMAGE_TYPES.has(type)) {
+    headers["Content-Disposition"] = "attachment";
+  }
+  if (!isPdf && !isVideo) {
+    headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+  }
+  return headers;
+}
+
+const OOXML_TYPES: Record<string, string> = {
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+const LEGACY_OFFICE_TYPES: Record<string, string> = {
+  ".doc": "application/msword",
+  ".xls": "application/vnd.ms-excel",
+  ".ppt": "application/vnd.ms-powerpoint",
+};
+const TEXT_TYPES: Record<string, string> = {
+  ".txt": "text/plain; charset=utf-8",
+  ".csv": "text/csv; charset=utf-8",
+};
+
+/**
+ * Classify a DocTrack/SafeTrack document from its first bytes (and, for
+ * container formats that share a signature, its file extension). Returns the
+ * content type to store, or null when the file is not an allowed document:
+ * PDF, Word/Excel/PowerPoint (current and legacy formats), images, the video
+ * formats the upload form offers, or UTF-8 plain text/CSV.
+ */
+export function detectDocumentUploadType(bytes: Buffer, fileName: string): string | null {
+  const extension = (fileName.match(/\.[a-z0-9]{1,10}$/i)?.[0] ?? "").toLowerCase();
+  const known = detectUploadType(bytes) ?? detectIssueVideoType(bytes);
+  if (known) return known;
+  const ascii = (start: number, end: number) => bytes.subarray(start, end).toString("latin1");
+  if (bytes.length >= 6 && (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a")) return "image/gif";
+  if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "AVI ") return "video/x-msvideo";
+  if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3
+    && ascii(4, Math.min(bytes.length, 64)).includes("matroska")) return "video/x-matroska";
+  // Office Open XML files are ZIP containers.
+  if (OOXML_TYPES[extension] && bytes.length >= 4 && ascii(0, 4) === "PK\x03\x04") return OOXML_TYPES[extension];
+  // Legacy Office files are OLE compound documents.
+  const cfb = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+  if (LEGACY_OFFICE_TYPES[extension] && bytes.length >= 8 && cfb.every((byte, index) => bytes[index] === byte)) {
+    return LEGACY_OFFICE_TYPES[extension];
+  }
+  if (TEXT_TYPES[extension] && bytes.length > 0 && !bytes.includes(0)) {
+    try {
+      // stream: true tolerates a character cut off at the end of the sample.
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: true });
+      return TEXT_TYPES[extension];
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+type UsageMetadataFile = Pick<File, "name" | "getMetadata"> & { metadata?: File["metadata"] };
+
+/** One finalised private object and its provider-reported size. */
+export type StorageUsageEntry = { objectPath: string; sizeBytes: number };
+
+export type StorageUsageChange =
+  | { kind: "present"; objectPath: string; sizeBytes: number }
+  | { kind: "removed"; objectPath: string };
+
+/**
+ * Receives tenant object lifecycle changes for the usage ledger
+ * (storageUsageSnapshot.ts). Implementations must not throw.
+ */
+export interface StorageUsageRecorder {
+  begin(tenantId: number): Promise<string | null>;
+  record(tenantId: number, change: StorageUsageChange, pendingId: string | null): Promise<void>;
+  abandon(pendingId: string): Promise<void>;
+}
+
+let storageUsageRecorder: StorageUsageRecorder | null = null;
+
+/** Registered by the API at start-up; unit tests without a database leave it unset. */
+export function setStorageUsageRecorder(recorder: StorageUsageRecorder | null): void {
+  storageUsageRecorder = recorder;
+}
+
+/**
+ * Mark a tenant lifecycle change as pending, apply it to the provider, then
+ * record its outcome. Errors that guarantee nothing changed clear the marker;
+ * any other failure leaves it so reconciliation re-checks the provider.
+ */
+async function trackStorageUsageChange<T>(
+  tenantId: number | string,
+  mutate: () => Promise<{ result: T; change: StorageUsageChange | null }>,
+): Promise<T> {
+  const recorder = storageUsageRecorder;
+  const clientId = Number(tenantId);
+  if (!recorder || !Number.isSafeInteger(clientId) || clientId <= 0) return (await mutate()).result;
+  const pendingId = await recorder.begin(clientId);
+  let outcome: Awaited<ReturnType<typeof mutate>>;
+  try {
+    outcome = await mutate();
+  } catch (error) {
+    if (pendingId && (error instanceof ObjectOwnershipError || error instanceof ObjectNotFoundError)) {
+      await recorder.abandon(pendingId);
+    }
+    throw error;
+  }
+  // Without a change to record the marker stays, so reconciliation re-checks.
+  if (outcome.change) await recorder.record(clientId, outcome.change, pendingId);
+  return outcome.result;
+}
+
+function isProviderNotFound(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 404;
+}
+
+/** Provider-reported size of a private object this tenant owns, else null. */
+async function ownedObjectSize(file: UsageMetadataFile, owner: string): Promise<number | null> {
+  // Listings already carry each object's metadata; reuse it instead of one
+  // metadata request per object.
+  let metadata = file.metadata?.size !== undefined ? file.metadata : undefined;
+  if (!metadata) {
+    try {
+      [metadata] = await file.getMetadata();
+    } catch (error) {
+      if (isProviderNotFound(error)) return null;
+      throw error;
+    }
+  }
+  const rawPolicy = metadata.metadata?.["custom:aclPolicy"];
+  if (!rawPolicy) return null;
+
+  let policy: ObjectAclPolicy;
+  try {
+    policy = JSON.parse(String(rawPolicy)) as ObjectAclPolicy;
+  } catch {
+    return null;
+  }
+  if (policy.owner !== owner || policy.visibility !== "private") return null;
+
+  const size = Number(metadata.size);
+  return Number.isSafeInteger(size) && size >= 0 ? size : null;
+}
+
+/**
+ * List the private objects owned by one tenant, once each, with their
+ * provider sizes. ACL metadata is the ownership source of truth.
+ */
+export async function listOwnedObjectMetadata(
+  objects: Array<{ objectPath: string; file: UsageMetadataFile }>,
+  tenantId: number | string,
+): Promise<StorageUsageEntry[]> {
+  const owner = String(tenantId);
+  const unique = [...new Map(objects.map((object) => [object.objectPath, object])).values()];
+  const entries: StorageUsageEntry[] = [];
+  for (let offset = 0; offset < unique.length; offset += 10) {
+    const batch = unique.slice(offset, offset + 10);
+    const sizes = await Promise.all(batch.map(({ file }) => ownedObjectSize(file, owner)));
+    sizes.forEach((sizeBytes, index) => {
+      if (sizeBytes !== null) entries.push({ objectPath: batch[index].objectPath, sizeBytes });
+    });
+  }
+  return entries;
+}
+
+export function sumStorageUsageEntries(entries: StorageUsageEntry[]): { usedBytes: number; objectCount: number } {
+  let usedBytes = 0;
+  for (const { sizeBytes } of entries) {
+    if (!Number.isSafeInteger(usedBytes + sizeBytes)) {
+      throw new Error("Tenant storage usage exceeds the supported range");
+    }
+    usedBytes += sizeBytes;
+  }
+  return { usedBytes, objectCount: entries.length };
+}
 
 export async function sumOwnedObjectMetadata(
   files: UsageMetadataFile[],
   tenantId: number | string,
 ): Promise<{ usedBytes: number; objectCount: number }> {
-  const owner = String(tenantId);
-  const uniqueFiles = [...new Map(files.map((file) => [file.name, file])).values()];
-  let usedBytes = 0;
-  let objectCount = 0;
-
-  for (let offset = 0; offset < uniqueFiles.length; offset += 10) {
-    const batch = uniqueFiles.slice(offset, offset + 10);
-    const ownedSizes = await Promise.all(batch.map(async (file) => {
-      const [metadata] = await file.getMetadata();
-      const rawPolicy = metadata.metadata?.["custom:aclPolicy"];
-      if (!rawPolicy) return null;
-
-      let policy: ObjectAclPolicy;
-      try {
-        policy = JSON.parse(String(rawPolicy)) as ObjectAclPolicy;
-      } catch {
-        return null;
-      }
-      if (policy.owner !== owner || policy.visibility !== "private") return null;
-
-      const size = Number(metadata.size);
-      return Number.isSafeInteger(size) && size >= 0 ? size : null;
-    }));
-
-    for (const size of ownedSizes) {
-      if (size === null) continue;
-      if (!Number.isSafeInteger(usedBytes + size)) {
-        throw new Error("Tenant storage usage exceeds the supported range");
-      }
-      usedBytes += size;
-      objectCount += 1;
-    }
-  }
-
-  return { usedBytes, objectCount };
+  return sumStorageUsageEntries(
+    await listOwnedObjectMetadata(files.map((file) => ({ objectPath: file.name, file })), tenantId),
+  );
 }
 
 export class ObjectStorageService {
@@ -196,9 +361,13 @@ export class ObjectStorageService {
     const nodeStream = file.createReadStream(byteRange ? { start: byteRange.start, end: byteRange.end } : undefined);
     const webStream = Readable.toWeb(nodeStream) as ReadableStream;
 
+    const contentType = (metadata.contentType as string) || "application/octet-stream";
     const headers: Record<string, string> = {
-      "Content-Type": (metadata.contentType as string) || "application/octet-stream",
+      "Content-Type": contentType,
       "Cache-Control": `${isPublic ? "public" : "private"}, max-age=${cacheTtlSec}`,
+      // Lets video players seek with byte ranges from the first response.
+      "Accept-Ranges": "bytes",
+      ...objectDownloadSecurityHeaders(contentType),
     };
     if (metadata.size) {
       const length = byteRange ? byteRange.end - byteRange.start + 1 : Number(metadata.size);
@@ -212,48 +381,93 @@ export class ObjectStorageService {
   }
 
   /**
-   * Sum authoritative provider-reported sizes for finalised private objects
-   * owned by one tenant. ACL metadata is the ownership source of truth: request
-   * sizes and attachment-table metadata can be missing or client supplied.
+   * List finalised private objects owned by one tenant with authoritative
+   * provider-reported sizes. Request sizes and attachment-table metadata can be
+   * missing or client supplied, so they are never used. Only the tenant's own
+   * provider prefixes are listed, plus the tenant's legacy references outside
+   * them, so this never scans other tenants' objects.
    */
-  async getTenantStorageUsage(tenantId: number | string, referencedPaths: string[] = []): Promise<{
-    usedBytes: number;
-    objectCount: number;
-  }> {
+  async listTenantStorageObjects(tenantId: number | string, referencedPaths: string[] = []): Promise<StorageUsageEntry[]> {
     if (process.env.NODE_ENV === "test" && process.env.OBJECT_STORAGE_TEST_FAKE_USAGE === "1") {
       const syntheticBytes = Number(tenantId);
       if (!Number.isSafeInteger(syntheticBytes) || syntheticBytes < 0) {
         throw new Error("Test tenant ID cannot be represented as storage usage");
       }
-      return { usedBytes: syntheticBytes, objectCount: 1 };
+      return [{ objectPath: `/objects/test-fake-usage/tenant-${tenantId}`, sizeBytes: syntheticBytes }];
     }
+    return listOwnedObjectMetadata(await this.tenantObjectCandidates(tenantId, referencedPaths), tenantId);
+  }
+
+  /**
+   * The tenant's own provider prefixes plus its legacy references outside
+   * them. Ownership is not checked here: callers filter by the ACL owner.
+   */
+  private async tenantObjectCandidates(
+    tenantId: number | string,
+    referencedPaths: string[],
+  ): Promise<Array<{ objectPath: string; file: File }>> {
     const { bucketName, objectName: privatePrefix } = parseObjectPath(this.getPrivateObjectDir());
     const root = privatePrefix.replace(/\/$/, "");
     const bucket = objectStorageClient.bucket(bucketName);
     const tenantPrefixes = [
-      `${root}/uploads/tenant-${tenantId}/`,
-      `${root}/finalized/tenant-${tenantId}/`,
+      `uploads/tenant-${tenantId}/`,
+      `finalized/tenant-${tenantId}/`,
     ];
     const listings = await Promise.all(
-      tenantPrefixes.map((prefix) => bucket.getFiles({ prefix })),
+      tenantPrefixes.map((prefix) => bucket.getFiles({ prefix: root ? `${root}/${prefix}` : prefix })),
     );
-    const tenantFiles = listings.flatMap(([files]) => files);
-    const tenantPrefixSet = tenantPrefixes.map((prefix) => `/objects/${prefix.slice(root.length + 1)}`);
-    const legacyFiles = await Promise.all(referencedPaths
-      .filter((objectPath) => !tenantPrefixSet.some((prefix) => objectPath.startsWith(prefix)))
-      .map(async (objectPath) => {
+    const tenantObjects = listings.flatMap(([files]) => files.map((file) => ({
+      objectPath: `/objects/${root ? file.name.slice(root.length + 1) : file.name}`,
+      file,
+    })));
+    const legacyObjects = referencedPaths
+      .filter((objectPath) => !tenantPrefixes.some((prefix) => objectPath.startsWith(`/objects/${prefix}`)))
+      .map((objectPath) => ({ objectPath, file: this.objectEntityFileRef(objectPath) }))
+      .filter((object): object is { objectPath: string; file: File } => object.file !== null);
+    return [...new Map([...tenantObjects, ...legacyObjects].map((object) => [object.objectPath, object])).values()];
+  }
+
+  /**
+   * Move every object this tenant owns (private ACL, same set as
+   * listTenantStorageObjects) to a provider storage class. Objects already in
+   * that class are not rewritten: a rewrite of a cold object counts as an early
+   * deletion. The rewrite keeps the object's path, content and ACL metadata, and
+   * every class stays readable by the same code.
+   */
+  async setTenantObjectsStorageClass(
+    tenantId: number | string,
+    referencedPaths: string[],
+    storageClass: string,
+  ): Promise<{ changed: number; unchanged: number }> {
+    const owner = String(tenantId);
+    let changed = 0;
+    let unchanged = 0;
+    for (const { file } of await this.tenantObjectCandidates(tenantId, referencedPaths)) {
+      let metadata = file.metadata?.size !== undefined ? file.metadata : undefined;
+      if (!metadata) {
         try {
-          return await this.getObjectEntityFile(objectPath);
+          [metadata] = await file.getMetadata();
         } catch (error) {
-          if (error instanceof ObjectNotFoundError) return null;
+          if (isProviderNotFound(error)) continue;
           throw error;
         }
-      }));
-
-    return sumOwnedObjectMetadata(
-      [...tenantFiles, ...legacyFiles.filter((file): file is File => file !== null)],
-      tenantId,
-    );
+      }
+      let policy: ObjectAclPolicy | null = null;
+      try {
+        const raw = metadata.metadata?.["custom:aclPolicy"];
+        policy = raw ? JSON.parse(String(raw)) as ObjectAclPolicy : null;
+      } catch {
+        policy = null;
+      }
+      if (policy?.owner !== owner || policy.visibility !== "private") continue;
+      if (String(metadata.storageClass ?? "").toUpperCase() === storageClass) {
+        unchanged++;
+        continue;
+      }
+      await file.setStorageClass(storageClass);
+      changed++;
+    }
+    return { changed, unchanged };
   }
 
   async getObjectEntityUploadURL(
@@ -284,14 +498,15 @@ export class ObjectStorageService {
     });
   }
 
-  async getObjectEntityFile(objectPath: string): Promise<File> {
+  /** Map a /objects/ path to its provider file without checking it exists. */
+  private objectEntityFileRef(objectPath: string): File | null {
     if (!objectPath.startsWith("/objects/")) {
-      throw new ObjectNotFoundError();
+      return null;
     }
 
     const parts = objectPath.slice(1).split("/");
     if (parts.length < 2) {
-      throw new ObjectNotFoundError();
+      return null;
     }
 
     const entityId = parts.slice(1).join("/");
@@ -301,8 +516,17 @@ export class ObjectStorageService {
     }
     const objectEntityPath = `${entityDir}${entityId}`;
     const { bucketName, objectName } = parseObjectPath(objectEntityPath);
-    const bucket = objectStorageClient.bucket(bucketName);
-    const objectFile = bucket.file(objectName);
+    return objectStorageClient.bucket(bucketName).file(objectName);
+  }
+
+  async getObjectEntityFile(objectPath: string): Promise<File> {
+    if (process.env.NODE_ENV === "test" && process.env.OBJECT_STORAGE_TEST_SIGNING_FAILURE === "1") {
+      throw new Error("TEST_ONLY_PROVIDER_CREDENTIAL_SECRET bucket-internal-name");
+    }
+    const objectFile = this.objectEntityFileRef(objectPath);
+    if (!objectFile) {
+      throw new ObjectNotFoundError();
+    }
     const [exists] = await objectFile.exists();
     if (!exists) {
       throw new ObjectNotFoundError();
@@ -340,9 +564,12 @@ export class ObjectStorageService {
       return normalizedPath;
     }
 
-    const objectFile = await this.getObjectEntityFile(normalizedPath);
-    await setObjectAclPolicy(objectFile, aclPolicy);
-    return normalizedPath;
+    const owner = aclPolicy.visibility === "private" ? Number(aclPolicy.owner) : NaN;
+    return trackStorageUsageChange(owner, async () => {
+      const objectFile = await this.getObjectEntityFile(normalizedPath);
+      await setObjectAclPolicy(objectFile, aclPolicy);
+      return { result: normalizedPath, change: await presentChange(objectFile, normalizedPath) };
+    });
   }
 
   /**
@@ -359,7 +586,26 @@ export class ObjectStorageService {
     if (!isTenantReservedObjectPath(normalizedPath, tenantId)) {
       throw new ObjectOwnershipError("Upload was not reserved for this tenant");
     }
+    await this.enforceUploadSizeLimit(normalizedPath, tenantId);
     return this.setTenantObjectAcl(normalizedPath, tenantId);
+  }
+
+  /**
+   * Refuse a new upload over maxUploadBytes() before it becomes a record. The
+   * rejected bytes were never attached to anything, so they are dropped rather
+   * than left in the bucket costing money. Objects already finalised (outside
+   * this tenant's upload reservation) are never touched.
+   */
+  async enforceUploadSizeLimit(objectPath: string, tenantId: number | string): Promise<void> {
+    const normalizedPath = this.normalizeObjectEntityPath(objectPath);
+    if (!isTenantReservedObjectPath(normalizedPath, tenantId)) return;
+    const file = await this.getObjectEntityFile(normalizedPath);
+    const [metadata] = await file.getMetadata();
+    const limit = maxUploadBytes();
+    if (Number(metadata.size) > limit) {
+      await this.discardTenantUpload(normalizedPath, tenantId).catch(() => {});
+      throw new UploadTooLargeError(limit);
+    }
   }
 
   /** Delete an unfinalised reserved upload after content inspection rejects it. */
@@ -374,12 +620,15 @@ export class ObjectStorageService {
 
   /** Delete a finalised private object only when it belongs to this tenant. */
   async deleteTenantObject(objectPath: string, tenantId: number | string): Promise<void> {
-    const file = await this.getObjectEntityFile(objectPath);
-    const acl = await getObjectAclPolicy(file);
-    if (acl?.owner !== String(tenantId) || acl.visibility !== "private") {
-      throw new ObjectOwnershipError();
-    }
-    await file.delete({ ignoreNotFound: true });
+    return trackStorageUsageChange(tenantId, async () => {
+      const file = await this.getObjectEntityFile(objectPath);
+      const acl = await getObjectAclPolicy(file);
+      if (acl?.owner !== String(tenantId) || acl.visibility !== "private") {
+        throw new ObjectOwnershipError();
+      }
+      await file.delete({ ignoreNotFound: true });
+      return { result: undefined, change: { kind: "removed", objectPath } };
+    });
   }
 
   /**
@@ -393,6 +642,26 @@ export class ObjectStorageService {
     const kind = detectUploadType(bytes);
     if (!kind || !allowed.has(kind)) throw new ObjectContentError();
     return kind;
+  }
+
+  /**
+   * Check an uploaded DocTrack/SafeTrack document's bytes against the
+   * document allow-list and store the content type derived from them, so the
+   * client-declared type is never what the file is later served as. Callers
+   * must have established that the object belongs to the tenant first.
+   */
+  async verifyDocumentUpload(objectPath: string, fileName: string): Promise<string> {
+    const file = await this.getObjectEntityFile(this.normalizeObjectEntityPath(objectPath));
+    const [bytes] = await file.download({ start: 0, end: 8191 });
+    const contentType = detectDocumentUploadType(bytes, fileName);
+    if (!contentType) {
+      throw new ObjectContentError("Choose a PDF, Word, Excel, PowerPoint, image, video, text or CSV file");
+    }
+    const [metadata] = await file.getMetadata();
+    if (String(metadata.contentType ?? "").toLowerCase() !== contentType) {
+      await file.setMetadata({ contentType });
+    }
+    return contentType;
   }
 
   /**
@@ -519,8 +788,9 @@ export class ObjectStorageService {
     const generation = String(metadata.generation ?? "");
     const metageneration = String(metadata.metageneration ?? "");
     const size = Number(metadata.size);
-    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0 || size > MAX_ISSUE_VIDEO_UPLOAD_BYTES) {
-      throw new ObjectContentError(`Video must be between 1 byte and ${MAX_ISSUE_VIDEO_UPLOAD_BYTES} bytes`);
+    if (Number.isSafeInteger(size) && size > maxUploadBytes()) throw new UploadTooLargeError();
+    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0) {
+      throw new ObjectContentError("Video must not be empty");
     }
 
     const pinned = staging.bucket.file(staging.name, {
@@ -583,21 +853,23 @@ export class ObjectStorageService {
   }
 
   private async setTenantObjectAcl(objectPath: string, tenantId: number | string): Promise<string> {
-    const objectFile = await this.getObjectEntityFile(objectPath);
-    const existing = await getObjectAclPolicy(objectFile);
-    if (existing?.owner && existing.owner !== String(tenantId)) {
-      throw new ObjectOwnershipError();
-    }
-    if (existing?.visibility === "public") {
-      throw new ObjectOwnershipError("Public objects cannot be attached to a tenant");
-    }
-    if (!existing?.owner) {
-      await setObjectAclPolicy(objectFile, {
-        owner: String(tenantId),
-        visibility: "private",
-      });
-    }
-    return objectPath;
+    return trackStorageUsageChange(tenantId, async () => {
+      const objectFile = await this.getObjectEntityFile(objectPath);
+      const existing = await getObjectAclPolicy(objectFile);
+      if (existing?.owner && existing.owner !== String(tenantId)) {
+        throw new ObjectOwnershipError();
+      }
+      if (existing?.visibility === "public") {
+        throw new ObjectOwnershipError("Public objects cannot be attached to a tenant");
+      }
+      if (!existing?.owner) {
+        await setObjectAclPolicy(objectFile, {
+          owner: String(tenantId),
+          visibility: "private",
+        });
+      }
+      return { result: objectPath, change: await presentChange(objectFile, objectPath) };
+    });
   }
 
   /**
@@ -660,6 +932,20 @@ export class ObjectStorageService {
       requestedPermission: requestedPermission ?? ObjectPermission.READ,
     });
   }
+}
+
+/**
+ * Ledger entry for an object that now carries a tenant ACL. Null when its size
+ * cannot be read: the ACL change has already succeeded, so the pending marker
+ * is left for reconciliation rather than failing the caller.
+ */
+async function presentChange(objectFile: File, objectPath: string): Promise<StorageUsageChange | null> {
+  const metadata = await objectFile.getMetadata().then(([value]) => value, () => null);
+  if (!metadata) return null;
+  const sizeBytes = Number(metadata.size);
+  return Number.isSafeInteger(sizeBytes) && sizeBytes >= 0
+    ? { kind: "present", objectPath, sizeBytes }
+    : null;
 }
 
 function parseObjectPath(path: string): {

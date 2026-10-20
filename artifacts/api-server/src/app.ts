@@ -14,10 +14,10 @@ import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import { Sentry } from "./lib/sentry";
-import { sendCancellationWarningEmail } from "./lib/offboarding";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 import { csrfProtection } from "./middleware/csrf";
 import { computeReadiness, getBillingReadiness } from "./lib/stripeStartup";
+import { withReadinessDetails } from "./lib/readinessDetails";
 import { internalAnalyticsRouter } from "./routes/analytics";
 
 const app: Express = express();
@@ -120,8 +120,21 @@ if (fs.existsSync(webIndexHtml)) {
   const isServerPath = (p: string) =>
     p === "/api" || p.startsWith("/api/") || p === "/healthz" || p === "/readyz";
 
+  // Public pages the web build prerendered as <path>/index.html (see
+  // compliance-tracker scripts/seo-pages.mjs). Every other client route gets
+  // the home page's HTML, so it is marked noindex: otherwise search engines
+  // would index app, token and unknown URLs as copies of the home page.
+  const publicPageFiles = new Map<string, string>();
+  for (const entry of fs.readdirSync(webDistDir, { withFileTypes: true })) {
+    const pageFile = path.join(webDistDir, entry.name, "index.html");
+    if (entry.isDirectory() && fs.existsSync(pageFile)) publicPageFiles.set(`/${entry.name}`, pageFile);
+  }
+
   const serveWebFiles = express.static(webDistDir, {
     index: false,
+    // A prerendered page lives in a directory; without this /signup would
+    // redirect to /signup/ instead of falling through to the handler below.
+    redirect: false,
     setHeaders(res, filePath) {
       // Vite fingerprints everything under assets/, so it can be cached forever.
       if (filePath.startsWith(path.join(webDistDir, "assets") + path.sep)) {
@@ -130,11 +143,33 @@ if (fs.existsSync(webIndexHtml)) {
     },
   });
 
+  // Once the site has its own domain (PUBLIC_SITE_URL), send web page
+  // requests that arrive on Render's onrender.com address there, so people
+  // and search engines see one copy of the site. API paths are left alone:
+  // the mobile app and webhooks may still call the onrender.com address.
+  const canonicalOrigin = process.env.PUBLIC_SITE_URL
+    ? new URL(process.env.PUBLIC_SITE_URL).origin
+    : null;
+  const renderHost = process.env.RENDER_EXTERNAL_URL
+    ? new URL(process.env.RENDER_EXTERNAL_URL).host.toLowerCase()
+    : null;
+  if (canonicalOrigin && renderHost && new URL(canonicalOrigin).host !== renderHost) {
+    app.use((req, res, next) => {
+      if ((req.method !== "GET" && req.method !== "HEAD") || isServerPath(req.path)) return next();
+      if (req.headers.host?.toLowerCase() !== renderHost) return next();
+      res.redirect(301, canonicalOrigin + req.originalUrl);
+    });
+  }
+
   app.use((req, res, next) => (isServerPath(req.path) ? next() : serveWebFiles(req, res, next)));
 
   app.use((req, res, next) => {
     if ((req.method !== "GET" && req.method !== "HEAD") || isServerPath(req.path)) return next();
     res.setHeader("Cache-Control", "no-cache");
+    const pagePath = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
+    const pageFile = publicPageFiles.get(pagePath);
+    if (pageFile) return void res.sendFile(pageFile);
+    if (pagePath !== "/") res.setHeader("X-Robots-Tag", "noindex");
     res.sendFile(webIndexHtml);
   });
 }
@@ -171,33 +206,15 @@ app.post(
       return;
     }
 
-    // Best-effort: send a cancellation warning email when a subscription is
-    // cancelled immediately or scheduled to cancel at period end.
-    // Must happen AFTER processWebhook so the DB is already updated.
-    // Never throws — a failure must not affect the 200 already sent.
-    try {
-      const sub = event?.data?.object ?? {};
-      const isCancelled = event.type === "customer.subscription.deleted";
-      const isCancelAtPeriodEnd =
-        event.type === "customer.subscription.updated" &&
-        sub.cancel_at_period_end === true;
-
-      if ((isCancelled || isCancelAtPeriodEnd) && sub.customer) {
-        const accessEndsAt: string | number | null =
-          typeof sub.cancel_at === "number" ? sub.cancel_at :
-          typeof sub.current_period_end === "number" ? sub.current_period_end :
-          null;
-        sendCancellationWarningEmail({
-          stripeCustomerId: String(sub.customer),
-          accessEndsAt,
-        }).catch((err) => logger.warn({ err }, "Cancellation warning email failed"));
-      }
-    } catch (err) {
-      logger.warn({ err }, "Could not parse Stripe event for cancellation warning");
-    }
+    // Best-effort follow-up once the synced tables are updated: local plan
+    // status, retention-clock reset on resubscription, cancellation and
+    // failed-payment emails. Never throws — the 200 has already been sent.
+    WebhookHandlers.afterSync(event).catch((err) => logger.warn({ err }, "Stripe webhook follow-up failed"));
   }
 );
 
+// Register CSV imports send up to 1,000 rows; every other route keeps the default limit.
+app.use("/api/imports", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
@@ -209,10 +226,15 @@ app.use("/api", enforceDailyEntryCutoff);
 app.use("/api", enforceTrialLock);
 
 // Root-level health check — matches the deployment probe path and is exempt
-// from the /api prefix so load balancers can reach it directly.
-app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+// from the /api prefix so load balancers can reach it directly. It is 503
+// until runtime migrations finish, so Render never promotes an instance whose
+// migrations are still running (or failed: the process then exits).
+app.get("/healthz", (_req, res) => {
+  if (!applicationReady) return void res.status(503).json({ status: "starting" });
+  res.json({ status: "ok" });
+});
 app.get("/readyz", (_req, res) => {
-  const report = computeReadiness(applicationReady, getBillingReadiness());
+  const report = withReadinessDetails(computeReadiness(applicationReady, getBillingReadiness()));
   res.status(report.httpStatus).json(report.body);
 });
 

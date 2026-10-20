@@ -83,7 +83,9 @@ async function createDocument(request, siteId, title) {
     siteId,
   });
   expectStatus(`finalize ${title}`, created, [201]);
-  return { document: created.data, content: title };
+  // The route returns the database row, so the stored path is object_path.
+  assert(`stored path returned for ${title}`, typeof created.data?.object_path === "string");
+  return { document: { ...created.data, objectPath: created.data.object_path }, content: title };
 }
 
 async function main() {
@@ -108,7 +110,9 @@ async function main() {
   const certificateBody = {
     siteId: alphaSite.id,
     roomIds: [alphaRoom.data.id],
-    visitDate: "2025-01-10",
+    // The certificate is updated below; keep its visit inside the correction
+    // window rather than on a fixed day that ages into locked evidence.
+    visitDate: new Date().toISOString().slice(0, 10),
     certificateRef: `ATTACH-${stamp}`,
   };
   const certificate = await owner("POST", "/pat-track/certificates", certificateBody);

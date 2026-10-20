@@ -5,6 +5,72 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export type DailyTrackRequirement = typeof DailyTrackRequirement[keyof typeof DailyTrackRequirement];
+
+
+export const DailyTrackRequirement = {
+  kitchen_opening: 'kitchen_opening',
+  premises_opening: 'premises_opening',
+  kitchen_closing: 'kitchen_closing',
+  premises_closing: 'premises_closing',
+  signoff: 'signoff',
+} as const;
+
+export interface DailyTrackHistoryChecklist {
+  checkDate: string;
+  siteId: number | null;
+  checklistType: string;
+  submittedAt: string | null;
+}
+
+export interface DailyTrackHistorySignoff {
+  signoffDate: string;
+  siteId: number | null;
+  submittedAt: string | null;
+}
+
+export interface DailyTrackHistory {
+  /** The checks each site is expected to complete per day, in display order */
+  requirements: DailyTrackRequirement[];
+  checklists: DailyTrackHistoryChecklist[];
+  signoffs: DailyTrackHistorySignoff[];
+}
+
+export interface SignTrainingRecordRequest {
+  /** Signature image as a data URL */
+  signature: string;
+}
+
+export interface ActiveDepartmentRequest {
+  departmentId: number;
+}
+
+export type OwnTrainingRecordRecordType = typeof OwnTrainingRecordRecordType[keyof typeof OwnTrainingRecordRecordType];
+
+
+export const OwnTrainingRecordRecordType = {
+  certificate: 'certificate',
+  signoff: 'signoff',
+  internal: 'internal',
+} as const;
+
+export interface OwnTrainingRecord {
+  id: number;
+  record_type: OwnTrainingRecordRecordType;
+  staff_name: string;
+  training_type?: string | null;
+  document_title?: string | null;
+  document_type?: string | null;
+  provider?: string | null;
+  trainer?: string | null;
+  completed_date: string;
+  expiry_date?: string | null;
+  notes?: string | null;
+  signed: boolean;
+  updated_at?: string;
+  site_name?: string | null;
+}
+
 export type FeedbackReportCategory = typeof FeedbackReportCategory[keyof typeof FeedbackReportCategory];
 
 
@@ -109,6 +175,44 @@ export interface HealthStatus {
   status: string;
 }
 
+export type PublicLinkAccessEntryLinkType = typeof PublicLinkAccessEntryLinkType[keyof typeof PublicLinkAccessEntryLinkType];
+
+
+export const PublicLinkAccessEntryLinkType = {
+  sign_off: 'sign_off',
+  contractor_portal: 'contractor_portal',
+  fix_track_action: 'fix_track_action',
+  fix_track_quote: 'fix_track_quote',
+} as const;
+
+export type PublicLinkAccessEntryActionType = typeof PublicLinkAccessEntryActionType[keyof typeof PublicLinkAccessEntryActionType];
+
+
+export const PublicLinkAccessEntryActionType = {
+  view: 'view',
+  submit: 'submit',
+} as const;
+
+export interface PublicLinkAccessEntry {
+  id: number;
+  linkType: PublicLinkAccessEntryLinkType;
+  actionType: PublicLinkAccessEntryActionType;
+  activity: string;
+  /**
+     * @minLength 8
+     * @maxLength 8
+     */
+  linkRef: string;
+  occurredAt: string;
+}
+
+export interface PublicLinkAccessPage {
+  /** @maxItems 100 */
+  entries: PublicLinkAccessEntry[];
+  /** @nullable */
+  nextCursor: string | null;
+}
+
 export type AuditLogEntryAction = typeof AuditLogEntryAction[keyof typeof AuditLogEntryAction];
 
 
@@ -136,6 +240,18 @@ export interface AuditLogEntry {
   diff: AuditLogEntryDiff;
   /** @nullable */
   actorName: string | null;
+}
+
+export interface FixTrackMediaDeleteRequest {
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  objectPath: string;
+}
+
+export interface FixTrackIssueMediaList {
+  mediaUrls: string[];
 }
 
 export interface ErrorResponse {
@@ -215,6 +331,53 @@ export interface CreateContractorRequest {
   dbsCheckDate?: string | null;
 }
 
+/**
+ * Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check's due date.
+ */
+export type CertificateOutcome = typeof CertificateOutcome[keyof typeof CertificateOutcome];
+
+
+export const CertificateOutcome = {
+  satisfactory: 'satisfactory',
+  unsatisfactory: 'unsatisfactory',
+  not_stated: 'not_stated',
+} as const;
+
+/**
+ * EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.
+ */
+export type CertificateDefectCode = typeof CertificateDefectCode[keyof typeof CertificateDefectCode];
+
+
+export const CertificateDefectCode = {
+  C1: 'C1',
+  C2: 'C2',
+  C3: 'C3',
+  FI: 'FI',
+  ID: 'ID',
+  AR: 'AR',
+  other: 'other',
+} as const;
+
+export interface CertificateDefect {
+  id: number;
+  certificateId: number;
+  code: CertificateDefectCode;
+  label: string;
+  description: string;
+  location?: string | null;
+  fixTrackIssueId?: number | null;
+  fixTrackStatus?: string | null;
+  fixTrackPriority?: string | null;
+  fixTrackTargetDate?: string | null;
+  resolvedAt?: string | null;
+  /** C1/C2/FI/ID/AR defects keep the check needing action while open. */
+  blocking: boolean;
+  /** The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied). */
+  open: boolean;
+  createdAt: string;
+}
+
 export interface Certificate {
   id: number;
   contractorId?: number | null;
@@ -224,7 +387,48 @@ export interface Certificate {
   issueDate?: string | null;
   expiryDate?: string | null;
   notes?: string | null;
+  outcome?: CertificateOutcome;
+  /** Defects listed on an item certificate (absent for contractor certificates). */
+  defects?: CertificateDefect[];
   createdAt: string;
+}
+
+export interface CreateCertificateDefectRequest {
+  code: CertificateDefectCode;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  description: string;
+  /** @maxLength 300 */
+  location?: string | null;
+}
+
+export interface UpdateCertificateDefectRequest {
+  resolved: boolean;
+}
+
+export interface CreateItemCertificateRequest {
+  name: string;
+  fileUrl?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  notes?: string | null;
+  outcome?: CertificateOutcome;
+  /** @maxItems 100 */
+  defects?: CreateCertificateDefectRequest[];
+}
+
+/**
+ * Defects are added through the certificate's defects endpoint.
+ */
+export interface UpdateItemCertificateRequest {
+  name?: string;
+  fileUrl?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  notes?: string | null;
+  outcome?: CertificateOutcome;
 }
 
 export interface CreateCertificateRequest {
@@ -255,6 +459,14 @@ export const ComplianceItemPriority = {
   critical: 'critical',
 } as const;
 
+export type ComplianceItemNeedsActionReason = typeof ComplianceItemNeedsActionReason[keyof typeof ComplianceItemNeedsActionReason] | null;
+
+
+export const ComplianceItemNeedsActionReason = {
+  unsatisfactory: 'unsatisfactory',
+  open_defects: 'open_defects',
+} as const;
+
 export interface ComplianceItem {
   id: number;
   title: string;
@@ -272,9 +484,20 @@ export interface ComplianceItem {
   assignedTo?: string | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notificationSentAt?: string | null;
   completedAt?: string | null;
   notes?: string | null;
+  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date. */
+  needsAction?: boolean;
+  needsActionReason?: ComplianceItemNeedsActionReason;
+  /** Open C1/C2/FI/ID/AR defects on the newest certificate. */
+  openDefectCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -310,6 +533,12 @@ export interface CreateComplianceItemRequest {
   assignedTo?: string | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notes?: string | null;
 }
 
@@ -344,6 +573,12 @@ export interface UpdateComplianceItemRequest {
   assignedTo?: string | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notes?: string | null;
 }
 
@@ -359,6 +594,11 @@ export const UpdateStatusRequestStatus = {
 
 export interface UpdateStatusRequest {
   status: UpdateStatusRequestStatus;
+  /**
+     * Date the check was done (YYYY-MM-DD), only with status completed. Not in the future in the account's timezone; defaults to today. The next due date is counted from it.
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  completedAt?: string | null;
 }
 
 export interface DashboardStats {
@@ -372,6 +612,8 @@ export interface DashboardStats {
   completionRate: number;
   contractorsCount: number;
   certificatesExpiringSoon: number;
+  /** Checks whose newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects (counted as out of compliance). */
+  actionRequired?: number;
 }
 
 export type PrivacyProgramInputCustomerRole = typeof PrivacyProgramInputCustomerRole[keyof typeof PrivacyProgramInputCustomerRole];
@@ -867,6 +1109,19 @@ export type StorageUsageEstimatedCost = {
 export interface StorageUsage {
   /** @minimum 0 */
   usedBytes: number;
+  /**
+     * When the totals were last reconciled with the storage provider; null before the first check.
+     * @nullable
+     */
+  usageCheckedAt: string | null;
+  /**
+     * Seconds since usageCheckedAt. Uploads and deletions since then are already included.
+     * @minimum 0
+     * @nullable
+     */
+  usageAgeSeconds: number | null;
+  /** A reconciliation with the storage provider is running; totals may change shortly. */
+  usageRefreshing: boolean;
   /** @minimum 0 */
   objectCount: number;
   /** @minimum 1 */
@@ -936,6 +1191,11 @@ export const FireCheckType = {
   extinguishers: 'extinguishers',
   fire_doors: 'fire_doors',
   fire_drill: 'fire_drill',
+  fire_walk: 'fire_walk',
+  alarm_panel: 'alarm_panel',
+  emergency_lights_annual: 'emergency_lights_annual',
+  alarm_service: 'alarm_service',
+  extinguisher_service: 'extinguisher_service',
 } as const;
 
 export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof FireSafetyCheckResult];
@@ -944,6 +1204,18 @@ export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof Fi
 export const FireSafetyCheckResult = {
   pass: 'pass',
   fail: 'fail',
+} as const;
+
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type FireSafetyCheckNightStaff = typeof FireSafetyCheckNightStaff[keyof typeof FireSafetyCheckNightStaff] | null;
+
+
+export const FireSafetyCheckNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
 } as const;
 
 export interface FireSafetyCheck {
@@ -956,6 +1228,12 @@ export interface FireSafetyCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: FireSafetyCheckNightStaff;
   createdAt: string;
   updatedAt: string;
 }
@@ -968,6 +1246,18 @@ export const CreateFireSafetyCheckRequestResult = {
   fail: 'fail',
 } as const;
 
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type CreateFireSafetyCheckRequestNightStaff = typeof CreateFireSafetyCheckRequestNightStaff[keyof typeof CreateFireSafetyCheckRequestNightStaff] | null;
+
+
+export const CreateFireSafetyCheckRequestNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
 export interface CreateFireSafetyCheckRequest {
   checkType: FireCheckType;
   checkDate: string;
@@ -976,6 +1266,12 @@ export interface CreateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: CreateFireSafetyCheckRequestNightStaff;
 }
 
 export type UpdateFireSafetyCheckRequestResult = typeof UpdateFireSafetyCheckRequestResult[keyof typeof UpdateFireSafetyCheckRequestResult];
@@ -986,6 +1282,18 @@ export const UpdateFireSafetyCheckRequestResult = {
   fail: 'fail',
 } as const;
 
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type UpdateFireSafetyCheckRequestNightStaff = typeof UpdateFireSafetyCheckRequestNightStaff[keyof typeof UpdateFireSafetyCheckRequestNightStaff] | null;
+
+
+export const UpdateFireSafetyCheckRequestNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
 export interface UpdateFireSafetyCheckRequest {
   checkDate?: string;
   result?: UpdateFireSafetyCheckRequestResult;
@@ -993,6 +1301,31 @@ export interface UpdateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
+}
+
+export interface FireCallPoint {
+  id: number;
+  siteId: number | null;
+  name: string;
+  archivedAt: string | null;
+  /** Date of the latest alarm test that used this call point. */
+  lastTestedDate: string | null;
+}
+
+export interface CreateFireCallPointRequest {
+  siteId: number | null;
+  name: string;
+}
+
+export interface UpdateFireCallPointRequest {
+  name?: string;
+  archived?: boolean;
 }
 
 export type FireSafetyStatusLastResult = typeof FireSafetyStatusLastResult[keyof typeof FireSafetyStatusLastResult] | null;
@@ -1021,6 +1354,14 @@ export interface FireSafetyStatus {
   lastResult: FireSafetyStatusLastResult;
   dueDate?: string | null;
   status: FireSafetyStatusStatus;
+  /** The site this row's status comes from; across all sites, the worst site for this check type. Null when no site is visible. */
+  siteId?: number | null;
+  /** Name of the site in siteId. */
+  siteName?: string | null;
+  /** How many visible sites were assessed for this check type. */
+  siteCount?: number;
+  /** How many of those sites are overdue or have never recorded the check. */
+  sitesAffected?: number;
 }
 
 export type FireControlProfileUkNation = typeof FireControlProfileUkNation[keyof typeof FireControlProfileUkNation] | null;
@@ -1494,7 +1835,7 @@ export interface PoolTrackConfig {
 }
 
 /**
- * Food-safety jurisdiction used to choose the standard reheating limit.
+ * Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
  */
 export type FoodSafetyConfigFoodJurisdiction = typeof FoodSafetyConfigFoodJurisdiction[keyof typeof FoodSafetyConfigFoodJurisdiction] | null;
 
@@ -1502,6 +1843,13 @@ export type FoodSafetyConfigFoodJurisdiction = typeof FoodSafetyConfigFoodJurisd
 export const FoodSafetyConfigFoodJurisdiction = {
   scotland: 'scotland',
   england_wales: 'england_wales',
+  northern_ireland: 'northern_ireland',
+  ireland: 'ireland',
+  australia: 'australia',
+  new_zealand: 'new_zealand',
+  canada: 'canada',
+  united_states: 'united_states',
+  other: 'other',
 } as const;
 
 export interface FoodSafetyConfig {
@@ -1521,7 +1869,7 @@ export interface FoodSafetyConfig {
   food_show_sous_vide?: string | null;
   food_num_fridges?: string | null;
   food_num_freezers?: string | null;
-  /** Food-safety jurisdiction used to choose the standard reheating limit. */
+  /** Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels. */
   food_jurisdiction?: FoodSafetyConfigFoodJurisdiction;
   food_cooking_limit?: string | null;
   food_cooling_limit?: string | null;
@@ -1545,6 +1893,18 @@ export interface FoodSafetyMissingDatesResponse {
   missingDates: string[];
   /** Dates with a diary record that has not been submitted. */
   draftDates: string[];
+  /** Dates marked closed (non-operating) with no diary record. Not counted as missing. */
+  nonOperatingDates?: string[];
+}
+
+export interface KitchenClosedDay {
+  id: number;
+  date: string;
+  reason: string;
+  createdAt: string;
+  createdByName: string | null;
+  /** The closure was recorded after the day itself. */
+  addedAfterDay: boolean;
 }
 
 export interface FoodSafetyMonthlySummaryDay {
@@ -1553,6 +1913,31 @@ export interface FoodSafetyMonthlySummaryDay {
   hasRecord: boolean;
   /** Whether the diary record has been submitted. */
   submitted: boolean;
+  /** The diary scope was marked closed and has no record for this date, so it is not a missing day. */
+  nonOperating: boolean;
+  closure: KitchenClosedDay | null;
+}
+
+export interface KitchenClosedDaysList {
+  from: string;
+  to: string;
+  siteId: number | null;
+  closedDays: KitchenClosedDay[];
+}
+
+export interface KitchenClosedDaysInput {
+  from: string;
+  to: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  reason: string;
+}
+
+export interface KitchenClosedDaysCreated {
+  siteId: number | null;
+  created: string[];
 }
 
 export interface FoodSafetyMonthlySummary {
@@ -1634,6 +2019,11 @@ export type MobileTemperatureLogCooling = { [key: string]: unknown };
 
 export type MobileTemperatureLogReheating = { [key: string]: unknown };
 
+/**
+ * One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).
+ */
+export type MobileTemperatureLogSousVide = { [key: string]: unknown };
+
 export interface MobileTemperatureLog {
   coldFood: unknown[];
   expectedColdFood: unknown[];
@@ -1642,6 +2032,8 @@ export interface MobileTemperatureLog {
   hotTemperature?: MobileTemperatureLogHotTemperature;
   cooling?: MobileTemperatureLogCooling;
   reheating?: MobileTemperatureLogReheating;
+  /** One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes). */
+  sousVide?: MobileTemperatureLogSousVide;
   correctives?: string;
   expectedCorrectives: string | null;
 }
@@ -1852,6 +2244,16 @@ export type ListFeedbackReportHistoryParams = {
 clientId?: number;
 };
 
+export type ListMyTrainingRecords200 = {
+  linked: boolean;
+  records: OwnTrainingRecord[];
+};
+
+export type SetActiveDepartment200 = {
+  departmentId: number;
+  departmentIds: number[];
+};
+
 export type ListAuditLogParams = {
 module: ListAuditLogModule;
 };
@@ -1868,6 +2270,49 @@ export const ListAuditLogModule = {
   train: 'train',
   doc: 'doc',
   incidents: 'incidents',
+} as const;
+
+export type ListPublicLinkAccessParams = {
+linkType?: ListPublicLinkAccessLinkType;
+actionType?: ListPublicLinkAccessActionType;
+/**
+ * Only access at or after this instant (ISO 8601).
+ * @maxLength 40
+ */
+from?: string;
+/**
+ * Only access before this instant (ISO 8601).
+ * @maxLength 40
+ */
+to?: string;
+/**
+ * nextCursor from the previous page.
+ * @maxLength 200
+ */
+cursor?: string;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+};
+
+export type ListPublicLinkAccessLinkType = typeof ListPublicLinkAccessLinkType[keyof typeof ListPublicLinkAccessLinkType];
+
+
+export const ListPublicLinkAccessLinkType = {
+  sign_off: 'sign_off',
+  contractor_portal: 'contractor_portal',
+  fix_track_action: 'fix_track_action',
+  fix_track_quote: 'fix_track_quote',
+} as const;
+
+export type ListPublicLinkAccessActionType = typeof ListPublicLinkAccessActionType[keyof typeof ListPublicLinkAccessActionType];
+
+
+export const ListPublicLinkAccessActionType = {
+  view: 'view',
+  submit: 'submit',
 } as const;
 
 export type ListComplianceItemsParams = {
@@ -1923,8 +2368,27 @@ siteId?: number;
 };
 
 export type GetFireSafetyStatusParams = {
+/**
+ * Use the site's checks and its risk-assessed frequencies.
+ */
 siteId?: number;
 };
+
+export type ListFireCallPointsParams = {
+/**
+ * A site id, or "none" for call points not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
+includeArchived?: ListFireCallPointsIncludeArchived;
+};
+
+export type ListFireCallPointsIncludeArchived = typeof ListFireCallPointsIncludeArchived[keyof typeof ListFireCallPointsIncludeArchived];
+
+
+export const ListFireCallPointsIncludeArchived = {
+  true: 'true',
+  false: 'false',
+} as const;
 
 export type GetFoodSafetyConfigParams = {
 /**
@@ -2008,6 +2472,11 @@ export type SavePATPresetTemplateBody = {
   items: PATPresetItem[];
 };
 
+export type GetDailyTrackHistoryParams = {
+from: string;
+to: string;
+};
+
 export type ListPremisesInspectionsParams = {
 from?: string;
 to?: string;
@@ -2061,6 +2530,22 @@ siteId?: number;
 export type GetFoodSafetyMissingDatesParams = {
 from: string;
 to: string;
+/**
+ * Scope to a site's diary. Omit for the whole-organisation diary.
+ */
+siteId?: number;
+};
+
+export type ListKitchenClosedDaysParams = {
+from: string;
+to: string;
+/**
+ * Scope to a site's diary. Omit for the whole-organisation diary.
+ */
+siteId?: number;
+};
+
+export type CreateKitchenClosedDaysParams = {
 /**
  * Scope to a site's diary. Omit for the whole-organisation diary.
  */

@@ -1,16 +1,36 @@
 {
   "expo": {
-    "name": "ComplyTrack Mobile",
-    "slug": "mobile",
+    "name": "ComplyTrack",
+    "slug": "complytrack",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "icon": "./assets/images/app-icon.png",
+    "scheme": "complytrack",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "uk.co.alpsconsultancy.complytrack",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
-    "android": {},
+    "android": {
+      "package": "uk.co.alpsconsultancy.complytrack",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#061537"
+      },
+      "permissions": [],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
@@ -22,22 +42,25 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/icon.png",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 160,
           "resizeMode": "contain",
-          "backgroundColor": "#162d42"
+          "backgroundColor": "#061537"
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow ComplyTrack to access photos for issue reports.",
-          "cameraPermission": "Allow ComplyTrack to use the camera to photograph issues and scan appliance asset tags."
+          "photosPermission": "ComplyTrack uses your photo library so you can attach existing photos as evidence to issue reports, check records and certificates.",
+          "cameraPermission": "ComplyTrack uses the camera to take photos as evidence for issue reports, check records and certificates, and to scan appliance asset tags.",
+          "microphonePermission": false
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow ComplyTrack to use the camera to photograph issues and scan appliance asset tags.",
+          "cameraPermission": "ComplyTrack uses the camera to take photos as evidence for issue reports, check records and certificates, and to scan appliance asset tags.",
+          "microphonePermission": false,
           "recordAudioAndroid": false
         }
       ],

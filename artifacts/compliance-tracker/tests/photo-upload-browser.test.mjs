@@ -94,6 +94,9 @@ const photoGetRequests = [];
 const photoMutationHeaders = [];
 const storagePutHeaders = [];
 const unexpectedApiRequests = [];
+// The layout's "Managed by" strip reads once per page load, never per render.
+let managedByRequests = 0;
+let harnessNavigations = 0;
 let csrfTokenRequests = 0;
 let nextPhotoFailure = null;
 let photoListUnavailable = false;
@@ -173,6 +176,10 @@ async function routeApi(route, url) {
   if (pathname === "/api/billing/cancellation-status" && method === "GET") {
     // AppLayout's admin-only subscription banner checks this status on mount.
     return jsonResponse(route, { accessEndsAt: null });
+  }
+  // The header's notification bell (#92).
+  if (pathname === "/api/notifications" && method === "GET") {
+    return jsonResponse(route, { notifications: [], unreadCount: 0 });
   }
   if (pathname === "/api/sites" && method === "GET") {
     return jsonResponse(route, [{ id: 11, name: "Photo Test Site" }]);
@@ -327,6 +334,12 @@ async function routeApi(route, url) {
     return route.fulfill({ status: 200, contentType: "image/png", body: tinyPng });
   }
 
+  if (pathname === "/api/managed-by" && method === "GET") {
+    // No consultant practice branding for this business.
+    managedByRequests += 1;
+    return jsonResponse(route, null);
+  }
+
   unexpectedApiRequests.push({
     method,
     url: url.toString(),
@@ -396,7 +409,7 @@ try {
   await waitForVite();
   browser = await chromium.launch({
     headless: true,
-    executablePath: process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium",
+    executablePath: process.env.CHROMIUM_PATH || undefined,
   });
   page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
   page.setDefaultTimeout(15000);
@@ -431,6 +444,7 @@ try {
   });
 
   const navigateHarness = async pageName => {
+    harnessNavigations += 1;
     const response = await page.goto(`${baseUrl}/tests/photo-upload-harness.html?page=${pageName}`, {
       waitUntil: "domcontentloaded",
     });
@@ -594,6 +608,7 @@ try {
   assert.ok(storagePutHeaders.length > 0, "the upload flow must PUT bytes to fake object storage");
   assert.ok(storagePutHeaders.every(token => token === null), "object-storage PUTs must not receive the session CSRF header");
   assert.deepEqual(unexpectedApiRequests, [], `unexpected API requests must fail the browser test: ${JSON.stringify(unexpectedApiRequests)}`);
+  assert.ok(managedByRequests <= harnessNavigations, `managed-by read ${managedByRequests} times over ${harnessNavigations} page loads`);
   assert.deepEqual(pageErrors, [], `the actual page components must not throw: ${pageErrors.join("; ")}`);
 
   console.log("SafeTrack, KitchenTrack and BikeTrack photo association browser checks passed.");

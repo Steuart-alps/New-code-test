@@ -1,14 +1,21 @@
 import { Router } from "express";
 import { createHash } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
-import { kitchenTemperatureRulesSchema, DEFAULT_KITCHEN_TEMPERATURE_RULES, parseKitchenTemperatureRules } from "@workspace/api-zod/kitchen-temperature";
+import {
+  kitchenTemperatureRulesSchema, DEFAULT_KITCHEN_TEMPERATURE_RULES, parseKitchenTemperatureRules,
+  FOOD_JURISDICTIONS, isFoodJurisdiction, kitchenTemperatureGuidance,
+} from "@workspace/api-zod/kitchen-temperature";
 import { KitchenTemperatureError, recordKitchenTemperatureActions } from "../lib/kitchenTemperatureActions";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, or, sql, inArray, isNull } from "drizzle-orm";
+import { eq, and, sql, inArray, isNull } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { defaultFoodJurisdiction } from "../lib/foodJurisdiction";
+
+import { getAccountToday } from "../lib/accountClock";
 
 const router = Router();
 
@@ -29,6 +36,7 @@ const mobileTemperatureLogSchema = z.object({
   hotTemperature: rowSchema.optional(),
   cooling: rowSchema.optional(),
   reheating: rowSchema.optional(),
+  sousVide: rowSchema.optional(),
   correctives: z.string().max(5000).optional(),
   expectedCorrectives: z.string().max(5000).nullable(),
 });
@@ -122,12 +130,14 @@ const CONFIG_KEYS = [
 const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_num_fridges: "2",
   food_num_freezers: "2",
-  // Keep the historical 82°C default for existing accounts. Administrators
-  // can select England/Wales to use the 75°C limit.
-  food_jurisdiction: "scotland",
-  food_cooking_limit: "Above 75°C (10 seconds)",
+  // Fallback only: when no jurisdiction is saved, GET /config uses the
+  // Compliance Hub nation (Scotland/Northern Ireland), else England/Wales (defaultFoodJurisdiction).
+  food_jurisdiction: "england_wales",
+  // No hold time is enforced by default, so the label states only the core
+  // temperature.
+  food_cooking_limit: "75°C or above (core)",
   food_cooling_limit: "8°C within 90 minutes",
-  food_reheating_limit: "Above 82°C",
+  food_reheating_limit: "Above 75°C",
   food_hot_holding_limit: "Above 63°C",
   food_temperature_rules: JSON.stringify(DEFAULT_KITCHEN_TEMPERATURE_RULES),
   food_cold_units: "",
@@ -144,12 +154,13 @@ const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_show_sous_vide: "true",
 };
 
-const FOOD_JURISDICTIONS = ["scotland", "england_wales"] as const;
-type FoodJurisdiction = (typeof FOOD_JURISDICTIONS)[number];
-const REHEATING_LIMIT_BY_JURISDICTION: Record<FoodJurisdiction, string> = {
-  scotland: "Above 82°C",
-  england_wales: "Above 75°C",
-};
+// Diary label keys a country's guidance supplies when the scope has not saved
+// its own. Reheating has its own, older precedence (see resolveDiaryLimits).
+const GUIDANCE_LABEL_KEYS = {
+  food_cooking_limit: "cooking",
+  food_cooling_limit: "cooling",
+  food_hot_holding_limit: "hotHolding",
+} as const;
 
 const DIARY_MERGE_FIELDS = [
   "deliveries",
@@ -253,10 +264,10 @@ function mergeStaleDiaryUpdate(
   return conflicts.length > 0 ? { ok: false, fields: conflicts } : { ok: true, updates };
 }
 
+/** The standard reheating label of a jurisdiction; unknown values read as
+ *  Scotland's, as they always have. */
 function reheatingLimitForJurisdiction(value: string | null | undefined): string {
-  return REHEATING_LIMIT_BY_JURISDICTION[
-    value as FoodJurisdiction
-  ] ?? REHEATING_LIMIT_BY_JURISDICTION.scotland;
+  return kitchenTemperatureGuidance(value).labels.reheating;
 }
 
 // ── Per-site override support ─────────────────────────────────────────────────
@@ -285,7 +296,7 @@ async function siteBelongsToClient(siteId: number, clientId: number, departmentI
     .where(and(
       eq(sitesTable.id, siteId),
       eq(sitesTable.clientId, clientId),
-      ...(departmentId != null ? [or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))] : []),
+      ...(departmentId != null ? [sitesTableVisibleTo(departmentId)] : []),
     ))
     .limit(1);
   return !!row;
@@ -376,8 +387,8 @@ function validateConfigPatch(
         out[key] = JSON.stringify(result.data);
       } catch { return { error: "Temperature rules must be valid JSON" }; }
     } else if (key === "food_jurisdiction") {
-      if (!(FOOD_JURISDICTIONS as readonly string[]).includes(raw)) {
-        return { error: `${key} must be "scotland" or "england_wales"` };
+      if (!isFoodJurisdiction(raw)) {
+        return { error: `${key} must be one of: ${FOOD_JURISDICTIONS.join(", ")}` };
       }
       out[key] = raw;
     } else if (key === "food_cold_units") {
@@ -443,7 +454,10 @@ router.get("/config", requireAuth, async (req, res) => {
     if (!clientStored.has("food_show_cooling")) config.food_show_cooling = config.food_show_hot_temperature;
     if (!clientStored.has("food_show_reheating")) config.food_show_reheating = config.food_show_hot_temperature;
   }
-  if (clientStored.has("food_jurisdiction") && !clientStored.has("food_reheating_limit")) {
+  if (!clientStored.has("food_jurisdiction")) {
+    config.food_jurisdiction = await defaultFoodJurisdiction(clientId);
+  }
+  if (!clientStored.has("food_reheating_limit")) {
     config.food_reheating_limit = reheatingLimitForJurisdiction(config.food_jurisdiction);
   }
 
@@ -466,12 +480,14 @@ router.get("/config", requireAuth, async (req, res) => {
     if (siteJurisdictionOverride && !siteReheatingOverride) {
       config.food_reheating_limit = reheatingLimitForJurisdiction(config.food_jurisdiction);
     }
+    applyGuidanceLabels(config, clientStored, siteOverrides);
     if (!clientStored.has("food_temperature_rules") && !siteOverrides.includes("food_temperature_rules")) {
       config.food_temperature_rules = JSON.stringify(parseKitchenTemperatureRules(null, config.food_jurisdiction));
     }
     return res.json({ ...config, _siteOverrides: siteOverrides });
   }
 
+  applyGuidanceLabels(config, clientStored, []);
   if (!clientStored.has("food_temperature_rules")) {
     config.food_temperature_rules = JSON.stringify(parseKitchenTemperatureRules(null, config.food_jurisdiction));
   }
@@ -505,6 +521,14 @@ router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, 
     validated.values.food_reheating_limit = reheatingLimitForJurisdiction(
       validated.values.food_jurisdiction,
     );
+  }
+  // Clearing a jurisdiction likewise clears the limit it selected, so the
+  // scope goes back to the inherited jurisdiction's target.
+  if (
+    validated.clears.includes("food_jurisdiction")
+    && !Object.prototype.hasOwnProperty.call(rawUpdates, "food_reheating_limit")
+  ) {
+    validated.clears.push("food_reheating_limit");
   }
 
   const storageKeyOf = (baseKey: string) =>
@@ -580,24 +604,54 @@ router.delete("/config", requireAuth, requireClientAdmin, denyViewers, async (re
   res.json({ ...DEFAULT_CONFIG });
 });
 
-/** Resolve the configured jurisdiction for a diary scope. Site-level settings
- * take precedence over the client-level setting, matching GET /config. */
-async function resolveReheatingLimit(
+/** Labels nobody saved follow the effective jurisdiction's guidance, the same
+ * way unsaved temperature rules do. The UK labels equal DEFAULT_CONFIG's. */
+function applyGuidanceLabels(config: Record<string, string>, clientStored: Set<string>, siteOverrides: string[]) {
+  const labels = kitchenTemperatureGuidance(config.food_jurisdiction).labels;
+  for (const [key, label] of Object.entries(GUIDANCE_LABEL_KEYS)) {
+    if (!clientStored.has(key) && !siteOverrides.includes(key)) config[key] = labels[label];
+  }
+}
+
+type DiaryLimits = { cookingLimit: string; coolingLimit: string; reheatingLimit: string; hotHoldingLimit: string };
+
+/** Resolve the limit labels a new diary record in this scope is stamped with,
+ * in the same order GET /config uses. Reheating: a site's own limit, else the
+ * standard limit of the site's jurisdiction, else the client's saved limit,
+ * else the standard limit of the client's (or default) jurisdiction. Other
+ * labels: the site's, else the client's, else the effective jurisdiction's
+ * guidance. A label the caller supplies always wins. */
+async function resolveDiaryLimits(
   clientId: number,
   siteId: number | null,
-  requestedLimit?: string,
-): Promise<string> {
-  if (requestedLimit !== undefined) return requestedLimit;
-
+  requested: Partial<DiaryLimits> = {},
+): Promise<DiaryLimits> {
   const rows = await db
     .select({ key: appSettingsTable.key, value: appSettingsTable.value })
     .from(appSettingsTable)
     .where(eq(appSettingsTable.clientId, clientId));
-  const clientJurisdiction = rows.find((row) => row.key === "food_jurisdiction")?.value;
-  const siteJurisdiction = siteId === null
-    ? undefined
-    : rows.find((row) => row.key === siteKeyFor(siteId, "food_jurisdiction"))?.value;
-  return reheatingLimitForJurisdiction(siteJurisdiction ?? clientJurisdiction);
+  const stored = (key: string) => rows.find((row) => row.key === key)?.value ?? undefined;
+  const siteStored = (key: string) => siteId === null ? undefined : stored(siteKeyFor(siteId, key));
+  const jurisdiction = siteStored("food_jurisdiction")
+    ?? stored("food_jurisdiction")
+    ?? await defaultFoodJurisdiction(clientId);
+  const labels = kitchenTemperatureGuidance(jurisdiction).labels;
+  const label = (key: keyof typeof GUIDANCE_LABEL_KEYS) =>
+    siteStored(key) ?? stored(key) ?? labels[GUIDANCE_LABEL_KEYS[key]];
+
+  let reheatingLimit = requested.reheatingLimit ?? siteStored("food_reheating_limit");
+  if (reheatingLimit === undefined) {
+    const siteJurisdiction = siteStored("food_jurisdiction");
+    reheatingLimit = siteJurisdiction !== undefined
+      ? reheatingLimitForJurisdiction(siteJurisdiction)
+      : stored("food_reheating_limit") ?? reheatingLimitForJurisdiction(jurisdiction);
+  }
+  return {
+    cookingLimit: requested.cookingLimit ?? label("food_cooking_limit"),
+    coolingLimit: requested.coolingLimit ?? label("food_cooling_limit"),
+    reheatingLimit,
+    hotHoldingLimit: requested.hotHoldingLimit ?? label("food_hot_holding_limit"),
+  };
 }
 
 // Drizzle condition selecting the right diary scope: a specific site when
@@ -623,6 +677,150 @@ async function resolveDiarySiteId(
   }
   return site.siteId;
 }
+
+// ── Non-operating (closed) days ───────────────────────────────────────────────
+// A closed day is not a missing diary day. Closures are scoped like the diary
+// (NULL = whole-organisation diary) and the scopes are independent. A day with
+// a diary record always counts as operating, whatever closure exists.
+type ClosedDay = {
+  id: number;
+  date: string;
+  reason: string;
+  createdAt: string;
+  createdByName: string | null;
+  /** Recorded after the day itself, so inspectors can tell planned closures
+   *  from ones added afterwards. */
+  addedAfterDay: boolean;
+};
+
+async function loadClosedDays(
+  clientId: number,
+  siteId: number | null,
+  from: string,
+  to: string,
+): Promise<Map<string, ClosedDay>> {
+  const scope = siteId === null ? sql`c.site_id IS NULL` : sql`c.site_id = ${siteId}`;
+  const result = await db.execute(sql`
+    SELECT c.id, c.closed_date::text AS date, c.reason, c.created_at, u.name AS created_by_name,
+      c.created_at::date > c.closed_date AS added_after_day
+    FROM kitchen_closed_days c
+    LEFT JOIN users u ON u.id = c.created_by
+    WHERE c.client_id = ${clientId} AND ${scope} AND c.removed_at IS NULL
+      AND c.closed_date >= ${from} AND c.closed_date <= ${to}
+    ORDER BY c.closed_date
+  `);
+  const rows = result.rows as Array<{
+    id: number; date: string; reason: string; created_at: string | Date;
+    created_by_name: string | null; added_after_day: boolean;
+  }>;
+  return new Map(rows.map((row) => [row.date, {
+    id: Number(row.id),
+    date: row.date,
+    reason: row.reason,
+    createdAt: new Date(row.created_at).toISOString(),
+    createdByName: row.created_by_name,
+    addedAfterDay: !!row.added_after_day,
+  }]));
+}
+
+const isCalendarDate = (value: unknown): value is string => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const millis = Date.parse(`${value}T00:00:00Z`);
+  return !Number.isNaN(millis) && new Date(millis).toISOString().slice(0, 10) === value;
+};
+const addDays = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+
+// GET /api/food-safety/closed-days?from=YYYY-MM-DD&to=YYYY-MM-DD[&siteId=N]
+router.get("/closed-days", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  const { from, to } = req.query as { from?: string; to?: string };
+  if (!isCalendarDate(from) || !isCalendarDate(to) || from > to || to > addDays(from, 366)) {
+    return void res.status(400).json({ error: "from and to (YYYY-MM-DD) are required, at most 367 days apart" });
+  }
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+  const closed = await loadClosedDays(clientId, siteId, from, to);
+  res.json({ from, to, siteId, closedDays: [...closed.values()] });
+});
+
+const closedDaysSchema = z.object({
+  from: z.string().refine(isCalendarDate),
+  to: z.string().refine(isCalendarDate),
+  reason: z.string().trim().min(1).max(200),
+}).strict();
+
+// POST /api/food-safety/closed-days[?siteId=N] — admin-only. Marks every day
+// from..to as not operating for this diary scope. Refuses days that already
+// have a diary record (they operated); days already closed are left as they are.
+router.post("/closed-days", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  const parsed = closedDaysSchema.safeParse(req.body);
+  if (!parsed.success || parsed.data.from > parsed.data.to || parsed.data.to > addDays(parsed.data.from, 366)) {
+    return void res.status(400).json({ error: "Give a reason and a from/to date range of at most 367 days" });
+  }
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+  const { from, to, reason } = parsed.data;
+
+  const recorded = await db
+    .select({ recordDate: foodSafetyRecordsTable.recordDate })
+    .from(foodSafetyRecordsTable)
+    .where(and(
+      eq(foodSafetyRecordsTable.clientId, clientId),
+      sql`${foodSafetyRecordsTable.recordDate} >= ${from}`,
+      sql`${foodSafetyRecordsTable.recordDate} <= ${to}`,
+      siteScopeCond(siteId),
+    ));
+  if (recorded.length > 0) {
+    return void res.status(409).json({
+      error: "These days already have a diary record, so they cannot be marked closed",
+      code: "KITCHEN_DAY_HAS_RECORD",
+      dates: recorded.map((row) => row.recordDate).sort(),
+    });
+  }
+
+  const userId = req.currentUser!.id;
+  const created: string[] = [];
+  for (let date = from; date <= to; date = addDays(date, 1)) {
+    const conflict = siteId === null
+      ? sql`ON CONFLICT (client_id, closed_date) WHERE site_id IS NULL AND removed_at IS NULL DO NOTHING`
+      : sql`ON CONFLICT (client_id, site_id, closed_date) WHERE site_id IS NOT NULL AND removed_at IS NULL DO NOTHING`;
+    const inserted = await db.execute(sql`
+      INSERT INTO kitchen_closed_days (client_id, site_id, closed_date, reason, created_by)
+      VALUES (${clientId}, ${siteId}, ${date}, ${reason}, ${userId})
+      ${conflict}
+      RETURNING id
+    `);
+    if (inserted.rows.length) created.push(date);
+  }
+  res.status(201).json({ siteId, created });
+});
+
+// DELETE /api/food-safety/closed-days/:id — admin-only. The closure stays in
+// the table (removed_at/removed_by) and in the audit log.
+router.delete("/closed-days/:id", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return void res.status(400).json({ error: "Invalid id" });
+  const found = await db.execute(sql`
+    SELECT site_id FROM kitchen_closed_days
+    WHERE id = ${id} AND client_id = ${clientId} AND removed_at IS NULL
+  `);
+  const row = found.rows[0] as { site_id: number | null } | undefined;
+  if (!row) return void res.status(404).json({ error: "Not found" });
+  if (row.site_id !== null && !(await siteBelongsToClient(Number(row.site_id), clientId, getActiveDepartmentId(req)))) {
+    return void res.status(404).json({ error: "Not found" });
+  }
+  await db.execute(sql`
+    UPDATE kitchen_closed_days SET removed_at = now(), removed_by = ${req.currentUser!.id}
+    WHERE id = ${id} AND client_id = ${clientId} AND removed_at IS NULL
+  `);
+  res.json({ ok: true });
+});
 
 // GET /api/food-safety/mobile-entries/:entryId?recordDate=YYYY-MM-DD[&siteId=N]
 // Whether the server has already applied a device entry for this user. The
@@ -745,13 +943,17 @@ router.get("/summary", requireAuth, async (req, res) => {
     ));
 
   const recordsByDate = new Map(records.map((record) => [record.recordDate, record]));
+  const closedDays = await loadClosedDays(clientId, siteId, firstDate, lastDate);
   const days = Array.from({ length: daysInMonth }, (_, index) => {
     const date = `${monthPrefix}-${String(index + 1).padStart(2, "0")}`;
     const record = recordsByDate.get(date);
+    const closure = record ? undefined : closedDays.get(date);
     return {
       date,
       hasRecord: !!record,
       submitted: !!record?.submittedAt,
+      nonOperating: !!closure,
+      closure: closure ?? null,
     };
   });
 
@@ -804,17 +1006,21 @@ router.get("/missing-dates", requireAuth, async (req, res) => {
     .filter((record) => !record.submittedAt)
     .map((record) => record.recordDate)
     .sort();
+  const closedDays = await loadClosedDays(clientId, siteId, from, to);
   const missingDates: string[] = [];
+  const nonOperatingDates: string[] = [];
   for (
     let day = fromMillis;
     day <= toMillis;
     day += 86400000
   ) {
     const date = new Date(day).toISOString().slice(0, 10);
-    if (!submittedDates.has(date) && !draftDates.includes(date)) missingDates.push(date);
+    if (submittedDates.has(date) || draftDates.includes(date)) continue;
+    if (closedDays.has(date)) nonOperatingDates.push(date);
+    else missingDates.push(date);
   }
 
-  res.json({ from, to, siteId, missingDates, draftDates });
+  res.json({ from, to, siteId, missingDates, draftDates, nonOperatingDates });
 });
 
 // POST /api/food-safety[?siteId=N]
@@ -832,7 +1038,10 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const fingerprint = submissionFingerprint({ siteId, data });
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  const reheatingLimit = await resolveReheatingLimit(clientId, siteId, data.reheatingLimit);
+  const limits = await resolveDiaryLimits(clientId, siteId, {
+    cookingLimit: data.cookingLimit, coolingLimit: data.coolingLimit,
+    reheatingLimit: data.reheatingLimit, hotHoldingLimit: data.hotHoldingLimit,
+  });
 
   // Check if record already exists for this date within the same diary scope.
   const [existing] = await db
@@ -867,10 +1076,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       reheating: data.reheating ?? [],
       hotHolding: data.hotHolding ?? [],
       sousVide: data.sousVide ?? [],
-      cookingLimit: data.cookingLimit ?? "Above 75°C (10 seconds)",
-      coolingLimit: data.coolingLimit ?? "8°C within 90 minutes",
-      reheatingLimit,
-      hotHoldingLimit: data.hotHoldingLimit ?? "Above 63°C",
+      ...limits,
       correctives: data.correctives,
       managerSignature: data.managerSignature,
       performedBy: performer.performedBy,
@@ -946,43 +1152,27 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
     ...(recordedAt ? { _recordedAt: recordedAt } : {}),
   };
   const rowJson = JSON.stringify(storedRow);
-  const userId = (req.session as any).userId ?? null;
-  const reheatingLimit = section === "reheating"
-    ? await resolveReheatingLimit(clientId, siteId)
-    : undefined;
+  const userId = req.currentUser?.id ?? null;
+  // Stamp the scope's limits whichever section opens the day, so a diary
+  // started with a delivery does not fall back to the column defaults.
+  const limits = await resolveDiaryLimits(clientId, siteId);
 
   const outcome = await db.transaction(async tx => {
   // Ensure the day's record exists for this diary scope (ignore the race where
   // another writer creates it first), then append in a single UPDATE. The
   // ON CONFLICT target uses the matching partial unique index for the scope.
   if (siteId === null) {
-    if (reheatingLimit !== undefined) {
-      await tx.execute(sql`
-        INSERT INTO food_safety_records (client_id, record_date, reheating_limit, created_by)
-        VALUES (${clientId}, ${recordDate}, ${reheatingLimit}, ${userId})
-        ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
-      `);
-    } else {
-      await tx.execute(sql`
-        INSERT INTO food_safety_records (client_id, record_date, created_by)
-        VALUES (${clientId}, ${recordDate}, ${userId})
-        ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
-      `);
-    }
+    await tx.execute(sql`
+      INSERT INTO food_safety_records (client_id, record_date, cooking_limit, cooling_limit, reheating_limit, hot_holding_limit, created_by)
+      VALUES (${clientId}, ${recordDate}, ${limits.cookingLimit}, ${limits.coolingLimit}, ${limits.reheatingLimit}, ${limits.hotHoldingLimit}, ${userId})
+      ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
+    `);
   } else {
-    if (reheatingLimit !== undefined) {
-      await tx.execute(sql`
-        INSERT INTO food_safety_records (client_id, site_id, record_date, reheating_limit, created_by)
-        VALUES (${clientId}, ${siteId}, ${recordDate}, ${reheatingLimit}, ${userId})
-        ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
-      `);
-    } else {
-      await tx.execute(sql`
-        INSERT INTO food_safety_records (client_id, site_id, record_date, created_by)
-        VALUES (${clientId}, ${siteId}, ${recordDate}, ${userId})
-        ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
-      `);
-    }
+    await tx.execute(sql`
+      INSERT INTO food_safety_records (client_id, site_id, record_date, cooking_limit, cooling_limit, reheating_limit, hot_holding_limit, created_by)
+      VALUES (${clientId}, ${siteId}, ${recordDate}, ${limits.cookingLimit}, ${limits.coolingLimit}, ${limits.reheatingLimit}, ${limits.hotHoldingLimit}, ${userId})
+      ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
+    `);
   }
 
   const scopeCond = siteId === null ? sql`site_id IS NULL` : sql`site_id = ${siteId}`;
@@ -1114,6 +1304,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
           hotTemperature: append(current.hotTemperature, mobileLog.hotTemperature),
           cooling: append(current.cooling, mobileLog.cooling),
           reheating: append(current.reheating, mobileLog.reheating),
+          sousVide: append(current.sousVide, mobileLog.sousVide),
           ...(mobileLog.correctives !== undefined ? { correctives: mobileLog.correctives } : {}),
           ...(mobileEntryId ? {
             mobileSubmissionReceipts: current.mobileSubmissionReceipts.concat({
@@ -1213,52 +1404,167 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
 });
 
 // ── Status — due/overdue per check type ───────────────────────────────────────
+// GET /api/food-safety/status[?siteId=N]
+// Only finished records count: a submitted diary, a submitted weekly review, a
+// submitted probe check that passed, and a submitted cleaning log with every
+// task done. A draft or a part-done log is not a completed check.
+// With siteId: the diary counts only that site's diary, matching the dashboard
+// summary; weekly reviews, probe checks and cleaning logs count that site's
+// records plus client-wide ones (site_id IS NULL), which cover every site, as
+// do client-wide cleaning tasks.
+// Without siteId: each site the caller can see is evaluated as above and the
+// worst site is reported per check type (with how many sites are affected), so
+// one site's diary cannot make another look up to date. A business without
+// sites is evaluated on its whole-business records.
 router.get("/status", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
 
   const MS_DAY = 86400000;
-  const todayDays = Math.floor(Date.now() / MS_DAY);
-  const toUtcDays = (iso: string) => Math.floor(new Date(iso).getTime() / MS_DAY);
+  const todayDays = Math.floor(Date.parse(`${await getAccountToday(clientId)}T00:00:00Z`) / MS_DAY);
+  const toUtcDays = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / MS_DAY);
+  type KitchenStatus = "ok" | "due_soon" | "overdue" | "never";
 
-  function computeStatus(lastDate: string | null, frequencyDays: number) {
-    if (!lastDate) return { lastDate: null, dueDate: null, status: "never" as const };
-    const dueDays = toUtcDays(lastDate) + frequencyDays;
+  // coveredThrough: the last day that needs no record (the last record, or
+  // closed days straight after it). Defaults to the last record.
+  function computeStatus(lastDate: string | null, frequencyDays: number, coveredThrough: string | null = lastDate) {
+    if (!lastDate) return { lastDate: null, dueDate: null, status: "never" as KitchenStatus };
+    const dueDays = toUtcDays(coveredThrough ?? lastDate) + frequencyDays;
     const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);
     const daysUntilDue = dueDays - todayDays;
     const dueSoonWindow = Math.max(1, Math.ceil(frequencyDays * 0.2));
-    const status = daysUntilDue < 0 ? "overdue" : daysUntilDue <= dueSoonWindow ? "due_soon" : "ok";
+    const status: KitchenStatus = daysUntilDue < 0 ? "overdue" : daysUntilDue <= dueSoonWindow ? "due_soon" : "ok";
     return { lastDate, dueDate, status };
   }
 
+  // Units: the selected site, every visible site, or the whole business (null).
+  let units: { id: number | null; name: string | null }[];
+  if (siteId !== null) {
+    units = [{ id: siteId, name: null }];
+  } else {
+    const departmentId = getActiveDepartmentId(req);
+    const siteRows = await db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable)
+      .where(and(
+        eq(sitesTable.clientId, clientId),
+        departmentId === null ? undefined : sitesTableVisibleTo(departmentId),
+      ))
+      .orderBy(sitesTable.name, sitesTable.id);
+    units = siteRows.length ? siteRows : [{ id: null, name: null }];
+  }
+  const siteIds = units.flatMap(unit => unit.id === null ? [] : [unit.id]);
+  const idList = sql.join(siteIds.map(id => sql`${id}`), sql`, `);
+  // The diary is per site; the other records also count whole-business rows.
+  const diaryScope = siteIds.length ? sql`AND site_id IN (${idList})` : sql`AND site_id IS NULL`;
+  const checkScope = siteIds.length ? sql`AND (site_id IN (${idList}) OR site_id IS NULL)` : sql`AND site_id IS NULL`;
+  const latestBySite = (table: string, column: string, extra = sql``, scope = checkScope) => db.execute(sql`
+    SELECT site_id, MAX(${sql.raw(column)})::text AS last_date
+    FROM ${sql.raw(table)} WHERE client_id = ${clientId} ${extra} ${scope}
+    GROUP BY site_id
+  `);
+
+  // Only finished records count: a draft, or a cleaning log with tasks not
+  // done, leaves the check red.
+  const cleaningComplete = sql`AND submitted_at IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(completions) AS c WHERE COALESCE((c->>'done')::boolean, false) = false)`;
   const [diary, weekly, probe, cleanDaily, cleanWeekly, cleanMonthly, taskCountsRes] = await Promise.all([
-    db.execute(sql`SELECT MAX(record_date)::text AS last_date FROM food_safety_records WHERE client_id = ${clientId}`),
-    db.execute(sql`SELECT MAX(week_commencing)::text AS last_date FROM kitchen_weekly_records WHERE client_id = ${clientId}`),
-    db.execute(sql`SELECT MAX(check_date)::text AS last_date FROM kitchen_probe_checks WHERE client_id = ${clientId}`),
-    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'daily'`),
-    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'weekly'`),
-    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'monthly'`),
+    latestBySite("food_safety_records", "record_date", sql`AND submitted_at IS NOT NULL`, diaryScope),
+    latestBySite("kitchen_weekly_records", "week_commencing", sql`AND submitted_at IS NOT NULL`),
+    // A failed probe check raises an action; the check stays due until a probe passes.
+    latestBySite("kitchen_probe_checks", "check_date", sql`AND submitted_at IS NOT NULL AND overall_result = 'pass'`),
+    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'daily' ${cleaningComplete}`),
+    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'weekly' ${cleaningComplete}`),
+    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'monthly' ${cleaningComplete}`),
     db.execute(sql`
-      SELECT frequency, COUNT(*)::int AS task_count
+      SELECT site_id, frequency, COUNT(*)::int AS task_count
       FROM kitchen_cleaning_tasks
-      WHERE client_id = ${clientId} AND active = true
-      GROUP BY frequency
+      WHERE client_id = ${clientId} AND active = true ${checkScope}
+      GROUP BY site_id, frequency
     `),
   ]);
 
-  const taskCounts = Object.fromEntries(
-    (taskCountsRes.rows as any[]).map((r: any) => [r.frequency, Number(r.task_count)])
+  // Closed (non-operating) days in each diary scope, for the daily diary only:
+  // a closure straight after the last diary day is not an overdue day.
+  const today = await getAccountToday(clientId);
+  const closedRows = await db.execute(sql`
+    SELECT site_id, closed_date::text AS closed_date FROM kitchen_closed_days
+    WHERE client_id = ${clientId} AND removed_at IS NULL
+      AND closed_date > ${new Date((todayDays - 400) * MS_DAY).toISOString().slice(0, 10)}
+      AND closed_date <= ${today} ${diaryScope}
+  `);
+  const closedByUnit = new Map<string, Set<string>>();
+  for (const row of closedRows.rows as { site_id: number | null; closed_date: string }[]) {
+    const key = row.site_id == null ? "none" : String(row.site_id);
+    if (!closedByUnit.has(key)) closedByUnit.set(key, new Set());
+    closedByUnit.get(key)!.add(row.closed_date);
+  }
+  const diaryCoveredThrough = (unitId: number | null, lastDate: string | null) => {
+    const closed = closedByUnit.get(unitId === null ? "none" : String(unitId));
+    if (!lastDate || !closed) return lastDate;
+    let covered = lastDate;
+    for (;;) {
+      const next = new Date((toUtcDays(covered) + 1) * MS_DAY).toISOString().slice(0, 10);
+      if (next > today || !closed.has(next)) return covered;
+      covered = next;
+    }
+  };
+
+  const byKey = (result: { rows: unknown[] }) => new Map(
+    (result.rows as { site_id: number | null; last_date: string | null }[])
+      .map(row => [row.site_id == null ? "none" : String(row.site_id), row.last_date]),
   );
+  // A site's latest record is its own or a whole-business one, whichever is later.
+  const latestFor = (map: Map<string, string | null>, unitId: number | null, includeWholeBusiness: boolean) => {
+    const own = unitId === null ? null : map.get(String(unitId)) ?? null;
+    const whole = includeWholeBusiness || unitId === null ? map.get("none") ?? null : null;
+    return own && whole ? (own > whole ? own : whole) : own ?? whole;
+  };
+  const tasks = (taskCountsRes.rows as { site_id: number | null; frequency: string; task_count: number }[]);
+  const taskCount = (unitId: number | null, frequency: string) => tasks
+    .filter(row => row.frequency === frequency && (row.site_id == null || (unitId !== null && Number(row.site_id) === unitId)))
+    .reduce((total, row) => total + Number(row.task_count), 0);
 
-  const statuses: any[] = [
-    { checkType: "daily_diary",   frequencyDays: 1,  ...computeStatus((diary.rows[0] as any)?.last_date  ?? null, 1) },
-    { checkType: "weekly_review", frequencyDays: 7,  ...computeStatus((weekly.rows[0] as any)?.last_date ?? null, 7) },
-    { checkType: "probe_check",   frequencyDays: 30, ...computeStatus((probe.rows[0] as any)?.last_date  ?? null, 30) },
+  const measures = [
+    { checkType: "daily_diary", frequencyDays: 1, map: byKey(diary), wholeBusiness: false },
+    { checkType: "weekly_review", frequencyDays: 7, map: byKey(weekly), wholeBusiness: true },
+    { checkType: "probe_check", frequencyDays: 30, map: byKey(probe), wholeBusiness: true },
+    { checkType: "cleaning_daily", frequencyDays: 1, map: byKey(cleanDaily), wholeBusiness: true, tasks: "daily" },
+    { checkType: "cleaning_weekly", frequencyDays: 7, map: byKey(cleanWeekly), wholeBusiness: true, tasks: "weekly" },
+    { checkType: "cleaning_monthly", frequencyDays: 30, map: byKey(cleanMonthly), wholeBusiness: true, tasks: "monthly" },
   ];
+  const severity = (status: KitchenStatus) => status === "overdue" ? 3 : status === "never" ? 2 : status === "due_soon" ? 1 : 0;
 
-  if ((taskCounts["daily"]   ?? 0) > 0) statuses.push({ checkType: "cleaning_daily",   frequencyDays: 1,  ...computeStatus((cleanDaily.rows[0] as any)?.last_date   ?? null, 1) });
-  if ((taskCounts["weekly"]  ?? 0) > 0) statuses.push({ checkType: "cleaning_weekly",  frequencyDays: 7,  ...computeStatus((cleanWeekly.rows[0] as any)?.last_date  ?? null, 7) });
-  if ((taskCounts["monthly"] ?? 0) > 0) statuses.push({ checkType: "cleaning_monthly", frequencyDays: 30, ...computeStatus((cleanMonthly.rows[0] as any)?.last_date ?? null, 30) });
+  const statuses: any[] = [];
+  for (const measure of measures) {
+    const perUnit = units
+      .filter(unit => !measure.tasks || taskCount(unit.id, measure.tasks) > 0)
+      .map(unit => {
+        const lastDate = latestFor(measure.map, unit.id, measure.wholeBusiness);
+        const covered = measure.checkType === "daily_diary" ? diaryCoveredThrough(unit.id, lastDate) : lastDate;
+        return { unit, ...computeStatus(lastDate, measure.frequencyDays, covered) };
+      });
+    if (!perUnit.length) continue;
+    const worst = perUnit.reduce((current, row) => {
+      const difference = severity(row.status) - severity(current.status);
+      if (difference !== 0) return difference > 0 ? row : current;
+      return (row.dueDate ?? "") < (current.dueDate ?? "") ? row : current;
+    });
+    statuses.push({
+      checkType: measure.checkType,
+      frequencyDays: measure.frequencyDays,
+      lastDate: worst.lastDate,
+      dueDate: worst.dueDate,
+      status: worst.status,
+      ...(siteId === null && siteIds.length ? {
+        siteId: worst.unit.id,
+        siteName: worst.unit.name,
+        siteCount: perUnit.length,
+        // Sites that are overdue or have never recorded it.
+        sitesAffected: perUnit.filter(row => row.status === "overdue" || row.status === "never").length,
+      } : {}),
+    });
+  }
 
   res.json(statuses);
 });

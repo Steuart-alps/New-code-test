@@ -18,7 +18,10 @@ import {
 import {
   SAFE_TRACK_REMINDER_FREQUENCY_SETTING,
   SAFE_TRACK_REMINDER_TIME_SETTING,
+  getSafeTrackReminderLastSentAt,
 } from "../lib/safeTrackAckReminders";
+import { REQUIRE_TWO_FACTOR_SETTING } from "../lib/twoFactorPolicy";
+import { isAllowedTenantSender, sanitizeSenderName } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -53,7 +56,66 @@ const SETTING_KEYS = [
   // Account-level warning only; reaching it never blocks or deletes uploads.
   "storageWarningThresholdBytes",
   ACCOUNT_TIMEZONE_SETTING,
+  // "false" lets login accounts in this business skip the authenticator app;
+  // absent or "true" keeps two-factor authentication mandatory.
+  REQUIRE_TWO_FACTOR_SETTING,
 ] as const;
+
+// Secrets are write-only: GET /settings reports only whether one is set.
+const SECRET_SETTING_KEYS = new Set<string>(["resendApiKey"]);
+
+// What staff and viewers may read. Managers (client admins and consultants)
+// read every non-secret setting; everyone else only needs these to work.
+const STAFF_READABLE_SETTING_KEYS = new Set<string>([
+  "companyName",
+  "defaultLeadTimeDays",
+  CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING,
+  "maintenanceEmail",
+  "notificationEmail",
+  "fixTrackStaleDays",
+  SAFE_TRACK_REMINDER_FREQUENCY_SETTING,
+  SAFE_TRACK_REMINDER_TIME_SETTING,
+  ACCOUNT_TIMEZONE_SETTING,
+  REQUIRE_TWO_FACTOR_SETTING,
+]);
+
+/**
+ * The settings response: only the known keys (other app_settings rows such as
+ * provider domain ids and per-site overrides are served by their own routes),
+ * never a secret value, and a reduced set for staff and viewers.
+ */
+function settingsResponse(
+  rows: Array<{ key: string; value: string | null }>,
+  role: string,
+): Record<string, string | boolean | null> {
+  const manager = role === "client_admin" || role === "consultant";
+  const stored = new Map(rows.map((row) => [row.key, row.value ?? null]));
+  const settings: Record<string, string | boolean | null> = {};
+  for (const key of SETTING_KEYS) {
+    if (SECRET_SETTING_KEYS.has(key)) continue;
+    settings[key] = manager || STAFF_READABLE_SETTING_KEYS.has(key) ? stored.get(key) ?? null : null;
+  }
+  settings.resendApiKey = null;
+  settings.resendApiKeySet = manager ? !!stored.get("resendApiKey")?.trim() : false;
+  return settings;
+}
+
+/**
+ * Adds when the last SafeTrack reminder went out (managers only, read-only)
+ * so Settings can preview the next one without offering a send the scheduler
+ * would skip as already done.
+ */
+async function settingsWithReminderStatus(
+  clientId: number,
+  rows: Array<{ key: string; value: string | null }>,
+  role: string,
+): Promise<Record<string, string | boolean | null>> {
+  const settings = settingsResponse(rows, role);
+  const manager = role === "client_admin" || role === "consultant";
+  const lastSent = manager ? await getSafeTrackReminderLastSentAt(clientId).catch(() => null) : null;
+  settings.safeTrackReminderLastSentAt = lastSent?.toISOString() ?? null;
+  return settings;
+}
 
 async function validateTrackSummaryRouting(
   clientId: number,
@@ -108,7 +170,7 @@ async function validateTrackSummaryRouting(
       ));
     const eligibleIds = new Set(
       eligible
-        .filter((user) => user.role === "client_admin" || user.role === "client_staff")
+        .filter((user) => user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff")
         .map((user) => user.id),
     );
     if ([...requestedIds].some((id) => !eligibleIds.has(id))) {
@@ -138,14 +200,7 @@ router.get("/settings", requireAuth, async (req, res) => {
     .from(appSettingsTable)
     .where(eq(appSettingsTable.clientId, clientId));
 
-  const settings: Record<string, string | null> = {};
-  for (const key of SETTING_KEYS) {
-    settings[key] = null;
-  }
-  for (const row of rows) {
-    settings[row.key] = row.value ?? null;
-  }
-  res.json(settings);
+  res.json(await settingsWithReminderStatus(clientId, rows, req.currentUser!.role));
 });
 
 router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
@@ -219,6 +274,68 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       rawBody[ACCOUNT_TIMEZONE_SETTING] = rawTimezone.trim();
     }
   }
+  if (rawBody[REQUIRE_TWO_FACTOR_SETTING] !== undefined) {
+    const rawRequired = rawBody[REQUIRE_TWO_FACTOR_SETTING];
+    if (rawRequired !== null && rawRequired !== "true" && rawRequired !== "false") {
+      res.status(400).json({ error: "Two-factor requirement must be true or false" });
+      return;
+    }
+    req.log.info(
+      { clientId, actorId: req.currentUser!.id, required: rawRequired === "true" },
+      "Two-factor requirement changed",
+    );
+  }
+  // The provider key is never sent back to the browser, so the settings form
+  // submits an empty value when it is left untouched: keep the stored key.
+  // null removes it.
+  if (rawBody.resendApiKey === "" || (typeof rawBody.resendApiKey === "string" && rawBody.resendApiKey.trim() === "")) {
+    delete rawBody.resendApiKey;
+  }
+  if (rawBody.smtpFromName !== undefined) {
+    const rawName = rawBody.smtpFromName;
+    if (rawName === null || rawName.trim() === "") {
+      rawBody.smtpFromName = null;
+    } else if (/[\r\n"<>\\]/.test(rawName) || rawName.trim().length > 100) {
+      res.status(400).json({ error: "Sender name must be up to 100 characters without quotes, angle brackets or line breaks" });
+      return;
+    } else {
+      rawBody.smtpFromName = sanitizeSenderName(rawName);
+    }
+  }
+  if (rawBody.smtpFrom !== undefined) {
+    const rawFrom = rawBody.smtpFrom;
+    if (rawFrom === null || rawFrom.trim() === "") {
+      rawBody.smtpFrom = null;
+    } else {
+      // Only the business's own registered sending domain may be used (see
+      // isAllowedTenantSender), so it can never send as another business or
+      // as the platform. Checked against what is stored plus this request.
+      const current = await db
+        .select({ key: appSettingsTable.key, value: appSettingsTable.value })
+        .from(appSettingsTable)
+        .where(and(
+          eq(appSettingsTable.clientId, clientId),
+          inArray(appSettingsTable.key, ["resendDomainName", "resendApiKey", "smtpFrom"]),
+        ));
+      const senderSettings: Record<string, string | null> = {};
+      for (const row of current) senderSettings[row.key] = row.value ?? null;
+      if (rawBody.resendApiKey !== undefined) senderSettings.resendApiKey = rawBody.resendApiKey ?? null;
+      // The settings form re-submits the stored address with every save; an
+      // unchanged legacy value is kept (sending falls back to the platform
+      // address for it) rather than blocking unrelated changes.
+      const unchanged = rawFrom.trim() === (senderSettings.smtpFrom ?? "").trim();
+      if (!unchanged && !isAllowedTenantSender(rawFrom, senderSettings)) {
+        const domain = senderSettings.resendDomainName?.trim();
+        res.status(400).json({
+          error: domain
+            ? `The sender email address must be on your sending domain (${domain})`
+            : "Add your sending domain under Sender domain before choosing a sender email address",
+        });
+        return;
+      }
+      rawBody.smtpFrom = rawFrom.trim();
+    }
+  }
   if (rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] !== undefined) {
     const rawFrequency = rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING];
     if (rawFrequency === null || rawFrequency.trim() === "") {
@@ -256,10 +373,7 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     .from(appSettingsTable)
     .where(eq(appSettingsTable.clientId, clientId));
 
-  const settings: Record<string, string | null> = {};
-  for (const k of SETTING_KEYS) settings[k] = null;
-  for (const row of rows) settings[row.key] = row.value ?? null;
-  res.json(settings);
+  res.json(await settingsWithReminderStatus(clientId, rows, req.currentUser!.role));
 });
 
 export default router;

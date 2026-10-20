@@ -5,6 +5,9 @@ import { getClientId, requireClientAdmin, requireAuth, denyViewers } from "../mi
 import { appSettingsTable } from "@workspace/db/schema";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/stagedPhotoReceipts";
+import {
+  findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, stagedPhotoEntry,
+} from "../lib/clientEntryReplay";
 
 const router = Router();
 
@@ -67,6 +70,22 @@ function rows<T = any>(result: any): T[] {
   return result.rows as T[];
 }
 
+// List endpoints return camelCase keys, matching the web app's row types.
+function camelRows(result: any): Record<string, unknown>[] {
+  return rows(result).map((row) => Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase()), value]),
+  ));
+}
+
+// A supplied siteId must name one of the caller's own sites.
+async function siteBelongsToClient(siteId: unknown, clientId: number | null): Promise<boolean> {
+  if (siteId == null) return true;
+  if (!Number.isInteger(siteId)) return false;
+  return rows(await db.execute(sql`
+    SELECT id FROM sites WHERE id = ${siteId} AND client_id = ${clientId}
+  `)).length > 0;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MACHINES — fleet register
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -77,11 +96,11 @@ router.get("/machines", async (req, res) => {
     const result = await db.execute(sql`
       SELECT m.*, s.name AS site_name
       FROM green_machines m
-      LEFT JOIN sites s ON s.id = m.site_id
+      LEFT JOIN sites s ON s.id = m.site_id AND s.client_id = m.client_id
       WHERE m.client_id = ${clientId}
       ORDER BY m.active DESC, m.type, m.name
     `);
-    res.json(rows(result));
+    res.json(camelRows(result));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch machines" });
   }
@@ -93,6 +112,8 @@ router.post("/machines", requireClientAdmin, async (req, res) => {
     const { name, type, make, model, serialNo, year, regNo, siteId, notes } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: "Machine name is required" });
     if (!type) return res.status(400).json({ error: "Machine type is required" });
+    if (!(MACHINE_TYPES as readonly string[]).includes(type)) return res.status(400).json({ error: "Invalid machine type" });
+    if (!(await siteBelongsToClient(siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
     const result = await db.execute(sql`
       INSERT INTO green_machines (client_id, site_id, name, type, make, model, serial_no, year, reg_no, notes)
       VALUES (${clientId}, ${siteId ?? null}, ${name.trim()}, ${type},
@@ -226,6 +247,7 @@ router.put("/machines/:id", requireClientAdmin, async (req, res) => {
     const clientId = getClientId(req);
     const { id } = req.params;
     const { name, type, make, model, serialNo, year, regNo, siteId, active, notes } = req.body;
+    if (!(await siteBelongsToClient(siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
     const result = await db.execute(sql`
       UPDATE green_machines
       SET name = ${name?.trim()}, type = ${type}, make = ${make?.trim() ?? null},
@@ -273,7 +295,7 @@ router.get("/pre-use-checks", async (req, res) => {
       ORDER BY c.check_date DESC, c.created_at DESC
       LIMIT ${parseInt(limit, 10)}
     `);
-    res.json(rows(result));
+    res.json(camelRows(result));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch pre-use checks" });
   }
@@ -290,6 +312,8 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
+    const entry = stagedPhotoEntry(req.body);
+    if (entry === "invalid") return res.status(400).json({ error: "Invalid clientEntryId" });
 
     let parsedChecklist: Array<{ key: string; label: string; section: string; status: "ok" | "fail" | "na"; note?: string }> | null = null;
     if (checklistItems !== undefined) {
@@ -318,6 +342,10 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
     const performer = await resolveStaffRoster(clientId, operatorRosterId, operator);
     if (operatorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
+    const userId = req.currentUser!.id;
+    const prior = await findRawStoredEntry("green_pre_use_checks", clientId, entry);
+    if (entry && prior) return respondToRawStoredEntry(res, prior, userId, entry);
+
     // The checklist is the source of truth. Never persist caller-supplied
     // aliases such as "advisory" as a newly recorded observation.
     const canonicalResult = parsedChecklist
@@ -335,14 +363,16 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
         INSERT INTO green_pre_use_checks (
            client_id, machine_id, check_date, operator, operator_roster_id,
           fluid_levels_ok, tyres_ok, blades_ok, guards_ok, controls_ok, lights_ok, cleanliness_ok,
-           defect_noted, result, notes, checklist_items, fuel_level, submitted_at
+           defect_noted, result, notes, checklist_items, fuel_level, submitted_at,
+           created_by, client_entry_id, client_entry_hash
         ) VALUES (
            ${clientId}, ${machineId}, ${checkDate}, ${performer?.performedBy ?? operator?.trim() ?? null}, ${performer?.staffRosterId ?? null},
           ${fluidLevelsOk ?? null}, ${tyresOk ?? null}, ${bladesOk ?? null},
           ${guardsOk ?? null}, ${controlsOk ?? null}, ${lightsOk ?? null}, ${cleanlinessOk ?? null},
            ${parsedChecklist?.some(item => item.status === "fail") ?? defectNoted ?? false},
            ${canonicalResult}, ${notes?.trim() ?? null}, ${parsedChecklist ? JSON.stringify(parsedChecklist) : null},
-           ${fuelLevel?.trim() ?? null}, now()
+           ${fuelLevel?.trim() ?? null}, now(),
+           ${userId}, ${entry?.id ?? null}, ${entry?.hash ?? null}
         )
         RETURNING *
       `);
@@ -351,6 +381,12 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
+    // A concurrent resend of the same device entry won the insert.
+    const entry = stagedPhotoEntry(req.body);
+    if (entry && entry !== "invalid" && isUniqueViolation(err)) {
+      const raced = await findRawStoredEntry("green_pre_use_checks", getClientId(req)!, entry);
+      if (raced) return respondToRawStoredEntry(res, raced, req.currentUser!.id, entry);
+    }
     res.status(500).json({ error: "Failed to create pre-use check" });
   }
 });
@@ -447,7 +483,7 @@ router.get("/service-records", async (req, res) => {
       ORDER BY s.service_date DESC, s.created_at DESC
       LIMIT ${parseInt(limit, 10)}
     `);
-    res.json(rows(result));
+    res.json(camelRows(result));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch service records" });
   }
@@ -562,7 +598,7 @@ router.get("/defects", async (req, res) => {
         d.report_date DESC
       LIMIT ${parseInt(limit, 10)}
     `);
-    res.json(rows(result));
+    res.json(camelRows(result));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch defects" });
   }
@@ -572,7 +608,7 @@ router.post("/defects", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
-    const { machineId, reportDate, reportedBy, reportedByRosterId, description, severity, outOfService, notes, photoUploadIds } = req.body;
+    const { machineId, reportDate, reportedBy, reportedByRosterId, description, severity, outOfService, status, resolution, resolvedDate, notes, photoUploadIds } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!description?.trim()) return res.status(400).json({ error: "description is required" });
 
@@ -592,11 +628,13 @@ router.post("/defects", denyViewers, async (req, res) => {
     }, async (tx) => {
       const result = await tx.execute(sql`
         INSERT INTO green_defects (
-          client_id, machine_id, report_date, reported_by, reported_by_roster_id, description, severity, out_of_service, notes
+          client_id, machine_id, report_date, reported_by, reported_by_roster_id, description, severity, out_of_service,
+          status, resolution, resolved_date, notes
         ) VALUES (
           ${clientId}, ${machineId}, ${reportDate ?? new Date().toISOString().split("T")[0]},
           ${performer?.performedBy ?? reportedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${description.trim()},
-          ${severity ?? "minor"}, ${outOfService ?? false}, ${notes?.trim() ?? null}
+          ${severity ?? "minor"}, ${outOfService ?? false},
+          ${status ?? "open"}, ${resolution?.trim() || null}, ${resolvedDate || null}, ${notes?.trim() ?? null}
         )
         RETURNING *
       `);
@@ -665,7 +703,7 @@ router.get("/puwer-inspections", async (req, res) => {
       ORDER BY p.inspection_date DESC
       LIMIT ${parseInt(limit, 10)}
     `);
-    res.json(rows(result));
+    res.json(camelRows(result));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch PUWER inspections" });
   }
@@ -770,7 +808,7 @@ router.get("/fuel-logs", async (req, res) => {
       ORDER BY f.log_date DESC, f.created_at DESC
       LIMIT ${parseInt(limit, 10)}
     `);
-    res.json(rows(result));
+    res.json(camelRows(result));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch fuel logs" });
   }

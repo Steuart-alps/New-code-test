@@ -10,6 +10,7 @@ export type AuthTokenGetter = () => Promise<string | null> | string | null;
 
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 // ---------------------------------------------------------------------------
 // Module-level configuration
@@ -46,6 +47,24 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
 }
 
+export type CsrfTokenProvider = {
+  get: () => Promise<string | null> | string | null;
+  reset: () => void;
+};
+
+let _csrfTokenProvider: CsrfTokenProvider | null = null;
+
+/**
+ * Register a provider for the session-bound CSRF token that the API requires
+ * on cookie-authenticated POST/PUT/PATCH/DELETE requests in production. The
+ * token is sent as `X-CSRF-Token` on those requests unless an Authorization
+ * header is present (bearer requests are exempt). `reset` is called after a
+ * 401 or 403 so a stale token is not reused. Pass `null` to clear.
+ */
+export function setCsrfTokenProvider(provider: CsrfTokenProvider | null): void {
+  _csrfTokenProvider = provider;
+}
+
 let _unauthorizedHandler: (() => void) | null = null;
 
 /**
@@ -67,6 +86,50 @@ let _paymentRequiredHandler: (() => void) | null = null;
  */
 export function setPaymentRequiredHandler(handler: (() => void) | null): void {
   _paymentRequiredHandler = handler;
+}
+
+export type OverrideReasonRequest = {
+  method: string;
+  url: string;
+  /** The server's explanation, suitable for showing to the user. */
+  message: string;
+};
+
+/** Resolves to the reason the user gave, or null when they cancelled. */
+export type OverrideReasonHandler = (info: OverrideReasonRequest) => Promise<string | null>;
+
+let _overrideReasonHandler: OverrideReasonHandler | null = null;
+
+/** Header carrying an owner's reason for changing a record past its correction window. */
+export const OVERRIDE_REASON_HEADER = "X-Override-Reason";
+/** Error code the API sends (HTTP 423) when such a change needs a reason. */
+export const OVERRIDE_REASON_REQUIRED_CODE = "OVERRIDE_REASON_REQUIRED";
+
+/**
+ * Register a handler that asks the user why they are changing a record older
+ * than its correction window. When a mutation is answered 423 with code
+ * OVERRIDE_REASON_REQUIRED, the handler is called; a returned reason retries
+ * the same request once with the `X-Override-Reason` header (URI-encoded),
+ * while null leaves the original 423 error in place. Pass `null` to clear.
+ */
+export function setOverrideReasonHandler(handler: OverrideReasonHandler | null): void {
+  _overrideReasonHandler = handler;
+}
+
+/** Whether a request body can be sent a second time unchanged. */
+export function isReplayableBody(body: unknown): boolean {
+  if (body == null || typeof body === "string") return true;
+  if (typeof FormData !== "undefined" && body instanceof FormData) return true;
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) return true;
+  if (typeof Blob !== "undefined" && body instanceof Blob) return true;
+  return false;
+}
+
+/** The server's message when an error body asks for an override reason, else null. */
+export function overrideReasonMessage(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  if ((data as Record<string, unknown>).code !== OVERRIDE_REASON_REQUIRED_CODE) return null;
+  return getStringField(data, "error") ?? "This record is more than a day old. Add a reason to change it.";
 }
 
 export type ApiMutationObserver = (
@@ -378,6 +441,34 @@ async function parseSuccessBody(
   }
 }
 
+/** Whether the URL query or a JSON object body already names a clientId. */
+export function callerChoseClientId(url: string, body: unknown): boolean {
+  const queryStart = url.indexOf("?");
+  if (queryStart !== -1) {
+    const query = url.slice(queryStart + 1).split("#", 1)[0];
+    if (new URLSearchParams(query).has("clientId")) return true;
+  }
+  if (typeof body === "string" && looksLikeJson(body)) {
+    try {
+      const parsed: unknown = JSON.parse(body);
+      return Boolean(parsed) && typeof parsed === "object" && !Array.isArray(parsed)
+        && Object.prototype.hasOwnProperty.call(parsed, "clientId");
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** Adds `clientId` to a URL's query string, before any fragment. */
+export function appendClientId(url: string, clientId: number): string {
+  const hashStart = url.indexOf("#");
+  const base = hashStart === -1 ? url : url.slice(0, hashStart);
+  const hash = hashStart === -1 ? "" : url.slice(hashStart);
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}clientId=${encodeURIComponent(String(clientId))}${hash}`;
+}
+
 export async function customFetch<T = unknown>(
   input: RequestInfo | URL,
   options: CustomFetchOptions = {},
@@ -414,13 +505,27 @@ export async function customFetch<T = unknown>(
     }
   }
 
-  // Inject clientId into all GET-like requests so the API can scope results
-  if (_clientIdGetter && method === "GET") {
+  // Cookie-authenticated mutations must carry the session's CSRF token.
+  const sendsCsrfToken =
+    _csrfTokenProvider !== null &&
+    UNSAFE_METHODS.has(method) &&
+    !headers.has("authorization") &&
+    !headers.has("x-csrf-token");
+  if (sendsCsrfToken) {
+    const token = await _csrfTokenProvider!.get();
+    if (token) {
+      headers.set("x-csrf-token", token);
+    }
+  }
+
+  // Scope every request (reads and writes) to the selected business so a
+  // consultant working in another client never falls back to their home one.
+  // A clientId the caller already chose, in the URL or a JSON body, wins.
+  if (_clientIdGetter) {
     const clientId = _clientIdGetter();
-    if (clientId !== null) {
-      const rawUrl = resolveUrl(input);
-      const separator = rawUrl.includes("?") ? "&" : "?";
-      const patchedUrl = `${rawUrl}${separator}clientId=${clientId}`;
+    const rawUrl = resolveUrl(input);
+    if (clientId !== null && !callerChoseClientId(rawUrl, init.body)) {
+      const patchedUrl = appendClientId(rawUrl, clientId);
       if (typeof input === "string") input = patchedUrl;
       else if (isUrl(input)) input = new URL(patchedUrl);
       else input = new Request(patchedUrl, input as Request);
@@ -438,9 +543,41 @@ export async function customFetch<T = unknown>(
     }
   }
 
-  const response = await fetch(input, { ...init, method, headers, credentials: "include" });
+  let response = await fetch(input, { ...init, method, headers, credentials: "include" });
+
+  // An owner changing a record past its correction window must give a
+  // reason: ask once, then resend the same request with it.
+  if (
+    response.status === 423 &&
+    UNSAFE_METHODS.has(method) &&
+    _overrideReasonHandler !== null &&
+    !isRequest(input) &&
+    isReplayableBody(init.body)
+  ) {
+    const lockedData = await parseErrorBody(response, method);
+    const message = overrideReasonMessage(lockedData);
+    let reason: string | null = null;
+    if (message) {
+      try {
+        reason = (await _overrideReasonHandler({ method, url: requestInfo.url, message }))?.trim() || null;
+      } catch {
+        reason = null;
+      }
+    }
+    if (!reason) throw new ApiError(response, lockedData, requestInfo);
+    const retryHeaders = new Headers(headers);
+    retryHeaders.set(OVERRIDE_REASON_HEADER, encodeURIComponent(reason));
+    response = await fetch(input, { ...init, method, headers: retryHeaders, credentials: "include" });
+  }
 
   if (!response.ok) {
+    if (sendsCsrfToken && (response.status === 401 || response.status === 403)) {
+      try {
+        _csrfTokenProvider?.reset();
+      } catch {
+        // never let the provider break error propagation
+      }
+    }
     if (response.status === 401 && _unauthorizedHandler) {
       try {
         _unauthorizedHandler();

@@ -11,6 +11,8 @@
 // Usage: node tests/discount-codes.mjs
 // Exits 0 when all checks pass, 1 otherwise.
 
+import { promoteToConsultant } from "./consultant-account.mjs";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
 let passed = 0;
@@ -42,9 +44,9 @@ function makeSession() {
   };
 }
 
-async function registerAccount(label, ts) {
+async function registerAccount(label, ts, fixedEmail) {
   const session = makeSession();
-  const email = `${label}-${ts}-${Math.floor(Math.random() * 1e6)}@test.local`;
+  const email = fixedEmail ?? `${label}-${ts}-${Math.floor(Math.random() * 1e6)}@test.local`;
   const password = "password-123";
   const reg = await session("POST", "/auth/register", { name: `${label} account`, email, password });
   if (![200, 201].includes(reg.status)) {
@@ -63,6 +65,8 @@ async function registerAccount(label, ts) {
       process.exit(1);
     }
   }
+  // Code status is for consultants; sign-up makes an Owner, so promote.
+  promoteToConsultant(email);
   const me = await session("GET", "/auth/me");
   const user = me.data?.user ?? me.data;
   const clientId = user?.clientId;
@@ -94,7 +98,15 @@ const CODE_RE = /^ALPS-[2-9A-HJKMNP-TV-Z]{4}(-[2-9A-HJKMNP-TV-Z]{4}){3}$/;
 
 async function main() {
   const ts = Date.now();
-  const a = await registerAccount("discount-a", ts);
+  // Issuing codes is for platform operators (PLATFORM_ADMIN_EMAILS); the
+  // runner names a unique operator address for this run and starts the API
+  // with it. Account B is an ordinary self-signup owner.
+  const operatorEmail = process.env.DISCOUNT_OPERATOR_EMAIL;
+  if (!operatorEmail) {
+    console.error("FATAL: run via tests/run-discount-codes.sh (needs DISCOUNT_OPERATOR_EMAIL in PLATFORM_ADMIN_EMAILS)");
+    process.exit(1);
+  }
+  const a = await registerAccount("discount-a", ts, operatorEmail);
   const b = await registerAccount("discount-b", ts);
 
   console.log("\n── Manager issue / status / replace ──");
@@ -141,6 +153,26 @@ async function main() {
   const legacy = await a.session("POST", "/billing/checkout", { discountCode: "ALPS50" });
   check("checkout: legacy ALPS50 → 400", legacy.status === 400, `got ${legacy.status}`);
 
+  console.log("\n── Existing subscription redemption ──");
+
+  const redeemWrong = await a.session("POST", "/billing/discount-code/redeem", { discountCode: "ALPS-XXXX-XXXX-XXXX-XXXX" });
+  check("redeem: wrong code → 400", redeemWrong.status === 400, `got ${redeemWrong.status}`);
+  const redeemOld = await a.session("POST", "/billing/discount-code/redeem", { discountCode: code1 });
+  check("redeem: replaced code → 400", redeemOld.status === 400, `got ${redeemOld.status}`);
+  const redeemCross = await b.session("POST", "/billing/discount-code/redeem", { discountCode: code2 });
+  check("redeem: other client's code → 400", redeemCross.status === 400, `got ${redeemCross.status}`);
+  // A valid code never reaches Stripe without a live subscription (or while
+  // billing is unverified, as in this Stripe-free test server).
+  const redeemValid = await a.session("POST", "/billing/discount-code/redeem", { discountCode: code2 });
+  check("redeem: valid code without a subscription → 409/503", [409, 503].includes(redeemValid.status), `got ${redeemValid.status}`);
+  const stillAvailable = await a.session("GET", "/billing/discount-code");
+  check("redeem: failed attempt leaves the code available", stillAvailable.data?.status === "available", `got ${stillAvailable.data?.status}`);
+
+  const operatorMe = await a.session("GET", "/auth/me");
+  check("me: operator flagged", operatorMe.data?.user?.platformOperator === true, `got ${operatorMe.data?.user?.platformOperator}`);
+  const ownerMe = await b.session("GET", "/auth/me");
+  check("me: ordinary owner not flagged", ownerMe.data?.user?.platformOperator === false, `got ${ownerMe.data?.user?.platformOperator}`);
+
   console.log("\n── Authorization boundaries ──");
 
   // Client-side roles cannot read or manage codes
@@ -150,7 +182,15 @@ async function main() {
     check(`${role}: GET blocked`, get.status === 403, `got ${get.status}`);
     const post = await sub("POST", "/billing/discount-code");
     check(`${role}: POST blocked`, post.status === 403, `got ${post.status}`);
+    if (role !== "client_admin") {
+      const redeem = await sub("POST", "/billing/discount-code/redeem", { discountCode: code2 });
+      check(`${role}: redeem blocked`, redeem.status === 403, `got ${redeem.status}`);
+    }
   }
+
+  // Consultants who aren't platform operators can't issue codes.
+  const ownerIssue = await b.session("POST", "/billing/discount-code");
+  check("non-operator owner: POST blocked", ownerIssue.status === 403, `got ${ownerIssue.status}`);
 
   // Cross-tenant: consultant B cannot touch client A's code
   const crossGet = await b.session("GET", `/billing/discount-code?clientId=${a.clientId}`);

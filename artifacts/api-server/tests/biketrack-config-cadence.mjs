@@ -25,6 +25,10 @@ try {
   const ownerQuery = `?clientId=${owner.clientId}`;
 
   // A consultant from another account who is explicitly linked to this client.
+  // Both other accounts are consultants; only otherTenant is linked here.
+  await db.execute(sql`
+    UPDATE users SET role = 'consultant' WHERE id IN (${otherTenant.userId}, ${outsider.userId})
+  `);
   await db.execute(sql`
     INSERT INTO consultant_clients (user_id, client_id) VALUES (${otherTenant.userId}, ${owner.clientId})
   `);

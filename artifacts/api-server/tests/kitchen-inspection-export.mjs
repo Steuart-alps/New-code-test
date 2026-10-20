@@ -29,7 +29,8 @@ function csv(text) {
   return rows;
 }
 try {
-  const owner = await createTenant('inspection'), other = await createTenant('foreign-inspection');
+  // The owner backfills a past inspection period, which needs a reason.
+  const owner = await createTenant('inspection', { overrideReason: 'Inspection export fixture: past period' }), other = await createTenant('foreign-inspection');
   const staff = await createUser(owner, { role: 'client_staff' }), viewer = await createUser(owner, { role: 'client_viewer' });
   const site = (await owner.request('POST', '/sites', { name: 'Inspection kitchen', seedStarterChecks: false })).data;
   const second = (await owner.request('POST', '/sites', { name: 'Other kitchen', seedStarterChecks: false })).data;
@@ -41,6 +42,9 @@ try {
   await pool.query('UPDATE users SET department_id = $1 WHERE id = $2', [department.id, staff.userId]);
   const manager = await createUser(owner, { role: 'client_staff', departmentId: department.id, isDepartmentManager: true });
   const wrongDepartmentManager = await createUser(owner, { role: 'client_staff', departmentId: otherDepartment.id, isDepartmentManager: true });
+  // Intentionally historical: a past export window and its excluded neighbours
+  // are the subject. Rows are inserted directly or created by the owner (exempt
+  // from the record lock) and only exported, so keep these dates fixed.
   const from = '2026-09-01', to = '2026-09-02';
   for (const [client, sid, date, marker] of [
     [owner.clientId, site.id, from, 'included'],

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 let passed = 0;
@@ -144,7 +145,7 @@ async function main() {
   });
   expectStatus("special category requires Article 9 condition", activityInvalid, 400);
 
-  const activity = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {
+  const activityBody = {
     kind: "activity",
     name: `Staff records ${stamp}`,
     purpose: "Manage employee onboarding and employment records",
@@ -165,8 +166,14 @@ async function main() {
     owner: "People team",
     reviewDueAt: null,
     active: true,
+  };
+  // A body clientId naming another tenant than the URL is refused outright.
+  const smuggledActivity = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {
+    ...activityBody,
     clientId: managerB.clientId,
   });
+  expectStatus("request body cannot select another tenant", smuggledActivity, 400);
+  const activity = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, activityBody);
   expectStatus("create processing activity", activity, 201);
   check("request body cannot select another tenant", activity.data?.clientId === managerA.clientId, `stored client=${activity.data?.clientId}`);
 
@@ -189,6 +196,9 @@ async function main() {
   });
   expectStatus("subprocessor requires appointing processor", invalidSubprocessor, 400);
 
+  // Intentionally historical: 2024-01-31 (a leap year) pins the one-calendar-
+  // month deadline clamp to 2024-02-29, and the breach below pins the 72-hour
+  // timer. Do not make these dates relative to today.
   const requestBody = {
     kind: "rights_request",
     requestType: "access",
@@ -206,7 +216,6 @@ async function main() {
     decisionRationale: null,
     responseSentAt: null,
     responseEvidence: null,
-    clientId: managerB.clientId,
   };
   const equalDeadlineExtension = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {
     ...requestBody,
@@ -215,11 +224,16 @@ async function main() {
   });
   expectStatus("extension must be after initial deadline", equalDeadlineExtension, 400);
 
+  const smuggledRequest = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {
+    ...requestBody,
+    clientId: managerB.clientId,
+  });
+  expectStatus("rights request body cannot select another tenant", smuggledRequest, 400);
   const createdRequest = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, requestBody);
   expectStatus("create rights request", createdRequest, 201);
   const expectedDue = addCalendarMonth(new Date(requestBody.receivedAt)).toISOString();
   check("one-calendar-month deadline clamps at February month-end", createdRequest.data?.dueAt === expectedDue, `expected ${expectedDue}, got ${createdRequest.data?.dueAt}`);
-  check("rights request ignores clientId from request body", createdRequest.data?.clientId === managerA.clientId);
+  check("rights request is stored for the URL tenant", createdRequest.data?.clientId === managerA.clientId);
   const requestId = createdRequest.data?.id;
 
   const managerBRequest = await managerB.session("POST", `/privacy-governance/records?clientId=${managerB.clientId}`, {
@@ -275,6 +289,8 @@ async function main() {
   );
   expectStatus("legal hold evidence is recorded", holdEvidence, 201);
   check("verification evidence identifies the schedule", holdEvidence.data?.scheduleId === scheduleId);
+  // Deleting a business outright is a consultant action.
+  promoteToConsultant(managerB.email);
   expectStatus("manual account deletion is blocked by privacy hold", await managerB.session("DELETE", `/clients/${managerB.clientId}`), 409);
 
   const breach = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {

@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { departmentsTable, sitesTable, usersTable } from "@workspace/db/schema";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, getTableColumns, ne } from "drizzle-orm";
 import {
   canAccessClient,
   getClientId,
@@ -16,6 +16,8 @@ const router: IRouter = Router();
 const UpsertDepartmentBody = z.object({
   name: z.string().min(1).refine(nameIsClean, { message: "Please use an appropriate name." }),
   description: z.string().nullable().optional(),
+  // The site the department sits under; null or left out spans every site.
+  siteId: z.number().int().positive().nullable().optional(),
   // Accepted for compatibility with the shared request shape, but the tenant
   // is always taken from the authenticated request.
   clientId: z.number().optional(),
@@ -28,12 +30,29 @@ router.get("/departments", requireAuth, async (req, res) => {
     return;
   }
 
+  const siteId = req.query.siteId === undefined ? undefined : Number(req.query.siteId);
+  if (siteId !== undefined && (!Number.isSafeInteger(siteId) || siteId <= 0)) {
+    res.status(400).json({ error: "Invalid siteId" });
+    return;
+  }
+  // siteName lets every page label "Housekeeping (Main Hotel)" without loading sites.
   const rows = await db
-    .select()
+    .select({ ...getTableColumns(departmentsTable), siteName: sitesTable.name })
     .from(departmentsTable)
-    .where(eq(departmentsTable.clientId, clientId));
+    .leftJoin(sitesTable, eq(sitesTable.id, departmentsTable.siteId))
+    .where(and(
+      eq(departmentsTable.clientId, clientId),
+      siteId === undefined ? undefined : eq(departmentsTable.siteId, siteId),
+    ))
+    .orderBy(departmentsTable.name, sitesTable.name, departmentsTable.id);
   res.json(rows);
 });
+
+async function siteInClient(siteId: number, clientId: number): Promise<boolean> {
+  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)));
+  return Boolean(site);
+}
 
 router.post("/departments", requireAuth, requireClientAdmin, async (req, res) => {
   const body = UpsertDepartmentBody.parse(req.body);
@@ -43,11 +62,17 @@ router.post("/departments", requireAuth, requireClientAdmin, async (req, res) =>
     return;
   }
 
+  if (body.siteId != null && !(await siteInClient(body.siteId, clientId))) {
+    res.status(400).json({ error: "Site does not belong to this client" });
+    return;
+  }
+
   const rows = await db
     .insert(departmentsTable)
     .values({
       name: body.name,
       description: body.description ?? null,
+      siteId: body.siteId ?? null,
       clientId,
     })
     .returning();
@@ -71,9 +96,34 @@ router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res)
   }
 
   const body = UpsertDepartmentBody.partial().parse(req.body);
-  const updates: { name?: string; description?: string | null } = {};
+  const updates: { name?: string; description?: string | null; siteId?: number | null } = {};
   if (body.name !== undefined) updates.name = body.name;
   if (body.description !== undefined) updates.description = body.description;
+  if (body.siteId !== undefined && body.siteId !== existing.siteId) {
+    if (body.siteId !== null) {
+      if (!(await siteInClient(body.siteId, existing.clientId))) {
+        res.status(400).json({ error: "Site does not belong to this client" });
+        return;
+      }
+      // A department under a site sees only that site, so it can't keep other
+      // sites that were given to it on the Sites page.
+      const [other] = await db.select({ value: count() }).from(sitesTable).where(and(
+        eq(sitesTable.clientId, existing.clientId),
+        eq(sitesTable.departmentId, id),
+        ne(sitesTable.id, body.siteId),
+      ));
+      const otherSites = Number(other?.value ?? 0);
+      if (otherSites > 0) {
+        res.status(409).json({
+          error: `This department is given ${otherSites} other site${otherSites === 1 ? "" : "s"} on the Sites page. Take ${otherSites === 1 ? "it" : "them"} off the department first.`,
+          code: "DEPARTMENT_HAS_OTHER_SITES",
+          otherSiteCount: otherSites,
+        });
+        return;
+      }
+    }
+    updates.siteId = body.siteId;
+  }
 
   const [updated] = await db
     .update(departmentsTable)

@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import { build } from "esbuild";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,7 +64,8 @@ async function main() {
   const lib = await import(pathToUrl(outFile));
   const { runTrainingExpiryReminderJob, db, pool, clientsTable, usersTable, sql } = lib;
 
-  const tag = `trainexp-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  const runId = resolveRunId();
+  const tag = `trainexp-${runId}`;
   let clientId = null;
   const recordIds = {};
 
@@ -171,16 +173,24 @@ async function main() {
       `claimed=${r3.remindersClaimed}, captured=${sent.length}`,
     );
   } finally {
+    // Remove only this run's tenant, including the audit_log rows its training
+    // records produced, which would otherwise block DELETE FROM clients
+    // (tests/fixture-ownership.mjs).
+    let cleanupConnection = null;
     try {
       if (clientId != null) {
         await db.execute(sql`DELETE FROM training_expiry_reminder_log WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM train_track_records WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM users WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM clients WHERE id = ${clientId}`);
       }
+      cleanupConnection = await pool.connect();
+      await cleanupConnection.query(buildOwnedFixturePurgeSql({
+        runId, clientIds: clientId == null ? [] : [clientId],
+      }));
     } catch (err) {
+      await cleanupConnection?.query("ROLLBACK").catch(() => {});
       console.error("Cleanup failed:", err);
       failures.push(`cleanup — ${err?.message ?? err}`);
+    } finally {
+      cleanupConnection?.release();
     }
     await rm(outDir, { recursive: true, force: true }).catch(() => {});
     await pool.end().catch(() => {});

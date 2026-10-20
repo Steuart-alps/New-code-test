@@ -43,6 +43,10 @@ const bundled = await build({
       builder.onResolve({
         filter: /^(react-native|react-native-safe-area-context|@expo\/vector-icons|expo-router|expo-haptics|expo-camera|@\/hooks\/useColors|@\/lib\/auth|@\/lib\/api|@\/components\/KeyboardAwareScrollViewCompat)$/,
       }, () => ({ path: nativePath }));
+      // The production outbox core with in-memory storage, signed in as the fixture user.
+      builder.onResolve({ filter: /^@\/lib\/checkOutbox$/ }, () => ({
+        path: fileURLToPath(new URL('./fixtures/check-outbox-native.jsx', import.meta.url)),
+      }));
     },
   }],
 });

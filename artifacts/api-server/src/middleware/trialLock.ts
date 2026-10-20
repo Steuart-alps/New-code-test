@@ -8,6 +8,14 @@ import { logger } from "../lib/logger";
 // (config, checkout, portal, invoices — the paths needed to pay), and health.
 const ALLOWED_PREFIXES = ["/auth", "/billing", "/healthz", "/data-deletion", "/admin/data-deletion-requests"];
 
+// Exact read-only requests that stay reachable while locked. A consultant's
+// portfolio lists the businesses they manage; it must keep working when only
+// the consultant's own business trial has ended (each business it lists has
+// its own lock, enforced when the consultant switches into it). The full data
+// export stays downloadable for the 12 months a cancelled business's records
+// are kept (the route itself allows only consultants and client admins).
+const ALLOWED_READS = new Set(["/portfolio", "/export"]);
+
 /**
  * Global guard mounted on the API router: once a client's free trial has
  * expired without a live subscription, every data endpoint returns
@@ -21,6 +29,10 @@ export async function enforceTrialLock(req: Request, res: Response, next: NextFu
     return;
   }
   if (ALLOWED_PREFIXES.some((p) => req.path === p || req.path.startsWith(`${p}/`))) {
+    next();
+    return;
+  }
+  if ((req.method === "GET" || req.method === "HEAD") && ALLOWED_READS.has(req.path)) {
     next();
     return;
   }

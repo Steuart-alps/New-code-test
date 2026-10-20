@@ -30,18 +30,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
-import { beginApiMutation } from "@/lib/api";
+import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
   const mutationSucceeded = beginApiMutation(init?.method, path);
-  const res = await fetch(`${apiBase}${path}`, {
+  const res = await fetchWithOverrideReason(withActiveClient(`${apiBase}${path}`, init?.body), await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
-  });
+  }));
+  notifyAuthStatus(res);
   const ct = res.headers.get("content-type") ?? "";
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
@@ -387,12 +388,13 @@ function RecordDialog({
     try {
       const payload = {
         checkType, checkDate, checkTime: checkTime || undefined,
-        siteId: selectedSite,
+        siteId: selectedSite ?? null,
         phLevel: parsedPh, freeChlorine: parsedFree, combinedChlorine: parsedComb,
         waterTempC: parsedWT, airTempC: airTemp ? parseFloat(airTemp) : null,
         turbidity: turbidity || null, poolOpen, performedBy: performedBy || null, staffRosterId: staffRosterId,
-        actionsTaken: actionsTaken || undefined, result: effectiveResult,
-        notes: notes || undefined,
+        // null (not undefined) so clearing a field on edit actually clears it
+        actionsTaken: actionsTaken || null, result: effectiveResult,
+        notes: notes || null,
       };
       if (isEdit) {
         await apiFetch(`/pool-track/${existing!.id}`, { method: "PUT", body: JSON.stringify(payload) });

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
-import { eq, and, or, isNull, desc } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
   requireAuth,
@@ -13,9 +13,10 @@ import {
 import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/billing";
 import { filterName } from "../lib/contentFilter";
-import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { ObjectContentError, ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { departmentsTable } from "@workspace/db/schema";
+import { sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 
 const storage = new ObjectStorageService();
 
@@ -26,15 +27,18 @@ function parsePositiveSafeInteger(raw: unknown): number | null {
   return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-async function validateDepartmentForClient(rawDepartmentId: unknown, clientId: number): Promise<number | null | "invalid"> {
+// A site can be given to one department; a department that sits under a
+// site can only be given that site (siteId is null for a new site).
+async function validateDepartmentForClient(rawDepartmentId: unknown, clientId: number, siteId: number | null): Promise<number | null | "invalid"> {
   if (rawDepartmentId === undefined || rawDepartmentId === null || rawDepartmentId === "") return null;
   const departmentId = Number(rawDepartmentId);
   if (!Number.isSafeInteger(departmentId) || departmentId <= 0) return "invalid";
-  const [department] = await db.select({ id: departmentsTable.id })
+  const [department] = await db.select({ id: departmentsTable.id, siteId: departmentsTable.siteId })
     .from(departmentsTable)
     .where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId)))
     .limit(1);
-  return department ? departmentId : "invalid";
+  if (!department) return "invalid";
+  return department.siteId === null || department.siteId === siteId ? departmentId : "invalid";
 }
 
 router.get("/sites", requireAuth, async (req, res) => {
@@ -47,10 +51,11 @@ router.get("/sites", requireAuth, async (req, res) => {
   const conditions: ReturnType<typeof eq>[] = [eq(sitesTable.clientId, clientId)];
 
   // Department scoping: staff/viewers with a department only see sites in their
-  // department or sites that have not been assigned to any department.
+  // department or sites that have not been assigned to any department, and
+  // only their department's own site when it sits under one.
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null) {
-    conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)) as any);
+    conditions.push(sitesTableVisibleTo(deptId) as any);
   }
 
   const sites = await db
@@ -77,9 +82,8 @@ router.get("/sites/:id", requireAuth, async (req, res) => {
     return;
   }
   // Department scoping: staff/viewers can only read sites in their department
-  // (or unassigned sites).
-  const deptId = getActiveDepartmentId(req);
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) {
+  // (or unassigned sites), and only their department's own site.
+  if (!(await siteVisibleToDepartment(site, getActiveDepartmentId(req)))) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -102,9 +106,9 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     res.status(400).json({ error: nameCheck.message });
     return;
   }
-  const departmentId = await validateDepartmentForClient(req.body?.departmentId, clientId);
+  const departmentId = await validateDepartmentForClient(req.body?.departmentId, clientId, null);
   if (departmentId === "invalid") {
-    res.status(400).json({ error: "Department does not belong to this client" });
+    res.status(400).json({ error: "Department does not belong to this client or this site" });
     return;
   }
   // The site row and its billing charge intent are created atomically: a
@@ -126,9 +130,9 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     return created;
   });
 
-  // Pre-populate the new site with the starter pack of compliance checks,
-  // unless the caller explicitly opted out.
-  if (req.body.seedStarterChecks !== false) {
+  // Pre-populate the new site with the starter pack of compliance checks only
+  // when the caller explicitly opts in.
+  if (req.body.seedStarterChecks === true) {
     await seedSiteStarterChecks(clientId, site.id);
   }
 
@@ -155,15 +159,29 @@ router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => 
   }
   let departmentId: number | null | "invalid" = existing.departmentId;
   if ("departmentId" in req.body) {
-    departmentId = await validateDepartmentForClient(req.body.departmentId, existing.clientId);
+    departmentId = await validateDepartmentForClient(req.body.departmentId, existing.clientId, existing.id);
     if (departmentId === "invalid") {
-      res.status(400).json({ error: "Department does not belong to this client" });
+      res.status(400).json({ error: "Department does not belong to this client or this site" });
       return;
     }
   }
   const updates: Record<string, unknown> = { updatedAt: new Date() };
-  for (const key of ["name", "responsiblePerson", "address", "phone"] as const) {
+  for (const key of ["responsiblePerson", "address", "phone"] as const) {
     if (key in req.body) updates[key] = req.body[key];
+  }
+  // Same name rules as POST /sites.
+  if ("name" in req.body) {
+    const name = String(req.body.name ?? "").trim();
+    if (!name) {
+      res.status(400).json({ error: "Site name is required" });
+      return;
+    }
+    const nameCheck = filterName(name);
+    if (!nameCheck.ok) {
+      res.status(400).json({ error: nameCheck.message });
+      return;
+    }
+    updates.name = name;
   }
   // Allow tagging / un-tagging a site to a department
   if ("departmentId" in req.body) updates.departmentId = departmentId;
@@ -267,6 +285,7 @@ router.post("/sites/:id/documents", requireAuth, requireClientAdmin, async (req,
   try {
     await storage.finalizeTenantUpload(objectPath, clientId);
   } catch (err) {
+    if (err instanceof ObjectContentError) return res.status(400).json({ error: err.message });
     const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
       : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
     return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });

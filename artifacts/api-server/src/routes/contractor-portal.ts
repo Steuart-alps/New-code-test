@@ -9,7 +9,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError, ObjectContentError, ObjectGenerationError, type AllowedUploadType } from "../lib/objectStorage";
-import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getNotificationEmails } from "../lib/getNotificationEmails";
 import { sendEmail } from "../lib/email";
 import { digestBearerToken } from "../lib/bearerTokens";
@@ -159,6 +159,7 @@ router.put("/:token", async (req, res) => {
         public_liability_expiry = ${data.insuranceExpiry ? new Date(data.insuranceExpiry) : null},
         dbs_type            = ${data.dbsType ?? null},
         dbs_expiry_date     = ${data.dbsType === "None" ? null : data.dbsExpiryDate ? new Date(data.dbsExpiryDate) : null},
+        dbs_issue_date      = CASE WHEN ${data.dbsType === "None"}::boolean THEN NULL ELSE dbs_issue_date END,
         gas_safe_number     = ${data.gasSafeNumber ?? null},
         updated_at          = now()
       WHERE id = ${row.contractor_id} AND client_id = ${row.client_id}
@@ -272,6 +273,7 @@ router.post("/:token/certificates", async (req, res) => {
 // Object paths are never accepted from the requester: resolve the path through
 // the already tenant- and contractor-scoped certificate row first.
 router.get("/:token/certificates/:certId/download", async (req, res) => {
+  let signing: { clientId: number; contractorId: number; certId: number } | null = null;
   try {
     const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
@@ -284,6 +286,7 @@ router.get("/:token/certificates/:certId/download", async (req, res) => {
     `);
     const objectPath = (certs.rows?.[0] as { object_path?: string } | undefined)?.object_path;
     if (!objectPath) return res.status(404).json({ error: "Certificate file not found" });
+    signing = { clientId: row.client_id, contractorId: row.contractor_id, certId };
     const downloadUrl = await objectStorageService.getSignedDownloadURL(
       objectPath, 900, ALLOWED_CERTIFICATE_TYPES, row.client_id,
     );
@@ -292,6 +295,9 @@ router.get("/:token/certificates/:certId/download", async (req, res) => {
     if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "Certificate file not found" });
     if (err instanceof ObjectContentError) return res.status(400).json({ error: err.message });
     if (err instanceof ObjectOwnershipError) return res.status(403).json({ error: err.message });
+    if (signing) {
+      return respondObjectStorageDownloadUnavailable(req, res, err, "Contractor portal certificate download", signing);
+    }
     req.log?.error({ err }, "contractor-portal certificate download error");
     return res.status(500).json({ error: "Could not prepare certificate download" });
   }

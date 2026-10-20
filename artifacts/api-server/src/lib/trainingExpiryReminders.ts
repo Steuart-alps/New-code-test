@@ -13,8 +13,11 @@
  * training_expiry_reminder_log. The milestone encodes the exact expiry date the
  * reminder was raised against (e.g. "expiry:2025-03-01"), so a renewed
  * certificate (new expiry date) produces a new milestone and re-alerts, while
- * the same milestone is never re-sent. Rows are claimed BEFORE sending so
- * concurrent runs can't double-send; the claim is released if the send fails.
+ * the same milestone is never re-sent. Each client is claimed with an expiring
+ * delivery lease (lib/emailDeliveryClaims.ts) so concurrent runs can't
+ * double-send; the log rows are written only after the provider accepted the
+ * email, so a crash mid-send is retried (same idempotency key) after the lease
+ * expires instead of being suppressed forever.
  *
  * Mirrors the EXACT structure of contractorComplianceReminders.ts.
  */
@@ -26,6 +29,8 @@ import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 import { getNotificationEmails } from "./getNotificationEmails";
+import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
+import { createHash } from "crypto";
 
 /** Certificates are flagged when they expire within this many days (or have expired). */
 export const TRAINING_LEAD_DAYS = 30;
@@ -145,7 +150,7 @@ function buildEmailHtml(alerts: TrainingExpiryAlert[], appUrl: string): string {
       </div>
     </div>
     <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · You are receiving this as an account manager.
+      ComplyTrack by ALPS Consultancy · You are receiving this as an account manager.
     </div>
   </div>
 </body>
@@ -186,24 +191,18 @@ export async function runTrainingExpiryReminderJob(
       const candidates = await getTrainingExpiryAlerts(client.id, now);
       if (candidates.length === 0) continue;
 
-      // Claim each (record, milestone) first so we never re-send the same
-      // reminder, and so concurrent runs can't double-send. Only the newly
-      // claimed alerts are then emailed/pushed.
-      const claimed: TrainingExpiryAlert[] = [];
-      // Any failure after the first successful claim (a later claim insert, the
-      // manager lookup, or the email send) must release every claimed row —
-      // otherwise the unique dedupe rows would permanently suppress the alert.
-      let sent = false;
+      // Lease the client's delivery, then keep only alerts no earlier run
+      // has logged. Log rows are written only after the provider accepted the
+      // email; a crash in between leaves the lease to expire and be retried.
+      const lease = await claimEmailDelivery("training-expiry", String(client.id));
+      if (!lease) continue; // another worker is sending for this client
+      let settled = false;
       try {
-        for (const alert of candidates) {
-          const claim = await db.execute(sql`
-            INSERT INTO training_expiry_reminder_log (client_id, record_id, milestone, sent_at)
-            VALUES (${client.id}, ${alert.recordId}, ${alert.milestone}, now())
-            ON CONFLICT (client_id, record_id, milestone) DO NOTHING
-            RETURNING id
-          `);
-          if (((claim as any).rows ?? []).length > 0) claimed.push(alert);
-        }
+        const logged = await db.execute(sql`
+          SELECT record_id, milestone FROM training_expiry_reminder_log WHERE client_id = ${client.id}
+        `);
+        const seen = new Set(((logged as any).rows ?? []).map((row: any) => `${row.record_id}|${row.milestone}`));
+        const claimed = candidates.filter((alert) => !seen.has(`${alert.recordId}|${alert.milestone}`));
         if (claimed.length === 0) continue;
         result.remindersClaimed += claimed.length;
 
@@ -211,22 +210,40 @@ export async function runTrainingExpiryReminderJob(
         const { emails, userIds } = await getNotificationEmails(client.id, { includeMaintenanceManagers: true });
 
         if (emails.length === 0) {
-          // No one to notify — release the claims so a later run (once managers
-          // exist) can re-send.
-          await releaseClaims(client.id, claimed);
+          // No one to notify — nothing is logged, so a later run (once
+          // managers exist) sends it.
           continue;
         }
 
         const subject = `⚠️ ${claimed.length} staff training certificate${claimed.length !== 1 ? "s" : ""} expiring — ComplyTrack`;
-        await send({ to: emails, subject, html: buildEmailHtml(claimed, appUrl) });
-        sent = true;
+        const alertSet = createHash("sha256")
+          .update(claimed.map((alert) => `${alert.recordId}|${alert.milestone}`).sort().join(","))
+          .digest("hex").slice(0, 16);
+        await send({
+          to: emails,
+          subject,
+          html: buildEmailHtml(claimed, appUrl),
+          idempotencyKey: emailDeliveryIdempotencyKey(lease, `${alertSet}:${now.toISOString().slice(0, 10)}`),
+        });
+
+        await db.transaction(async (tx) => {
+          for (const alert of claimed) {
+            await tx.execute(sql`
+              INSERT INTO training_expiry_reminder_log (client_id, record_id, milestone, sent_at)
+              VALUES (${client.id}, ${alert.recordId}, ${alert.milestone}, now())
+              ON CONFLICT (client_id, record_id, milestone) DO NOTHING
+            `);
+          }
+          await settleEmailDelivery(lease, tx);
+        });
+        settled = true;
 
         // Push managers a matching alert (best-effort; never blocks the job).
         await sendPushToUsers(userIds, {
           title: "Staff training expiring",
           body: `${claimed.length} staff training certificate${claimed.length !== 1 ? "s" : ""} expiring soon or expired.`,
           data: { route: "/train-track" },
-        });
+        }).catch((err) => logger.warn({ err, clientId: client.id }, "Training expiry push failed"));
 
         result.clientsAlerted++;
         result.emailsSent += emails.length;
@@ -234,18 +251,8 @@ export async function runTrainingExpiryReminderJob(
           { clientId: client.id, alerts: claimed.length, emails: emails.length },
           "Training expiry reminder sent",
         );
-      } catch (innerErr) {
-        if (!sent && claimed.length > 0) {
-          try {
-            await releaseClaims(client.id, claimed);
-          } catch (releaseErr) {
-            logger.error(
-              { err: releaseErr, clientId: client.id },
-              "Failed to release training expiry claims — these milestones may be suppressed",
-            );
-          }
-        }
-        throw innerErr;
+      } finally {
+        if (!settled) await settleEmailDelivery(lease).catch(() => {});
       }
     } catch (err) {
       result.errors++;
@@ -254,14 +261,4 @@ export async function runTrainingExpiryReminderJob(
   }
 
   return result;
-}
-
-/** Release previously-claimed reminder rows so a later run retries. */
-async function releaseClaims(clientId: number, alerts: TrainingExpiryAlert[]): Promise<void> {
-  for (const a of alerts) {
-    await db.execute(sql`
-      DELETE FROM training_expiry_reminder_log
-      WHERE client_id = ${clientId} AND record_id = ${a.recordId} AND milestone = ${a.milestone}
-    `);
-  }
 }

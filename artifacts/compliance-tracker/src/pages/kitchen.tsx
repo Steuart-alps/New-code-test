@@ -1,7 +1,10 @@
 import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
-import { assessKitchenTemperatures, kitchenFailureValue, kitchenHoldRequirement, parseKitchenTemperatureRules, type KitchenTemperatureFailure } from "@workspace/api-client-react";
+import { FoodJurisdictionOptions, KitchenGuidanceNote } from "@/components/kitchen-temperature-guidance";
+import { assessKitchenTemperatures, isFoodJurisdiction, kitchenFailureValue, kitchenHoldRequirement, kitchenTemperatureGuidance, parseKitchenTemperatureRules, type FoodJurisdiction, type KitchenTemperatureFailure } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { ChecklistItemRow } from "@/components/checklist-item-row";
+import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import {
@@ -19,6 +22,7 @@ import {
   useUpdateFoodSafetyRecord,
   useListSites,
   FoodSafetyRecord,
+  type KitchenClosedDay,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
@@ -44,14 +48,27 @@ import CleaningScheduleTab from "./kitchen-cleaning";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  isKitchenDiaryDirty,
   isKitchenTemplateReady,
+  kitchenDiaryHydrationAction,
+  kitchenDiaryRecordKey,
+  kitchenDiaryScopeKey,
+  kitchenDayStatus,
+  kitchenDiarySnapshot,
   parseColdUnits,
   parseJsonArray,
   parseStringArray,
+  requestKitchenDiaryScopeChange,
   stampedLimit,
   shouldDisplayKitchenSection,
   type ColdUnit,
+  type KitchenDayStatus,
+  type KitchenDiaryLoaded,
 } from "@/lib/kitchen-state";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // CookSafe All-in-One Record field shapes
 type DeliveryRow = {
@@ -144,12 +161,6 @@ function coolingMins(start: string, finish: string): number | null {
   if (m < 0) m += 24 * 60; // overnight wrap
   return m;
 }
-const REHEATING_LIMITS = {
-  scotland: "Above 82°C",
-  england_wales: "Above 75°C",
-} as const;
-
-type FoodJurisdiction = keyof typeof REHEATING_LIMITS;
 
 // ── ConfigDialog ───────────────────────────────────────────────────────────────
 function ConfigDialog() {
@@ -176,10 +187,10 @@ function ConfigDialog() {
   const resetConfig = useResetFoodSafetyConfig();
 
   // Limits tab
-  const [cookingLimit, setCookingLimit] = useState("Above 75°C (10 seconds)");
+  const [cookingLimit, setCookingLimit] = useState("75°C or above (core)");
   const [coolingLimit, setCoolingLimit] = useState("8°C within 90 minutes");
-  const [foodJurisdiction, setFoodJurisdiction] = useState<FoodJurisdiction>("scotland");
-  const [reheatingLimit, setReheatingLimit] = useState("Above 82°C");
+  const [foodJurisdiction, setFoodJurisdiction] = useState<FoodJurisdiction>("england_wales");
+  const [reheatingLimit, setReheatingLimit] = useState<string>("Above 75°C");
   const [hotHoldingLimit, setHotHoldingLimit] = useState("Above 63°C");
 
   // Sections tab
@@ -202,10 +213,10 @@ function ConfigDialog() {
 
   useEffect(() => {
     if (!config) return;
-    setCookingLimit(config.food_cooking_limit || "Above 75°C (10 seconds)");
+    setCookingLimit(config.food_cooking_limit || "75°C or above (core)");
     setCoolingLimit(config.food_cooling_limit || "8°C within 90 minutes");
-    setFoodJurisdiction((config.food_jurisdiction as FoodJurisdiction) || "scotland");
-    setReheatingLimit(config.food_reheating_limit || "Above 82°C");
+    setFoodJurisdiction(isFoodJurisdiction(config.food_jurisdiction) ? config.food_jurisdiction : "england_wales");
+    setReheatingLimit(config.food_reheating_limit || "Above 75°C");
     setHotHoldingLimit(config.food_hot_holding_limit || "Above 63°C");
     setShowDeliveries(config.food_show_deliveries !== "false");
     setShowColdFood(config.food_show_cold_food !== "false");
@@ -485,8 +496,31 @@ function ConfigDialog() {
               These limits are starting guidance only. Set and review critical limits in your food-business-specific HACCP system, with competent advice where needed.
             </p>
             <div className="space-y-1.5">
+              <Label htmlFor="kitchen-food-country">Country guidance</Label>
+              <select
+                id="kitchen-food-country"
+                value={foodJurisdiction}
+                onChange={e => {
+                  const next = e.target.value as FoodJurisdiction;
+                  const labels = kitchenTemperatureGuidance(next).labels;
+                  setFoodJurisdiction(next);
+                  setCookingLimit(labels.cooking);
+                  setCoolingLimit(labels.cooling);
+                  setReheatingLimit(labels.reheating);
+                  setHotHoldingLimit(labels.hotHolding);
+                }}
+                className="h-9 w-full rounded-sm border border-input bg-background px-2 text-sm"
+              >
+                <FoodJurisdictionOptions />
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Choosing a country fills in its recommended limits below for new diary records; you can change any of them. To use its numbers for pass/fail checks, choose the same country in Numeric temperature controls at the top of KitchenTrack.
+              </p>
+              <KitchenGuidanceNote jurisdiction={foodJurisdiction} />
+            </div>
+            <div className="space-y-1.5">
               <Label>Cooking temperature limit</Label>
-              <Input value={cookingLimit} placeholder="Above 75°C (10 seconds)"
+              <Input value={cookingLimit} placeholder="75°C or above (core)"
                 onChange={e => setCookingLimit(e.target.value)} />
               <p className="text-xs text-muted-foreground">Example guidance varies by process and nation; use the critical limit in your documented HACCP system.</p>
             </div>
@@ -495,24 +529,6 @@ function ConfigDialog() {
               <Input value={coolingLimit} placeholder="8°C within 90 minutes"
                 onChange={e => setCoolingLimit(e.target.value)} />
               <p className="text-xs text-muted-foreground">Set a safe cooling limit and corrective action for your process in the HACCP system.</p>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Food-safety jurisdiction</Label>
-              <select
-                value={foodJurisdiction}
-                onChange={e => {
-                  const next = e.target.value as FoodJurisdiction;
-                  setFoodJurisdiction(next);
-                  setReheatingLimit(REHEATING_LIMITS[next]);
-                }}
-                className="h-9 w-full rounded-sm border border-input bg-background px-2 text-sm"
-              >
-                <option value="scotland">Scotland — above 82°C</option>
-                <option value="england_wales">England / Wales — above 75°C</option>
-              </select>
-              <p className="text-xs text-muted-foreground">
-                Selecting a jurisdiction sets the standard reheating target used for new diary records.
-              </p>
             </div>
             <div className="space-y-1.5">
               <Label>Reheating limit</Label>
@@ -551,8 +567,6 @@ function ConfigDialog() {
 
 // ── Food Safety Completeness Calendar ────────────────────────────────────────
 
-type FSDayStatus = "complete" | "draft" | "missing" | "nonOperating";
-
 function shiftFSMonth(ym: string, delta: number): string {
   const [y, m] = ym.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
@@ -564,15 +578,102 @@ function fsMonthLabel(ym: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 }
 
+function fsDayLabel(date: string): string {
+  return new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
 interface FSCompletenessCalendarProps {
   siteId?: number | null;
   onPickDay: (date: string) => void;
+}
+
+/** Admin control: mark a run of days as closed (not operating) for the diary
+ *  scope shown. Days with a diary record are refused by the API. */
+function MarkClosedDaysDialog({ siteId, defaultDate, onSaved }: { siteId: number | null; defaultDate: string; onSaved: () => void }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [from, setFrom] = useState(defaultDate);
+  const [to, setTo] = useState(defaultDate);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const siteQuery = siteId == null ? "" : `?siteId=${siteId}`;
+      const res = await apiFetch(`/food-safety/closed-days${siteQuery}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to, reason }),
+      });
+      if (res.status === 409) {
+        const body = await res.json().catch(() => ({}));
+        const dates: string[] = Array.isArray(body?.dates) ? body.dates : [];
+        toast({
+          title: "Not marked closed",
+          description: `${dates.map(fsDayLabel).join(", ")} already ${dates.length === 1 ? "has" : "have"} a diary record, so ${dates.length === 1 ? "it was" : "they were"} open.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!res.ok) {
+        toast({ title: "Not marked closed", description: await getApiErrorMessage(res, "Closed days could not be saved."), variant: "destructive" });
+        return;
+      }
+      toast({ title: "Closed days saved", description: "They no longer count as missing records." });
+      setOpen(false);
+      setReason("");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (next) { setFrom(defaultDate); setTo(defaultDate); } }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7">Mark closed days</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Mark days the kitchen is closed</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Closed days are not counted as missing diary records. Who marked them and when is kept in the audit history.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="closed-from">From</Label>
+            <Input id="closed-from" type="date" value={from} onChange={(e) => { setFrom(e.target.value); if (to < e.target.value) setTo(e.target.value); }} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="closed-to">To</Label>
+            <Input id="closed-to" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="closed-reason">Reason</Label>
+          <Input id="closed-reason" value={reason} maxLength={200} placeholder="e.g. Closed for refurbishment" onChange={(e) => setReason(e.target.value)} />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button disabled={saving || !from || !to || from > to || !reason.trim()} onClick={save}>
+            {saving ? "Saving…" : "Mark closed"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCalendarProps) {
   const today = format(new Date(), "yyyy-MM-dd");
   const currentMonth = today.slice(0, 7);
   const [month, setMonth] = useState(currentMonth);
+  const canAdmin = useCanAdmin();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [removing, setRemoving] = useState<KitchenClosedDay | null>(null);
 
   const [y, m] = month.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
@@ -585,25 +686,38 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
   });
   const summaryByDate = new Map((summary?.days ?? []).map((day) => [day.date, day]));
 
-  const dayStatuses: { date: string; status: FSDayStatus }[] = [];
+  const dayStatuses: { date: string; status: KitchenDayStatus; closure: KitchenClosedDay | null }[] = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const date = `${month}-${String(d).padStart(2, "0")}`;
-    if (date > today) {
-      dayStatuses.push({ date, status: "nonOperating" });
-      continue;
-    }
     const day = summaryByDate.get(date);
-    const status: FSDayStatus = day?.submitted
-      ? "complete"
-      : day?.hasRecord
-      ? "draft"
-      : "missing";
-    dayStatuses.push({ date, status });
+    dayStatuses.push({ date, status: kitchenDayStatus(date, today, day), closure: day?.closure ?? null });
   }
 
   const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Mon = 0
+  // Closed days are never missing: they are counted on their own.
   const missingCount = dayStatuses.filter(({ status }) => status === "missing").length;
+  const closedDays = dayStatuses.filter(({ status }) => status === "nonOperating");
   const actionableDates = dayStatuses.filter(({ status }) => status === "missing" || status === "draft");
+
+  const refreshCompleteness = () => {
+    queryClient.invalidateQueries({
+      predicate: (query) => {
+        const key = query.queryKey[0];
+        return typeof key === "string" && (key.startsWith("/api/food-safety") || key.startsWith("/api/dashboard"));
+      },
+    });
+  };
+
+  const removeClosure = async (closure: KitchenClosedDay) => {
+    const res = await apiFetch(`/food-safety/closed-days/${closure.id}`, { method: "DELETE" });
+    setRemoving(null);
+    if (!res.ok) {
+      toast({ title: "Closed day not removed", description: await getApiErrorMessage(res, "Try again shortly."), variant: "destructive" });
+      return;
+    }
+    toast({ title: "Closed day removed", description: `${fsDayLabel(closure.date)} counts as an operating day again.` });
+    refreshCompleteness();
+  };
 
   return (
     <Card className="mt-6">
@@ -611,9 +725,10 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h3 className="font-semibold text-sm">Monthly Completeness</h3>
-            <p className="text-xs text-muted-foreground">Days where the food safety diary was not completed.</p>
+            <p className="text-xs text-muted-foreground">Days where the food safety diary was not completed. Closed days are not counted as missing.</p>
           </div>
           <div className="flex items-center gap-2">
+            {canAdmin && <MarkClosedDaysDialog siteId={siteId ?? null} defaultDate={month === currentMonth ? today : `${month}-01`} onSaved={refreshCompleteness} />}
             <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setMonth(shiftFSMonth(month, -1))}>←</Button>
             <span className="text-sm font-medium min-w-[130px] text-center">{fsMonthLabel(month)}</span>
             <Button
@@ -639,13 +754,15 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
                 <div key={d} className="text-[10px] text-muted-foreground text-center font-medium py-1">{d}</div>
               ))}
               {Array.from({ length: firstWeekday }).map((_, i) => <div key={`pad-${i}`} />)}
-              {dayStatuses.map(({ date, status }) => (
+              {dayStatuses.map(({ date, status, closure }) => (
                 <button
                   key={date}
-                  disabled={status === "nonOperating"}
-                  onClick={() => { if (status !== "nonOperating") onPickDay(date); }}
+                  data-day-status={status}
+                  disabled={status === "future"}
+                  onClick={() => { if (status !== "future") onPickDay(date); }}
                   title={
-                    status === "nonOperating" ? `${date} — not operating yet` :
+                    status === "future" ? `${date} — future` :
+                    status === "nonOperating" ? `${date} — closed (not operating)${closure ? `: ${closure.reason}${closure.createdByName ? ` · marked by ${closure.createdByName}` : ""}${closure.addedAfterDay ? " · added afterwards" : ""}` : ""}` :
                     status === "complete" ? `${date} — submitted` :
                     status === "draft" ? `${date} — draft saved` :
                     `${date} — no record`
@@ -655,7 +772,8 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
                     status === "complete" && "bg-emerald-100 text-emerald-700 hover:scale-110",
                     status === "draft"    && "bg-amber-100 text-amber-700 hover:scale-110",
                     status === "missing"  && "bg-amber-200 text-amber-800 hover:scale-110",
-                    status === "nonOperating"   && "bg-muted/30 text-muted-foreground/40",
+                    status === "nonOperating" && "bg-slate-100 text-slate-500 border border-dashed border-slate-300 hover:scale-110",
+                    status === "future"   && "bg-muted/30 text-muted-foreground/40",
                   )}
                 >
                   {parseInt(date.slice(8), 10)}
@@ -666,10 +784,12 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300" /> Filled / submitted</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-300" /> Draft only</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-200 border border-amber-300" /> Missing</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-muted/30 border border-border" /> Non-operating / future</span>
-              {missingCount > 0 && (
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-100 border border-dashed border-slate-300" /> Closed (not operating)</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-muted/30 border border-border" /> Future</span>
+              {(missingCount > 0 || closedDays.length > 0) && (
                 <span className="ml-auto font-medium text-amber-700">
                   {missingCount} missing day{missingCount !== 1 ? "s" : ""} in {fsMonthLabel(month)}
+                  {closedDays.length > 0 && <span className="text-muted-foreground font-normal"> · {closedDays.length} closed</span>}
                 </span>
               )}
             </div>
@@ -684,22 +804,62 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
                         ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
                         : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100",
                     )} onClick={() => onPickDay(date)}>
-                      {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} — {status === "missing" ? "missing" : "draft"}
+                      {fsDayLabel(date)} — {status === "missing" ? "missing" : "draft"}
                     </Button>
                   ))}
                 </div>
               </div>
             )}
+            {closedDays.length > 0 && (
+              <div className="mt-4 border-t border-border/50 pt-3">
+                <p className="text-xs font-medium text-foreground">Closed days</p>
+                <ul className="mt-2 space-y-1">
+                  {closedDays.map(({ date, closure }) => (
+                    <li key={date} className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">{fsDayLabel(date)}</span>
+                      {closure && (
+                        <>
+                          <span>{closure.reason}</span>
+                          <span>
+                            · marked by {closure.createdByName ?? "a former user"} on {fsDayLabel(closure.createdAt.slice(0, 10))}
+                            {closure.addedAfterDay && " (added afterwards)"}
+                          </span>
+                          {canAdmin && (
+                            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setRemoving(closure)}>
+                              Remove
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </>
         )}
       </CardContent>
+      <AlertDialog open={removing !== null} onOpenChange={(next) => { if (!next) setRemoving(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this closed day?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removing ? `${fsDayLabel(removing.date)} will count as an operating day again, so it shows as missing until a diary is filled in. The removal is kept in the audit history.` : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (removing) void removeClosure(removing); }}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
 
 // ── Daily Diary tab ───────────────────────────────────────────────────────────
 
-function DailyDiaryTab() {
+export function DailyDiaryTab() {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
   // Which site's diary we're viewing/filling. null = the legacy client-wide
@@ -733,7 +893,7 @@ function DailyDiaryTab() {
   const updateRecord = useUpdateFoodSafetyRecord();
 
   // ── Derived template values from config ─────────────────────────────────────
-  const cookingLimit = config?.food_cooking_limit || "Above 75°C (10 seconds)";
+  const cookingLimit = config?.food_cooking_limit || "75°C or above (core)";
   const coolingLimit = config?.food_cooling_limit || "8°C within 90 minutes";
   const reheatingLimit = config?.food_reheating_limit || "Above 82°C";
   const hotHoldingLimit = config?.food_hot_holding_limit || "Above 63°C";
@@ -764,66 +924,96 @@ function DailyDiaryTab() {
   const [sousVide, setSousVide] = useState<SousVideRow[]>([]);
   const [correctives, setCorrectives] = useState("");
   const [managerSignature, setManagerSignature] = useState(user?.name ?? "");
-  const hydratedScopeRef = useRef<string | null>(null);
+  // What the form last loaded from, or saved to, the server for this
+  // date/site scope. Unsaved edits are measured against it, never against
+  // whatever the latest server response happens to be.
+  const [loaded, setLoaded] = useState<(KitchenDiaryLoaded & { record: FoodSafetyRecord | null }) | null>(null);
+  const [pendingScope, setPendingScope] = useState<{ date: string; siteId: number | null } | null>(null);
+  const scopeKey = kitchenDiaryScopeKey(selectedSiteId, selectedDate);
+  const currentSnapshot = kitchenDiarySnapshot({
+    deliveries, coldFood, cooking, cooling, reheating, hotHolding, sousVide, correctives, managerSignature,
+  });
+  const isDirty = isKitchenDiaryDirty(loaded, scopeKey, currentSnapshot);
+  const formReady = loaded?.scope === scopeKey;
+  // The server version the edits are based on. Saves are checked against it,
+  // so a newer version that arrived meanwhile is merged or reported as a
+  // conflict instead of being overwritten.
+  const baseRecord = formReady ? loaded.record : null;
 
   useEffect(() => {
     if (recordLoading || configLoading) return;
-    const hydrationKey = `${selectedSiteId ?? "all"}:${selectedDate}:${record?.id ?? "new"}`;
-    if (hydratedScopeRef.current === hydrationKey) return;
+    const recordKey = kitchenDiaryRecordKey(record);
+    // A refetch or late response must not replace unsaved edits, except a
+    // day filed elsewhere: it is locked, so the filed version is shown.
+    const keepEdits = isDirty && !record?.submittedAt;
+    if (kitchenDiaryHydrationAction(loaded, scopeKey, recordKey, keepEdits) !== "hydrate") return;
 
+    let next: {
+      deliveries: DeliveryRow[]; coldFood: ColdFoodRow[]; cooking: CookingRow[]; cooling: CoolingRow[];
+      reheating: ReheatingRow[]; hotHolding: HotHoldingRow[]; sousVide: SousVideRow[];
+      correctives: string; managerSignature: string;
+    };
     if (record) {
-      setDeliveries((record.deliveries || []) as DeliveryRow[]);
-      setColdFood((record.coldFood || []) as ColdFoodRow[]);
-
       // Support old combined-row format (cookTimeStart field) — migrate to split arrays
       const rawHot: any[] = (record.hotTemperature || []) as any[];
       const isOldFormat = rawHot.some(r => "cookTimeStart" in r || "coolTimeStart" in r);
-      if (isOldFormat) {
-        setCooking(rawHot.map(r => ({ item: r.item || "", timeStart: r.cookTimeStart || "", timeFinish: r.cookTimeFinish || "", coreTemp: r.cookCoreTemp || "" })));
-        setCooling(rawHot.filter(r => r.coolTimeStart || r.coolTimeFinish).map(r => ({ item: r.item || "", timeStart: r.coolTimeStart || "", timeFinish: r.coolTimeFinish || "", coreTemp: "" })));
-        setReheating(rawHot.filter(r => r.reheatCoreTemp).map(r => ({ item: r.item || "", timeStart: "", timeFinish: "", coreTemp: r.reheatCoreTemp || "" })));
-      } else {
-        setCooking(rawHot as CookingRow[]);
-        setCooling(((record as any).cooling || []) as CoolingRow[]);
-        setReheating(((record as any).reheating || []) as ReheatingRow[]);
-      }
-
-      setHotHolding((record.hotHolding || []) as HotHoldingRow[]);
-      setSousVide(((record as any).sousVide || []) as SousVideRow[]);
-      setCorrectives(record.correctives || "");
-      setManagerSignature(record.managerSignature || user?.name || "");
+      next = {
+        deliveries: (record.deliveries || []) as DeliveryRow[],
+        coldFood: (record.coldFood || []) as ColdFoodRow[],
+        cooking: isOldFormat
+          ? rawHot.map(r => ({ item: r.item || "", timeStart: r.cookTimeStart || "", timeFinish: r.cookTimeFinish || "", coreTemp: r.cookCoreTemp || "" }))
+          : rawHot as CookingRow[],
+        cooling: isOldFormat
+          ? rawHot.filter(r => r.coolTimeStart || r.coolTimeFinish).map(r => ({ item: r.item || "", timeStart: r.coolTimeStart || "", timeFinish: r.coolTimeFinish || "", coreTemp: "" }))
+          : ((record as any).cooling || []) as CoolingRow[],
+        reheating: isOldFormat
+          ? rawHot.filter(r => r.reheatCoreTemp).map(r => ({ item: r.item || "", timeStart: "", timeFinish: "", coreTemp: r.reheatCoreTemp || "" }))
+          : ((record as any).reheating || []) as ReheatingRow[],
+        hotHolding: (record.hotHolding || []) as HotHoldingRow[],
+        sousVide: ((record as any).sousVide || []) as SousVideRow[],
+        correctives: record.correctives || "",
+        managerSignature: record.managerSignature || user?.name || "",
+      };
     } else {
       // New record — initialise from template
-      const coldRows: ColdFoodRow[] = templateColdUnits.map(u => ({
-        unit: u.name, tempAm: "", tempPm: "", correctiveAction: "",
-      }));
-      const cookingRows: CookingRow[] = templateHotItems.map(item => ({
-        item, timeStart: "", timeFinish: "", coreTemp: "",
-      }));
-      const holdingRows: HotHoldingRow[] = templateHoldingItems.map(item => ({
-        item, coreTemp: "", timeOfCheck: "",
-      }));
-      const svRows: SousVideRow[] = templateSvItems.map(item => ({
-        item, targetTemp: "", waterTemp: "", timeStarted: "", timeFinished: "", coreTemp: "", result: "", notes: "",
-      }));
-      setDeliveries([]);
-      setColdFood(coldRows);
-      setCooking(cookingRows);
-      setCooling([]);
-      setReheating([]);
-      setHotHolding(holdingRows);
-      setSousVide(svRows);
-      setCorrectives("");
-      setManagerSignature("");
+      next = {
+        deliveries: [],
+        coldFood: templateColdUnits.map(u => ({
+          unit: u.name, tempAm: "", tempPm: "", correctiveAction: "",
+        })),
+        cooking: templateHotItems.map(item => ({
+          item, timeStart: "", timeFinish: "", coreTemp: "",
+        })),
+        cooling: [],
+        reheating: [],
+        hotHolding: templateHoldingItems.map(item => ({
+          item, coreTemp: "", timeOfCheck: "",
+        })),
+        sousVide: templateSvItems.map(item => ({
+          item, targetTemp: "", waterTemp: "", timeStarted: "", timeFinished: "", coreTemp: "", result: "", notes: "",
+        })),
+        correctives: "",
+        managerSignature: "",
+      };
     }
-    hydratedScopeRef.current = hydrationKey;
+    setDeliveries(next.deliveries);
+    setColdFood(next.coldFood);
+    setCooking(next.cooking);
+    setCooling(next.cooling);
+    setReheating(next.reheating);
+    setHotHolding(next.hotHolding);
+    setSousVide(next.sousVide);
+    setCorrectives(next.correctives);
+    setManagerSignature(next.managerSignature);
+    setLoaded({ scope: scopeKey, recordKey, snapshot: kitchenDiarySnapshot(next), record: record ?? null });
   }, [
     config,
     configLoading,
+    isDirty,
+    loaded,
     record,
     recordLoading,
-    selectedDate,
-    selectedSiteId,
+    scopeKey,
     templateColdUnits,
     templateHoldingItems,
     templateHotItems,
@@ -831,22 +1021,47 @@ function DailyDiaryTab() {
     user?.name,
   ]);
 
+  // Date and site changes replace the form, so unsaved edits need a
+  // deliberate discard; "Keep editing" stays on the current day and site.
+  const applyScope = (next: { date: string; siteId: number | null }) => {
+    setPendingScope(null);
+    setSelectedDate(next.date);
+    setSelectedSiteId(next.siteId);
+  };
+  const changeScope = (next: { date: string; siteId: number | null }) => {
+    if (!next.date) return;
+    const decision = requestKitchenDiaryScopeChange(
+      scopeKey,
+      kitchenDiaryScopeKey(next.siteId, next.date),
+      isDirty,
+      createRecord.isPending || updateRecord.isPending,
+    );
+    if (decision === "confirm") setPendingScope(next);
+    else if (decision === "switch") applyScope(next);
+  };
+  useEffect(() => {
+    if (!isDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isDirty]);
+
   // Historical records retain the limits that were filed with them. The
   // current template applies only when starting a new diary day.
-  const entryCookingLimit = stampedLimit(record?.cookingLimit, cookingLimit);
-  const entryCoolingLimit = stampedLimit(record?.coolingLimit, coolingLimit);
-  const entryReheatingLimit = stampedLimit(record?.reheatingLimit, reheatingLimit);
-  const entryHotHoldingLimit = stampedLimit(record?.hotHoldingLimit, hotHoldingLimit);
+  const entryCookingLimit = stampedLimit(baseRecord?.cookingLimit, cookingLimit);
+  const entryCoolingLimit = stampedLimit(baseRecord?.coolingLimit, coolingLimit);
+  const entryReheatingLimit = stampedLimit(baseRecord?.reheatingLimit, reheatingLimit);
+  const entryHotHoldingLimit = stampedLimit(baseRecord?.hotHoldingLimit, hotHoldingLimit);
 
   // A later template change must not hide evidence already stored on an older
   // record. Empty sections still follow the current template.
-  const displayDeliveries = shouldDisplayKitchenSection(showDeliveries, !!record && deliveries.length > 0);
-  const displayColdFood = shouldDisplayKitchenSection(showColdFood, !!record && coldFood.length > 0);
-  const displayHotTemp = shouldDisplayKitchenSection(showHotTemp, !!record && cooking.length > 0);
-  const displayCooling = shouldDisplayKitchenSection(showCooling, !!record && cooling.length > 0);
-  const displayReheating = shouldDisplayKitchenSection(showReheating, !!record && reheating.length > 0);
-  const displayHotHolding = shouldDisplayKitchenSection(showHotHolding, !!record && hotHolding.length > 0);
-  const displaySousVide = shouldDisplayKitchenSection(showSousVide, !!record && sousVide.length > 0);
+  const displayDeliveries = shouldDisplayKitchenSection(showDeliveries, !!baseRecord && deliveries.length > 0);
+  const displayColdFood = shouldDisplayKitchenSection(showColdFood, !!baseRecord && coldFood.length > 0);
+  const displayHotTemp = shouldDisplayKitchenSection(showHotTemp, !!baseRecord && cooking.length > 0);
+  const displayCooling = shouldDisplayKitchenSection(showCooling, !!baseRecord && cooling.length > 0);
+  const displayReheating = shouldDisplayKitchenSection(showReheating, !!baseRecord && reheating.length > 0);
+  const displayHotHolding = shouldDisplayKitchenSection(showHotHolding, !!baseRecord && hotHolding.length > 0);
+  const displaySousVide = shouldDisplayKitchenSection(showSousVide, !!baseRecord && sousVide.length > 0);
 
   // Invalidate the record queries for the current diary scope.
   const invalidateRecords = () => {
@@ -856,7 +1071,9 @@ function DailyDiaryTab() {
     queryClient.invalidateQueries({ queryKey: getGetFoodSafetySummaryQueryKey().slice(0, 1) });
   };
   const handleDiaryConflict = (error: any) => {
-    hydratedScopeRef.current = null;
+    // Deliberate reload: the save was refused, so the latest diary replaces
+    // the form (the toast tells staff to review and re-enter).
+    setLoaded(null);
     const latest = error?.data?.record;
     if (latest) {
       queryClient.setQueryData(
@@ -875,26 +1092,27 @@ function DailyDiaryTab() {
 
   const buildData = (submittedAt?: string) => ({
     recordDate: selectedDate,
-    deliveries: record || showDeliveries ? deliveries : [],
-    coldFood: record || showColdFood ? coldFood : [],
-    hotTemperature: record || showHotTemp ? cooking : [],
-    cooling: record || showCooling ? cooling : [],
-    reheating: record || showReheating ? reheating : [],
-    hotHolding: record || showHotHolding ? hotHolding : [],
-    sousVide: record || showSousVide ? sousVide : [],
+    deliveries: baseRecord || showDeliveries ? deliveries : [],
+    coldFood: baseRecord || showColdFood ? coldFood : [],
+    hotTemperature: baseRecord || showHotTemp ? cooking : [],
+    cooling: baseRecord || showCooling ? cooling : [],
+    reheating: baseRecord || showReheating ? reheating : [],
+    hotHolding: baseRecord || showHotHolding ? hotHolding : [],
+    sousVide: baseRecord || showSousVide ? sousVide : [],
     cookingLimit: entryCookingLimit,
     coolingLimit: entryCoolingLimit,
     reheatingLimit: entryReheatingLimit,
     hotHoldingLimit: entryHotHoldingLimit,
-    correctives: correctives || undefined,
-    managerSignature: managerSignature || undefined,
+    // "" clears a saved value; leave unset fields out so a stale save can still merge.
+    correctives: correctives || (record?.correctives ? "" : undefined),
+    managerSignature: managerSignature || (record?.managerSignature ? "" : undefined),
     submittedAt,
   });
   const temperatureAssessment = (() => {
     try {
       const rules = parseKitchenTemperatureRules(config?.food_temperature_rules);
       const units = JSON.parse(config?.food_cold_units || "[]");
-      const failures = assessKitchenTemperatures(record as unknown as Record<string, unknown> | null, buildData(), rules, units);
+      const failures = assessKitchenTemperatures(baseRecord as unknown as Record<string, unknown> | null, buildData(), rules, units);
       return { failures, error: "", rules };
     } catch (problem) {
       return { failures: [] as KitchenTemperatureFailure[], error: problem instanceof Error ? problem.message : "Numeric rules could not be evaluated", rules: null };
@@ -914,22 +1132,39 @@ function DailyDiaryTab() {
     return true;
   };
 
-  const handleSaveDraft = async () => {
-    if (!validateTemperatures()) return;
-    const data = buildData(undefined);
+  // After a save the form is clean against what was sent. The saved record
+  // becomes the base for further edits; if nothing was typed meanwhile, the
+  // form reloads it (picking up rows merged in from other devices).
+  const markSaved = (saved: unknown, savedScope: string, savedSnapshot: string) => {
+    const savedRecord = saved && typeof saved === "object" && "recordDate" in saved
+      ? saved as FoodSafetyRecord : null;
+    if (savedRecord) {
+      queryClient.setQueryData(getGetFoodSafetyRecordByDateQueryKey(selectedDate, recordParams), savedRecord);
+    }
+    setLoaded(current => current && current.scope === savedScope
+      ? { scope: savedScope, recordKey: "saved", snapshot: savedSnapshot, record: savedRecord ?? current.record }
+      : current);
+  };
 
-    if (record) {
+  const handleSaveDraft = async () => {
+    if (!formReady || !validateTemperatures()) return;
+    const data = buildData(undefined);
+    const savedScope = scopeKey;
+    const savedSnapshot = currentSnapshot;
+
+    if (baseRecord) {
       updateRecord.mutate(
         {
-          id: record.id,
+          id: baseRecord.id,
           data: {
             ...data,
-            expectedUpdatedAt: record.updatedAt,
-            expectedRecord: buildDiaryBaseline(record),
+            expectedUpdatedAt: baseRecord.updatedAt,
+            expectedRecord: buildDiaryBaseline(baseRecord),
           },
         },
         {
-          onSuccess: () => {
+          onSuccess: (saved) => {
+            markSaved(saved, savedScope, savedSnapshot);
             invalidateRecords();
             toast({ title: "Draft saved" });
           },
@@ -946,11 +1181,17 @@ function DailyDiaryTab() {
       createRecord.mutate(
         { data, params: recordParams },
         {
-          onSuccess: () => {
+          onSuccess: (saved) => {
+            markSaved(saved, savedScope, savedSnapshot);
             invalidateRecords();
             toast({ title: "Draft created" });
           },
           onError: (error: any) => {
+            // Someone else started this day after the form loaded.
+            if (error?.status === 409) {
+              handleDiaryConflict(error);
+              return;
+            }
             toast({ title: "Failed to create", description: error.message, variant: "destructive" });
           },
         }
@@ -959,13 +1200,16 @@ function DailyDiaryTab() {
   };
 
   const handleSubmit = async () => {
-    if (!validateTemperatures()) return;
+    if (!formReady || !validateTemperatures()) return;
     if (!managerSignature.trim()) {
       toast({ title: "Manager signature required", variant: "destructive" });
       return;
     }
     const data = buildData(new Date().toISOString());
-    const onSuccess = () => {
+    const savedScope = scopeKey;
+    const savedSnapshot = currentSnapshot;
+    const onSuccess = (saved: unknown) => {
+      markSaved(saved, savedScope, savedSnapshot);
       invalidateRecords();
       toast({ title: "Diary filed", description: "Kitchen diary signed off and stored." });
     };
@@ -976,13 +1220,13 @@ function DailyDiaryTab() {
       }
       toast({ title: "Failed to submit", description: error.message, variant: "destructive" });
     };
-    if (record) {
+    if (baseRecord) {
       updateRecord.mutate({
-        id: record.id,
+        id: baseRecord.id,
         data: {
           ...data,
-          expectedUpdatedAt: record.updatedAt,
-          expectedRecord: buildDiaryBaseline(record),
+          expectedUpdatedAt: baseRecord.updatedAt,
+          expectedRecord: buildDiaryBaseline(baseRecord),
         },
       }, { onSuccess, onError });
     } else {
@@ -990,7 +1234,10 @@ function DailyDiaryTab() {
     }
   };
 
-  const isSubmitted = !!record?.submittedAt;
+  const isFiled = !!record?.submittedAt;
+  // Viewers are read-only: they see the diary locked like a filed one, with no
+  // Add/Save/File actions (the server would refuse them).
+  const isSubmitted = isFiled || user?.role === "client_viewer";
 
   return (
     <div className="space-y-6">
@@ -999,12 +1246,32 @@ function DailyDiaryTab() {
         <p className="font-medium">Outside configured limits — record the action taken. Each new failed observation opens a manager-verified follow-up.</p>
         {temperatureAssessment.failures.map((failure, index) => <p key={index}>{failure.label} · {failure.field}: {kitchenFailureValue(failure)}{!failure.actionTaken ? " — corrective action required" : " — action recorded"}</p>)}
       </div>}
+      <AlertDialog open={pendingScope !== null} onOpenChange={(open) => { if (!open) setPendingScope(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Save your draft before changing date or site, or discard these changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (pendingScope) applyScope(pendingScope); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Date Picker */}
       <Card>
         <CardHeader className="border-b border-border/50 pb-4">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-display">Select Date</CardTitle>
-            {isSubmitted && (
+            {isFiled && (
               <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                 <CheckCircle2 className="w-3 h-3 mr-1" />
                 Submitted
@@ -1018,7 +1285,7 @@ function DailyDiaryTab() {
             <Input
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => changeScope({ date: e.target.value, siteId: selectedSiteId })}
               className="max-w-xs"
             />
             {sites && sites.length > 0 && (
@@ -1026,7 +1293,7 @@ function DailyDiaryTab() {
                 <Label className="text-sm">Site:</Label>
                 <select
                   value={selectedSiteId ?? ""}
-                  onChange={(e) => setSelectedSiteId(e.target.value === "" ? null : Number(e.target.value))}
+                  onChange={(e) => changeScope({ date: selectedDate, siteId: e.target.value === "" ? null : Number(e.target.value) })}
                   className="h-9 rounded-sm border border-input bg-background px-2 text-sm"
                 >
                   <option value="">Organisation diary</option>
@@ -1040,7 +1307,7 @@ function DailyDiaryTab() {
         </CardContent>
       </Card>
 
-      {recordLoading || configLoading ? (
+      {recordLoading || configLoading || !formReady ? (
         <Card>
           <CardContent className="p-12 flex justify-center">
             <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
@@ -1049,7 +1316,7 @@ function DailyDiaryTab() {
       ) : (
         <>
           {/* Filed banner */}
-          {isSubmitted && record?.submittedAt && (
+          {isFiled && record?.submittedAt && (
             <Card className="border-emerald-200 bg-emerald-50">
               <CardContent className="py-4 px-6 flex items-center gap-3">
                 <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
@@ -1617,7 +1884,7 @@ function DailyDiaryTab() {
               {records.slice(0, 10).map((r) => (
                 <button
                   key={r.id}
-                  onClick={() => setSelectedDate(r.recordDate)}
+                  onClick={() => changeScope({ date: r.recordDate, siteId: selectedSiteId })}
                   className="w-full p-4 hover:bg-muted/20 transition-colors text-left flex items-center justify-between"
                 >
                   <div className="flex items-center gap-3">
@@ -1644,7 +1911,7 @@ function DailyDiaryTab() {
       {/* Monthly completeness calendar */}
       <FoodSafetyCompletenessCalendar
         siteId={selectedSiteId}
-        onPickDay={(d) => { setSelectedDate(d); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+        onPickDay={(d) => { changeScope({ date: d, siteId: selectedSiteId }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
       />
     </div>
   );
@@ -1652,7 +1919,7 @@ function DailyDiaryTab() {
 
 // ── Kitchen Daily Checks tab ──────────────────────────────────────────────────
 
-interface KCLItem { label: string; checked: boolean; notes?: string; section?: string; }
+interface KCLItem { label: string; checked: boolean; notes?: string; section?: string; result?: ChecklistResult; }
 interface KCLRecord {
   id: number; checklistType: string; checkDate: string;
   siteId?: number | null; items: KCLItem[];
@@ -1781,7 +2048,8 @@ function KitchenChecklistCard({
     setManagerNote(existing?.managerNote ?? "");
   }, [existing, type, templateItems]);
 
-  const toggle = (i: number) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, checked: !item.checked } : item)); };
+  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
+  const passRemaining = () => { if (submitted) return; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
   const setNote = (i: number, note: string) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
 
   async function save(submit: boolean) {
@@ -1789,16 +2057,27 @@ function KitchenChecklistCard({
     const endpoint = KCL_ENDPOINT[type];
     const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, staffRosterId: staffRosterId, managerNote: managerNote || null };
     if (submit) payload.submittedAt = new Date().toISOString();
+    const failedTitle = submit ? "Checklist not submitted" : "Draft not saved";
     try {
-      if (existing) { await apiFetch(`${endpoint}/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
-      else { await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) }); }
+      const res = existing
+        ? await apiFetch(`${endpoint}/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) {
+        // Keep the user's ticks; only a 409 (already submitted elsewhere)
+        // reloads, to show the stored submitted copy.
+        toast({ title: failedTitle, description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        if (res.status === 409) onSaved();
+        return;
+      }
+      toast({ title: submit ? "Checklist submitted" : "Draft saved" });
       onSaved();
-    } catch (err: any) {
-      toast({ title: "Save failed", description: err?.message, variant: "destructive" });
+    } catch {
+      toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
-  const checkedCount = items.filter(i => i.checked).length;
+  const progress = checklistProgress(items);
+  const hint = submitHint(progress);
   const Icon = type === "kitchen_opening" ? Sunrise : Sunset;
 
   return (
@@ -1815,10 +2094,10 @@ function KitchenChecklistCard({
                 <Settings2 className="w-3.5 h-3.5" />
               </Button>
             )}
-            <span className="text-xs text-muted-foreground">{checkedCount}/{items.length}</span>
+            <span className="text-xs text-muted-foreground">{progress.answered}/{items.length}{progress.failed > 0 && <span className="text-red-600 font-medium"> · {progress.failed} failed</span>}</span>
             {submitted
               ? <Badge className="bg-emerald-100 text-emerald-800 text-xs"><Lock className="w-3 h-3 mr-1" />Submitted</Badge>
-              : checkedCount === items.length && items.length > 0
+              : progress.ready
               ? <Badge className="bg-blue-100 text-blue-800 text-xs">Ready to submit</Badge>
               : <Badge variant="secondary" className="text-xs">In progress</Badge>}
           </div>
@@ -1833,18 +2112,7 @@ function KitchenChecklistCard({
                 {item.section && item.section !== items[i - 1]?.section && (
                   <p className={`text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 px-1 ${i > 0 ? "mt-3" : ""} mb-1`}>{item.section}</p>
                 )}
-                <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
-                  <div className="flex items-start gap-3" onClick={() => toggle(i)}>
-                    {item.checked ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" /> : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
-                    <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
-                  </div>
-                  {!submitted && item.checked && (
-                    <div className="mt-2 ml-7">
-                      <Input value={item.notes ?? ""} onChange={e => setNote(i, e.target.value)} placeholder="Optional note…" className="h-7 text-xs bg-white" onClick={e => e.stopPropagation()} />
-                    </div>
-                  )}
-                  {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
-                </div>
+                <ChecklistItemRow item={item} submitted={submitted} onResult={result => setResult(i, result)} onNote={note => setNote(i, note)} />
               </div>
             ))}
           </div>
@@ -1856,9 +2124,13 @@ function KitchenChecklistCard({
               <StaffPerformerSelect label="Completed by" value={completedBy} onChange={setCompletedBy} onRosterIdChange={setStaffRosterId} />
               {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
             </div>
+            {progress.remaining > 0 && progress.answered > 0 && (
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={passRemaining}>Mark the {progress.remaining} remaining as Pass</Button>
+            )}
+            {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}</Button>
-              <Button size="sm" onClick={() => save(true)} disabled={saving || checkedCount === 0} className="flex-1">Submit checklist</Button>
+              <Button size="sm" onClick={() => save(true)} disabled={saving || !progress.ready} className="flex-1">Submit checklist</Button>
             </div>
           </div>
         )}
@@ -1916,8 +2188,10 @@ function DailyChecksTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const getAm = (type: string) => amRows.find(c => c.checklistType === type);
-  const getPm = (type: string) => pmRows.find(c => c.checklistType === type);
+  // Without a site filter the lists hold every site's rows; match the card's
+  // own slot so it never edits another site's checklist.
+  const getAm = (type: string) => amRows.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
+  const getPm = (type: string) => pmRows.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
 
   return (
     <div className="space-y-4">
@@ -2068,7 +2342,13 @@ export default function KitchenPage() {
             </div>
             <p className="text-sm text-muted-foreground">{activeTabMeta.description}</p>
           </div>
-          {activeTab === "diary" && canAdmin && <ConfigDialog />}
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/food-safety" className="text-sm font-medium text-primary underline underline-offset-2">Inspection register &amp; diary calendar</Link>
+            <Link href="/allergens">
+              <Button variant="outline" size="sm" className="gap-1.5">Allergen records</Button>
+            </Link>
+            {activeTab === "diary" && canAdmin && <ConfigDialog />}
+          </div>
         </div>
 
         {/* Check status cards */}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
 import type { PasskeyOptions } from "@/context/auth-context";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, clearCsrfToken } from "@/lib/api";
 import { useLocation } from "wouter";
 import { ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
 import { startAuthentication } from "@simplewebauthn/browser";
@@ -10,10 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import alpsLogo from "@/assets/alps-logo.png";
+import { API_BASE } from "@/lib/api";
 
 type View = "login" | "totp" | "passkey" | "forgot" | "forgot-sent";
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
 export default function LoginPage() {
   const { login, refresh } = useAuth();
@@ -41,11 +41,11 @@ export default function LoginPage() {
         setView("passkey");
       }
       if (result.requiresEmailVerification) {
-        navigate("/verify-email");
+        navigate(`/verify-email?email=${encodeURIComponent(email)}`);
       }
     } catch (err: unknown) {
       if (err instanceof Error && (err as Error & { requiresEmailVerification?: boolean }).requiresEmailVerification) {
-        navigate("/verify-email");
+        navigate(`/verify-email?email=${encodeURIComponent(email)}`);
       } else {
         setError(err instanceof Error ? err.message : "Login failed");
       }
@@ -66,6 +66,7 @@ export default function LoginPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Passkey verification failed");
+      clearCsrfToken(); // a completed sign-in gets a new session and CSRF token
       if (data.requires2fa) {
         setView("totp");
         setPasskeyOptions(null);
@@ -90,7 +91,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${baseUrl}/auth/2fa/verify`, {
+      const res = await fetch(`${API_BASE}/auth/2fa/verify`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -98,6 +99,7 @@ export default function LoginPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Verification failed");
+      clearCsrfToken(); // the signed-in session is new, so is its CSRF token
       // Session is now fully established — reload auth state
       await refresh();
     } catch (err: unknown) {
@@ -113,7 +115,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${baseUrl}/auth/forgot-password`, {
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: forgotEmail }),
@@ -146,7 +148,7 @@ export default function LoginPage() {
             </h1>
             <div className="flex items-center justify-center gap-2 mt-4 relative z-10">
               <span className="text-white/60 text-xs font-display italic">by</span>
-              <img src={alpsLogo} alt="Alps Consultancy" className="h-4 opacity-70 brightness-0 invert" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-4 opacity-70 brightness-0 invert" />
             </div>
           </div>
 

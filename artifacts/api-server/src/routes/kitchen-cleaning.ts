@@ -8,8 +8,12 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin, getActiveDepartmentId } from "../middleware/requireAuth";
 import { createCleaningSchedulePdf, type CleaningScheduleCompletion } from "../lib/cleaningSchedulePdf";
+import { siteVisibleSql } from "../lib/departmentSites";
 
 const router = Router();
+
+/** siteId value for logs not tied to a kitchen (GET /logs/history). */
+const ACCOUNT_LEVEL = "account";
 
 type SiteResolution =
   | { ok: true; siteId: number | null }
@@ -33,15 +37,11 @@ async function resolveAccessibleSite(
 
   const departmentId = getActiveDepartmentId(req);
   const result = await db.execute(sql`
-    SELECT id
-    FROM sites
-    WHERE id = ${siteId}
-      AND client_id = ${clientId}
-      AND (
-        ${departmentId}::integer IS NULL
-        OR department_id IS NULL
-        OR department_id = ${departmentId}
-      )
+    SELECT s.id
+    FROM sites s
+    WHERE s.id = ${siteId}
+      AND s.client_id = ${clientId}
+      ${departmentId === null ? sql`` : sql`AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)}`}
     LIMIT 1
   `);
   if (!result.rows[0]) {
@@ -71,36 +71,53 @@ router.get("/export", requireAuth, requireClientAdmin, async (req, res) => {
   const { from, to, frequency } = parsed.data;
   if (from > to) return res.status(400).json({ error: "The start date must be on or before the end date" });
 
-  const [logsResult, clientResult] = await Promise.all([
+  const scope = await resolveAccessibleSite(req, res, clientId, req.query.siteId);
+  if (!scope.ok) return;
+  // A single-site export only includes logs stamped with that site; logs
+  // without a site appear in the all-sites export.
+  const siteFilter = scope.siteId === null
+    ? sql``
+    : sql`AND l.site_id = ${scope.siteId}`;
+
+  const [logsResult, clientResult, siteResult] = await Promise.all([
     db.execute(sql`
-      SELECT log_date, frequency, completions, signed_by, submitted_at
-      FROM kitchen_cleaning_logs
-      WHERE client_id = ${clientId}
-        AND log_date >= ${from}
-        AND log_date <= ${to}
-        AND frequency = ${frequency}
-      ORDER BY log_date ASC
+      SELECT l.log_date, l.frequency, l.completions, l.signed_by, l.submitted_at, s.name AS site_name
+      FROM kitchen_cleaning_logs l
+      LEFT JOIN sites s ON s.id = l.site_id AND s.client_id = l.client_id
+      WHERE l.client_id = ${clientId}
+        AND l.log_date >= ${from}
+        AND l.log_date <= ${to}
+        AND l.frequency = ${frequency}
+        ${siteFilter}
+      ORDER BY l.log_date ASC, s.name ASC NULLS LAST
     `),
     db.execute(sql`SELECT name FROM clients WHERE id = ${clientId} LIMIT 1`),
+    scope.siteId === null
+      ? Promise.resolve(null)
+      : db.execute(sql`SELECT name FROM sites WHERE id = ${scope.siteId} AND client_id = ${clientId} LIMIT 1`),
   ]);
 
   const logs = logsResult.rows.map((row: any) => ({
     date: String(row.log_date),
     frequency: String(row.frequency),
+    siteName: row.site_name ? String(row.site_name) : null,
     completions: (Array.isArray(row.completions) ? row.completions : []) as CleaningScheduleCompletion[],
     signedBy: row.signed_by ? String(row.signed_by) : "",
     submittedAt: row.submitted_at ? new Date(row.submitted_at) : null,
   }));
   const businessName = String((clientResult.rows[0] as any)?.name ?? "");
+  const siteName = siteResult ? String((siteResult.rows[0] as any)?.name ?? "") : null;
   const pdf = await createCleaningSchedulePdf({
     businessName,
+    siteName,
     dateFrom: from,
     dateTo: to,
     frequency: frequency.charAt(0).toUpperCase() + frequency.slice(1),
     generatedAt: new Date().toLocaleDateString("en-GB"),
     logs,
   });
-  const filename = `cleaning-schedule-${frequency}-${from}-to-${to}.pdf`;
+  const siteSuffix = scope.siteId === null ? "" : `-site-${scope.siteId}`;
+  const filename = `cleaning-schedule-${frequency}-${from}-to-${to}${siteSuffix}.pdf`;
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.setHeader("Content-Length", pdf.length);
@@ -146,12 +163,14 @@ router.post("/tasks", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { area, task, frequency, method, product, responsible, sortOrder, siteId } = parsed.data;
+  const scope = await resolveAccessibleSite(req, res, clientId, siteId);
+  if (!scope.ok) return;
 
   const result = await db.execute(sql`
     INSERT INTO kitchen_cleaning_tasks
       (client_id, site_id, area, task, frequency, method, product, responsible, sort_order)
     VALUES
-      (${clientId}, ${siteId ?? null}, ${area}, ${task}, ${frequency},
+      (${clientId}, ${scope.siteId}, ${area}, ${task}, ${frequency},
        ${method ?? null}, ${product ?? null}, ${responsible ?? null}, ${sortOrder ?? 0})
     RETURNING *
   `);
@@ -175,6 +194,10 @@ router.put("/tasks/:id", requireAuth, denyViewers, async (req, res) => {
 
   const row = existing.rows[0] as any;
   const { area, task, frequency, method, product, responsible, sortOrder, siteId } = parsed.data;
+  if (siteId !== undefined) {
+    const scope = await resolveAccessibleSite(req, res, clientId, siteId);
+    if (!scope.ok) return;
+  }
 
   const result = await db.execute(sql`
     UPDATE kitchen_cleaning_tasks SET
@@ -213,20 +236,30 @@ router.get("/logs/history", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const scope = await resolveAccessibleSite(req, res, clientId, req.query.siteId);
-  if (!scope.ok) return;
-  const siteFilter = scope.siteId === null
-    ? sql``
-    : sql`AND (site_id = ${scope.siteId} OR site_id IS NULL)`;
+  // Logs without a site are account-level: most were recorded before kitchens
+  // were added. A kitchen's history lists only that kitchen's logs, so an
+  // account-level log is never shown as a kitchen's evidence; siteId=account
+  // lists the account-level logs on their own, and no siteId lists every log
+  // with its kitchen (or account_level) marked.
+  let siteFilter = sql``;
+  if (req.query.siteId === ACCOUNT_LEVEL) {
+    siteFilter = sql`AND l.site_id IS NULL`;
+  } else {
+    const scope = await resolveAccessibleSite(req, res, clientId, req.query.siteId);
+    if (!scope.ok) return;
+    if (scope.siteId !== null) siteFilter = sql`AND l.site_id = ${scope.siteId}`;
+  }
   const rows = await db.execute(sql`
-    SELECT id, site_id, log_date, frequency, signed_by, submitted_at,
-      (SELECT count(*) FROM jsonb_array_elements(completions) AS c
+    SELECT l.id, l.site_id, s.name AS site_name, (l.site_id IS NULL) AS account_level,
+      l.log_date, l.frequency, l.signed_by, l.submitted_at,
+      (SELECT count(*) FROM jsonb_array_elements(l.completions) AS c
        WHERE (c->>'done')::boolean = true)::int AS completed_count,
-      jsonb_array_length(completions) AS total_count
-    FROM kitchen_cleaning_logs
-    WHERE client_id = ${clientId}
+      jsonb_array_length(l.completions) AS total_count
+    FROM kitchen_cleaning_logs l
+    LEFT JOIN sites s ON s.id = l.site_id AND s.client_id = l.client_id
+    WHERE l.client_id = ${clientId}
       ${siteFilter}
-    ORDER BY log_date DESC, frequency
+    ORDER BY l.log_date DESC, l.frequency, l.id
     LIMIT 60
   `);
   res.json(rows.rows);
@@ -241,13 +274,15 @@ router.get("/logs", requireAuth, async (req, res) => {
 
   const scope = await resolveAccessibleSite(req, res, clientId, req.query.siteId);
   if (!scope.ok) return;
+  // Match POST /logs: no siteId means the client-wide (site_id IS NULL) log.
   const siteFilter = scope.siteId === null
-    ? sql``
+    ? sql`AND site_id IS NULL`
     : sql`AND site_id = ${scope.siteId}`;
   const row = await db.execute(sql`
     SELECT * FROM kitchen_cleaning_logs
     WHERE client_id = ${clientId} AND log_date = ${date as string} AND frequency = ${frequency as string}
       ${siteFilter}
+    ORDER BY id
     LIMIT 1
   `);
   if (!row.rows[0]) return res.status(404).json({ error: "Not found" });

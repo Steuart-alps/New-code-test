@@ -1,6 +1,8 @@
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { historicalTestDepartmentScope } from "./patLegacyHistoryScope";
+import { submittedDailyChecklists } from "./dailyChecklistCompletion";
+import { departmentSiteIdSql, siteVisibleSql } from "./departmentSites";
 
 type Options = {
   clientId: number;
@@ -13,6 +15,16 @@ type Options = {
   restrictSitesToDepartment: boolean;
 };
 
+/**
+ * Boolean SQL: the site whose id and department_id columns are given is one of
+ * department `departmentId`'s own sites, i.e. given to it or the site it sits
+ * under (when not another department's), and never another site than that.
+ */
+export function departmentOwnsSiteSql(siteIdColumn: SQL, siteDepartmentColumn: SQL, departmentId: number): SQL {
+  return sql`(${siteVisibleSql(siteIdColumn, siteDepartmentColumn, departmentId)}
+    AND (${siteDepartmentColumn} = ${departmentId} OR ${siteIdColumn} = ${departmentSiteIdSql(departmentId)}))`;
+}
+
 /** Attribute records to the department of the account that entered them.
  * NULL/removed authors cannot be assigned reliably and are excluded.
  * The site restriction for department-scoped staff remains in effect; managers
@@ -24,7 +36,7 @@ export async function getDepartmentComplianceReport({
 }: Options) {
   const siteScope = sql`
     ${siteId !== undefined ? sql`AND s.id = ${siteId}` : sql``}
-    ${restrictSitesToDepartment ? sql`AND s.department_id = ${departmentId}` : sql``}
+    ${restrictSitesToDepartment ? sql`AND ${departmentOwnsSiteSql(sql`s.id`, sql`s.department_id`, departmentId)}` : sql``}
   `;
   const [sitesRes, dailyRes, moduleRes] = await Promise.all([
     db.execute(sql`
@@ -33,30 +45,14 @@ export async function getDepartmentComplianceReport({
       ORDER BY s.name, s.id
     `),
     db.execute(sql`
-      SELECT s.id AS site_id, checklists.checklist_type,
+      SELECT s.id AS site_id, checklists.period AS checklist_type,
              COUNT(DISTINCT checklists.check_date)::int AS submitted
-      FROM (
-        SELECT site_id, check_date::text AS check_date,
-               CASE
-                 WHEN checklist_type IN ('kitchen_opening', 'premises_opening') THEN 'am'
-                 WHEN checklist_type IN ('kitchen_closing', 'premises_closing') THEN 'pm'
-                 ELSE checklist_type
-               END AS checklist_type,
-               created_by AS author_id
-        FROM daily_checklists
-        WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
-          AND submitted_at IS NOT NULL
-        UNION ALL
-        SELECT site_id, checklist_date, type, submitted_by_id
-        FROM daily_checklist_submissions
-        WHERE client_id = ${clientId} AND checklist_date BETWEEN ${from} AND ${to}
-          AND submitted_at IS NOT NULL
-      ) checklists
+      FROM ${submittedDailyChecklists(clientId, from, to)} checklists
       JOIN sites s ON s.id = checklists.site_id AND s.client_id = ${clientId}
       JOIN users author ON author.id = checklists.author_id
         AND author.client_id = ${clientId} AND author.department_id = ${departmentId}
       WHERE true ${siteScope}
-      GROUP BY s.id, checklists.checklist_type
+      GROUP BY s.id, checklists.period
     `),
     db.execute(sql`
       SELECT activity.module, s.id AS site_id, COUNT(*)::int AS records

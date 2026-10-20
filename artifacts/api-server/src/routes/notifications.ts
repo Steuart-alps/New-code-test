@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 import { complianceItemsTable, contractorsTable, appSettingsTable, usersTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { sendEmail, sendSystemEmail, parseEmailList } from "../lib/email";
-import { buildReminderEmail, buildCalendarInvite, buildVisitConfirmationEmail, getPublicAppUrl } from "../lib/email";
+import { buildReminderEmail, buildCalendarInvite, buildVisitConfirmationEmail, getPublicAppUrl, getSenderEmail } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
@@ -180,7 +180,7 @@ export async function runReminderJob(): Promise<{ queued: number; sent: number; 
     }
     const settings = settingsCache[item.clientId];
     const companyName = settings["companyName"] ?? "ComplyTrack";
-    const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+    const fromEmail = getSenderEmail(settings);
     const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
     const ccList = await buildReminderCcList({
       clientId: item.clientId,
@@ -258,7 +258,7 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
     }
     const settings = settingsCache[item.clientId];
   const companyName = settings["companyName"] ?? "ComplyTrack";
-  const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const fromEmail = getSenderEmail(settings);
   const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
 
     const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
@@ -325,7 +325,7 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
 
   const settings = await getClientSettings(row.item.clientId);
   const companyName = settings["companyName"] ?? "ComplyTrack";
-  const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const fromEmail = getSenderEmail(settings);
   const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
   const ccList = await buildReminderCcList({
     clientId: item.clientId,
@@ -411,7 +411,7 @@ notificationsPublicRouter.post("/:token", async (req, res) => {
   const settings = await getClientSettings(item.clientId);
   const companyName = settings["companyName"] ?? "ComplyTrack";
   const maintenanceEmail = settings["maintenanceEmail"] ?? null;
-  const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const fromEmail = getSenderEmail(settings);
 
   const ics = buildCalendarInvite({
     itemTitle: item.title,

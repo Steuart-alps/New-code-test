@@ -18,7 +18,7 @@
 - [Artifact API request rules](artifact-api-request-rules.md) — hand-written artifact fetches need the `/api` base prefix; use Drizzle `inArray` rather than interpolated arrays in SQL `ANY`.
 - [Subagent delegation pitfalls](subagent-delegation-pitfalls.md) — subagents skip getClientId/dept-scoping/shared apiFetch; spell out tenant rules in tasks, then architect-review.
 - [Mobile 2FA login](mobile-2fa.md) — stateless: /auth/mobile-login takes optional code; client re-submits email+password+code; recovery code disables 2FA.
-- [Mandatory account 2FA](mandatory-two-factor.md) — every login account needs TOTP before app access; passkeys are optional web sign-in; roster-only people are not auth accounts.
+- [Mandatory account 2FA](mandatory-two-factor.md) — 2FA is optional unless a business they belong to sets `requireTwoFactor` to "true"; use isTwoFactorRequired; passkeys are optional web sign-in.
 - [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.
 - [Push-only Drizzle tables](push-only-tables.md) — every pgTable needs runtime CREATE TABLE; Oct 2026 audit found 5 (certificates, password_reset_tokens, two SafeTrack, unused green_machine_reconciliations).
 - [Task queue lags codebase](task-queue-lag.md) — most queued tasks already built; verify in code before implementing, brief subagents to audit first.
@@ -49,26 +49,28 @@
 - [Staff kiosk security](staff-kiosk-security.md) — public roster access uses rotatable tenant tokens; verified actions use short-lived one-use capabilities and atomic PIN lockout.
 - [Mobile draft hydration](mobile-draft-hydration.md) — server refreshes must never overwrite dirty mobile form state; reset abandoned edits before changing query scope.
 - [Custom form-option semantics](custom-form-option-semantics.md) — customize only business vocabularies; new records use active values, while edits preserve disabled legacy values.
-- [Track record lock](daily-entry-cutoff.md) — staff get the scheduled day plus one correction day; older records lock, while client admins and consultants can override.
+- [Track record lock](daily-entry-cutoff.md) — staff get the scheduled day plus one correction day; older records lock, while client admins and consultants can change them only with an audited X-Override-Reason.
 - [Browser CSRF and test sessions](csrf-test-sessions.md) — production cookie mutations require a session-bound header; legacy integration fixtures need the explicit test-only bypass.
 - [Track evidence profiles](track-evidence-profiles.md) — source-linked Fire/Legionella action sign-off requires structured, independently reviewed profile evidence; manual actions retain the generic contract.
 - [OpenAPI nullable object generation](openapi-nullable-object-generation.md) — keep referenced object schemas non-nullable; put nullability on the containing property to avoid invalid generated TypeScript.
 - [Contractor calendar semantics](contractor-calendar.md) — date-only targets are all-day events; revised invitations retain identity and resends still require approval.
 - [Contractor warning windows](contractor-warning-windows.md) — contractor expiry reminders use a separate client setting; absent or blank means 30 days, while legacy DBS age stays fixed.
 - [Storage overage pricing](storage-overage-pricing.md) — include 1 GiB per base subscription; price excess from the provider rate (STORAGE_PROVIDER_USD_PER_GIB_MONTH, default set from Replit's rate) plus a 20% ALPS margin.
+- [Storage usage snapshot](storage-usage-snapshot.md) — Settings totals come from a per-object ledger (upsert/tombstone, never deltas) reconciled with provider ACL listings; lifecycle writes beat stale listings.
 - [Postgres row locking](postgres-row-locking.md) — joined route transactions must scope FOR UPDATE to the base table when nullable joins are present.
 - [Approval refresh storage fallback](approval-refresh-storage.md) — scope approval state by user/client; use localStorage, then scoped BroadcastChannel, then in-memory same-tab continuity.
 - [Cross-module action authorization](linked-action-integrity.md) — generic action endpoints must honor the linked record's access boundary, not just their own tenant checks.
 - [Browser engine runtime](browser-engine-runtime.md) — Playwright WebKit needs exact native sonames that may be unavailable even after its browser archive is installed.
 - [Browser test API proxy](browser-test-api-proxy.md) — real-browser tests against a private API must enrol mandatory 2FA and strip the Vite origin from upstream requests; with enforced CSRF, rewrite it to the API origin (FRESH_SCHEMA_BROWSER_POLICY).
 - [API codegen launcher drift](api-codegen-launcher-drift.md) — a stale Orval workspace launcher can point at a missing peer variant and produce misleading generated-client diffs.
+- [Cancelled business storage class](cancelled-storage-class.md) — files move to ARCHIVE 30 days after cancellation and back on resubscription; export stays open while locked.
 - [Account erasure review](account-erasure-review.md) — independent approval, 30-day minimum and legal holds must survive every deletion entry point and request race.
 - [Drizzle transaction startup](drizzle-transaction-startup.md) — actor-context setup failures occur before Drizzle cleanup; the pool adapter must own rollback and release.
 - [Shell runtime stalls](shell-runtime-loader-hangs.md) — Historical (Replit-only): distinguish injected-loader stalls from memory pressure caused by parallel validation jobs.
 - [Staged validation runner](validation-runner.md) — validation checks run through scripts/validate.mjs: shared flock slots, memory waits, codegen lock, restart reaping, 8080 guard.
 - [Browser fault fixtures](browser-fault-fixtures.md) — hold read outages until explicit retry; test legacy pages without changing production routing.
 - [Orphaned workflow children](workflow-orphaned-children.md) — Historical (Replit-only): surviving Vite children can force restarted workflows off the registered preview port.
-- [Track release gates](track-release-gates.md) — GreenTrack's public Coming soon gate remains until an explicit activation request.
+- [Track release gates](track-release-gates.md) — GreenTrack launched 2026-10-19; how to gate a future module as "Coming soon".
 - [Required photo creation](required-photo-creation.md) — stage verified evidence before atomically creating records; creation rules do not retroactively invalidate history.
 - [Mobile staged photo evidence](mobile-staged-photo-evidence.md) — mobile mirrors the web staged-receipt flow; storage PUT never carries the bearer; receipts scoped to user+client+type.
 - [Staged photo cleanup](staged-photo-cleanup.md) — cancelled/expired receipts delete their object first, then the row, under the receipt lock with ACL and reference checks; never prune receipt rows directly.

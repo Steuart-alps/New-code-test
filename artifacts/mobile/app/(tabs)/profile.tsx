@@ -11,10 +11,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as WebBrowser from 'expo-web-browser';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import { appVersionLabel } from '@/lib/appVersion';
+import { privacyPolicyUrl, termsUrl } from '@/lib/links';
 
 interface Site {
   id: number;
@@ -23,9 +27,45 @@ interface Site {
 
 const ROLE_LABELS: Record<string, string> = {
   consultant: 'Consultant',
-  client_admin: 'Admin',
+  client_admin: 'Owner',
+  client_manager: 'Manager',
   client_staff: 'Staff',
   client_viewer: 'Viewer',
+};
+
+function LinkRow({
+  icon,
+  label,
+  onPress,
+  testID,
+  destructive = false,
+  last = false,
+}: {
+  icon: React.ComponentProps<typeof Feather>['name'];
+  label: string;
+  onPress: () => void;
+  testID: string;
+  destructive?: boolean;
+  last?: boolean;
+}) {
+  const colors = useColors();
+  const color = destructive ? colors.destructive : colors.foreground;
+  return (
+    <TouchableOpacity
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      style={[styles.infoRow, { borderBottomColor: colors.border }, last && { borderBottomWidth: 0 }]}
+    >
+      <Feather name={icon} size={16} color={destructive ? colors.destructive : colors.mutedForeground} />
+      <Text style={[styles.linkLabel, { color }]}>{label}</Text>
+      <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+    </TouchableOpacity>
+  );
+}
+
+const openPage = (url: string) => {
+  WebBrowser.openBrowserAsync(url).catch(() => undefined);
 };
 
 function InfoRow({
@@ -62,6 +102,7 @@ export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
+  const router = useRouter();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const { data: sites = [] } = useQuery<Site[]>({
@@ -173,7 +214,7 @@ export default function ProfileScreen() {
                 Version
               </Text>
               <Text style={[styles.infoValue, { color: colors.foreground }]}>
-                1.0.0
+                {appVersionLabel()}
               </Text>
             </View>
           </View>
@@ -186,10 +227,34 @@ export default function ProfileScreen() {
                 Platform
               </Text>
               <Text style={[styles.infoValue, { color: colors.foreground }]}>
-                ComplyTrack by ALPS Consulting
+                ComplyTrack by ALPS Consultancy
               </Text>
             </View>
           </View>
+        </View>
+      </View>
+
+      {/* Legal and account */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
+          Privacy
+        </Text>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <LinkRow icon="lock" label="Privacy policy" testID="profile-privacy" onPress={() => openPage(privacyPolicyUrl())} />
+          <LinkRow icon="file-text" label="Terms of service" testID="profile-terms" onPress={() => openPage(termsUrl())} />
+          <LinkRow
+            icon="trash-2"
+            label="Delete my account"
+            testID="profile-delete-account"
+            destructive
+            last
+            onPress={() => router.push('/account/delete' as any)}
+          />
         </View>
       </View>
 
@@ -201,6 +266,7 @@ export default function ProfileScreen() {
             { borderColor: colors.destructive },
           ]}
           onPress={confirmLogout}
+          accessibilityRole="button"
         >
           <Feather name="log-out" size={18} color={colors.destructive} />
           <Text style={[styles.signOutText, { color: colors.destructive }]}>
@@ -266,6 +332,7 @@ const styles = StyleSheet.create({
   },
   infoLabel: { fontSize: 11, fontFamily: 'Inter_400Regular', marginBottom: 2 },
   infoValue: { fontSize: 14, fontFamily: 'Inter_500Medium' },
+  linkLabel: { flex: 1, marginLeft: 12, fontSize: 14, fontFamily: 'Inter_500Medium' },
   signOutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
