@@ -143,7 +143,7 @@ export const aquaUiStyles = StyleSheet.create({
     fontSize: 15,
     fontFamily: 'Inter_400Regular',
   },
-  textArea: { height: 82, paddingTop: 12 },
+  textArea: { minHeight: 82, paddingTop: 12 },
   choiceRow: { flexDirection: 'row', gap: 8, paddingBottom: 1 },
   choice: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 13, paddingVertical: 9 },
   choiceText: { fontSize: 13, fontFamily: 'Inter_500Medium' },

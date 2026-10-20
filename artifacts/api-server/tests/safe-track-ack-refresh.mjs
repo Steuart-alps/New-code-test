@@ -2,6 +2,7 @@
 // ?sinceId=<latest ack id> to pick up staff self-signatures without
 // re-downloading every row. Covers the incremental lists, the overlap window,
 // the fallbacks, and that the public sign-off link works without a session.
+// Also covers publishing SOPs and handbook entries with an ISO publishedAt.
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -69,6 +70,27 @@ const ra = await as("POST", "/safe-track/risk-assessments", {
   title: "Refresh fixture assessment", status: "published", requiresAcknowledgement: true,
 });
 requireSuccess("create risk assessment", ra, 201);
+
+// The web sends publishedAt as an ISO string; SOPs and handbook entries once
+// returned a 500 when saving it into the timestamp column.
+for (const [kind, extra] of [["sops", { scope: "Kitchen" }], ["handbook", { section: "Welcome" }]]) {
+  const firstPublished = "2026-10-01T09:30:00.000Z";
+  const created = await as("POST", `/safe-track/${kind}`, {
+    title: `Published ${kind} fixture`, version: "1.0", publishedAt: firstPublished, ...extra,
+  });
+  requireSuccess(`create ${kind} with an ISO publishedAt`, created, 201);
+  check(`${kind} create stores publishedAt`, new Date(created.data?.publishedAt).toISOString() === firstPublished);
+  const republished = "2026-10-12T14:00:00.000Z";
+  const updated = await as("PUT", `/safe-track/${kind}/${created.data.id}`, { version: "1.1", publishedAt: republished });
+  check(`update ${kind} with an ISO publishedAt`, updated.status === 200);
+  check(`${kind} update stores publishedAt`, new Date(updated.data?.publishedAt).toISOString() === republished);
+  const cleared = await as("PUT", `/safe-track/${kind}/${created.data.id}`, { publishedAt: null });
+  check(`${kind} publishedAt can be cleared`, cleared.status === 200 && cleared.data?.publishedAt === null);
+  check(`invalid ${kind} publishedAt is rejected`,
+    (await as("PUT", `/safe-track/${kind}/${created.data.id}`, { publishedAt: "not a date" })).status === 400);
+  await as("DELETE", `/safe-track/${kind}/${created.data.id}`);
+}
+
 const listPath = `/safe-track/risk-assessments/${ra.data.id}/acknowledgements`;
 
 // The manager records the first acknowledgement in the dialog.

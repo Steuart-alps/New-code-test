@@ -18,6 +18,11 @@ import {
   useGetFireSafetyConfig,
   getGetFireSafetyConfigQueryKey,
   useUpdateFireSafetyConfig,
+  useListFireCallPoints,
+  getListFireCallPointsQueryKey,
+  useCreateFireCallPoint,
+  useUpdateFireCallPoint,
+  FireCallPoint,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -35,29 +40,35 @@ import { format } from "date-fns";
 import {
   Flame, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Filter, Pencil, Trash2, Lock, Route, Cpu, Check, X, Minus, Settings, XCircle, ShieldAlert,
+  BellRing, Lightbulb, Moon, Archive, RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { AuditLog } from "@/components/audit-log";
+import { LoadError } from "@/components/load-error";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
 const ALL_CHECK_TYPES = [
   "alarm", "emergency_lights", "extinguishers",
   "fire_doors", "fire_drill", "fire_walk", "alarm_panel",
+  "emergency_lights_annual", "alarm_service", "extinguisher_service",
 ] as const;
 type AnyCheckType = typeof ALL_CHECK_TYPES[number];
 
 const CHECK_TYPE_LABELS: Record<AnyCheckType, string> = {
   alarm:            "Weekly fire alarm test",
-  emergency_lights: "Monthly emergency lighting test",
+  emergency_lights: "Monthly emergency lighting flick test",
   extinguishers:    "Weekly extinguisher visual check",
   fire_doors:       "Fire door check",
-  fire_drill:       "Fire drill / evacuation",
+  fire_drill:       "Fire drill (6-monthly, with night staff)",
   fire_walk:        "Fire walk — escape route sign-off",
   alarm_panel:      "Alarm panel check",
+  emergency_lights_annual: "Annual 3-hour emergency lighting discharge test",
+  alarm_service:    "6-monthly fire alarm service",
+  extinguisher_service: "Annual fire extinguisher service",
 };
 
 const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
@@ -69,7 +80,266 @@ const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
     label: "Walkthroughs & drills",
     types: ["fire_walk", "fire_drill"],
   },
+  {
+    label: "Contractor services & annual tests",
+    types: ["alarm_service", "extinguisher_service", "emergency_lights_annual"],
+  },
 ];
+
+/** How often, in words, for the status cards. */
+function frequencyLabel(days: number): string {
+  if (days === 1) return "Daily";
+  if (days === 7) return "Weekly";
+  if (days === 14) return "Fortnightly";
+  if (days === 30) return "Monthly";
+  if (days === 90) return "Quarterly";
+  if (days === 180) return "At least every 6 months";
+  if (days === 365) return "Annual";
+  return `Every ${days} days`;
+}
+
+// ── Night staff (fire drills) ─────────────────────────────────────────────────
+
+type NightStaff = "included" | "not_included" | "no_night_staff";
+
+const NIGHT_STAFF_LABELS: Record<NightStaff, string> = {
+  included: "Night staff took part",
+  not_included: "Night staff did not take part",
+  no_night_staff: "No night staff at this site",
+};
+
+function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | null; onChange: (v: NightStaff) => void; optional?: boolean }) {
+  return (
+    <div className="space-y-2 border border-border rounded-sm p-3 bg-muted/20">
+      <div className="flex items-center gap-2">
+        <Moon className="w-4 h-4 text-primary flex-shrink-0" />
+        <p className="text-sm font-medium">Night staff {optional && <span className="text-muted-foreground text-xs font-normal">optional</span>}</p>
+      </div>
+      <p className="text-xs text-muted-foreground">Drills are due at least every 6 months and should include night staff.</p>
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Night staff">
+        {(Object.keys(NIGHT_STAFF_LABELS) as NightStaff[]).map(option => (
+          <button key={option} type="button" role="radio" aria-checked={value === option} onClick={() => onChange(option)}
+            data-testid={`night-staff-${option}`}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium rounded-sm border transition-colors",
+              value === option
+                ? option === "not_included" ? "bg-amber-500 border-amber-500 text-white" : "bg-primary border-primary text-primary-foreground"
+                : "bg-background text-muted-foreground border-border hover:border-primary/50",
+            )}>
+            {NIGHT_STAFF_LABELS[option]}
+          </button>
+        ))}
+      </div>
+      {value === "not_included" && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-sm px-2 py-1.5">
+          Plan the next drill so night staff take part.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Emergency lighting ────────────────────────────────────────────────────────
+
+function FlickTestGuide() {
+  return (
+    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground">
+      <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+      <p>
+        <span className="font-medium text-foreground">Monthly 5 minute flick test.</span> Switch the emergency lighting
+        to test for 5 minutes and check every fitting lights. Record Fail and note which fittings if any do not.
+      </p>
+    </div>
+  );
+}
+
+/** Contractor jobs that are also ComplyTrack tasks, and the task each one completes. */
+const LINKED_TASK_GUIDES: Partial<Record<AnyCheckType, { testId: string; heading: string; who: string; task: string }>> = {
+  emergency_lights_annual: {
+    testId: "discharge-test-guide", heading: "Annual 3-hour discharge test.",
+    who: "emergency lighting contractor, who certifies it", task: "Emergency Light Maintenance",
+  },
+  alarm_service: {
+    testId: "alarm-service-guide", heading: "6-monthly fire alarm service.",
+    who: "fire alarm contractor (BS 5839)", task: "Fire Alarm Maintenance",
+  },
+  extinguisher_service: {
+    testId: "extinguisher-service-guide", heading: "Annual fire extinguisher service.",
+    who: "extinguisher contractor (BS 5306-3)", task: "Fire Extinguishers Maintenance",
+  },
+};
+
+function LinkedTaskGuide({ checkType }: { checkType: AnyCheckType }) {
+  const guide = LINKED_TASK_GUIDES[checkType];
+  if (!guide) return null;
+  return (
+    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground" data-testid={guide.testId}>
+      <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+      <p>
+        <span className="font-medium text-foreground">{guide.heading}</span> Usually done by your {guide.who}.
+        A pass here also completes the "{guide.task}" task in ComplyTrack, and completing that task records it here.
+      </p>
+    </div>
+  );
+}
+
+// ── Call points (weekly alarm tests) ──────────────────────────────────────────
+
+/** The call point to suggest next: never tested first, then the longest ago. */
+function nextCallPoint(points: FireCallPoint[]): FireCallPoint | undefined {
+  return [...points].sort((a, b) => {
+    if (!a.lastTestedDate !== !b.lastTestedDate) return a.lastTestedDate ? 1 : -1;
+    return (a.lastTestedDate ?? "").localeCompare(b.lastTestedDate ?? "") || a.name.localeCompare(b.name);
+  })[0];
+}
+
+function callPointSiteParam(siteId: number | undefined | null) {
+  return { siteId: siteId ? String(siteId) : "none" };
+}
+
+/**
+ * Pick the call point used for this week's alarm test. With a list set up for
+ * the site, the one tested longest ago is suggested so each one is used in
+ * turn; without one, the call point is typed in. With no site chosen at a
+ * business that has sites, every site's call points are listed and picking
+ * one sets the test's site.
+ */
+function CallPointPicker({
+  siteId, sites, open, callPointId, callPoint, onChange, onSiteChange, optional, keepId,
+}: {
+  siteId: number | undefined;
+  sites: { id: number; name: string }[] | undefined;
+  open: boolean;
+  callPointId: number | null;
+  callPoint: string;
+  onChange: (value: { callPointId: number | null; callPoint: string }) => void;
+  onSiteChange: (siteId: number | undefined) => void;
+  optional?: boolean;
+  /** An archived call point already on this record stays selectable. */
+  keepId?: number | null;
+}) {
+  const anySite = siteId === undefined && (sites?.length ?? 0) > 0;
+  const params = anySite ? { includeArchived: "true" as const } : { ...callPointSiteParam(siteId), includeArchived: "true" as const };
+  const { data: allPoints, isLoading } = useListFireCallPoints(params, {
+    query: { enabled: open, queryKey: getListFireCallPointsQueryKey(params) },
+  });
+  const points = (allPoints ?? []).filter(p => !p.archivedAt || p.id === keepId);
+  const active = points.filter(p => !p.archivedAt);
+  const suggested = anySite ? undefined : nextCallPoint(active);
+  const siteName = (id: number | null) => sites?.find(site => site.id === id)?.name ?? "No specific site";
+
+  // Suggest the next call point in the rotation when nothing is chosen yet.
+  useEffect(() => {
+    if (!open || optional || callPointId != null || callPoint || !suggested) return;
+    onChange({ callPointId: suggested.id, callPoint: suggested.name });
+  }, [open, suggested?.id, callPointId, callPoint]);
+
+  return (
+    <div className="space-y-2 border border-border rounded-sm p-3 bg-muted/20">
+      <div className="flex items-center gap-2">
+        <BellRing className="w-4 h-4 text-primary flex-shrink-0" />
+        <p className="text-sm font-medium">Call point tested {optional && <span className="text-muted-foreground text-xs font-normal">optional</span>}</p>
+      </div>
+      <p className="text-xs text-muted-foreground">Test the alarm weekly from a different call point each time.</p>
+      {isLoading ? null : points.length > 0 ? (
+        <Select value={callPointId ? String(callPointId) : ""}
+          onValueChange={v => {
+            const p = points.find(x => String(x.id) === v);
+            if (!p) return;
+            onChange({ callPointId: p.id, callPoint: p.name });
+            if (anySite) onSiteChange(p.siteId ?? undefined);
+          }}>
+          <SelectTrigger className="rounded-sm" data-testid="select-call-point"><SelectValue placeholder="Choose the call point" /></SelectTrigger>
+          <SelectContent>
+            {points.map(p => (
+              <SelectItem key={p.id} value={String(p.id)}>
+                {p.name}{anySite ? ` (${siteName(p.siteId)})` : ""} · {p.lastTestedDate ? `last tested ${format(new Date(p.lastTestedDate), "dd/MM/yyyy")}` : "not tested yet"}
+                {p.id === suggested?.id ? " · next in turn" : ""}{p.archivedAt ? " · archived" : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <>
+          <Input value={callPoint} onChange={e => onChange({ callPointId: null, callPoint: e.target.value })}
+            placeholder='e.g. "CP3 – First floor fire exit"' className="rounded-sm" data-testid="input-call-point" />
+          <p className="text-xs text-muted-foreground">Managers can list this site's call points under Template, Call points.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled: boolean }) {
+  const params = { ...callPointSiteParam(siteId), includeArchived: "true" as const };
+  const { data: points } = useListFireCallPoints(params, { query: { enabled, queryKey: getListFireCallPointsQueryKey(params) } });
+  const createPoint = useCreateFireCallPoint();
+  const updatePoint = useUpdateFireCallPoint();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [newName, setNewName] = useState("");
+  const [editing, setEditing] = useState<Record<number, string>>({});
+  const refresh = () => queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
+  const fail = (err: any) => toast({ title: "Call point not saved", description: err.message, variant: "destructive" });
+
+  const add = () => {
+    const name = newName.trim();
+    if (!name) return;
+    createPoint.mutate({ data: { siteId, name } }, { onSuccess: () => { setNewName(""); refresh(); }, onError: fail });
+  };
+  const save = (point: FireCallPoint, data: { name?: string; archived?: boolean }) =>
+    updatePoint.mutate({ id: point.id, data }, {
+      onSuccess: () => { setEditing(({ [point.id]: _, ...rest }) => rest); refresh(); },
+      onError: fail,
+    });
+
+  const active = (points ?? []).filter(p => !p.archivedAt);
+  const archived = (points ?? []).filter(p => p.archivedAt);
+  return (
+    <div className="space-y-3">
+      {active.length === 0 && <p className="text-xs text-muted-foreground italic">No call points listed yet.</p>}
+      {active.map(point => (
+        <div key={point.id} className="flex gap-2 items-center">
+          <Input value={editing[point.id] ?? point.name} className="h-8 text-sm rounded-sm flex-1"
+            onChange={e => setEditing(current => ({ ...current, [point.id]: e.target.value }))} />
+          <span className="text-[11px] text-muted-foreground w-28 shrink-0">
+            {point.lastTestedDate ? `Tested ${format(new Date(point.lastTestedDate), "dd/MM/yyyy")}` : "Not tested yet"}
+          </span>
+          {editing[point.id] !== undefined && editing[point.id].trim() && editing[point.id].trim() !== point.name && (
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" title="Save name"
+              onClick={() => save(point, { name: editing[point.id].trim() })}>
+              <Check className="w-3.5 h-3.5 text-emerald-700" />
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" title="Archive (kept on past tests)"
+            onClick={() => save(point, { archived: true })}>
+            <Archive className="w-3.5 h-3.5 text-muted-foreground" />
+          </Button>
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder='e.g. "CP1 – Reception"'
+          className="h-8 text-sm rounded-sm" onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
+        <Button variant="outline" size="sm" onClick={add} disabled={!newName.trim() || createPoint.isPending}>
+          <Plus className="w-3.5 h-3.5 mr-1.5" /> Add
+        </Button>
+      </div>
+      {archived.length > 0 && (
+        <div className="space-y-1 pt-2 border-t border-border">
+          <p className="text-xs font-medium text-muted-foreground">Archived (kept on past tests)</p>
+          {archived.map(point => (
+            <div key={point.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="flex-1">{point.name}</span>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => save(point, { archived: false })}>
+                <RotateCcw className="w-3 h-3 mr-1" /> Restore
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Structured note types ─────────────────────────────────────────────────────
 
@@ -273,7 +543,8 @@ function parseJsonRecord(raw: string | undefined | null, fallback: Record<string
 
 const DEFAULT_FIRE_FREQUENCIES: Record<string, number> = {
   alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90,
-  fire_drill: 180, fire_walk: 7, alarm_panel: 7,
+  fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365,
+  alarm_service: 180, extinguisher_service: 365,
 };
 
 type FireProfileState = {
@@ -293,6 +564,10 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updateConfig = useUpdateFireSafetyConfig();
+  const { data: sites } = useListSites();
+  const hasSites = (sites?.length ?? 0) > 0;
+  const [callPointSite, setCallPointSite] = useState<number | undefined>(siteId);
+  useEffect(() => { if (open) setCallPointSite(siteId ?? (sites?.length === 1 ? sites[0].id : undefined)); }, [open, siteId, sites]);
 
   const [defaultPerformer, setDefaultPerformer] = useState("");
   const [escapeRoutes, setEscapeRoutes] = useState<Array<{ name: string; location: string }>>([]);
@@ -385,8 +660,9 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
         </DialogHeader>
 
         <Tabs defaultValue="defaults" className="flex-1 min-h-0 flex flex-col">
-           <TabsList className="shrink-0 w-full grid grid-cols-3 sm:grid-cols-6 h-auto">
+           <TabsList className="shrink-0 w-full grid grid-cols-3 sm:grid-cols-4 h-auto">
             <TabsTrigger value="defaults">Defaults</TabsTrigger>
+            <TabsTrigger value="callpoints" data-testid="tab-fire-call-points">Call points</TabsTrigger>
             <TabsTrigger value="routes">Escape Routes</TabsTrigger>
             <TabsTrigger value="zones">Alarm Zones</TabsTrigger>
             <TabsTrigger value="ext">Extinguishers</TabsTrigger>
@@ -473,6 +749,28 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
             </div>
           </TabsContent>
 
+          <TabsContent value="callpoints" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">
+              List this site's manual call points. Each weekly alarm test records the one used, and the next one in turn is suggested so every call point gets tested.
+            </p>
+            {hasSites && (
+              <Select value={callPointSite ? String(callPointSite) : ""} onValueChange={v => setCallPointSite(Number(v))}>
+                <SelectTrigger className="rounded-sm" data-testid="select-call-point-site"><SelectValue placeholder="Choose a site" /></SelectTrigger>
+                <SelectContent>
+                  {sites!.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {hasSites && !callPointSite ? (
+              <p className="text-xs text-muted-foreground italic">Choose a site to list its call points.</p>
+            ) : (
+              <>
+                <CallPointsEditor key={callPointSite ?? "none"} siteId={callPointSite ?? null} enabled={open} />
+                <p className="text-[11px] text-muted-foreground">Changes save straight away. Archived call points stay on the tests that used them.</p>
+              </>
+            )}
+          </TabsContent>
+
           <TabsContent value="zones" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
             <p className="text-xs text-muted-foreground">
               List your alarm panel zones. They'll be pre-filled in the "Zones tested" field on alarm panel checks.
@@ -534,6 +832,15 @@ function RecordCheckDialog({
   const [notes, setNotes] = useState("");
   const [selectedSite, setSelectedSite] = useState<number | undefined>(siteId);
 
+  // Weekly alarm test: the call point used. Drills: whether night staff took part.
+  const [callPointChoice, setCallPointChoice] = useState<{ callPointId: number | null; callPoint: string }>({ callPointId: null, callPoint: "" });
+  const [nightStaff, setNightStaff] = useState<NightStaff | null>(null);
+  // A call point belongs to one site, so choosing another site clears it.
+  const changeSite = (value: number | undefined) => {
+    if (value !== selectedSite) setCallPointChoice({ callPointId: null, callPoint: "" });
+    setSelectedSite(value);
+  };
+
   // Fire walk state
   const [routes, setRoutes] = useState<EscapeRoute[]>([]);
 
@@ -548,6 +855,11 @@ function RecordCheckDialog({
   const createCheck = useCreateFireSafetyCheck();
   const { data: sites } = useListSites();
   const { data: config } = useGetFireSafetyConfig();
+
+  // A business with one site records against it, so its call point list applies.
+  useEffect(() => {
+    if (open && selectedSite === undefined && sites?.length === 1) setSelectedSite(sites[0].id);
+  }, [open, sites]);
 
   // Pre-fill from template
   useEffect(() => {
@@ -598,7 +910,12 @@ function RecordCheckDialog({
   function reset() {
     setCheckDate(todayIso()); setResult("pass"); setLocation(""); setPerformedBy(user?.name ?? ""); setNotes("");
     setRoutes([]); setPanelStatus("normal"); setFaultsFound(""); setZonesTested(""); setActionsTaken("");
+    setCallPointChoice({ callPointId: null, callPoint: "" }); setNightStaff(null);
   }
+
+  const missing = checkType === "alarm" && !callPointChoice.callPointId && !callPointChoice.callPoint.trim()
+    ? "Choose the call point tested"
+    : checkType === "fire_drill" && !nightStaff ? "Say whether night staff took part" : null;
 
   const handleSubmit = async () => {
     const data: CreateFireSafetyCheckRequest & { staffRosterId?: number | null } = {
@@ -610,6 +927,11 @@ function RecordCheckDialog({
       performedBy: performedBy || null,
       staffRosterId: staffRosterId,
       notes: buildNotes(),
+      ...(checkType === "alarm" ? {
+        callPointId: callPointChoice.callPointId,
+        callPoint: callPointChoice.callPointId ? null : callPointChoice.callPoint.trim(),
+      } : {}),
+      ...(checkType === "fire_drill" ? { nightStaff } : {}),
     };
     createCheck.mutate(
       { data },
@@ -617,6 +939,7 @@ function RecordCheckDialog({
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListFireSafetyChecksQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetFireSafetyStatusQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
           toast({ title: "Check recorded", description: "Fire safety check saved." });
           reset(); setOpen(false);
         },
@@ -670,7 +993,7 @@ function RecordCheckDialog({
           {sites && sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Select value={selectedSite ? String(selectedSite) : "none"} onValueChange={v => setSelectedSite(v === "none" ? undefined : Number(v))}>
+              <Select value={selectedSite ? String(selectedSite) : "none"} onValueChange={v => changeSite(v === "none" ? undefined : Number(v))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No specific site</SelectItem>
@@ -679,6 +1002,16 @@ function RecordCheckDialog({
               </Select>
             </div>
           )}
+
+          {checkType === "alarm" && (
+            <CallPointPicker siteId={selectedSite} sites={sites} open={open} callPointId={callPointChoice.callPointId}
+              callPoint={callPointChoice.callPoint} onChange={setCallPointChoice} onSiteChange={setSelectedSite} />
+          )}
+
+          {checkType === "emergency_lights" && <FlickTestGuide />}
+          <LinkedTaskGuide checkType={checkType} />
+
+          {checkType === "fire_drill" && <NightStaffPicker value={nightStaff} onChange={setNightStaff} />}
 
           {/* ── Fire walk ─────────────────────────────────────────────────── */}
           {checkType === "fire_walk" && (
@@ -758,9 +1091,9 @@ function RecordCheckDialog({
             </div>
           )}
 
-          {checkType !== "fire_walk" && checkType !== "alarm_panel" && (
+          {checkType !== "fire_walk" && checkType !== "alarm_panel" && checkType !== "alarm" && (
             <div className="space-y-1.5">
-              <Label>Location / Call Point <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Label>Location <span className="text-muted-foreground text-xs">optional</span></Label>
               <Input value={location} onChange={e => setLocation(e.target.value)} placeholder="e.g. Ground floor near kitchen" className="rounded-sm" />
             </div>
           )}
@@ -770,9 +1103,10 @@ function RecordCheckDialog({
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm" />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="items-center">
+          {missing && <p className="text-xs text-muted-foreground sm:mr-auto">{missing}</p>}
           <Button variant="outline" onClick={() => { reset(); setOpen(false); }}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={createCheck.isPending}>
+          <Button onClick={handleSubmit} disabled={createCheck.isPending || !!missing}>
             {createCheck.isPending ? "Saving…" : "Record Check"}
           </Button>
         </DialogFooter>
@@ -812,6 +1146,17 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
   const checkType = check.checkType as AnyCheckType;
   const isFireWalk = checkType === "fire_walk";
   const isPanel = checkType === "alarm_panel";
+  const isAlarm = checkType === "alarm";
+  const isDrill = checkType === "fire_drill";
+
+  // Records saved before these fields existed may stay blank; a recorded
+  // answer can be changed but not removed.
+  const [callPointChoice, setCallPointChoice] = useState({ callPointId: check.callPointId ?? null, callPoint: check.callPoint ?? "" });
+  const [nightStaff, setNightStaff] = useState<NightStaff | null>((check.nightStaff as NightStaff | null) ?? null);
+  const changeSite = (value: number | undefined) => {
+    if (value !== selectedSite && callPointChoice.callPointId) setCallPointChoice({ callPointId: null, callPoint: "" });
+    setSelectedSite(value);
+  };
 
   const effectiveResult: "pass" | "fail" = isFireWalk
     ? autoFireWalkResult(routes)
@@ -836,14 +1181,21 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
         id: check.id,
         data: {
           checkDate, result: effectiveResult,
-          siteId: selectedSite, location: location || undefined,
-           performedBy: performedBy || null, staffRosterId: staffRosterId, notes: buildNotes(),
+          // null (not undefined) so clearing a field on edit actually clears it
+          siteId: selectedSite ?? null, location: location || null,
+           performedBy: performedBy || null, staffRosterId: staffRosterId, notes: buildNotes() ?? null,
+          ...(isAlarm ? {
+            callPointId: callPointChoice.callPointId,
+            callPoint: callPointChoice.callPointId ? null : callPointChoice.callPoint.trim() || null,
+          } : {}),
+          ...(isDrill ? { nightStaff } : {}),
         } as any,
       },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListFireSafetyChecksQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetFireSafetyStatusQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
           toast({ title: "Check updated" }); setOpen(false);
         },
         onError: (error: any) => {
@@ -878,7 +1230,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
           {sites && sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site</Label>
-              <Select value={selectedSite ? String(selectedSite) : "none"} onValueChange={v => setSelectedSite(v === "none" ? undefined : Number(v))}>
+              <Select value={selectedSite ? String(selectedSite) : "none"} onValueChange={v => changeSite(v === "none" ? undefined : Number(v))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No specific site</SelectItem>
@@ -887,6 +1239,14 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
               </Select>
             </div>
           )}
+
+          {isAlarm && (
+            <CallPointPicker siteId={selectedSite} sites={sites} open={open} callPointId={callPointChoice.callPointId}
+              callPoint={callPointChoice.callPoint} onChange={setCallPointChoice} onSiteChange={setSelectedSite}
+              optional={!check.callPoint} keepId={check.callPointId} />
+          )}
+
+          {isDrill && <NightStaffPicker value={nightStaff} onChange={setNightStaff} optional={!check.nightStaff} />}
 
           {isFireWalk && (
             <div className="space-y-3 border border-border rounded-sm p-3 bg-muted/20">
@@ -960,10 +1320,12 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label>Location / Call Point</Label>
-                <Input value={location} onChange={e => setLocation(e.target.value)} className="rounded-sm" />
-              </div>
+              {(!isAlarm || check.location) && (
+                <div className="space-y-1.5">
+                  <Label>{isAlarm ? "Location / Call Point" : "Location"}</Label>
+                  <Input value={location} onChange={e => setLocation(e.target.value)} className="rounded-sm" />
+                </div>
+              )}
             </>
           )}
 
@@ -974,7 +1336,9 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={updateCheck.isPending}>
+          <Button onClick={handleSubmit} disabled={updateCheck.isPending
+            || (isAlarm && !!check.callPoint && !callPointChoice.callPointId && !callPointChoice.callPoint.trim())
+            || (isDrill && !!check.nightStaff && !nightStaff)}>
             {updateCheck.isPending ? "Saving…" : "Update"}
           </Button>
         </DialogFooter>
@@ -988,6 +1352,8 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
 export default function FireSafetyPage() {
   const { hasService } = useAuth();
   const canAdmin = useCanAdmin();
+  // Viewers are read-only: recording, editing and deleting checks would 403.
+  const canEdit = useCanEdit();
   const hasFiretrack = hasService("firetrack");
 
   const [filterType, setFilterType] = useState<AnyCheckType | "">("");
@@ -995,12 +1361,12 @@ export default function FireSafetyPage() {
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<AnyCheckType | undefined>(undefined);
 
-  const { data: status, isLoading: statusLoading, error: statusError } = useGetFireSafetyStatus(
+  const { data: status, isLoading: statusLoading, error: statusError, refetch: refetchStatus } = useGetFireSafetyStatus(
     { siteId: filterSite },
     { query: { enabled: hasFiretrack, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetFireSafetyStatusQueryKey({ siteId: filterSite }) } }
   );
   const serverLocked = (statusError as any)?.status === 403;
-  const { data: checks, isLoading: checksLoading } = useListFireSafetyChecks(
+  const { data: checks, isLoading: checksLoading, isError: checksFailed, refetch: refetchChecks } = useListFireSafetyChecks(
     { checkType: filterType as FireCheckType || undefined, siteId: filterSite },
     { query: { enabled: hasFiretrack, queryKey: getListFireSafetyChecksQueryKey({ checkType: filterType as FireCheckType || undefined, siteId: filterSite }) } }
   );
@@ -1074,12 +1440,12 @@ export default function FireSafetyPage() {
               <Flame className="w-6 h-6 text-primary" />
             </div>
             <p className="text-sm text-muted-foreground">
-              Fire safety logbook — alarm tests, fire walks, escape route sign-offs, panel checks
+              Fire safety logbook: weekly alarm tests by call point, monthly emergency lighting, 6-monthly drills, fire walks and panel checks
             </p>
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && <FireConfigDialog siteId={filterSite} />}
-            <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />
+            {canEdit && <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />}
           </div>
         </div>
 
@@ -1090,13 +1456,16 @@ export default function FireSafetyPage() {
               <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
             </CardContent>
           </Card>
+        ) : statusError ? (
+          <LoadError message="Fire check status could not be loaded." onRetry={() => void refetchStatus()} />
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {status?.map(item => (
               <Card
                 key={item.checkType}
                 className={cn(
-                  "border-l-4 transition-all hover:shadow-md cursor-pointer group",
+                  "border-l-4 transition-all hover:shadow-md group",
+                  canEdit && "cursor-pointer",
                   item.lastResult === "fail"       ? "border-l-red-600 bg-red-100/60" :
                   item.lastResult === "action_required"
                                              ? "border-l-orange-600 bg-orange-100/60" :
@@ -1105,7 +1474,7 @@ export default function FireSafetyPage() {
                   item.status === "never"    ? "border-l-slate-400 bg-slate-50/50" :
                                                "border-l-emerald-500 bg-emerald-50/50"
                 )}
-                onClick={() => { setQuickCheckType(item.checkType as AnyCheckType); setRecordOpen(true); }}
+                onClick={canEdit ? () => { setQuickCheckType(item.checkType as AnyCheckType); setRecordOpen(true); } : undefined}
               >
                 <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-start justify-between gap-2">
@@ -1116,7 +1485,7 @@ export default function FireSafetyPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="pb-3 px-4 space-y-0.5">
-                  <div className="text-xs text-muted-foreground">Every {item.frequencyDays} days</div>
+                  <div className="text-xs text-muted-foreground">{frequencyLabel(item.frequencyDays)}</div>
                   {item.lastDate && (
                     <div className="text-xs text-muted-foreground">
                       Last: {format(new Date(item.lastDate), "dd/MM/yyyy")}
@@ -1130,9 +1499,9 @@ export default function FireSafetyPage() {
                   {item.status === "never" && (
                     <div className="text-xs text-muted-foreground italic">Not yet recorded</div>
                   )}
-                  <div className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity pt-0.5 font-medium">
+                  {canEdit && <div className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity pt-0.5 font-medium">
                     + Record check →
-                  </div>
+                  </div>}
                 </CardContent>
               </Card>
             ))}
@@ -1216,10 +1585,14 @@ export default function FireSafetyPage() {
               <div className="p-12 flex justify-center">
                 <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
               </div>
+            ) : checksFailed ? (
+              <div className="p-6">
+                <LoadError message="Check history could not be loaded." onRetry={() => void refetchChecks()} />
+              </div>
             ) : !checks || checks.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <Flame className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                <p className="text-sm">No checks recorded yet. Record your first check above.</p>
+                <p className="text-sm">{canEdit ? "No checks recorded yet. Record your first check above." : "No checks recorded yet."}</p>
               </div>
             ) : (
               <div className="divide-y divide-border">
@@ -1246,7 +1619,13 @@ export default function FireSafetyPage() {
                           <div className="text-xs text-muted-foreground space-y-0.5">
                             <div><span className="font-medium">Date:</span> {format(new Date(check.checkDate), "dd/MM/yyyy")}</div>
                             {check.performedBy && <div><span className="font-medium">Performed by:</span> {check.performedBy}</div>}
-                            {check.location && <div><span className="font-medium">Location:</span> {check.location}</div>}
+                            {check.callPoint && <div><span className="font-medium">Call point:</span> {check.callPoint}</div>}
+                            {check.location && <div><span className="font-medium">{check.checkType === "alarm" && !check.callPoint ? "Location / Call Point" : "Location"}:</span> {check.location}</div>}
+                            {check.nightStaff && (
+                              <div className={cn(check.nightStaff === "not_included" && "text-amber-700")}>
+                                <span className="font-medium">Night staff:</span> {NIGHT_STAFF_LABELS[check.nightStaff as NightStaff] ?? check.nightStaff}
+                              </div>
+                            )}
                           </div>
                           {/* Structured display */}
                           {structured?._type === "fire_walk" && <FireWalkDisplay data={structured as FireWalkNotes} />}
@@ -1257,13 +1636,13 @@ export default function FireSafetyPage() {
                           )}
                           <CheckPhotoUploader entityType="fire_safety_check" entityId={check.id} compact />
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
+                        {canEdit && <div className="flex items-center gap-1 flex-shrink-0">
                           <EditCheckDialog check={check} siteId={filterSite} />
                           <Button variant="ghost" size="sm" onClick={() => handleDelete(check.id)}
                             className="text-destructive hover:bg-destructive/10">
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
-                        </div>
+                        </div>}
                       </div>
                     </div>
                   );

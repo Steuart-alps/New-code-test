@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/auth-context";
+import { API_BASE } from "@/lib/api";
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
 export default function TwoFaRecoverPage() {
   const { refresh } = useAuth();
@@ -24,7 +24,7 @@ export default function TwoFaRecoverPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${baseUrl}/auth/2fa/recover`, {
+      const res = await fetch(`${API_BASE}/auth/2fa/recover`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

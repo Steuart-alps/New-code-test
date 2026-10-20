@@ -148,6 +148,9 @@ async function routeApi(route) {
       services: ["incidenttrack"],
     });
     case "/api/billing/cancellation-status": return json(route, { accessEndsAt: null });
+    // The header's notification bell (#92).
+    case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
+    case "/api/managed-by": return json(route, null);
     case "/api/sites": return json(route, SITES);
     case "/api/photos": return json(route, []);
     case "/api/photos/requirements": return json(route, []);

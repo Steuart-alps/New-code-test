@@ -3,7 +3,7 @@ import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -242,7 +242,7 @@ const DISCOUNT_STATUS_COPY: Record<DiscountStatus["status"], { label: string; cl
   none: {
     label: "No code issued",
     className: "bg-gray-100 text-gray-600",
-    desc: "This client has no discount code yet. Generate one and share it with them privately.",
+    desc: "This client has no discount code yet. Generate one and share it with them privately. They enter it when they subscribe, or under Settings, Billing if they already pay.",
   },
   available: {
     label: "Code available",
@@ -374,7 +374,7 @@ function DiscountCodeDialog({ client, onClose }: { client: Client | null; onClos
 }
 
 export default function ClientsPage() {
-  const { setActiveClientId } = useAuth();
+  const { setActiveClientId, user } = useAuth();
   const [, navigate] = useLocation();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -404,7 +404,7 @@ export default function ClientsPage() {
       <div className="space-y-6">
         <PendingDeletionRequests />
         <div className="flex items-center justify-between">
-          <p className="text-muted-foreground text-sm">Manage client organisations</p>
+          <p className="text-muted-foreground text-sm">Manage client organisations · <Link href="/portfolio" className="font-medium text-primary underline-offset-2 hover:underline">See the portfolio overview</Link></p>
           <Button onClick={() => { setEditingClient(null); setDialogOpen(true); }}>
             <Plus className="w-4 h-4 mr-2" />
             Add Client
@@ -446,9 +446,11 @@ export default function ClientsPage() {
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditingClient(c); setDialogOpen(true); }} title="Edit">
                     <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDiscountClient(c)} title="Discount code">
-                    <TicketPercent className="w-3.5 h-3.5 text-muted-foreground" />
-                  </Button>
+                  {user?.platformOperator && (
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDiscountClient(c)} title="Discount code">
+                      <TicketPercent className="w-3.5 h-3.5 text-muted-foreground" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleActive(c)} title={c.active ? "Deactivate" : "Activate"}>
                     {c.active ? <ToggleRight className="w-4 h-4 text-green-600" /> : <ToggleLeft className="w-4 h-4 text-muted-foreground" />}
                   </Button>
@@ -456,7 +458,7 @@ export default function ClientsPage() {
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs"
-                    onClick={() => { setActiveClientId(c.id); navigate("/"); }}
+                    onClick={() => { setActiveClientId(c.id); navigate("/dashboard"); }}
                   >
                     View
                   </Button>

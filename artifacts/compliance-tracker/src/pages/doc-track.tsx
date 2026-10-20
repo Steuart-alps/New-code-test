@@ -4,6 +4,7 @@ import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadFile, getDownloadErrorMessage } from "@/lib/download";
 import { useAuth } from "@/context/auth-context";
 import { AuditLog } from "@/components/audit-log";
+import { PublicLinkAccessHistory } from "@/components/public-link-access-history";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MyDocumentsView } from "@/components/my-documents-view";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,6 +61,7 @@ interface StaffMember {
   name: string;
   job_title: string | null;
   department: string | null;
+  site_id: number | null;
   active: boolean;
 }
 
@@ -179,12 +182,18 @@ function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; o
       apiFetch("/staff-roster").then(r => r.ok ? r.json() : []),
       apiFetch(`/doc-track/documents/${doc.id}/acknowledgements`).then(r => r.ok ? r.json() : []),
     ]).then(([s, a]) => {
-      setStaff(s);
+      // Only staff the API will accept for this document (same rule as
+      // findEligibleRosterMember: active, and in its department and site when set).
+      setStaff((s as StaffMember[]).filter(m =>
+        m.active
+        && (!doc.department || m.department === doc.department)
+        && (doc.site_id == null || m.site_id === doc.site_id),
+      ));
       setAcks(a);
       setChecked({});
       setSigs({});
     }).finally(() => setLoading(false));
-  }, [open, doc.id]);
+  }, [open, doc.id, doc.department, doc.site_id]);
 
   // Pick up signatures staff record on their own devices while this is open.
   useLiveAcknowledgements(open && !loading ? `/doc-track/documents/${doc.id}/acknowledgements` : null, acks, setAcks);
@@ -257,8 +266,8 @@ function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; o
         ) : staff.length === 0 ? (
           <div className="py-8 text-center text-muted-foreground">
             <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">No staff in roster</p>
-            <p className="text-sm mt-1">Add staff members in <strong>Staff Roster</strong> before recording acknowledgements.</p>
+            <p className="font-medium">No eligible staff in roster</p>
+            <p className="text-sm mt-1">Add active staff in this document's department and site in <strong>Staff Roster</strong> before recording acknowledgements.</p>
           </div>
         ) : (
           <>
@@ -583,6 +592,7 @@ function UploadDialog({
     setUploading(true);
 
     try {
+      assertWithinUploadLimit(file);
       // 1. Request presigned PUT URL
       setProgress("requesting");
       const urlRes = await apiFetch("/doc-track/documents/request-upload", {
@@ -804,7 +814,7 @@ export default function DocTrackPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
-  const [pageView, setPageView] = useState<"library" | "my-docs" | "audit">(
+  const [pageView, setPageView] = useState<"library" | "my-docs" | "audit" | "link-access">(
     user?.role === "client_admin" || user?.role === "consultant" ? "library" : "my-docs",
   );
   const [search, setSearch] = useState("");
@@ -981,8 +991,10 @@ export default function DocTrackPage() {
             <BookOpen className="w-4 h-4" /> My Documents
           </button>
           {isManager && <button type="button" data-testid="tab-doc-audit" onClick={() => setPageView("audit")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
+          {isManager && <button type="button" data-testid="tab-doc-link-access" onClick={() => setPageView("link-access")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "link-access" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Sign-off link access</button>}
       </div>
       {isManager && pageView === "audit" && <AuditLog module="doc" />}
+      {isManager && pageView === "link-access" && <PublicLinkAccessHistory linkType="sign_off" />}
 
       {/* My Documents personal view */}
       {pageView === "my-docs" && (

@@ -37,8 +37,12 @@ const bundled = await build({
     name: 'native-test-io',
     setup(builder) {
       builder.onResolve({
-        filter: /^(react-native|react-native-safe-area-context|@expo\/vector-icons|expo-router|expo-haptics|@\/hooks\/useColors|@\/lib\/auth|@\/lib\/api|@\/components\/KeyboardAwareScrollViewCompat)$/,
+        filter: /^(react-native|react-native-safe-area-context|@expo\/vector-icons|expo-router|expo-haptics|expo-camera|@\/hooks\/useColors|@\/lib\/auth|@\/lib\/api|@\/components\/KeyboardAwareScrollViewCompat)$/,
       }, () => ({ path: nativePath }));
+      // The production outbox core with in-memory storage, signed in as the fixture user.
+      builder.onResolve({ filter: /^@\/lib\/checkOutbox$/ }, () => ({
+        path: fileURLToPath(new URL('./fixtures/check-outbox-native.jsx', import.meta.url)),
+      }));
       builder.onResolve({ filter: /^@\/components\/aqua-track-logic$/ }, () => ({
         path: fileURLToPath(new URL('../components/aqua-track-logic.ts', import.meta.url)),
       }));
@@ -129,7 +133,9 @@ async function openScreen({ screen = 'pat', services } = {}) {
   await page.waitForFunction(() => window.harnessReady);
   return {
     page, requests, errors, close: () => context.close(),
-    posts: () => requests.filter((r) => r.method === 'POST' && r.path === '/api/pat-track/tests'),
+    // Bodies without the outbox's device entry ID (checked separately below).
+    posts: () => requests.filter((r) => r.method === 'POST' && r.path === '/api/pat-track/tests')
+      .map(({ body: { clientEntryId, ...body }, ...request }) => ({ ...request, body, clientEntryId })),
     alerts: () => page.evaluate(() => window.patHarness.alerts),
   };
 }
@@ -220,6 +226,9 @@ try {
       assert.deepEqual(s.posts()[1].body, {
         applianceId: 25, testDate: TODAY, result: 'pass', nextTestDate: '2027-10-10', testedBy: 'Sam Field',
       });
+      // Each test carries its own device entry ID, so a resend is never a duplicate.
+      assert.match(s.posts()[0].clientEntryId, /^pat-test-[A-Za-z0-9_-]{8,}$/);
+      assert.notEqual(s.posts()[0].clientEntryId, s.posts()[1].clientEntryId);
       assert.deepEqual(s.errors, []);
     } finally { await s.close(); }
   });

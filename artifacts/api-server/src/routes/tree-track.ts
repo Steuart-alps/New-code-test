@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { treeInspectionsTable, sitesTable, TREE_CHECK_TYPES } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -62,7 +63,7 @@ async function checkSiteAccess(
   if (siteId == null) return null;
   const site = await fetchClientSite(siteId, clientId);
   if (!site) return "not_found";
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return "forbidden";
+  if (!(await siteVisibleToDepartment(site, deptId))) return "forbidden";
   return "ok";
 }
 
@@ -72,7 +73,7 @@ function allowedSitesSubquery(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 

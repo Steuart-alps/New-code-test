@@ -158,7 +158,7 @@ async function main() {
   const outDir = await buildHarness();
   const server = await serve(outDir);
   const base = `http://127.0.0.1:${server.address().port}/tests/browser/photo-uploader.html`;
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium" });
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const open = async (query, photos = fixturePhotos()) => {
     const page = await browser.newPage();
     page.setDefaultTimeout(5_000); // a missing control fails fast instead of hanging

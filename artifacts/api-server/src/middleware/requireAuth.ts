@@ -1,9 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { auditContext, db } from "@workspace/db";
-import { consultantClientsTable } from "@workspace/db/schema";
+import { clientsTable, consultantClientsTable, userDepartmentsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
+import { storedCredentialCandidates } from "../lib/sessionRevocation";
 import type { SafeUser, UserRole } from "@workspace/db/schema";
 
 declare global {
@@ -11,8 +12,13 @@ declare global {
     interface Request {
       currentUser?: SafeUser;
       // Client accounts the current user is allowed to act on. Populated for
-      // consultant-role users from consultant_clients plus their own clientId.
+      // consultant-role users from consultant_clients plus their own clientId;
+      // a consultant who is also a platform operator gets every business.
       allowedClientIds?: Set<number>;
+      // Every department a Manager covers, main one first. Set for Managers
+      // without every-department access; currentUser.departmentId is then
+      // the one they're working in.
+      departmentIds?: number[];
     }
   }
 }
@@ -22,12 +28,46 @@ async function loadConsultantClients(req: Request, userId: number) {
   if (!user || user.role !== "consultant") return;
   const allowed = new Set<number>();
   if (user.clientId != null) allowed.add(user.clientId);
+  if (isPlatformOperator(user)) {
+    // ALPS's own consultant sign-in looks after every business on the service.
+    const clients = await db.select({ id: clientsTable.id }).from(clientsTable);
+    for (const client of clients) allowed.add(client.id);
+    req.allowedClientIds = allowed;
+    return;
+  }
   const memberships = await db
     .select({ clientId: consultantClientsTable.clientId })
     .from(consultantClientsTable)
     .where(eq(consultantClientsTable.userId, userId));
   for (const m of memberships) allowed.add(m.clientId);
   req.allowedClientIds = allowed;
+}
+
+/** A Manager's main department and any extra ones, main first. */
+export async function managerDepartmentIds(user: Pick<SafeUser, "id" | "departmentId">): Promise<number[]> {
+  const extras = await db
+    .select({ departmentId: userDepartmentsTable.departmentId })
+    .from(userDepartmentsTable)
+    .where(eq(userDepartmentsTable.userId, user.id));
+  const ids = user.departmentId != null ? [user.departmentId] : [];
+  for (const row of extras) if (!ids.includes(row.departmentId)) ids.push(row.departmentId);
+  return ids;
+}
+
+/**
+ * A Manager with several departments works in one at a time, chosen with
+ * PUT /users/me/active-department and kept in their session. Department
+ * scoping everywhere reads currentUser.departmentId, so it is set to that
+ * department (their main one until they switch, and always on the phone app).
+ */
+async function loadManagerDepartments(req: Request) {
+  const user = req.currentUser;
+  if (!user || user.role !== "client_manager" || user.allDepartments) return;
+  const ids = await managerDepartmentIds(user);
+  req.departmentIds = ids;
+  const chosen = req.session?.activeDepartmentId;
+  const active = chosen != null && ids.includes(chosen) ? chosen : ids[0] ?? null;
+  if (active !== user.departmentId) req.currentUser = { ...user, departmentId: active };
 }
 
 export async function loadUser(req: Request, _res: Response, next: NextFunction) {
@@ -42,11 +82,13 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
   if (!userId) {
     const auth = req.headers.authorization;
     if (auth?.startsWith("Bearer ")) {
-      const token = auth.slice(7);
+      const [hashed, legacy = hashed] = storedCredentialCandidates(auth.slice(7));
       try {
+        // Tokens are stored hashed; a legacy plaintext row (written by an
+        // older instance mid-deploy) still matches until start-up hashes it.
         const result = await db.execute(sql`
           SELECT user_id FROM mobile_sessions
-          WHERE token = ${token} AND expires_at > now()
+          WHERE token IN (${hashed}, ${legacy}) AND expires_at > now()
           LIMIT 1
         `);
         const row = (result as any).rows?.[0] as { user_id: number } | undefined;
@@ -62,6 +104,7 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
     if (user && user.active) {
       req.currentUser = user;
       await loadConsultantClients(req, userId);
+      await loadManagerDepartments(req);
     }
   }
 
@@ -69,6 +112,31 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
   _res.once("finish", () => { context.active = false; });
   _res.once("close", () => { context.active = false; });
   auditContext.run(context, next);
+}
+
+/**
+ * The clientId a request names, read the same way by enforceClientAccess and
+ * getClientId. It may arrive in the query string, the JSON body or both (the
+ * web client adds the active business to every URL); every supplied value
+ * must agree, so a route that reads req.body.clientId directly can never act
+ * on a business other than the one the guard checked. Returns undefined when
+ * none is supplied, "conflict" when values differ, otherwise the number (NaN
+ * when malformed).
+ */
+export function requestedClientId(req: Request): number | "conflict" | undefined {
+  const raw: unknown[] = [];
+  const fromQuery = req.query.clientId;
+  if (Array.isArray(fromQuery)) raw.push(...fromQuery);
+  else raw.push(fromQuery);
+  const body = req.body;
+  if (body && typeof body === "object" && !Array.isArray(body)) raw.push((body as Record<string, unknown>).clientId);
+  const values = raw
+    .filter((value) => value !== undefined && value !== null && value !== "")
+    .map((value) => (typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN));
+  if (values.length === 0) return undefined;
+  const first = values[0];
+  if (values.some((value) => !Object.is(value, first))) return "conflict";
+  return first;
 }
 
 /**
@@ -84,12 +152,16 @@ export function enforceClientAccess(req: Request, res: Response, next: NextFunct
     next();
     return;
   }
-  const raw = req.query.clientId ?? req.body?.clientId;
-  if (raw === undefined || raw === null || raw === "") {
+  const requested = requestedClientId(req);
+  if (requested === undefined) {
     next();
     return;
   }
-  const clientId = Number(raw);
+  if (requested === "conflict") {
+    res.status(400).json({ error: "The clientId in the URL and the request body do not match" });
+    return;
+  }
+  const clientId = requested;
   if (!Number.isInteger(clientId) || clientId <= 0) {
     res.status(400).json({ error: "Invalid clientId" });
     return;
@@ -178,6 +250,37 @@ export function requireConsultant(req: Request, res: Response, next: NextFunctio
   return requireRole("consultant")(req, res, next);
 }
 
+/**
+ * Platform operators run the ComplyTrack service itself (Stripe catalogue
+ * repair, ALPS discount codes, unrestricted business creation, and, when
+ * signed in as a consultant, access to every business). The "consultant" role
+ * cannot be used for this because outside consultancies have it too (and
+ * older self-signup owners still do), so operators are named explicitly by
+ * sign-in email in the
+ * PLATFORM_ADMIN_EMAILS allowlist (comma-separated, case-insensitive). Unset
+ * or empty means nobody is a platform operator.
+ */
+export function isPlatformOperator(user: Pick<SafeUser, "email"> | null | undefined): boolean {
+  if (!user?.email) return false;
+  const allowlist = (process.env.PLATFORM_ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => email.length > 0);
+  return allowlist.includes(user.email.trim().toLowerCase());
+}
+
+export function requirePlatformOperator(req: Request, res: Response, next: NextFunction) {
+  if (!req.currentUser) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (!isPlatformOperator(req.currentUser)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  next();
+}
+
 export function requireClientAdmin(req: Request, res: Response, next: NextFunction) {
   return requireRole("consultant", "client_admin")(req, res, next);
 }
@@ -202,7 +305,8 @@ export function denyViewers(req: Request, res: Response, next: NextFunction) {
  * Returns the department ID that should restrict what data this user can see,
  * or null if the user is unrestricted (admin / consultant).
  *
- * Only client_staff and client_viewer are subject to department scoping.
+ * client_staff, client_viewer and client_manager are subject to department
+ * scoping, unless the Manager has been given every department.
  * Unassigned staff/viewers receive a non-matching sentinel. Existing route
  * filters consequently expose only explicitly unassigned/site-neutral records,
  * never every department's records.
@@ -211,15 +315,31 @@ export function getActiveDepartmentId(req: Request): number | null {
   const user = req.currentUser;
   if (!user) return null;
   if (user.role === "client_admin" || user.role === "consultant") return null;
+  if (user.role === "client_manager" && user.allDepartments === true) return null;
   return (user as any).departmentId ?? -1;
+}
+
+/**
+ * Managers, and Staff with the older "Department manager" switch, lead their
+ * department: department summaries, CSV imports, inspection exports, RIDDOR
+ * health data and department tasks.
+ */
+export function isDepartmentLead(user: Pick<SafeUser, "role" | "isDepartmentManager"> | null | undefined): boolean {
+  if (!user) return false;
+  return user.role === "client_manager" || (user.role === "client_staff" && user.isDepartmentManager === true);
+}
+
+/** Owners and consultants manage every user; Managers manage the Staff and Viewers in their departments. */
+export function requireUserManager(req: Request, res: Response, next: NextFunction) {
+  return requireRole("consultant", "client_admin", "client_manager")(req, res, next);
 }
 
 export function getClientId(req: Request): number | null {
   if (!req.currentUser) return null;
   if (req.currentUser.role === "consultant") {
-    const raw = req.query.clientId ?? req.body?.clientId;
-    if (raw !== undefined && raw !== null && raw !== "") {
-      const clientId = Number(raw);
+    const clientId = requestedClientId(req);
+    if (clientId === "conflict") return null;
+    if (clientId !== undefined) {
       // Defense in depth: enforceClientAccess already rejects unauthorized
       // clientIds, but never honor one here that isn't explicitly linked.
       return canAccessClient(req, clientId) ? clientId : null;

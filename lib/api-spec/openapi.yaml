@@ -11,6 +11,8 @@ tags:
     description: Health operations
   - name: audit-log
     description: Compliance change history
+  - name: public-link-access
+    description: Privacy-safe history of public link use
   - name: compliance-items
     description: Compliance item operations
   - name: categories
@@ -25,6 +27,8 @@ tags:
     description: App settings
   - name: notifications
     description: Notification operations
+  - name: fix-track
+    description: FixTrack issue operations
   - name: storage
     description: File storage operations
   - name: fire-safety
@@ -33,6 +37,8 @@ tags:
     description: Kitchen / food safety diary operations
   - name: legionella
     description: Legionella water safety logbook operations (L8/HSG274)
+  - name: daily-track
+    description: DailyTrack daily checklist status (AM/PM checklists and manager sign-offs)
   - name: pat-track
     description: PAT testing register operations (appliance inventory and test results)
   - name: premises-track
@@ -128,6 +134,84 @@ paths:
           description: Not an administrator or not authorised for this client
         "404":
           description: Report not found in the selected client
+  /train-track/my-records:
+    get:
+      operationId: listMyTrainingRecords
+      tags: [train-track]
+      summary: The signed-in Viewer's own training records (their linked staff roster entry)
+      responses:
+        "200":
+          description: Whether the account is linked to the roster, and that person's records, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [linked, records]
+                properties:
+                  linked: { type: boolean }
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-records/{id}/sign:
+    post:
+      operationId: signMyTrainingRecord
+      tags: [train-track]
+      summary: Add the signed-in Viewer's signature to one of their own unsigned training records
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The signed record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not one of this Viewer's records
+        "409":
+          description: Already signed
+  /users/me/active-department:
+    put:
+      operationId: setActiveDepartment
+      tags: [users]
+      summary: Choose which of their departments a Manager with several is working in (kept for the session)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActiveDepartmentRequest" }
+      responses:
+        "200":
+          description: The chosen department and all of the Manager's departments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [departmentId, departmentIds]
+                properties:
+                  departmentId: { type: integer }
+                  departmentIds:
+                    type: array
+                    items: { type: integer }
+        "400":
+          description: No department given
+        "403":
+          description: Not a Manager
+        "404":
+          description: Not one of the Manager's departments
   /healthz:
     get:
       operationId: healthCheck
@@ -164,6 +248,65 @@ paths:
                 maxItems: 50
                 items:
                   $ref: "#/components/schemas/AuditLogEntry"
+
+  /public-link-access:
+    get:
+      operationId: listPublicLinkAccess
+      tags: [public-link-access]
+      summary: List recent public-link access for the signed-in business
+      description: >-
+        Client admins and consultants only. Newest first, scoped to the active
+        business. Entries never include link tokens; linkRef is a short prefix
+        of the stored SHA-256 fingerprint so repeat use of one link can be
+        matched without exposing the credential.
+      parameters:
+        - in: query
+          name: linkType
+          required: false
+          schema:
+            type: string
+            enum: [sign_off, contractor_portal, fix_track_action, fix_track_quote]
+        - in: query
+          name: actionType
+          required: false
+          schema:
+            type: string
+            enum: [view, submit]
+        - in: query
+          name: from
+          required: false
+          description: Only access at or after this instant (ISO 8601).
+          schema:
+            type: string
+            maxLength: 40
+        - in: query
+          name: to
+          required: false
+          description: Only access before this instant (ISO 8601).
+          schema:
+            type: string
+            maxLength: 40
+        - in: query
+          name: cursor
+          required: false
+          description: nextCursor from the previous page.
+          schema:
+            type: string
+            maxLength: 200
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: One page of access events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicLinkAccessPage"
 
   /categories:
     get:
@@ -573,7 +716,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCertificateRequest"
+              $ref: "#/components/schemas/CreateItemCertificateRequest"
       responses:
         "201":
           description: Created certificate
@@ -603,7 +746,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCertificateRequest"
+              $ref: "#/components/schemas/UpdateItemCertificateRequest"
       responses:
         "200":
           description: Updated certificate
@@ -622,6 +765,100 @@ paths:
           schema:
             type: integer
         - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /items/{itemId}/certificates/{id}/defects:
+    post:
+      operationId: createCertificateDefect
+      tags: [certificates]
+      summary: Add a defect to a compliance item's certificate (opens a FixTrack job when FixTrack is enabled)
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateDefectRequest"
+      responses:
+        "201":
+          description: Created defect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateDefect"
+
+  /items/{itemId}/certificates/{id}/defects/{defectId}:
+    patch:
+      operationId: updateCertificateDefect
+      tags: [certificates]
+      summary: Mark a defect without a FixTrack job remedied (or not)
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: defectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCertificateDefectRequest"
+      responses:
+        "200":
+          description: Updated defect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateDefect"
+        "409":
+          description: The defect has a FixTrack job; close it in FixTrack
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteCertificateDefect
+      tags: [certificates]
+      summary: Remove a defect recorded in error (its FixTrack job stays)
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: defectId
           in: path
           required: true
           schema:
@@ -1042,6 +1279,52 @@ paths:
               schema:
                 $ref: "#/components/schemas/RequestUploadUrlResponse"
 
+  /fix-track/issues/{id}/media/delete:
+    post:
+      operationId: deleteFixTrackIssueMedia
+      tags: [fix-track]
+      summary: Delete a photo or video from a resolved or closed issue (owners and admins)
+      description: >
+        Frees storage once an issue is finished. The issue, its notes and its
+        history stay; the history records who deleted which file and when.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FixTrackMediaDeleteRequest"
+      responses:
+        "200":
+          description: The issue's remaining photos and videos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FixTrackIssueMediaList"
+        "403":
+          description: Not an owner or admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue or file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The issue is not resolved or closed yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /fire-safety:
     get:
       operationId: listFireSafetyChecks
@@ -1107,6 +1390,76 @@ paths:
           description: The site is not one of this client's sites
         "403":
           description: The site belongs to a department the caller cannot see
+
+  /fire-safety/call-points:
+    get:
+      operationId: listFireCallPoints
+      tags: [fire-safety]
+      summary: List manual call points with when each was last tested
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for call points not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+        - in: query
+          name: includeArchived
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Call points
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireCallPoint"
+    post:
+      operationId: createFireCallPoint
+      tags: [fire-safety]
+      summary: Add a manual call point (managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFireCallPointRequest"
+      responses:
+        "201":
+          description: Created call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
+        "409":
+          description: The site already has a call point with that name
+
+  /fire-safety/call-points/{id}:
+    put:
+      operationId: updateFireCallPoint
+      tags: [fire-safety]
+      summary: Rename, archive or restore a call point (managers)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFireCallPointRequest"
+      responses:
+        "200":
+          description: Updated call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
 
   /fire-safety/{id}:
     put:
@@ -1764,6 +2117,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/OkResponse"
 
+  /daily-track-status/history:
+    get:
+      operationId: getDailyTrackHistory
+      tags: [daily-track]
+      summary: Daily checklist and sign-off history for the status page
+      description: >
+        The daily checks the client's services make each site responsible for,
+        with the AM/PM checklists and manager sign-offs dated in the range
+        (department-scoped users see their department's and shared sites).
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Requirements and history rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyTrackHistory"
+        "400":
+          description: from or to is missing or not YYYY-MM-DD
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: No daily checklist service is enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /premises-track:
     get:
       operationId: listPremisesInspections
@@ -2053,6 +2448,91 @@ paths:
               schema:
                 $ref: "#/components/schemas/FoodSafetyMissingDatesResponse"
 
+  /food-safety/closed-days:
+    get:
+      operationId: listKitchenClosedDays
+      tags: [food-safety]
+      summary: List days marked closed (non-operating) for a diary scope
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Active closures in the range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitchenClosedDaysList"
+    post:
+      operationId: createKitchenClosedDays
+      tags: [food-safety]
+      summary: Mark a range of days closed (non-operating) for a diary scope (admins)
+      parameters:
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KitchenClosedDaysInput"
+      responses:
+        "201":
+          description: Days newly marked closed (days already closed are left as they are)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KitchenClosedDaysCreated"
+        "409":
+          description: Some days already have a diary record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /food-safety/closed-days/{id}:
+    delete:
+      operationId: removeKitchenClosedDay
+      tags: [food-safety]
+      summary: Remove a closure (admins); it stays in the history
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /food-safety/{id}:
     put:
       operationId: updateFoodSafetyRecord
@@ -2305,6 +2785,84 @@ paths:
 
 components:
   schemas:
+    DailyTrackRequirement:
+      type: string
+      enum: [kitchen_opening, premises_opening, kitchen_closing, premises_closing, signoff]
+    DailyTrackHistoryChecklist:
+      type: object
+      required: [checkDate, siteId, checklistType, submittedAt]
+      properties:
+        checkDate:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        checklistType:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DailyTrackHistorySignoff:
+      type: object
+      required: [signoffDate, siteId, submittedAt]
+      properties:
+        signoffDate:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DailyTrackHistory:
+      type: object
+      required: [requirements, checklists, signoffs]
+      properties:
+        requirements:
+          type: array
+          description: The checks each site is expected to complete per day, in display order
+          items:
+            $ref: "#/components/schemas/DailyTrackRequirement"
+        checklists:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyTrackHistoryChecklist"
+        signoffs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyTrackHistorySignoff"
+    SignTrainingRecordRequest:
+      type: object
+      required: [signature]
+      properties:
+        signature: { type: string, description: Signature image as a data URL }
+    ActiveDepartmentRequest:
+      type: object
+      required: [departmentId]
+      properties:
+        departmentId: { type: integer }
+    OwnTrainingRecord:
+      type: object
+      required: [id, record_type, staff_name, completed_date, signed]
+      properties:
+        id: { type: integer }
+        record_type: { type: string, enum: [certificate, signoff, internal] }
+        staff_name: { type: string }
+        training_type: { type: string, nullable: true }
+        document_title: { type: string, nullable: true }
+        document_type: { type: string, nullable: true }
+        provider: { type: string, nullable: true }
+        trainer: { type: string, nullable: true }
+        completed_date: { type: string }
+        expiry_date: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        signed: { type: boolean }
+        updated_at: { type: string }
+        site_name: { type: string, nullable: true }
     FeedbackReport:
       type: object
       required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, updatedByName, revision, submitterName]
@@ -2363,6 +2921,40 @@ components:
       required:
         - status
 
+    PublicLinkAccessPage:
+      type: object
+      required: [entries, nextCursor]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/PublicLinkAccessEntry"
+        nextCursor:
+          type: [string, "null"]
+
+    PublicLinkAccessEntry:
+      type: object
+      required: [id, linkType, actionType, activity, linkRef, occurredAt]
+      properties:
+        id:
+          type: integer
+        linkType:
+          type: string
+          enum: [sign_off, contractor_portal, fix_track_action, fix_track_quote]
+        actionType:
+          type: string
+          enum: [view, submit]
+        activity:
+          type: string
+        linkRef:
+          type: string
+          minLength: 8
+          maxLength: 8
+        occurredAt:
+          type: string
+          format: date-time
+
     AuditLogEntry:
       type: object
       required: [id, tableName, rowId, action, changedBy, changedAt, diff, actorName]
@@ -2395,6 +2987,22 @@ components:
         before: {}
         after: {}
 
+    FixTrackMediaDeleteRequest:
+      type: object
+      required: [objectPath]
+      properties:
+        objectPath:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    FixTrackIssueMediaList:
+      type: object
+      required: [mediaUrls]
+      properties:
+        mediaUrls:
+          type: array
+          items:
+            type: string
     ErrorResponse:
       type: object
       properties:
@@ -2618,6 +3226,13 @@ components:
         notes:
           type: string
           nullable: true
+        outcome:
+          $ref: "#/components/schemas/CertificateOutcome"
+        defects:
+          type: array
+          description: Defects listed on an item certificate (absent for contractor certificates).
+          items:
+            $ref: "#/components/schemas/CertificateDefect"
         createdAt:
           type: string
           format: date-time
@@ -2625,6 +3240,144 @@ components:
         - id
         - name
         - createdAt
+
+    CertificateOutcome:
+      type: string
+      enum: [satisfactory, unsatisfactory, not_stated]
+      description: Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check's due date.
+
+    CertificateDefectCode:
+      type: string
+      enum: [C1, C2, C3, FI, ID, AR, other]
+      description: EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.
+
+    CertificateDefect:
+      type: object
+      properties:
+        id:
+          type: integer
+        certificateId:
+          type: integer
+        code:
+          $ref: "#/components/schemas/CertificateDefectCode"
+        label:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+          nullable: true
+        fixTrackIssueId:
+          type: integer
+          nullable: true
+        fixTrackStatus:
+          type: string
+          nullable: true
+        fixTrackPriority:
+          type: string
+          nullable: true
+        fixTrackTargetDate:
+          type: string
+          nullable: true
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        blocking:
+          type: boolean
+          description: C1/C2/FI/ID/AR defects keep the check needing action while open.
+        open:
+          type: boolean
+          description: The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - certificateId
+        - code
+        - label
+        - description
+        - blocking
+        - open
+        - createdAt
+
+    CreateCertificateDefectRequest:
+      type: object
+      properties:
+        code:
+          $ref: "#/components/schemas/CertificateDefectCode"
+        description:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        location:
+          type: string
+          nullable: true
+          maxLength: 300
+      required:
+        - code
+        - description
+
+    UpdateCertificateDefectRequest:
+      type: object
+      properties:
+        resolved:
+          type: boolean
+      required:
+        - resolved
+
+    CreateItemCertificateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        fileUrl:
+          type: string
+          nullable: true
+        issueDate:
+          type: string
+          format: date-time
+          nullable: true
+        expiryDate:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        outcome:
+          $ref: "#/components/schemas/CertificateOutcome"
+        defects:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/CreateCertificateDefectRequest"
+      required:
+        - name
+
+    UpdateItemCertificateRequest:
+      type: object
+      description: Defects are added through the certificate's defects endpoint.
+      properties:
+        name:
+          type: string
+        fileUrl:
+          type: string
+          nullable: true
+        issueDate:
+          type: string
+          format: date-time
+          nullable: true
+        expiryDate:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        outcome:
+          $ref: "#/components/schemas/CertificateOutcome"
 
     CreateCertificateRequest:
       type: object
@@ -2698,6 +3451,12 @@ components:
         leadTimeDays:
           type: integer
           nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
         notificationSentAt:
           type: string
           format: date-time
@@ -2709,6 +3468,16 @@ components:
         notes:
           type: string
           nullable: true
+        needsAction:
+          type: boolean
+          description: The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date.
+        needsActionReason:
+          type: string
+          nullable: true
+          enum: [unsatisfactory, open_defects]
+        openDefectCount:
+          type: integer
+          description: Open C1/C2/FI/ID/AR defects on the newest certificate.
         createdAt:
           type: string
           format: date-time
@@ -2758,6 +3527,12 @@ components:
         leadTimeDays:
           type: integer
           nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
         notes:
           type: string
           nullable: true
@@ -2797,6 +3572,12 @@ components:
         leadTimeDays:
           type: integer
           nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
         notes:
           type: string
           nullable: true
@@ -2807,6 +3588,11 @@ components:
         status:
           type: string
           enum: [pending, in_progress, completed, overdue]
+        completedAt:
+          type: string
+          nullable: true
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Date the check was done (YYYY-MM-DD), only with status completed. Not in the future in the account's timezone; defaults to today. The next due date is counted from it.
       required:
         - status
 
@@ -2833,6 +3619,9 @@ components:
           type: integer
         certificatesExpiringSoon:
           type: integer
+        actionRequired:
+          type: integer
+          description: Checks whose newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects (counted as out of compliance).
       required:
         - total
         - pending
@@ -3643,7 +4432,7 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service]
 
     FireSafetyCheck:
       type: object
@@ -3671,6 +4460,19 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
         createdAt:
           type: string
           format: date-time
@@ -3708,6 +4510,19 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
       required:
         - checkType
         - checkDate
@@ -3733,6 +4548,64 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
+
+    FireCallPoint:
+      type: object
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastTestedDate:
+          type: string
+          nullable: true
+          description: Date of the latest alarm test that used this call point.
+      required:
+        - id
+        - siteId
+        - name
+        - archivedAt
+        - lastTestedDate
+
+    CreateFireCallPointRequest:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+      required:
+        - siteId
+        - name
+
+    UpdateFireCallPointRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        archived:
+          type: boolean
 
     FireSafetyStatus:
       type: object
@@ -3754,6 +4627,20 @@ components:
         status:
           type: string
           enum: [ok, due_soon, overdue, never]
+        siteId:
+          type: integer
+          nullable: true
+          description: The site this row's status comes from; across all sites, the worst site for this check type. Null when no site is visible.
+        siteName:
+          type: string
+          nullable: true
+          description: Name of the site in siteId.
+        siteCount:
+          type: integer
+          description: How many visible sites were assessed for this check type.
+        sitesAffected:
+          type: integer
+          description: How many of those sites are overdue or have never recorded the check.
       required:
         - checkType
         - frequencyDays
@@ -4407,11 +5294,18 @@ components:
           type: string
           nullable: true
         food_jurisdiction:
-          description: Food-safety jurisdiction used to choose the standard reheating limit.
+          description: Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
           type: string
           enum:
             - scotland
             - england_wales
+            - northern_ireland
+            - ireland
+            - australia
+            - new_zealand
+            - canada
+            - united_states
+            - other
           nullable: true
         food_cooking_limit:
           type: string
@@ -4478,6 +5372,12 @@ components:
           items:
             type: string
             format: date
+        nonOperatingDates:
+          type: array
+          description: Dates marked closed (non-operating) with no diary record. Not counted as missing.
+          items:
+            type: string
+            format: date
 
     FoodSafetyMonthlySummaryDay:
       type: object
@@ -4485,6 +5385,8 @@ components:
         - date
         - hasRecord
         - submitted
+        - nonOperating
+        - closure
       properties:
         date:
           type: string
@@ -4495,6 +5397,81 @@ components:
         submitted:
           type: boolean
           description: Whether the diary record has been submitted.
+        nonOperating:
+          type: boolean
+          description: The diary scope was marked closed and has no record for this date, so it is not a missing day.
+        closure:
+          allOf:
+            - $ref: "#/components/schemas/KitchenClosedDay"
+          nullable: true
+
+    KitchenClosedDay:
+      type: object
+      required: [id, date, reason, createdAt, createdByName, addedAfterDay]
+      properties:
+        id:
+          type: integer
+        date:
+          type: string
+          format: date
+        reason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        createdByName:
+          type: string
+          nullable: true
+        addedAfterDay:
+          type: boolean
+          description: The closure was recorded after the day itself.
+
+    KitchenClosedDaysList:
+      type: object
+      required: [from, to, siteId, closedDays]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        closedDays:
+          type: array
+          items:
+            $ref: "#/components/schemas/KitchenClosedDay"
+
+    KitchenClosedDaysInput:
+      type: object
+      required: [from, to, reason]
+      additionalProperties: false
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    KitchenClosedDaysCreated:
+      type: object
+      required: [siteId, created]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        created:
+          type: array
+          items:
+            type: string
+            format: date
 
     FoodSafetyMonthlySummary:
       type: object
@@ -4739,6 +5716,10 @@ components:
         reheating:
           type: object
           additionalProperties: true
+        sousVide:
+          type: object
+          additionalProperties: true
+          description: One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).
         correctives:
           type: string
         expectedCorrectives:

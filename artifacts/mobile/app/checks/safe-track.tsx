@@ -59,6 +59,8 @@ interface Handbook {
 
 interface Ack {
   acknowledged_by: number | null;
+  /** True for the signed-in user's own acknowledgement (by roster entry or account). */
+  acknowledged_by_me?: boolean;
   staff_name: string;
 }
 
@@ -111,7 +113,7 @@ function DocCard({
   });
 
   const alreadyAcked = userId != null
-    ? acks.some((a) => a.acknowledged_by === userId)
+    ? acks.some((a) => a.acknowledged_by_me ?? a.acknowledged_by === userId)
     : false;
 
   const { mutate: acknowledge, isPending } = useMutation({
@@ -279,7 +281,7 @@ export default function SafeTrackScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.navy, paddingTop: topPad + 16 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
             <Feather name="arrow-left" size={22} color="#ffffff" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>

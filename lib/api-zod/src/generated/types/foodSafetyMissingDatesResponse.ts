@@ -14,4 +14,6 @@ export interface FoodSafetyMissingDatesResponse {
   missingDates: Date[];
   /** Dates with a diary record that has not been submitted. */
   draftDates: Date[];
+  /** Dates marked closed (non-operating) with no diary record. Not counted as missing. */
+  nonOperatingDates?: Date[];
 }

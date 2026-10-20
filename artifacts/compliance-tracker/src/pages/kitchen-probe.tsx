@@ -33,6 +33,7 @@ type ProbeRecord = {
   probes: ProbeRow[];
   overall_result?: string | null;
   checked_by?: string | null;
+  checked_by_roster_id?: number | null;
   signature?: string | null;
   notes?: string | null;
   submitted_at?: string | null;
@@ -192,6 +193,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
         setProbes(Array.isArray(r.probes) ? r.probes : defaultProbes(defaultProbeNames));
         setOverallResult((r.overall_result as any) ?? "");
         setCheckedBy(r.checked_by ?? "");
+        setCheckedByRosterId(r.checked_by_roster_id ?? null);
         setSignature(r.signature ?? "");
         setNotes(r.notes ?? "");
       } else {
@@ -199,6 +201,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
         setProbes(defaultProbes(defaultProbeNames));
         setOverallResult("");
         setCheckedBy("");
+        setCheckedByRosterId(null);
         setSignature("");
         setNotes("");
       }

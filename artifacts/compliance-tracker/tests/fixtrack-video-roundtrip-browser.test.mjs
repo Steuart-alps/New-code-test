@@ -151,7 +151,7 @@ let staffPage;
 try {
   browser = await chromium.launch({
     headless: true,
-    executablePath: process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium",
+    executablePath: process.env.CHROMIUM_PATH || undefined,
     args: [
       "--autoplay-policy=no-user-gesture-required",
       // Fake mode only: resolve the storage host to the in-process fake inside
@@ -357,9 +357,9 @@ try {
   assert.deepEqual((await api(tenantB.page, "GET", `/fix-track/issues/${otherIssueId}`)).data.mediaUrls ?? [], [],
     "tenant B's issue gained no media");
 
-  // ── 6. Viewers can watch but cannot upload or attach ──────────────────────
+  // ── 6. Viewers only see their own training records, so FixTrack is closed ──
   const viewerRead = await rangedGet(viewerPage, mediaPaths[1], "bytes=0-99");
-  assert.equal(viewerRead.status, 206, "a viewer in the tenant can still play the evidence");
+  assert.equal(viewerRead.status, 403, "a viewer cannot open FixTrack evidence");
   const viewerReserve = await api(viewerPage, "POST", `/fix-track/issues/${issueId}/request-upload`, {
     name: "viewer.mp4", contentType: "video/mp4",
   });
@@ -374,15 +374,41 @@ try {
   assert.equal(viewerReplace.status, 403, "viewer cannot attach media through an issue update");
   assert.deepEqual((await api(staffPage, "GET", `/fix-track/issues/${issueId}`)).data.mediaUrls, mediaPaths,
     "the viewer's attempts changed nothing");
-  await viewerPage.goto(`${appUrl}/fix-track/${issueId}`);
-  await viewerPage.getByTestId("button-open-issue-media-2").waitFor({ state: "visible" });
-  assert.equal(await viewerPage.getByTestId("button-select-issue-media").count(), 0, "viewers get no upload controls");
-  assert.equal(await viewerPage.getByTestId("input-select-issue-media").count(), 0, "viewers get no file input");
+
+  // ── Deleting media to free storage: owners and admins, finished issues only ──
+  const removePath = mediaPaths[0];
+  const deleteMedia = (page, id, objectPath) => api(page, "POST", `/fix-track/issues/${id}/media/delete`, { objectPath });
+  assert.equal((await deleteMedia(staffPage, issueId, removePath)).status, 409, "media stays while the issue is open");
+  await staffPage.goto(`${appUrl}/fix-track/${issueId}`);
+  await staffPage.getByTestId("button-open-issue-media-0").waitFor({ state: "visible" });
+  assert.equal(await staffPage.getByTestId("button-delete-issue-media-0").count(), 0, "no delete button while the issue is open");
+  assert.equal((await deleteMedia(viewerPage, issueId, removePath)).status, 403, "viewers cannot delete media");
+  assert.equal((await deleteMedia(tenantB.page, issueId, removePath)).status, 404, "another tenant cannot delete media");
+  assert.equal((await api(staffPage, "PUT", `/fix-track/issues/${issueId}`, { status: "in_progress" })).status, 200);
+  const resolved = await api(staffPage, "PUT", `/fix-track/issues/${issueId}`, {
+    status: "resolved", solutionNotes: "Valve replaced", resolverSignature: "data:image/png;base64,AAAA",
+  });
+  assert.equal(resolved.status, 200, `resolve: ${resolved.text}`);
+  assert.equal((await deleteMedia(viewerPage, issueId, removePath)).status, 403, "viewers still cannot delete once resolved");
+  assert.equal((await deleteMedia(staffPage, issueId, "/objects/finalized/not-on-this-issue.mp4")).status, 404, "only this issue's files");
+  await staffPage.goto(`${appUrl}/fix-track/${issueId}`);
+  await staffPage.getByTestId("button-delete-issue-media-0").waitFor({ state: "visible" });
+  staffPage.once("dialog", dialog => { void dialog.accept(); });
+  const deleteResponse = staffPage.waitForResponse(response => response.url().includes(`/fix-track/issues/${issueId}/media/delete`));
+  await staffPage.getByTestId("button-delete-issue-media-0").click();
+  assert.equal((await deleteResponse).status(), 200, "the owner deletes a video from the resolved issue");
+  const afterDelete = (await api(staffPage, "GET", `/fix-track/issues/${issueId}`)).data;
+  assert.deepEqual(afterDelete.mediaUrls, mediaPaths.slice(1), "the deleted video is gone and the rest stay");
+  assert.ok(afterDelete.notes.some(note => note.note === `Deleted a video to free up storage (${removePath}).` && note.createdBy === "FixTrack video admin"),
+    "the issue history records who deleted which file");
+  assert.equal((await rangedGet(staffPage, removePath, "bytes=0-99")).status, 404, "the stored file was deleted");
+  assert.equal((await rangedGet(staffPage, mediaPaths[1], "bytes=0-99")).status, 206, "other videos still play");
+  assert.equal((await deleteMedia(staffPage, issueId, removePath)).status, 404, "a repeat delete finds nothing to remove");
 
   assert.deepEqual(pageErrors, [], `page errors: ${pageErrors.join("; ")}`);
   console.log(fakeStorage
     ? "FixTrack video round trip passed against the IN-PROCESS FAKE storage client (test logic only; not a real GCS round trip)."
-    : `FixTrack video round trip passed against ${inspector.label}: MP4/MOV/WebM upload, immutable finalization, gallery play and seek before and after reload, byte ranges, tenant boundaries and viewer refusal.`);
+    : `FixTrack video round trip passed against ${inspector.label}: MP4/MOV/WebM upload, immutable finalization, gallery play and seek before and after reload, byte ranges, tenant boundaries, viewer refusal and deleting media from a resolved issue.`);
 } catch (error) {
   if (staffPage) {
     console.error("Page:", staffPage.url());

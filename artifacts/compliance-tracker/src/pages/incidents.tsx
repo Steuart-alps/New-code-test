@@ -24,6 +24,8 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
+import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import {
   useGetIncidentConfig,
   getGetIncidentConfigQueryKey,
@@ -32,7 +34,7 @@ import {
 import {
   AlertOctagon, Plus, AlertTriangle, CheckCircle2, Clock,
   Pencil, Lock, Search, Filter, FileWarning,
-  ShieldAlert, UserX, Activity, Settings, X, Printer,
+  ShieldAlert, UserX, Activity, Settings, X, Printer, FileText, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
@@ -48,6 +50,40 @@ type IncidentType = (typeof INCIDENT_TYPES)[number];
 type Severity = (typeof SEVERITIES)[number];
 type Status = (typeof STATUSES)[number];
 type EmploymentType = (typeof EMPLOYMENT_TYPES)[number];
+
+// RIDDOR 2013 categories. Over-3-day injuries are recorded, not reported.
+const RIDDOR_CATEGORY_LABELS = {
+  death:                  "Death",
+  specified_injury:       "Specified injury",
+  over_7_day_injury:      "Over-7-day injury",
+  non_worker_hospital:    "Non-worker taken to hospital",
+  occupational_disease:   "Occupational disease",
+  dangerous_occurrence:   "Dangerous occurrence",
+  over_3_day_record_only: "Over-3-day injury (record only)",
+} as const;
+type RiddorCategory = keyof typeof RIDDOR_CATEGORY_LABELS;
+interface RiddorDeadline {
+  category: RiddorCategory;
+  reportBy: string | null;
+  notifyWithoutDelay: boolean;
+  state: "reported" | "overdue" | "due" | "on_diagnosis" | "record_only";
+}
+// Report windows in days from the incident (RIDDOR 2013); mirrors the API.
+const RIDDOR_REPORT_DAYS: Partial<Record<RiddorCategory, number>> = {
+  death: 10, specified_injury: 10, non_worker_hospital: 10, dangerous_occurrence: 10, over_7_day_injury: 15,
+};
+const RIDDOR_NOTIFY_NOW = new Set<RiddorCategory>(["death", "specified_injury", "non_worker_hospital", "dangerous_occurrence", "occupational_disease"]);
+
+/** Plain-English reporting deadline for a category and incident date. */
+function riddorDeadlineText(category: RiddorCategory, incidentDate: string): string {
+  if (category === "over_3_day_record_only") return "Record in your accident book; not reportable to the HSE.";
+  if (category === "occupational_disease") return "Report without delay once you receive a written diagnosis.";
+  const days = RIDDOR_REPORT_DAYS[category]!;
+  const reportBy = incidentDate ? new Date(`${incidentDate.slice(0, 10)}T00:00:00Z`) : null;
+  reportBy?.setUTCDate(reportBy.getUTCDate() + days);
+  const by = reportBy ? ` (by ${reportBy.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })})` : "";
+  return `${RIDDOR_NOTIFY_NOW.has(category) ? "Notify the HSE without delay, and report" : "Report"} within ${days} days of the incident${by}.`;
+}
 
 interface Incident {
   id: number;
@@ -68,6 +104,9 @@ interface Incident {
   firstAiderName: string | null;
   witnesses: string | null;
   riddorReportable: boolean;
+  riddorCategory: RiddorCategory | null;
+  /** Computed by the API from the category and incident date. */
+  riddorDeadline: RiddorDeadline | null;
   reportedToHse: boolean;
   hseReference: string | null;
   hseReportDate: string | null;
@@ -90,12 +129,15 @@ interface Summary {
 
 interface Site { id: number; name: string; }
 interface RiddorHistoryEvent {
-  id: number; eventType: "decision" | "submission"; riddorReportable: boolean;
+  id: number; eventType: "decision" | "submission"; riddorReportable: boolean; riddorCategory: RiddorCategory | null;
   reportedToHse: boolean; rationale: string | null; hseReference: string | null;
   hseReportDate: string | null; decisionMaker: string | null; decisionAt: string;
   submittedAt: string | null; submissionEvidence: string | null;
+  receiptFileName: string | null; receiptContentType: string | null;
+  receiptSource: "upload" | "incident_attachment" | null;
   createdAt: string; actorName: string | null; actorEmail: string | null;
 }
+interface IncidentAttachment { id: number; caption: string | null; created_at: string; }
 interface IncidentAction {
   id: number; title: string; status: string; ownerName: string;
   correctiveAction: string; evidenceReference: string | null;
@@ -343,11 +385,16 @@ const emptyForm = () => ({
   firstAiderName: "",
   witnesses: "",
   riddorReportable: false,
+  riddorCategory: "" as RiddorCategory | "",
   reportedToHse: false,
   hseReference: "",
   hseReportDate: "",
   submittedAt: "",
   submissionEvidence: "",
+  // HSE receipt for the submission being recorded: a new upload, or one of
+  // the incident's attachments (receiptAttachmentId, editing only).
+  receiptUpload: { objectPath: null, fileName: null } as DocumentValue,
+  receiptAttachmentId: "",
   riddorRationale: "",
   immediateActions: "",
   investigationFindings: "",
@@ -360,8 +407,12 @@ const emptyForm = () => ({
 
 export default function IncidentsPage() {
   const { toast } = useToast();
-  const { activeClientId, hasService, client } = useAuth();
+  const { activeClientId, hasService, client, user } = useAuth();
   const canAdmin = useCanAdmin();
+  const clientApi = useActiveClientApi();
+  // Managers read injury details, so they attach and download HSE receipts.
+  const isManager = user?.role === "client_admin" || user?.role === "consultant" || user?.role === "client_manager"
+    || (user?.role === "client_staff" && user.isDepartmentManager === true);
   const qc = useQueryClient();
   const apiFetch = useIncidentsApi();
   const hasIncidentTrack = hasService("incidenttrack");
@@ -463,6 +514,7 @@ export default function IncidentsPage() {
   }, [incidents, filterStatus, filterSeverity, filterType, filterSite, filterFrom, filterTo, filterRiddor, search]);
 
   const riddorOutstanding = summary?.riddorOutstanding ?? 0;
+  const riddorOverdue = incidents.filter(r => r.riddorDeadline?.state === "overdue").length;
 
   // ── Export register (for HSE audits / insurance) ─────────────────────────────
 
@@ -567,11 +619,14 @@ ${rows.map(r => `<tr>
       firstAiderName: r.firstAiderName ?? "",
       witnesses: r.witnesses ?? "",
       riddorReportable: r.riddorReportable,
+      riddorCategory: r.riddorCategory ?? "",
       reportedToHse: r.reportedToHse,
       hseReference: r.hseReference ?? "",
       hseReportDate: r.hseReportDate?.slice(0, 10) ?? "",
       submittedAt: "",
       submissionEvidence: "",
+      receiptUpload: { objectPath: null, fileName: null },
+      receiptAttachmentId: "",
       riddorRationale: "",
       immediateActions: r.immediateActions ?? "",
       investigationFindings: r.investigationFindings ?? "",
@@ -583,6 +638,27 @@ ${rows.map(r => `<tr>
     setShowDialog(true);
   }
 
+  // This save records a new or corrected HSE submission (a new history event).
+  const submissionChanged = form.reportedToHse &&
+    (!editItem?.reportedToHse || form.hseReference.trim() !== (editItem.hseReference ?? "") ||
+      form.hseReportDate !== (editItem.hseReportDate?.slice(0, 10) ?? ""));
+  const receiptChosen = isManager && (!!form.receiptUpload.objectPath || !!form.receiptAttachmentId);
+  const { data: incidentAttachments = [] } = useQuery<IncidentAttachment[]>({
+    queryKey: ["incident-attachments", editItem?.id, activeClientId],
+    queryFn: () => apiFetch(`/photos?entityType=incident&entityId=${editItem!.id}`),
+    enabled: showDialog && !!editItem && isManager && submissionChanged,
+  });
+
+  async function downloadReceipt(event: RiddorHistoryEvent) {
+    if (!historyIncident) return;
+    try {
+      await downloadRegisterDocument(clientApi, `/incidents/${historyIncident.id}/riddor-history/${event.id}/receipt`,
+        event.receiptFileName ?? "hse-receipt");
+    } catch (e: any) {
+      toast({ title: "Could not download the receipt", description: e.message, variant: "destructive" });
+    }
+  }
+
   async function handleSave() {
     if (!form.incidentDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     if (!form.location.trim()) { toast({ title: "Location is required", variant: "destructive" }); return; }
@@ -590,6 +666,7 @@ ${rows.map(r => `<tr>
     if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     if (!form.reportedBy.trim()) { toast({ title: "Reported by is required", variant: "destructive" }); return; }
     const assessmentChanged = !editItem || form.riddorReportable !== editItem.riddorReportable ||
+      (form.riddorCategory || null) !== (editItem.riddorCategory ?? null) ||
       form.reportedToHse !== editItem.reportedToHse ||
       form.hseReference.trim() !== (editItem.hseReference ?? "") ||
       form.hseReportDate !== (editItem.hseReportDate?.slice(0, 10) ?? "");
@@ -598,13 +675,11 @@ ${rows.map(r => `<tr>
       toast({ title: "Explain the RIDDOR decision", variant: "destructive" });
       return;
     }
-    const submissionChanged = form.reportedToHse &&
-      (!editItem?.reportedToHse || form.hseReference.trim() !== (editItem.hseReference ?? "") ||
-        form.hseReportDate !== (editItem.hseReportDate?.slice(0, 10) ?? ""));
     if (submissionChanged &&
-      (!form.hseReference.trim() || !form.hseReportDate || !form.submittedAt || !form.submissionEvidence.trim())) {
+      (!form.hseReference.trim() || !form.hseReportDate || !form.submittedAt ||
+        (!form.submissionEvidence.trim() && !receiptChosen))) {
       setFormSection("actions");
-      toast({ title: "Record the HSE reference, date, time and submission evidence", variant: "destructive" });
+      toast({ title: "Record the HSE reference, date, time and submission evidence or receipt", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -625,6 +700,7 @@ ${rows.map(r => `<tr>
         firstAiderName: form.firstAiderName.trim() || null,
         witnesses: form.witnesses.trim() || null,
         riddorReportable: form.riddorReportable,
+        riddorCategory: form.riddorCategory || null,
         reportedToHse: form.reportedToHse,
         hseReference: form.hseReference.trim() || null,
         hseReportDate: form.hseReportDate || null,
@@ -632,6 +708,11 @@ ${rows.map(r => `<tr>
         // not a request to overwrite an earlier decision or submission.
         submittedAt: form.submittedAt ? new Date(form.submittedAt).toISOString() : undefined,
         submissionEvidence: form.submissionEvidence.trim() || (editItem ? undefined : null),
+        // Bound to the submission event this save records; never changed later.
+        submissionReceipt: !submissionChanged || !isManager ? undefined
+          : form.receiptUpload.objectPath
+            ? { objectPath: form.receiptUpload.objectPath, fileName: form.receiptUpload.fileName ?? "HSE receipt" }
+            : form.receiptAttachmentId ? { attachmentId: Number(form.receiptAttachmentId) } : undefined,
         riddorRationale: form.riddorRationale.trim() || undefined,
         immediateActions: form.immediateActions.trim() || null,
         investigationFindings: form.investigationFindings.trim() || null,
@@ -749,7 +830,9 @@ ${rows.map(r => `<tr>
           <ShieldAlert className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <span>
             <strong>{riddorOutstanding} RIDDOR-reportable incident{riddorOutstanding !== 1 ? "s have" : " has"} not yet been reported to the HSE.</strong>{" "}
-            RIDDOR reports must be submitted within the statutory timeframe.
+            {riddorOverdue > 0
+              ? <><strong>{riddorOverdue} {riddorOverdue === 1 ? "is" : "are"} past the RIDDOR reporting deadline.</strong> Report now.</>
+              : "RIDDOR reports must be submitted within the statutory timeframe."}
           </span>
         </div>
       )}
@@ -927,8 +1010,19 @@ ${rows.map(r => `<tr>
                           <CheckCircle2 className="w-3.5 h-3.5" /> Reported
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-xs text-rose-700 font-medium">
-                          <ShieldAlert className="w-3.5 h-3.5" /> Outstanding
+                        <span className="inline-flex flex-col text-xs text-rose-700 font-medium">
+                          <span className="inline-flex items-center gap-1">
+                            <ShieldAlert className="w-3.5 h-3.5" />
+                            {r.riddorDeadline?.state === "overdue" ? "Overdue" : "Outstanding"}
+                          </span>
+                          {r.riddorDeadline?.reportBy && (
+                            <span className={cn("font-normal", r.riddorDeadline.state === "overdue" ? "text-rose-700" : "text-muted-foreground")}>
+                              Report by {fmt(r.riddorDeadline.reportBy)}
+                            </span>
+                          )}
+                          {r.riddorDeadline?.state === "on_diagnosis" && (
+                            <span className="font-normal text-muted-foreground">Report on diagnosis</span>
+                          )}
                         </span>
                       )
                     ) : (
@@ -1066,10 +1160,10 @@ ${rows.map(r => `<tr>
                   {sites.length > 0 && (
                     <div>
                       <Label>Site</Label>
-                      <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+                      <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                         <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">No specific site</SelectItem>
+                          <SelectItem value="none">No specific site</SelectItem>
                           {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
@@ -1198,6 +1292,8 @@ ${rows.map(r => `<tr>
                     <Checkbox id="riddor" checked={form.riddorReportable}
                       onCheckedChange={v => setForm(f => ({
                         ...f, riddorReportable: !!v, reportedToHse: !!v ? f.reportedToHse : false,
+                        // Drop a category that no longer matches the reportability decision.
+                        riddorCategory: f.riddorCategory && (f.riddorCategory !== "over_3_day_record_only") !== !!v ? "" : f.riddorCategory,
                         hseReference: !!v ? f.hseReference : "", hseReportDate: !!v ? f.hseReportDate : "",
                       }))}
                       className="mt-0.5" />
@@ -1207,6 +1303,34 @@ ${rows.map(r => `<tr>
                         Deaths, specified injuries, over-7-day incapacitation, occupational diseases, dangerous occurrences
                       </p>
                     </div>
+                  </div>
+                  <div>
+                    <Label>RIDDOR category <span className="text-muted-foreground text-xs">optional</span></Label>
+                    <Select
+                      value={form.riddorCategory || "none"}
+                      onValueChange={v => setForm(f => {
+                        const riddorCategory = v === "none" ? "" : v as RiddorCategory;
+                        // A category decides reportability; keep the tick box consistent with it.
+                        if (!riddorCategory) return { ...f, riddorCategory };
+                        const reportable = riddorCategory !== "over_3_day_record_only";
+                        return {
+                          ...f, riddorCategory, riddorReportable: reportable,
+                          reportedToHse: reportable ? f.reportedToHse : false,
+                          hseReference: reportable ? f.hseReference : "", hseReportDate: reportable ? f.hseReportDate : "",
+                        };
+                      })}
+                    >
+                      <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Not categorised" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Not categorised</SelectItem>
+                        {(Object.keys(RIDDOR_CATEGORY_LABELS) as RiddorCategory[]).map(c => (
+                          <SelectItem key={c} value={c}>{RIDDOR_CATEGORY_LABELS[c]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {form.riddorCategory && (
+                      <p className="mt-1 text-xs text-orange-800">{riddorDeadlineText(form.riddorCategory, form.incidentDate)}</p>
+                    )}
                   </div>
                   <div>
                     <Label>RIDDOR decision rationale *</Label>
@@ -1253,13 +1377,44 @@ ${rows.map(r => `<tr>
                               className="mt-1 rounded-sm" />
                           </div>
                           <div>
-                            <Label>Submission evidence / secure location *</Label>
+                            <Label>Submission evidence / secure location{receiptChosen ? "" : " *"}</Label>
                             <Input placeholder="Receipt ID, document reference or secure URL"
                               value={form.submissionEvidence}
                               onChange={e => setForm(f => ({ ...f, submissionEvidence: e.target.value }))}
                               className="mt-1 rounded-sm" />
                           </div>
                         </div>
+                        {submissionChanged && isManager && (
+                          <div className="space-y-2">
+                            <DocumentField
+                              label="HSE receipt (PDF, JPEG or PNG)"
+                              requestUrlPath="/incidents/riddor-receipts/request-upload"
+                              value={form.receiptUpload}
+                              disabled={saving}
+                              onChange={receiptUpload => setForm(f => ({
+                                ...f, receiptUpload, receiptAttachmentId: receiptUpload.objectPath ? "" : f.receiptAttachmentId,
+                              }))}
+                            />
+                            {editItem && incidentAttachments.length > 0 && !form.receiptUpload.objectPath && (
+                              <div>
+                                <Label>Or use one of this incident's attachments</Label>
+                                <Select value={form.receiptAttachmentId || "none"}
+                                  onValueChange={v => setForm(f => ({ ...f, receiptAttachmentId: v === "none" ? "" : v }))}>
+                                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="No attachment" /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">No attachment</SelectItem>
+                                    {incidentAttachments.map((a, i) => (
+                                      <SelectItem key={a.id} value={String(a.id)}>
+                                        {a.caption?.trim() || `Attachment ${i + 1}`} · added {fmtDateTime(a.created_at)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                            <p className="text-xs text-muted-foreground">The receipt is saved with this submission in the history and can't be changed or removed afterwards.</p>
+                          </div>
+                        )}
                         </>
                       )}
 
@@ -1304,13 +1459,25 @@ ${rows.map(r => `<tr>
               riddorHistory.map(event => (
                 <div key={event.id} className="border rounded-sm p-3 text-sm space-y-1">
                   <div className="flex justify-between gap-2 font-medium">
-                    <span>{event.eventType === "submission" ? "HSE submission" : "RIDDOR decision"}: {event.riddorReportable ? "Reportable" : "Not reportable"}</span>
+                    <span>{event.eventType === "submission" ? "HSE submission" : "RIDDOR decision"}: {event.riddorReportable ? "Reportable" : "Not reportable"}{event.riddorCategory ? ` · ${RIDDOR_CATEGORY_LABELS[event.riddorCategory]}` : ""}</span>
                     <span className="text-xs text-muted-foreground whitespace-nowrap">{fmtDateTime(event.decisionAt)}</span>
                   </div>
                   <p className="text-muted-foreground">{event.reportedToHse ? "Reported to HSE" : "Not reported to HSE"}{event.hseReference ? ` · ${event.hseReference}` : ""}</p>
                   <p className="text-xs text-muted-foreground">Decision by {event.decisionMaker ?? event.actorName ?? event.actorEmail ?? "System"} · {fmtDateTime(event.decisionAt)}</p>
                   {event.rationale && <p>{event.rationale}</p>}
                   {event.submittedAt && <p className="text-xs text-muted-foreground">Submitted {fmtDateTime(event.submittedAt)}{event.submissionEvidence ? ` · Evidence: ${event.submissionEvidence}` : ""}</p>}
+                  {event.receiptFileName && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <FileText className="w-3.5 h-3.5 text-primary shrink-0" aria-hidden="true" />
+                      <span className="truncate">HSE receipt: {event.receiptFileName}{event.receiptSource === "incident_attachment" ? " (from incident attachments)" : ""}</span>
+                      {isManager ? (
+                        <Button type="button" variant="outline" size="sm" className="h-6 text-xs gap-1"
+                          onClick={() => downloadReceipt(event)}>
+                          <Download className="w-3 h-3" aria-hidden="true" /> Download
+                        </Button>
+                      ) : <span className="text-muted-foreground">Managers can download it.</span>}
+                    </div>
+                  )}
                 </div>
               ))}
             <div className="border-t pt-3 space-y-2 text-sm">

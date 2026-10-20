@@ -57,6 +57,14 @@ async function main() {
   check("verification token is available in test mode", typeof registered.data?.verificationToken === "string");
   check("email verification succeeds", (await request("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`)).status === 200);
 
+  // 2FA is optional until a manager requires it: the new owner signs in with
+  // a password, turns the requirement on, and is then held at setup.
+  const passwordOnly = await request("POST", "/auth/login", { email, password: "password-123" });
+  check("a new business signs in with just a password", passwordOnly.status === 200 && !passwordOnly.data?.requires2faSetup, JSON.stringify(passwordOnly.data));
+  const required = await request("PUT", "/settings", { requireTwoFactor: "true" });
+  check("the owner can require 2FA", required.status === 200 && required.data?.requireTwoFactor === "true", JSON.stringify(required.data));
+  await request("POST", "/auth/logout");
+
   const firstLogin = await request("POST", "/auth/login", { email, password: "password-123" });
   check("first login requires setup", firstLogin.status === 200 && firstLogin.data?.requires2faSetup === true);
   const mobileBeforeSetup = await request("POST", "/auth/mobile-login", { email, password: "password-123" });

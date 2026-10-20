@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { Link, useRoute } from "wouter";
+import { Link, useLocation, useRoute, useSearch } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { CertificateFormDialog } from "@/components/certificate-form-dialog";
-import { StatusBadge, PriorityBadge, ExpiryBadge } from "@/components/badges";
+import { StatusBadge, PriorityBadge, ExpiryBadge, NeedsActionBadge, needsActionLabel } from "@/components/badges";
+import { CompleteCheckDialog } from "@/components/complete-check-dialog";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetComplianceItem,
   getGetComplianceItemQueryKey,
@@ -17,12 +19,14 @@ import {
   useListCategories,
 } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
+import { LoadError } from "@/components/load-error";
 import { format } from "date-fns";
 import {
   ArrowLeft, Pencil, Trash2, FileText, Plus, ExternalLink,
-  Briefcase, MapPin, Calendar, Clock, ClipboardList, Mail, User,
+  Briefcase, MapPin, Calendar, Clock, ClipboardList, Mail, User, Repeat,
+  CheckCircle2, ShieldAlert, Wrench,
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -43,7 +47,27 @@ type AuditEvent = {
   createdAt: string;
 };
 
+const CERTIFICATE_AUDIT: Record<string, string> = {
+  certificate_added: "Added a certificate",
+  certificate_updated: "Updated a certificate",
+  certificate_deleted: "Deleted a certificate",
+  certificate_defect_added: "Recorded a certificate defect",
+  certificate_defect_resolved: "Marked a certificate defect remedied",
+  certificate_defect_reopened: "Reopened a certificate defect",
+  certificate_defect_deleted: "Removed a certificate defect",
+};
+
+const OUTCOME_LABELS: Record<string, { label: string; className: string }> = {
+  satisfactory: { label: "Satisfactory", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+  unsatisfactory: { label: "Unsatisfactory", className: "bg-rose-100 text-rose-800 border-rose-300" },
+  not_stated: { label: "Outcome not stated", className: "bg-slate-100 text-slate-700 border-slate-200" },
+};
+
 function auditSummary(event: AuditEvent) {
+  if (CERTIFICATE_AUDIT[event.action]) {
+    const name = (event.after?.name ?? event.before?.name) as string | undefined;
+    return name ? `${CERTIFICATE_AUDIT[event.action]}: ${name}` : CERTIFICATE_AUDIT[event.action];
+  }
   if (event.action === "created") return "Created this compliance check";
   if (event.action === "deleted") return "Deleted this compliance check";
   const beforeStatus = event.before?.status;
@@ -58,7 +82,7 @@ export default function ItemDetailPage() {
   const [, params] = useRoute("/items/:id");
   const id = params ? Number(params.id) : NaN;
 
-  const { data: item, isLoading } = useGetComplianceItem(id, { query: { enabled: Number.isFinite(id), queryKey: getGetComplianceItemQueryKey(id) } });
+  const { data: item, isLoading, error: itemError, refetch: refetchItem } = useGetComplianceItem(id, { query: { enabled: Number.isFinite(id), queryKey: getGetComplianceItemQueryKey(id) } });
   const { data: certificates = [] } = useListItemCertificates(id, { query: { enabled: Number.isFinite(id), queryKey: getListItemCertificatesQueryKey(id) } });
   const { data: contractors = [] } = useListContractors();
   const { data: sites = [] } = useListSites();
@@ -67,6 +91,13 @@ export default function ItemDetailPage() {
   const { deleteItem, deleteItemCertificate } = useAppMutations();
   const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
+  const canEdit = useCanEdit();
+  const queryClient = useQueryClient();
+  const search = useSearch();
+  const [, navigate] = useLocation();
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [certIssueDate, setCertIssueDate] = useState<string | null>(null);
+  const [defectBusy, setDefectBusy] = useState<number | null>(null);
 
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -74,6 +105,37 @@ export default function ItemDetailPage() {
   const [editingCert, setEditingCert] = useState<any>(null);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditError, setAuditError] = useState(false);
+
+  // "Done + add certificate" from the checks list lands here with
+  // ?certificate=new&issued=YYYY-MM-DD: open the upload form once.
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    if (params.get("certificate") !== "new" || !canAdmin) return;
+    const issued = params.get("issued");
+    setEditingCert(null);
+    setCertIssueDate(issued && /^\d{4}-\d{2}-\d{2}$/.test(issued) ? issued : null);
+    setCertOpen(true);
+    navigate(`/items/${id}`, { replace: true });
+  }, [search, canAdmin, id, navigate]);
+
+  const markDefectRemedied = async (certificateId: number, defectId: number, resolved: boolean) => {
+    setDefectBusy(defectId);
+    try {
+      const clientQuery = activeClientId ? `?clientId=${activeClientId}` : "";
+      const res = await apiFetch(`/items/${id}/certificates/${certificateId}/defects/${defectId}${clientQuery}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolved }),
+      });
+      if (!res.ok) throw new Error("Could not update the defect");
+      await queryClient.invalidateQueries({ queryKey: getListItemCertificatesQueryKey(id) });
+      await queryClient.invalidateQueries({ queryKey: getGetComplianceItemQueryKey(id) });
+    } catch {
+      /* the list keeps the last known state */
+    } finally {
+      setDefectBusy(null);
+    }
+  };
 
   useEffect(() => {
     // Clear a prior item's entries immediately when a route or consultant
@@ -95,6 +157,10 @@ export default function ItemDetailPage() {
 
   if (isLoading) {
     return <AppLayout title="Compliance Check"><div className="py-12 flex justify-center"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div></AppLayout>;
+  }
+  // Only a 404 means the check does not exist; anything else is a failed load.
+  if (!item && itemError && (itemError as { status?: number }).status !== 404) {
+    return <AppLayout title="Compliance Check"><div className="py-12"><LoadError message="This compliance check could not be loaded." onRetry={() => void refetchItem()} /></div></AppLayout>;
   }
   if (!item) {
     return <AppLayout title="Not Found"><div className="py-12 text-center text-muted-foreground">Compliance check not found.</div></AppLayout>;
@@ -125,6 +191,7 @@ export default function ItemDetailPage() {
                     </span>
                   )}
                   <StatusBadge status={item.status} />
+                  <NeedsActionBadge item={item} />
                   <PriorityBadge priority={item.priority} />
                 </div>
                 <h1 className="font-display font-bold text-2xl">{item.title}</h1>
@@ -133,6 +200,11 @@ export default function ItemDetailPage() {
                 )}
               </div>
               <div className="flex gap-2 flex-shrink-0">
+                {canEdit && (
+                  <Button variant="outline" size="sm" onClick={() => setCompleteOpen(true)} title="Mark as done">
+                    <CheckCircle2 className="w-4 h-4 mr-1.5 text-emerald-600" /> Mark done
+                  </Button>
+                )}
                 <Button variant="ghost" size="icon" onClick={() => setEditOpen(true)} title="Edit">
                   <Pencil className="w-4 h-4" />
                 </Button>
@@ -142,12 +214,37 @@ export default function ItemDetailPage() {
               </div>
             </div>
 
+            {item.needsAction && (
+              <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:bg-rose-950/30 dark:text-rose-200">
+                <ShieldAlert className="w-5 h-5 mt-0.5 shrink-0 text-rose-600" />
+                <div>
+                  <p className="font-semibold">{needsActionLabel(item)}</p>
+                  <p className="mt-0.5">
+                    {(item.openDefectCount ?? 0) > 0
+                      ? "This check needs action until the FixTrack jobs for its C1/C2/FI (or gas ID/AR) defects are resolved, or a new satisfactory certificate is added."
+                      : "The latest certificate is unsatisfactory. Add its defects so the remedial work is tracked, or add a new satisfactory certificate once the work is done."}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-x-6 gap-y-4 pt-4 border-t border-border/50">
               <div className="flex items-start gap-3">
                 <Calendar className="w-4 h-4 mt-0.5 text-muted-foreground" />
                 <div>
                   <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Due Date</p>
-                  <p className="text-sm font-medium">{fmt(item.dueDate)}</p>
+                  <p className="text-sm font-medium">{item.dueDate ? fmt(item.dueDate) : "Not set — enter it from your last service date"}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Repeat className="w-4 h-4 mt-0.5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Repeats</p>
+                  <p className="text-sm font-medium">
+                    {item.frequencyMonths
+                      ? `Every ${item.frequencyMonths} month${item.frequencyMonths === 1 ? "" : "s"}`
+                      : "One-off"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
@@ -219,7 +316,7 @@ export default function ItemDetailPage() {
                   Documentation for this compliance check — upload the certificate that proves this requirement.
                 </p>
               </div>
-              <Button size="sm" onClick={() => { setEditingCert(null); setCertOpen(true); }} className="shadow-sm">
+              <Button size="sm" onClick={() => { setEditingCert(null); setCertIssueDate(null); setCertOpen(true); }} className="shadow-sm">
                 <Plus className="w-4 h-4 mr-1.5" /> Upload
               </Button>
             </div>
@@ -238,10 +335,39 @@ export default function ItemDetailPage() {
                     <div className="min-w-0">
                       <h4 className="font-semibold truncate">{cert.name}</h4>
                       <div className="flex flex-wrap gap-3 mt-1.5 text-sm">
+                        {cert.outcome && OUTCOME_LABELS[cert.outcome] && (
+                          <Badge variant="outline" className={OUTCOME_LABELS[cert.outcome].className}>{OUTCOME_LABELS[cert.outcome].label}</Badge>
+                        )}
                         <ExpiryBadge expiryDate={cert.expiryDate} />
-                        {cert.issueDate && <span className="text-muted-foreground">Issued: {format(new Date(cert.issueDate), "MMM d, yyyy")}</span>}
+                        {cert.issueDate && <span className="text-muted-foreground">Issued: {format(new Date(cert.issueDate), "d MMM yyyy")}</span>}
                       </div>
                       {cert.notes && <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2">{cert.notes}</p>}
+                      {(cert.defects ?? []).length > 0 && (
+                        <ul className="mt-2 space-y-1.5">
+                          {(cert.defects ?? []).map((d) => (
+                            <li key={d.id} className={`flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${d.open && d.blocking ? "border-rose-300 bg-rose-50 dark:bg-rose-950/30" : "bg-muted/30"}`}>
+                              <span className={`font-bold ${d.open && d.blocking ? "text-rose-700" : ""}`}>{d.code}</span>
+                              <span className="min-w-0">{d.description}{d.location ? <span className="text-muted-foreground"> · {d.location}</span> : null}</span>
+                              {d.fixTrackIssueId ? (
+                                <Link href={`/fix-track/${d.fixTrackIssueId}`} className="inline-flex items-center gap-1 text-primary hover:underline">
+                                  <Wrench className="w-3 h-3" /> FixTrack #{d.fixTrackIssueId}
+                                  {d.fixTrackStatus ? ` (${d.fixTrackStatus.replace("_", " ")})` : ""}
+                                </Link>
+                              ) : d.resolvedAt ? (
+                                <span className="text-emerald-700">Remedied</span>
+                              ) : (
+                                <span className="text-muted-foreground">No FixTrack job</span>
+                              )}
+                              {canAdmin && !d.fixTrackIssueId && (
+                                <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" disabled={defectBusy === d.id}
+                                  onClick={() => void markDefectRemedied(cert.id, d.id, !d.resolvedAt)}>
+                                  {d.resolvedAt ? "Reopen" : "Mark remedied"}
+                                </Button>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                       {cert.fileUrl && (
@@ -251,7 +377,7 @@ export default function ItemDetailPage() {
                           </a>
                         </Button>
                       )}
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingCert(cert); setCertOpen(true); }}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingCert(cert); setCertIssueDate(null); setCertOpen(true); }}>
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteItemCertificate.mutate({ itemId: id, id: cert.id })}>
@@ -292,7 +418,7 @@ export default function ItemDetailPage() {
               )}
               {item.completedAt && (
                 <div>
-                  <p className="text-xs text-emerald-700">Completed</p>
+                  <p className="text-xs text-emerald-700">{item.status === "completed" ? "Completed" : "Last completed"}</p>
                   <p className="font-medium">{fmt(item.completedAt)}</p>
                 </div>
               )}
@@ -328,7 +454,13 @@ export default function ItemDetailPage() {
         onClose={() => setCertOpen(false)}
         itemId={id}
         suggestedName={item.title}
+        defaultIssueDate={certIssueDate}
         certificate={editingCert}
+      />
+      <CompleteCheckDialog
+        item={completeOpen ? item : null}
+        onClose={() => setCompleteOpen(false)}
+        onAddCertificate={canAdmin ? (date) => { setEditingCert(null); setCertIssueDate(date); setCertOpen(true); } : undefined}
       />
 
       <AlertDialog open={deleteConfirm} onOpenChange={setDeleteConfirm}>

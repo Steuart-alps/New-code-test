@@ -5,7 +5,11 @@ import { hotTubChecksTable, sitesTable, HOT_TUB_CHECK_TYPES, trackControlProfile
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
+import { PER_TUB_CHECK_TYPES, sitesWithUnreadHotTubs } from "../lib/checkReminders";
+import { getAccountToday } from "../lib/accountClock";
+import { sitesTableVisibleTo, siteVisibleToDepartment, visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -18,7 +22,10 @@ const FREQUENCY_DAYS: Record<HotTubCheckType, number> = {
   filter_clean:          7,    // Weekly: filter rinse; deep-clean monthly
   cover_inspection:      7,    // Weekly: check cover condition and seals
   drain_refill:          91,   // Quarterly: full drain, clean and disinfect
-  microbiological_test:  91,   // Quarterly: water sample bacteria test
+  // HSG282: microbiological sampling at least monthly (bacteria), with
+  // Legionella sampling at least quarterly. One check type covers both, so
+  // the default follows the monthly bacteria test.
+  microbiological_test:  30,   // Monthly
   risk_assessment:       365,  // Annual: HSG282 risk assessment review
 };
 router.use("/monitoring-plan", createMonitoringPlanRouter("hot_tub", HOT_TUB_CHECK_TYPES, "frequencyDays"));
@@ -63,23 +70,30 @@ router.get("/tubs", requireAuth, async (req, res) => {
         ? false
         : null;
   if (activeFilter === null) return res.status(400).json({ error: "Invalid active filter" });
+  // Optional case-insensitive match on the tub's name or its site's name.
+  const searchParam = req.query.search;
+  if (searchParam !== undefined && (typeof searchParam !== "string" || searchParam.length > 200)) {
+    return res.status(400).json({ error: "Invalid search" });
+  }
+  const search = searchParam?.trim() ?? "";
+  const searchPattern = `%${search.replace(/[\\%_]/g, ch => `\\${ch}`)}%`;
   const departmentId = getActiveDepartmentId(req);
   const rows = await db.execute(sql`
-    SELECT ht.id, ht.client_id, ht.site_id, ht.name, ht.description, ht.active,
-           ht.created_at, ht.updated_at,
-           s.name AS site_name
+    SELECT ht.id, ht.client_id AS "clientId", ht.site_id AS "siteId", ht.name, ht.description, ht.active,
+           ht.created_at AS "createdAt", ht.updated_at AS "updatedAt",
+           s.name AS "siteName"
     FROM hot_tubs ht
     LEFT JOIN sites s ON s.id = ht.site_id
     WHERE ht.client_id = ${clientId}
       ${departmentId !== null ? sql`AND (
         ht.site_id IS NULL
-        OR ht.site_id IN (
-          SELECT id FROM sites
-          WHERE client_id = ${clientId}
-            AND (department_id IS NULL OR department_id = ${departmentId})
-        )
+        OR ht.site_id IN (${visibleSiteIdsSql(clientId, departmentId)})
       )` : sql``}
       ${activeFilter !== undefined ? sql`AND ht.active = ${activeFilter}` : sql``}
+      ${search ? sql`AND (
+        ht.name ILIKE ${searchPattern} ESCAPE '\\'
+        OR s.name ILIKE ${searchPattern} ESCAPE '\\'
+      )` : sql``}
     ORDER BY ht.active DESC, ht.name
   `);
   res.json(rows.rows ?? rows);
@@ -160,6 +174,8 @@ router.delete("/tubs/:id", requireAuth, denyViewers, async (req, res) => {
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 async function fetchClientSite(siteId: number | null | undefined, clientId: number) {
   if (siteId == null) return null;
@@ -179,7 +195,7 @@ async function checkSiteAccess(
   if (siteId == null) return null;
   const site = await fetchClientSite(siteId, clientId);
   if (!site) return "not_found";
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return "forbidden";
+  if (!(await siteVisibleToDepartment(site, deptId))) return "forbidden";
   return "ok";
 }
 
@@ -189,7 +205,7 @@ function allowedSitesSubquery(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
@@ -303,17 +319,19 @@ router.get("/status", requireAuth, async (req, res) => {
       ? "fail" : row.lastResult;
     lastByType.set(row.checkType, { date, result });
   }
+  // A registered tub with no readings yet is "never" for its own checks, so a
+  // newly added tub cannot be hidden by the site's other tubs.
+  const hasUnreadTub = (await sitesWithUnreadHotTubs(clientId, [selectedSiteId])).has(selectedSiteId);
   const MS_DAY = 24 * 60 * 60 * 1000;
   const toUtcDays = (isoDate: string) => Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / MS_DAY);
-  const now = new Date();
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const todayIso = await getAccountToday(clientId);
   const todayDays = toUtcDays(todayIso);
 
   const frequencies = approvedFrequencies(await getHotTubProfile(clientId, selectedSiteId), HOT_TUB_CHECK_TYPES, "frequencyDays");
   const statuses = HOT_TUB_CHECK_TYPES.map((checkType) => {
     const frequencyDays = frequencies?.[checkType] ?? null;
     const last = lastByType.get(checkType) ?? null;
-    const lastDate = last?.date ?? null;
+    const lastDate = hasUnreadTub && PER_TUB_CHECK_TYPES.has(checkType) ? null : last?.date ?? null;
     if (frequencyDays === null) return { checkType, frequencyDays, lastDate, lastResult: last?.result ?? null,
       dueDate: null, status: "plan_required" as const };
     if (!lastDate) {
@@ -336,7 +354,7 @@ router.get("/status", requireAuth, async (req, res) => {
       AND check_date = ${todayIso}
       AND check_type IN ('water_chemistry', 'temperature')
       AND site_id = ${selectedSiteId}
-      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))` : sql``}
+      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))` : sql``}
   `);
   const unitsByType = new Map<string, Set<number>>();
   const sessionsByType = new Map<string, Map<number, Set<string>>>();
@@ -345,7 +363,7 @@ router.get("/status", requireAuth, async (req, res) => {
     FROM hot_tubs
     WHERE client_id = ${clientId} AND active = true
       AND site_id = ${selectedSiteId}
-      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))` : sql``}
+      ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))` : sql``}
   `);
   const expectedUnitIds = (expectedUnits.rows ?? []).map((row: any) => Number(row.unit_id));
   for (const checkType of DAILY_SESSION_TYPES) unitsByType.set(checkType, new Set(expectedUnitIds));
@@ -384,7 +402,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = createSchema.safeParse(req.body);
+  const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   if (data.checkType === "water_chemistry" && (data.phValue == null || data.sanitiserLevel == null))
@@ -413,29 +431,47 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     if (effectiveAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   }
 
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(data);
+  const storedEntry = async () => entry && (await db.select().from(hotTubChecksTable)
+    .where(and(eq(hotTubChecksTable.clientId, clientId), eq(hotTubChecksTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+
   const profile = effectiveSiteId == null ? null : await getHotTubProfile(clientId, effectiveSiteId);
   const breach = hotTubBreach(data, data.checkType, profile);
-  const inserted = await db.transaction(async tx => {
-    const [row] = await tx.insert(hotTubChecksTable).values({
-      clientId,
-      checkType: data.checkType,
-      checkDate: data.checkDate,
-      result: breach ? "fail" : data.result,
-      session: data.session ?? null,
-      phValue: data.phValue != null ? String(data.phValue) : null,
-      sanitiserLevel: data.sanitiserLevel != null ? String(data.sanitiserLevel) : null,
-      temperature: data.temperature != null ? String(data.temperature) : null,
-      siteId: effectiveSiteId,
-      hotTubId: data.hotTubId ?? null,
-      location: data.location ?? null,
-       performedBy: performer.performedBy,
-       staffRosterId: performer.staffRosterId,
-      notes: data.notes ?? null,
-      createdBy: req.currentUser!.id,
-    }).returning();
-    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
-    return row;
-  });
+  let inserted;
+  try {
+    inserted = await db.transaction(async tx => {
+      const [row] = await tx.insert(hotTubChecksTable).values({
+        clientId,
+        checkType: data.checkType,
+        checkDate: data.checkDate,
+        result: breach ? "fail" : data.result,
+        session: data.session ?? null,
+        phValue: data.phValue != null ? String(data.phValue) : null,
+        sanitiserLevel: data.sanitiserLevel != null ? String(data.sanitiserLevel) : null,
+        temperature: data.temperature != null ? String(data.temperature) : null,
+        siteId: effectiveSiteId,
+        hotTubId: data.hotTubId ?? null,
+        location: data.location ?? null,
+         performedBy: performer.performedBy,
+         staffRosterId: performer.staffRosterId,
+        notes: data.notes ?? null,
+        createdBy: userId,
+        clientEntryId: entry?.id ?? null,
+        clientEntryHash: entry?.hash ?? null,
+      }).returning();
+      if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, req.currentUser?.id ?? null, performer.performedBy);
+      return row;
+    });
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
 
   res.status(201).json(inserted);
 });
@@ -510,7 +546,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(hotTubChecksTable).set(updateData)
       .where(and(eq(hotTubChecksTable.id, id), eq(hotTubChecksTable.clientId, clientId))).returning();
-    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, id, breach, (req.session as any).userId ?? null, performer.performedBy);
+    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, id, breach, req.currentUser?.id ?? null, performer.performedBy);
     return row;
   });
 

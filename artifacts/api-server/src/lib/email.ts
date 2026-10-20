@@ -4,10 +4,36 @@ import { appSettingsTable } from "@workspace/db/schema";
 import { randomUUID } from "crypto";
 import { appendFile } from "node:fs/promises";
 
+/** Upper bound for one email provider request (a hung connection fails the send). */
+const RESEND_REQUEST_TIMEOUT_MS = 15_000;
+
 function getResend(apiKeyOverride?: string | null) {
   const apiKey = apiKeyOverride?.trim() || process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY is not configured.");
-  return new Resend(apiKey);
+  const resend = new Resend(apiKey);
+  // The SDK sends every request through fetchRequest(path, init) without a
+  // timeout. Give each one an abort deadline; the SDK reports the abort as an
+  // error result, which the senders below turn into a failed send.
+  const client = resend as unknown as { fetchRequest?: (path: string, init?: RequestInit) => Promise<unknown> };
+  const fetchRequest = client.fetchRequest?.bind(resend);
+  if (fetchRequest) {
+    client.fetchRequest = (path, init = {}) =>
+      fetchRequest(path, { ...init, signal: init.signal ?? AbortSignal.timeout(RESEND_REQUEST_TIMEOUT_MS) });
+  }
+  return resend;
+}
+
+/**
+ * Configuration problems that stop system email reaching customers. Fixed,
+ * non-secret strings: reported at start-up and in /readyz details.
+ */
+export function describeEmailConfigurationIssues(): string[] {
+  const issues: string[] = [];
+  if (!process.env.RESEND_API_KEY?.trim()) issues.push("RESEND_API_KEY is not set: emails cannot be sent");
+  if (!process.env.RESEND_FROM_EMAIL?.trim()) {
+    issues.push("RESEND_FROM_EMAIL is not set: mail is sent from onboarding@resend.dev, which only delivers to the Resend account owner");
+  }
+  return issues;
 }
 
 export async function getEmailSettings(clientId?: number | null): Promise<Record<string, string>> {
@@ -25,10 +51,54 @@ export async function getEmailSettings(clientId?: number | null): Promise<Record
   return settings;
 }
 
+const SENDER_ADDRESS = /^[^\s@<>"(),;:\\[\]]+@([a-z0-9-]+(?:\.[a-z0-9-]+)+)$/i;
+
+/**
+ * Whether a business may send as `address`. With the platform's provider
+ * account, only the business's own registered sending domain is allowed
+ * (resendDomainName, set by routes/emailDomain.ts), so one business can never
+ * send as another business or as the platform. A business that connected its
+ * own provider key sends through that account, which only delivers from
+ * domains verified there.
+ */
+export function isAllowedTenantSender(address: string | null | undefined, settings: Record<string, string | null | undefined>): boolean {
+  const domain = address?.trim().match(SENDER_ADDRESS)?.[1]?.toLowerCase();
+  if (!domain) return false;
+  if (settings["resendApiKey"]?.trim()) return true;
+  const ownDomain = settings["resendDomainName"]?.trim().toLowerCase();
+  return !!ownDomain && domain === ownDomain;
+}
+
+/** A display name safe to place in a From header (no quotes, brackets or line breaks). */
+export function sanitizeSenderName(name: string | null | undefined): string {
+  return (name ?? "").replace(/[\r\n"<>\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+}
+
+function senderAddress(settings: Record<string, string>): string {
+  // A stored address that is not on the business's own domain (e.g. saved
+  // before this check existed) falls back to the platform sender.
+  return isAllowedTenantSender(settings["smtpFrom"], settings)
+    ? settings["smtpFrom"].trim()
+    : process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+}
+
 function buildFrom(settings: Record<string, string>): string {
-  const email = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
-  const name = settings["smtpFromName"] ?? "ComplyTrack";
-  return `${name} <${email}>`;
+  const name = sanitizeSenderName(settings["smtpFromName"]) || "ComplyTrack";
+  return `${name} <${senderAddress(settings)}>`;
+}
+
+/**
+ * The bare address a business's email is sent from (the same validated
+ * sender as sendEmail's From header), e.g. for a calendar invite organiser.
+ * Never the raw stored smtpFrom.
+ */
+export function getSenderEmail(settings: Record<string, string>): string {
+  const address = senderAddress(settings);
+  return address.match(/<([^>]+)>/)?.[1]?.trim() ?? address.trim();
+}
+
+export async function getClientSenderEmail(clientId: number): Promise<string> {
+  return getSenderEmail(await getEmailSettings(clientId));
 }
 
 /**

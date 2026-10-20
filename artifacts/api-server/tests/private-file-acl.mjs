@@ -38,8 +38,11 @@ try {
     validation: `
       export class ObjectContentError extends Error {}
       export const MAX_RESTRICTED_UPLOAD_BYTES = 10485760;
-      export const detectIssueVideoType = () => { throw Error('Unexpected video validation'); };
-      export const detectUploadType = () => { throw Error('Unexpected image validation'); };
+      export const maxUploadBytes = () => 262144000;
+      export class UploadTooLargeError extends ObjectContentError {}
+      // DocTrack registration checks the file signature; these PDFs are the only uploads.
+      export const detectIssueVideoType = () => null;
+      export const detectUploadType = (bytes) => bytes.subarray(0, 5).toString('latin1') === '%PDF-' ? 'application/pdf' : null;
       export const validatePdfInWorker = () => { throw Error('Unexpected PDF validation'); };
       export const validateUploadContent = () => { throw Error('Unexpected content validation'); };`,
   };

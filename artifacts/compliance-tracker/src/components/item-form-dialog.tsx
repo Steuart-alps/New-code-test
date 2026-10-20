@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { localToday } from "@/lib/onboarding";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -13,6 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
+import { format } from "date-fns";
 import { ComplianceItem, useListCategories, useListSites, useListContractors } from "@workspace/api-client-react";
 
 const ALL_SITES = "__all__";
@@ -29,6 +31,12 @@ const formSchema = z.object({
   contractorId: z.coerce.number().optional().nullable(),
   dueDate: z.string().optional().nullable(),
   leadTimeDays: z.coerce.number().optional().nullable(),
+  // Blank = one-off check. With an interval, completing the check reopens it
+  // due that many months after completion.
+  frequencyMonths: z.preprocess(
+    (v) => (v === "" || v == null || Number.isNaN(v) ? null : Number(v)),
+    z.number().int("Use whole months").min(1, "At least 1 month").max(120, "At most 120 months").nullable(),
+  ),
   notes: z.string().optional(),
 });
 
@@ -52,12 +60,15 @@ export function ItemFormDialog({
   const { data: sites = [] } = useListSites();
   const { data: contractors = [] } = useListContractors();
 
+  // Completing an existing check through this form asks for the date done,
+  // like the "Mark done" dialog; the next due date is counted from it.
+  const [completedDay, setCompletedDay] = useState(localToday());
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       title: "", description: "", status: "pending", priority: "medium",
       categoryId: undefined, siteId: undefined, contractorId: undefined,
-      dueDate: "", leadTimeDays: 7, notes: "",
+      dueDate: "", leadTimeDays: 7, frequencyMonths: null, notes: "",
     }
   });
 
@@ -71,8 +82,9 @@ export function ItemFormDialog({
         categoryId: item.categoryId || undefined,
         siteId: item.siteId ? String(item.siteId) : undefined,
         contractorId: item.contractorId || undefined,
-        dueDate: item.dueDate ? new Date(item.dueDate).toISOString().slice(0, 16) : "",
+        dueDate: item.dueDate ? format(new Date(item.dueDate), "yyyy-MM-dd'T'HH:mm") : "",
         leadTimeDays: item.leadTimeDays || 7,
+        frequencyMonths: item.frequencyMonths ?? null,
         notes: item.notes || "",
       });
     } else {
@@ -81,12 +93,24 @@ export function ItemFormDialog({
         categoryId: defaultCategoryId ?? undefined,
         siteId: defaultSiteId ? String(defaultSiteId) : undefined,
         contractorId: undefined,
-        dueDate: "", leadTimeDays: 7, notes: "",
+        dueDate: "", leadTimeDays: 7, frequencyMonths: null, notes: "",
       });
     }
+    setCompletedDay(localToday());
   }, [item, isOpen, form, defaultCategoryId, defaultSiteId]);
 
+  const watchedStatus = form.watch("status");
+  const completing = !!item && watchedStatus === "completed" && item.status !== "completed";
+  const completedDayError = !completing ? null
+    : !/^\d{4}-\d{2}-\d{2}$/.test(completedDay) ? "Enter the date the check was done"
+    : completedDay > localToday() ? "The date done cannot be in the future" : null;
+
+  const rawFrequency = form.watch("frequencyMonths") as unknown;
+  const watchedFrequency = rawFrequency === "" || rawFrequency == null || !Number.isInteger(Number(rawFrequency)) || Number(rawFrequency) < 1
+    ? null : Number(rawFrequency);
+
   const onSubmit = async (data: FormValues) => {
+    if (completedDayError) return;
     try {
       const isAllSites = data.siteId === ALL_SITES;
       const numericSiteId =
@@ -97,6 +121,7 @@ export function ItemFormDialog({
         categoryId: data.categoryId || null,
         contractorId: data.contractorId || null,
         leadTimeDays: data.leadTimeDays || null,
+        frequencyMonths: data.frequencyMonths ?? null,
         assignedTo: null,
         dueDate: data.dueDate ? new Date(data.dueDate).toISOString() : null,
       };
@@ -107,7 +132,11 @@ export function ItemFormDialog({
         // was selected. This avoids duplicating the current site's check.
         await updateItem.mutateAsync({
           id: item.id,
-          data: { ...basePayload, siteId: numericSiteId ?? item.siteId ?? null } as any,
+          data: {
+            ...basePayload,
+            siteId: numericSiteId ?? item.siteId ?? null,
+            ...(completing ? { completedAt: completedDay } : {}),
+          } as any,
         });
 
         if (isAllSites) {
@@ -220,6 +249,14 @@ export function ItemFormDialog({
                   <SelectItem value="overdue">Overdue</SelectItem>
                 </SelectContent>
               </Select>
+              {completing && (
+                <div className="pt-1 space-y-1">
+                  <Label htmlFor="completedDay" className="text-xs font-medium">Date done</Label>
+                  <Input id="completedDay" type="date" className="h-9" value={completedDay} max={localToday()}
+                    onChange={(e) => setCompletedDay(e.target.value)} />
+                  {completedDayError && <p className="text-xs text-destructive">{completedDayError}</p>}
+                </div>
+              )}
             </div>
 
             <div className="space-y-1">
@@ -262,6 +299,29 @@ export function ItemFormDialog({
             <div className="space-y-1">
               <Label className="text-xs font-medium">Alert Lead Time (Days)</Label>
               <Input type="number" {...form.register("leadTimeDays")} className="bg-background h-9" placeholder="7" />
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <Label htmlFor="frequencyMonths" className="text-xs font-medium">Repeat every (months)</Label>
+              <Input
+                id="frequencyMonths"
+                type="number"
+                min={1}
+                max={120}
+                step={1}
+                {...form.register("frequencyMonths")}
+                className="bg-background h-9 w-full sm:w-40"
+                placeholder="One-off"
+              />
+              {form.formState.errors.frequencyMonths ? (
+                <p className="text-xs text-destructive">{form.formState.errors.frequencyMonths.message}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {watchedFrequency
+                    ? `When marked completed, this check reopens due ${watchedFrequency} month${watchedFrequency === 1 ? "" : "s"} after the completion date.`
+                    : "Leave blank for a one-off check. Set the interval your contractor, competent person or guidance recommends for your premises."}
+                </p>
+              )}
             </div>
 
             <div className="col-span-2 space-y-1">

@@ -1,9 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import fs from "fs";
 import path from "path";
 // @ts-expect-error plain .mjs module without type declarations
 import { resolveBaseUrl, assertCanonicalForProduction } from "./scripts/site-url.mjs";
+// @ts-expect-error plain .mjs module without type declarations
+import { publicPages, renderPublicPageHtml } from "./scripts/seo-pages.mjs";
 
 // Injects the canonical site URL into index.html (canonical link, Open Graph,
 // Twitter, JSON-LD) at dev-serve and build time via the __SITE_URL__ placeholder.
@@ -14,6 +17,27 @@ function siteUrlHtmlPlugin() {
       const { baseUrl, source } = resolveBaseUrl();
       assertCanonicalForProduction(baseUrl, source);
       return html.replaceAll("__SITE_URL__", baseUrl);
+    },
+  };
+}
+
+// Writes <path>/index.html for each public page other than the home page, so
+// crawlers get that page's own title, description and canonical URL rather
+// than the home page's. See scripts/seo-pages.mjs.
+function publicPagesHtmlPlugin() {
+  return {
+    name: "public-pages-html",
+    apply: "build" as const,
+    writeBundle(options: { dir?: string }) {
+      if (!options.dir) return;
+      const indexHtml = fs.readFileSync(path.join(options.dir, "index.html"), "utf8");
+      const { baseUrl } = resolveBaseUrl();
+      for (const page of publicPages as Array<{ path: string; title?: string }>) {
+        if (page.path === "/") continue;
+        const pageDir = path.join(options.dir, page.path);
+        fs.mkdirSync(pageDir, { recursive: true });
+        fs.writeFileSync(path.join(pageDir, "index.html"), renderPublicPageHtml(indexHtml, page, baseUrl));
+      }
     },
   };
 }
@@ -52,6 +76,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     siteUrlHtmlPlugin(),
+    publicPagesHtmlPlugin(),
   ],
   resolve: {
     alias: {

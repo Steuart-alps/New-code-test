@@ -3,6 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "main": "expo-router/entry",
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "expo-location"
+      ]
+    }
+  },
   "scripts": {
     "dev": "pnpm exec expo start",
     "build": "node scripts/build.js",
@@ -15,6 +22,7 @@
     "test:auth-query-isolation": "node tests/auth-query-isolation.mjs",
     "test:staged-photo-evidence": "node tests/staged-photo-evidence.mjs",
     "test:pat-screen": "node tests/pat-screen.mjs",
+    "test:pat-tag-scan": "node tests/pat-tag-scan.mjs",
     "test:pat-release-checks": "node tests/pat-release-checks.mjs",
     "test:track-controls": "node tests/track-controls-logic.mjs && node tests/track-controls-screen.mjs",
     "test:kitchen-site-scope": "pnpm run test:kitchen-diary-scope && pnpm run test:kitchen-temperature-flow && pnpm run test:kitchen-outbox && pnpm run test:kitchen-form-drafts && pnpm run test:cleaning-draft",
@@ -22,8 +30,15 @@
     "test:kitchen-diary-scope": "node tests/kitchen-diary-scope.mjs",
     "test:kitchen-temperature-flow": "node tests/kitchen-temperature-form-flow.mjs",
     "test:kitchen-outbox": "node tests/kitchen-outbox.mjs",
-    "export:ios": "rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear --dump-assetmap",
-    "export:android": "rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear --dump-assetmap",
+    "test:check-outbox": "node tests/check-outbox.mjs",
+    "test:client-entry-logic": "node tests/client-entry-logic.mjs",
+    "test:offline-resilience": "node tests/offline-resilience-logic.mjs",
+    "test:auth-offline": "node tests/auth-offline.mjs",
+    "test:store-compliance": "node tests/store-compliance.mjs",
+    "test:today-tasks": "node tests/today-tasks-logic.mjs",
+    "test:accessibility": "node tests/accessibility-basics.mjs",
+    "export:ios": "node scripts/require-domain.js && rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear --dump-assetmap",
+    "export:android": "node scripts/require-domain.js && rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear --dump-assetmap",
     "validate:production": "node scripts/validate-production.js"
   },
   "devDependencies": {
@@ -74,6 +89,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "dependencies": {
+    "expo-camera": "~57.0.6",
     "expo-device": "~57.0.1",
     "expo-file-system": "~57.0.6",
     "expo-notifications": "~57.0.17",

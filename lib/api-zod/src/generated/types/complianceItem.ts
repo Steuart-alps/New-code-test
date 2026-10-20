@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { ComplianceItemNeedsActionReason } from './complianceItemNeedsActionReason';
 import type { ComplianceItemPriority } from './complianceItemPriority';
 import type { ComplianceItemStatus } from './complianceItemStatus';
 
@@ -25,9 +26,20 @@ export interface ComplianceItem {
   assignedTo?: string | null;
   dueDate?: Date | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notificationSentAt?: Date | null;
   completedAt?: Date | null;
   notes?: string | null;
+  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date. */
+  needsAction?: boolean;
+  needsActionReason?: ComplianceItemNeedsActionReason;
+  /** Open C1/C2/FI/ID/AR defects on the newest certificate. */
+  openDefectCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }

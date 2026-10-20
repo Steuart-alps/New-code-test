@@ -12,8 +12,10 @@ import { createDownloadToken } from "./downloadUsage";
 import {
   MAX_RESTRICTED_UPLOAD_BYTES,
   ObjectContentError,
+  UploadTooLargeError,
   detectIssueVideoType,
   detectUploadType,
+  maxUploadBytes,
   validateUploadContent,
 } from "./uploadValidation";
 import type {
@@ -24,6 +26,8 @@ import type {
 
 export {
   ObjectContentError,
+  UploadTooLargeError,
+  maxUploadBytes,
   detectIssueVideoType,
   detectUploadType,
   validatePdfInWorker,
@@ -79,10 +83,88 @@ export class ObjectGenerationError extends Error {
   }
 }
 
-const MAX_ISSUE_VIDEO_UPLOAD_BYTES = 250 * 1024 * 1024;
 /** The reservation namespace is part of the upload security boundary. */
 export function isTenantReservedObjectPath(objectPath: string, tenantId: number | string): boolean {
   return objectPath.startsWith(`/objects/uploads/tenant-${tenantId}/`);
+}
+
+// Stored objects are served from the app's own origin, so their content type
+// decides what a browser does with them. Only these render inline; anything
+// else (HTML, SVG, XML, scripts, Office files, unknown bytes) is a download.
+const INLINE_IMAGE_TYPES = new Set([
+  "image/jpeg", "image/png", "image/gif", "image/webp", "image/avif", "image/heic", "image/heif",
+]);
+
+/**
+ * Security headers for serving a stored object. nosniff stops a browser from
+ * second-guessing the stored type; non-inline types are forced to download;
+ * and the sandboxing CSP keeps anything that is rendered from running script
+ * or loading content on the app origin. PDFs and videos are left without the
+ * CSP: browsers' built-in PDF viewers refuse to run in a sandboxed document,
+ * and neither type can execute script against the app.
+ */
+export function objectDownloadSecurityHeaders(contentType: string): Record<string, string> {
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  const headers: Record<string, string> = { "X-Content-Type-Options": "nosniff" };
+  const isPdf = type === "application/pdf";
+  const isVideo = type.startsWith("video/");
+  if (!isPdf && !isVideo && !INLINE_IMAGE_TYPES.has(type)) {
+    headers["Content-Disposition"] = "attachment";
+  }
+  if (!isPdf && !isVideo) {
+    headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+  }
+  return headers;
+}
+
+const OOXML_TYPES: Record<string, string> = {
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+const LEGACY_OFFICE_TYPES: Record<string, string> = {
+  ".doc": "application/msword",
+  ".xls": "application/vnd.ms-excel",
+  ".ppt": "application/vnd.ms-powerpoint",
+};
+const TEXT_TYPES: Record<string, string> = {
+  ".txt": "text/plain; charset=utf-8",
+  ".csv": "text/csv; charset=utf-8",
+};
+
+/**
+ * Classify a DocTrack/SafeTrack document from its first bytes (and, for
+ * container formats that share a signature, its file extension). Returns the
+ * content type to store, or null when the file is not an allowed document:
+ * PDF, Word/Excel/PowerPoint (current and legacy formats), images, the video
+ * formats the upload form offers, or UTF-8 plain text/CSV.
+ */
+export function detectDocumentUploadType(bytes: Buffer, fileName: string): string | null {
+  const extension = (fileName.match(/\.[a-z0-9]{1,10}$/i)?.[0] ?? "").toLowerCase();
+  const known = detectUploadType(bytes) ?? detectIssueVideoType(bytes);
+  if (known) return known;
+  const ascii = (start: number, end: number) => bytes.subarray(start, end).toString("latin1");
+  if (bytes.length >= 6 && (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a")) return "image/gif";
+  if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "AVI ") return "video/x-msvideo";
+  if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3
+    && ascii(4, Math.min(bytes.length, 64)).includes("matroska")) return "video/x-matroska";
+  // Office Open XML files are ZIP containers.
+  if (OOXML_TYPES[extension] && bytes.length >= 4 && ascii(0, 4) === "PK\x03\x04") return OOXML_TYPES[extension];
+  // Legacy Office files are OLE compound documents.
+  const cfb = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+  if (LEGACY_OFFICE_TYPES[extension] && bytes.length >= 8 && cfb.every((byte, index) => bytes[index] === byte)) {
+    return LEGACY_OFFICE_TYPES[extension];
+  }
+  if (TEXT_TYPES[extension] && bytes.length > 0 && !bytes.includes(0)) {
+    try {
+      // stream: true tolerates a character cut off at the end of the sample.
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: true });
+      return TEXT_TYPES[extension];
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 type UsageMetadataFile = Pick<File, "name" | "getMetadata"> & { metadata?: File["metadata"] };
@@ -279,11 +361,13 @@ export class ObjectStorageService {
     const nodeStream = file.createReadStream(byteRange ? { start: byteRange.start, end: byteRange.end } : undefined);
     const webStream = Readable.toWeb(nodeStream) as ReadableStream;
 
+    const contentType = (metadata.contentType as string) || "application/octet-stream";
     const headers: Record<string, string> = {
-      "Content-Type": (metadata.contentType as string) || "application/octet-stream",
+      "Content-Type": contentType,
       "Cache-Control": `${isPublic ? "public" : "private"}, max-age=${cacheTtlSec}`,
       // Lets video players seek with byte ranges from the first response.
       "Accept-Ranges": "bytes",
+      ...objectDownloadSecurityHeaders(contentType),
     };
     if (metadata.size) {
       const length = byteRange ? byteRange.end - byteRange.start + 1 : Number(metadata.size);
@@ -311,6 +395,17 @@ export class ObjectStorageService {
       }
       return [{ objectPath: `/objects/test-fake-usage/tenant-${tenantId}`, sizeBytes: syntheticBytes }];
     }
+    return listOwnedObjectMetadata(await this.tenantObjectCandidates(tenantId, referencedPaths), tenantId);
+  }
+
+  /**
+   * The tenant's own provider prefixes plus its legacy references outside
+   * them. Ownership is not checked here: callers filter by the ACL owner.
+   */
+  private async tenantObjectCandidates(
+    tenantId: number | string,
+    referencedPaths: string[],
+  ): Promise<Array<{ objectPath: string; file: File }>> {
     const { bucketName, objectName: privatePrefix } = parseObjectPath(this.getPrivateObjectDir());
     const root = privatePrefix.replace(/\/$/, "");
     const bucket = objectStorageClient.bucket(bucketName);
@@ -329,8 +424,50 @@ export class ObjectStorageService {
       .filter((objectPath) => !tenantPrefixes.some((prefix) => objectPath.startsWith(`/objects/${prefix}`)))
       .map((objectPath) => ({ objectPath, file: this.objectEntityFileRef(objectPath) }))
       .filter((object): object is { objectPath: string; file: File } => object.file !== null);
+    return [...new Map([...tenantObjects, ...legacyObjects].map((object) => [object.objectPath, object])).values()];
+  }
 
-    return listOwnedObjectMetadata([...tenantObjects, ...legacyObjects], tenantId);
+  /**
+   * Move every object this tenant owns (private ACL, same set as
+   * listTenantStorageObjects) to a provider storage class. Objects already in
+   * that class are not rewritten: a rewrite of a cold object counts as an early
+   * deletion. The rewrite keeps the object's path, content and ACL metadata, and
+   * every class stays readable by the same code.
+   */
+  async setTenantObjectsStorageClass(
+    tenantId: number | string,
+    referencedPaths: string[],
+    storageClass: string,
+  ): Promise<{ changed: number; unchanged: number }> {
+    const owner = String(tenantId);
+    let changed = 0;
+    let unchanged = 0;
+    for (const { file } of await this.tenantObjectCandidates(tenantId, referencedPaths)) {
+      let metadata = file.metadata?.size !== undefined ? file.metadata : undefined;
+      if (!metadata) {
+        try {
+          [metadata] = await file.getMetadata();
+        } catch (error) {
+          if (isProviderNotFound(error)) continue;
+          throw error;
+        }
+      }
+      let policy: ObjectAclPolicy | null = null;
+      try {
+        const raw = metadata.metadata?.["custom:aclPolicy"];
+        policy = raw ? JSON.parse(String(raw)) as ObjectAclPolicy : null;
+      } catch {
+        policy = null;
+      }
+      if (policy?.owner !== owner || policy.visibility !== "private") continue;
+      if (String(metadata.storageClass ?? "").toUpperCase() === storageClass) {
+        unchanged++;
+        continue;
+      }
+      await file.setStorageClass(storageClass);
+      changed++;
+    }
+    return { changed, unchanged };
   }
 
   async getObjectEntityUploadURL(
@@ -449,7 +586,26 @@ export class ObjectStorageService {
     if (!isTenantReservedObjectPath(normalizedPath, tenantId)) {
       throw new ObjectOwnershipError("Upload was not reserved for this tenant");
     }
+    await this.enforceUploadSizeLimit(normalizedPath, tenantId);
     return this.setTenantObjectAcl(normalizedPath, tenantId);
+  }
+
+  /**
+   * Refuse a new upload over maxUploadBytes() before it becomes a record. The
+   * rejected bytes were never attached to anything, so they are dropped rather
+   * than left in the bucket costing money. Objects already finalised (outside
+   * this tenant's upload reservation) are never touched.
+   */
+  async enforceUploadSizeLimit(objectPath: string, tenantId: number | string): Promise<void> {
+    const normalizedPath = this.normalizeObjectEntityPath(objectPath);
+    if (!isTenantReservedObjectPath(normalizedPath, tenantId)) return;
+    const file = await this.getObjectEntityFile(normalizedPath);
+    const [metadata] = await file.getMetadata();
+    const limit = maxUploadBytes();
+    if (Number(metadata.size) > limit) {
+      await this.discardTenantUpload(normalizedPath, tenantId).catch(() => {});
+      throw new UploadTooLargeError(limit);
+    }
   }
 
   /** Delete an unfinalised reserved upload after content inspection rejects it. */
@@ -486,6 +642,26 @@ export class ObjectStorageService {
     const kind = detectUploadType(bytes);
     if (!kind || !allowed.has(kind)) throw new ObjectContentError();
     return kind;
+  }
+
+  /**
+   * Check an uploaded DocTrack/SafeTrack document's bytes against the
+   * document allow-list and store the content type derived from them, so the
+   * client-declared type is never what the file is later served as. Callers
+   * must have established that the object belongs to the tenant first.
+   */
+  async verifyDocumentUpload(objectPath: string, fileName: string): Promise<string> {
+    const file = await this.getObjectEntityFile(this.normalizeObjectEntityPath(objectPath));
+    const [bytes] = await file.download({ start: 0, end: 8191 });
+    const contentType = detectDocumentUploadType(bytes, fileName);
+    if (!contentType) {
+      throw new ObjectContentError("Choose a PDF, Word, Excel, PowerPoint, image, video, text or CSV file");
+    }
+    const [metadata] = await file.getMetadata();
+    if (String(metadata.contentType ?? "").toLowerCase() !== contentType) {
+      await file.setMetadata({ contentType });
+    }
+    return contentType;
   }
 
   /**
@@ -612,8 +788,9 @@ export class ObjectStorageService {
     const generation = String(metadata.generation ?? "");
     const metageneration = String(metadata.metageneration ?? "");
     const size = Number(metadata.size);
-    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0 || size > MAX_ISSUE_VIDEO_UPLOAD_BYTES) {
-      throw new ObjectContentError(`Video must be between 1 byte and ${MAX_ISSUE_VIDEO_UPLOAD_BYTES} bytes`);
+    if (Number.isSafeInteger(size) && size > maxUploadBytes()) throw new UploadTooLargeError();
+    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0) {
+      throw new ObjectContentError("Video must not be empty");
     }
 
     const pinned = staging.bucket.file(staging.name, {

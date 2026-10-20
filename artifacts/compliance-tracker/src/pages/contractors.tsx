@@ -3,12 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Search, Building, Mail, Phone, ChevronRight, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getContractorListStatus, type ContractorListRecord, type ContractorListStatus } from "@/lib/contractor-list-status";
 
@@ -42,6 +43,7 @@ export default function ContractorsPage() {
   const [showNonCompliantOnly, setShowNonCompliantOnly] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const { activeClientId } = useAuth();
+  const canAdmin = useCanAdmin();
   const clientApiFetch = useActiveClientApi();
 
   const { data: contractors = [], isLoading, isError } = useQuery<ContractorListRecord[]>({
@@ -84,10 +86,13 @@ export default function ContractorsPage() {
             <AlertTriangle className="w-4 h-4 mr-2" />
             Missing or expired ({nonCompliantCount})
           </Button>
+          <ImportCsvButton type="contractors" className="h-10" />
         </div>
-        <Button onClick={() => setIsFormOpen(true)} className="shadow-lg shadow-primary/20 w-full sm:w-auto">
-          <Plus className="w-4 h-4 mr-2" /> Add Contractor
-        </Button>
+        {canAdmin && (
+          <Button onClick={() => setIsFormOpen(true)} className="shadow-lg shadow-primary/20 w-full sm:w-auto">
+            <Plus className="w-4 h-4 mr-2" /> Add Contractor
+          </Button>
+        )}
       </div>
 
       {isLoading ? (

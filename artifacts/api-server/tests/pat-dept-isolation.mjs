@@ -19,10 +19,10 @@ function expectStatus(name, response, expected) {
 }
 function session() {
   let cookie = "";
-  const request = async (method, path, body) => {
+  const request = async (method, path, body, extraHeaders = {}) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -339,9 +339,10 @@ async function main() {
   const previousAppliance = await admin("POST", "/pat-track/appliances", {
     siteId: alphaSite.data.id, name: "Previous-month appliance", location: "Previous-month location",
   });
+  // Backfilling a past test needs an owner's reason.
   expectStatus("admin records previous-month evidence", await admin("POST", "/pat-track/tests", {
     applianceId: previousAppliance.data.id, testDate: previousTestDate, result: "pass",
-  }), [201]);
+  }, { "X-Override-Reason": encodeURIComponent("PAT isolation fixture: previous-month test") }), [201]);
   await admin("PUT", `/pat-track/appliances/${previousAppliance.data.id}`, {
     siteId: betaSite.data.id, name: "Previous-month appliance", location: "Moved",
   });

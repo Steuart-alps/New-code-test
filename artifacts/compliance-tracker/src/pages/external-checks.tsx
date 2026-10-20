@@ -5,11 +5,13 @@ import { useListComplianceItems, useSendReminderForItem, useListSites } from "@w
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { toast } from "sonner";
-import { StatusBadge, PriorityBadge } from "@/components/badges";
+import { StatusBadge, PriorityBadge, NeedsActionBadge } from "@/components/badges";
+import { CompleteCheckDialog } from "@/components/complete-check-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { format } from "date-fns";
 import { Plus, Briefcase, Mail, Send, Calendar, X, Building2, Sparkles } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { 
@@ -29,7 +31,7 @@ type FilterKey =
 
 const FILTER_LABELS: Record<FilterKey, { label: string; description: string }> = {
   "due-soon": { label: "Due in next 30 days", description: "Compliance checks with a due date in the next 30 days." },
-  "action-needed": { label: "Action needed", description: "Overdue checks and any critical-priority checks that aren't yet completed." },
+  "action-needed": { label: "Action needed", description: "Overdue checks, critical-priority checks that aren't yet completed, and checks whose latest certificate is unsatisfactory or has open remedial defects." },
   "overdue": { label: "Overdue", description: "Checks past their due date or marked overdue." },
   "expired-certs": { label: "Expired certificates", description: "Checks whose latest related contractor certificate is past its expiry date." },
   "status-pending": { label: "Pending", description: "Checks waiting to be started." },
@@ -42,6 +44,7 @@ export default function ExternalChecksPage() {
   const search = useSearch();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
+  const [completingItem, setCompletingItem] = useState<any>(null);
 
   const filterParam = useMemo(() => {
     const v = new URLSearchParams(search).get("filter");
@@ -57,6 +60,10 @@ export default function ExternalChecksPage() {
   const { data: sites = [] } = useListSites();
   const queryClient = useQueryClient();
   const [loadingStarter, setLoadingStarter] = useState(false);
+  // Adding/editing checks and sending reminders are admin-only on the server;
+  // staff may update a status; viewers only read.
+  const canAdmin = useCanAdmin();
+  const canEdit = useCanEdit();
 
   const loadStarterPack = async () => {
     if (!confirm("Load the starter pack? This adds the standard H&S categories and around 27 example compliance checks (Gas, Fire, Electrical, LOLER, Legionella, Pressure Systems, HVAC). Everything is fully editable.")) return;
@@ -106,6 +113,7 @@ export default function ExternalChecksPage() {
           return i.status === "overdue" || (i.dueDate && new Date(i.dueDate) < now && i.status !== "completed");
         case "action-needed":
           return (
+            i.needsAction === true ||
             i.status === "overdue" ||
             (i.priority === "critical" && i.status !== "completed") ||
             (i.dueDate && new Date(i.dueDate) < now && i.status !== "completed")
@@ -157,7 +165,7 @@ export default function ExternalChecksPage() {
           {filterParam ? FILTER_LABELS[filterParam].description : "All compliance checks across the business."}
           {selectedSiteName && <span className="ml-1">Site: <span className="font-semibold text-foreground">{selectedSiteName}</span>.</span>}
         </p>
-        <div className="flex gap-3 w-full sm:w-auto items-center">
+        <div className="flex flex-wrap gap-3 w-full sm:w-auto items-center">
           <Select value={siteParam} onValueChange={setSiteFilter}>
             <SelectTrigger className="w-[180px] bg-card shadow-sm">
               <Building2 className="w-4 h-4 mr-2 text-muted-foreground" />
@@ -171,30 +179,36 @@ export default function ExternalChecksPage() {
               <SelectItem value="none">No site assigned</SelectItem>
             </SelectContent>
           </Select>
-          <Button
-            variant="outline"
-            onClick={loadStarterPack}
-            disabled={loadingStarter}
-            className="flex-1 sm:flex-none shadow-sm hover:shadow-md transition-shadow bg-card"
-          >
-            <Sparkles className="w-4 h-4 mr-2 text-amber-500" />
-            {loadingStarter ? "Loading…" : "Load Starter Pack"}
-          </Button>
-          <Button 
-            variant="secondary" 
-            onClick={() => triggerReminders.mutate()} 
-            disabled={triggerReminders.isPending}
-            className="flex-1 sm:flex-none shadow-sm hover:shadow-md transition-shadow bg-card"
-          >
-            <Send className="w-4 h-4 mr-2 text-indigo-500" />
-            {triggerReminders.isPending ? "Sending..." : "Send Reminders"}
-          </Button>
-          <Button 
-            onClick={() => { setEditingItem(null); setIsFormOpen(true); }}
-            className="flex-1 sm:flex-none shadow-lg shadow-primary/20"
-          >
-            <Plus className="w-4 h-4 mr-2" /> Add Check
-          </Button>
+          {canEdit && (
+            <Button
+              variant="outline"
+              onClick={loadStarterPack}
+              disabled={loadingStarter}
+              className="flex-1 sm:flex-none shadow-sm hover:shadow-md transition-shadow bg-card"
+            >
+              <Sparkles className="w-4 h-4 mr-2 text-amber-500" />
+              {loadingStarter ? "Loading…" : "Load Starter Pack"}
+            </Button>
+          )}
+          {canAdmin && (
+            <Button
+              variant="secondary"
+              onClick={() => triggerReminders.mutate()}
+              disabled={triggerReminders.isPending}
+              className="flex-1 sm:flex-none shadow-sm hover:shadow-md transition-shadow bg-card"
+            >
+              <Send className="w-4 h-4 mr-2 text-indigo-500" />
+              {triggerReminders.isPending ? "Sending..." : "Send Reminders"}
+            </Button>
+          )}
+          {canAdmin && (
+            <Button
+              onClick={() => { setEditingItem(null); setIsFormOpen(true); }}
+              className="flex-1 sm:flex-none shadow-lg shadow-primary/20"
+            >
+              <Plus className="w-4 h-4 mr-2" /> Add Check
+            </Button>
+          )}
         </div>
       </div>
 
@@ -256,26 +270,30 @@ export default function ExternalChecksPage() {
             <td className="px-6 py-4">
               <div className="flex flex-col gap-1.5 items-start">
                 <StatusBadge status={item.status} />
+                <NeedsActionBadge item={item} />
                 <PriorityBadge priority={item.priority} />
               </div>
             </td>
             <td className="px-6 py-4">
               {item.dueDate ? (
                 <div className="flex flex-col">
-                  <span className="font-medium">{format(new Date(item.dueDate), "MMM d, yyyy")}</span>
+                  <span className="font-medium">{format(new Date(item.dueDate), "d MMM yyyy")}</span>
                   {item.leadTimeDays && <span className="text-xs text-muted-foreground flex items-center mt-0.5"><Calendar className="w-3 h-3 mr-1" /> Alert {item.leadTimeDays}d before</span>}
+                  {item.frequencyMonths && <span className="text-xs text-muted-foreground mt-0.5">Repeats every {item.frequencyMonths} month{item.frequencyMonths === 1 ? "" : "s"}</span>}
                   {filterParam === "expired-certs" && item.latestCertExpiryDate && (
-                    <span className="text-xs text-red-600 mt-0.5">Cert expired {format(new Date(item.latestCertExpiryDate), "MMM d, yyyy")}</span>
+                    <span className="text-xs text-red-600 mt-0.5">Cert expired {format(new Date(item.latestCertExpiryDate), "d MMM yyyy")}</span>
                   )}
                 </div>
               ) : (
                 filterParam === "expired-certs" && item.latestCertExpiryDate ? (
-                  <span className="text-xs text-red-600">Cert expired {format(new Date(item.latestCertExpiryDate), "MMM d, yyyy")}</span>
+                  <span className="text-xs text-red-600">Cert expired {format(new Date(item.latestCertExpiryDate), "d MMM yyyy")}</span>
+                ) : item.status !== "completed" ? (
+                  <span className="text-xs text-muted-foreground italic">Due date not set</span>
                 ) : "-"
               )}
             </td>
             <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-              <DropdownMenu>
+              {canEdit && <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="h-8 w-8 p-0 border border-transparent hover:border-border">
                     <span className="sr-only">Open menu</span>
@@ -285,31 +303,31 @@ export default function ExternalChecksPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-48 shadow-xl">
-                  <DropdownMenuItem onClick={() => { setEditingItem(item); setIsFormOpen(true); }}>
+                  {canAdmin && <DropdownMenuItem onClick={() => { setEditingItem(item); setIsFormOpen(true); }}>
                     Edit Details
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
+                  </DropdownMenuItem>}
+                  {canAdmin && <DropdownMenuItem
                     disabled={!item.contractorEmail || sendOne.isPending}
                     onClick={() => sendOne.mutate({ itemId: item.id })}
                   >
                     <Send className="w-3.5 h-3.5 mr-2 text-indigo-500" />
                     {sendOne.isPending && sendOne.variables?.itemId === item.id ? "Sending..." : "Send Reminder Now"}
-                  </DropdownMenuItem>
+                  </DropdownMenuItem>}
                   <DropdownMenuSub>
                     <DropdownMenuSubTrigger>Update Status</DropdownMenuSubTrigger>
                     <DropdownMenuSubContent>
                       <DropdownMenuItem onClick={() => updateItemStatus.mutate({ id: item.id, data: { status: "pending" }})}>Pending</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => updateItemStatus.mutate({ id: item.id, data: { status: "in_progress" }})}>In Progress</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateItemStatus.mutate({ id: item.id, data: { status: "completed" }})}>Completed</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setCompletingItem(item)}>Completed…</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => updateItemStatus.mutate({ id: item.id, data: { status: "overdue" }})}>Overdue</DropdownMenuItem>
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-destructive focus:bg-destructive/10" onClick={() => deleteItem.mutate({ id: item.id })}>
+                  {canAdmin && <DropdownMenuSeparator />}
+                  {canAdmin && <DropdownMenuItem className="text-destructive focus:bg-destructive/10" onClick={() => deleteItem.mutate({ id: item.id })}>
                     Delete
-                  </DropdownMenuItem>
+                  </DropdownMenuItem>}
                 </DropdownMenuContent>
-              </DropdownMenu>
+              </DropdownMenu>}
             </td>
           </tr>
         );
@@ -401,6 +419,13 @@ export default function ExternalChecksPage() {
         isOpen={isFormOpen} 
         onClose={() => setIsFormOpen(false)} 
         item={editingItem}
+      />
+      <CompleteCheckDialog
+        item={completingItem}
+        onClose={() => setCompletingItem(null)}
+        onAddCertificate={canAdmin && completingItem
+          ? (date) => navigate(`/items/${completingItem.id}?certificate=new&issued=${date}`)
+          : undefined}
       />
     </AppLayout>
   );

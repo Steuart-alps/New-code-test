@@ -138,6 +138,18 @@ async function main() {
     status: "verified", reviewNotes: "Independently checked.",
   }), [200]);
 
+  // Datasets that used to be missing from the export: mobile-app daily
+  // checklists and corrective actions of modules other than Fire/Legionella.
+  const today = new Date().toISOString().slice(0, 10);
+  ownerMarkers.mobileChecklist = `Mobile owner question ${stamp}`;
+  ownerMarkers.pestAction = `Pest owner action ${stamp}`;
+  expectStatus("submit owner mobile AM checklist", await owner("POST", `/daily-checklists/${ownerSite.data?.id}/${today}/am`, {
+    answers: [{ question: ownerMarkers.mobileChecklist, checked: true }],
+  }), [201]);
+  expectStatus("create owner PestTrack action", await owner("POST", "/track-actions", {
+    module: "pest", siteId: ownerSite.data?.id, title: ownerMarkers.pestAction, severity: "action_required",
+  }), [201]);
+
   const other = session();
   await register(other, "other", stamp);
   const otherSite = await other("POST", "/sites", { name: `Other site ${stamp}`, seedStarterChecks: false });
@@ -156,6 +168,14 @@ async function main() {
   expectStatus("save other LegionellaTrack profile", await other("PUT", `/legionella/config?siteId=${otherSite.data?.id}`, {
     controlProfile: { writtenControlSchemeReference: otherMarkers.legionellaProfile, frequencyDays: { hot_sentinel_temp: 60 } },
   }), [200]);
+  otherMarkers.mobileChecklist = `Mobile other question ${stamp}`;
+  otherMarkers.pestAction = `Pest other action ${stamp}`;
+  expectStatus("submit other mobile AM checklist", await other("POST", `/daily-checklists/${otherSite.data?.id}/${today}/am`, {
+    answers: [{ question: otherMarkers.mobileChecklist, checked: true }],
+  }), [201]);
+  expectStatus("create other PestTrack action", await other("POST", "/track-actions", {
+    module: "pest", siteId: otherSite.data?.id, title: otherMarkers.pestAction, severity: "monitor",
+  }), [201]);
   const otherFireAction = await other("POST", "/track-actions", {
     module: "fire", siteId: otherSite.data?.id, title: otherMarkers.fireAction, severity: "monitor",
   });
@@ -180,10 +200,20 @@ async function main() {
     "fire-safety/evidence.csv", "fire-safety/actions.csv",
     "legionella/control-profiles.csv", "legionella/evidence-requirements.csv",
     "legionella/evidence.csv", "legionella/actions.csv",
+    "kitchen/mobile-daily-checklists.csv", "track-actions/actions.csv",
+  ];
+  // Present (header-only CSVs are empty files) and not in export-errors.csv,
+  // so each query runs against the real schema.
+  const addedFiles = [
+    "kitchen/cleaning-tasks.csv", "kitchen/cleaning-logs.csv", "kitchen/closed-days.csv",
+    "room-track/rooms.csv", "room-track/checks.csv",
+    "swim-track/first-aid-checks.csv",
+    "green-track/puwer-inspections.csv", "green-track/service-records.csv", "green-track/defects.csv",
+    "incidents/riddor-events.csv",
   ];
   try {
     const ownerEntries = await exportZip(owner, ownerPath);
-    for (const file of files) check(`owner export contains ${file}`, ownerEntries.includes(file));
+    for (const file of [...files, ...addedFiles]) check(`owner export contains ${file}`, ownerEntries.includes(file));
     const ownerCsv = Object.fromEntries(files.map(file => [file, zipCsv(ownerPath, file)]));
     check("owner export contains FireTrack profile", ownerCsv["fire-safety/control-profiles.csv"].includes(ownerMarkers.fireProfile));
     check("owner export contains LegionellaTrack profile", ownerCsv["legionella/control-profiles.csv"].includes(ownerMarkers.legionellaProfile));
@@ -194,6 +224,10 @@ async function main() {
     check("owner export contains FireTrack action", ownerCsv["fire-safety/actions.csv"].includes(ownerMarkers.fireAction));
     check("owner export contains LegionellaTrack action", ownerCsv["legionella/actions.csv"].includes(ownerMarkers.legionellaAction));
     check("owner export excludes other tenant profiles", !ownerCsv["fire-safety/control-profiles.csv"].includes(otherMarkers.fireProfile) && !ownerCsv["legionella/control-profiles.csv"].includes(otherMarkers.legionellaProfile));
+    check("owner export contains its mobile daily checklist", ownerCsv["kitchen/mobile-daily-checklists.csv"].includes(ownerMarkers.mobileChecklist));
+    check("owner export contains its PestTrack action", ownerCsv["track-actions/actions.csv"].includes(ownerMarkers.pestAction));
+    check("other-module actions exclude Fire/Legionella actions", !ownerCsv["track-actions/actions.csv"].includes(ownerMarkers.fireAction) && !ownerCsv["track-actions/actions.csv"].includes(ownerMarkers.legionellaAction));
+    check("owner export excludes other tenant mobile checklists and actions", !ownerCsv["kitchen/mobile-daily-checklists.csv"].includes(otherMarkers.mobileChecklist) && !ownerCsv["track-actions/actions.csv"].includes(otherMarkers.pestAction));
     check("owner export excludes other tenant evidence", !ownerCsv["fire-safety/evidence.csv"].includes(otherMarkers.fireEvidence) && !ownerCsv["legionella/evidence.csv"].includes(otherMarkers.legionellaEvidence));
 
     await exportZip(other, otherPath);
@@ -204,6 +238,10 @@ async function main() {
     check("other export contains its profiles", otherFireProfiles.includes(otherMarkers.fireProfile) && otherLegionellaProfiles.includes(otherMarkers.legionellaProfile));
     check("other export contains its evidence", otherFireEvidence.includes(otherMarkers.fireEvidence) && otherLegionellaEvidence.includes(otherMarkers.legionellaEvidence));
     check("other export excludes owner profiles", !otherFireProfiles.includes(ownerMarkers.fireProfile) && !otherLegionellaProfiles.includes(ownerMarkers.legionellaProfile));
+    const otherMobile = zipCsv(otherPath, "kitchen/mobile-daily-checklists.csv");
+    const otherActions = zipCsv(otherPath, "track-actions/actions.csv");
+    check("other export contains its mobile checklist and action", otherMobile.includes(otherMarkers.mobileChecklist) && otherActions.includes(otherMarkers.pestAction));
+    check("other export excludes owner mobile checklist and action", !otherMobile.includes(ownerMarkers.mobileChecklist) && !otherActions.includes(ownerMarkers.pestAction));
     check("other export excludes owner evidence", !otherFireEvidence.includes(ownerMarkers.fireEvidence) && !otherLegionellaEvidence.includes(ownerMarkers.legionellaEvidence));
   } finally {
     await rm(ownerPath, { force: true });

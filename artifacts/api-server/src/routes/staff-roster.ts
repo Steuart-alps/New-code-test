@@ -332,6 +332,30 @@ const normalizeIdentifier = (value: string) => value.trim().toUpperCase();
 const normalizeName = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 const normalizeEmail = (value: string | null | undefined) => value?.trim().toLocaleLowerCase() || null;
 
+// Columns returned for roster rows. PIN hashes and lockout counters are
+// never sent to the browser.
+const ROSTER_COLUMNS = sql.raw(`sr.id, sr.client_id, sr.site_id, sr.name, sr.first_name, sr.last_name,
+  sr.external_payroll_id, sr.last_reconciled_at, sr.job_title, sr.department, sr.email, sr.active,
+  sr.created_at, sr.updated_at`);
+
+async function loadRosterRow(id: number, clientId: number) {
+  const result = await db.execute(sql`
+    SELECT ${ROSTER_COLUMNS}, s.name AS site_name
+    FROM staff_roster sr
+    LEFT JOIN sites s ON s.id = sr.site_id AND s.client_id = sr.client_id
+    WHERE sr.id = ${id} AND sr.client_id = ${clientId}
+    LIMIT 1
+  `);
+  return (result.rows ?? [])[0];
+}
+
+/** A roster entry may only be placed on one of the business's own sites. */
+async function siteBelongsToClient(siteId: number | null | undefined, clientId: number): Promise<boolean> {
+  if (siteId == null) return true;
+  const result = await db.execute(sql`SELECT id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1`);
+  return (result.rows ?? []).length > 0;
+}
+
 // ── List staff ────────────────────────────────────────────────────────────────
 
 router.get("/staff-roster", requireAuth, async (req, res) => {
@@ -345,7 +369,7 @@ router.get("/staff-roster", requireAuth, async (req, res) => {
            sr.email, sr.active, sr.created_at, sr.updated_at,
            s.name AS site_name
     FROM staff_roster sr
-    LEFT JOIN sites s ON sr.site_id = s.id
+    LEFT JOIN sites s ON s.id = sr.site_id AND s.client_id = sr.client_id
     WHERE sr.client_id = ${clientId}
       ${includeInactive !== "true" ? sql`AND sr.active = true` : sql``}
     ORDER BY sr.name ASC
@@ -359,6 +383,13 @@ router.get("/staff-roster", requireAuth, async (req, res) => {
 
 // ── Create staff member ───────────────────────────────────────────────────────
 
+// Payroll IDs are unique per business (UQ_staff_roster_client_payroll_id).
+function isDuplicatePayrollId(err: any) {
+  const pgErr = err?.code ? err : err?.cause;
+  return pgErr?.code === "23505" && pgErr?.constraint === "UQ_staff_roster_client_payroll_id";
+}
+const DUPLICATE_PAYROLL_ID_ERROR = "Payroll ID already in use";
+
 router.post("/staff-roster", requireRole("client_admin", "consultant"), async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -367,15 +398,24 @@ router.post("/staff-roster", requireRole("client_admin", "consultant"), async (r
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { name, externalPayrollId, jobTitle, department, email, siteId, active } = parsed.data;
+  if (!await siteBelongsToClient(siteId, clientId)) {
+    return res.status(403).json({ error: "Selected site does not belong to this client" });
+  }
   const displayName = canonicalName(name);
   const [firstName, lastName] = splitName(displayName);
 
-  const result = await db.execute(sql`
-    INSERT INTO staff_roster (client_id, site_id, name, first_name, last_name, external_payroll_id, job_title, department, email, active)
-    VALUES (${clientId}, ${siteId ?? null}, ${displayName}, ${firstName}, ${lastName}, ${externalPayrollId ? normalizeIdentifier(externalPayrollId) : null}, ${jobTitle ?? null},
-            ${department ?? null}, ${email ?? null}, ${active ?? true})
-    RETURNING *
-  `);
+  let result;
+  try {
+    result = await db.execute(sql`
+      INSERT INTO staff_roster AS sr (client_id, site_id, name, first_name, last_name, external_payroll_id, job_title, department, email, active)
+      VALUES (${clientId}, ${siteId ?? null}, ${displayName}, ${firstName}, ${lastName}, ${externalPayrollId ? normalizeIdentifier(externalPayrollId) : null}, ${jobTitle ?? null},
+              ${department ?? null}, ${email ?? null}, ${active ?? true})
+      RETURNING ${ROSTER_COLUMNS}
+    `);
+  } catch (err) {
+    if (isDuplicatePayrollId(err)) return res.status(409).json({ error: DUPLICATE_PAYROLL_ID_ERROR });
+    throw err;
+  }
 
   res.status(201).json((result.rows ?? [])[0]);
 });
@@ -506,6 +546,9 @@ router.patch("/staff-roster/:id", requireRole("client_admin", "consultant"), asy
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { name, externalPayrollId, jobTitle, department, email, siteId, active } = parsed.data;
+  if (!await siteBelongsToClient(siteId, clientId)) {
+    return res.status(403).json({ error: "Selected site does not belong to this client" });
+  }
   const nameChanged = name !== undefined;
   const [firstName, lastName] = nameChanged ? splitName(name!) : [null, null];
   const hasJobTitle  = jobTitle  !== undefined;
@@ -515,29 +558,27 @@ router.patch("/staff-roster/:id", requireRole("client_admin", "consultant"), asy
   const hasActive    = active    !== undefined;
   const hasExternalId = externalPayrollId !== undefined;
 
-  await db.execute(sql`
-    UPDATE staff_roster
-    SET name       = COALESCE(${nameChanged ? canonicalName(name!) : null}, name),
-        first_name = CASE WHEN ${nameChanged}::boolean THEN ${firstName} ELSE first_name END,
-        last_name  = CASE WHEN ${nameChanged}::boolean THEN ${lastName} ELSE last_name END,
-        job_title  = CASE WHEN ${hasJobTitle}::boolean  THEN ${jobTitle ?? null}   ELSE job_title  END,
-        department = CASE WHEN ${hasDept}::boolean       THEN ${department ?? null} ELSE department END,
-        email      = CASE WHEN ${hasEmail}::boolean      THEN ${email ?? null}      ELSE email      END,
-        site_id    = CASE WHEN ${hasSite}::boolean       THEN ${siteId ?? null}     ELSE site_id    END,
-        active     = CASE WHEN ${hasActive}::boolean     THEN ${active ?? true}     ELSE active     END,
-        external_payroll_id = CASE WHEN ${hasExternalId}::boolean THEN ${externalPayrollId ? normalizeIdentifier(externalPayrollId) : null} ELSE external_payroll_id END,
-        updated_at = now()
-    WHERE id = ${id} AND client_id = ${clientId}
-  `);
+  try {
+    await db.execute(sql`
+      UPDATE staff_roster
+      SET name       = COALESCE(${nameChanged ? canonicalName(name!) : null}, name),
+          first_name = CASE WHEN ${nameChanged}::boolean THEN ${firstName} ELSE first_name END,
+          last_name  = CASE WHEN ${nameChanged}::boolean THEN ${lastName} ELSE last_name END,
+          job_title  = CASE WHEN ${hasJobTitle}::boolean  THEN ${jobTitle ?? null}   ELSE job_title  END,
+          department = CASE WHEN ${hasDept}::boolean       THEN ${department ?? null} ELSE department END,
+          email      = CASE WHEN ${hasEmail}::boolean      THEN ${email ?? null}      ELSE email      END,
+          site_id    = CASE WHEN ${hasSite}::boolean       THEN ${siteId ?? null}     ELSE site_id    END,
+          active     = CASE WHEN ${hasActive}::boolean     THEN ${active ?? true}     ELSE active     END,
+          external_payroll_id = CASE WHEN ${hasExternalId}::boolean THEN ${externalPayrollId ? normalizeIdentifier(externalPayrollId) : null} ELSE external_payroll_id END,
+          updated_at = now()
+      WHERE id = ${id} AND client_id = ${clientId}
+    `);
+  } catch (err) {
+    if (isDuplicatePayrollId(err)) return res.status(409).json({ error: DUPLICATE_PAYROLL_ID_ERROR });
+    throw err;
+  }
 
-  const result = await db.execute(sql`
-    SELECT sr.*, s.name AS site_name
-    FROM staff_roster sr
-    LEFT JOIN sites s ON sr.site_id = s.id
-    WHERE sr.id = ${id} AND sr.client_id = ${clientId}
-    LIMIT 1
-  `);
-  const row = (result.rows ?? [])[0];
+  const row = await loadRosterRow(id, clientId);
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });

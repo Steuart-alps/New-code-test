@@ -4,8 +4,8 @@
  * Configurable cleaning task templates + dated completion logs.
  * Frequencies: Daily | Weekly | Monthly
  */
-import { useState, useEffect, useMemo } from "react";
-import { apiFetch } from "@/lib/api";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,6 +62,9 @@ type CleaningLog = {
 
 type HistoryEntry = {
   id: number;
+  site_id: number | null;
+  site_name: string | null;
+  account_level: boolean;
   log_date: string;
   frequency: string;
   signed_by: string | null;
@@ -157,17 +160,19 @@ function ManageTasksDialog({
         method: form.method.trim() || null, product: form.product.trim() || null,
         responsible: form.responsible.trim() || null,
       };
-      if (editTask) {
-        await apiFetch(`/kitchen-cleaning/tasks/${editTask.id}`, { method: "PUT", body: JSON.stringify(body) });
-        toast({ title: "Task updated" });
-      } else {
-        await apiFetch("/kitchen-cleaning/tasks", { method: "POST", body: JSON.stringify(body) });
-        toast({ title: "Task added" });
+      const res = editTask
+        ? await apiFetch(`/kitchen-cleaning/tasks/${editTask.id}`, { method: "PUT", body: JSON.stringify(body) })
+        : await apiFetch("/kitchen-cleaning/tasks", { method: "POST", body: JSON.stringify(body) });
+      if (!res.ok) {
+        // Keep the form open with the user's input.
+        toast({ title: "Failed to save task", description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        return;
       }
+      toast({ title: editTask ? "Task updated" : "Task added" });
       setShowForm(false);
       onChanged();
     } catch {
-      toast({ title: "Failed to save task", variant: "destructive" });
+      toast({ title: "Failed to save task", description: "Check your connection and try again.", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -176,11 +181,15 @@ function ManageTasksDialog({
   async function handleDelete(t: CleaningTask) {
     if (!confirm(`Remove "${t.task}" from the cleaning schedule?`)) return;
     try {
-      await apiFetch(`/kitchen-cleaning/tasks/${t.id}`, { method: "DELETE" });
+      const res = await apiFetch(`/kitchen-cleaning/tasks/${t.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast({ title: "Failed to remove task", description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        return;
+      }
       toast({ title: "Task removed" });
       onChanged();
     } catch {
-      toast({ title: "Failed to remove task", variant: "destructive" });
+      toast({ title: "Failed to remove task", description: "Check your connection and try again.", variant: "destructive" });
     }
   }
 
@@ -299,15 +308,16 @@ function ManageTasksDialog({
 
 // ── History panel ─────────────────────────────────────────────────────────────
 
-function HistoryPanel({ history, onSelect }: {
+function HistoryPanel({ history, title, onSelect }: {
   history: HistoryEntry[];
+  title: string;
   onSelect: (e: HistoryEntry) => void;
 }) {
   if (!history.length) return null;
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base font-display">Recent Logs</CardTitle>
+        <CardTitle className="text-base font-display">{title}</CardTitle>
         <CardDescription>Click a row to view that record</CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -319,6 +329,9 @@ function HistoryPanel({ history, onSelect }: {
                 <p className="text-sm font-medium truncate">{periodLabel(h.frequency as Frequency, h.log_date)}</p>
                 <p className="text-xs text-muted-foreground capitalize">{freqLabel(h.frequency as Frequency)}</p>
               </div>
+              {h.account_level && (
+                <Badge variant="outline" className="shrink-0 text-muted-foreground">Account-level</Badge>
+              )}
               <div className="shrink-0 text-right">
                 <p className="text-sm font-medium">
                   {h.completed_count}/{h.total_count}
@@ -339,6 +352,12 @@ function HistoryPanel({ history, onSelect }: {
 }
 
 const ALL_SITES = "__all__";
+/**
+ * Logs with no kitchen are account-level: most were recorded before kitchens
+ * were added. They have their own view and are never shown as the selected
+ * kitchen's evidence (the API keeps the two apart as well).
+ */
+const ACCOUNT_LEVEL = "account";
 
 // ── Main tab ──────────────────────────────────────────────────────────────────
 
@@ -363,7 +382,14 @@ export default function CleaningScheduleTab() {
   const [exportTo, setExportTo]         = useState(todayIso());
   const [exportFrequency, setExportFrequency] = useState<Frequency>("daily");
   const [exportSiteId, setExportSiteId] = useState<string>(ALL_SITES);
-  const { data: sites = [] } = useListSites();
+  const { data: sites = [], isLoading: sitesLoading } = useListSites();
+  // A kitchen's id, ACCOUNT_LEVEL, or null until the sites have loaded.
+  const [view, setView]                 = useState<string | null>(null);
+  const [hasAccountLevel, setHasAccountLevel] = useState(false);
+  const viewSite = sites.find(site => String(site.id) === view) ?? null;
+  const loadSeq = useRef(0);
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   const submitted = !!log?.submitted_at;
 
@@ -418,11 +444,21 @@ export default function CleaningScheduleTab() {
 
   // ── Load log and build completions ───────────────────────────────────────
 
+  // Query string for the selected view; account-level logs are the ones
+  // saved without a siteId.
+  function siteQuery(forHistory = false) {
+    if (view && view !== ACCOUNT_LEVEL) return `siteId=${encodeURIComponent(view)}`;
+    return forHistory ? `siteId=${ACCOUNT_LEVEL}` : "";
+  }
+
   async function loadLog(freq: Frequency, date: string) {
+    const seq = ++loadSeq.current;
     setLoading(true);
     try {
-      const r = await apiFetch(`/kitchen-cleaning/logs?date=${date}&frequency=${freq}`);
+      const site = siteQuery();
+      const r = await apiFetch(`/kitchen-cleaning/logs?date=${date}&frequency=${freq}${site ? `&${site}` : ""}`);
       const savedLog: CleaningLog | null = r.ok ? await r.json() : null;
+      if (seq !== loadSeq.current) return;
       setLog(savedLog);
       setSignedBy(savedLog?.signed_by ?? user?.name ?? "");
 
@@ -444,20 +480,29 @@ export default function CleaningScheduleTab() {
       });
       setCompletions(merged);
     } catch {
+      if (seq !== loadSeq.current) return;
       setLog(null);
       setCompletions(tasks.filter(t => t.frequency === freq).map(t => ({
         taskId: t.id, taskArea: t.area, taskName: t.task,
         done: false, doneBy: user?.name ?? "", notes: "",
       })));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }
 
   async function loadHistory() {
+    if (view === null) return;
+    const requested = view;
     try {
-      const r = await apiFetch("/kitchen-cleaning/logs/history");
-      if (r.ok) setHistory(await r.json());
+      const r = await apiFetch(`/kitchen-cleaning/logs/history?${siteQuery(true)}`);
+      if (r.ok && requested === viewRef.current) setHistory(await r.json());
+      // Only matters while a kitchen is selected: points staff at the
+      // account-level view instead of mixing those logs in.
+      if (requested !== ACCOUNT_LEVEL && sites.length > 0) {
+        const a = await apiFetch(`/kitchen-cleaning/logs/history?siteId=${ACCOUNT_LEVEL}`);
+        if (a.ok && requested === viewRef.current) setHasAccountLevel((await a.json()).length > 0);
+      }
     } catch { /* ignore */ }
   }
 
@@ -465,17 +510,31 @@ export default function CleaningScheduleTab() {
 
   useEffect(() => {
     loadTasks();
-    loadHistory();
   }, []);
+
+  // Open on the first kitchen once kitchens exist; a business without
+  // kitchens keeps the account-level view it has always had.
+  useEffect(() => {
+    if (sitesLoading) return;
+    if (view !== null && (view === ACCOUNT_LEVEL || viewSite)) return;
+    setView(sites.length > 0 ? String(sites[0].id) : ACCOUNT_LEVEL);
+  }, [sites, sitesLoading, view, viewSite]);
+
+  useEffect(() => {
+    setHistory([]);
+    setHasAccountLevel(false);
+    loadHistory();
+  }, [view]);
 
   // A site picked for another client would be rejected by the export.
   useEffect(() => {
     setExportSiteId(ALL_SITES);
+    setView(null);
   }, [activeClientId]);
 
   useEffect(() => {
-    if (tasks.length >= 0) loadLog(activeFreq, periodDate);
-  }, [activeFreq, periodDate, tasks]);
+    if (view !== null) loadLog(activeFreq, periodDate);
+  }, [activeFreq, periodDate, tasks, view]);
 
   // ── Save ─────────────────────────────────────────────────────────────────
 
@@ -488,15 +547,19 @@ export default function CleaningScheduleTab() {
         completions,
         signedBy:    signedBy.trim() || null,
         submittedAt: submit ? new Date().toISOString() : (log?.submitted_at ?? null),
+        siteId:      viewSite ? viewSite.id : null,
       };
       const r = await apiFetch("/kitchen-cleaning/logs", { method: "POST", body: JSON.stringify(body) });
-      if (!r.ok) throw new Error();
+      if (!r.ok) {
+        toast({ title: "Failed to save", description: await getApiErrorMessage(r, "Please try again."), variant: "destructive" });
+        return;
+      }
       const saved = await r.json();
       setLog(saved);
       toast({ title: submit ? "Schedule signed off" : "Draft saved" });
       loadHistory();
     } catch {
-      toast({ title: "Failed to save", variant: "destructive" });
+      toast({ title: "Failed to save", description: "Check your connection and try again.", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -607,6 +670,36 @@ export default function CleaningScheduleTab() {
           )}
         </div>
       </div>
+
+      {/* ── Kitchen / account-level view ── */}
+      {sites.length > 0 && view !== null && (
+        <div className="space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <Label htmlFor="cleaning-view" className="shrink-0">Kitchen</Label>
+            <Select value={view} onValueChange={setView}>
+              <SelectTrigger id="cleaning-view" className="sm:w-72"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {sites.map(site => (
+                  <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>
+                ))}
+                <SelectItem value={ACCOUNT_LEVEL}>Account-level (no kitchen)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {view === ACCOUNT_LEVEL ? (
+            <p className="text-xs text-muted-foreground" data-testid="cleaning-account-level-note">
+              Account-level records aren't tied to a kitchen. Most were recorded before kitchens were added.
+              They are never counted as evidence for any kitchen.
+            </p>
+          ) : hasAccountLevel && (
+            <p className="text-xs text-muted-foreground" data-testid="cleaning-account-level-hint">
+              Only {viewSite?.name ?? "this kitchen"}'s records are shown. Older records that aren't tied to a
+              kitchen are under <button type="button" className="text-primary hover:underline"
+                onClick={() => setView(ACCOUNT_LEVEL)}>Account-level</button>.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── Period navigator ── */}
       <div className="flex items-center gap-3">
@@ -773,7 +866,13 @@ export default function CleaningScheduleTab() {
       )}
 
       {/* ── History ── */}
-      <HistoryPanel history={history} onSelect={handleHistorySelect} />
+      <HistoryPanel
+        history={history}
+        title={sites.length === 0 ? "Recent Logs"
+          : view === ACCOUNT_LEVEL ? "Recent account-level logs"
+          : `Recent logs · ${viewSite?.name ?? "kitchen"}`}
+        onSelect={handleHistorySelect}
+      />
 
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="max-w-md">

@@ -24,11 +24,30 @@
 //        - disabled or another client's values are rejected for new records
 //        - unrelated edits preserve an unchanged disabled value
 //        - consultant ?clientId context keeps both modules tenant-scoped
+//   2c. Every option-backed record route (incidents, FixTrack issues and
+//       trades, PremisesTrack, PestTrack, BikeTrack, TrainTrack, contractor
+//       CSV import)
+//        - a disabled value is rejected for new records
+//        - an unrelated edit keeps an unchanged disabled value
+//        - re-enabling the value lets new records use it again
+//        - TrainTrack "Other" free text cannot reintroduce a disabled type
+//   2d. PestTrack pest/evidence types and BikeTrack bike types for two
+//       consultant-selectable clients
+//        - each client's active values are accepted, the other client's are not
+//        - disabled values are rejected for new records; unrelated edits keep them
+//        - option settings are reset afterwards
 //   3. /api/food-safety/config
 //        - PUT/DELETE require admin (viewer/staff → 403)
 //        - invalid section-toggle values (not "true"/"false") → 400
 //        - siteId belonging to another client → 400
 //        - per-site override layering (PUT ?siteId affects only that site's GET)
+//        - a site's jurisdiction stamps its reheating target (England/Wales 75°C,
+//          Scotland 82°C) through POST and append; other sites keep the
+//          inherited target; clearing the override restores the client's
+//        - closed (non-operating) days: admin-only with a reason, never
+//          reported as missing, org and site scopes independent, a diary record
+//          always wins, removal brings the day back as missing, and the daily
+//          diary is not overdue across closed days
 //   4. /api/mobile/push-token
 //        - requires auth (401 without a session)
 //        - POST stores a row for the session user (204)
@@ -41,6 +60,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const runId = resolveRunId();
 const fixtures = createFixtureOwnership({ runId, suite: "config-endpoints" });
@@ -75,10 +95,10 @@ function expectStatus(name, status, expected) {
 
 // A cookie-carrying session. `bearer` mode drops the cookie and instead sends
 // an Authorization header (used for the push-token auth checks).
-function makeSession() {
+function makeSession(defaultHeaders = {}) {
   let cookie = "";
   async function request(method, path, body, opts = {}) {
-    const headers = { "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json", ...defaultHeaders };
     if (cookie && !opts.noCookie) headers.cookie = cookie;
     if (opts.bearer) headers.authorization = `Bearer ${opts.bearer}`;
     const res = await fetch(`${BASE}${path}`, {
@@ -104,10 +124,12 @@ function isoDate(daysOffset = 0) {
   return d.toISOString().slice(0, 10);
 }
 
-// Register a fresh self-service account (role "consultant" linked to a single
-// auto-provisioned client). Returns { session, clientId, email }.
+// Register a fresh self-service account and make it a consultant linked to its
+// auto-provisioned client, so it can add and switch to a second client.
+// Returns { session, clientId, email }.
 async function registerAccount(label, ts) {
-  const session = makeSession();
+  // Account owners deliberately write past-dated records here, which needs a reason.
+  const session = makeSession({ "X-Override-Reason": encodeURIComponent("Config fixture: past-dated record") });
   const email = `${label}-${runId}-${randomUUID()}@test.local`;
   const reg = await session("POST", "/auth/register", {
     name: `${label} account`,
@@ -130,6 +152,7 @@ async function registerAccount(label, ts) {
       throw new Error(`FATAL: login after verification failed for ${label} (${login.status})`);
     }
   }
+  promoteToConsultant(email);
   const me = await session("GET", "/auth/me");
   const user = me.data?.user ?? me.data;
   const clientId = user?.clientId;
@@ -277,6 +300,29 @@ async function testFormOptions(admin, viewer, staff, ts) {
     afterReenable.data?.options?.incident_types?.includes(custom[1])
       && !afterReenable.data?.disabled?.incident_types?.includes(custom[1]),
     `active=${JSON.stringify(afterReenable.data?.options?.incident_types)}, disabled=${JSON.stringify(afterReenable.data?.disabled?.incident_types)}`,
+  );
+
+  // Replacing the list more than 50 times builds up more than 50 disabled
+  // options. The saved list must keep loading (newest disabled options kept)
+  // rather than silently reverting to the defaults.
+  const rotations = Array.from({ length: 56 }, (_, i) => `rotated ${i} ${ts}`.slice(0, 60));
+  let rotationFailures = 0;
+  for (const item of rotations) {
+    if ((await admin("PUT", "/form-options/incident_types", { items: [item] })).status !== 200) rotationFailures++;
+  }
+  check("form-options: 56 list replacements saved", rotationFailures === 0, `${rotationFailures} failed`);
+  const afterRotation = await admin("GET", "/form-options");
+  const rotatedDisabled = afterRotation.data?.disabled?.incident_types ?? [];
+  check(
+    "form-options: list with over 50 disabled options still loads",
+    afterRotation.data?.customised?.incident_types === true
+      && JSON.stringify(afterRotation.data?.options?.incident_types) === JSON.stringify([rotations.at(-1)]),
+    `options=${JSON.stringify(afterRotation.data?.options?.incident_types)} customised=${afterRotation.data?.customised?.incident_types}`,
+  );
+  check(
+    "form-options: newest 50 disabled options kept",
+    rotatedDisabled.length === 50 && rotatedDisabled.includes(rotations.at(-2)) && !rotatedDisabled.includes(rotations[0]),
+    `disabled count=${rotatedDisabled.length}`,
   );
 
   // DELETE resets to default.
@@ -665,6 +711,315 @@ async function testCustomTradeAndInspectionValidation(admin, clientAId, clientBI
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 2c. Every form-option-backed record route
+// ─────────────────────────────────────────────────────────────────────────────
+// For each option list and each route that stores one of its values: a new
+// record is rejected once the value is disabled, an existing record keeps the
+// unchanged value through an unrelated edit, and re-enabling the value lets
+// new records use it again.
+async function testDisabledOptionsOnEveryRoute(admin, ts) {
+  console.log("\n── disabled options on every record route ──");
+
+  const setOptions = (key, items) => admin("PUT", `/form-options/${key}`, { items });
+  const fieldOf = (data, ...names) => names.map((name) => data?.[name]).find((v) => v !== undefined);
+
+  async function roundTrip({ label, key, create, edit, storedValue }) {
+    const value = `${label} ${ts}`.slice(0, 60);
+    const spare = `${label} spare ${ts}`.slice(0, 60);
+    expectOk(`${label}: activate custom option`, (await setOptions(key, [value, spare])).status);
+    const first = await create(value, "first");
+    expectOk(`${label}: new record accepts active option`, first.status, [200, 201]);
+    const id = first.data?.id;
+    check(`${label}: created record id`, Number.isInteger(id), `got ${JSON.stringify(first.data)}`);
+
+    expectOk(`${label}: disable option`, (await setOptions(key, [spare])).status);
+    const listed = await admin("GET", "/form-options");
+    check(
+      `${label}: option listed as disabled`,
+      listed.data?.disabled?.[key]?.includes(value) && !listed.data?.options?.[key]?.includes(value),
+      `options=${JSON.stringify(listed.data?.options?.[key])} disabled=${JSON.stringify(listed.data?.disabled?.[key])}`,
+    );
+    expectStatus(`${label}: new record rejects disabled option`, (await create(value, "disabled")).status, 400);
+
+    if (Number.isInteger(id)) {
+      const edited = await edit(id, value, first.data);
+      expectOk(`${label}: unrelated edit keeps unchanged disabled option`, edited.status, [200]);
+      const stored = await storedValue(id, edited);
+      check(`${label}: stored value unchanged after edit`, stored === value, `got ${JSON.stringify(stored)}`);
+    }
+
+    expectOk(`${label}: re-enable option`, (await setOptions(key, [spare, value])).status);
+    expectOk(`${label}: new record accepts re-enabled option`, (await create(value, "re-enabled")).status, [200, 201]);
+    await admin("DELETE", `/form-options/${key}`);
+  }
+
+  await roundTrip({
+    label: "Incident type",
+    key: "incident_types",
+    create: (value, note) => admin("POST", "/incidents", {
+      incidentType: value,
+      incidentDate: isoDate(-1),
+      location: "Kitchen",
+      description: `Disabled-option probe (${note})`,
+      involvedName: "Jane Doe",
+      reportedBy: "Test Reporter",
+      riddorRationale: "Assessed against RIDDOR criteria; no reportable injury or occurrence.",
+    }),
+    edit: (id, value) => admin("PUT", `/incidents/${id}`, { incidentType: value, description: "Edited, type unchanged" }),
+    storedValue: (_id, edited) => edited.data?.incidentType,
+  });
+
+  await roundTrip({
+    label: "FixTrack issue type",
+    key: "fixtrack_issue_types",
+    create: (value, note) => admin("POST", "/fix-track/issues", {
+      title: `Disabled-option probe (${note})`,
+      issueType: value,
+      location: "Plant room",
+      reportedBy: "Config endpoint tester",
+      reportedDate: isoDate(-1),
+    }),
+    edit: (id, value) => admin("PUT", `/fix-track/issues/${id}`, { issueType: value, title: "Edited, type unchanged" }),
+    storedValue: (_id, edited) => fieldOf(edited.data, "issueType", "issue_type"),
+  });
+
+  await roundTrip({
+    label: "FixTrack trade",
+    key: "fixtrack_trades",
+    create: (value, note) => admin("POST", "/contractors", {
+      name: `Disabled-option contractor ${note}`,
+      email: `disabled-option-${note}-${ts}@test.local`,
+      trades: [value],
+    }),
+    edit: (id, _value, record) => admin("PUT", `/contractors/${id}`, {
+      name: "Edited contractor, trades unchanged",
+      email: record.email,
+    }),
+    storedValue: (_id, edited) => edited.data?.trades?.[0],
+  });
+
+  await roundTrip({
+    label: "Premises inspection type",
+    key: "premises_inspection_types",
+    create: (value, note) => admin("POST", "/premises-track", {
+      inspectionDate: isoDate(-2),
+      inspectionType: value,
+      area: "Test kitchen",
+      findings: `Disabled-option probe (${note})`,
+      inspectedBy: "Config endpoint tester",
+    }),
+    edit: (id, value) => admin("PUT", `/premises-track/${id}`, {
+      inspectionDate: isoDate(-2),
+      inspectionType: value,
+      area: "Test kitchen",
+      findings: "Edited, type unchanged",
+      inspectedBy: "Config endpoint tester",
+    }),
+    storedValue: async (id) => {
+      const list = await admin("GET", "/premises-track");
+      return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id)?.inspectionType;
+    },
+  });
+
+  const pestBody = (pestType, evidenceType, notes) => ({
+    recordedDate: isoDate(-1),
+    pestType,
+    evidenceType,
+    location: "Store room",
+    severity: "low",
+    notes,
+  });
+  const pestActivity = async (id) => {
+    const list = await admin("GET", "/pest-track/activity");
+    return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id);
+  };
+  await roundTrip({
+    label: "Pest type",
+    key: "pest_types",
+    create: (value, note) => admin("POST", "/pest-track/activity", pestBody(value, "droppings", note)),
+    edit: (id, value) => admin("PUT", `/pest-track/activity/${id}`, pestBody(value, "droppings", "Edited, type unchanged")),
+    storedValue: (id) => pestActivity(id).then((row) => fieldOf(row, "pestType", "pest_type")),
+  });
+  await roundTrip({
+    label: "Pest evidence type",
+    key: "pest_evidence_types",
+    create: (value, note) => admin("POST", "/pest-track/activity", pestBody("rodent", value, note)),
+    edit: (id, value) => admin("PUT", `/pest-track/activity/${id}`, pestBody("rodent", value, "Edited, evidence unchanged")),
+    storedValue: (id) => pestActivity(id).then((row) => fieldOf(row, "evidenceType", "evidence_type")),
+  });
+
+  await roundTrip({
+    label: "Bike type",
+    key: "bike_types",
+    create: (value, note) => admin("POST", "/bike-track/bikes", { ref: `OPT-${note}-${ts}`.slice(0, 100), type: value }),
+    edit: (id, value) => admin("PUT", `/bike-track/bikes/${id}`, { ref: `OPT-first-${ts}`.slice(0, 100), type: value, notes: "Edited, type unchanged" }),
+    storedValue: (_id, edited) => edited.data?.type,
+  });
+
+  const trainingBody = (trainingType, note) => ({
+    recordType: "internal",
+    staffName: `Disabled-option probe ${note}`,
+    trainingType,
+    trainer: "Test Trainer",
+    completedDate: isoDate(-1),
+  });
+  await roundTrip({
+    label: "TrainTrack type",
+    key: "traintrack_types",
+    create: (value, note) => admin("POST", "/train-track/records", trainingBody(value, note)),
+    edit: (id, value) => admin("PATCH", `/train-track/records/${id}`, { trainingType: value, notes: "Edited, type unchanged" }),
+    storedValue: (_id, edited) => fieldOf(edited.data, "trainingType", "training_type"),
+  });
+
+  // TrainTrack's "Other" accepts typed training names, but not a disabled one.
+  const retired = `Retired training ${ts}`.slice(0, 60);
+  expectOk("TrainTrack Other: activate a named type and Other", (await setOptions("traintrack_types", [retired, "Other"])).status);
+  expectOk("TrainTrack Other: disable the named type", (await setOptions("traintrack_types", ["Other"])).status);
+  expectStatus(
+    "TrainTrack Other: typed disabled type is rejected",
+    (await admin("POST", "/train-track/records", trainingBody(retired.toUpperCase(), "typed-disabled"))).status,
+    400,
+  );
+  expectOk(
+    "TrainTrack Other: other typed names still accepted",
+    (await admin("POST", "/train-track/records", trainingBody(`Bespoke course ${ts}`.slice(0, 60), "typed-new"))).status,
+    [201],
+  );
+  await admin("DELETE", "/form-options/traintrack_types");
+
+  // The contractor CSV import applies the same rule to new contractors.
+  const trade = `CSV trade ${ts}`.slice(0, 60);
+  const importRow = (note) => ({
+    headers: ["Contact name", "Email", "Trades"],
+    rows: [[`CSV contractor ${note}`, `csv-${note}-${ts}@test.local`, trade]],
+    preview: true,
+  });
+  expectOk("CSV import: disable trade", (await setOptions("fixtrack_trades", [`CSV spare ${ts}`.slice(0, 60)])).status);
+  const csvDisabled = await admin("POST", "/imports/contractors", importRow("disabled"));
+  check(
+    "CSV import: new contractor with disabled trade is an error row",
+    csvDisabled.status === 200 && csvDisabled.data?.rows?.[0]?.action === "error",
+    `status=${csvDisabled.status} rows=${JSON.stringify(csvDisabled.data?.rows)}`,
+  );
+  expectOk("CSV import: re-enable trade", (await setOptions("fixtrack_trades", [trade])).status);
+  const csvEnabled = await admin("POST", "/imports/contractors", importRow("enabled"));
+  check(
+    "CSV import: new contractor with re-enabled trade is created",
+    csvEnabled.status === 200 && csvEnabled.data?.rows?.[0]?.action === "create",
+    `status=${csvEnabled.status} rows=${JSON.stringify(csvEnabled.data?.rows)}`,
+  );
+  await admin("DELETE", "/form-options/fixtrack_trades");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2d. PestTrack and BikeTrack options across two consultant-selectable clients
+// ─────────────────────────────────────────────────────────────────────────────
+// Each client's custom pest, evidence and bike types are accepted only for that
+// client's records, a disabled value is rejected for new records, and an
+// unrelated edit keeps an unchanged disabled value.
+async function testPestAndBikeOptionsAcrossClients(admin, clientAId, clientBId, ts) {
+  console.log("\n── PestTrack + BikeTrack options across two clients ──");
+
+  const scope = (clientId) => (clientId === clientAId ? "" : `?clientId=${clientId}`);
+  const setOptions = (clientId, key, items) => admin("PUT", `/form-options/${key}${scope(clientId)}`, { items });
+  const pestBody = (pestType, evidenceType, notes) => ({
+    recordedDate: isoDate(-1),
+    pestType,
+    evidenceType,
+    location: "Store room",
+    severity: "low",
+    notes,
+  });
+  const pestRow = async (clientId, id) => {
+    const list = await admin("GET", `/pest-track/activity${scope(clientId)}`);
+    return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id);
+  };
+
+  const lists = [
+    {
+      key: "pest_types",
+      label: "pest type",
+      create: (clientId, value, note) =>
+        admin("POST", `/pest-track/activity${scope(clientId)}`, pestBody(value, "droppings", note)),
+      edit: (clientId, id, value) =>
+        admin("PUT", `/pest-track/activity/${id}${scope(clientId)}`, pestBody(value, "droppings", "Edited, type unchanged")),
+      stored: async (clientId, id) => (await pestRow(clientId, id))?.pestType,
+    },
+    {
+      key: "pest_evidence_types",
+      label: "pest evidence type",
+      create: (clientId, value, note) =>
+        admin("POST", `/pest-track/activity${scope(clientId)}`, pestBody("rodent", value, note)),
+      edit: (clientId, id, value) =>
+        admin("PUT", `/pest-track/activity/${id}${scope(clientId)}`, pestBody("rodent", value, "Edited, evidence unchanged")),
+      stored: async (clientId, id) => (await pestRow(clientId, id))?.evidenceType,
+    },
+    {
+      key: "bike_types",
+      label: "bike type",
+      create: (clientId, value, note) =>
+        admin("POST", `/bike-track/bikes${scope(clientId)}`, { ref: `X-${clientId}-${note}-${ts}`.slice(0, 100), type: value }),
+      edit: (clientId, id, value) =>
+        admin("PUT", `/bike-track/bikes/${id}${scope(clientId)}`, {
+          ref: `X-${clientId}-active-${ts}`.slice(0, 100),
+          type: value,
+          notes: "Edited, type unchanged",
+        }),
+      stored: async (clientId, id) => {
+        const list = await admin("GET", `/bike-track/bikes${scope(clientId)}`);
+        return (Array.isArray(list.data) ? list.data : []).find((row) => row.id === id)?.type;
+      },
+    },
+  ];
+
+  try {
+    for (const list of lists) {
+      const valueA = `A ${list.label} ${ts}`.slice(0, 60);
+      const valueB = `B ${list.label} ${ts}`.slice(0, 60);
+      const spareA = `A spare ${list.label} ${ts}`.slice(0, 60);
+
+      expectOk(`${list.label}: save client A custom list`, (await setOptions(clientAId, list.key, [valueA])).status);
+      expectOk(`${list.label}: save client B custom list via ?clientId`, (await setOptions(clientBId, list.key, [valueB])).status);
+
+      const aRecord = await list.create(clientAId, valueA, "active");
+      expectOk(`${list.label}: client A accepts its active value`, aRecord.status, [201]);
+      expectStatus(`${list.label}: client A rejects client B's value`, (await list.create(clientAId, valueB, "foreign")).status, 400);
+      expectOk(`${list.label}: client B accepts its active value`, (await list.create(clientBId, valueB, "active")).status, [201]);
+      expectStatus(`${list.label}: client B rejects client A's value`, (await list.create(clientBId, valueA, "foreign")).status, 400);
+
+      expectOk(`${list.label}: disable client A value`, (await setOptions(clientAId, list.key, [spareA])).status);
+      expectStatus(`${list.label}: client A rejects its disabled value`, (await list.create(clientAId, valueA, "disabled")).status, 400);
+
+      const aId = aRecord.data?.id;
+      if (Number.isInteger(aId)) {
+        expectOk(`${list.label}: unrelated edit keeps disabled value`, (await list.edit(clientAId, aId, valueA)).status, [200]);
+        const stored = await list.stored(clientAId, aId);
+        check(`${list.label}: stored value unchanged after edit`, stored === valueA, `got ${JSON.stringify(stored)}`);
+      } else {
+        check(`${list.label}: client A record id`, false, `got ${JSON.stringify(aRecord.data)}`);
+      }
+      // Back to the defaults before the next list (pest evidence records need
+      // the default pest type).
+      expectOk(`${list.label}: reset client A list`, (await admin("DELETE", `/form-options/${list.key}`)).status);
+      expectOk(`${list.label}: reset client B list`, (await admin("DELETE", `/form-options/${list.key}?clientId=${clientBId}`)).status);
+    }
+  } finally {
+    // Also reset after a failure; the records go with the fixture purge of
+    // both clients.
+    for (const list of lists) {
+      await admin("DELETE", `/form-options/${list.key}`).catch(() => {});
+      await admin("DELETE", `/form-options/${list.key}?clientId=${clientBId}`).catch(() => {});
+    }
+  }
+  const after = await admin("GET", `/form-options?clientId=${clientBId}`);
+  check(
+    "pest/bike options: client B lists reset after the run",
+    lists.every((list) => after.data?.customised?.[list.key] === false),
+    `customised=${JSON.stringify(after.data?.customised)}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 3. /api/food-safety/config
 // ─────────────────────────────────────────────────────────────────────────────
 async function testFoodSafetyConfig(admin, viewer, staff, clientBId, ts) {
@@ -711,7 +1066,7 @@ async function testFoodSafetyConfig(admin, viewer, staff, clientBId, ts) {
 
   expectStatus(
     "food-config: invalid jurisdiction → 400",
-    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "northern_ireland" })).status,
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "republic_of_ireland" })).status,
     400,
   );
   expectOk(
@@ -1001,6 +1356,355 @@ async function testSiteDiaries(admin, ts) {
   await admin("DELETE", "/food-safety/config");
 }
 
+// A site's jurisdiction override selects its reheating target for every way a
+// diary day can be created (POST, and append whichever section opens the day),
+// while sites without an override keep the client-level target.
+async function testSiteJurisdictionReheating(admin, ts) {
+  console.log("\n── food-safety: site jurisdiction reheating targets ──");
+  const ENGLAND_WALES = "Above 75°C";
+  const SCOTLAND = "Above 82°C";
+
+  const siteA = await admin("POST", "/sites", { name: `Reheat Site A ${ts}` });
+  const siteB = await admin("POST", "/sites", { name: `Reheat Site B ${ts}` });
+  expectOk("site-reheat: create site A", siteA.status, [200, 201]);
+  expectOk("site-reheat: create site B", siteB.status, [200, 201]);
+  const a = siteA.data?.id;
+  const b = siteB.data?.id;
+  check("site-reheat: site ids", Number.isInteger(a) && Number.isInteger(b), `a=${a} b=${b}`);
+
+  await admin("DELETE", "/food-safety/config");
+  // Each diary scope gets fresh dates far from any other test's records.
+  let dayOfMonth = 0;
+  const nextDay = () => `2097-03-${String(++dayOfMonth).padStart(2, "0")}`;
+  const scope = (siteId) => (siteId == null ? "" : `?siteId=${siteId}`);
+  const configOf = async (siteId) => (await admin("GET", `/food-safety/config${scope(siteId)}`)).data ?? {};
+  // POST without reheatingLimit, as the mobile app does: the server stamps it.
+  const postLimit = async (siteId) => {
+    const res = await admin("POST", `/food-safety${scope(siteId)}`, { recordDate: nextDay() });
+    return res.status === 201 ? res.data?.reheatingLimit : `HTTP ${res.status}`;
+  };
+  const appendLimit = async (siteId, section) => {
+    const recordDate = nextDay();
+    const res = await admin("POST", `/food-safety/append${scope(siteId)}`, {
+      recordDate,
+      section,
+      row: { item: "Soup", coreTemp: "90" },
+      entryId: randomUUID(),
+    });
+    if (res.status !== 201) return `HTTP ${res.status}`;
+    const sep = siteId == null ? "" : `?siteId=${siteId}`;
+    return (await admin("GET", `/food-safety/by-date/${recordDate}${sep}`)).data?.reheatingLimit;
+  };
+  const expectStamps = async (label, siteId, expected) => {
+    const posted = await postLimit(siteId);
+    check(`site-reheat: ${label} POST stamps ${expected}`, posted === expected, `got ${posted}`);
+    const reheatAppend = await appendLimit(siteId, "reheating");
+    check(`site-reheat: ${label} reheating append stamps ${expected}`, reheatAppend === expected, `got ${reheatAppend}`);
+    // A day opened by another section must still carry the scope's target.
+    const deliveryAppend = await appendLimit(siteId, "deliveries");
+    check(`site-reheat: ${label} delivery-first append stamps ${expected}`, deliveryAppend === expected, `got ${deliveryAppend}`);
+  };
+
+  // ── Client on Scotland; site A overrides to England/Wales ──
+  expectOk(
+    "site-reheat: client jurisdiction Scotland",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "scotland" })).status,
+  );
+  expectOk(
+    "site-reheat: site A override England/Wales",
+    (await admin("PUT", `/food-safety/config?siteId=${a}`, { food_jurisdiction: "england_wales" })).status,
+  );
+  const aCfg = await configOf(a);
+  check(
+    "site-reheat: site A config is England/Wales at 75°C",
+    aCfg.food_jurisdiction === "england_wales" && aCfg.food_reheating_limit === ENGLAND_WALES,
+    `jurisdiction=${aCfg.food_jurisdiction}, limit=${aCfg.food_reheating_limit}`,
+  );
+  check(
+    "site-reheat: site A temperature rules reheat at 75°C",
+    JSON.parse(aCfg.food_temperature_rules ?? "{}")?.reheating?.min === 75,
+    `got ${aCfg.food_temperature_rules}`,
+  );
+  const bCfg = await configOf(b);
+  check(
+    "site-reheat: site B keeps inherited Scotland 82°C",
+    bCfg.food_jurisdiction === "scotland" && bCfg.food_reheating_limit === SCOTLAND
+      && !(bCfg._siteOverrides ?? []).includes("food_jurisdiction"),
+    `jurisdiction=${bCfg.food_jurisdiction}, limit=${bCfg.food_reheating_limit}`,
+  );
+  const clientCfg = await configOf(null);
+  check(
+    "site-reheat: client-level stays Scotland 82°C",
+    clientCfg.food_jurisdiction === "scotland" && clientCfg.food_reheating_limit === SCOTLAND,
+    `jurisdiction=${clientCfg.food_jurisdiction}, limit=${clientCfg.food_reheating_limit}`,
+  );
+  await expectStamps("site A (England/Wales)", a, ENGLAND_WALES);
+  await expectStamps("site B (inherits Scotland)", b, SCOTLAND);
+  await expectStamps("whole-org (Scotland)", null, SCOTLAND);
+
+  // ── Clearing site A's override restores the client-level jurisdiction ──
+  expectOk(
+    "site-reheat: clear site A jurisdiction (null)",
+    (await admin("PUT", `/food-safety/config?siteId=${a}`, { food_jurisdiction: null })).status,
+  );
+  const aCleared = await configOf(a);
+  check(
+    "site-reheat: cleared site A is back on Scotland 82°C",
+    aCleared.food_jurisdiction === "scotland" && aCleared.food_reheating_limit === SCOTLAND,
+    `jurisdiction=${aCleared.food_jurisdiction}, limit=${aCleared.food_reheating_limit}`,
+  );
+  check(
+    "site-reheat: cleared site A has no jurisdiction or reheating override",
+    Array.isArray(aCleared._siteOverrides)
+      && !aCleared._siteOverrides.includes("food_jurisdiction")
+      && !aCleared._siteOverrides.includes("food_reheating_limit"),
+    `got ${JSON.stringify(aCleared._siteOverrides)}`,
+  );
+  await expectStamps("cleared site A", a, SCOTLAND);
+
+  // ── Reverse: client on England/Wales; site B overrides to Scotland ──
+  expectOk(
+    "site-reheat: client jurisdiction England/Wales",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "england_wales" })).status,
+  );
+  expectOk(
+    "site-reheat: site B override Scotland",
+    (await admin("PUT", `/food-safety/config?siteId=${b}`, { food_jurisdiction: "scotland" })).status,
+  );
+  const bScot = await configOf(b);
+  check(
+    "site-reheat: site B config is Scotland at 82°C",
+    bScot.food_jurisdiction === "scotland" && bScot.food_reheating_limit === SCOTLAND,
+    `jurisdiction=${bScot.food_jurisdiction}, limit=${bScot.food_reheating_limit}`,
+  );
+  await expectStamps("site B (Scotland)", b, SCOTLAND);
+  await expectStamps("site A (inherits England/Wales)", a, ENGLAND_WALES);
+
+  // A site's own documented limit wins over its jurisdiction's standard one,
+  // matching what the template shows.
+  const custom = `Above 80°C ${ts}`.slice(0, 40);
+  expectOk(
+    "site-reheat: site B custom reheating limit",
+    (await admin("PUT", `/food-safety/config?siteId=${b}`, { food_reheating_limit: custom })).status,
+  );
+  check("site-reheat: site B config shows custom limit", (await configOf(b)).food_reheating_limit === custom);
+  await expectStamps("site B (custom limit)", b, custom);
+
+  // Resetting the site removes every override, back to the client's target.
+  await admin("DELETE", `/food-safety/config?siteId=${b}`);
+  const bReset = await configOf(b);
+  check(
+    "site-reheat: reset site B is back on England/Wales 75°C",
+    bReset.food_jurisdiction === "england_wales" && bReset.food_reheating_limit === ENGLAND_WALES,
+    `jurisdiction=${bReset.food_jurisdiction}, limit=${bReset.food_reheating_limit}`,
+  );
+  await expectStamps("reset site B", b, ENGLAND_WALES);
+
+  await admin("DELETE", `/food-safety/config?siteId=${a}`);
+  await admin("DELETE", "/food-safety/config");
+}
+
+// Countries outside the UK: choosing one gives its starting labels and numeric
+// rules wherever nothing is saved, for GET /config and for every way a diary
+// day is created. Saved labels and rules still win.
+async function testCountryGuidance(admin, ts) {
+  console.log("\n── food-safety: country temperature guidance ──");
+  const IRELAND = {
+    cookingLimit: "75°C or above (core)",
+    coolingLimit: "In the fridge within 2 hours (below 10°C by 2½ hours at the latest)",
+    reheatingLimit: "70°C or above (core), reheat once only",
+    hotHoldingLimit: "Above 63°C",
+  };
+  const US = {
+    coolingLimit: "57°C (135°F) to 21°C (70°F) within 2 hours, then 5°C (41°F) within 6 hours in total",
+    reheatingLimit: "74°C (165°F) for 15 seconds, within 2 hours",
+    hotHoldingLimit: "57°C (135°F) or above",
+  };
+  const site = await admin("POST", "/sites", { name: `Country Site ${ts}` });
+  expectOk("country: create site", site.status, [200, 201]);
+  const siteId = site.data?.id;
+  await admin("DELETE", "/food-safety/config");
+
+  let dayOfMonth = 0;
+  const nextDay = () => `2097-04-${String(++dayOfMonth).padStart(2, "0")}`;
+  const scope = (id) => (id == null ? "" : `?siteId=${id}`);
+  const configOf = async (id) => (await admin("GET", `/food-safety/config${scope(id)}`)).data ?? {};
+  const labelsOf = (record) => ({
+    cookingLimit: record?.cookingLimit, coolingLimit: record?.coolingLimit,
+    reheatingLimit: record?.reheatingLimit, hotHoldingLimit: record?.hotHoldingLimit,
+  });
+  const configLabels = (config) => ({
+    cookingLimit: config.food_cooking_limit, coolingLimit: config.food_cooling_limit,
+    reheatingLimit: config.food_reheating_limit, hotHoldingLimit: config.food_hot_holding_limit,
+  });
+  // A day opened by POST without labels (as the phone app does) and one
+  // opened by a delivery append both carry the scope's labels.
+  const expectStamps = async (label, id, expected) => {
+    const posted = await admin("POST", `/food-safety${scope(id)}`, { recordDate: nextDay() });
+    check(`country: ${label} POST stamps labels`, posted.status === 201
+      && JSON.stringify(labelsOf(posted.data)) === JSON.stringify(expected), `${posted.status} ${JSON.stringify(labelsOf(posted.data))}`);
+    const recordDate = nextDay();
+    const appended = await admin("POST", `/food-safety/append${scope(id)}`, {
+      recordDate, section: "deliveries", row: { supplier: "Dairy", tempChilled: "3" }, entryId: randomUUID(),
+    });
+    const day = (await admin("GET", `/food-safety/by-date/${recordDate}${scope(id)}`)).data;
+    check(`country: ${label} delivery-first append stamps labels`, appended.status === 201
+      && JSON.stringify(labelsOf(day)) === JSON.stringify(expected), `${appended.status} ${JSON.stringify(labelsOf(day))}`);
+  };
+
+  const unknown = await admin("PUT", "/food-safety/config", { food_jurisdiction: "atlantis" });
+  check("country: unknown country → 400 naming the choices",
+    unknown.status === 400 && /ireland/.test(unknown.data?.error ?? "") && /united_states/.test(unknown.data?.error ?? ""),
+    `${unknown.status} ${JSON.stringify(unknown.data)}`);
+
+  // ── Organisation on Ireland ──
+  expectOk("country: organisation chooses Ireland",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "ireland" })).status);
+  const ireland = await configOf(null);
+  check("country: Ireland labels in config", ireland.food_jurisdiction === "ireland"
+    && JSON.stringify(configLabels(ireland)) === JSON.stringify(IRELAND), JSON.stringify(configLabels(ireland)));
+  const irelandRules = JSON.parse(ireland.food_temperature_rules ?? "{}");
+  check("country: Ireland numeric rules in config",
+    irelandRules.reheating?.min === 70 && irelandRules.cooling?.max === 10 && irelandRules.coolingMinutes === 150
+      && irelandRules.chilledDelivery?.max === 5, ireland.food_temperature_rules);
+  await expectStamps("Ireland", null, IRELAND);
+
+  // ── A saved label wins over the country's ──
+  const ownCooking = `Our HACCP: 80°C ${ts}`.slice(0, 60);
+  expectOk("country: organisation saves its own cooking label",
+    (await admin("PUT", "/food-safety/config", { food_cooking_limit: ownCooking })).status);
+  check("country: saved cooking label shown", (await configOf(null)).food_cooking_limit === ownCooking);
+
+  // ── Site on the United States inherits the saved label, not the rest ──
+  expectOk("country: site chooses the United States",
+    (await admin("PUT", `/food-safety/config?siteId=${siteId}`, { food_jurisdiction: "united_states" })).status);
+  const usLabels = { cookingLimit: ownCooking, ...US };
+  const usConfig = await configOf(siteId);
+  check("country: US site labels in config", usConfig.food_jurisdiction === "united_states"
+    && JSON.stringify(configLabels(usConfig)) === JSON.stringify(usLabels), JSON.stringify(configLabels(usConfig)));
+  check("country: US site numeric rules", JSON.parse(usConfig.food_temperature_rules ?? "{}").hotHolding?.min === 57, usConfig.food_temperature_rules);
+  await expectStamps("US site", siteId, usLabels);
+  check("country: organisation stays on Ireland", (await configOf(null)).food_jurisdiction === "ireland");
+
+  // ── Saved numeric rules win over the country preset ──
+  const ownRules = { ...irelandRules, hotHolding: { min: 65, max: null } };
+  expectOk("country: organisation saves its own rules",
+    (await admin("PUT", "/food-safety/config", { food_temperature_rules: JSON.stringify(ownRules) })).status);
+  check("country: US site inherits the saved rules",
+    JSON.parse((await configOf(siteId)).food_temperature_rules ?? "{}").hotHolding?.min === 65);
+
+  // ── Back to a UK nation: the UK labels return ──
+  await admin("DELETE", `/food-safety/config?siteId=${siteId}`);
+  await admin("DELETE", "/food-safety/config");
+  expectOk("country: organisation back on England/Wales",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "england_wales" })).status);
+  const uk = { cookingLimit: "75°C or above (core)", coolingLimit: "8°C within 90 minutes", reheatingLimit: "Above 75°C", hotHoldingLimit: "Above 63°C" };
+  check("country: England/Wales labels in config", JSON.stringify(configLabels(await configOf(null))) === JSON.stringify(uk));
+  await expectStamps("England/Wales", null, uk);
+  await admin("DELETE", "/food-safety/config");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3c. KitchenTrack closed (non-operating) days
+// ─────────────────────────────────────────────────────────────────────────────
+async function testKitchenClosedDays(admin, viewer, staff, ts) {
+  console.log("\n── food-safety: closed days are not missing records ──");
+  const siteC = await admin("POST", "/sites", { name: `Closed Site C ${ts}` });
+  const siteD = await admin("POST", "/sites", { name: `Closed Site D ${ts}` });
+  expectOk("closed-days: create site C", siteC.status, [200, 201]);
+  expectOk("closed-days: create site D", siteD.status, [200, 201]);
+  const c = siteC.data?.id;
+  const d = siteD.data?.id;
+  const missingIn = async (scope, from, to) =>
+    (await admin("GET", `/food-safety/missing-dates?from=${from}&to=${to}${scope == null ? "" : `&siteId=${scope}`}`)).data ?? {};
+  const close = (session, scope, body) =>
+    session("POST", `/food-safety/closed-days${scope == null ? "" : `?siteId=${scope}`}`, body);
+
+  // Only admins mark closures, and a reason is required.
+  expectStatus("closed-days: viewer POST → 403", (await close(viewer, null, { from: "2097-05-02", to: "2097-05-02", reason: "x" })).status, 403);
+  expectStatus("closed-days: staff POST → 403", (await close(staff, null, { from: "2097-05-02", to: "2097-05-02", reason: "x" })).status, 403);
+  expectStatus("closed-days: blank reason → 400", (await close(admin, null, { from: "2097-05-02", to: "2097-05-02", reason: "  " })).status, 400);
+  expectStatus("closed-days: from after to → 400", (await close(admin, null, { from: "2097-05-03", to: "2097-05-02", reason: "x" })).status, 400);
+  expectStatus("closed-days: other client's site → 400", (await close(admin, 999999999, { from: "2097-05-02", to: "2097-05-02", reason: "x" })).status, 400);
+
+  // ── Whole-organisation closure: neither missing nor in the site's scope ──
+  const orgClose = await close(admin, null, { from: "2097-05-02", to: "2097-05-03", reason: "Bank holiday" });
+  expectStatus("closed-days: org POST → 201", orgClose.status, 201);
+  check("closed-days: org POST creates both days", JSON.stringify(orgClose.data?.created) === JSON.stringify(["2097-05-02", "2097-05-03"]), JSON.stringify(orgClose.data));
+  const again = await close(admin, null, { from: "2097-05-02", to: "2097-05-03", reason: "Bank holiday" });
+  check("closed-days: repeating a closure creates nothing new", again.status === 201 && again.data?.created?.length === 0, JSON.stringify(again.data));
+
+  const orgMissing = await missingIn(null, "2097-05-01", "2097-05-04");
+  check("closed-days: org closure is not a missing date", !orgMissing.missingDates?.includes("2097-05-02") && !orgMissing.missingDates?.includes("2097-05-03"), JSON.stringify(orgMissing.missingDates));
+  check("closed-days: org closure is a non-operating date", JSON.stringify(orgMissing.nonOperatingDates) === JSON.stringify(["2097-05-02", "2097-05-03"]), JSON.stringify(orgMissing.nonOperatingDates));
+  check("closed-days: open org days stay missing", orgMissing.missingDates?.includes("2097-05-01") && orgMissing.missingDates?.includes("2097-05-04"), JSON.stringify(orgMissing.missingDates));
+
+  const siteMissing = await missingIn(c, "2097-05-01", "2097-05-04");
+  check("closed-days: org closure does not close site C", siteMissing.missingDates?.includes("2097-05-02") && (siteMissing.nonOperatingDates ?? []).length === 0, JSON.stringify(siteMissing));
+
+  // ── Site closure: org scope unaffected ──
+  expectStatus("closed-days: site C POST → 201", (await close(admin, c, { from: "2097-05-04", to: "2097-05-04", reason: "Kitchen deep clean" })).status, 201);
+  check("closed-days: site C closure is non-operating there", (await missingIn(c, "2097-05-01", "2097-05-04")).nonOperatingDates?.includes("2097-05-04"));
+  check("closed-days: site C closure leaves org day missing", (await missingIn(null, "2097-05-01", "2097-05-04")).missingDates?.includes("2097-05-04"));
+  check("closed-days: site C closure leaves site D day missing", (await missingIn(d, "2097-05-01", "2097-05-04")).missingDates?.includes("2097-05-04"));
+
+  // ── Monthly summary labels the closure with who and why ──
+  const summary = await admin("GET", "/food-safety/summary?year=2097&month=5");
+  const day2 = summary.data?.days?.find((entry) => entry.date === "2097-05-02");
+  const day1 = summary.data?.days?.find((entry) => entry.date === "2097-05-01");
+  check("closed-days: summary marks closure non-operating", day2?.nonOperating === true && day2?.hasRecord === false, JSON.stringify(day2));
+  check("closed-days: summary closure carries reason and who", day2?.closure?.reason === "Bank holiday" && typeof day2?.closure?.createdByName === "string" && day2?.closure?.addedAfterDay === false, JSON.stringify(day2?.closure));
+  check("closed-days: summary open day is not non-operating", day1?.nonOperating === false && day1?.closure === null, JSON.stringify(day1));
+
+  // ── A diary record always wins over a closure ──
+  expectOk("closed-days: org diary on 2097-05-05", (await admin("POST", "/food-safety", { recordDate: "2097-05-05" })).status, [201]);
+  const blocked = await close(admin, null, { from: "2097-05-05", to: "2097-05-06", reason: "Closed" });
+  check("closed-days: a day with a record cannot be closed (409)", blocked.status === 409 && blocked.data?.code === "KITCHEN_DAY_HAS_RECORD" && JSON.stringify(blocked.data?.dates) === JSON.stringify(["2097-05-05"]), `${blocked.status} ${JSON.stringify(blocked.data)}`);
+  check("closed-days: refused range closes nothing", !(await missingIn(null, "2097-05-06", "2097-05-06")).nonOperatingDates?.includes("2097-05-06"));
+  expectStatus("closed-days: close 2097-05-07", (await close(admin, null, { from: "2097-05-07", to: "2097-05-07", reason: "Closed" })).status, 201);
+  expectOk("closed-days: diary still allowed on a closed day", (await admin("POST", "/food-safety", { recordDate: "2097-05-07" })).status, [201]);
+  const recordWins = await missingIn(null, "2097-05-07", "2097-05-07");
+  check("closed-days: recorded closed day counts as operating", recordWins.draftDates?.includes("2097-05-07") && (recordWins.nonOperatingDates ?? []).length === 0, JSON.stringify(recordWins));
+  const day7 = (await admin("GET", "/food-safety/summary?year=2097&month=5")).data?.days?.find((entry) => entry.date === "2097-05-07");
+  check("closed-days: summary record wins over closure", day7?.hasRecord === true && day7?.nonOperating === false, JSON.stringify(day7));
+
+  // ── Closures added after the day are flagged for inspectors ──
+  const pastDay = isoDate(-40);
+  expectStatus("closed-days: retroactive closure → 201", (await close(admin, c, { from: pastDay, to: pastDay, reason: "Power cut" })).status, 201);
+  const pastList = await admin("GET", `/food-safety/closed-days?from=${pastDay}&to=${pastDay}&siteId=${c}`);
+  expectOk("closed-days: owner can list closures", pastList.status);
+  // Viewers see only their own training records.
+  expectStatus("closed-days: viewer list → 403", (await viewer("GET", `/food-safety/closed-days?from=${pastDay}&to=${pastDay}&siteId=${c}`)).status, 403);
+  check("closed-days: retroactive closure flagged added afterwards", pastList.data?.closedDays?.[0]?.addedAfterDay === true, JSON.stringify(pastList.data));
+
+  // ── Removing a closure brings the day back as missing ──
+  const orgList = await admin("GET", "/food-safety/closed-days?from=2097-05-01&to=2097-05-31");
+  const closure2 = orgList.data?.closedDays?.find((entry) => entry.date === "2097-05-02");
+  check("closed-days: org list holds only org closures", orgList.data?.closedDays?.every((entry) => entry.date !== "2097-05-04"), JSON.stringify(orgList.data));
+  expectStatus("closed-days: staff DELETE → 403", (await staff("DELETE", `/food-safety/closed-days/${closure2?.id}`)).status, 403);
+  expectStatus("closed-days: viewer DELETE → 403", (await viewer("DELETE", `/food-safety/closed-days/${closure2?.id}`)).status, 403);
+  expectOk("closed-days: admin DELETE", (await admin("DELETE", `/food-safety/closed-days/${closure2?.id}`)).status);
+  expectStatus("closed-days: DELETE twice → 404", (await admin("DELETE", `/food-safety/closed-days/${closure2?.id}`)).status, 404);
+  check("closed-days: removed closure is missing again", (await missingIn(null, "2097-05-02", "2097-05-02")).missingDates?.includes("2097-05-02"));
+  const remark = await close(admin, null, { from: "2097-05-02", to: "2097-05-02", reason: "Bank holiday" });
+  check("closed-days: a removed day can be closed again", remark.status === 201 && remark.data?.created?.[0] === "2097-05-02", JSON.stringify(remark.data));
+
+  // ── The daily diary is not overdue across closed days ──
+  const diaryStatus = async () => {
+    const res = await admin("GET", `/food-safety/status?siteId=${d}`);
+    return (res.data ?? []).find((entry) => entry.checkType === "daily_diary")?.status;
+  };
+  expectOk("closed-days: site D submitted diary 3 days ago", (await admin("POST", `/food-safety?siteId=${d}`, {
+    recordDate: isoDate(-3),
+    submittedAt: new Date().toISOString(),
+  })).status, [201]);
+  const before = await diaryStatus();
+  check("closed-days: diary overdue without closures", before === "overdue", `got ${before}`);
+  expectStatus("closed-days: close site D since", (await close(admin, d, { from: isoDate(-2), to: isoDate(0), reason: "Closed for refurbishment" })).status, 201);
+  const after = await diaryStatus();
+  check("closed-days: diary not overdue across closed days", after === "ok" || after === "due_soon", `got ${after}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. /api/mobile/push-token
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1233,8 +1937,13 @@ async function runSuite() {
   await testRecordValidation(a.session, ts);
   fixtures.probe("after-record-validation");
   await testCustomTradeAndInspectionValidation(a.session, a.clientId, clientBId, ts);
+  await testDisabledOptionsOnEveryRoute(a.session, ts);
+  await testPestAndBikeOptionsAcrossClients(a.session, a.clientId, clientBId, ts);
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
+  await testSiteJurisdictionReheating(a.session, ts);
+  await testCountryGuidance(a.session, ts);
+  await testKitchenClosedDays(a.session, viewer, staff, ts);
   await testPushToken(a.session, other, ts);
   await testStorageUsage(a.session, viewer, staff, a.clientId, clientBId);
 }

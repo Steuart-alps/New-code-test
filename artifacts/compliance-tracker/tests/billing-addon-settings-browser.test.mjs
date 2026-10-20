@@ -31,6 +31,8 @@ const serviceMutationRequests = [];
 const csrfHeaders = [];
 const unexpectedApiRequests = [];
 const failedApiResponses = [];
+// First-party analytics posts: never scoped to (or identifying) the business.
+const analyticsRequests = [];
 let csrfTokenRequests = 0;
 // Per-service queue of mocked add outcomes. An empty queue means the mocked
 // billing boundary activates the service, mirroring the real API's response
@@ -180,6 +182,15 @@ async function routeApi(route, url) {
   if (pathname === "/api/billing/cancellation-status" && method === "GET") {
     return jsonResponse(route, { accessEndsAt: null });
   }
+  // Settings also loads track owners (#92) and paid storage (#100).
+  if (pathname === "/api/track-owners" && method === "GET") {
+    return jsonResponse(route, { modules: [], owners: [], sites: [], users: [], defaultRecipients: [] });
+  }
+  if (pathname === "/api/billing/storage" && method === "GET") return jsonResponse(route, { subscribed: false });
+  // The header's notification bell (#92).
+  if (pathname === "/api/notifications" && method === "GET") {
+    return jsonResponse(route, { notifications: [], unreadCount: 0 });
+  }
   if (pathname === "/api/billing/invoices" && method === "GET") {
     return jsonResponse(route, { invoices: [] });
   }
@@ -238,6 +249,21 @@ async function routeApi(route, url) {
     });
   }
   if (pathname === "/api/auth/passkeys" && method === "GET") return jsonResponse(route, { passkeys: [] });
+  // Layout and Settings background reads: no consultant branding, and a
+  // business that has already finished the setup wizard.
+  if (pathname === "/api/managed-by" && method === "GET") return jsonResponse(route, null);
+  if (pathname === "/api/setup/state" && method === "GET") {
+    return jsonResponse(route, {
+      setupCompletedAt: "2026-09-01T09:00:00.000Z",
+      needsSetup: false,
+      canManage: true,
+      businessType: null,
+    });
+  }
+  if (pathname === "/api/analytics/events" && method === "POST") {
+    analyticsRequests.push({ search: url.search, body: request.postDataJSON() });
+    return route.fulfill({ status: 204 });
+  }
 
   unexpectedApiRequests.push({
     method,
@@ -353,6 +379,11 @@ try {
   assert.deepEqual(csrfHeaders, Array(addons.length).fill("billing-settings-test-csrf"), "every service mutation should carry the session CSRF header");
   assert.deepEqual(unexpectedApiRequests, [], `unexpected API requests must fail the browser test: ${JSON.stringify(unexpectedApiRequests)}`);
   assert.deepEqual(failedApiResponses, [], `API requests must not fail: ${JSON.stringify(failedApiResponses)}`);
+  assert.deepEqual(
+    analyticsRequests.filter(({ body }) => body.event === "service_action_succeeded").map(({ body }) => body.dimensions.service_key).sort(),
+    addons.map(addon => addon.key).sort(),
+    "each confirmed add is counted once",
+  );
   assert.deepEqual(pageErrors, [], `Settings must not throw browser errors: ${pageErrors.join("; ")}`);
   assert.deepEqual(consoleErrors, [], `Settings must not log browser errors: ${consoleErrors.join("; ")}`);
 
@@ -611,6 +642,10 @@ try {
   assert.deepEqual(consoleErrors.filter(text => !isExpectedResourceError(text)), [], `unexpected console errors: ${consoleErrors.join("; ")}`);
   console.log("Settings add-on price availability checks passed.");
 
+  for (const { search, body } of analyticsRequests) {
+    assert.equal(search, "", `analytics events must not carry the business id: ${search}`);
+    assert.deepEqual(Object.keys(body).sort(), ["dimensions", "event"]);
+  }
   console.log(`Settings add-on browser checks passed for all ${addons.length} billable add-ons.`);
 } catch (error) {
   console.error("Billing add-on Settings browser test failed:", error);

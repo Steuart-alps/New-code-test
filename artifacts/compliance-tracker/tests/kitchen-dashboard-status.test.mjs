@@ -152,7 +152,8 @@ try {
 
   const appSource = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(appSource, /<Route path="\/kitchen" component=\{KitchenPage\} \/>/, "/kitchen must route to the KitchenTrack page");
-  assert.match(appSource, /import KitchenPage from "@\/pages\/kitchen"/, "KitchenPage must be the KitchenTrack page module");
+  // Pages are lazy-loaded per route; either form must point at the KitchenTrack module.
+  assert.match(appSource, /(import KitchenPage from|const KitchenPage = lazy\(\(\) => import\()"@\/pages\/kitchen"/, "KitchenPage must be the KitchenTrack page module");
 
   console.log("Kitchen dashboard status tests passed");
 } finally {

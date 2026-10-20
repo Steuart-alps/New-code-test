@@ -9,10 +9,14 @@
 import { Router } from "express";
 import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId } from "../middleware/requireAuth";
-import { getCheckAlerts } from "../lib/checkReminders";
+import { getCheckAlerts, type CheckAlert } from "../lib/checkReminders";
 import { getEntitledServices, isEntitled } from "../lib/services";
+import { addCalendarDays, getAccountToday } from "../lib/accountClock";
+import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
+import { getPickedModules } from "./setup";
+import { siteVisibleSql, visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -30,10 +34,48 @@ export interface TrackSummary {
   path: string;
   enabled: boolean;
   status: TrackStatus;
-  health: "action_required" | "clear";
+  /**
+   * action_required: overdue, failed or otherwise needs someone now.
+   * not_started: nothing has been recorded yet and nothing is overdue — a
+   * neutral state for a new business, not a failure.
+   * clear: up to date, or only future reminders.
+   */
+  health: "action_required" | "not_started" | "clear";
   badge: string;
   items: TrackItem[];
+  /**
+   * True when the business picked its modules in the setup wizard, did not
+   * pick this one, and nothing is recorded for it yet: the dashboard lists it
+   * under "Other modules". Entitlement is unaffected.
+   */
+  otherModule?: boolean;
 }
+
+/**
+ * Setup-wizard module keys that count as picking each track. Tracks of
+ * superseded modules the wizard never offers (SafeTrack) are never moved.
+ */
+const TRACK_PICK_KEYS: Record<string, readonly string[]> = {
+  daily_am: ["dailytrack_am", "kitchentrack", "premisestrack"],
+  daily_pm: ["dailytrack_pm", "kitchentrack", "premisestrack"],
+  kitchen: ["kitchentrack"],
+  fire: ["firetrack"],
+  legionella: ["legionellatrack"],
+  pool: ["aquatrack"],
+  swim: ["aquatrack"],
+  hot_tub: ["hottubtrack"],
+  pat: ["pattrack"],
+  pest: ["pesttrack"],
+  fix: ["fixtrack"],
+  premises: ["premisestrack"],
+  room: ["roomtrack"],
+  doc: ["doctrack"],
+  train: ["traintrack"],
+  tree: ["treetrack"],
+  bike: ["biketrack"],
+  green: ["greentrack"],
+  incident: ["incidenttrack"],
+};
 
 export interface ChecklistTotals {
   date: string;
@@ -45,9 +87,13 @@ export interface ChecklistTotals {
   completedSitePairs: number;
 }
 
+type TrackDraft = Omit<TrackSummary, "health">;
+
 function rows(result: unknown): any[] {
   return (result as any).rows ?? [];
 }
+
+const plural = (count: number, word: string, suffix = "s") => `${count} ${word}${count === 1 ? "" : suffix}`;
 
 router.get("/dashboard/summary", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -59,18 +105,14 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   let accessibleSiteIds: number[] | null = null;
   try {
     if (departmentId != null) {
-      const accessibleRows = await db.execute(sql`
-        SELECT id FROM sites
-        WHERE client_id = ${clientId}
-          AND (department_id IS NULL OR department_id = ${departmentId})
-      `);
+      const accessibleRows = await db.execute(visibleSiteIdsSql(clientId, departmentId));
       accessibleSiteIds = rows(accessibleRows).map((site: any) => Number(site.id));
     }
     if (siteId != null) {
       const requestedSite = await db.execute(sql`
         SELECT id FROM sites
         WHERE id = ${siteId} AND client_id = ${clientId}
-          ${departmentId != null ? sql`AND (department_id IS NULL OR department_id = ${departmentId})` : sql``}
+          ${departmentId != null ? sql`AND ${siteVisibleSql(sql`id`, sql`department_id`, departmentId)}` : sql``}
         LIMIT 1
       `);
       if (rows(requestedSite).length === 0) {
@@ -80,20 +122,64 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   } catch {
     return res.status(500).json({ error: "Unable to validate site access" });
   }
-  const protectedSiteClause = siteId != null
-    ? sql`AND site_id = ${siteId}`
-    : accessibleSiteIds != null
-    ? sql`AND (site_id IS NULL OR site_id = ANY(${accessibleSiteIds}))`
-    : sql``;
+  // Department users see unassigned rows plus their department's sites. The
+  // ids are expanded as an IN list: an interpolated array is not a SQL array.
+  const accessClause = (column: SQL) => accessibleSiteIds == null
+    ? sql``
+    : accessibleSiteIds.length
+      ? sql`AND (${column} IS NULL OR ${column} IN (${sql.join(accessibleSiteIds.map(id => sql`${id}`), sql`, `)}))`
+      : sql`AND ${column} IS NULL`;
+  const scopedSiteClause = (column: SQL) => siteId != null ? sql`AND ${column} = ${siteId}` : accessClause(column);
+  const protectedSiteClause = scopedSiteClause(sql`site_id`);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  // "Today" is the business's local calendar day (default Europe/London).
+  const today = await getAccountToday(clientId);
+  const in30 = addCalendarDays(today, 30);
 
   const services = await getEntitledServices(clientId);
   const entitled = (key: string) =>
     isEntitled(services, key as Parameters<typeof isEntitled>[1]);
 
-  const tracks: Omit<TrackSummary, "health">[] = [];
+  // A failed query must not look like an empty, never-started track.
+  const unavailableTrackIds = new Set<string>();
+  const unavailable = (trackId: string, error: unknown): Pick<TrackDraft, "status" | "badge"> => {
+    unavailableTrackIds.add(trackId);
+    req.log.warn({ err: error, trackId }, "Unable to load a dashboard track");
+    return { status: "no_data", badge: "Status unavailable" };
+  };
+
+  // Shared, computed once per request: the fire/water/pool/spa alerts and
+  // whether each check-based module has ever been used (anywhere the caller
+  // can see, regardless of the site filter).
+  let checkAlertsPromise: Promise<CheckAlert[]> | null = null;
+  const loadCheckAlerts = () => (checkAlertsPromise ??= getCheckAlerts(clientId, { siteId, accessibleSiteIds }));
+  let startedPromise: Promise<Record<string, boolean>> | null = null;
+  const loadStarted = () => (startedPromise ??= (async () => {
+    const scope = accessClause(sql`site_id`);
+    const exists = (table: string, extra = sql``) =>
+      sql`EXISTS (SELECT 1 FROM ${sql.raw(table)} WHERE client_id = ${clientId} ${extra} ${scope})`;
+    const profile = (module: string) =>
+      sql`EXISTS (SELECT 1 FROM track_control_profiles WHERE client_id = ${clientId} AND module = ${module} ${scope})`;
+    try {
+      const [row] = rows(await db.execute(sql`
+        SELECT
+          ${exists("daily_checklists", sql`AND submitted_at IS NOT NULL`)}
+            OR ${exists("daily_checklist_submissions", sql`AND submitted_at IS NOT NULL`)} AS daily,
+          ${exists("food_safety_records", sql`AND submitted_at IS NOT NULL`)} AS kitchen,
+          ${exists("fire_safety_checks")} AS fire,
+          ${exists("legionella_checks")} OR ${profile("legionella")} AS legionella,
+          ${exists("pool_checks")} OR ${profile("pool")} AS pool,
+          ${exists("hot_tub_checks")} OR ${profile("hot_tub")}
+            OR ${exists("hot_tubs", sql`AND active = true`)} AS hot_tub
+      `));
+      return Object.fromEntries(Object.entries(row ?? {}).map(([key, value]) => [key, value === true || value === "t"]));
+    } catch (error) {
+      // Without history we cannot tell "not started" apart from neglected:
+      // treat every module as started so nothing is hidden.
+      req.log.warn({ err: error }, "Unable to load dashboard module history");
+      return new Proxy({}, { get: () => true }) as Record<string, boolean>;
+    }
+  })());
 
   // ── Sites list (for daily track gap detection) ──────────────────────────────
   let allSites: { id: number; name: string }[] = [];
@@ -134,22 +220,10 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   checklistTotals.available = checklistTotalsAvailable;
   if (allSites.length > 0) {
     try {
-      const completed = await db.execute(sql`
-        SELECT
-          site_id,
-          BOOL_OR(checklist_type IN ('kitchen_opening', 'premises_opening')) FILTER (WHERE submitted_at IS NOT NULL) AS am_submitted,
-          BOOL_OR(checklist_type IN ('kitchen_closing', 'premises_closing')) FILTER (WHERE submitted_at IS NOT NULL) AS pm_submitted
-        FROM daily_checklists
-        WHERE client_id = ${clientId}
-          AND check_date = ${today}
-          AND site_id IN (${sql.join(allSites.map((site) => sql`${site.id}`), sql`, `)})
-        GROUP BY site_id
-      `);
-      for (const row of rows(completed)) {
-        checklistCompletionBySite.set(Number(row.site_id), {
-          am: row.am_submitted === true || row.am_submitted === "true",
-          pm: row.pm_submitted === true || row.pm_submitted === "true",
-        });
+      // Web (daily_checklists) and mobile (daily_checklist_submissions) both count.
+      const completed = await getDailyChecklistCompletionBySite(clientId, today, allSites.map((site) => site.id));
+      for (const [completedSiteId, complete] of completed) {
+        checklistCompletionBySite.set(completedSiteId, complete);
       }
       checklistTotalsAvailable = true;
       checklistTotals.available = true;
@@ -167,82 +241,48 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     }
   }
 
-  // ── Daily AM ─────────────────────────────────────────────────────────────────
-  {
+  // ── Daily AM / PM ────────────────────────────────────────────────────────────
+  const dailyTrack = async (branch: "am" | "pm"): Promise<TrackDraft> => {
+    const enabled = branch === "am" ? amEnabled : pmEnabled;
+    const path = branch === "am" ? "/daily-track-am" : "/daily-track-pm";
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
     let badge = "No records";
 
-    if (amEnabled && allSites.length > 0) {
+    if (enabled && allSites.length > 0) {
       if (checklistTotalsAvailable) {
-        const missing = allSites.filter((site) => !checklistCompletionBySite.get(site.id)?.am);
-        const missingCount = checklistTotals.expectedAmPairs - checklistTotals.completedAmPairs;
+        const missing = allSites.filter((site) => !checklistCompletionBySite.get(site.id)?.[branch]);
+        const missingCount = branch === "am"
+          ? checklistTotals.expectedAmPairs - checklistTotals.completedAmPairs
+          : checklistTotals.expectedPmPairs - checklistTotals.completedPmPairs;
         if (missingCount === 0) {
           status = "ok";
           badge = "All submitted";
+        } else if (!(await loadStarted()).daily) {
+          // No checklist has ever been submitted: a new business, not a failure.
+          status = "no_data";
+          badge = "Not started";
         } else {
-          status = "overdue";
-          badge = `${missingCount} site${missingCount > 1 ? "s" : ""} not submitted`;
+          status = branch === "am" ? "overdue" : "attention";
+          badge = `${plural(missingCount, "site")} not submitted`;
           for (const site of missing.slice(0, 10)) {
-            items.push({ label: site.name, detail: "AM checklist not submitted today", path: "/daily-track-am" });
+            items.push({ label: site.name, detail: `${branch.toUpperCase()} checklist not submitted today`, path });
           }
         }
       } else {
+        unavailableTrackIds.add(branch === "am" ? "daily_am" : "daily_pm");
         status = "no_data";
-        badge = "No records";
+        badge = "Status unavailable";
       }
     }
 
-    tracks.push({
-      trackId: "daily_am",
-      label: "Daily AM Checklist",
-      path: "/daily-track-am",
-      enabled: amEnabled,
-      status,
-      badge,
-      items,
-    });
-  }
-
-  // ── Daily PM / Sign-off ───────────────────────────────────────────────────────
-  {
-    const items: TrackItem[] = [];
-    let status: TrackStatus = "no_data";
-    let badge = "No records";
-
-    if (pmEnabled && allSites.length > 0) {
-      if (checklistTotalsAvailable) {
-        const missing = allSites.filter((site) => !checklistCompletionBySite.get(site.id)?.pm);
-        const missingCount = checklistTotals.expectedPmPairs - checklistTotals.completedPmPairs;
-        if (missingCount === 0) {
-          status = "ok";
-          badge = "All submitted";
-        } else {
-          status = "attention";
-          badge = `${missingCount} site${missingCount > 1 ? "s" : ""} not submitted`;
-          for (const site of missing.slice(0, 10)) {
-            items.push({ label: site.name, detail: "PM checklist not submitted today", path: "/daily-track-pm" });
-          }
-        }
-      } else {
-        status = "no_data";
-        badge = "No records";
-      }
-    }
-
-    tracks.push({
-      trackId: "daily_pm",
-      label: "Daily PM Sign-off",
-      path: "/daily-track-pm",
-      enabled: pmEnabled,
-      status,
-      badge,
-      items,
-    });
-  }
+    return branch === "am"
+      ? { trackId: "daily_am", label: "Daily AM Checklist", path, enabled, status, badge, items }
+      : { trackId: "daily_pm", label: "Daily PM Sign-off", path, enabled, status, badge, items };
+  };
 
   // ── KitchenTrack — food safety diary ─────────────────────────────────────────
-  {
+  const kitchenTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("kitchentrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -260,219 +300,116 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             ${siteId ? sql`AND site_id = ${siteId}` : sql``}
         `);
         const submittedIds = new Set(rows(fsRows).map((r: any) => r.site_id));
-        const missing = allSites.filter((s) => !submittedIds.has(s.id));
+        // A site marked closed today (KitchenTrack closed days) is not missing.
+        const closedRows = await db.execute(sql`
+          SELECT site_id
+          FROM kitchen_closed_days
+          WHERE client_id = ${clientId}
+            AND closed_date = ${today}
+            AND site_id IS NOT NULL
+            AND removed_at IS NULL
+            ${siteId ? sql`AND site_id = ${siteId}` : sql``}
+        `);
+        const closedIds = new Set(rows(closedRows).map((r: any) => r.site_id));
+        const missing = allSites.filter((s) => !submittedIds.has(s.id) && !closedIds.has(s.id));
         if (missing.length === 0) {
           status = "ok";
-          badge = "All submitted";
+          badge = closedIds.size > 0 && submittedIds.size === 0 ? "Closed today" : "All submitted";
+        } else if (!(await loadStarted()).kitchen) {
+          status = "no_data";
+          badge = "Not started";
         } else {
           status = "attention";
-          badge = `${missing.length} site${missing.length > 1 ? "s" : ""} not recorded today`;
+          badge = `${plural(missing.length, "site")} not recorded today`;
           for (const site of missing.slice(0, 10)) {
             items.push({ label: site.name, detail: "Food safety diary not submitted today", path: "/kitchen" });
           }
         }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("kitchen", error));
       }
     }
 
-    tracks.push({
-      trackId: "kitchen",
-      label: "KitchenTrack",
-      path: "/kitchen",
-      enabled,
-      status,
-      badge,
-      items,
-    });
-  }
+    return { trackId: "kitchen", label: "KitchenTrack", path: "/kitchen", enabled, status, badge, items };
+  };
 
-  // ── FireTrack ─────────────────────────────────────────────────────────────────
-  {
-    const enabled = entitled("firetrack");
+  // ── FireTrack, LegionellaTrack, AquaTrack (pools), TubTrack ───────────────────────
+  // Every site is evaluated on its own records. A site's alerts carry its name;
+  // the badge says how many sites are affected and the worst items come first.
+  const checkAlertTrack = async (config: {
+    trackId: "fire" | "legionella" | "pool" | "hot_tub";
+    module: CheckAlert["module"];
+    label: string;
+    path: string;
+    enabled: boolean;
+    daysDetail: boolean;
+  }): Promise<TrackDraft> => {
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
     let badge = "No records";
-
-    if (enabled && departmentId === null) {
+    if (config.enabled) {
       try {
-        const alerts = await getCheckAlerts(clientId, { siteId, accessibleSiteIds });
-        const fireAlerts = alerts.filter((a) => a.module === "fire");
-        const overdue = fireAlerts.filter((a) => a.status === "overdue");
-        const dueSoon = fireAlerts.filter((a) => a.status === "due_soon");
-        const never = fireAlerts.filter((a) => a.status === "never");
-        const totalAlerts = fireAlerts.length;
+        const [alerts, started] = await Promise.all([loadCheckAlerts(), loadStarted()]);
+        const moduleAlerts = alerts.filter((a) => a.module === config.module);
+        const byDue = (a: CheckAlert, b: CheckAlert) => (a.daysUntilDue ?? 0) - (b.daysUntilDue ?? 0);
+        const overdue = moduleAlerts.filter((a) => a.status === "overdue").sort(byDue);
+        const dueSoon = moduleAlerts.filter((a) => a.status === "due_soon").sort(byDue);
+        const never = moduleAlerts.filter((a) => a.status === "never");
+        const planRequired = moduleAlerts.filter((a) => a.status === "plan_required");
+        const atSites = (list: CheckAlert[]) => {
+          const sites = new Set(list.map((a) => a.siteId ?? null));
+          return siteId == null && sites.size > 1 ? ` at ${sites.size} sites` : "";
+        };
 
-        if (overdue.length > 0) {
+        if (!started[config.trackId]) {
+          // Nothing has ever been recorded and nothing can be overdue yet.
+          status = "no_data";
+          badge = "Not started";
+        } else if (overdue.length > 0) {
           status = "overdue";
-          badge = `${overdue.length} overdue`;
-        } else if (dueSoon.length > 0) {
+          badge = `${overdue.length} overdue${atSites(overdue)}`;
+        } else if (planRequired.length > 0) {
           status = "attention";
-          badge = `${dueSoon.length} due soon`;
+          badge = `${plural(planRequired.length, "site plan")} need review`;
         } else if (never.length > 0) {
-          status = "no_data";
-          badge = `${never.length} check${never.length > 1 ? "s" : ""} never recorded`;
-        } else if (totalAlerts === 0) {
-          status = "ok";
-          badge = "All checks up to date";
-        } else if (never.length > 0 && overdue.length === 0 && dueSoon.length === 0) {
-          status = "no_data";
-          badge = "No records yet";
-        } else {
-          status = "ok";
-          badge = "All checks up to date";
-        }
-
-        for (const a of [...overdue, ...dueSoon, ...never].slice(0, 10)) {
-          const days = a.daysUntilDue;
-          const detail =
-            a.status === "overdue"
-              ? `Overdue by ${Math.abs(days ?? 0)} day${Math.abs(days ?? 0) !== 1 ? "s" : ""}`
-              : days === 0
-              ? "Due today"
-              : a.status === "never"
-              ? "No record has been submitted"
-              : `Due in ${days} day${days !== 1 ? "s" : ""}`;
-          items.push({ label: a.checkLabel, detail, path: "/fire-safety" });
-        }
-      } catch {
-        status = "no_data";
-        badge = "No records";
-      }
-    }
-
-    tracks.push({
-      trackId: "fire",
-      label: "FireTrack",
-      path: "/fire-safety",
-      enabled,
-      status,
-      badge,
-      items,
-    });
-  }
-
-  // ── LegionellaTrack ───────────────────────────────────────────────────────────
-  {
-    const enabled = entitled("legionellatrack");
-    const items: TrackItem[] = [];
-    let status: TrackStatus = "no_data";
-    let badge = "No records";
-
-    if (enabled && departmentId === null) {
-      try {
-        const alerts = await getCheckAlerts(clientId, { siteId, accessibleSiteIds });
-        const legAlerts = alerts.filter((a) => a.module === "legionella");
-        const overdue = legAlerts.filter((a) => a.status === "overdue");
-        const dueSoon = legAlerts.filter((a) => a.status === "due_soon");
-        const never = legAlerts.filter((a) => a.status === "never");
-        const planRequired = legAlerts.filter((a) => a.status === "plan_required");
-
-        if (overdue.length > 0) {
-          status = "overdue";
-          badge = `${overdue.length} overdue`;
-        } else if (planRequired.length > 0) {
+          // The module is in use, so a site or unit never checked is a gap.
           status = "attention";
-          badge = `${planRequired.length} site plan${planRequired.length === 1 ? "" : "s"} need review`;
+          badge = `${plural(never.length, "check")} never recorded${atSites(never)}`;
         } else if (dueSoon.length > 0) {
           status = "attention";
-          badge = `${dueSoon.length} due soon`;
-        } else if (never.length > 0 || legAlerts.length === 0) {
+          badge = `${dueSoon.length} due soon${atSites(dueSoon)}`;
+        } else if (allSites.length === 0 && config.module !== "fire") {
           status = "no_data";
-          badge = never.length > 0 ? `${never.length} check${never.length > 1 ? "s" : ""} never recorded` : "No records yet";
+          badge = "No sites";
         } else {
           status = "ok";
           badge = "All checks up to date";
         }
 
-        for (const a of [...overdue, ...planRequired, ...dueSoon, ...never].slice(0, 10)) {
+        for (const a of [...overdue, ...planRequired, ...never, ...dueSoon].slice(0, 10)) {
           const days = a.daysUntilDue;
-          const detail =
-            a.status === "overdue"
-              ? `Overdue by ${Math.abs(days ?? 0)} day${Math.abs(days ?? 0) !== 1 ? "s" : ""}`
-              : a.status === "plan_required" ? "Risk assessment and written scheme need competent-person review"
-              : days === 0
-              ? "Due today"
-              : a.status === "never" ? "No record has been submitted" : `Due in ${days} day${days !== 1 ? "s" : ""}`;
-          items.push({ label: a.checkLabel, detail, path: "/legionella" });
+          const detail = a.status === "plan_required"
+            ? "Risk assessment and written scheme need competent-person review"
+            : a.status === "never"
+            ? "No record has been submitted"
+            : !config.daysDetail
+            ? a.status === "overdue" ? "Overdue check" : "Due soon"
+            : a.status === "overdue"
+            ? `Overdue by ${plural(Math.abs(days ?? 0), "day")}`
+            : days === 0
+            ? "Due today"
+            : `Due in ${plural(days ?? 0, "day")}`;
+          items.push({ label: a.checkLabel, detail, path: config.path });
         }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable(config.trackId, error));
       }
     }
-
-    tracks.push({
-      trackId: "legionella",
-      label: "LegionellaTrack",
-      path: "/legionella",
-      enabled,
-      status,
-      badge,
-      items,
-    });
-  }
-
-  // ── PoolTrack ─────────────────────────────────────────────────────────────────
-  {
-    const enabled = entitled("pooltrack");
-    const items: TrackItem[] = [];
-    let status: TrackStatus = "no_data";
-    let badge = "No records";
-
-    if (enabled && departmentId === null) {
-      try {
-        const alerts = await getCheckAlerts(clientId, { siteId, accessibleSiteIds });
-        const poolAlerts = alerts.filter((a) => a.module === "pool");
-        const overdue = poolAlerts.filter((a) => a.status === "overdue");
-        const dueSoon = poolAlerts.filter((a) => a.status === "due_soon");
-        const never = poolAlerts.filter((a) => a.status === "never");
-        const planRequired = poolAlerts.filter((a) => a.status === "plan_required");
-
-        if (overdue.length > 0) {
-          status = "overdue";
-          badge = `${overdue.length} overdue`;
-        } else if (planRequired.length > 0) {
-          status = "attention";
-          badge = `${planRequired.length} site plan${planRequired.length === 1 ? "" : "s"} need review`;
-        } else if (dueSoon.length > 0) {
-          status = "attention";
-          badge = `${dueSoon.length} due soon`;
-        } else if (never.length > 0 || poolAlerts.length === 0) {
-          status = "no_data";
-          badge = never.length > 0 ? `${never.length} check${never.length > 1 ? "s" : ""} never recorded` : "No records yet";
-        } else {
-          status = "ok";
-          badge = "All checks up to date";
-        }
-
-        for (const a of [...overdue, ...planRequired, ...dueSoon, ...never].slice(0, 10)) {
-          const detail =
-            a.status === "overdue" ? "Overdue check" : a.status === "plan_required"
-              ? "Risk assessment and written scheme need competent-person review"
-              : a.status === "never" ? "No record has been submitted" : "Due soon";
-          items.push({ label: a.checkLabel, detail, path: "/aqua-track" });
-        }
-      } catch {
-        status = "no_data";
-        badge = "No records";
-      }
-    }
-
-    tracks.push({
-      trackId: "pool",
-      label: "PoolTrack",
-      path: "/aqua-track",
-      enabled,
-      status,
-      badge,
-      items,
-    });
-  }
+    return { trackId: config.trackId, label: config.label, path: config.path, enabled: config.enabled, status, badge, items };
+  };
 
   // ── PATtrack ──────────────────────────────────────────────────────────────────
-  {
+  const patTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("pattrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -480,9 +417,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId != null
-          ? sql`AND a.site_id = ${siteId}`
-          : accessibleSiteIds != null ? sql`AND (a.site_id IS NULL OR a.site_id = ANY(${accessibleSiteIds}))` : sql``;
+        const siteClause = scopedSiteClause(sql`a.site_id`);
         const patRows = await db.execute(sql`
           SELECT
             a.id, a.name, a.appliance_type, a.location,
@@ -517,7 +452,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           badge = `${overdue.length} overdue`;
         } else if (untested.length > 0) {
           status = "attention";
-          badge = `${untested.length} appliance${untested.length > 1 ? "s" : ""} never tested`;
+          badge = `${plural(untested.length, "appliance")} never tested`;
         } else if (dueSoon.length > 0) {
           status = "attention";
           badge = `${dueSoon.length} due for testing`;
@@ -542,25 +477,16 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             path: "/pat-track",
           });
         }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("pat", error));
       }
     }
 
-    tracks.push({
-      trackId: "pat",
-      label: "PATtrack",
-      path: "/pat-track",
-      enabled,
-      status,
-      badge,
-      items,
-    });
-  }
+    return { trackId: "pat", label: "PATtrack", path: "/pat-track", enabled, status, badge, items };
+  };
 
   // ── PestTrack ──────────────────────────────────────────────────────────────────
-  {
+  const pestTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("pesttrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -569,55 +495,55 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        // Overdue visits
-        const overdueVisits = await db.execute(sql`
-          SELECT id, pest_contractor, next_visit_date, site_id
-          FROM pest_visits
-          WHERE client_id = ${clientId}
-            AND next_visit_date IS NOT NULL
-            AND next_visit_date < ${today}
-            ${siteClause}
-          ORDER BY next_visit_date ASC
-          LIMIT 10
-        `);
-        // Open pest activities
-        const openActivities = await db.execute(sql`
-          SELECT id, pest_type, area_affected
-          FROM pest_activities
-          WHERE client_id = ${clientId}
-            AND status = 'active'
-            ${siteClause}
-          ORDER BY id DESC
-          LIMIT 10
-        `);
+        const [overdueVisits, activityCount, openActivities] = await Promise.all([
+          // Each site's latest visit sets its next due visit; older visits'
+          // next-visit dates are superseded and must not count as overdue.
+          db.execute(sql`
+            SELECT id, contractor_name, next_visit_date, site_id FROM (
+              SELECT DISTINCT ON (site_id) id, contractor_name, next_visit_date, site_id
+              FROM pest_visits
+              WHERE client_id = ${clientId} ${siteClause}
+              ORDER BY site_id, visit_date DESC, id DESC
+            ) latest
+            WHERE next_visit_date IS NOT NULL AND next_visit_date < ${today}
+            ORDER BY next_visit_date ASC
+          `),
+          db.execute(sql`
+            SELECT count(*)::int AS open FROM pest_activity
+            WHERE client_id = ${clientId} AND resolved = false ${siteClause}
+          `),
+          db.execute(sql`
+            SELECT id, pest_type, location
+            FROM pest_activity
+            WHERE client_id = ${clientId} AND resolved = false ${siteClause}
+            ORDER BY recorded_date DESC, id DESC
+            LIMIT 5
+          `),
+        ]);
 
         const overdueCount = rows(overdueVisits).length;
-        const openCount = rows(openActivities).length;
+        const openCount = Number(rows(activityCount)[0]?.open ?? 0);
 
         if (overdueCount > 0) {
           status = "overdue";
-          badge = `${overdueCount} visit${overdueCount > 1 ? "s" : ""} overdue`;
+          badge = `${plural(overdueCount, "visit")} overdue`;
           for (const v of rows(overdueVisits).slice(0, 5)) {
             items.push({
               label: `Visit overdue`,
-              detail: `${v.pest_contractor ?? "Unknown contractor"} — due ${v.next_visit_date}`,
+              detail: `${v.contractor_name ?? "Unknown contractor"} — due ${v.next_visit_date}`,
               path: "/pest-track",
             });
           }
         } else if (openCount > 0) {
           status = "attention";
-          badge = `${openCount} active infestation${openCount > 1 ? "s" : ""}`;
-          for (const a of rows(openActivities).slice(0, 5)) {
-            items.push({
-              label: a.pest_type ?? "Pest activity",
-              detail: `Active — ${a.area_affected ?? "area not specified"}`,
-              path: "/pest-track",
-            });
-          }
+          badge = `${plural(openCount, "active infestation")}`;
         } else {
           // Check if there are any records at all
           const anyRows = await db.execute(sql`
-            SELECT 1 FROM pest_visits WHERE client_id = ${clientId} ${siteClause} LIMIT 1
+            SELECT 1 FROM pest_visits WHERE client_id = ${clientId} ${siteClause}
+            UNION ALL
+            SELECT 1 FROM pest_activity WHERE client_id = ${clientId} ${siteClause}
+            LIMIT 1
           `);
           if (rows(anyRows).length === 0) {
             status = "no_data";
@@ -627,25 +553,23 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             badge = "All up to date";
           }
         }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+        for (const a of rows(openActivities)) {
+          items.push({
+            label: a.pest_type ?? "Pest activity",
+            detail: `Active — ${a.location ?? "area not specified"}`,
+            path: "/pest-track",
+          });
+        }
+      } catch (error) {
+        ({ status, badge } = unavailable("pest", error));
       }
     }
 
-    tracks.push({
-      trackId: "pest",
-      label: "PestTrack",
-      path: "/pest-track",
-      enabled,
-      status,
-      badge,
-      items,
-    });
-  }
+    return { trackId: "pest", label: "PestTrack", path: "/pest-track", enabled, status, badge, items };
+  };
 
   // ── FixTrack ──────────────────────────────────────────────────────────────────
-  {
+  const fixTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("fixtrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -654,28 +578,39 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        const openIssues = await db.execute(sql`
-          SELECT id, title, priority, status, reported_date
-          FROM fix_track_issues
-          WHERE client_id = ${clientId}
-            AND status IN ('reported', 'in_progress')
-            ${siteClause}
-          ORDER BY
-            CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
-            reported_date ASC
-          LIMIT 10
-        `);
-        const urgent = rows(openIssues).filter(
-          (i: any) => i.priority === "urgent" || i.priority === "high",
-        );
-        const total = rows(openIssues).length;
+        const [openIssues, counts] = await Promise.all([
+          db.execute(sql`
+            SELECT id, title, priority, status, reported_date
+            FROM fix_track_issues
+            WHERE client_id = ${clientId}
+              AND status IN ('reported', 'in_progress')
+              ${siteClause}
+            ORDER BY
+              CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
+              reported_date ASC
+            LIMIT 10
+          `),
+          // Counts come from the whole register, not the 10 rows displayed.
+          db.execute(sql`
+            SELECT
+              count(*)::int AS total,
+              count(*) FILTER (WHERE priority IN ('urgent', 'high'))::int AS urgent
+            FROM fix_track_issues
+            WHERE client_id = ${clientId}
+              AND status IN ('reported', 'in_progress')
+              ${siteClause}
+          `),
+        ]);
+        const countRow = rows(counts)[0] ?? {};
+        const urgent = Number(countRow.urgent ?? 0);
+        const total = Number(countRow.total ?? 0);
 
-        if (urgent.length > 0) {
+        if (urgent > 0) {
           status = "overdue";
-          badge = `${urgent.length} urgent/high issue${urgent.length > 1 ? "s" : ""} open`;
+          badge = `${plural(urgent, "urgent/high issue")} open`;
         } else if (total > 0) {
           status = "attention";
-          badge = `${total} open issue${total > 1 ? "s" : ""}`;
+          badge = `${plural(total, "open issue")}`;
         } else {
           const anyRows = await db.execute(sql`
             SELECT 1 FROM fix_track_issues WHERE client_id = ${clientId} ${siteClause} LIMIT 1
@@ -691,25 +626,16 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             path: `/fix-track`,
           });
         }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("fix", error));
       }
     }
 
-    tracks.push({
-      trackId: "fix",
-      label: "FixTrack",
-      path: "/fix-track",
-      enabled,
-      status,
-      badge,
-      items,
-    });
-  }
+    return { trackId: "fix", label: "FixTrack", path: "/fix-track", enabled, status, badge, items };
+  };
 
   // ── PremisesTrack ─────────────────────────────────────────────────────────────
-  {
+  const premisesTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("premisestrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -746,10 +672,10 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
         if (overdueCount > 0) {
           status = "overdue";
-          badge = `${overdueCount} overdue inspection${overdueCount > 1 ? "s" : ""}`;
+          badge = `${plural(overdueCount, "overdue inspection")}`;
         } else if (total > 0) {
           status = "attention";
-          badge = `${total} open inspection${total > 1 ? "s" : ""}`;
+          badge = `${plural(total, "open inspection")}`;
         } else {
           const anyRows = await db.execute(sql`
             SELECT 1 FROM premises_inspections WHERE client_id = ${clientId} ${siteClause} LIMIT 1
@@ -769,37 +695,22 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             : `Status: ${i.status}`;
           items.push({ label: inspType, detail, path: "/premises-track" });
         }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("premises", error));
       }
     }
 
-    tracks.push({
-      trackId: "premises",
-      label: "PremisesTrack",
-      path: "/premises-track",
-      enabled,
-      status,
-      badge,
-      items,
-    });
-  }
+    return { trackId: "premises", label: "PremisesTrack", path: "/premises-track", enabled, status, badge, items };
+  };
 
-  // ── DocTrack ──────────────────────────────────────────────────────────────────
   // ── RoomTrack ─────────────────────────────────────────────────────────────────
-  {
+  const roomTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("roomtrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
     let badge = "No rooms";
     if (enabled) {
       try {
-        const roomSiteClause = siteId != null
-          ? sql`AND r.site_id = ${siteId}`
-          : accessibleSiteIds != null
-          ? sql`AND (r.site_id IS NULL OR r.site_id = ANY(${accessibleSiteIds}))`
-          : sql``;
         const result = await db.execute(sql`
           SELECT
             count(*)::int AS total,
@@ -811,7 +722,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
            AND c.check_date = ${today}
           WHERE r.client_id = ${clientId}
             AND r.active = true
-            ${roomSiteClause}
+            ${scopedSiteClause(sql`r.site_id`)}
         `);
         const roomTotals = rows(result)[0] ?? { total: 0, checked: 0 };
         const total = Number(roomTotals.total);
@@ -822,24 +733,24 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         } else if (checked === 0) {
           status = "attention";
           badge = `0 / ${total} checked today`;
-          items.push({ label: `${total} room${total === 1 ? "" : "s"} unchecked`, detail: "Room checks are still due today", path: "/room-track" });
+          items.push({ label: `${plural(total, "room")} unchecked`, detail: "Room checks are still due today", path: "/room-track" });
         } else if (checked < total) {
           status = "attention";
           badge = `${checked} / ${total} checked today`;
-          items.push({ label: `${total - checked} room${total - checked === 1 ? "" : "s"} unchecked`, detail: "Room checks are still due today", path: "/room-track" });
+          items.push({ label: `${plural(total - checked, "room")} unchecked`, detail: "Room checks are still due today", path: "/room-track" });
         } else {
           status = "ok";
           badge = `${checked} / ${total} checked today`;
         }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("room", error));
       }
     }
-    tracks.push({ trackId: "room", label: "RoomTrack", path: "/room-track", enabled, status, badge, items });
-  }
+    return { trackId: "room", label: "RoomTrack", path: "/room-track", enabled, status, badge, items };
+  };
 
-  {
+  // ── DocTrack ──────────────────────────────────────────────────────────────────
+  const docTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("doctrack") || entitled("safetrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -848,77 +759,69 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        const overdueRows = await db.execute(sql`
-          SELECT id, title, next_review_date, category
-          FROM doc_track_documents
-          WHERE client_id = ${clientId}
-            AND next_review_date IS NOT NULL
-            AND next_review_date < ${today}
-            ${siteClause}
-          ORDER BY next_review_date ASC
-          LIMIT 10
-        `);
-        const dueSoonRows = await db.execute(sql`
-          SELECT id, title, next_review_date, category
-          FROM doc_track_documents
-          WHERE client_id = ${clientId}
-            AND next_review_date IS NOT NULL
-            AND next_review_date >= ${today}
-            AND next_review_date <= ${in30}
-            ${siteClause}
-          ORDER BY next_review_date ASC
-          LIMIT 10
-        `);
-        const overdueCount = rows(overdueRows).length;
-        const dueSoonCount = rows(dueSoonRows).length;
+        const [overdueRows, dueSoonRows, counts] = await Promise.all([
+          db.execute(sql`
+            SELECT id, title, next_review_date, category
+            FROM doc_track_documents
+            WHERE client_id = ${clientId}
+              AND next_review_date IS NOT NULL
+              AND next_review_date < ${today}
+              ${siteClause}
+            ORDER BY next_review_date ASC
+            LIMIT 10
+          `),
+          db.execute(sql`
+            SELECT id, title, next_review_date, category
+            FROM doc_track_documents
+            WHERE client_id = ${clientId}
+              AND next_review_date IS NOT NULL
+              AND next_review_date >= ${today}
+              AND next_review_date <= ${in30}
+              ${siteClause}
+            ORDER BY next_review_date ASC
+            LIMIT 10
+          `),
+          db.execute(sql`
+            SELECT
+              count(*)::int AS total,
+              count(*) FILTER (WHERE next_review_date < ${today})::int AS overdue,
+              count(*) FILTER (WHERE next_review_date >= ${today} AND next_review_date <= ${in30})::int AS due_soon
+            FROM doc_track_documents
+            WHERE client_id = ${clientId} ${siteClause}
+          `),
+        ]);
+        const countRow = rows(counts)[0] ?? {};
+        const overdueCount = Number(countRow.overdue ?? 0);
+        const dueSoonCount = Number(countRow.due_soon ?? 0);
 
         if (overdueCount > 0) {
           status = "overdue";
-          badge = `${overdueCount} review${overdueCount > 1 ? "s" : ""} overdue`;
+          badge = `${plural(overdueCount, "review")} overdue`;
         } else if (dueSoonCount > 0) {
           status = "attention";
-          badge = `${dueSoonCount} review${dueSoonCount > 1 ? "s" : ""} due soon`;
+          badge = `${plural(dueSoonCount, "review")} due soon`;
         } else {
-          const anyRows = await db.execute(sql`
-            SELECT 1 FROM doc_track_documents WHERE client_id = ${clientId} ${siteClause} LIMIT 1
-          `);
-          status = rows(anyRows).length > 0 ? "ok" : "no_data";
-          badge = rows(anyRows).length > 0 ? "All documents up to date" : "No documents yet";
+          const any = Number(countRow.total ?? 0) > 0;
+          status = any ? "ok" : "no_data";
+          badge = any ? "All documents up to date" : "No documents yet";
         }
 
         for (const d of rows(overdueRows)) {
-          items.push({
-            label: d.title,
-            detail: `Review overdue since ${d.next_review_date}`,
-            path: "/doc-track",
-          });
+          items.push({ label: d.title, detail: `Review overdue since ${d.next_review_date}`, path: "/doc-track" });
         }
         for (const d of rows(dueSoonRows)) {
-          items.push({
-            label: d.title,
-            detail: `Review due ${d.next_review_date}`,
-            path: "/doc-track",
-          });
+          items.push({ label: d.title, detail: `Review due ${d.next_review_date}`, path: "/doc-track" });
         }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("doc", error));
       }
     }
 
-    tracks.push({
-      trackId: "doc",
-      label: "DocTrack",
-      path: "/doc-track",
-      enabled,
-      status,
-      badge,
-      items,
-    });
-  }
+    return { trackId: "doc", label: "DocTrack", path: "/doc-track", enabled, status, badge, items };
+  };
 
   // ── SafeTrack — risk assessments & SOPs ─────────────────────────────────────
-  {
+  const safeTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("safetrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -927,70 +830,62 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        // Overdue risk assessments
-        const overdueRA = await db.execute(sql`
-          SELECT id, title, next_review_date FROM safe_risk_assessments
-          WHERE client_id = ${clientId} AND next_review_date IS NOT NULL AND next_review_date < ${today} ${siteClause}
-          ORDER BY next_review_date ASC LIMIT 5
+        // Risk assessments carry one "Review Date" (review_date), the date the
+        // assessment is next due for review. SOPs have no review date, so they
+        // only count towards whether SafeTrack has any records.
+        const reviewList = (overdue: boolean) => db.execute(sql`
+          SELECT id, title, review_date FROM safe_risk_assessments
+          WHERE client_id = ${clientId} AND review_date IS NOT NULL
+            ${overdue ? sql`AND review_date < ${today}` : sql`AND review_date >= ${today} AND review_date <= ${in30}`}
+            ${siteClause}
+          ORDER BY review_date ASC LIMIT 5
         `);
-        // Overdue SOPs
-        const overdueSOPs = await db.execute(sql`
-          SELECT id, title, next_review_date FROM safe_sops
-          WHERE client_id = ${clientId} AND next_review_date IS NOT NULL AND next_review_date < ${today} ${siteClause}
-          ORDER BY next_review_date ASC LIMIT 5
-        `);
-        // Due soon
-        const dueSoonRA = await db.execute(sql`
-          SELECT id, title, next_review_date FROM safe_risk_assessments
-          WHERE client_id = ${clientId} AND next_review_date >= ${today} AND next_review_date <= ${in30} ${siteClause}
-          ORDER BY next_review_date ASC LIMIT 5
-        `);
-        const dueSoonSOPs = await db.execute(sql`
-          SELECT id, title, next_review_date FROM safe_sops
-          WHERE client_id = ${clientId} AND next_review_date >= ${today} AND next_review_date <= ${in30} ${siteClause}
-          ORDER BY next_review_date ASC LIMIT 5
-        `);
-
-        const overdueCount = rows(overdueRA).length + rows(overdueSOPs).length;
-        const dueSoonCount = rows(dueSoonRA).length + rows(dueSoonSOPs).length;
+        const [overdueRA, dueSoonRA, raCounts, sopCounts] = await Promise.all([
+          reviewList(true),
+          reviewList(false),
+          db.execute(sql`
+            SELECT
+              count(*)::int AS total,
+              count(*) FILTER (WHERE review_date < ${today})::int AS overdue,
+              count(*) FILTER (WHERE review_date >= ${today} AND review_date <= ${in30})::int AS due_soon
+            FROM safe_risk_assessments
+            WHERE client_id = ${clientId} ${siteClause}
+          `),
+          db.execute(sql`SELECT count(*)::int AS total FROM safe_sops WHERE client_id = ${clientId} ${siteClause}`),
+        ]);
+        const ra = rows(raCounts)[0] ?? {};
+        const sop = rows(sopCounts)[0] ?? {};
+        const overdueCount = Number(ra.overdue ?? 0);
+        const dueSoonCount = Number(ra.due_soon ?? 0);
 
         if (overdueCount > 0) {
           status = "overdue";
-          badge = `${overdueCount} review${overdueCount > 1 ? "s" : ""} overdue`;
+          badge = `${plural(overdueCount, "review")} overdue`;
         } else if (dueSoonCount > 0) {
           status = "attention";
-          badge = `${dueSoonCount} review${dueSoonCount > 1 ? "s" : ""} due soon`;
+          badge = `${plural(dueSoonCount, "review")} due soon`;
         } else {
-          const anyRows = await db.execute(sql`
-            SELECT 1 FROM safe_risk_assessments WHERE client_id = ${clientId} ${siteClause} LIMIT 1
-          `);
-          status = rows(anyRows).length > 0 ? "ok" : "no_data";
-          badge = rows(anyRows).length > 0 ? "All documents up to date" : "No records yet";
+          const any = Number(ra.total ?? 0) + Number(sop.total ?? 0) > 0;
+          status = any ? "ok" : "no_data";
+          badge = any ? "All documents up to date" : "No records yet";
         }
 
         for (const d of rows(overdueRA)) {
-          items.push({ label: d.title, detail: `Risk assessment review overdue since ${d.next_review_date}`, path: "/safe-track" });
-        }
-        for (const d of rows(overdueSOPs)) {
-          items.push({ label: d.title, detail: `SOP review overdue since ${d.next_review_date}`, path: "/safe-track" });
+          items.push({ label: d.title, detail: `Risk assessment review overdue since ${d.review_date}`, path: "/safe-track" });
         }
         for (const d of rows(dueSoonRA)) {
-          items.push({ label: d.title, detail: `Risk assessment review due ${d.next_review_date}`, path: "/safe-track" });
+          items.push({ label: d.title, detail: `Risk assessment review due ${d.review_date}`, path: "/safe-track" });
         }
-        for (const d of rows(dueSoonSOPs)) {
-          items.push({ label: d.title, detail: `SOP review due ${d.next_review_date}`, path: "/safe-track" });
-        }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("safe", error));
       }
     }
 
-    tracks.push({ trackId: "safe", label: "SafeTrack", path: "/safe-track", enabled, status, badge, items });
-  }
+    return { trackId: "safe", label: "SafeTrack", path: "/safe-track", enabled, status, badge, items };
+  };
 
   // ── TrainTrack ────────────────────────────────────────────────────────────────
-  {
+  const trainTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("traintrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -999,32 +894,44 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        const expiredRows = await db.execute(sql`
-          SELECT id, staff_name, training_title, expiry_date
-          FROM train_track_records
-          WHERE client_id = ${clientId} AND expiry_date IS NOT NULL AND expiry_date < ${today} ${siteClause}
-          ORDER BY expiry_date ASC LIMIT 10
-        `);
-        const expiringSoonRows = await db.execute(sql`
-          SELECT id, staff_name, training_title, expiry_date
-          FROM train_track_records
-          WHERE client_id = ${clientId} AND expiry_date >= ${today} AND expiry_date <= ${in30} ${siteClause}
-          ORDER BY expiry_date ASC LIMIT 10
-        `);
-
-        const expiredCount = rows(expiredRows).length;
-        const expiringSoonCount = rows(expiringSoonRows).length;
+        // Internal training records carry a training type; uploaded
+        // certificates carry a document title instead.
+        const [expiredRows, expiringSoonRows, counts] = await Promise.all([
+          db.execute(sql`
+            SELECT id, staff_name, COALESCE(training_type, document_title, 'Training') AS training_title, expiry_date
+            FROM train_track_records
+            WHERE client_id = ${clientId} AND expiry_date IS NOT NULL AND expiry_date < ${today} ${siteClause}
+            ORDER BY expiry_date ASC LIMIT 10
+          `),
+          db.execute(sql`
+            SELECT id, staff_name, COALESCE(training_type, document_title, 'Training') AS training_title, expiry_date
+            FROM train_track_records
+            WHERE client_id = ${clientId} AND expiry_date >= ${today} AND expiry_date <= ${in30} ${siteClause}
+            ORDER BY expiry_date ASC LIMIT 10
+          `),
+          db.execute(sql`
+            SELECT
+              count(*)::int AS total,
+              count(*) FILTER (WHERE expiry_date < ${today})::int AS expired,
+              count(*) FILTER (WHERE expiry_date >= ${today} AND expiry_date <= ${in30})::int AS expiring
+            FROM train_track_records
+            WHERE client_id = ${clientId} ${siteClause}
+          `),
+        ]);
+        const countRow = rows(counts)[0] ?? {};
+        const expiredCount = Number(countRow.expired ?? 0);
+        const expiringSoonCount = Number(countRow.expiring ?? 0);
 
         if (expiredCount > 0) {
           status = "overdue";
-          badge = `${expiredCount} expired certificate${expiredCount > 1 ? "s" : ""}`;
+          badge = `${plural(expiredCount, "expired certificate")}`;
         } else if (expiringSoonCount > 0) {
           status = "attention";
           badge = `${expiringSoonCount} expiring soon`;
         } else {
-          const anyRows = await db.execute(sql`SELECT 1 FROM train_track_records WHERE client_id = ${clientId} ${siteClause} LIMIT 1`);
-          status = rows(anyRows).length > 0 ? "ok" : "no_data";
-          badge = rows(anyRows).length > 0 ? "All training up to date" : "No records yet";
+          const any = Number(countRow.total ?? 0) > 0;
+          status = any ? "ok" : "no_data";
+          badge = any ? "All training up to date" : "No records yet";
         }
 
         for (const r of rows(expiredRows)) {
@@ -1033,55 +940,16 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         for (const r of rows(expiringSoonRows)) {
           items.push({ label: `${r.staff_name} — ${r.training_title}`, detail: `Expires ${r.expiry_date}`, path: "/train-track" });
         }
-      } catch {
-        status = "no_data";
-        badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("train", error));
       }
     }
 
-    tracks.push({ trackId: "train", label: "TrainTrack", path: "/train-track", enabled, status, badge, items });
-  }
-
-  // ── HotTubTrack ───────────────────────────────────────────────────────────────
-  {
-    const enabled = entitled("hottubtrack");
-    const items: TrackItem[] = [];
-    let status: TrackStatus = "no_data";
-    let badge = "No records";
-
-    if (enabled) {
-      try {
-        const alerts = (await getCheckAlerts(clientId, { siteId, accessibleSiteIds }))
-          .filter(a => a.module === "hot_tub");
-        const overdue = alerts.filter(a => a.status === "overdue");
-        const planRequired = alerts.filter(a => a.status === "plan_required");
-        const dueSoon = alerts.filter(a => a.status === "due_soon");
-        const never = alerts.filter(a => a.status === "never");
-        if (overdue.length) { status = "overdue"; badge = `${overdue.length} overdue`; }
-        else if (planRequired.length) {
-          status = "attention"; badge = `${planRequired.length} site plan${planRequired.length === 1 ? "" : "s"} need review`;
-        } else if (dueSoon.length) { status = "attention"; badge = `${dueSoon.length} due soon`; }
-        else if (never.length || !alerts.length) {
-          status = "no_data"; badge = never.length ? `${never.length} checks never recorded` : "No records yet";
-        } else { status = "ok"; badge = "All checks up to date"; }
-        for (const a of [...overdue, ...planRequired, ...dueSoon, ...never].slice(0, 10)) {
-          const detail = a.status === "overdue"
-            ? `Overdue by ${Math.abs(a.daysUntilDue ?? 0)} days`
-            : a.status === "plan_required" ? "Risk assessment and written scheme need competent-person review"
-            : a.status === "never" ? "No record has been submitted"
-            : a.daysUntilDue === 0 ? "Due today" : `Due in ${a.daysUntilDue} days`;
-          items.push({ label: a.checkLabel, detail, path: "/hot-tub" });
-        }
-      } catch {
-        status = "no_data"; badge = "No records";
-      }
-    }
-
-    tracks.push({ trackId: "hot_tub", label: "HotTubTrack", path: "/hot-tub", enabled, status, badge, items });
-  }
+    return { trackId: "train", label: "TrainTrack", path: "/train-track", enabled, status, badge, items };
+  };
 
   // ── TreeTrack ─────────────────────────────────────────────────────────────────
-  {
+  const treeTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("treetrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -1091,8 +959,8 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       try {
         const siteClause = protectedSiteClause;
         const MS_DAY = 86400000;
-        const todayDays = Math.floor(Date.now() / MS_DAY);
         const toUtcDays = (iso: string) => Math.floor(Date.parse(`${iso}T00:00:00Z`) / MS_DAY);
+        const todayDays = toUtcDays(today);
 
         const FREQ: Record<string, number> = {
           visual_assessment: 365, detailed_assessment: 365,
@@ -1123,10 +991,10 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           const window = Math.max(14, Math.ceil(freqDays * 0.1));
           if (daysUntil < 0) {
             overdueCount++;
-            items.push({ label: CHECK_LABELS[ct] ?? ct, detail: `Overdue by ${Math.abs(daysUntil)} day${Math.abs(daysUntil) !== 1 ? "s" : ""}`, path: "/tree-track" });
+            items.push({ label: CHECK_LABELS[ct] ?? ct, detail: `Overdue by ${plural(Math.abs(daysUntil), "day")}`, path: "/tree-track" });
           } else if (daysUntil <= window) {
             dueSoonCount++;
-            items.push({ label: CHECK_LABELS[ct] ?? ct, detail: daysUntil === 0 ? "Due today" : `Due in ${daysUntil} day${daysUntil !== 1 ? "s" : ""}`, path: "/tree-track" });
+            items.push({ label: CHECK_LABELS[ct] ?? ct, detail: daysUntil === 0 ? "Due today" : `Due in ${plural(daysUntil, "day")}`, path: "/tree-track" });
           }
         }
 
@@ -1134,16 +1002,16 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         else if (dueSoonCount > 0) { status = "attention"; badge = `${dueSoonCount} due soon`; }
         else if (!hasAny) { status = "no_data"; badge = "No records yet"; }
         else { status = "ok"; badge = "All inspections up to date"; }
-      } catch {
-        status = "no_data"; badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("tree", error));
       }
     }
 
-    tracks.push({ trackId: "tree", label: "TreeTrack", path: "/tree-track", enabled, status, badge, items });
-  }
+    return { trackId: "tree", label: "TreeTrack", path: "/tree-track", enabled, status, badge, items };
+  };
 
   // ── BikeTrack ─────────────────────────────────────────────────────────────────
-  {
+  const bikeTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("biketrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -1151,68 +1019,83 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId != null
-          ? sql`AND b.site_id = ${siteId}`
-          : accessibleSiteIds != null ? sql`AND (b.site_id IS NULL OR b.site_id = ANY(${accessibleSiteIds}))` : sql``;
-        // Bikes currently on hire past their expected return date
-        const overdueHires = await db.execute(sql`
-          SELECT h.id, b.name AS bike_name, h.hirer_name, h.return_date_expected
-          FROM bike_hire_records h
-          JOIN bikes b ON b.id = h.bike_id
-          WHERE h.client_id = ${clientId}
-            AND h.status = 'active'
-            AND h.return_date_expected IS NOT NULL
-            AND h.return_date_expected < ${today}
-            ${siteClause}
-          ORDER BY h.return_date_expected ASC
-          LIMIT 10
-        `);
-        // Bikes with overdue service
-        const overdueService = await db.execute(sql`
-          SELECT DISTINCT b.id, b.name
-          FROM bikes b
-          JOIN LATERAL (
-            SELECT next_service_date FROM bike_service_records
-            WHERE bike_id = b.id AND client_id = b.client_id
-            ORDER BY service_date DESC LIMIT 1
-          ) s ON true
-          WHERE b.client_id = ${clientId}
-            ${siteClause}
-            AND s.next_service_date IS NOT NULL
-            AND s.next_service_date < ${today}
-          LIMIT 10
-        `);
-
-        const overdueHireCount = rows(overdueHires).length;
-        const overdueServiceCount = rows(overdueService).length;
+        const siteClause = scopedSiteClause(sql`b.site_id`);
+        const [overdueHires, overdueService, counts] = await Promise.all([
+          // Bikes currently on hire past their expected return date
+          db.execute(sql`
+            SELECT h.id, COALESCE(b.name, b.ref) AS bike_name, h.guest_name, h.return_date_expected
+            FROM bike_hire_records h
+            JOIN bikes b ON b.id = h.bike_id AND b.client_id = h.client_id
+            WHERE h.client_id = ${clientId}
+              AND h.status = 'active'
+              AND h.return_date_expected IS NOT NULL
+              AND h.return_date_expected < ${today}
+              ${siteClause}
+            ORDER BY h.return_date_expected ASC
+            LIMIT 10
+          `),
+          // Bikes whose latest service sets a next service date that has passed
+          db.execute(sql`
+            SELECT b.id, COALESCE(b.name, b.ref) AS name
+            FROM bikes b
+            JOIN LATERAL (
+              SELECT next_service_date FROM bike_services
+              WHERE bike_id = b.id AND client_id = b.client_id
+              ORDER BY service_date DESC, id DESC LIMIT 1
+            ) s ON true
+            WHERE b.client_id = ${clientId} AND b.active = true
+              ${siteClause}
+              AND s.next_service_date IS NOT NULL
+              AND s.next_service_date < ${today}
+            ORDER BY s.next_service_date ASC
+            LIMIT 10
+          `),
+          db.execute(sql`
+            SELECT
+              (SELECT count(*)::int FROM bike_hire_records h JOIN bikes b ON b.id = h.bike_id AND b.client_id = h.client_id
+                WHERE h.client_id = ${clientId} AND h.status = 'active'
+                  AND h.return_date_expected IS NOT NULL AND h.return_date_expected < ${today} ${siteClause}) AS overdue_hires,
+              (SELECT count(*)::int FROM bikes b JOIN LATERAL (
+                  SELECT next_service_date FROM bike_services
+                  WHERE bike_id = b.id AND client_id = b.client_id
+                  ORDER BY service_date DESC, id DESC LIMIT 1
+                ) s ON true
+                WHERE b.client_id = ${clientId} AND b.active = true ${siteClause}
+                  AND s.next_service_date IS NOT NULL AND s.next_service_date < ${today}) AS overdue_service,
+              (SELECT count(*)::int FROM bikes b WHERE b.client_id = ${clientId} ${siteClause}) AS bikes
+          `),
+        ]);
+        const countRow = rows(counts)[0] ?? {};
+        const overdueHireCount = Number(countRow.overdue_hires ?? 0);
+        const overdueServiceCount = Number(countRow.overdue_service ?? 0);
 
         if (overdueHireCount > 0) {
           status = "overdue";
-          badge = `${overdueHireCount} bike${overdueHireCount > 1 ? "s" : ""} not returned`;
+          badge = `${plural(overdueHireCount, "bike")} not returned`;
           for (const h of rows(overdueHires)) {
-            items.push({ label: h.bike_name ?? "Bike", detail: `${h.hirer_name ?? "Unknown"} — return overdue since ${h.return_date_expected}`, path: "/bike-track" });
+            items.push({ label: h.bike_name ?? "Bike", detail: `${h.guest_name ?? "Unknown"} — return overdue since ${h.return_date_expected}`, path: "/bike-track" });
           }
         } else if (overdueServiceCount > 0) {
           status = "attention";
-          badge = `${overdueServiceCount} bike${overdueServiceCount > 1 ? "s" : ""} overdue service`;
+          badge = `${plural(overdueServiceCount, "bike")} overdue service`;
           for (const b of rows(overdueService)) {
             items.push({ label: b.name, detail: "Service overdue", path: "/bike-track" });
           }
         } else {
-          const anyRows = await db.execute(sql`SELECT 1 FROM bikes b WHERE b.client_id = ${clientId} ${siteClause} LIMIT 1`);
-          status = rows(anyRows).length > 0 ? "ok" : "no_data";
-          badge = rows(anyRows).length > 0 ? "No bikes overdue" : "No bikes registered";
+          const any = Number(countRow.bikes ?? 0) > 0;
+          status = any ? "ok" : "no_data";
+          badge = any ? "No bikes overdue" : "No bikes registered";
         }
-      } catch {
-        status = "no_data"; badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("bike", error));
       }
     }
 
-    tracks.push({ trackId: "bike", label: "BikeTrack", path: "/bike-track", enabled, status, badge, items });
-  }
+    return { trackId: "bike", label: "BikeTrack", path: "/bike-track", enabled, status, badge, items };
+  };
 
   // ── GreenTrack ────────────────────────────────────────────────────────────────
-  {
+  const greenTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("greentrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -1220,50 +1103,49 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId != null
-          ? sql`AND m.site_id = ${siteId}`
-          : accessibleSiteIds != null ? sql`AND (m.site_id IS NULL OR m.site_id = ANY(${accessibleSiteIds}))` : sql``;
-        // Machines with no pre-use check today
-        const machines = await db.execute(sql`
-          SELECT m.id, m.name, m.type FROM green_machines m
-          WHERE m.client_id = ${clientId} AND m.active = true ${siteClause}
-          ORDER BY m.name
-        `);
-        const checkedTodayRows = await db.execute(sql`
-          SELECT DISTINCT c.machine_id FROM green_pre_use_checks c
-          JOIN green_machines m ON m.id = c.machine_id
-          WHERE c.client_id = ${clientId} AND c.check_date = ${today} ${siteClause}
-        `);
-        const checkedTodayIds = new Set(rows(checkedTodayRows).map((r: any) => r.machine_id));
-        const uncheckedToday = rows(machines).filter((m: any) => !checkedTodayIds.has(m.id));
-
-        // Machines with overdue service
-        const overdueService = await db.execute(sql`
-          SELECT DISTINCT m.id, m.name
+        const siteClause = scopedSiteClause(sql`m.site_id`);
+        const overdueServiceFrom = sql`
           FROM green_machines m
           JOIN LATERAL (
             SELECT next_service_date FROM green_service_records
             WHERE machine_id = m.id AND client_id = m.client_id
-            ORDER BY service_date DESC LIMIT 1
+            ORDER BY service_date DESC, id DESC LIMIT 1
           ) s ON true
           WHERE m.client_id = ${clientId} AND m.active = true ${siteClause}
             AND s.next_service_date IS NOT NULL AND s.next_service_date < ${today}
-          LIMIT 10
-        `);
+        `;
+        const [machines, checkedTodayRows, overdueService, overdueServiceCountRows] = await Promise.all([
+          // Machines with no pre-use check today
+          db.execute(sql`
+            SELECT m.id, m.name, m.type FROM green_machines m
+            WHERE m.client_id = ${clientId} AND m.active = true ${siteClause}
+            ORDER BY m.name
+          `),
+          db.execute(sql`
+            SELECT DISTINCT c.machine_id FROM green_pre_use_checks c
+            JOIN green_machines m ON m.id = c.machine_id
+            WHERE c.client_id = ${clientId} AND c.check_date = ${today} ${siteClause}
+          `),
+          // Machines with overdue service
+          db.execute(sql`SELECT m.id, m.name ${overdueServiceFrom} ORDER BY s.next_service_date ASC LIMIT 10`),
+          db.execute(sql`SELECT count(*)::int AS overdue ${overdueServiceFrom}`),
+        ]);
+        const checkedTodayIds = new Set(rows(checkedTodayRows).map((r: any) => r.machine_id));
+        const uncheckedToday = rows(machines).filter((m: any) => !checkedTodayIds.has(m.id));
 
-        const overdueServiceCount = rows(overdueService).length;
+        const overdueServiceCount = Number(rows(overdueServiceCountRows)[0]?.overdue ?? 0);
         const uncheckedCount = uncheckedToday.length;
         const totalMachines = rows(machines).length;
 
         if (overdueServiceCount > 0) {
           status = "overdue";
-          badge = `${overdueServiceCount} machine${overdueServiceCount > 1 ? "s" : ""} service overdue`;
+          badge = `${plural(overdueServiceCount, "machine")} service overdue`;
           for (const m of rows(overdueService)) {
             items.push({ label: m.name, detail: "Service overdue", path: "/green-track" });
           }
         } else if (uncheckedCount > 0 && totalMachines > 0) {
           status = "attention";
-          badge = `${uncheckedCount} machine${uncheckedCount > 1 ? "s" : ""} not checked today`;
+          badge = `${plural(uncheckedCount, "machine")} not checked today`;
           for (const m of uncheckedToday.slice(0, 10)) {
             items.push({ label: m.name, detail: `${m.type ?? "Machine"} — no pre-use check today`, path: "/green-track" });
           }
@@ -1272,16 +1154,16 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         } else {
           status = "ok"; badge = "All machines checked";
         }
-      } catch {
-        status = "no_data"; badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("green", error));
       }
     }
 
-    tracks.push({ trackId: "green", label: "GreenTrack", path: "/green-track", enabled, status, badge, items });
-  }
+    return { trackId: "green", label: "GreenTrack", path: "/green-track", enabled, status, badge, items };
+  };
 
-  // ── SwimTrack ─────────────────────────────────────────────────────────────────
-  {
+  // ── AquaTrack swim safety (legacy SwimTrack) ─────────────────────────────────────────────────────────────────
+  const swimTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("swimtrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -1290,21 +1172,20 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        // Check if there's a swim session logged today
-        const todaySessions = await db.execute(sql`
-          SELECT id, session_type, lifeguard_name, site_id
-          FROM swim_sessions
-          WHERE client_id = ${clientId} AND session_date = ${today} ${siteClause}
-          ORDER BY id DESC LIMIT 10
-        `);
-        const sessionCount = rows(todaySessions).length;
-
-        // Surveillance checks today
-        const todaySurveillance = await db.execute(sql`
-          SELECT COUNT(*) AS cnt FROM swim_surveillance_checks
-          WHERE client_id = ${clientId} AND check_date = ${today} ${siteClause}
-        `);
-        const surveillanceCount = Number((rows(todaySurveillance)[0] as any)?.cnt ?? 0);
+        const [todaySessions, todaySurveillance] = await Promise.all([
+          // Swim sessions logged today
+          db.execute(sql`
+            SELECT COUNT(*)::int AS cnt FROM swim_sessions
+            WHERE client_id = ${clientId} AND session_date = ${today} ${siteClause}
+          `),
+          // Surveillance checks today
+          db.execute(sql`
+            SELECT COUNT(*)::int AS cnt FROM swim_surveillance_checks
+            WHERE client_id = ${clientId} AND check_date = ${today} ${siteClause}
+          `),
+        ]);
+        const sessionCount = Number(rows(todaySessions)[0]?.cnt ?? 0);
+        const surveillanceCount = Number(rows(todaySurveillance)[0]?.cnt ?? 0);
 
         if (sessionCount === 0) {
           // Check if there were any historical records
@@ -1316,21 +1197,21 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             items.push({ label: "No session today", detail: "No swimming session has been recorded for today", path: "/swim-track" });
           }
         } else if (surveillanceCount === 0) {
-          status = "attention"; badge = `${sessionCount} session${sessionCount > 1 ? "s" : ""} — no surveillance checks`;
+          status = "attention"; badge = `${plural(sessionCount, "session")} — no surveillance checks`;
           items.push({ label: "Surveillance checks missing", detail: "Session logged but no surveillance checks recorded", path: "/swim-track" });
         } else {
-          status = "ok"; badge = `${sessionCount} session${sessionCount > 1 ? "s" : ""} logged`;
+          status = "ok"; badge = `${plural(sessionCount, "session")} logged`;
         }
-      } catch {
-        status = "no_data"; badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("swim", error));
       }
     }
 
-    tracks.push({ trackId: "swim", label: "SwimTrack", path: "/swim-track", enabled, status, badge, items });
-  }
+    return { trackId: "swim", label: "AquaTrack sessions", path: "/swim-track", enabled, status, badge, items };
+  };
 
   // ── IncidentTrack ─────────────────────────────────────────────────────────────
-  {
+  const incidentTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("incidenttrack");
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -1356,26 +1237,54 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
         if (riddorOutstanding > 0) {
           status = "overdue";
-          badge = `${riddorOutstanding} RIDDOR report${riddorOutstanding > 1 ? "s" : ""} outstanding`;
-          items.push({ label: "RIDDOR reporting outstanding", detail: `${riddorOutstanding} incident${riddorOutstanding > 1 ? "s" : ""} require HSE notification`, path: "/incidents" });
+          badge = `${plural(riddorOutstanding, "RIDDOR report")} outstanding`;
+          items.push({ label: "RIDDOR reporting outstanding", detail: `${plural(riddorOutstanding, "incident")} require HSE notification`, path: "/incidents" });
         } else if (openCount > 0 || investigatingCount > 0) {
           const count = openCount + investigatingCount;
           status = "attention";
-          badge = `${count} open incident${count > 1 ? "s" : ""}`;
-          if (openCount > 0) items.push({ label: `${openCount} open incident${openCount > 1 ? "s" : ""}`, detail: "Awaiting action", path: "/incidents" });
+          badge = `${plural(count, "open incident")}`;
+          if (openCount > 0) items.push({ label: `${plural(openCount, "open incident")}`, detail: "Awaiting action", path: "/incidents" });
           if (investigatingCount > 0) items.push({ label: `${investigatingCount} under investigation`, detail: "Investigation in progress", path: "/incidents" });
         } else if (total === 0) {
           status = "no_data"; badge = "No records yet";
         } else {
           status = "ok"; badge = "No open incidents";
         }
-      } catch {
-        status = "no_data"; badge = "No records";
+      } catch (error) {
+        ({ status, badge } = unavailable("incident", error));
       }
     }
 
-    tracks.push({ trackId: "incident", label: "IncidentTrack", path: "/incidents", enabled, status, badge, items });
-  }
+    return { trackId: "incident", label: "IncidentTrack", path: "/incidents", enabled, status, badge, items };
+  };
+
+  // Independent tracks load in parallel; the order here is the response order.
+  const tracks: TrackDraft[] = await Promise.all([
+    dailyTrack("am"),
+    dailyTrack("pm"),
+    kitchenTrack(),
+    checkAlertTrack({ trackId: "fire", module: "fire", label: "FireTrack", path: "/fire-safety",
+      enabled: entitled("firetrack"), daysDetail: true }),
+    checkAlertTrack({ trackId: "legionella", module: "legionella", label: "LegionellaTrack", path: "/legionella",
+      enabled: entitled("legionellatrack"), daysDetail: true }),
+    checkAlertTrack({ trackId: "pool", module: "pool", label: "AquaTrack water quality", path: "/aqua-track",
+      enabled: entitled("pooltrack"), daysDetail: false }),
+    patTrack(),
+    pestTrack(),
+    fixTrack(),
+    premisesTrack(),
+    roomTrack(),
+    docTrack(),
+    safeTrack(),
+    trainTrack(),
+    checkAlertTrack({ trackId: "hot_tub", module: "hot_tub", label: "TubTrack", path: "/hot-tub",
+      enabled: entitled("hottubtrack"), daysDetail: true }),
+    treeTrack(),
+    bikeTrack(),
+    greenTrack(),
+    swimTrack(),
+    incidentTrack(),
+  ]);
 
   // Actions are deliberately read-only here. During the transition to the
   // shared action table it may not exist yet, so a missing table must not
@@ -1387,12 +1296,13 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       FROM track_actions
       WHERE client_id = ${clientId}
         AND COALESCE(status, 'open') NOT IN ('resolved', 'closed', 'completed', 'cancelled')
-        ${siteId != null ? sql`AND (site_id IS NULL OR site_id = ${siteId})` : accessibleSiteIds != null ? sql`AND (site_id IS NULL OR site_id = ANY(${accessibleSiteIds}))` : sql``}
+        ${siteId != null ? sql`AND (site_id IS NULL OR site_id = ${siteId})` : accessClause(sql`site_id`)}
       ORDER BY due_date ASC NULLS LAST
     `);
     openActions = rows(actionRows);
-  } catch {
+  } catch (error) {
     // track_actions is introduced independently of this endpoint.
+    req.log.warn({ err: error }, "Unable to load open track actions for the dashboard");
   }
 
   const aliases: Record<string, string[]> = {
@@ -1439,6 +1349,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   // Surface the current result for result-based tracks as an actionable item.
   // DISTINCT ON ensures an old failed check does not remain red after a newer
   // passing check of the same type at the same site.
+  const machineSiteClause = scopedSiteClause(sql`m.site_id`);
   const failedResultQueries: Array<{
     trackId: string;
     path: string;
@@ -1497,7 +1408,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         FROM green_pre_use_checks c
         JOIN green_machines m ON m.id = c.machine_id
         WHERE c.client_id = ${clientId}
-          ${siteId != null ? sql`AND m.site_id = ${siteId}` : accessibleSiteIds != null ? sql`AND (m.site_id IS NULL OR m.site_id = ANY(${accessibleSiteIds}))` : sql``}
+          ${machineSiteClause}
         ORDER BY c.machine_id, c.check_date DESC, c.id DESC
       `,
     },
@@ -1509,7 +1420,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         FROM green_puwer_inspections p
         JOIN green_machines m ON m.id = p.machine_id
         WHERE p.client_id = ${clientId}
-          ${siteId != null ? sql`AND m.site_id = ${siteId}` : accessibleSiteIds != null ? sql`AND (m.site_id IS NULL OR m.site_id = ANY(${accessibleSiteIds}))` : sql``}
+          ${machineSiteClause}
         ORDER BY p.machine_id, p.inspection_date DESC, p.id DESC
       `,
     },
@@ -1541,34 +1452,41 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       `,
     },
   ];
-  for (const resultQuery of failedResultQueries) {
+  const resultSets = await Promise.all(failedResultQueries.map(async (resultQuery) => {
+    if (!tracks.some((track) => track.trackId === resultQuery.trackId && track.enabled)) return [];
     try {
-      const resultRows = rows(await db.execute(resultQuery.query));
-      const track = tracks.find((candidate) => candidate.trackId === resultQuery.trackId);
-      if (!track) continue;
-      for (const result of resultRows) {
-        const failedResult = /fail|action.?required|urgent|out.?of.?range|unsafe|non.?compliant/i.test(
-          String(result.result ?? ""),
-        );
-        if (!failedResult) continue;
-        actionRequiredTrackIds.add(track.trackId);
-        if (track.status !== "overdue") {
-          track.status = "attention";
-          track.badge = "Action required";
-        }
-        track.items.unshift({
-          label: `${String(result.check_type ?? "Check").replace(/_/g, " ")} result requires action`,
-          detail: `${result.result || "Action required"}${result.location ? ` — ${result.location}` : ""}${result.date ? ` (${result.date})` : ""}`,
-          path: resultQuery.path,
-        });
-      }
-    } catch {
+      return rows(await db.execute(resultQuery.query));
+    } catch (error) {
       // Older schemas can lack a result column; dashboard availability wins.
+      req.log.warn({ err: error, trackId: resultQuery.trackId }, "Unable to load latest results for a dashboard track");
+      return [];
     }
-  }
+  }));
+  failedResultQueries.forEach((resultQuery, index) => {
+    const track = tracks.find((candidate) => candidate.trackId === resultQuery.trackId);
+    if (!track) return;
+    for (const result of resultSets[index]!) {
+      const failedResult = /fail|action.?required|urgent|out.?of.?range|unsafe|non.?compliant/i.test(
+        String(result.result ?? ""),
+      );
+      if (!failedResult) continue;
+      actionRequiredTrackIds.add(track.trackId);
+      if (track.status !== "overdue") {
+        track.status = "attention";
+        track.badge = "Action required";
+      }
+      track.items.unshift({
+        label: `${String(result.check_type ?? "Check").replace(/_/g, " ")} result requires action`,
+        detail: `${result.result || "Action required"}${result.location ? ` — ${result.location}` : ""}${result.date ? ` (${result.date})` : ""}`,
+        path: resultQuery.path,
+      });
+    }
+  });
 
   // A red state means a user must act now. Amber future reminders remain
   // visible through their existing badge but do not turn the module red.
+  // A track with nothing recorded and nothing overdue is "not started": a
+  // neutral state, so a new business does not see every module as failing.
   const summaries: TrackSummary[] = tracks.map((track) => {
     const dueNow = track.items.some((item) => /due today/i.test(item.detail));
     const futureReminderOnly =
@@ -1579,16 +1497,29 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         /^due soon$|due in|review due|next test due|expires \d{4}-\d{2}-\d{2}/i.test(item.detail),
       ) &&
       !dueNow;
-    const health: TrackSummary["health"] =
-      track.enabled &&
-      (track.status === "overdue" ||
-        track.status === "no_data" ||
+    const health: TrackSummary["health"] = !track.enabled
+      ? "clear"
+      : track.status === "overdue" ||
+        unavailableTrackIds.has(track.trackId) ||
         actionRequiredTrackIds.has(track.trackId) ||
-        (track.status === "attention" && !futureReminderOnly))
-        ? "action_required"
-        : "clear";
+        (track.status === "attention" && !futureReminderOnly)
+      ? "action_required"
+      : track.status === "no_data"
+      ? "not_started"
+      : "clear";
     return { ...track, health };
   });
+
+  // Modules the business did not pick in setup move to "Other modules" while
+  // they are not started; once used or needing action they stay in the list.
+  const picked = new Set(await getPickedModules(clientId).catch(() => [] as string[]));
+  if (picked.size > 0) {
+    for (const summary of summaries) {
+      const keys = TRACK_PICK_KEYS[summary.trackId];
+      summary.otherModule = summary.enabled && summary.health === "not_started"
+        && !!keys && !keys.some((key) => picked.has(key));
+    }
+  }
 
   res.json({ tracks: summaries, checklistTotals });
 });

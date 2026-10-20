@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { apiFetch } from "@/lib/api";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useListSites } from "@workspace/api-client-react";
@@ -207,7 +208,7 @@ export default function RoomTrackPage() {
       <div className="space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-sm border border-sky-200 bg-sky-50"><BedDouble className="h-4 w-4 text-sky-700" /></div><div><h1 className="text-lg font-semibold">RoomTrack</h1><p className="text-xs text-muted-foreground">Daily room housekeeping checks</p></div></div>
-          {canAdmin && <Button size="sm" className="gap-1.5 rounded-sm" onClick={() => { setEditingRoom(null); setDialogOpen(true); }}><Plus className="h-3.5 w-3.5" />Add room</Button>}
+          <div className="flex flex-wrap gap-2"><ImportCsvButton type="room-track-rooms" onImported={load} className="rounded-sm" />{canAdmin && <Button size="sm" className="gap-1.5 rounded-sm" onClick={() => { setEditingRoom(null); setDialogOpen(true); }}><Plus className="h-3.5 w-3.5" />Add room</Button>}</div>
         </div>
         <p className="rounded-sm border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs text-sky-900">Clean, Tidy and To standard are all housekeeping outcomes. Use notes to capture anything needing attention.</p>
         <Card className="grid gap-3 rounded-sm p-4 sm:grid-cols-[minmax(140px,1fr)_minmax(180px,1fr)_auto]">

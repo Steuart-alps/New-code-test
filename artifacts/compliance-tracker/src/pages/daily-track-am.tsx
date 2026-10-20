@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
+import { format } from "date-fns";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+import { ChecklistItemRow } from "@/components/checklist-item-row";
+import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
+import { fetchMobileChecklistSubmission, MobileChecklistSubmissionCard, type MobileChecklistSubmission } from "@/components/mobile-checklist-submission-card";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -11,12 +16,12 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckSquare, Square, Sunrise, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, Settings2 } from "lucide-react";
+import { Sunrise, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, Settings2 } from "lucide-react";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface ChecklistItem { label: string; checked: boolean; notes?: string; section?: string; }
+interface ChecklistItem { label: string; checked: boolean; notes?: string; section?: string; result?: ChecklistResult; }
 
 interface Checklist {
   id: number;
@@ -145,7 +150,7 @@ const CHECKLIST_LABELS: Record<string, string> = {
 
 // ── Checklist card ────────────────────────────────────────────────────────────
 
-function ChecklistCard({
+export function ChecklistCard({
   type, siteId, siteName, date, existing, onSaved, canAdmin,
 }: {
   type: string;
@@ -181,6 +186,7 @@ function ChecklistCard({
     : (TEMPLATES[type] ?? []);
 
   const { user } = useAuth();
+  const { toast } = useToast();
   const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? effectiveDefault);
   const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
   const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
@@ -194,10 +200,8 @@ function ChecklistCard({
     setManagerNote(existing?.managerNote ?? "");
   }, [existing, type, templateItems]);
 
-  const toggle = (i: number) => {
-    if (submitted) return;
-    setItems(prev => prev.map((item, idx) => idx === i ? { ...item, checked: !item.checked } : item));
-  };
+  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
+  const passRemaining = () => { if (submitted) return; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
 
   const setNote = (i: number, note: string) => {
     if (submitted) return;
@@ -211,17 +215,27 @@ function ChecklistCard({
        items, completedBy: completedBy || null, staffRosterId, managerNote: managerNote || null,
     };
     if (submit) payload.submittedAt = new Date().toISOString();
+    const failedTitle = submit ? "Checklist not submitted" : "Draft not saved";
     try {
-      if (existing) {
-        await apiFetch(`/daily-track-am/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) });
-      } else {
-        await apiFetch(`/daily-track-am`, { method: "POST", body: JSON.stringify(payload) });
+      const res = existing
+        ? await apiFetch(`/daily-track-am/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(`/daily-track-am`, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) {
+        // Keep the user's ticks; only a 409 (already submitted elsewhere)
+        // reloads, to show the stored submitted copy.
+        toast({ title: failedTitle, description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        if (res.status === 409) onSaved();
+        return;
       }
+      toast({ title: submit ? "Checklist submitted" : "Draft saved" });
       onSaved();
+    } catch {
+      toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
-  const checkedCount = items.filter(i => i.checked).length;
+  const progress = checklistProgress(items);
+  const hint = submitHint(progress);
   const Icon = type === "kitchen_opening" ? UtensilsCrossed : Building2;
 
   return (
@@ -238,10 +252,10 @@ function ChecklistCard({
                 <Settings2 className="w-3.5 h-3.5" />
               </Button>
             )}
-            <span className="text-xs text-muted-foreground">{checkedCount}/{items.length}</span>
+            <span className="text-xs text-muted-foreground">{progress.answered}/{items.length}{progress.failed > 0 && <span className="text-red-600 font-medium"> · {progress.failed} failed</span>}</span>
             {submitted
               ? <Badge className="bg-emerald-100 text-emerald-800 text-xs"><Lock className="w-3 h-3 mr-1" />Submitted</Badge>
-              : checkedCount === items.length && items.length > 0
+              : progress.ready
               ? <Badge className="bg-blue-100 text-blue-800 text-xs">Ready to submit</Badge>
               : <Badge variant="secondary" className="text-xs">In progress</Badge>}
           </div>
@@ -260,26 +274,7 @@ function ChecklistCard({
                     {item.section}
                   </p>
                 )}
-                <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
-                  <div className="flex items-start gap-3" onClick={() => toggle(i)}>
-                    {item.checked
-                      ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
-                      : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
-                    <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
-                  </div>
-                  {!submitted && item.checked && (
-                    <div className="mt-2 ml-7">
-                      <Input
-                        value={item.notes ?? ""}
-                        onChange={e => setNote(i, e.target.value)}
-                        placeholder="Optional note…"
-                        className="h-7 text-xs bg-white"
-                        onClick={e => e.stopPropagation()}
-                      />
-                    </div>
-                  )}
-                  {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
-                </div>
+                <ChecklistItemRow item={item} submitted={submitted} onResult={result => setResult(i, result)} onNote={note => setNote(i, note)} />
               </div>
             ))}
           </div>
@@ -298,11 +293,15 @@ function ChecklistCard({
                 </div>
               )}
             </div>
+            {progress.remaining > 0 && progress.answered > 0 && (
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={passRemaining}>Mark the {progress.remaining} remaining as Pass</Button>
+            )}
+            {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}
               </Button>
-              <Button size="sm" onClick={() => save(true)} disabled={saving || checkedCount === 0} className="flex-1">
+              <Button size="sm" onClick={() => save(true)} disabled={saving || !progress.ready} className="flex-1">
                 Submit checklist
               </Button>
             </div>
@@ -349,11 +348,12 @@ export default function DailyTrackAmPage() {
   const canAdmin = useCanAdmin();
   const { data: sites = [] } = useListSites();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = format(new Date(), "yyyy-MM-dd");
   const _qs = new URLSearchParams(window.location.search);
   const [date, setDate] = useState(_qs.get("date") ?? today);
   const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
   const [checklists, setChecklists] = useState<Checklist[]>([]);
+  const [mobileSubmission, setMobileSubmission] = useState<MobileChecklistSubmission | null>(null);
   const [loading, setLoading] = useState(false);
 
   const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
@@ -368,14 +368,20 @@ export default function DailyTrackAmPage() {
     setLoading(true);
     const params = new URLSearchParams({ date });
     if (selectedSiteId) params.set("siteId", String(selectedSiteId));
-    const r = await apiFetch(`/daily-track-am?${params}`);
+    const [r, mobile] = await Promise.all([
+      apiFetch(`/daily-track-am?${params}`),
+      hasStandaloneDailyTrack ? fetchMobileChecklistSubmission(selectedSiteId, date, "am") : Promise.resolve(null),
+    ]);
     if (r.ok) setChecklists(await r.json());
+    setMobileSubmission(mobile);
     setLoading(false);
-  }, [date, selectedSiteId, activeClientId]);
+  }, [date, selectedSiteId, activeClientId, hasStandaloneDailyTrack]);
 
   useEffect(() => { load(); }, [load]);
 
-  const getChecklist = (type: string) => checklists.find(c => c.checklistType === type);
+  // Without a site filter the list holds every site's rows; match the card's
+  // own slot so it never edits another site's checklist.
+  const getChecklist = (type: string) => checklists.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
 
   return (
     <AppLayout title="DailyTrack AM">
@@ -414,6 +420,7 @@ export default function DailyTrackAmPage() {
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {mobileSubmission && <MobileChecklistSubmissionCard submission={mobileSubmission} />}
           {visibleTypes.map(type => (
             <ChecklistCard
               key={type}

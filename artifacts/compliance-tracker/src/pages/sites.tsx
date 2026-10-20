@@ -23,7 +23,13 @@ interface Department {
   id: number;
   name: string;
   clientId: number;
+  siteId?: number | null;
 }
+
+// A site can be given to one department: one that spans every site, or one
+// of its own (a department under another site never sees this one).
+const departmentsFor = (departments: Department[], siteId: number | null) =>
+  departments.filter(d => d.siteId == null || d.siteId === siteId);
 
 interface FormState {
   name: string;
@@ -33,7 +39,7 @@ interface FormState {
   seedStarterChecks: boolean;
   departmentId: number | null;
 }
-const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: true, departmentId: null };
+const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: false, departmentId: null };
 
 export default function SitesPage() {
   const { data: sites = [], isLoading } = useListSites();
@@ -180,7 +186,7 @@ export default function SitesPage() {
                         <SelectItem value={NO_DEPT} className="text-xs text-muted-foreground">
                           All departments
                         </SelectItem>
-                        {departments.map(d => (
+                        {departmentsFor(departments, site.id).map(d => (
                           <SelectItem key={d.id} value={d.id.toString()} className="text-xs">
                             {d.name}
                           </SelectItem>
@@ -235,7 +241,7 @@ export default function SitesPage() {
               <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 0161 496 1234" />
             </div>
 
-            {departments.length > 0 && (
+            {departmentsFor(departments, editingId).length > 0 && (
               <div className="space-y-1.5">
                 <Label>Department</Label>
                 <Select
@@ -247,7 +253,7 @@ export default function SitesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NO_DEPT}>All departments</SelectItem>
-                    {departments.map(d => (
+                    {departmentsFor(departments, editingId).map(d => (
                       <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -264,9 +270,9 @@ export default function SitesPage() {
                   onChange={e => setForm({ ...form, seedStarterChecks: e.target.checked })}
                 />
                 <span className="text-sm">
-                  <span className="font-medium">Pre-populate with starter compliance checks</span>
+                  <span className="font-medium">Add starter compliance checks to this site</span>
                   <span className="block text-xs text-muted-foreground mt-0.5">
-                    Adds the standard Fire Safety, Electrical, Staff Training and Premises checks to this site. You can edit or remove any of them afterwards.
+                    Adds example gas, fire, electrical, lifting equipment (LOLER), legionella, asbestos, pressure system, air conditioning and insurance checks, without due dates. Starter checks your business already has that aren't assigned to a site are moved to this site instead of copied. Set each due date from your last service and remove any that don't apply.
                   </span>
                 </span>
               </label>

@@ -1,0 +1,55 @@
+name: Home page module cards
+
+# Path-filtered so it only spends CI minutes when the public home page or the
+# sign-up plan it hands over changes.
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/pages/landing.tsx"
+      - "artifacts/compliance-tracker/src/lib/signup-plan.ts"
+      - "artifacts/compliance-tracker/src/lib/addon-catalog.ts"
+      - "artifacts/compliance-tracker/tests/landing-modules-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/landing-modules-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/pages/landing.tsx"
+      - "artifacts/compliance-tracker/src/lib/signup-plan.ts"
+      - "artifacts/compliance-tracker/src/lib/addon-catalog.ts"
+      - "artifacts/compliance-tracker/tests/landing-modules-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/landing-modules-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  landing-modules:
+    name: Home page module cards open the pricing builder
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run home page module card checks
+        run: pnpm --filter @workspace/compliance-tracker run test:landing-modules-browser

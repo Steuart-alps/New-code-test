@@ -97,10 +97,17 @@ const stubs = {
   `,
   drizzle: `
     export const eq = (left, right) => ({ left, right });
+    // offboarding.ts (imported through billing.ts) needs these at bundle time.
+    export const and = (...conditions) => ({ and: conditions });
+    export const isNull = (column) => ({ isNull: column });
+    export const isNotNull = (column) => ({ isNotNull: column });
+    export const inArray = (column, values) => ({ column, values });
+    export const lt = (left, right) => ({ lt: [left, right] });
     export const sql = (strings, ...values) => ({
       text: strings.reduce((text, part, index) => text + part + (index < values.length ? "?" : ""), ""),
       values,
     });
+    sql.raw = (text) => ({ text, values: [] });
   `,
   db: `
     const state = globalThis.__billingAddonCatalogState;
@@ -181,6 +188,7 @@ const stubs = {
     export const requireRole = (..._roles) => (_req, _res, next) => next();
     export const requireClientAdmin = (_req, _res, next) => next();
     export const denyViewers = (_req, _res, next) => next();
+    export const requirePlatformOperator = (_req, _res, next) => next();
   `,
   trialLock: `
     export const invalidateTrialLock = () => {};
@@ -193,6 +201,7 @@ const stubs = {
     export const hashDiscountCode = (value) => value;
     export const issueClientDiscountCode = async () => ({});
     export const normaliseAlpsDiscountCode = (value) => value;
+    export const redeemAlpsDiscountOnSubscription = async () => ({});
     export const releaseAlpsDiscountReservation = async () => {};
     export const reserveAlpsDiscount = async () => null;
     export const verifyClientDiscountCode = async () => false;
@@ -397,6 +406,15 @@ try {
     assert.equal(response.status, 400, `${forbidden} must not be accepted as a self-service add-on`);
     assert.equal(state.calls, before, "rejected service keys must not touch fake Stripe");
   }
+
+  // Every module is live: none is marked "Coming soon", so each one, GreenTrack
+  // included, must be purchasable through the loop below.
+  assert.deepEqual(
+    config.data.services.catalog.filter(({ comingSoon: soon }) => soon === true).map(({ key }) => key),
+    [],
+    "GET /billing/config must not mark any live service as coming soon",
+  );
+  assert.ok(fixtures.some(({ key }) => key === "greentrack"), "GreenTrack must be a purchasable add-on");
 
   for (const fixture of fixtures) {
     state.subscription = makeSubscription();

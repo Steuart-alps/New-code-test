@@ -175,5 +175,6 @@ test("the audit is read-only towards Stripe, prices, subscriptions and charges",
     assert.equal(write[2], "service_price_audit_state", `unexpected write: ${write[0]}`);
   }
   const startup = await readFile(path.join(apiDir, "src/index.ts"), "utf8");
-  assert.match(startup, /cron\.schedule\(SERVICE_PRICE_AUDIT_CRON, \(\) => runScheduledServicePriceAudit\(\)\)/);
+  // Registered through index.ts's monitored schedule() helper, with no arguments.
+  assert.match(startup, /schedule\(SERVICE_PRICE_AUDIT_CRON, "service-price-audit", \(\) => runScheduledServicePriceAudit\(\)\)/);
 });
