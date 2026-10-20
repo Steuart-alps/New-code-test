@@ -303,6 +303,54 @@ export interface UpdateSiteRequest {
   phone?: string | null;
 }
 
+export type ContractorVisitTypeDueFrom = typeof ContractorVisitTypeDueFrom[keyof typeof ContractorVisitTypeDueFrom];
+
+
+export const ContractorVisitTypeDueFrom = {
+  track: 'track',
+  later: 'later',
+  check: 'check',
+} as const;
+
+export interface ContractorVisitType {
+  key: string;
+  module: string;
+  trackLabel: string;
+  /** Title of the linked compliance check */
+  title: string;
+  label: string;
+  description: string;
+  dueFrom: ContractorVisitTypeDueFrom;
+}
+
+export interface ContractorVisit {
+  visitKey: string;
+  siteId: number;
+  siteName: string;
+  trackDueDate: string | null;
+  checkId: number | null;
+  /** Null for a business-wide check at a one-site business */
+  checkSiteId: number | null;
+  dueDate: string | null;
+  status: string | null;
+  contractorId: number | null;
+  contractorName: string | null;
+  reminderSentAt: string | null;
+}
+
+export interface ContractorVisitsResponse {
+  types: ContractorVisitType[];
+  visits: ContractorVisit[];
+}
+
+export interface SetContractorVisitRequest {
+  visitKey: string;
+  siteId: number;
+  contractorId: number | null;
+  /** Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet) */
+  dueDate?: string | null;
+}
+
 export interface Contractor {
   id: number;
   name: string;
@@ -1932,6 +1980,8 @@ export interface PremisesInspection {
   createdBy?: number | null;
   createdAt?: string;
   updatedAt?: string;
+  /** True when a later inspection of the same type and area at the same site exists, so this one's next inspection date no longer applies. Returned by the list. */
+  superseded?: boolean;
 }
 
 export interface CreatePremisesInspectionRequest {

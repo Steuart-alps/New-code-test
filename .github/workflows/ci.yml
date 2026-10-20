@@ -297,6 +297,12 @@ jobs:
       - name: FireTrack and Water Safety contractor jobs kept in step with ComplyTrack tasks (production schema base)
         run: pnpm --filter @workspace/api-server run test:track-task-links
 
+      - name: PestTrack, PremisesTrack and GreenTrack due dates and the contractor reminder lead time (production schema base)
+        run: pnpm --filter @workspace/api-server run test:track-due-dates
+
+      - name: Contractor visits on every track reach the contractor reminder (production schema base)
+        run: pnpm --filter @workspace/api-server run test:contractor-visits
+
       # KitchenTrack numeric controls: the shared rule model and country
       # presets, then hold-time boundaries, retries and the corrective-action
       # follow-up, each on its own fresh database.

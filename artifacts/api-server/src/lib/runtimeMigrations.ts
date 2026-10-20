@@ -2624,9 +2624,10 @@ async function migrateTrackActions() {
 
 
 // Findings that are not a pass/fail result still need an action on their
-// track: a premises inspection that records action required, and any pest
-// sighting not already resolved. Keyed by source row, so an update never
-// adds a second action. Whether the work goes to FixTrack is the user's call.
+// track: a premises inspection that records action required, any pest
+// sighting not already resolved, and a pest contractor's visit
+// recommendations. Keyed by source row, so an update never adds a second
+// action. Whether the work goes to FixTrack is the user's call.
 async function migrateTrackActionsForFindings() {
   await db.execute(sql`
     CREATE OR REPLACE FUNCTION raise_track_action_for_finding()
@@ -2666,6 +2667,17 @@ async function migrateTrackActionsForFindings() {
         IF lower(NEW.severity) IN ('high', 'critical', 'severe') THEN
           action_severity := 'urgent';
         END IF;
+      ELSIF TG_TABLE_NAME = 'pest_visits' THEN
+        IF nullif(trim(coalesce(NEW.recommendations, '')), '') IS NULL THEN
+          RETURN NEW;
+        END IF;
+        action_module := 'pest';
+        action_title := 'Pest control visit recommendations';
+        action_instruction := concat_ws(E'\n',
+          'Visit on ' || NEW.visit_date::text
+            || coalesce(' by ' || nullif(trim(concat_ws(', ', nullif(trim(NEW.contractor_name), ''), nullif(trim(NEW.contractor_company), ''))), ''), '') || '.',
+          'Recommendations: ' || trim(NEW.recommendations),
+          'Findings: ' || nullif(trim(NEW.findings), ''));
       ELSE
         RETURN NEW;
       END IF;
@@ -2698,6 +2710,14 @@ async function migrateTrackActionsForFindings() {
   await db.execute(sql`
     CREATE TRIGGER raise_track_action_for_finding
     AFTER INSERT ON "pest_activity"
+    FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
+  `);
+  // Only visits saved from now on: older recommendations are not turned into
+  // a batch of new actions.
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_track_action_for_finding ON "pest_visits"`);
+  await db.execute(sql`
+    CREATE TRIGGER raise_track_action_for_finding
+    AFTER INSERT OR UPDATE OF recommendations ON "pest_visits"
     FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
   `);
 }

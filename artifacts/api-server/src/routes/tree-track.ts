@@ -9,7 +9,7 @@ import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentS
 const router = Router();
 
 /** Recommended inspection frequencies (days) — based on BS 3998:2010 / NTSG guidance */
-const FREQUENCY_DAYS: Record<(typeof TREE_CHECK_TYPES)[number], number> = {
+export const TREE_FREQUENCY_DAYS: Record<(typeof TREE_CHECK_TYPES)[number], number> = {
   visual_assessment:  365,  // Annual visual tree assessment (minimum)
   detailed_assessment: 365, // Following a VTA where anomalies were found
   post_storm:           30, // After any severe weather event
@@ -142,7 +142,7 @@ router.get("/status", requireAuth, async (req, res) => {
   const todayDays = toUtcDays(todayIso);
 
   const statuses = TREE_CHECK_TYPES.map((checkType) => {
-    const frequencyDays = FREQUENCY_DAYS[checkType];
+    const frequencyDays = TREE_FREQUENCY_DAYS[checkType];
     const lastDate = lastByType.get(checkType) ?? null;
     if (!lastDate) {
       return { checkType, frequencyDays, lastDate: null, dueDate: null, status: "never" as const };

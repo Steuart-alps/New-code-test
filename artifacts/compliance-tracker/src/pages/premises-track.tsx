@@ -103,6 +103,8 @@ interface PremisesInspection {
   status: string;
   inspectedBy: string | null;
   createdAt: string;
+  /** A later inspection of the same type and area at the site exists. */
+  superseded?: boolean;
 }
 
 interface PremisesSummary {
@@ -598,7 +600,9 @@ ${sorted.map(r => `<tr>
               </thead>
               <tbody>
                 {filtered.map((r, i) => {
-                   const isOverdue = (r.status === "open" || r.status === "actioned")
+                   // The latest inspection of its type and area sets when the
+                   // next is due, whatever its action status.
+                   const isOverdue = !r.superseded
                      && !!r.nextInspectionDate
                      && r.nextInspectionDate < today;
                   return (
