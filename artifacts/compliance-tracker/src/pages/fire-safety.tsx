@@ -48,6 +48,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { AuditLog } from "@/components/audit-log";
 import { LoadError } from "@/components/load-error";
+import { takeLinkParams } from "@/lib/deep-link";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -805,11 +806,14 @@ function RecordCheckDialog({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   defaultCheckType,
+  preset,
 }: {
   siteId?: number;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   defaultCheckType?: AnyCheckType;
+  /** Filled in from a scanned QR label: its site, call point or extinguisher location. */
+  preset?: { siteId?: number; callPointId?: number; location?: string };
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
@@ -855,6 +859,13 @@ function RecordCheckDialog({
   const createCheck = useCreateFireSafetyCheck();
   const { data: sites } = useListSites();
   const { data: config } = useGetFireSafetyConfig();
+
+  useEffect(() => {
+    if (!open || !preset) return;
+    if (preset.siteId !== undefined) setSelectedSite(preset.siteId);
+    if (preset.callPointId) setCallPointChoice({ callPointId: preset.callPointId, callPoint: "" });
+    if (preset.location) setLocation(preset.location);
+  }, [open, preset]);
 
   // A business with one site records against it, so its call point list applies.
   useEffect(() => {
@@ -1360,6 +1371,26 @@ export default function FireSafetyPage() {
   const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<AnyCheckType | undefined>(undefined);
+  const [scanPreset, setScanPreset] = useState<{ siteId?: number; callPointId?: number; location?: string }>();
+
+  // A scanned QR label: a call point opens its weekly alarm test, an
+  // extinguisher opens its weekly visual check at that location.
+  useEffect(() => {
+    const link = takeLinkParams(["open", "callPoint", "siteId", "location"] as const);
+    if (!link) return;
+    const siteId = Number(link.siteId);
+    const site = Number.isSafeInteger(siteId) && siteId > 0 ? siteId : undefined;
+    const callPointId = Number(link.callPoint);
+    if (link.open === "alarm" && Number.isSafeInteger(callPointId) && callPointId > 0) {
+      setScanPreset({ siteId: site, callPointId });
+      setQuickCheckType("alarm");
+      setRecordOpen(true);
+    } else if (link.open === "extinguishers") {
+      setScanPreset({ siteId: site, location: link.location?.slice(0, 200) });
+      setQuickCheckType("extinguishers");
+      setRecordOpen(true);
+    }
+  }, []);
 
   const { data: status, isLoading: statusLoading, error: statusError, refetch: refetchStatus } = useGetFireSafetyStatus(
     { siteId: filterSite },
@@ -1445,7 +1476,7 @@ export default function FireSafetyPage() {
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && <FireConfigDialog siteId={filterSite} />}
-            {canEdit && <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />}
+            {canEdit && <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={value => { setRecordOpen(value); if (!value) setScanPreset(undefined); }} defaultCheckType={quickCheckType} preset={scanPreset} />}
           </div>
         </div>
 

@@ -11,7 +11,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { Sentry } from "./sentry";
+import { Sentry, isErrorReportingEnabled } from "./sentry";
 
 const STALE_DAILY_JOB_MS = 26 * 60 * 60 * 1000;
 const processStartedAt = Date.now();
@@ -28,7 +28,7 @@ export function registerDailyJob(name: string): void {
 
 /** Send a background failure to Sentry, tagged with the job name. Never throws. */
 export function captureJobFailure(job: string, err: unknown): void {
-  if (!process.env.SENTRY_DSN) return;
+  if (!isErrorReportingEnabled()) return;
   try {
     Sentry.captureException(err, { tags: { job } });
   } catch {

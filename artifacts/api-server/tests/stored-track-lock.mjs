@@ -937,6 +937,27 @@ async function main() {
     return { oldId, currentId };
   };
 
+  // COSHHTrack checks (LEV, health checks, monitoring, briefings) are dated
+  // records; their assessments are reviewed documents and are not locked.
+  const coshhSite = await admin("POST", "/sites", { name: `Lock COSHH Site ${suffix}`, seedStarterChecks: false });
+  expect("COSHH checks: seed site", coshhSite, [200, 201]);
+  if ([200, 201].includes(coshhSite.status)) {
+    const coshhCheck = (checkDate, extra = {}) => ({
+      siteId: coshhSite.data.id, checkType: "lev_examination", checkDate, subject: `Lock booth ${suffix}`, result: "pass", ...extra,
+    });
+    await lockedSubroute({
+      label: "COSHH check", path: "/coshh-track/checks",
+      createOld: () => admin("POST", "/coshh-track/checks", coshhCheck(old)),
+      createCurrent: () => admin("POST", "/coshh-track/checks", coshhCheck(today)),
+      staffEdit: coshhCheck(old, { notes: bypassMarker }),
+      forgedEdit: coshhCheck(today, { notes: bypassMarker }),
+      adminEdit: coshhCheck(old, { notes: "admin correction" }),
+      currentEdit: coshhCheck(today, { notes: "staff edit" }),
+      backdateEdit: coshhCheck(old, { notes: "backdated" }),
+      staffCurrentPut: 200, staffCurrentDelete: 204, adminDelete: 204,
+    });
+  }
+
   // PAT: certificates, replacements and failures are retained evidence. Their
   // DELETE handlers refuse every role (405); staff hit the lock first on old rows.
   const patSite = await admin("POST", "/sites", { name: `Lock PAT Site ${suffix}`, seedStarterChecks: false });
@@ -1372,6 +1393,10 @@ async function main() {
   await siteMove({ label: "COSHH register item", createPath: "/registers/coshh",
     create: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }),
     move: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }) });
+  const coshhAssessment = (siteId) => ({ siteId, task: `Lock cleaning ${suffix}`, riskLevel: "low", assessmentDate: today });
+  await siteMove({ label: "COSHH assessment", createPath: "/coshh-track/assessments", create: coshhAssessment, move: coshhAssessment });
+  const coshhCheck = (siteId) => ({ siteId, checkType: "lev_examination", checkDate: today, subject: `Lock booth ${suffix}`, result: "pass" });
+  await siteMove({ label: "COSHH check", createPath: "/coshh-track/checks", create: coshhCheck, move: coshhCheck });
   await siteMove({ label: "Asbestos register item", createPath: "/registers/asbestos",
     create: (siteId) => ({ siteId, builtBefore2000: "unknown" }),
     move: (siteId) => ({ siteId, builtBefore2000: "unknown" }) });

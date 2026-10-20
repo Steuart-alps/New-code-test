@@ -7,12 +7,14 @@ import { getEntitledServices, isEntitled } from "../lib/services";
 import { ukToday } from "../lib/riddor";
 import { actionStateLabel, itemActionStates } from "../lib/certificateOutcomes";
 import { inclusiveDays, isCalendarDate, resolveSiteAccessScope, siteScopeSql } from "../lib/siteAccessScope";
+import { getCoshhDueItems } from "../lib/coshhTrack";
 
 /**
  * Read-only calendar of what falls due: compliance check due dates, scheduled
  * contractor visits, contractor insurance/DBS/accreditation expiries, FixTrack
  * contractor target dates, PestTrack next visits, training expiries, COSHH
- * assessment reviews and asbestos management plan reviews. Each
+ * register reviews, COSHHTrack assessment reviews and checks, and asbestos
+ * management plan reviews. Each
  * entry links to its record page. Dates are calendar days (no times).
  */
 const router = Router();
@@ -24,7 +26,7 @@ const MAX_ENTRIES = 1000;
 export type CalendarKind =
   | "compliance_due" | "contractor_visit" | "contractor_insurance" | "contractor_indemnity"
   | "contractor_dbs" | "contractor_accreditation" | "fix_visit" | "pest_visit" | "training_expiry"
-  | "coshh_review" | "asbestos_plan_review";
+  | "coshh_review" | "coshh_track_due" | "asbestos_plan_review";
 
 export type CalendarEntry = {
   id: string;
@@ -239,6 +241,21 @@ router.get("/calendar", requireAuth, async (req, res) => {
       id: `coshh-${row.id}`, date: row.date, kind: "coshh_review", title: `COSHH assessment review: ${row.product_name}`,
       detail: null, siteName: row.site_name ?? null, href: "/coshh", status: state(row.date, false),
     });
+  }
+  // COSHHTrack: assessment reviews and the next LEV examination, health
+  // check, monitoring or briefing in each series (lib/coshhTrack.ts).
+  if (isEntitled(services, "coshhtrack")) {
+    const due = await getCoshhDueItems(clientId, {
+      siteId: scope.siteId,
+      accessibleSiteIds: scope.departmentId === null ? null : scope.sites.map((site) => site.id),
+    }, today);
+    for (const item of due) {
+      if (!item.dueDate || item.dueDate < from || item.dueDate > to) continue;
+      entries.push({
+        id: `coshh-track-${item.kind}-${item.recordId}`, date: item.dueDate, kind: "coshh_track_due", title: item.label,
+        detail: null, siteName: item.siteName, href: "/coshh-track", status: state(item.dueDate, false),
+      });
+    }
   }
   for (const row of asbestos) {
     entries.push({

@@ -93,6 +93,9 @@ jobs:
       - name: Weekly kitchen review result rule test
         run: pnpm --filter @workspace/api-zod run test:kitchen-weekly
 
+      - name: GreenTrack NSTS sprayer test schedule
+        run: pnpm --filter @workspace/api-zod run test:nsts-sprayer-tests
+
       - name: Build web app
         env:
           PORT: "5173"
@@ -115,6 +118,8 @@ jobs:
       # database double, including a failed ACL write during registration.
       - name: Private file ACL checks
         run: pnpm --filter @workspace/api-server run test:private-file-acl
+      - name: Sidebar sections and pins test
+        run: pnpm --filter @workspace/compliance-tracker run test:nav-groups
 
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
@@ -193,6 +198,12 @@ jobs:
 
       - name: Viewer read-only tests
         run: pnpm --filter @workspace/api-server run test:viewer-read-only
+      # Sentry reports against a fake ingest: environment/release tags, nothing
+      # secret sent, and a clean production start without SENTRY_DSN.
+      - name: Error report tests
+        run: |
+          pnpm --filter @workspace/api-zod run test:error-report-scrub
+          pnpm --filter @workspace/api-server run test:error-reports:ci
 
       # The schema-shape suites start their own private cluster with initdb and
       # pg_ctl, which ubuntu-latest ships (PostgreSQL 16, service disabled) but
@@ -216,6 +227,9 @@ jobs:
       - name: SafeTrack reminder job tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:safe-track-ack-reminders:fresh
 
+      - name: COSHHTrack tests (fresh schema)
+        run: pnpm --filter @workspace/api-server run test:coshh-track
+
       # Older, populated databases (Replit-era table layouts) must keep every
       # record through the runtime migrations, readable through today's routes.
       - name: Upgrade-path fixture tests
@@ -223,6 +237,9 @@ jobs:
 
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
+
+      - name: GreenTrack NSTS sprayer test API (production schema base)
+        run: pnpm --filter @workspace/api-server run test:green-nsts
 
       - name: Checklist results and FixTrack job tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:checklist-results-fixtrack
@@ -232,6 +249,9 @@ jobs:
 
       - name: Departments under sites tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:departments-under-sites
+
+      - name: Today by department dashboard card tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:today-by-department
 
       - name: Hot tub registry search tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:hot-tub-registry:pushed
@@ -296,6 +316,15 @@ jobs:
 
       - name: FireTrack and Water Safety contractor jobs kept in step with ComplyTrack tasks (production schema base)
         run: pnpm --filter @workspace/api-server run test:track-task-links
+
+      - name: PestTrack, PremisesTrack and GreenTrack due dates and the contractor reminder lead time (production schema base)
+        run: pnpm --filter @workspace/api-server run test:track-due-dates
+
+      - name: Contractor visits on every track reach the contractor reminder (production schema base)
+        run: pnpm --filter @workspace/api-server run test:contractor-visits
+
+      - name: Equipment list and QR label tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:equipment-labels
 
       # KitchenTrack numeric controls: the shared rule model and country
       # presets, then hold-time boundaries, retries and the corrective-action

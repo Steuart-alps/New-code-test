@@ -5,6 +5,53 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export type TodayByDepartmentRowKind = typeof TodayByDepartmentRowKind[keyof typeof TodayByDepartmentRowKind];
+
+
+export const TodayByDepartmentRowKind = {
+  whole_site: 'whole_site',
+  department: 'department',
+} as const;
+
+export type TodayByDepartmentItemStatus = typeof TodayByDepartmentItemStatus[keyof typeof TodayByDepartmentItemStatus];
+
+
+export const TodayByDepartmentItemStatus = {
+  todo: 'todo',
+  failed: 'failed',
+} as const;
+
+export interface TodayByDepartmentItem {
+  status: TodayByDepartmentItemStatus;
+  label: string;
+  detail: string;
+  path: string;
+}
+
+export interface TodayByDepartmentRow {
+  key: string;
+  kind: TodayByDepartmentRowKind;
+  departmentId: number | null;
+  name: string;
+  done: number;
+  todo: number;
+  failed: number;
+  items: TodayByDepartmentItem[];
+  moreItems: number;
+}
+
+export interface TodayByDepartmentGroup {
+  /** null for work not tied to one site ("All sites") */
+  siteId: number | null;
+  siteName: string;
+  rows: TodayByDepartmentRow[];
+}
+
+export interface TodayByDepartment {
+  date: string;
+  groups: TodayByDepartmentGroup[];
+}
+
 export type DailyTrackRequirement = typeof DailyTrackRequirement[keyof typeof DailyTrackRequirement];
 
 
@@ -254,6 +301,11 @@ export interface FixTrackIssueMediaList {
   mediaUrls: string[];
 }
 
+export interface GreenTrackCertificateDownload {
+  downloadUrl: string;
+  fileName?: string | null;
+}
+
 export interface ErrorResponse {
   error: string;
 }
@@ -301,6 +353,54 @@ export interface UpdateSiteRequest {
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+}
+
+export type ContractorVisitTypeDueFrom = typeof ContractorVisitTypeDueFrom[keyof typeof ContractorVisitTypeDueFrom];
+
+
+export const ContractorVisitTypeDueFrom = {
+  track: 'track',
+  later: 'later',
+  check: 'check',
+} as const;
+
+export interface ContractorVisitType {
+  key: string;
+  module: string;
+  trackLabel: string;
+  /** Title of the linked compliance check */
+  title: string;
+  label: string;
+  description: string;
+  dueFrom: ContractorVisitTypeDueFrom;
+}
+
+export interface ContractorVisit {
+  visitKey: string;
+  siteId: number;
+  siteName: string;
+  trackDueDate: string | null;
+  checkId: number | null;
+  /** Null for a business-wide check at a one-site business */
+  checkSiteId: number | null;
+  dueDate: string | null;
+  status: string | null;
+  contractorId: number | null;
+  contractorName: string | null;
+  reminderSentAt: string | null;
+}
+
+export interface ContractorVisitsResponse {
+  types: ContractorVisitType[];
+  visits: ContractorVisit[];
+}
+
+export interface SetContractorVisitRequest {
+  visitKey: string;
+  siteId: number;
+  contractorId: number | null;
+  /** Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet) */
+  dueDate?: string | null;
 }
 
 export interface Contractor {
@@ -1794,6 +1894,451 @@ export interface IncidentConfig {
   incident_locations?: string;
 }
 
+export type CoshhCheckType = typeof CoshhCheckType[keyof typeof CoshhCheckType];
+
+
+export const CoshhCheckType = {
+  lev_examination: 'lev_examination',
+  health_surveillance: 'health_surveillance',
+  exposure_monitoring: 'exposure_monitoring',
+  staff_briefing: 'staff_briefing',
+} as const;
+
+export type CoshhExposureRoute = typeof CoshhExposureRoute[keyof typeof CoshhExposureRoute];
+
+
+export const CoshhExposureRoute = {
+  inhalation: 'inhalation',
+  skin: 'skin',
+  eyes: 'eyes',
+  ingestion: 'ingestion',
+  injection: 'injection',
+} as const;
+
+export type CoshhPpe = typeof CoshhPpe[keyof typeof CoshhPpe];
+
+
+export const CoshhPpe = {
+  gloves: 'gloves',
+  eye_protection: 'eye_protection',
+  face_shield: 'face_shield',
+  respirator: 'respirator',
+  apron_overalls: 'apron_overalls',
+  footwear: 'footwear',
+} as const;
+
+/**
+ * @nullable
+ */
+export type CoshhAssessmentInputSignalWord = typeof CoshhAssessmentInputSignalWord[keyof typeof CoshhAssessmentInputSignalWord] | null;
+
+
+export const CoshhAssessmentInputSignalWord = {
+  danger: 'danger',
+  warning: 'warning',
+  none: 'none',
+} as const;
+
+export type CoshhAssessmentInputRiskLevel = typeof CoshhAssessmentInputRiskLevel[keyof typeof CoshhAssessmentInputRiskLevel];
+
+
+export const CoshhAssessmentInputRiskLevel = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type CoshhAssessmentInputStatus = typeof CoshhAssessmentInputStatus[keyof typeof CoshhAssessmentInputStatus];
+
+
+export const CoshhAssessmentInputStatus = {
+  current: 'current',
+  archived: 'archived',
+} as const;
+
+/**
+ * Set to ai when the form was pre-filled from a safety data sheet.
+ * @nullable
+ */
+export type CoshhAssessmentInputDraftSource = typeof CoshhAssessmentInputDraftSource[keyof typeof CoshhAssessmentInputDraftSource] | null;
+
+
+export const CoshhAssessmentInputDraftSource = {
+  ai: 'ai',
+} as const;
+
+export interface CoshhAssessmentInput {
+  siteId: number;
+  /** @nullable */
+  substanceId?: number | null;
+  task: string;
+  /** @nullable */
+  whoAtRisk?: string | null;
+  exposureRoutes?: CoshhExposureRoute[];
+  /** @nullable */
+  howOften?: string | null;
+  /** @nullable */
+  hazardStatements?: string | null;
+  /** @nullable */
+  signalWord?: CoshhAssessmentInputSignalWord;
+  /** @nullable */
+  healthEffects?: string | null;
+  /** @nullable */
+  exposureLimits?: string | null;
+  /** @nullable */
+  controls?: string | null;
+  ppe?: CoshhPpe[];
+  /** @nullable */
+  ppeDetails?: string | null;
+  riskLevel: CoshhAssessmentInputRiskLevel;
+  healthSurveillanceRequired?: boolean;
+  monitoringRequired?: boolean;
+  levRequired?: boolean;
+  /** @nullable */
+  storage?: string | null;
+  /** @nullable */
+  spillProcedure?: string | null;
+  /** @nullable */
+  firstAid?: string | null;
+  /** @nullable */
+  disposal?: string | null;
+  /** @nullable */
+  assessor?: string | null;
+  assessmentDate: string;
+  /**
+     * Omitted on create = 12 months after the assessment date.
+     * @nullable
+     */
+  reviewDue?: string | null;
+  status?: CoshhAssessmentInputStatus;
+  /** @nullable */
+  notes?: string | null;
+  /**
+     * Set to ai when the form was pre-filled from a safety data sheet.
+     * @nullable
+     */
+  draftSource?: CoshhAssessmentInputDraftSource;
+  /** @nullable */
+  draftedAt?: string | null;
+  /** Required (true) to save an AI draft; the saver is recorded as having checked it. */
+  checkedAgainstSds?: boolean;
+  /** Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site. */
+  signOffDepartments?: string[];
+  /**
+     * A fresh upload from POST /registers/uploads/request-url, null to detach, omitted to keep.
+     * @nullable
+     */
+  objectPath?: string | null;
+  /** @nullable */
+  fileName?: string | null;
+}
+
+export interface CoshhAssessment {
+  id: number;
+  clientId: number;
+  /** @nullable */
+  siteId?: number | null;
+  /** @nullable */
+  substanceId?: number | null;
+  task: string;
+  /** @nullable */
+  whoAtRisk?: string | null;
+  exposureRoutes: string[];
+  /** @nullable */
+  howOften?: string | null;
+  /** @nullable */
+  hazardStatements?: string | null;
+  /** @nullable */
+  signalWord?: string | null;
+  /** @nullable */
+  healthEffects?: string | null;
+  /** @nullable */
+  exposureLimits?: string | null;
+  /** @nullable */
+  controls?: string | null;
+  ppe: string[];
+  /** @nullable */
+  ppeDetails?: string | null;
+  riskLevel: string;
+  healthSurveillanceRequired: boolean;
+  monitoringRequired: boolean;
+  levRequired: boolean;
+  /** @nullable */
+  storage?: string | null;
+  /** @nullable */
+  spillProcedure?: string | null;
+  /** @nullable */
+  firstAid?: string | null;
+  /** @nullable */
+  disposal?: string | null;
+  /** @nullable */
+  assessor?: string | null;
+  assessmentDate: string;
+  /** @nullable */
+  reviewDue?: string | null;
+  status: string;
+  /** @nullable */
+  documentObjectPath?: string | null;
+  /** @nullable */
+  documentFileName?: string | null;
+  /** @nullable */
+  documentFileSize?: number | null;
+  /** @nullable */
+  documentMimeType?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  draftSource?: string | null;
+  /** @nullable */
+  draftedAt?: string | null;
+  /** @nullable */
+  checkedBy?: number | null;
+  /** @nullable */
+  checkedByName?: string | null;
+  /** @nullable */
+  checkedAt?: string | null;
+  /** Goes up when a change alters what staff read, so they sign the assessment again. */
+  revision: number;
+  signOffDepartments: string[];
+  /** @nullable */
+  createdBy?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+  /** @nullable */
+  deletedAt?: string | null;
+  reviewOverdue: boolean;
+}
+
+/**
+ * The parts of a current COSHH assessment a person reads before signing.
+ */
+export interface CoshhSignOffSummary {
+  id: number;
+  siteId: number;
+  /** @nullable */
+  siteName?: string | null;
+  task: string;
+  /** @nullable */
+  productName?: string | null;
+  /** @nullable */
+  substanceId?: number | null;
+  hasSafetyDataSheet: boolean;
+  hasDocument: boolean;
+  revision: number;
+  signOffDepartments: string[];
+  /** @nullable */
+  assessmentDate?: string | null;
+  /** @nullable */
+  assessor?: string | null;
+  riskLevel: string;
+  /** @nullable */
+  hazardStatements?: string | null;
+  /** @nullable */
+  signalWord?: string | null;
+  /** @nullable */
+  healthEffects?: string | null;
+  exposureRoutes: string[];
+  /** @nullable */
+  controls?: string | null;
+  ppe: string[];
+  /** @nullable */
+  ppeDetails?: string | null;
+  /** @nullable */
+  storage?: string | null;
+  /** @nullable */
+  spillProcedure?: string | null;
+  /** @nullable */
+  firstAid?: string | null;
+  /** @nullable */
+  disposal?: string | null;
+}
+
+export type CoshhSignOffStatusSignedItem = {
+  staffRosterId: number;
+  name: string;
+  /** @nullable */
+  department?: string | null;
+  signedAt: string;
+  hasSignature: boolean;
+  /** @nullable */
+  trainTrackRecordId?: number | null;
+};
+
+export type CoshhSignOffStatusOutstandingItem = {
+  staffRosterId: number;
+  name: string;
+  /** @nullable */
+  department?: string | null;
+  /** They signed an earlier revision, so this is a re-sign after a change. */
+  resign: boolean;
+};
+
+export type CoshhSignOffStatus = CoshhSignOffSummary & {
+  staffTotal: number;
+  signedCount: number;
+  signed: CoshhSignOffStatusSignedItem[];
+  outstanding: CoshhSignOffStatusOutstandingItem[];
+};
+
+export type CoshhSignOffRequestSignOffsItem = {
+  staffRosterId: number;
+  /**
+     * The person's signature drawn on this device (base64 PNG).
+     * @nullable
+     */
+  signature?: string | null;
+};
+
+export interface CoshhSignOffRequest {
+  /**
+     * @minItems 1
+     * @maxItems 200
+     */
+  signOffs: CoshhSignOffRequestSignOffsItem[];
+}
+
+export type MyCoshhSignOffsSignedItem = CoshhSignOffSummary & {
+  signedAt: string;
+};
+
+export interface MyCoshhSignOffs {
+  linked: boolean;
+  pending: CoshhSignOffSummary[];
+  signed: MyCoshhSignOffsSignedItem[];
+}
+
+export type CoshhCheckInputResult = typeof CoshhCheckInputResult[keyof typeof CoshhCheckInputResult];
+
+
+export const CoshhCheckInputResult = {
+  pass: 'pass',
+  fail: 'fail',
+} as const;
+
+export interface CoshhCheckInput {
+  siteId: number;
+  /** @nullable */
+  assessmentId?: number | null;
+  checkType: CoshhCheckType;
+  checkDate: string;
+  /**
+     * The extraction system, the person checked or briefed, or the area monitored.
+     * @nullable
+     */
+  subject?: string | null;
+  /** @nullable */
+  carriedOutBy?: string | null;
+  result?: CoshhCheckInputResult;
+  /**
+     * Required when the result is fail.
+     * @nullable
+     */
+  actionRequired?: string | null;
+  /**
+     * Omitted on create = the suggested interval (LEV 14 months, others 12).
+     * @nullable
+     */
+  nextDueDate?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  objectPath?: string | null;
+  /** @nullable */
+  fileName?: string | null;
+}
+
+export interface CoshhCheck {
+  id: number;
+  clientId: number;
+  /** @nullable */
+  siteId?: number | null;
+  /** @nullable */
+  assessmentId?: number | null;
+  checkType: string;
+  checkDate: string;
+  /** @nullable */
+  subject?: string | null;
+  /** @nullable */
+  carriedOutBy?: string | null;
+  result: string;
+  /** @nullable */
+  actionRequired?: string | null;
+  /** @nullable */
+  nextDueDate?: string | null;
+  /** @nullable */
+  reportObjectPath?: string | null;
+  /** @nullable */
+  reportFileName?: string | null;
+  /** @nullable */
+  reportFileSize?: number | null;
+  /** @nullable */
+  reportMimeType?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  createdBy?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+  /** @nullable */
+  deletedAt?: string | null;
+}
+
+export type CoshhDueItemKind = typeof CoshhDueItemKind[keyof typeof CoshhDueItemKind];
+
+
+export const CoshhDueItemKind = {
+  assessment_review: 'assessment_review',
+  lev_examination: 'lev_examination',
+  health_surveillance: 'health_surveillance',
+  exposure_monitoring: 'exposure_monitoring',
+  staff_briefing: 'staff_briefing',
+} as const;
+
+export type CoshhDueItemStatus = typeof CoshhDueItemStatus[keyof typeof CoshhDueItemStatus];
+
+
+export const CoshhDueItemStatus = {
+  overdue: 'overdue',
+  due_soon: 'due_soon',
+  ok: 'ok',
+  missing: 'missing',
+} as const;
+
+export interface CoshhDueItem {
+  kind: CoshhDueItemKind;
+  recordId: number;
+  /** @nullable */
+  assessmentId: number | null;
+  label: string;
+  /** @nullable */
+  siteId: number | null;
+  /** @nullable */
+  siteName: string | null;
+  /** @nullable */
+  dueDate: string | null;
+  /**
+     * Negative = overdue by that many days; null for items not recorded yet.
+     * @nullable
+     */
+  daysUntilDue: number | null;
+  status: CoshhDueItemStatus;
+}
+
+export interface CoshhTrackStatus {
+  today: string;
+  dueSoonDays: number;
+  overdue: number;
+  dueSoon: number;
+  missing: number;
+  items: CoshhDueItem[];
+}
+
+export interface CoshhDocumentUrl {
+  downloadUrl: string;
+  /** @nullable */
+  fileName?: string | null;
+}
+
 export interface OkResponse {
   ok: boolean;
 }
@@ -1932,6 +2477,8 @@ export interface PremisesInspection {
   createdBy?: number | null;
   createdAt?: string;
   updatedAt?: string;
+  /** True when a later inspection of the same type and area at the same site exists, so this one's next inspection date no longer applies. Returned by the list. */
+  superseded?: boolean;
 }
 
 export interface CreatePremisesInspectionRequest {
@@ -2276,6 +2823,8 @@ export type CreateLegionellaCheckRequest = unknown & ({
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** A cold water tank or calorifier on the equipment list (its site must match siteId). */
+  equipmentId?: number | null;
 });
 
 export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckRequestResult[keyof typeof UpdateLegionellaCheckRequestResult];
@@ -2353,6 +2902,167 @@ export type WaterMonitoringPlanResultProfile = { [key: string]: unknown };
 export interface WaterMonitoringPlanResult {
   profile: WaterMonitoringPlanResultProfile;
   approved: boolean;
+}
+
+export type EquipmentType = typeof EquipmentType[keyof typeof EquipmentType];
+
+
+export const EquipmentType = {
+  cold_water_tank: 'cold_water_tank',
+  calorifier: 'calorifier',
+  boiler: 'boiler',
+  water_heater: 'water_heater',
+  lift: 'lift',
+  hoist: 'hoist',
+  lifting_equipment: 'lifting_equipment',
+  pressure_system: 'pressure_system',
+  gas_appliance: 'gas_appliance',
+  air_conditioning: 'air_conditioning',
+  fire_extinguisher: 'fire_extinguisher',
+  ladder: 'ladder',
+  other: 'other',
+} as const;
+
+export type EquipmentLabelKind = typeof EquipmentLabelKind[keyof typeof EquipmentLabelKind];
+
+
+export const EquipmentLabelKind = {
+  green_machine: 'green_machine',
+  pat_appliance: 'pat_appliance',
+  hot_tub: 'hot_tub',
+  fire_call_point: 'fire_call_point',
+  water_outlet: 'water_outlet',
+  bike: 'bike',
+  room: 'room',
+  cold_unit: 'cold_unit',
+  equipment: 'equipment',
+} as const;
+
+export interface EquipmentLinkedCheck {
+  id: number;
+  title: string;
+}
+
+export interface EquipmentItem {
+  id: number;
+  siteId: number | null;
+  siteName: string | null;
+  name: string;
+  type: EquipmentType;
+  typeLabel: string;
+  location: string | null;
+  make: string | null;
+  model: string | null;
+  serialNo: string | null;
+  notes: string | null;
+  active: boolean;
+  complianceItems: EquipmentLinkedCheck[];
+  labelCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EquipmentItemRequest {
+  name: string;
+  type: EquipmentType;
+  siteId?: number | null;
+  location?: string | null;
+  make?: string | null;
+  model?: string | null;
+  serialNo?: string | null;
+  notes?: string | null;
+  active?: boolean;
+  complianceItemIds?: number[];
+}
+
+export interface UpdateEquipmentItemRequest {
+  name?: string;
+  type?: EquipmentType;
+  siteId?: number | null;
+  location?: string | null;
+  make?: string | null;
+  model?: string | null;
+  serialNo?: string | null;
+  notes?: string | null;
+  active?: boolean;
+  complianceItemIds?: number[];
+}
+
+export interface EquipmentLabelRef {
+  kind: EquipmentLabelKind;
+  /** The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer. */
+  ref: string;
+}
+
+export type EquipmentLabelSheetRequestSize = typeof EquipmentLabelSheetRequestSize[keyof typeof EquipmentLabelSheetRequestSize];
+
+
+export const EquipmentLabelSheetRequestSize = {
+  standard: 'standard',
+  large: 'large',
+} as const;
+
+export interface EquipmentLabelSheetRequest {
+  items: EquipmentLabelRef[];
+  size?: EquipmentLabelSheetRequestSize;
+}
+
+export interface EquipmentLabelTarget {
+  kind: EquipmentLabelKind;
+  ref: string;
+  track: string;
+  name: string;
+  detail: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  code: string | null;
+  url: string | null;
+}
+
+export type EquipmentScanState = typeof EquipmentScanState[keyof typeof EquipmentScanState];
+
+
+export const EquipmentScanState = {
+  ok: 'ok',
+  due_soon: 'due_soon',
+  overdue: 'overdue',
+  never: 'never',
+  problem: 'problem',
+  info: 'info',
+} as const;
+
+export interface EquipmentScanStatus {
+  label: string;
+  state: EquipmentScanState;
+  text: string;
+  note?: string;
+}
+
+export interface EquipmentScanAction {
+  label: string;
+  href: string;
+  primary?: boolean;
+}
+
+export interface EquipmentScanHistory {
+  date: string;
+  text: string;
+  state: EquipmentScanState;
+}
+
+export interface EquipmentScan {
+  code: string;
+  clientId: number;
+  kind: EquipmentLabelKind;
+  track: string;
+  name: string;
+  detail: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  active: boolean;
+  statuses: EquipmentScanStatus[];
+  actions: EquipmentScanAction[];
+  history: EquipmentScanHistory[];
 }
 
 export type ListFeedbackReportsParams = {
@@ -2484,6 +3194,10 @@ export const ListComplianceItemsPriority = {
   high: 'high',
   critical: 'critical',
 } as const;
+
+export type GetTodayByDepartmentParams = {
+siteId?: number;
+};
 
 export type GetPrivacyGovernanceParams = {
 clientId?: number;
@@ -2738,5 +3452,64 @@ siteId: number;
 
 export type UpdatePoolMonitoringPlanParams = {
 siteId: number;
+};
+
+export type ListEquipmentParams = {
+/**
+ * A site id, or "none" for items not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
+includeArchived?: ListEquipmentIncludeArchived;
+};
+
+export type ListEquipmentIncludeArchived = typeof ListEquipmentIncludeArchived[keyof typeof ListEquipmentIncludeArchived];
+
+
+export const ListEquipmentIncludeArchived = {
+  true: 'true',
+  false: 'false',
+} as const;
+
+export type ImportExtinguisherPointsBody = {
+  siteId?: number | null;
+};
+
+export type ImportExtinguisherPoints200 = {
+  added: number;
+  alreadyListed: number;
+};
+
+export type ListEquipmentLabelsParams = {
+/**
+ * A site id, or "none" for items not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
+};
+
+export type GetCoshhTrackStatusParams = {
+siteId?: number;
+};
+
+export type ListCoshhAssessmentsParams = {
+siteId?: number;
+};
+
+export type ListCoshhChecksParams = {
+siteId?: number;
+checkType?: CoshhCheckType;
+assessmentId?: number;
+};
+
+export type ListCoshhSignOffsParams = {
+siteId?: number;
+};
+
+export type ListCoshhSignOffs200 = {
+  assessments: CoshhSignOffStatus[];
+};
+
+export type RecordCoshhSignOffs200 = {
+  signed: number;
+  assessment: CoshhSignOffStatus | null;
 };
 

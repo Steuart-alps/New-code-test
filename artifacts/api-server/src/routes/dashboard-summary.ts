@@ -12,6 +12,8 @@ import { db } from "@workspace/db";
 import { sql, type SQL } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId } from "../middleware/requireAuth";
 import { getCheckAlerts, type CheckAlert } from "../lib/checkReminders";
+import { getCoshhDueItems } from "../lib/coshhTrack";
+import { NSTS_TEST_INSPECTION_TYPE, nstsStatus } from "@workspace/api-zod/nsts-sprayer-tests";
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { addCalendarDays, getAccountToday } from "../lib/accountClock";
 import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
@@ -75,6 +77,7 @@ const TRACK_PICK_KEYS: Record<string, readonly string[]> = {
   bike: ["biketrack"],
   green: ["greentrack"],
   incident: ["incidenttrack"],
+  coshh: ["coshhtrack"],
 };
 
 export interface ChecklistTotals {
@@ -644,31 +647,43 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        const [openInspections, activeCounts] = await Promise.all([
+        const [overdueInspections, openInspections, activeCounts] = await Promise.all([
+          // The latest inspection of each type and area at a site sets when
+          // the next one is due, whatever its action status (as on the
+          // PremisesTrack page).
+          db.execute(sql`
+            SELECT id, inspection_type, next_inspection_date FROM (
+              SELECT DISTINCT ON (site_id, inspection_type, lower(trim(coalesce(area, ''))))
+                id, inspection_type, next_inspection_date
+              FROM premises_inspections
+              WHERE client_id = ${clientId} ${siteClause}
+              ORDER BY site_id, inspection_type, lower(trim(coalesce(area, ''))), inspection_date DESC, id DESC
+            ) latest
+            WHERE next_inspection_date IS NOT NULL AND next_inspection_date < ${today}
+            ORDER BY next_inspection_date ASC
+          `),
           db.execute(sql`
             SELECT id, inspection_type, inspection_date, next_inspection_date, status, site_id
             FROM premises_inspections
             WHERE client_id = ${clientId}
               AND status IN ('open', 'actioned')
               ${siteClause}
-            ORDER BY
-              CASE WHEN next_inspection_date < ${today} THEN 0 ELSE 1 END,
-              next_inspection_date ASC NULLS LAST
+            ORDER BY next_inspection_date ASC NULLS LAST
             LIMIT 10
           `),
           db.execute(sql`
-            SELECT
-              count(*)::int AS total,
-              count(*) FILTER (WHERE next_inspection_date < ${today})::int AS overdue
+            SELECT count(*)::int AS total
             FROM premises_inspections
             WHERE client_id = ${clientId}
               AND status IN ('open', 'actioned')
               ${siteClause}
           `),
         ]);
-        const countRow = rows(activeCounts)[0] ?? {};
-        const overdueCount = Number(countRow.overdue ?? 0);
-        const total = Number(countRow.total ?? 0);
+        const overdueCount = rows(overdueInspections).length;
+        const total = Number(rows(activeCounts)[0]?.total ?? 0);
+        const typeLabel = (type: string) => type
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (c: string) => c.toUpperCase());
 
         if (overdueCount > 0) {
           status = "overdue";
@@ -684,16 +699,17 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           badge = rows(anyRows).length > 0 ? "No open inspections" : "No records yet";
         }
 
+        const overdueIds = new Set(rows(overdueInspections).map((i: any) => i.id));
+        for (const i of rows(overdueInspections).slice(0, 10)) {
+          items.push({ label: typeLabel(i.inspection_type as string), detail: `Overdue since ${i.next_inspection_date}`, path: "/premises-track" });
+        }
         for (const i of rows(openInspections)) {
-          const inspType = (i.inspection_type as string)
-            .replace(/_/g, " ")
-            .replace(/\b\w/g, (c: string) => c.toUpperCase());
-          const detail = i.next_inspection_date
-            ? i.next_inspection_date < today
-              ? `Overdue since ${i.next_inspection_date}`
-              : `Due ${i.next_inspection_date}`
+          if (items.length >= 10) break;
+          if (overdueIds.has(i.id)) continue;
+          const detail = i.next_inspection_date && i.next_inspection_date >= today
+            ? `Due ${i.next_inspection_date}`
             : `Status: ${i.status}`;
-          items.push({ label: inspType, detail, path: "/premises-track" });
+          items.push({ label: typeLabel(i.inspection_type as string), detail, path: "/premises-track" });
         }
       } catch (error) {
         ({ status, badge } = unavailable("premises", error));
@@ -1010,6 +1026,38 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     return { trackId: "tree", label: "TreeTrack", path: "/tree-track", enabled, status, badge, items };
   };
 
+  // ── COSHHTrack ────────────────────────────────────────────────────────────────
+  const coshhTrack = async (): Promise<TrackDraft> => {
+    const enabled = entitled("coshhtrack");
+    const items: TrackItem[] = [];
+    let status: TrackStatus = "no_data";
+    let badge = "No records";
+
+    if (enabled) {
+      try {
+        const due = await getCoshhDueItems(clientId, { siteId, accessibleSiteIds }, today);
+        const overdue = due.filter((item) => item.status === "overdue");
+        const soon = due.filter((item) => item.status === "due_soon");
+        const missing = due.filter((item) => item.status === "missing");
+        for (const item of overdue) {
+          items.push({ label: item.label, detail: `Overdue by ${plural(Math.abs(item.daysUntilDue ?? 0), "day")}`, path: "/coshh-track" });
+        }
+        for (const item of missing) items.push({ label: item.label, detail: "Not recorded yet", path: "/coshh-track" });
+        for (const item of soon) {
+          items.push({ label: item.label, detail: item.daysUntilDue === 0 ? "Due today" : `Due in ${plural(item.daysUntilDue ?? 0, "day")}`, path: "/coshh-track" });
+        }
+        if (overdue.length > 0) { status = "overdue"; badge = `${overdue.length} overdue`; }
+        else if (soon.length + missing.length > 0) { status = "attention"; badge = soon.length ? `${soon.length} due soon` : `${missing.length} to record`; }
+        else if (due.length === 0) { status = "no_data"; badge = "No assessments yet"; }
+        else { status = "ok"; badge = "All reviews and checks up to date"; }
+      } catch (error) {
+        ({ status, badge } = unavailable("coshh", error));
+      }
+    }
+
+    return { trackId: "coshh", label: "COSHHTrack", path: "/coshh-track", enabled, status, badge, items };
+  };
+
   // ── BikeTrack ─────────────────────────────────────────────────────────────────
   const bikeTrack = async (): Promise<TrackDraft> => {
     const enabled = entitled("biketrack");
@@ -1114,7 +1162,33 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           WHERE m.client_id = ${clientId} AND m.active = true ${siteClause}
             AND s.next_service_date IS NOT NULL AND s.next_service_date < ${today}
         `;
-        const [machines, checkedTodayRows, overdueService, overdueServiceCountRows] = await Promise.all([
+        // Statutory (PUWER / LOLER) examinations: a machine's latest one of
+        // each kind sets when the next of that kind is due.
+        const overdueExamination = sql`
+          SELECT m.id, m.name, p.inspection_type, p.next_inspection_date
+          FROM green_machines m
+          JOIN (
+            SELECT DISTINCT ON (machine_id, inspection_type) machine_id, inspection_type, next_inspection_date
+            FROM green_puwer_inspections
+            WHERE client_id = ${clientId}
+            ORDER BY machine_id, inspection_type, inspection_date DESC, id DESC
+          ) p ON p.machine_id = m.id
+          WHERE m.client_id = ${clientId} AND m.active = true ${siteClause}
+            AND p.next_inspection_date IS NOT NULL AND p.next_inspection_date < ${today}
+          ORDER BY p.next_inspection_date ASC
+        `;
+        // Sprayers never NSTS tested: the first test is due by a set age.
+        const untestedSprayers = sql`
+          SELECT m.id, m.name, m.sprayer_category, to_char(m.purchase_date, 'YYYY-MM-DD') AS purchase_date, m.year
+          FROM green_machines m
+          WHERE m.client_id = ${clientId} AND m.active = true AND m.sprayer_category IS NOT NULL ${siteClause}
+            AND NOT EXISTS (
+              SELECT 1 FROM green_puwer_inspections t
+              WHERE t.machine_id = m.id AND t.client_id = m.client_id AND t.inspection_type = ${NSTS_TEST_INSPECTION_TYPE}
+            )
+          ORDER BY m.name
+        `;
+        const [machines, checkedTodayRows, overdueService, overdueServiceCountRows, overdueExaminations, untestedSprayerRows] = await Promise.all([
           // Machines with no pre-use check today
           db.execute(sql`
             SELECT m.id, m.name, m.type FROM green_machines m
@@ -1129,6 +1203,8 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           // Machines with overdue service
           db.execute(sql`SELECT m.id, m.name ${overdueServiceFrom} ORDER BY s.next_service_date ASC LIMIT 10`),
           db.execute(sql`SELECT count(*)::int AS overdue ${overdueServiceFrom}`),
+          db.execute(overdueExamination),
+          db.execute(untestedSprayers),
         ]);
         const checkedTodayIds = new Set(rows(checkedTodayRows).map((r: any) => r.machine_id));
         const uncheckedToday = rows(machines).filter((m: any) => !checkedTodayIds.has(m.id));
@@ -1137,11 +1213,29 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         const uncheckedCount = uncheckedToday.length;
         const totalMachines = rows(machines).length;
 
-        if (overdueServiceCount > 0) {
+        const isNsts = (m: any) => m.inspection_type === NSTS_TEST_INSPECTION_TYPE;
+        const overdueExaminationCount = rows(overdueExaminations).filter((m: any) => !isNsts(m)).length;
+        const overdueFirstTests = rows(untestedSprayerRows)
+          .map((m: any) => ({ ...m, nsts: nstsStatus(m.sprayer_category, { purchaseDate: m.purchase_date, year: m.year }, null, today) }))
+          .filter((m: any) => m.nsts.state === "overdue");
+        const overdueNstsCount = rows(overdueExaminations).filter(isNsts).length + overdueFirstTests.length;
+
+        if (overdueServiceCount > 0 || overdueExaminationCount > 0 || overdueNstsCount > 0) {
           status = "overdue";
-          badge = `${plural(overdueServiceCount, "machine")} service overdue`;
+          badge = [
+            overdueServiceCount > 0 ? `${plural(overdueServiceCount, "machine")} service overdue` : null,
+            overdueExaminationCount > 0 ? `${plural(overdueExaminationCount, "examination")} overdue` : null,
+            overdueNstsCount > 0 ? `${plural(overdueNstsCount, "NSTS test")} overdue` : null,
+          ].filter(Boolean).join(", ");
           for (const m of rows(overdueService)) {
             items.push({ label: m.name, detail: "Service overdue", path: "/green-track" });
+          }
+          for (const m of rows(overdueExaminations).slice(0, 10)) {
+            const kind = isNsts(m) ? "NSTS test" : /examination/.test(String(m.inspection_type)) ? "Thorough examination" : "Inspection";
+            items.push({ label: m.name, detail: `${kind} overdue since ${m.next_inspection_date}`, path: "/green-track" });
+          }
+          for (const m of overdueFirstTests.slice(0, 10)) {
+            items.push({ label: m.name, detail: `NSTS test overdue since ${m.nsts.dueDate} (never tested)`, path: "/green-track" });
           }
         } else if (uncheckedCount > 0 && totalMachines > 0) {
           status = "attention";
@@ -1280,6 +1374,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     checkAlertTrack({ trackId: "hot_tub", module: "hot_tub", label: "TubTrack", path: "/hot-tub",
       enabled: entitled("hottubtrack"), daysDetail: true }),
     treeTrack(),
+    coshhTrack(),
     bikeTrack(),
     greenTrack(),
     swimTrack(),
@@ -1321,6 +1416,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     train: ["train", "traintrack"],
     hot_tub: ["hottub", "hottubtrack", "tub", "tubtrack"],
     tree: ["tree", "treetrack"],
+    coshh: ["coshh", "coshhtrack"],
     bike: ["bike", "biketrack"],
     green: ["green", "greentrack"],
     swim: ["swim", "swimtrack"],

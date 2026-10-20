@@ -83,6 +83,7 @@ const directLocked = new Set([
   "test:water-dept-isolation",
 ]);
 const runnerLocked = new Set([
+  "test:error-reports:ci", "test:manager-role", // boots its own API instances against a fake Sentry ingest
   "test:two-factor-policy", "test:passkey-webauthn",
   "test:safe-track-ack-refresh", "test:sign-off-access",
   "test:photo-storage-roundtrip", "test:photo-storage-roundtrip:fake", // runner sources the lock after its config gate
@@ -117,7 +118,7 @@ const freshSchema = new Set([
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
   "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
   "test:owner-late-edit-reason",
-  "test:kitchen-cleaning-export", "test:pat-register-access",
+  "test:kitchen-cleaning-export", "test:pat-register-access", "test:green-nsts", "test:safe-track-induction-browser", "test:equipment-qr-browser", "test:daily-track-month-history:pushed", "test:approved-account-deletion", "test:deletion-reminder", "test:export-parts", "test:cancelled-storage-class", "test:today-by-department", "test:equipment-labels",
   "test:storage-metering", "test:storage-usage-snapshot", "test:storage-capacity-reduction", "test:storage-warning-emails",
   "test:content-filter",
   "test:feedback-triage", "test:contractor-token-security",
@@ -135,15 +136,17 @@ const freshSchema = new Set([
   "test:cancellation-warnings:fresh",
   "test:train-track-roster-identity",
   "test:registers", // allergen, COSHH and asbestos registers on the private cluster
+  "test:coshh-track", // COSHHTrack assessments and checks on the private cluster
   "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
   "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster
-  "test:fire-call-points", "test:fire-discharge-task-link", "test:track-task-links",
+  "test:fire-call-points", "test:fire-discharge-task-link", "test:track-task-links", "test:track-due-dates", "test:contractor-visits",
   "test:hot-tub-registry:pushed", "test:kitchen-cleaning-legacy", "test:contractor-portal:pushed",
   "test:public-link-access", "test:public-link-rate-limit", // two API instances on the private cluster
   "test:safe-track-ack-reminders:fresh", "test:storage-price-audit",
 ]);
 const pure = new Set([
+  "test:stripe-tax-check", // bundles the Stripe Tax check into a mkdtemp dir; never contacts Stripe
   "test:upload-size-limit", // ObjectStorageService against an in-memory bucket
   "test:api-runner-lock", // validates this lock without application resources
   "test:staged-photo-creation", // real routes/helper with in-memory transaction/storage fakes

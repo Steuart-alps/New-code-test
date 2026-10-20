@@ -2211,10 +2211,14 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_survey_history_record_idx" ON "asbestos_survey_history" ("client_id", "record_id")`);
 
+    // ---- COSHHTrack (Oct 2026): after coshh_substances, which it references ----
+    await migrateCoshhTrack();
+
     // ---- Track owners and in-app notifications (Oct 2026) ----
     await migrateTrackOwnersAndNotifications();
     await migrateCertificateOutcomes();
     await migrateFireCallPoints();
+    await migrateEquipmentLabels();
 
     // ---- Department recorded with each submission (Oct 2026) ----
     // After every reported table exists; see submitterDepartmentMigration.ts.
@@ -2231,6 +2235,116 @@ async function runRuntimeMigrationsOnce() {
     logger.error({ err }, "Runtime migrations failed");
     throw err;
   }
+}
+
+// ---- COSHHTrack ----
+async function migrateCoshhTrack() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "coshh_assessments" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "substance_id" integer REFERENCES "coshh_substances"("id") ON DELETE SET NULL,
+      "task" text NOT NULL,
+      "who_at_risk" text,
+      "exposure_routes" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "how_often" text,
+      "hazard_statements" text,
+      "signal_word" text,
+      "health_effects" text,
+      "exposure_limits" text,
+      "controls" text,
+      "ppe" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "ppe_details" text,
+      "risk_level" text NOT NULL DEFAULT 'medium',
+      "health_surveillance_required" boolean NOT NULL DEFAULT false,
+      "monitoring_required" boolean NOT NULL DEFAULT false,
+      "lev_required" boolean NOT NULL DEFAULT false,
+      "storage" text,
+      "spill_procedure" text,
+      "first_aid" text,
+      "disposal" text,
+      "assessor" text,
+      "assessment_date" date NOT NULL,
+      "review_due" date,
+      "status" text NOT NULL DEFAULT 'current',
+      "document_object_path" text,
+      "document_file_name" text,
+      "document_file_size" bigint,
+      "document_mime_type" text,
+      "notes" text,
+      "draft_source" text,
+      "drafted_at" timestamp,
+      "checked_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "checked_by_name" text,
+      "checked_at" timestamp,
+      "revision" integer NOT NULL DEFAULT 1,
+      "sign_off_departments" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now(),
+      "deleted_at" timestamp
+    )
+  `);
+  await db.execute(sql`
+    ALTER TABLE "coshh_assessments"
+      ADD COLUMN IF NOT EXISTS "revision" integer NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS "sign_off_departments" jsonb NOT NULL DEFAULT '[]'::jsonb
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "coshh_assessments_client_site_idx" ON "coshh_assessments" ("client_id", "site_id")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "coshh_checks" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "assessment_id" integer REFERENCES "coshh_assessments"("id") ON DELETE SET NULL,
+      "check_type" text NOT NULL,
+      "check_date" date NOT NULL,
+      "subject" text,
+      "carried_out_by" text,
+      "result" text NOT NULL DEFAULT 'pass',
+      "action_required" text,
+      "next_due_date" date,
+      "report_object_path" text,
+      "report_file_name" text,
+      "report_file_size" bigint,
+      "report_mime_type" text,
+      "notes" text,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now(),
+      "deleted_at" timestamp
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "coshh_checks_client_site_idx" ON "coshh_checks" ("client_id", "site_id", "check_type")`);
+  // A failed check opens a COSHHTrack action, like the other result-based
+  // tracks. coshh_checks is created after migrateTrackActions has installed
+  // those triggers, so it gets its own here.
+  await db.execute(sql`DROP TRIGGER IF EXISTS sync_track_action_on_result ON "coshh_checks"`);
+  await db.execute(sql`
+    CREATE TRIGGER sync_track_action_on_result
+    AFTER INSERT OR UPDATE OF "result" ON "coshh_checks"
+    FOR EACH ROW EXECUTE FUNCTION sync_track_action_from_source('coshh', 'result', 'coshh_checks')
+  `);
+  // Staff read-and-sign records; each also writes a TrainTrack sign-off.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "coshh_acknowledgements" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "assessment_id" integer NOT NULL REFERENCES "coshh_assessments"("id") ON DELETE CASCADE,
+      "revision" integer NOT NULL,
+      "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "staff_name" text NOT NULL,
+      "signature" text,
+      "acknowledged_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "train_track_record_id" integer REFERENCES "train_track_records"("id") ON DELETE SET NULL,
+      "acknowledged_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "coshh_acknowledgements_person_revision_idx"
+    ON "coshh_acknowledgements" ("assessment_id", "revision", "staff_roster_id")
+  `);
 }
 
 // ---- Shared operational action register ----
@@ -2497,6 +2611,14 @@ async function migrateTrackActions() {
         action_due_date := (record_json->>'follow_up_date')::date;
       END IF;
       source_site_id := nullif(record_json->>'site_id', '')::integer;
+      IF TG_ARGV[0] = 'coshh' THEN
+        action_title := CASE record_json->>'check_type'
+          WHEN 'lev_examination' THEN 'Extraction (LEV) examination failed'
+          WHEN 'health_surveillance' THEN 'Health check needs follow-up'
+          WHEN 'exposure_monitoring' THEN 'Exposure monitoring result needs action'
+          ELSE 'COSHH check needs action'
+        END || coalesce(': ' || nullif(record_json->>'subject', ''), '');
+      END IF;
       -- Green PUWER checks are machine-scoped. Resolve their site through the
       -- machine when the check row itself has no site_id, so department
       -- filtering remains as strict as for directly site-scoped records.
@@ -2624,9 +2746,10 @@ async function migrateTrackActions() {
 
 
 // Findings that are not a pass/fail result still need an action on their
-// track: a premises inspection that records action required, and any pest
-// sighting not already resolved. Keyed by source row, so an update never
-// adds a second action. Whether the work goes to FixTrack is the user's call.
+// track: a premises inspection that records action required, any pest
+// sighting not already resolved, and a pest contractor's visit
+// recommendations. Keyed by source row, so an update never adds a second
+// action. Whether the work goes to FixTrack is the user's call.
 async function migrateTrackActionsForFindings() {
   await db.execute(sql`
     CREATE OR REPLACE FUNCTION raise_track_action_for_finding()
@@ -2666,6 +2789,17 @@ async function migrateTrackActionsForFindings() {
         IF lower(NEW.severity) IN ('high', 'critical', 'severe') THEN
           action_severity := 'urgent';
         END IF;
+      ELSIF TG_TABLE_NAME = 'pest_visits' THEN
+        IF nullif(trim(coalesce(NEW.recommendations, '')), '') IS NULL THEN
+          RETURN NEW;
+        END IF;
+        action_module := 'pest';
+        action_title := 'Pest control visit recommendations';
+        action_instruction := concat_ws(E'\n',
+          'Visit on ' || NEW.visit_date::text
+            || coalesce(' by ' || nullif(trim(concat_ws(', ', nullif(trim(NEW.contractor_name), ''), nullif(trim(NEW.contractor_company), ''))), ''), '') || '.',
+          'Recommendations: ' || trim(NEW.recommendations),
+          'Findings: ' || nullif(trim(NEW.findings), ''));
       ELSE
         RETURN NEW;
       END IF;
@@ -2698,6 +2832,14 @@ async function migrateTrackActionsForFindings() {
   await db.execute(sql`
     CREATE TRIGGER raise_track_action_for_finding
     AFTER INSERT ON "pest_activity"
+    FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
+  `);
+  // Only visits saved from now on: older recommendations are not turned into
+  // a batch of new actions.
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_track_action_for_finding ON "pest_visits"`);
+  await db.execute(sql`
+    CREATE TRIGGER raise_track_action_for_finding
+    AFTER INSERT OR UPDATE OF recommendations ON "pest_visits"
     FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
   `);
 }
@@ -3855,6 +3997,19 @@ async function migrateGreenTrack() {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_green_puwer_client_machine"
     ON "green_puwer_inspections" ("client_id", "machine_id")
+  `);
+  // NSTS sprayer tests: a sprayer's category and purchase date set when its
+  // tests are due, and any inspection can carry its certificate (PDF or image).
+  await db.execute(sql`
+    ALTER TABLE "green_machines"
+      ADD COLUMN IF NOT EXISTS "sprayer_category" text,
+      ADD COLUMN IF NOT EXISTS "purchase_date" date
+  `);
+  await db.execute(sql`
+    ALTER TABLE "green_puwer_inspections"
+      ADD COLUMN IF NOT EXISTS "certificate_object_path" text,
+      ADD COLUMN IF NOT EXISTS "certificate_file_name" text,
+      ADD COLUMN IF NOT EXISTS "certificate_mime_type" text
   `);
 
   // Fuel & oil usage logs
@@ -5797,6 +5952,61 @@ async function migrateFireCallPoints() {
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point_id" integer REFERENCES "fire_call_points"("id") ON DELETE SET NULL`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point" text`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "night_staff" text`);
+}
+
+// Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks
+// point at an equipment item; labels point at a record in any track.
+async function migrateEquipmentLabels() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "equipment_items" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "name" text NOT NULL,
+      "type" text NOT NULL DEFAULT 'other',
+      "location" text,
+      "make" text,
+      "model" text,
+      "serial_no" text,
+      "notes" text,
+      "active" boolean NOT NULL DEFAULT true,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_equipment_items_client_site" ON "equipment_items" ("client_id", "site_id")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "equipment_labels" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "code" text NOT NULL,
+      "kind" text NOT NULL,
+      "target_ref" text NOT NULL,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "replaced_at" timestamp
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_equipment_labels_code" ON "equipment_labels" ("code")`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_equipment_labels_active_target"
+    ON "equipment_labels" ("client_id", "kind", "target_ref") WHERE "replaced_at" IS NULL
+  `);
+  for (const table of ["legionella_checks", "compliance_items"]) {
+    await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "equipment_id" integer`));
+    // A database built by drizzle-kit push already has the plain column, so
+    // the foreign key is added on its own.
+    await db.execute(sql.raw(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${table}_equipment_id_fkey') THEN
+          ALTER TABLE "${table}" ADD CONSTRAINT "${table}_equipment_id_fkey"
+            FOREIGN KEY ("equipment_id") REFERENCES "equipment_items"("id") ON DELETE SET NULL;
+        END IF;
+      END $$
+    `));
+    await db.execute(sql.raw(`CREATE INDEX IF NOT EXISTS "IDX_${table}_equipment" ON "${table}" ("client_id", "equipment_id") WHERE "equipment_id" IS NOT NULL`));
+  }
 }
 
 async function migrateCertificateOutcomes() {

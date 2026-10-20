@@ -36,6 +36,7 @@ export const TRACK_MODULES: readonly TrackModule[] = [
   { key: "tree", label: "TreeTrack", services: ["treetrack"], path: "/tree-track", mobileRoute: "/(tabs)" },
   { key: "bike", label: "BikeTrack", services: ["biketrack"], path: "/bike-track", mobileRoute: "/(tabs)" },
   { key: "green", label: "GreenTrack", services: ["greentrack"], path: "/green-track", mobileRoute: "/checks/green" },
+  { key: "coshh", label: "COSHHTrack", services: ["coshhtrack"], path: "/coshh-track", mobileRoute: "/(tabs)" },
   { key: "incident", label: "IncidentTrack", services: ["incidenttrack"], path: "/incidents", mobileRoute: "/checks/incident" },
   { key: "compliance", label: "Compliance checks", services: ["core"], path: "/external", mobileRoute: "/(tabs)" },
 ];

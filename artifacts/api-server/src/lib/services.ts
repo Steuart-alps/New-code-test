@@ -34,12 +34,13 @@ export const SERVICES = {
   pesttrack:     { label: "PestTrack",     amountPence: 1000 },
   premisestrack: { label: "PremisesTrack", amountPence: 1000 },
   roomtrack: { label: "RoomTrack", amountPence: 1000 },
+  coshhtrack: { label: "COSHHTrack", amountPence: 1000 },
   dailytrack_am: { label: "DailyTrack AM", amountPence: 1000 },
   dailytrack_pm: { label: "DailyTrack PM", amountPence: 1000 },
 } as const;
 
 export type ServiceKey = keyof typeof SERVICES;
-export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safetrack", "fixtrack", "doctrack", "traintrack", "hottubtrack", "treetrack", "biketrack", "aquatrack", "pooltrack", "greentrack", "swimtrack", "incidenttrack", "pattrack", "pesttrack", "premisestrack", "roomtrack", "dailytrack_am", "dailytrack_pm"] as const satisfies readonly ServiceKey[];
+export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safetrack", "fixtrack", "doctrack", "traintrack", "hottubtrack", "treetrack", "biketrack", "aquatrack", "pooltrack", "greentrack", "swimtrack", "incidenttrack", "pattrack", "pesttrack", "premisestrack", "roomtrack", "coshhtrack", "dailytrack_am", "dailytrack_pm"] as const satisfies readonly ServiceKey[];
 
 /**
  * Services listed in the catalogue whose module is not available yet (its page

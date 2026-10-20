@@ -33,6 +33,8 @@ tags:
     description: File storage operations
   - name: fire-safety
     description: Fire safety logbook operations
+  - name: equipment
+    description: Equipment list and QR labels
   - name: food-safety
     description: Kitchen / food safety diary operations
   - name: legionella
@@ -41,6 +43,8 @@ tags:
     description: DailyTrack daily checklist status (AM/PM checklists and manager sign-offs)
   - name: pat-track
     description: PAT testing register operations (appliance inventory and test results)
+  - name: coshh-track
+    description: COSHHTrack assessments, LEV examinations, health surveillance, monitoring and briefings
   - name: premises-track
     description: PremisesTrack premises safety inspection operations
   - name: privacy-governance
@@ -183,6 +187,48 @@ paths:
           description: Not one of this Viewer's records
         "409":
           description: Already signed
+  /train-track/my-coshh:
+    get:
+      operationId: listMyCoshhSignOffs
+      tags: [train-track]
+      summary: Current COSHH assessments the signed-in Viewer must read and sign, and those already signed
+      responses:
+        "200":
+          description: Assessments for the Viewer's site (and department, where the assessment names departments)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyCoshhSignOffs" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-coshh/{id}/sign:
+    post:
+      operationId: signMyCoshhAssessment
+      tags: [train-track]
+      summary: Sign that the signed-in Viewer has read a current COSHH assessment (writes a TrainTrack sign-off)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The Viewer's assessments after signing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyCoshhSignOffs" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not an assessment this Viewer must sign
+        "409":
+          description: Already signed this revision
   /users/me/active-department:
     put:
       operationId: setActiveDepartment
@@ -489,6 +535,40 @@ paths:
       responses:
         "204":
           description: Deleted
+
+  /contractor-visits:
+    get:
+      operationId: listContractorVisits
+      tags: [contractors]
+      summary: Contractor visits kept on the tracks, per site, with the contractor reminded
+      description: >
+        Each visit type the business's tracks cover, at each site the user can
+        see: when the track says it is next due, and the compliance check
+        (with its contractor) that drives the contractor reminder.
+      responses:
+        "200":
+          description: Visit types and per-site rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorVisitsResponse"
+    put:
+      operationId: setContractorVisit
+      tags: [contractors]
+      summary: Choose the contractor reminded about a visit at a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetContractorVisitRequest"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
 
   /contractors:
     get:
@@ -1028,6 +1108,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/today-by-department:
+    get:
+      operationId: getTodayByDepartment
+      tags: [compliance-items]
+      summary: Today's checks per site and department
+      description: >
+        For each site, one bar per department (and one for the whole site) with
+        today's checks done, not done yet and failed, and what is outstanding.
+        Owners see every department, Managers the departments they cover, others
+        their own. Owners choose which roles see it (setting todayByDepartmentRoles).
+      parameters:
+        - in: query
+          name: siteId
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Today's status by site and department
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TodayByDepartment"
+        "403":
+          description: The card is not shown for this person's role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /settings:
     get:
@@ -1954,6 +2064,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GreenTrackConfig"
+
+  /green-track/puwer-inspections/{id}/certificate-url:
+    get:
+      operationId: getGreenTrackInspectionCertificateUrl
+      tags: [green-track]
+      summary: Get a short-lived download link for an inspection's uploaded certificate
+      description: >
+        Covers PUWER and LOLER examinations and NSTS sprayer tests. The link
+        expires after 15 minutes.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Download link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackCertificateDownload"
+        "404":
+          description: Inspection or certificate not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: File storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /incidents/config:
     get:
@@ -2912,8 +3056,516 @@ paths:
         "204":
           description: Deleted
 
+  /equipment:
+    get:
+      operationId: listEquipment
+      tags: [equipment]
+      summary: List the equipment list (plant no track keeps a record of)
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for items not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+        - in: query
+          name: includeArchived
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Equipment items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EquipmentItem"
+    post:
+      operationId: createEquipment
+      tags: [equipment]
+      summary: Add an equipment item (Owners, consultants and Managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipmentItemRequest"
+      responses:
+        "201":
+          description: Created item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentItem"
+
+  /equipment/{id}:
+    put:
+      operationId: updateEquipment
+      tags: [equipment]
+      summary: Change, archive or restore an equipment item, and its linked Compliance Checks
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEquipmentItemRequest"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentItem"
+
+  /equipment/import-extinguishers:
+    post:
+      operationId: importExtinguisherPoints
+      tags: [equipment]
+      summary: Copy FireTrack's extinguisher list onto a site's equipment list
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: integer
+                  nullable: true
+      responses:
+        "200":
+          description: How many were added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added:
+                    type: integer
+                  alreadyListed:
+                    type: integer
+                required: [added, alreadyListed]
+
+  /equipment-labels:
+    get:
+      operationId: listEquipmentLabels
+      tags: [equipment]
+      summary: Everything that can carry a QR label, with its code once printed
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for items not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Labelable items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EquipmentLabelTarget"
+
+  /equipment-labels/sheet:
+    post:
+      operationId: printEquipmentLabelSheet
+      tags: [equipment]
+      summary: A PDF sheet of QR labels; items without a code get one
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipmentLabelSheetRequest"
+      responses:
+        "200":
+          description: PDF of labels
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /equipment-labels/replace:
+    post:
+      operationId: replaceEquipmentLabel
+      tags: [equipment]
+      summary: Replace a lost or damaged label; the old code stops working
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipmentLabelRef"
+      responses:
+        "200":
+          description: The item with its new code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentLabelTarget"
+
+  /equipment-labels/scan/{code}:
+    get:
+      operationId: scanEquipmentLabel
+      tags: [equipment]
+      summary: What a scanned QR label shows
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The item, whether it is in date, and what to do next
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentScan"
+        "404":
+          description: The label is not available to this person (also for unknown codes)
+
+  /coshh-track/status:
+    get:
+      operationId: getCoshhTrackStatus
+      tags: [coshh-track]
+      summary: COSHHTrack assessment reviews and checks that are due, overdue or not yet recorded
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Due items, soonest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhTrackStatus"
+
+  /coshh-track/assessments:
+    get:
+      operationId: listCoshhAssessments
+      tags: [coshh-track]
+      summary: List COSHH assessments
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: COSHH assessments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CoshhAssessment"
+    post:
+      operationId: createCoshhAssessment
+      tags: [coshh-track]
+      summary: Record a COSHH assessment (owners, consultants and managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhAssessmentInput"
+      responses:
+        "201":
+          description: Created assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhAssessment"
+
+  /coshh-track/assessments/{id}:
+    put:
+      operationId: updateCoshhAssessment
+      tags: [coshh-track]
+      summary: Update a COSHH assessment (owners, consultants and managers)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhAssessmentInput"
+      responses:
+        "200":
+          description: Updated assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhAssessment"
+    delete:
+      operationId: deleteCoshhAssessment
+      tags: [coshh-track]
+      summary: Remove a COSHH assessment (kept in the audit trail and export)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+
+  /coshh-track/assessments/{id}/document-url:
+    get:
+      operationId: getCoshhAssessmentDocumentUrl
+      tags: [coshh-track]
+      summary: Short-lived download link for an assessment's attached document
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Download link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhDocumentUrl"
+
+  /coshh-track/checks:
+    get:
+      operationId: listCoshhChecks
+      tags: [coshh-track]
+      summary: List LEV examinations, health checks, exposure monitoring and staff briefings
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/CoshhCheckType"
+        - in: query
+          name: assessmentId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: COSHH checks, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CoshhCheck"
+    post:
+      operationId: createCoshhCheck
+      tags: [coshh-track]
+      summary: Record a COSHH check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhCheckInput"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhCheck"
+
+  /coshh-track/checks/{id}:
+    put:
+      operationId: updateCoshhCheck
+      tags: [coshh-track]
+      summary: Update a COSHH check
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhCheckInput"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhCheck"
+    delete:
+      operationId: deleteCoshhCheck
+      tags: [coshh-track]
+      summary: Remove a COSHH check (kept in the audit trail and export)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+
+  /coshh-track/checks/{id}/report-url:
+    get:
+      operationId: getCoshhCheckReportUrl
+      tags: [coshh-track]
+      summary: Short-lived download link for a check's attached report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Download link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhDocumentUrl"
+  /coshh-track/sign-offs:
+    get:
+      operationId: listCoshhSignOffs
+      tags: [coshh-track]
+      summary: Current COSHH assessments with who has read and signed them and who still needs to (TrainTrack's COSHH section)
+      parameters:
+        - in: query
+          name: siteId
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Assessments the caller can see, with sign-off status for their current revision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assessments:
+                    type: array
+                    items: { $ref: "#/components/schemas/CoshhSignOffStatus" }
+                required: [assessments]
+  /coshh-track/assessments/{id}/sign-offs:
+    post:
+      operationId: recordCoshhSignOffs
+      tags: [coshh-track]
+      summary: Record staff signing that they have read a current COSHH assessment; each writes a TrainTrack sign-off
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CoshhSignOffRequest" }
+      responses:
+        "200":
+          description: How many were newly signed (people who need not sign, or already have, are skipped) and the assessment's status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signed: { type: integer }
+                  assessment:
+                    oneOf:
+                      - $ref: "#/components/schemas/CoshhSignOffStatus"
+                      - type: "null"
+                required: [signed, assessment]
+        "404":
+          description: Not a current assessment the caller can see
+
 components:
   schemas:
+    TodayByDepartment:
+      type: object
+      required: [date, groups]
+      properties:
+        date:
+          type: string
+          format: date
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayByDepartmentGroup"
+    TodayByDepartmentGroup:
+      type: object
+      required: [siteId, siteName, rows]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+          description: null for work not tied to one site ("All sites")
+        siteName:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayByDepartmentRow"
+    TodayByDepartmentRow:
+      type: object
+      required: [key, kind, departmentId, name, done, todo, failed, items, moreItems]
+      properties:
+        key:
+          type: string
+        kind:
+          type: string
+          enum: [whole_site, department]
+        departmentId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        done:
+          type: integer
+        todo:
+          type: integer
+        failed:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayByDepartmentItem"
+        moreItems:
+          type: integer
+    TodayByDepartmentItem:
+      type: object
+      required: [status, label, detail, path]
+      properties:
+        status:
+          type: string
+          enum: [todo, failed]
+        label:
+          type: string
+        detail:
+          type: string
+        path:
+          type: string
     DailyTrackRequirement:
       type: string
       enum: [kitchen_opening, premises_opening, kitchen_closing, premises_closing, signoff]
@@ -3132,6 +3784,16 @@ components:
           type: array
           items:
             type: string
+    GreenTrackCertificateDownload:
+      type: object
+      required: [downloadUrl]
+      properties:
+        downloadUrl:
+          type: string
+        fileName:
+          type: string
+          nullable: true
+
     ErrorResponse:
       type: object
       properties:
@@ -3248,6 +3910,54 @@ components:
           type: string
           nullable: true
 
+    ContractorVisitType:
+      type: object
+      required: [key, module, trackLabel, title, label, description, dueFrom]
+      properties:
+        key: { type: string }
+        module: { type: string }
+        trackLabel: { type: string }
+        title: { type: string, description: Title of the linked compliance check }
+        label: { type: string }
+        description: { type: string }
+        dueFrom: { type: string, enum: [track, later, check] }
+    ContractorVisit:
+      type: object
+      required: [visitKey, siteId, siteName, trackDueDate, checkId, checkSiteId, dueDate, status, contractorId, contractorName, reminderSentAt]
+      properties:
+        visitKey: { type: string }
+        siteId: { type: integer }
+        siteName: { type: string }
+        trackDueDate: { type: string, format: date, nullable: true }
+        checkId: { type: integer, nullable: true }
+        checkSiteId: { type: integer, nullable: true, description: Null for a business-wide check at a one-site business }
+        dueDate: { type: string, format: date, nullable: true }
+        status: { type: string, nullable: true }
+        contractorId: { type: integer, nullable: true }
+        contractorName: { type: string, nullable: true }
+        reminderSentAt: { type: string, format: date-time, nullable: true }
+    ContractorVisitsResponse:
+      type: object
+      required: [types, visits]
+      properties:
+        types:
+          type: array
+          items: { $ref: "#/components/schemas/ContractorVisitType" }
+        visits:
+          type: array
+          items: { $ref: "#/components/schemas/ContractorVisit" }
+    SetContractorVisitRequest:
+      type: object
+      required: [visitKey, siteId, contractorId]
+      properties:
+        visitKey: { type: string }
+        siteId: { type: integer }
+        contractorId: { type: integer, nullable: true }
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+          description: Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)
     Contractor:
       type: object
       properties:
@@ -5170,6 +5880,437 @@ components:
         incident_locations:
           type: string
 
+    CoshhCheckType:
+      type: string
+      enum: [lev_examination, health_surveillance, exposure_monitoring, staff_briefing]
+
+    CoshhExposureRoute:
+      type: string
+      enum: [inhalation, skin, eyes, ingestion, injection]
+
+    CoshhPpe:
+      type: string
+      enum: [gloves, eye_protection, face_shield, respirator, apron_overalls, footwear]
+
+    CoshhAssessmentInput:
+      type: object
+      properties:
+        siteId:
+          type: integer
+        substanceId:
+          type: ["integer", "null"]
+        task:
+          type: string
+        whoAtRisk:
+          type: ["string", "null"]
+        exposureRoutes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoshhExposureRoute"
+        howOften:
+          type: ["string", "null"]
+        hazardStatements:
+          type: ["string", "null"]
+        signalWord:
+          type: ["string", "null"]
+          enum: [danger, warning, none, null]
+        healthEffects:
+          type: ["string", "null"]
+        exposureLimits:
+          type: ["string", "null"]
+        controls:
+          type: ["string", "null"]
+        ppe:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoshhPpe"
+        ppeDetails:
+          type: ["string", "null"]
+        riskLevel:
+          type: string
+          enum: [low, medium, high]
+        healthSurveillanceRequired:
+          type: boolean
+        monitoringRequired:
+          type: boolean
+        levRequired:
+          type: boolean
+        storage:
+          type: ["string", "null"]
+        spillProcedure:
+          type: ["string", "null"]
+        firstAid:
+          type: ["string", "null"]
+        disposal:
+          type: ["string", "null"]
+        assessor:
+          type: ["string", "null"]
+        assessmentDate:
+          type: string
+        reviewDue:
+          type: ["string", "null"]
+          description: Omitted on create = 12 months after the assessment date.
+        status:
+          type: string
+          enum: [current, archived]
+        notes:
+          type: ["string", "null"]
+        draftSource:
+          type: ["string", "null"]
+          enum: [ai, null]
+          description: Set to ai when the form was pre-filled from a safety data sheet.
+        draftedAt:
+          type: ["string", "null"]
+          format: date-time
+        checkedAgainstSds:
+          type: boolean
+          description: Required (true) to save an AI draft; the saver is recorded as having checked it.
+        signOffDepartments:
+          type: array
+          items: { type: string }
+          description: Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site.
+        objectPath:
+          type: ["string", "null"]
+          description: A fresh upload from POST /registers/uploads/request-url, null to detach, omitted to keep.
+        fileName:
+          type: ["string", "null"]
+      required: [siteId, task, riskLevel, assessmentDate]
+
+    CoshhAssessment:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: ["integer", "null"]
+        substanceId:
+          type: ["integer", "null"]
+        task:
+          type: string
+        whoAtRisk:
+          type: ["string", "null"]
+        exposureRoutes:
+          type: array
+          items:
+            type: string
+        howOften:
+          type: ["string", "null"]
+        hazardStatements:
+          type: ["string", "null"]
+        signalWord:
+          type: ["string", "null"]
+        healthEffects:
+          type: ["string", "null"]
+        exposureLimits:
+          type: ["string", "null"]
+        controls:
+          type: ["string", "null"]
+        ppe:
+          type: array
+          items:
+            type: string
+        ppeDetails:
+          type: ["string", "null"]
+        riskLevel:
+          type: string
+        healthSurveillanceRequired:
+          type: boolean
+        monitoringRequired:
+          type: boolean
+        levRequired:
+          type: boolean
+        storage:
+          type: ["string", "null"]
+        spillProcedure:
+          type: ["string", "null"]
+        firstAid:
+          type: ["string", "null"]
+        disposal:
+          type: ["string", "null"]
+        assessor:
+          type: ["string", "null"]
+        assessmentDate:
+          type: string
+        reviewDue:
+          type: ["string", "null"]
+        status:
+          type: string
+        documentObjectPath:
+          type: ["string", "null"]
+        documentFileName:
+          type: ["string", "null"]
+        documentFileSize:
+          type: ["integer", "null"]
+        documentMimeType:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        draftSource:
+          type: ["string", "null"]
+        draftedAt:
+          type: ["string", "null"]
+        checkedBy:
+          type: ["integer", "null"]
+        checkedByName:
+          type: ["string", "null"]
+        checkedAt:
+          type: ["string", "null"]
+        revision:
+          type: integer
+          description: Goes up when a change alters what staff read, so they sign the assessment again.
+        signOffDepartments:
+          type: array
+          items: { type: string }
+        createdBy:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        deletedAt:
+          type: ["string", "null"]
+        reviewOverdue:
+          type: boolean
+      required: [id, clientId, task, exposureRoutes, ppe, riskLevel, healthSurveillanceRequired, monitoringRequired, levRequired, assessmentDate, status, reviewOverdue, revision, signOffDepartments]
+
+    CoshhSignOffSummary:
+      type: object
+      description: The parts of a current COSHH assessment a person reads before signing.
+      properties:
+        id: { type: integer }
+        siteId: { type: integer }
+        siteName: { type: ["string", "null"] }
+        task: { type: string }
+        productName: { type: ["string", "null"] }
+        substanceId: { type: ["integer", "null"] }
+        hasSafetyDataSheet: { type: boolean }
+        hasDocument: { type: boolean }
+        revision: { type: integer }
+        signOffDepartments:
+          type: array
+          items: { type: string }
+        assessmentDate: { type: ["string", "null"], format: date }
+        assessor: { type: ["string", "null"] }
+        riskLevel: { type: string }
+        hazardStatements: { type: ["string", "null"] }
+        signalWord: { type: ["string", "null"] }
+        healthEffects: { type: ["string", "null"] }
+        exposureRoutes:
+          type: array
+          items: { type: string }
+        controls: { type: ["string", "null"] }
+        ppe:
+          type: array
+          items: { type: string }
+        ppeDetails: { type: ["string", "null"] }
+        storage: { type: ["string", "null"] }
+        spillProcedure: { type: ["string", "null"] }
+        firstAid: { type: ["string", "null"] }
+        disposal: { type: ["string", "null"] }
+      required: [id, siteId, task, revision, signOffDepartments, riskLevel, exposureRoutes, ppe, hasSafetyDataSheet, hasDocument]
+
+    CoshhSignOffStatus:
+      allOf:
+        - $ref: "#/components/schemas/CoshhSignOffSummary"
+        - type: object
+          properties:
+            staffTotal: { type: integer }
+            signedCount: { type: integer }
+            signed:
+              type: array
+              items:
+                type: object
+                properties:
+                  staffRosterId: { type: integer }
+                  name: { type: string }
+                  department: { type: ["string", "null"] }
+                  signedAt: { type: string, format: date-time }
+                  hasSignature: { type: boolean }
+                  trainTrackRecordId: { type: ["integer", "null"] }
+                required: [staffRosterId, name, signedAt, hasSignature]
+            outstanding:
+              type: array
+              items:
+                type: object
+                properties:
+                  staffRosterId: { type: integer }
+                  name: { type: string }
+                  department: { type: ["string", "null"] }
+                  resign:
+                    type: boolean
+                    description: They signed an earlier revision, so this is a re-sign after a change.
+                required: [staffRosterId, name, resign]
+          required: [staffTotal, signedCount, signed, outstanding]
+
+    CoshhSignOffRequest:
+      type: object
+      properties:
+        signOffs:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              staffRosterId: { type: integer }
+              signature:
+                type: ["string", "null"]
+                description: The person's signature drawn on this device (base64 PNG).
+            required: [staffRosterId]
+      required: [signOffs]
+
+    MyCoshhSignOffs:
+      type: object
+      properties:
+        linked: { type: boolean }
+        pending:
+          type: array
+          items: { $ref: "#/components/schemas/CoshhSignOffSummary" }
+        signed:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/CoshhSignOffSummary"
+              - type: object
+                properties:
+                  signedAt: { type: string, format: date-time }
+                required: [signedAt]
+      required: [linked, pending, signed]
+
+    CoshhCheckInput:
+      type: object
+      properties:
+        siteId:
+          type: integer
+        assessmentId:
+          type: ["integer", "null"]
+        checkType:
+          $ref: "#/components/schemas/CoshhCheckType"
+        checkDate:
+          type: string
+        subject:
+          type: ["string", "null"]
+          description: The extraction system, the person checked or briefed, or the area monitored.
+        carriedOutBy:
+          type: ["string", "null"]
+        result:
+          type: string
+          enum: [pass, fail]
+        actionRequired:
+          type: ["string", "null"]
+          description: Required when the result is fail.
+        nextDueDate:
+          type: ["string", "null"]
+          description: Omitted on create = the suggested interval (LEV 14 months, others 12).
+        notes:
+          type: ["string", "null"]
+        objectPath:
+          type: ["string", "null"]
+        fileName:
+          type: ["string", "null"]
+      required: [siteId, checkType, checkDate]
+
+    CoshhCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: ["integer", "null"]
+        assessmentId:
+          type: ["integer", "null"]
+        checkType:
+          type: string
+        checkDate:
+          type: string
+        subject:
+          type: ["string", "null"]
+        carriedOutBy:
+          type: ["string", "null"]
+        result:
+          type: string
+        actionRequired:
+          type: ["string", "null"]
+        nextDueDate:
+          type: ["string", "null"]
+        reportObjectPath:
+          type: ["string", "null"]
+        reportFileName:
+          type: ["string", "null"]
+        reportFileSize:
+          type: ["integer", "null"]
+        reportMimeType:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdBy:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        deletedAt:
+          type: ["string", "null"]
+      required: [id, clientId, checkType, checkDate, result]
+
+    CoshhDueItem:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [assessment_review, lev_examination, health_surveillance, exposure_monitoring, staff_briefing]
+        recordId:
+          type: integer
+        assessmentId:
+          type: ["integer", "null"]
+        label:
+          type: string
+        siteId:
+          type: ["integer", "null"]
+        siteName:
+          type: ["string", "null"]
+        dueDate:
+          type: ["string", "null"]
+        daysUntilDue:
+          type: ["integer", "null"]
+          description: Negative = overdue by that many days; null for items not recorded yet.
+        status:
+          type: string
+          enum: [overdue, due_soon, ok, missing]
+      required: [kind, recordId, assessmentId, label, siteId, siteName, dueDate, daysUntilDue, status]
+
+    CoshhTrackStatus:
+      type: object
+      properties:
+        today:
+          type: string
+        dueSoonDays:
+          type: integer
+        overdue:
+          type: integer
+        dueSoon:
+          type: integer
+        missing:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoshhDueItem"
+      required: [today, dueSoonDays, overdue, dueSoon, missing, items]
+
+    CoshhDocumentUrl:
+      type: object
+      properties:
+        downloadUrl:
+          type: string
+        fileName:
+          type: ["string", "null"]
+      required: [downloadUrl]
+
     OkResponse:
       type: object
       properties:
@@ -5423,6 +6564,12 @@ components:
         updatedAt:
           type: string
           format: date-time
+        superseded:
+          type: boolean
+          description: >-
+            True when a later inspection of the same type and area at the same
+            site exists, so this one's next inspection date no longer applies.
+            Returned by the list.
       required:
         - id
         - clientId
@@ -6084,6 +7231,10 @@ components:
         performedBy:
           type: string
           nullable: true
+        equipmentId:
+          type: integer
+          nullable: true
+          description: A cold water tank or calorifier on the equipment list (its site must match siteId).
       required:
         - checkType
         - checkDate
@@ -6169,3 +7320,261 @@ components:
         approved:
           type: boolean
       required: [profile, approved]
+
+    EquipmentType:
+      type: string
+      enum: [cold_water_tank, calorifier, boiler, water_heater, lift, hoist, lifting_equipment, pressure_system, gas_appliance, air_conditioning, fire_extinguisher, ladder, other]
+
+    EquipmentLabelKind:
+      type: string
+      enum: [green_machine, pat_appliance, hot_tub, fire_call_point, water_outlet, bike, room, cold_unit, equipment]
+
+    EquipmentLinkedCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+      required: [id, title]
+
+    EquipmentItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/EquipmentType"
+        typeLabel:
+          type: string
+        location:
+          type: string
+          nullable: true
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serialNo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        complianceItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentLinkedCheck"
+        labelCode:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, siteId, siteName, name, type, typeLabel, location, make, model, serialNo, notes, active, complianceItems, labelCode, createdAt, updatedAt]
+
+    EquipmentItemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/EquipmentType"
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serialNo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        complianceItemIds:
+          type: array
+          items:
+            type: integer
+      required: [name, type]
+
+    UpdateEquipmentItemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/EquipmentType"
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serialNo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        complianceItemIds:
+          type: array
+          items:
+            type: integer
+
+    EquipmentLabelRef:
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/EquipmentLabelKind"
+        ref:
+          type: string
+          description: The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer.
+      required: [kind, ref]
+
+    EquipmentLabelSheetRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentLabelRef"
+        size:
+          type: string
+          enum: [standard, large]
+      required: [items]
+
+    EquipmentLabelTarget:
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/EquipmentLabelKind"
+        ref:
+          type: string
+        track:
+          type: string
+        name:
+          type: string
+        detail:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        code:
+          type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+      required: [kind, ref, track, name, detail, siteId, siteName, code, url]
+
+    EquipmentScanState:
+      type: string
+      enum: [ok, due_soon, overdue, never, problem, info]
+
+    EquipmentScanStatus:
+      type: object
+      properties:
+        label:
+          type: string
+        state:
+          $ref: "#/components/schemas/EquipmentScanState"
+        text:
+          type: string
+        note:
+          type: string
+      required: [label, state, text]
+
+    EquipmentScanAction:
+      type: object
+      properties:
+        label:
+          type: string
+        href:
+          type: string
+        primary:
+          type: boolean
+      required: [label, href]
+
+    EquipmentScanHistory:
+      type: object
+      properties:
+        date:
+          type: string
+        text:
+          type: string
+        state:
+          $ref: "#/components/schemas/EquipmentScanState"
+      required: [date, text, state]
+
+    EquipmentScan:
+      type: object
+      properties:
+        code:
+          type: string
+        clientId:
+          type: integer
+        kind:
+          $ref: "#/components/schemas/EquipmentLabelKind"
+        track:
+          type: string
+        name:
+          type: string
+        detail:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentScanStatus"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentScanAction"
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentScanHistory"
+      required: [code, clientId, kind, track, name, detail, siteId, siteName, active, statuses, actions, history]

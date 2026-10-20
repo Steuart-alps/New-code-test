@@ -231,6 +231,12 @@ async function main() {
       edit: { notes: "viewer edit" } },
     { family: "COSHH register item", path: "/registers/coshh", body: { siteId, productName: `Viewer cleaner ${suffix}` },
       edit: { siteId, productName: "viewer edit" } },
+    { family: "COSHH assessment", path: "/coshh-track/assessments",
+      body: { siteId, task: `Viewer cleaning ${suffix}`, riskLevel: "low", assessmentDate: today },
+      edit: { siteId, task: "viewer edit", riskLevel: "low", assessmentDate: today } },
+    { family: "COSHH check", path: "/coshh-track/checks",
+      body: { siteId, checkType: "staff_briefing", checkDate: today, subject: "Viewer Fixture", result: "pass" },
+      edit: { siteId, checkType: "staff_briefing", checkDate: today, subject: "viewer edit", result: "pass" } },
     { family: "SafeTrack training record", path: "/safe-track/training-records",
       body: { staffName: "Viewer Fixture", trainingType: "Manual handling", completedAt: today, siteId }, edit: { staffName: "viewer edit" } },
     { family: "TrainTrack record", path: "/train-track/records", editMethod: "PATCH",
@@ -290,8 +296,9 @@ async function main() {
   const placeholder = "2000000000";
   let notFound = 0;
   for (const route of routes) {
-    // The one write a viewer makes, checked above.
-    if (route.path === "/train-track/my-records/:id/sign") continue;
+    // The writes a viewer makes: signing their own records, checked above, and
+    // signing a COSHH assessment for their site (tests/coshh-track.mjs).
+    if (route.path === "/train-track/my-records/:id/sign" || route.path === "/train-track/my-coshh/:id/sign") continue;
     let usedPlaceholder = false;
     const collection = route.path.replace(/\/:[^/]+.*$/, "");
     const path = route.path.replace(/:(\w+)(\([^)]*\))?\??/g, (_match, param) => {

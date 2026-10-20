@@ -25,4 +25,6 @@ export interface PremisesInspection {
   createdBy?: number | null;
   createdAt?: Date;
   updatedAt?: Date;
+  /** True when a later inspection of the same type and area at the same site exists, so this one's next inspection date no longer applies. Returned by the list. */
+  superseded?: boolean;
 }
