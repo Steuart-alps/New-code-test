@@ -72,8 +72,8 @@ assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Ev
 // Section membership: a nav edit that moves, drops or duplicates a link fails here.
 const membership = groups => Object.fromEntries(groups.map(g => [g.id, g.items.map(i => i.href)]));
 assert.deepEqual(membership(adminGroups), {
-  core: ["/dashboard", "/portfolio", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors", "/categories"],
-  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh", "/asbestos"],
+  core: ["/dashboard", "/portfolio", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors", "/categories", "/equipment"],
+  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/coshh", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
   operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
   "people-training": ["/doc-track", "/train-track", "/users", "/staff-roster"],
@@ -82,7 +82,7 @@ assert.deepEqual(membership(adminGroups), {
 }, "Consultant admin sections");
 assert.deepEqual(membership(userGroups), {
   core: ["/dashboard", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors"],
-  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh", "/asbestos"],
+  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/coshh", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
   operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
   "people-training": ["/doc-track", "/train-track"],

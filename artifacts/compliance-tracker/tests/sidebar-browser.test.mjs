@@ -79,6 +79,12 @@ try {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/api/auth/me")) return route.fulfill({ json: authMe() });
     if (path.endsWith("/api/auth/csrf")) return route.fulfill({ json: { csrfToken: "test" } });
+    // The header's notification bell (#92) and the app-wide storage limit banner (#156).
+    if (path.endsWith("/api/notifications")) return route.fulfill({ json: { notifications: [], unreadCount: 0 } });
+    if (path.endsWith("/api/managed-by")) return route.fulfill({ json: null });
+    if (path.endsWith("/api/storage/status")) {
+      return route.fulfill({ json: { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null } });
+    }
     return route.fulfill({ json: [] });
   });
 
