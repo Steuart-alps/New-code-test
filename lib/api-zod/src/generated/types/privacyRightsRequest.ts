@@ -7,6 +7,7 @@
  */
 import type { PrivacyRightsRequestInput } from './privacyRightsRequestInput';
 import type { PrivacyRightsRequestKind } from './privacyRightsRequestKind';
+import type { PrivacyRightsRequestSource } from './privacyRightsRequestSource';
 
 export type PrivacyRightsRequest = PrivacyRightsRequestInput & ({
   kind: PrivacyRightsRequestKind;
@@ -17,6 +18,10 @@ export type PrivacyRightsRequest = PrivacyRightsRequestInput & ({
   identityVerifiedBy: number | null;
   decidedAt: Date | null;
   decidedBy: number | null;
+  source: PrivacyRightsRequestSource;
+  publicReference: string | null;
+  assignedTo: number | null;
+  adminNotifiedAt: Date | null;
   createdBy: number | null;
   updatedBy: number | null;
   createdAt: Date;

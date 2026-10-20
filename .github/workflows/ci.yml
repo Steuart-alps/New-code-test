@@ -177,6 +177,9 @@ jobs:
       - name: Settings and dropdown option tests
         run: pnpm --filter @workspace/api-server run test:config:ci
 
+      - name: Privacy Centre and online request form tests
+        run: pnpm --filter @workspace/api-server run test:privacy-governance:ci
+
       - name: Staff invitation tests
         run: pnpm --filter @workspace/api-server run test:staff-invitations
 

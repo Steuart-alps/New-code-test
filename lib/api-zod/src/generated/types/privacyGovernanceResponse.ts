@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { PrivacyAdministrator } from './privacyAdministrator';
 import type { PrivacyBreach } from './privacyBreach';
 import type { PrivacyProcessingActivity } from './privacyProcessingActivity';
 import type { PrivacyProcessor } from './privacyProcessor';
@@ -21,4 +22,6 @@ export interface PrivacyGovernanceResponse {
   retentionVerifications: PrivacyRetentionVerification[];
   processors: PrivacyProcessor[];
   breaches: PrivacyBreach[];
+  /** People who can be assigned online privacy requests */
+  privacyAdministrators: PrivacyAdministrator[];
 }
