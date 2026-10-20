@@ -75,6 +75,8 @@ export * from './fireSafetyConfig';
 export * from './fireSafetyStatus';
 export * from './fireSafetyStatusLastResult';
 export * from './fireSafetyStatusStatus';
+export * from './fixTrackIssueMediaList';
+export * from './fixTrackMediaDeleteRequest';
 export * from './foodSafetyConfig';
 export * from './foodSafetyConfigFoodJurisdiction';
 export * from './foodSafetyMissingDatesResponse';

@@ -58,6 +58,8 @@ import type {
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
+  FixTrackIssueMediaList,
+  FixTrackMediaDeleteRequest,
   FoodSafetyConfig,
   FoodSafetyMissingDatesResponse,
   FoodSafetyMonthlySummary,
@@ -4263,6 +4265,79 @@ export const useRequestUploadUrl = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRequestUploadUrlMutationOptions(options));
+    }
+
+export const getDeleteFixTrackIssueMediaUrl = (id: number,) => {
+
+
+
+
+  return `/api/fix-track/issues/${id}/media/delete`
+}
+
+/**
+ * Frees storage once an issue is finished. The issue, its notes and its history stay; the history records who deleted which file and when.
+ * @summary Delete a photo or video from a resolved or closed issue (owners and admins)
+ */
+export const deleteFixTrackIssueMedia = async (id: number,
+    fixTrackMediaDeleteRequest: FixTrackMediaDeleteRequest, options?: RequestInit): Promise<FixTrackIssueMediaList> => {
+
+  return customFetch<FixTrackIssueMediaList>(getDeleteFixTrackIssueMediaUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fixTrackMediaDeleteRequest)
+  }
+);}
+
+
+
+
+
+export const getDeleteFixTrackIssueMediaMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>, TError,{id: number;data: BodyType<FixTrackMediaDeleteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>, TError,{id: number;data: BodyType<FixTrackMediaDeleteRequest>}, TContext> => {
+
+const mutationKey = ['deleteFixTrackIssueMedia'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>, {id: number;data: BodyType<FixTrackMediaDeleteRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  deleteFixTrackIssueMedia(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteFixTrackIssueMediaMutationResult = NonNullable<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>>
+    export type DeleteFixTrackIssueMediaMutationBody = BodyType<FixTrackMediaDeleteRequest>
+    export type DeleteFixTrackIssueMediaMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete a photo or video from a resolved or closed issue (owners and admins)
+ */
+export const useDeleteFixTrackIssueMedia = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>, TError,{id: number;data: BodyType<FixTrackMediaDeleteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteFixTrackIssueMedia>>,
+        TError,
+        {id: number;data: BodyType<FixTrackMediaDeleteRequest>},
+        TContext
+      > => {
+      return useMutation(getDeleteFixTrackIssueMediaMutationOptions(options));
     }
 
 export const getListFireSafetyChecksUrl = (params?: ListFireSafetyChecksParams,) => {
