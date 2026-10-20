@@ -9,6 +9,7 @@ import { sendEmail } from "../lib/email";
 import { getPublicAppUrl } from "../lib/email";
 import { ObjectContentError, ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { digestBearerToken } from "../lib/bearerTokens";
 import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
 
@@ -474,11 +475,12 @@ router.post("/:token/upload-url", async (req, res) => {
   if (new Date(t.expires_at) < new Date()) return res.status(410).json({ error: "Link expired" });
 
   try {
+    await ensureUploadCapacity(t.client_id, req.log);
     const uploadUrl  = await storage.getObjectEntityUploadURL(t.client_id);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
   } catch (err) {
-    return respondObjectStorageUnavailable(req, res, err, "public FixTrack completion upload");
+    return respondObjectStorageUnavailable(req, res, err, "public FixTrack completion upload", { external: true });
   }
 });
 

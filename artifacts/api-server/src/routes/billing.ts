@@ -41,13 +41,9 @@ import {
 import { logger } from "../lib/logger";
 import {
   checkStorageAddonPrice,
-  evaluateStorageAddonPrice,
-  findStoragePriceId,
   isWholeStoragePacks,
-  rememberStoragePriceCheck,
   roundUpToStoragePacks,
   STORAGE_PACK_GIB,
-  type StoragePriceInput,
 } from "../lib/storagePricing";
 import { BILLING_UNVERIFIED_ERROR, getBillingReadiness, isBillingActivationAllowed } from "../lib/stripeStartup";
 import { getPublicAppUrl } from "../lib/email";
@@ -55,6 +51,8 @@ import { z } from "zod";
 import { requireAuth, getClientId, requireRole, requireClientAdmin, denyViewers, requirePlatformOperator } from "../middleware/requireAuth";
 import { syncClientSubscriptionState } from "../lib/subscriptionState";
 import { readStorageUsageSnapshot } from "../lib/storageUsageSnapshot";
+import { addStorageCapacity } from "../lib/storagePurchase";
+import { clearStorageCapacityCache, setStorageTopUpBuyer, STORAGE_CAPACITY_LOCK_NS } from "../lib/storageLimit";
 import {
   isStorageSubscriptionItem,
   listScheduledStorageReductions,
@@ -66,6 +64,10 @@ import {
 import { SUBSCRIPTION_ACCESS_ENDS_AT } from "../lib/offboarding";
 
 const router = Router();
+
+// Automatic storage top-ups (lib/storageLimit.ts) charge through the same path
+// as a Settings purchase.
+setStorageTopUpBuyer(addStorageCapacity);
 
 // Keep this lightweight for the app-wide offboarding banner. Read the synced
 // Stripe state on each request so reversing a cancellation hides the warning.
@@ -711,114 +713,23 @@ router.post("/storage", requireAuth, requireRole("consultant", "client_admin"), 
 
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "clientId required" });
-  const priceId = await findStoragePriceId().catch(() => null);
-  if (!priceId) return res.status(503).json({ error: "Storage add-on billing is not configured" });
-
-  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
-  if (!client?.stripeCustomerId) return res.status(400).json({ error: "No Stripe customer for this client" });
 
   try {
-    const stripe = await getUncachableStripeClient();
-    const subscription = await findLiveSubscription(client.stripeCustomerId);
-    if (!subscription) return res.status(400).json({ error: "No active subscription — subscribe first" });
-
-    const price = await stripe.prices.retrieve(priceId);
-    const unitAmount = Number(price.unit_amount);
-    const subscriptionCurrency = subscription.items.data.find((item) => item.price?.currency)?.price?.currency;
-    if (
-      !price.active
-      || price.type !== "recurring"
-      || price.recurring?.interval !== "month"
-      || !subscriptionCurrency
-      || price.currency !== subscriptionCurrency
-      || !Number.isSafeInteger(unitAmount)
-      || unitAmount < 1
-    ) {
-      return res.status(503).json({ error: "Storage add-on price must be an active monthly price in the subscription currency" });
+    // Same lock as automatic top-ups and reductions, so two changes never
+    // both start from the same subscription quantity.
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${STORAGE_CAPACITY_LOCK_NS}, ${clientId})`);
+      return addStorageCapacity({ clientId, gib: parsed.data.gib, requestId: parsed.data.requestId, log: req.log });
+    });
+    if (!result.ok) {
+      return res.status(result.status).json(result.code ? { error: result.error, code: result.code } : { error: result.error });
     }
-
-    // Never charge anything but the £1 per 10 GiB the customer was shown, or a
-    // price that no longer covers costs; pause purchases and alert instead.
-    const priceCheck = evaluateStorageAddonPrice(price as unknown as StoragePriceInput);
-    rememberStoragePriceCheck(priceCheck);
-    if (priceCheck.status !== "ok") {
-      req.log.error({ clientId, storagePriceCheck: priceCheck }, "Storage add-on purchase refused: price out of line with provider rate");
-      return res.status(503).json({
-        error: "Buying extra storage is paused while we update its price. You have not been charged.",
-        code: "STORAGE_PRICE_UNDER_REVIEW",
-      });
-    }
-    const existingItem = subscription.items.data.find(
-      (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
-    );
-    const oldQuantity = existingItem?.quantity ?? 0;
-    const desiredQuantity = oldQuantity + parsed.data.gib;
-    const periodStart = subscription.items.data[0]?.current_period_start ?? subscription.created;
-    const idempotencyPrefix = `storage-add-${subscription.id}-${parsed.data.requestId}`;
-
-    await stripe.subscriptions.update(
-      subscription.id,
-      {
-        items: [existingItem
-          ? { id: existingItem.id, price: priceId, quantity: desiredQuantity }
-          : { price: priceId, quantity: desiredQuantity }],
-        proration_behavior: "none",
-      },
-      { idempotencyKey: `${idempotencyPrefix}-subscription` },
-    );
-
-    try {
-      const payment = await collectAddonFirstMonthInvoice(stripe, {
-        customerId: client.stripeCustomerId,
-        amount: unitAmount * parsed.data.gib,
-        currency: price.currency,
-        description: `Additional storage — ${parsed.data.gib} GB per month`,
-        metadata: {
-          addon_service: "storage",
-          client_id: String(clientId),
-          gib_added: String(parsed.data.gib),
-          period_start: String(periodStart),
-        },
-        idempotencyPrefix,
-      });
-      if (payment === "unknown") {
-        invalidateEntitlements(clientId);
-        return res.status(502).json({
-          error: "We couldn't confirm the payment outcome. Storage access was kept while Stripe confirms it; please contact support before retrying.",
-        });
-      }
-      if (payment !== "paid") throw new Error("Storage add-on invoice was not collected");
-    } catch (error) {
-      try {
-        const fresh = await findLiveSubscription(client.stripeCustomerId);
-        const added = fresh?.items.data.find(
-          (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
-        );
-        if (added) {
-          if (oldQuantity > 0 && existingItem?.price?.id) {
-            await stripe.subscriptionItems.update(added.id, {
-              price: existingItem.price.id,
-              quantity: oldQuantity,
-              proration_behavior: "none",
-            });
-          } else {
-            await stripe.subscriptionItems.del(added.id, { proration_behavior: "none" });
-          }
-        }
-      } catch (rollbackError) {
-        req.log.error({ err: rollbackError, clientId }, "Storage add-on rollback failed");
-      }
-      invalidateEntitlements(clientId);
-      req.log.error({ err: error, clientId }, "Storage add-on payment failed");
-      return res.status(502).json({ error: "We couldn't complete the storage charge, so the add-on was not enabled. Please try again." });
-    }
-
-    invalidateEntitlements(clientId);
+    clearStorageCapacityCache(clientId);
     res.status(201).json({
-      gibAdded: parsed.data.gib,
-      monthlyGib: desiredQuantity,
-      unitAmount,
-      currency: price.currency,
+      gibAdded: result.gibAdded,
+      monthlyGib: result.monthlyGib,
+      unitAmount: result.unitAmount,
+      currency: result.currency,
     });
   } catch (err: any) {
     req.log.error({ err, clientId }, "Storage add-on failed");
@@ -827,7 +738,6 @@ router.post("/storage", requireAuth, requireRole("consultant", "client_admin"), 
 });
 
 // Serialises storage reductions per client across API instances.
-const STORAGE_CAPACITY_LOCK_NS = 0x53544f52; // "STOR"
 
 type LiveSubscription = NonNullable<Awaited<ReturnType<typeof findLiveSubscription>>>;
 
@@ -995,6 +905,7 @@ router.post("/storage/reduce", requireAuth, requireRole("consultant", "client_ad
     });
     if ("replay" in outcome) return replayResponse(outcome.replay!);
     if ("error" in outcome) return res.status(outcome.status).json({ error: outcome.error });
+    clearStorageCapacityCache(clientId);
     res.status(outcome.status).json(outcome.body);
   } catch (err: any) {
     req.log.error({ err, clientId }, "Storage reduction failed");

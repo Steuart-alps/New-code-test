@@ -141,6 +141,7 @@ import type {
   SetPrivacyIntakeAssigneeParams,
   SignTrainingRecordRequest,
   Site,
+  StorageStatus,
   StorageUsage,
   TestEmailRequest,
   TestEmailResponse,
@@ -4378,6 +4379,83 @@ export function useGetStorageUsage<TData = Awaited<ReturnType<typeof getStorageU
 
 
 
+export const getGetStorageStatusUrl = () => {
+
+
+
+
+  return `/api/storage/status`
+}
+
+/**
+ * @summary Whether this business's storage is nearly full or full, for the in-app banner
+ */
+export const getStorageStatus = async ( options?: RequestInit): Promise<StorageStatus> => {
+
+  return customFetch<StorageStatus>(getGetStorageStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetStorageStatusQueryKey = () => {
+    return [
+    `/api/storage/status`
+    ] as const;
+    }
+
+
+export const getGetStorageStatusQueryOptions = <TData = Awaited<ReturnType<typeof getStorageStatus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStorageStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetStorageStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getStorageStatus>>> = ({ signal }) => getStorageStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getStorageStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetStorageStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getStorageStatus>>>
+export type GetStorageStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Whether this business's storage is nearly full or full, for the in-app banner
+ */
+
+export function useGetStorageStatus<TData = Awaited<ReturnType<typeof getStorageStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStorageStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetStorageStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getSendRemindersUrl = () => {
 
 
@@ -4617,7 +4695,7 @@ export const requestUploadUrl = async (requestUploadUrlBody: RequestUploadUrlBod
 
 
 
-export const getRequestUploadUrlMutationOptions = <TError = ErrorType<unknown>,
+export const getRequestUploadUrlMutationOptions = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<RequestUploadUrlBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<RequestUploadUrlBody>}, TContext> => {
 
@@ -4646,12 +4724,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RequestUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof requestUploadUrl>>>
     export type RequestUploadUrlMutationBody = BodyType<RequestUploadUrlBody>
-    export type RequestUploadUrlMutationError = ErrorType<unknown>
+    export type RequestUploadUrlMutationError = ErrorType<ErrorResponse>
 
     /**
  * @summary Request a presigned upload URL for a file
  */
-export const useRequestUploadUrl = <TError = ErrorType<unknown>,
+export const useRequestUploadUrl = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<RequestUploadUrlBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof requestUploadUrl>>,

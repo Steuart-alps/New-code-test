@@ -12,7 +12,7 @@
 //     provider cost plus the ALPS markup, in integer minor units;
 //   - invalid pricing configuration hides the estimate instead of guessing;
 //   - download traffic is measured and shown, but never priced.
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import http from "node:http";
 import path from "node:path";
@@ -142,6 +142,7 @@ async function main(base) {
   await monthAggregation(tenantA, tenantB, month);
   await downloads(base, tenantA, tenantB, month);
   await downloadsDisplayedNotBilled(tenantA, pricing, month);
+  await storageLimit(await registerTenant(base, "limit", runId));
 }
 
 async function utcMonthBoundaries() {
@@ -513,6 +514,145 @@ async function downloadsDisplayedNotBilled(tenantA, pricing, month) {
   same("within the allowance, downloads alone cost nothing", [withinAllowance.data?.monthlyDownloadBytes >= 500 * GIB, withinAllowance.data?.estimatedCost?.totalMinorUnits], [true, 0]);
 }
 
+// ─── storage limit: uploads stop at paid capacity unless top-up is on ──────
+
+async function storageLimit({ user, clientId }) {
+  console.log("\n── storage limit ──");
+  const captureDir = await mkdtemp(path.join(dir, ".storage-limit-mail-"));
+  const capture = path.join(captureDir, "mail.jsonl");
+  process.env.TEST_EMAIL_CAPTURE_PATH = capture;
+  const mails = async () => (await readFile(capture, "utf8").catch(() => "")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const customer = `cus_storage_limit_${clientId}`;
+  await query("UPDATE clients SET stripe_customer_id = $1 WHERE id = $2", [customer, clientId]);
+  t.setTestSubscription(customer, ["core"]); // 1 GiB included
+  const setUsage = async (bytes) => {
+    await query("DELETE FROM storage_usage_objects WHERE client_id = $1", [clientId]);
+    if (bytes > 0) {
+      await query("INSERT INTO storage_usage_objects (object_path, client_id, size_bytes, present) VALUES ($1, $2, $3, true)",
+        [`/objects/uploads/tenant-${clientId}/limit-${stamp()}`, clientId, bytes]);
+    }
+  };
+  const upload = () => user("POST", "/storage/uploads/request-url", { name: "evidence.pdf", size: 1024, contentType: "application/pdf" });
+  const events = () => query("SELECT kind, gib_added, cleared_at IS NOT NULL AS cleared, emailed_at IS NOT NULL AS emailed FROM storage_limit_events WHERE client_id = $1 ORDER BY id", [clientId]);
+  const waitFor = async (predicate, timeoutMs = 5000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await predicate()) return true;
+      await sleep(50);
+    }
+    return false;
+  };
+  const status = async () => (await user("GET", "/storage/status")).data;
+
+  try {
+    // Under capacity: uploads work and nothing is recorded.
+    await setUsage(GIB / 2);
+    t.clearStorageCapacityCache(clientId);
+    same("under capacity: upload link issued", (await upload()).status, 200);
+    same("under capacity: status ok", (await status())?.state, "ok");
+
+    await setUsage(Math.ceil(GIB * 0.85));
+    const nearly = await status();
+    same("85% of capacity: nearly full, with figures for the owner", [nearly?.state, nearly?.capacityBytes, nearly?.canManage], ["nearly_full", GIB, true]);
+    same("nearly full: uploads still work", (await upload()).status, 200);
+
+    // Full, automatic top-up off (the default): uploads stop with a clear message.
+    await setUsage(GIB + 1);
+    const refused = await upload();
+    same("full: upload refused with 409", refused.status, 409);
+    same("full: STORAGE_FULL code", refused.data?.code, "STORAGE_FULL");
+    check("full: message says nothing was deleted and where to add storage",
+      /storage is full/i.test(refused.data?.error ?? "") && /Nothing has been deleted/.test(refused.data?.error ?? "") && /Settings/.test(refused.data?.error ?? ""), refused.data?.error);
+    same("full: a second refusal records no second event", ((await upload()).status), 409);
+    same("full: one open full event", (await events()).map((e) => [e.kind, e.cleared]), [["full", false]]);
+    check("full: owners emailed once", await waitFor(async () => (await events())[0]?.emailed), "full event never emailed");
+    const fullMails = (await mails()).filter((mail) => /storage is full, uploads have stopped/.test(mail.subject));
+    same("full: one email to the owner", fullMails.length, 1);
+    check("full email: says nothing deleted and links to storage settings",
+      /Nothing has been deleted/.test(fullMails[0]?.text ?? "") && /\/settings#storage/.test(fullMails[0]?.text ?? ""), fullMails[0]?.text);
+    same("full: status full", (await status())?.state, "full");
+
+    // Invalid setting values are rejected; owners can switch top-up on.
+    same("top-up setting rejects other values", (await user("PUT", "/settings", { storageAutoTopUp: "yes" })).status, 400);
+    same("owner switches automatic top-up on", (await user("PUT", "/settings", { storageAutoTopUp: "true" })).status, 200);
+
+    // A failed automatic charge: uploads stay stopped, owners are told, and
+    // it isn't retried on every upload.
+    const buys = [];
+    t.setStorageTopUpBuyer(async (input) => {
+      buys.push(input);
+      return { ok: false, status: 502, error: "card declined" };
+    });
+    same("top-up fails: upload still refused", (await upload()).status, 409);
+    same("top-up fails: one 10 GB attempt", buys.map((b) => b.gib), [10]);
+    same("top-up fails: no retry on the next upload", ((await upload()).status, buys.length), 1);
+    check("top-up failure emailed", await waitFor(async () => (await events()).some((e) => e.kind === "top_up_failed" && e.emailed)));
+    check("failure email says not charged", (await mails()).some((mail) => /automatic top-up failed/.test(mail.subject) && /not been charged/.test(mail.text)));
+    same("top-up on: no separate storage-full email on top of the failure email",
+      (await mails()).filter((mail) => /storage is full, uploads have stopped/.test(mail.subject)).length, 1);
+
+    // A charge that throws (Stripe unreachable) is a failure too, not retried per upload.
+    await query("UPDATE storage_limit_events SET created_at = now() - interval '25 hours' WHERE client_id = $1 AND kind = 'top_up_failed'", [clientId]);
+    t.setStorageTopUpBuyer(async (input) => {
+      buys.push(input);
+      throw new Error("Stripe unreachable");
+    });
+    same("top-up throws: upload refused as full, not an outage", (await upload()).data?.code, "STORAGE_FULL");
+    same("top-up throws: recorded as a failure, no retry on the next upload", ((await upload()).status, buys.length), 2);
+
+    // After the retry pause, a successful top-up lets the upload through.
+    await query("UPDATE storage_limit_events SET created_at = now() - interval '25 hours' WHERE client_id = $1 AND kind = 'top_up_failed'", [clientId]);
+    t.setStorageTopUpBuyer(async (input) => {
+      buys.push(input);
+      t.setTestStorageGib(customer, input.gib);
+      return { ok: true, gibAdded: input.gib };
+    });
+    same("top-up succeeds: upload link issued", (await upload()).status, 200);
+    same("top-up succeeds: bought 10 GB once", buys.slice(2).map((b) => b.gib), [10]);
+    check("top-up request ids are unique", new Set(buys.map((b) => b.requestId)).size === buys.length);
+    const afterTopUp = await events();
+    same("top-up succeeds: full event cleared, topped_up recorded",
+      afterTopUp.map((e) => [e.kind, e.gib_added, e.kind === "full" ? e.cleared : null]),
+      [["full", null, true], ["top_up_failed", 10, null], ["top_up_failed", 10, null], ["topped_up", 10, null]]);
+    check("top-up emailed", await waitFor(async () => (await events()).some((e) => e.kind === "topped_up" && e.emailed)));
+    check("top-up email names the amount and monthly cost",
+      (await mails()).some((mail) => /added 10 GB/.test(mail.subject) && /£1 a month/.test(mail.text)));
+    same("after top-up: capacity 11 GiB", (await status())?.capacityBytes, 11 * GIB);
+    same("next upload needs no further top-up", ((await upload()).status, buys.length), 3);
+
+    // Far over capacity: one top-up buys enough 10 GB steps to make room.
+    await setUsage(35 * GIB);
+    same("far over: upload allowed after top-up", (await upload()).status, 200);
+    same("far over: bought 30 GB in one go (35 GiB used, 11 GiB capacity)", buys.at(-1)?.gib, 30);
+    t.setTestStorageGib(customer, 0);
+
+    // Switching top-up off again: uploads stop at the limit.
+    same("owner switches automatic top-up off", (await user("PUT", "/settings", { storageAutoTopUp: "false" })).status, 200);
+    t.clearStorageCapacityCache(clientId);
+    const callsBefore = buys.length;
+    same("top-up off: refused again", (await upload()).status, 409);
+    same("top-up off: nothing bought", buys.length, callsBefore);
+
+    // Back under capacity: the open full event closes and uploads resume.
+    await setUsage(GIB / 4);
+    same("under capacity again: upload allowed", (await upload()).status, 200);
+    same("under capacity again: no open full event", (await events()).filter((e) => e.kind === "full" && !e.cleared).length, 0);
+
+    // No live subscription (e.g. a trial): not limited, uploads allowed.
+    t.setTestSubscription(customer, null);
+    t.clearStorageCapacityCache(clientId);
+    await setUsage(50 * GIB);
+    same("no subscription: not limited", (await status())?.state, "not_limited");
+    same("no subscription: upload allowed", (await upload()).status, 200);
+  } finally {
+    t.setStorageTopUpBuyer(null);
+    t.setTestSubscription(customer, ["core"]);
+    await setUsage(0);
+    delete process.env.TEST_EMAIL_CAPTURE_PATH;
+    await rm(captureDir, { recursive: true, force: true });
+  }
+}
+
 // ─── run (last, so every helper above is initialised) ───────────────────────
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -522,7 +662,10 @@ let server;
 try {
   const outfile = path.join(outDir, "entry.mjs");
   const billingStub = path.join(dir, "storage-metering-billing.stub.ts");
-  const storageRoute = path.join(dir, "..", "src", "routes", "storage.ts");
+  const stubbedImporters = new Set([
+    path.join(dir, "..", "src", "routes", "storage.ts"),
+    path.join(dir, "..", "src", "lib", "storageLimit.ts"),
+  ]);
   await build({
     entryPoints: [path.join(dir, "storage-metering.entry.ts")],
     bundle: true,
@@ -535,9 +678,9 @@ try {
     plugins: [{
       name: "storage-route-billing-stub",
       setup(builder) {
-        // Only the storage route's Stripe lookup is replaced.
-        builder.onResolve({ filter: /\/lib\/billing$/ }, (args) =>
-          path.resolve(args.importer) === storageRoute ? { path: billingStub } : undefined);
+        // Only the storage route's and storage limit's Stripe lookups are replaced.
+        builder.onResolve({ filter: /(^|\/)billing$/ }, (args) =>
+          stubbedImporters.has(path.resolve(args.importer)) ? { path: billingStub } : undefined);
       },
     }],
   });

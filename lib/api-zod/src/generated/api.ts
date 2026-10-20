@@ -1222,7 +1222,8 @@ export const GetSettingsResponse = zod.object({
   "contractorComplianceLeadTimeDays": zod.string().nullish(),
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
-  "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
+  "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.')
 })
 
 
@@ -1243,7 +1244,8 @@ export const UpdateSettingsBody = zod.object({
   "contractorComplianceLeadTimeDays": zod.string().nullish(),
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
-  "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish()
+  "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish(),
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.')
 })
 
 export const updateSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
@@ -1260,7 +1262,8 @@ export const UpdateSettingsResponse = zod.object({
   "contractorComplianceLeadTimeDays": zod.string().nullish(),
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
-  "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
+  "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.')
 })
 
 
@@ -2326,6 +2329,8 @@ export const AddPrivacyRetentionVerificationResponse = zod.object({
  */
 export const getStorageUsageResponseUsedBytesMin = 0;
 
+export const getStorageUsageResponseCapacityBytesMin = 0;
+
 export const getStorageUsageResponseUsageAgeSecondsMin = 0;
 
 export const getStorageUsageResponseObjectCountMin = 0;
@@ -2354,6 +2359,9 @@ export const getStorageUsageResponseEstimatedCostMarkupPercentMin = 0;
 
 export const GetStorageUsageResponse = zod.object({
   "usedBytes": zod.number().min(getStorageUsageResponseUsedBytesMin),
+  "capacityBytes": zod.number().min(getStorageUsageResponseCapacityBytesMin).nullable().describe('The storage the business pays for (plan allowance plus extra storage); null when uploads aren\'t limited.'),
+  "limitState": zod.enum(['ok', 'nearly_full', 'full', 'not_limited']).describe('Usage against the storage the business pays for. nearly_full is 80% or more; full stops new uploads unless automatic top-up adds storage; not_limited means no paid limit applies (no live subscription, or it couldn\'t be read).'),
+  "autoTopUp": zod.boolean().describe('Whether automatic 10 GB top-up is switched on.'),
   "usageCheckedAt": zod.date().nullable().describe('When the totals were last reconciled with the storage provider; null before the first check.'),
   "usageAgeSeconds": zod.number().min(getStorageUsageResponseUsageAgeSecondsMin).nullable().describe('Seconds since usageCheckedAt. Uploads and deletions since then are already included.'),
   "usageRefreshing": zod.boolean().describe('A reconciliation with the storage provider is running; totals may change shortly.'),
@@ -2374,6 +2382,24 @@ export const GetStorageUsageResponse = zod.object({
   "markupMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostMarkupMinorUnitsMin),
   "markupPercent": zod.number().min(getStorageUsageResponseEstimatedCostMarkupPercentMin)
 }).nullable()
+})
+
+
+/**
+ * @summary Whether this business's storage is nearly full or full, for the in-app banner
+ */
+export const getStorageStatusResponseUsedBytesMin = 0;
+
+export const getStorageStatusResponseCapacityBytesMin = 0;
+
+
+
+export const GetStorageStatusResponse = zod.object({
+  "state": zod.enum(['ok', 'nearly_full', 'full', 'not_limited']).describe('Usage against the storage the business pays for. nearly_full is 80% or more; full stops new uploads unless automatic top-up adds storage; not_limited means no paid limit applies (no live subscription, or it couldn\'t be read).'),
+  "canManage": zod.boolean().describe('Whether this user can add storage or change automatic top-up.'),
+  "autoTopUp": zod.boolean(),
+  "usedBytes": zod.number().min(getStorageStatusResponseUsedBytesMin).nullable().describe('Only for users who can manage storage.'),
+  "capacityBytes": zod.number().min(getStorageStatusResponseCapacityBytesMin).nullable().describe('Only for users who can manage storage, and null when not limited.')
 })
 
 

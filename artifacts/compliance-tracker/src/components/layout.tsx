@@ -28,6 +28,7 @@ import alpsLogo from "@/assets/alps-logo.png";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { CancellationBanner } from "@/components/cancellation-banner";
+import { StorageLimitBanner } from "@/components/storage-limit-banner";
 import { ManagedByBadge } from "@/components/managed-by-badge";
 import { NotificationBell } from "@/components/notification-bell";
 import { QuickTutorial, openQuickTutorial } from "@/components/quick-tutorial";
@@ -521,6 +522,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           >
             <ManagedByBadge />
             <CancellationBanner />
+            <StorageLimitBanner />
             {isTrackPage && !trackGuidanceDismissed && (
               <div className="flex items-center justify-between gap-3 rounded-sm border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-950">
                 <span>Track records support your site-specific controls; review the applicable UK sources, appointments and corrective actions.</span>

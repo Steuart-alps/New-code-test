@@ -22,6 +22,7 @@ import {
 } from "../lib/safeTrackAckReminders";
 import { REQUIRE_TWO_FACTOR_SETTING } from "../lib/twoFactorPolicy";
 import { isAllowedTenantSender, sanitizeSenderName } from "../lib/email";
+import { STORAGE_AUTO_TOP_UP_SETTING } from "../lib/storageFull";
 
 const router: IRouter = Router();
 
@@ -53,8 +54,12 @@ const SETTING_KEYS = [
   // JSON map of operational module keys to the active manager user IDs who
   // should receive that track's daily action summary.
   "trackSummaryRouting",
-  // Account-level warning only; reaching it never blocks or deletes uploads.
+  // Account-level warning level for the storage email; the hard stop is the
+  // paid capacity (lib/storageLimit.ts), whichever is lower warns first.
   "storageWarningThresholdBytes",
+  // "true" buys 10 GB of storage automatically when the paid capacity is full;
+  // otherwise new uploads stop there. Owners and consultants only.
+  STORAGE_AUTO_TOP_UP_SETTING,
   ACCOUNT_TIMEZONE_SETTING,
   // "false" lets login accounts in this business skip the authenticator app;
   // absent or "true" keeps two-factor authentication mandatory.
@@ -259,6 +264,13 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     }
     rawBody.storageWarningThresholdBytes = String(threshold);
+    }
+  }
+  if (rawBody[STORAGE_AUTO_TOP_UP_SETTING] !== undefined) {
+    const rawTopUp = rawBody[STORAGE_AUTO_TOP_UP_SETTING];
+    if (rawTopUp !== null && rawTopUp !== "true" && rawTopUp !== "false") {
+      res.status(400).json({ error: "Automatic storage top-up must be true or false" });
+      return;
     }
   }
   if (rawBody[ACCOUNT_TIMEZONE_SETTING] !== undefined) {

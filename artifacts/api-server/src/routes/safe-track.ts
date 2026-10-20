@@ -21,6 +21,7 @@ import {
   isTenantReservedObjectPath,
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { sitesTableVisibleTo } from "../lib/departmentSites";
 
 const router = Router();
@@ -183,6 +184,7 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
     const storage = new ObjectStorageService();
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });

@@ -15,6 +15,7 @@ import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/bil
 import { filterName } from "../lib/contentFilter";
 import { ObjectContentError, ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { departmentsTable } from "@workspace/db/schema";
 import { sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 
@@ -261,6 +262,7 @@ router.post("/sites/:id/documents/request-upload", requireAuth, requireClientAdm
   if (!site) return res.status(404).json({ error: "Site not found" });
 
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });

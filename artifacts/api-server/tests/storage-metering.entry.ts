@@ -17,7 +17,8 @@ import {
   resolveDownloadToken,
   utcMonth,
 } from "../src/lib/downloadUsage";
-import { setTestSubscription, stripeLookups } from "./storage-metering-billing.stub";
+import { setTestStorageGib, setTestSubscription, stripeLookups } from "./storage-metering-billing.stub";
+import { clearStorageCapacityCache, setStorageTopUpBuyer } from "../src/lib/storageLimit";
 
 if (process.env.NODE_ENV !== "test" || process.env.FRESH_SCHEMA_TEST !== "1") {
   throw new Error("This entry point is only for the isolated storage metering suite");
@@ -78,6 +79,7 @@ class FakeFile {
     return object;
   }
   async exists(): Promise<[boolean]> { return [objects.has(this.name)]; }
+  async getSignedUrl(): Promise<[string]> { return [`https://storage.test/${this.bucket.name}/${this.name}?signed=1`]; }
   async getMetadata() {
     const object = this.require();
     return [{ name: this.name, size: String(object.size), contentType: object.contentType, metadata: { ...object.metadata } }];
@@ -144,5 +146,8 @@ export {
   resolveDownloadToken,
   utcMonth,
   setTestSubscription,
+  setTestStorageGib,
   stripeLookups,
+  clearStorageCapacityCache,
+  setStorageTopUpBuyer,
 };
