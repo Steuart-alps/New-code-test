@@ -357,6 +357,8 @@ export async function ensureServicePrices(): Promise<EnsurePricesResult> {
         unit_amount: svc.amountPence,
         currency: PER_SITE_CURRENCY,
         recurring: { interval: "month" },
+        // Prices are shown "+ VAT", so Stripe Tax adds VAT on top.
+        tax_behavior: "exclusive",
         metadata: { service_key: svc.key },
       },
       { idempotencyKey: `svc-price-${svc.key}` },
@@ -402,6 +404,8 @@ export async function ensureStoragePrice(): Promise<boolean> {
       unit_amount: STORAGE_UNIT_AMOUNT_PENCE,
       currency: STORAGE_PRICE_CURRENCY,
       recurring: { interval: "month" },
+      // Like the service prices, VAT is added on top.
+      tax_behavior: "exclusive",
       metadata: { service_key: "storage" },
     },
     { idempotencyKey: `storage-price-${STORAGE_PRICE_CURRENCY}-${STORAGE_UNIT_AMOUNT_PENCE}-v1` },

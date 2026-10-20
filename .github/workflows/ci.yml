@@ -146,6 +146,9 @@ jobs:
       - name: Stripe start-up copies Stripe data into the database
         run: pnpm --filter @workspace/api-server run test:stripe-backfill-scope
 
+      - name: Stripe Tax settings check
+        run: pnpm --filter @workspace/api-server run test:stripe-tax-check
+
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
       - name: Create base database schema
@@ -275,6 +278,11 @@ jobs:
       # One email to owners and admins per crossing of the storage warning level.
       - name: Storage warning email tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:storage-warning-emails
+
+      # Uploads stop at the paid storage unless the owner switched on automatic
+      # 10 GB top-up; also storage pricing and download metering.
+      - name: Storage limit and metering tests
+        run: pnpm --filter @workspace/api-server run test:storage-metering
 
       # Large exports come as numbered parts; every file is in exactly one.
       - name: Export in parts tests (production schema base)

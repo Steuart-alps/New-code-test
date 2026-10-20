@@ -18,6 +18,7 @@ import {
   type AllowedUploadType,
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -534,6 +535,7 @@ router.post("/riddor-receipts/request-upload", requireAuth, denyViewers, async (
     return res.status(400).json({ error: "Upload the HSE receipt as a PDF, JPEG or PNG" });
   }
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, contentType);
     res.json({ uploadUrl, objectPath: storage.normalizeObjectEntityPath(uploadUrl) });
   } catch (err) {

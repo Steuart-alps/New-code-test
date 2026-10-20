@@ -10,6 +10,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError, ObjectContentError, ObjectGenerationError, type AllowedUploadType } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { getNotificationEmails } from "../lib/getNotificationEmails";
 import { sendEmail } from "../lib/email";
 import { digestBearerToken } from "../lib/bearerTokens";
@@ -191,12 +192,13 @@ router.post("/:token/upload-url", async (req, res) => {
 
   try {
     const contentType = parsed.data.contentType.toLowerCase() as AllowedUploadType;
+    await ensureUploadCapacity(row.client_id, req.log);
     const uploadUrl  = await objectStorageService.getObjectEntityUploadURL(row.client_id, contentType);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadUrl);
 
     return res.json({ uploadUrl, objectPath });
   } catch (err) {
-    return respondObjectStorageUnavailable(req, res, err, "contractor certificate upload");
+    return respondObjectStorageUnavailable(req, res, err, "contractor certificate upload", { external: true });
   }
 });
 

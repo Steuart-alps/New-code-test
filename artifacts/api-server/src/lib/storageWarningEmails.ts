@@ -3,11 +3,25 @@ import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { escapeHtml, getPublicAppUrl, sendSystemEmail } from "./email";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
+import {
+  formatStorageGb,
+  isStorageAutoTopUpOn,
+  readStorageCapacity,
+  sendPendingStorageLimitEmails,
+  STORAGE_NEARLY_FULL_RATIO,
+  storageOwnersOf,
+} from "./storageLimit";
+
+export { formatStorageGb } from "./storageLimit";
 
 /**
  * One email to a business's managers (consultant and client_admin users) when
- * its retained files pass the storage warning level set in Settings, with a
- * link to the File Storage section where they can buy more or raise the level.
+ * its retained files pass the storage warning level, with a link to the File
+ * Storage section where they can buy more or raise the level. The level is the
+ * one set in Settings or 80% of the storage the business pays for, whichever
+ * is lower, so owners always hear before uploads stop (storageLimit.ts, which
+ * also sends the "full" and top-up emails; this daily job retries any of
+ * those a restart left unsent).
  *
  * Usage comes from the storage usage ledger (storageUsageSnapshot.ts), so the
  * job never lists the storage provider. Each crossing is a notice in
@@ -31,28 +45,31 @@ export function storageWarningThresholdBytes(settingValue: string | null | undef
     : DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES;
 }
 
-/** Bytes as GB the way Settings shows them (1 GB = 1024³ bytes), one decimal. */
-export function formatStorageGb(bytes: number): string {
-  const gb = bytes / 1024 ** 3;
-  return `${Number(gb.toFixed(gb >= 10 ? 0 : 1))} GB`;
-}
-
 export function buildStorageWarningEmail(opts: {
   recipientName: string;
   companyName: string;
   usedBytes: number;
   thresholdBytes: number;
   storageUrl: string;
+  /** The storage the business pays for; null when uploads aren't limited. */
+  capacityBytes?: number | null;
+  autoTopUp?: boolean;
 }) {
   const used = formatStorageGb(opts.usedBytes);
   const level = formatStorageGb(opts.thresholdBytes);
+  const capacity = opts.capacityBytes ? formatStorageGb(opts.capacityBytes) : null;
+  const whatNext = capacity === null
+    ? "Nothing has been deleted and uploads carry on as normal."
+    : opts.autoTopUp
+      ? `Nothing has been deleted. Your storage is ${capacity}; when it is full we will add 10 GB automatically (£1 a month), as set in Settings, and email you when we do.`
+      : `Nothing has been deleted. Your storage is ${capacity}; when it is full, new uploads will stop until more storage is added.`;
   const subject = `${opts.companyName} has reached its ComplyTrack storage warning level`;
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2 style="color: #1e293b;">Storage warning level reached</h2>
       <p>Hi ${escapeHtml(opts.recipientName)},</p>
-      <p><strong>${escapeHtml(opts.companyName)}</strong> is now storing about <strong>${used}</strong> of files in ComplyTrack, past the warning level of <strong>${level}</strong> set in Settings.</p>
-      <p>Nothing has been deleted and uploads carry on as normal.</p>
+      <p><strong>${escapeHtml(opts.companyName)}</strong> is now storing about <strong>${used}</strong> of files in ComplyTrack, past the warning level of <strong>${level}</strong>.</p>
+      <p>${escapeHtml(whatNext)}</p>
       <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
         <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">If you need more room, buy extra storage in the File Storage section of Settings. You can also raise the warning level there.</p>
         <a href="${escapeHtml(opts.storageUrl)}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Manage storage</a>
@@ -65,9 +82,9 @@ Storage warning level reached
 
 Hi ${opts.recipientName},
 
-${opts.companyName} is now storing about ${used} of files in ComplyTrack, past the warning level of ${level} set in Settings.
+${opts.companyName} is now storing about ${used} of files in ComplyTrack, past the warning level of ${level}.
 
-Nothing has been deleted and uploads carry on as normal.
+${whatNext}
 
 If you need more room, buy extra storage in the File Storage section of Settings. You can also raise the warning level there:
 ${opts.storageUrl}
@@ -78,10 +95,30 @@ ComplyTrack
   return { subject, html, text };
 }
 
-type UsageRow = { clientId: number; name: string; usedBytes: number; thresholdBytes: number };
+type UsageRow = {
+  clientId: number;
+  name: string;
+  usedBytes: number;
+  thresholdBytes: number;
+  capacityBytes: number | null;
+  autoTopUp: boolean;
+};
+
+/** The paid capacity in bytes, or null when not limited or Stripe can't be read. */
+async function defaultCapacityBytes(clientId: number): Promise<number | null> {
+  try {
+    return (await readStorageCapacity(clientId))?.capacityBytes ?? null;
+  } catch (err) {
+    logger.warn({ err, clientId }, "Storage warning: capacity unavailable; using the Settings level only");
+    return null;
+  }
+}
 
 /** Ledger usage and warning level for every live business with stored files. */
-async function readUsageByClient(clientIds?: readonly number[]): Promise<UsageRow[]> {
+async function readUsageByClient(
+  clientIds: readonly number[] | undefined,
+  capacityBytesOf: (clientId: number) => Promise<number | null>,
+): Promise<UsageRow[]> {
   const scope = clientIds === undefined
     ? sql``
     : sql`AND c.id IN (${sql.join(clientIds.map((id) => sql`${id}`), sql`, `)})`;
@@ -100,29 +137,23 @@ async function readUsageByClient(clientIds?: readonly number[]): Promise<UsageRo
        AND c.data_deleted_at IS NULL
        ${scope}
   `);
-  return (result.rows as Array<Record<string, unknown>>).map((row) => ({
-    clientId: Number(row.id),
-    name: String(row.name),
-    usedBytes: Number(row.used_bytes),
-    thresholdBytes: storageWarningThresholdBytes(row.threshold as string | null),
-  }));
-}
-
-async function managersOf(clientId: number) {
-  const result = await db.execute(sql`
-    SELECT id, name, email FROM users
-     WHERE client_id = ${clientId}
-       AND active
-       AND role IN ('consultant', 'client_admin')
-       AND email IS NOT NULL AND email <> ''
-     ORDER BY id
-     LIMIT 30
-  `);
-  return (result.rows as Array<Record<string, unknown>>).map((row) => ({
-    id: Number(row.id),
-    name: String(row.name ?? ""),
-    email: String(row.email),
-  }));
+  const rows: UsageRow[] = [];
+  for (const row of result.rows as Array<Record<string, unknown>>) {
+    const clientId = Number(row.id);
+    const configured = storageWarningThresholdBytes(row.threshold as string | null);
+    const capacityBytes = await capacityBytesOf(clientId);
+    rows.push({
+      clientId,
+      name: String(row.name),
+      usedBytes: Number(row.used_bytes),
+      thresholdBytes: capacityBytes === null
+        ? configured
+        : Math.min(configured, Math.floor(capacityBytes * STORAGE_NEARLY_FULL_RATIO)),
+      capacityBytes,
+      autoTopUp: capacityBytes === null ? false : await isStorageAutoTopUpOn(clientId),
+    });
+  }
+  return rows;
 }
 
 export async function runStorageWarningEmailJob(
@@ -130,11 +161,19 @@ export async function runStorageWarningEmailJob(
     sendEmail?: typeof sendSystemEmail;
     /** Optional internal batch scope; omitted by the production scheduler. */
     clientIds?: readonly number[];
+    /** Paid storage in bytes (null = not limited); defaults to the live subscription. */
+    capacityBytes?: (clientId: number) => Promise<number | null>;
   } = {},
 ): Promise<{ noticesClosed: number; clientsNotified: number; emailsSent: number }> {
   const sendEmail = deps.sendEmail ?? sendSystemEmail;
   if (deps.clientIds?.length === 0) return { noticesClosed: 0, clientsNotified: 0, emailsSent: 0 };
-  const usage = await readUsageByClient(deps.clientIds);
+  if (deps.clientIds === undefined) {
+    // Storage-full and top-up emails a restart or provider outage left unsent.
+    await sendPendingStorageLimitEmails(sendEmail).catch((err) => {
+      logger.error({ err }, "Pending storage limit emails failed");
+    });
+  }
+  const usage = await readUsageByClient(deps.clientIds, deps.capacityBytes ?? defaultCapacityBytes);
   const usageById = new Map(usage.map((row) => [row.clientId, row]));
 
   // Close open notices whose business is now comfortably under its level
@@ -196,7 +235,7 @@ async function notifyClient(row: UsageRow, sendEmail: typeof sendSystemEmail): P
     `);
     if (openNow.rows.length > 0) return 0;
 
-    const managers = await managersOf(row.clientId);
+    const managers = await storageOwnersOf(row.clientId);
     if (managers.length === 0) {
       logger.warn({ clientId: row.clientId }, "Storage warning: no active managers to email");
       return 0;
@@ -210,6 +249,8 @@ async function notifyClient(row: UsageRow, sendEmail: typeof sendSystemEmail): P
           usedBytes: row.usedBytes,
           thresholdBytes: row.thresholdBytes,
           storageUrl,
+          capacityBytes: row.capacityBytes,
+          autoTopUp: row.autoTopUp,
         });
         await sendEmail({
           to: manager.email,
