@@ -268,7 +268,7 @@ export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promi
   <p style="font-size:14px;color:#475569;margin:0 0 16px">
     Please submit your quotation, including cost, availability, and any assumptions.
   </p>
-  ${quoteUrl ? `<p><a href="${quoteUrl}" style="display:inline-block;background:#8b5cf6;color:#fff;text-decoration:none;padding:12px 20px;border-radius:7px;font-weight:700">Submit Quote Online</a></p>` : ""}
+  ${quoteUrl ? `<p><a href="${quoteUrl}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:7px;font-weight:700">Submit Quote Online</a></p>` : ""}
 
   ${siteDocuments?.length ? `
   <div style="margin:0 0 20px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">

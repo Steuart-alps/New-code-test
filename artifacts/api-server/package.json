@@ -176,6 +176,7 @@
     "test:staff-invitations": "bash tests/run-staff-invitations.sh",
     "test:manager-role": "bash tests/run-manager-role.sh",
     "test:welcome-email": "bash tests/run-welcome-email.sh",
+    "test:email-layout": "node tests/email-layout.mjs",
     "test:viewer-route-policy": "node tests/viewer-route-policy.mjs",
     "test:openapi-routes": "node tests/openapi-route-inventory.mjs",
     "test:site-move-routes": "node tests/site-move-route-inventory.mjs",

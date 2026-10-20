@@ -108,6 +108,9 @@ jobs:
       - name: Storage test-bucket safety checks
         run: pnpm --filter @workspace/api-server run test:storage-happy-path-config
 
+      - name: Email design test
+        run: pnpm --filter @workspace/api-server run test:email-layout
+
       # Real DocTrack and /documents routes against an in-memory storage and
       # database double, including a failed ACL write during registration.
       - name: Private file ACL checks

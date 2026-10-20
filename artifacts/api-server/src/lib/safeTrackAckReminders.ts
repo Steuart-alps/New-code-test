@@ -309,7 +309,7 @@ function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
   const tableOpen = `
     <table style="width:100%;border-collapse:collapse;"><tbody>`;
   const tail = `</tbody></table>
-    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open the secure SafeTrack register</a></p>
+    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#2563eb;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open the secure SafeTrack register</a></p>
     <p style="font-size:12px;color:#64748b;">Sign in to review the complete acknowledgement details and follow up.</p>
   </body></html>`;
   const shellBytes = Buffer.byteLength(head + tableOpen + tail, "utf8");
@@ -354,7 +354,7 @@ function buildStaffEmailHtml(
     <h2 style="color:#0f172a;">Your SafeTrack sign-offs are outstanding</h2>
     <p>Hello ${esc(staffName)}, the following required records still need your acknowledgement.</p>
     <table style="width:100%;border-collapse:collapse;"><tbody>${rows}</tbody></table>
-    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open SafeTrack</a></p>
+    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#2563eb;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open SafeTrack</a></p>
     <p style="font-size:12px;color:#64748b;">Please sign in and complete the outstanding sign-offs.</p>
   </body></html>`;
 }

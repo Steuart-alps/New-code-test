@@ -55,7 +55,7 @@ export function buildStorageWarningEmail(opts: {
       <p>Nothing has been deleted and uploads carry on as normal.</p>
       <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
         <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">If you need more room, buy extra storage in the File Storage section of Settings. You can also raise the warning level there.</p>
-        <a href="${escapeHtml(opts.storageUrl)}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Manage storage</a>
+        <a href="${escapeHtml(opts.storageUrl)}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Manage storage</a>
       </div>
       <p>Best regards,<br><strong>ComplyTrack</strong></p>
     </div>

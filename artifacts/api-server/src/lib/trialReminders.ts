@@ -87,7 +87,7 @@ function buildTrialReminderEmail(opts: {
       <p>${escapeHtml(priceLine)}</p>
       <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
         <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Subscribe now to keep your compliance tracking, reminders and certificates running without interruption.</p>
-        <a href="${opts.billingUrl}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Set Up Billing</a>
+        <a href="${opts.billingUrl}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Set Up Billing</a>
       </div>
       <p>Best regards,<br><strong>ComplyTrack</strong></p>
     </div>
@@ -343,7 +343,7 @@ function buildTrialEndedEmail(opts: {
       <p>${escapeHtml(priceLine)}</p>
       <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
         <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Subscribe to restore access to your compliance tracking, reminders and certificates.</p>
-        <a href="${opts.billingUrl}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Subscribe now</a>
+        <a href="${opts.billingUrl}" style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Subscribe now</a>
       </div>
       <p>Best regards,<br><strong>ComplyTrack</strong></p>
     </div>
