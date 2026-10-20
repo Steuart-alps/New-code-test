@@ -10,11 +10,19 @@
 //   3. Admin creates staff and viewer users assigned to Department Alpha.
 //   4. Staff and viewer log in; tests confirm they see only Alpha resources.
 //   5. Admin confirms unrestricted access to both departments.
+//   6. A staff member moves from Alpha to Beta: department reports keep each
+//      record with the department recorded when it was created (cookie and
+//      bearer submissions), across sites and tenants, and older records with
+//      no recorded department are listed apart rather than reassigned.
 //
 // Usage: node tests/dept-isolation.mjs  (API must be running on API_BASE)
 // Exits 0 when every check passes, 1 otherwise.
 
+import { createRequire } from "node:module";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
+// pg comes from @workspace/db; used only for the legacy-row and trigger checks.
+const pg = createRequire(new URL("../../../lib/db/package.json", import.meta.url))("pg");
 
 let passed = 0;
 const failures = [];
@@ -38,6 +46,20 @@ function expectForbidden(name, status) {
 
 function expectOk(name, status, allowed = [200, 201]) {
   check(name, allowed.includes(status), `expected ${allowed.join("/")}, got ${status}`);
+}
+
+// Mobile app requests: Authorization: Bearer <token from /auth/mobile-login>.
+function makeBearerSession(token) {
+  return async function request(method, path, body) {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", authorization: `Bearer ${token}` },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const ct = res.headers.get("content-type") ?? "";
+    const data = ct.includes("application/json") ? await res.json().catch(() => null) : (await res.text().catch(() => null), null);
+    return { status: res.status, data };
+  };
 }
 
 function makeSession() {
@@ -969,6 +991,198 @@ async function main() {
     adminSites.some((s) => s.id === siteBetaId),
     "beta site missing from admin list",
   );
+
+  // ── 10. Department moves keep past report totals fixed ─────────────────────
+  // Records keep the department their author belonged to when each was
+  // created; a later move, an edit or the author's other sites never move them.
+  const annexAlpha = await admin("POST", "/sites", { name: `Alpha Annex ${ts}`, departmentId: deptAlphaId });
+  const annexBeta = await admin("POST", "/sites", { name: `Beta Annex ${ts}`, departmentId: deptBetaId });
+  expectOk("transfer: create Alpha Annex", annexAlpha.status, [200, 201]);
+  expectOk("transfer: create Beta Annex", annexBeta.status, [200, 201]);
+  const annexAlphaId = annexAlpha.data?.id;
+  const annexBetaId = annexBeta.data?.id;
+  const moverEmail = `dept-mover-${ts}@test.local`;
+  const moverPassword = "password-789";
+  const moverRes = await admin("POST", "/users", {
+    name: "Moving Staff", email: moverEmail, password: moverPassword,
+    role: "client_staff", clientId, departmentId: deptAlphaId,
+  });
+  expectOk("transfer: create staff in Alpha", moverRes.status, [200, 201]);
+  const moverId = moverRes.data?.id;
+  const mover = makeSession();
+  expectOk("transfer: staff web login", (await mover("POST", "/auth/login", {
+    email: moverEmail, password: moverPassword,
+  })).status, [200, 201]);
+  const mobileLogin = await makeSession()("POST", "/auth/mobile-login", { email: moverEmail, password: moverPassword });
+  expectOk("transfer: staff mobile login", mobileLogin.status);
+  check("transfer: mobile login returns a bearer token", typeof mobileLogin.data?.token === "string",
+    JSON.stringify(mobileLogin.data));
+  const moverMobile = makeBearerSession(mobileLogin.data?.token ?? "missing");
+
+  const today10 = uniqueDate(0);
+  const range = `from=${uniqueDate(1)}&to=${today10}`;
+  const fireAt = (session, siteId) => session("POST", "/fire-safety", {
+    checkType: "alarm", callPoint: "CP1", checkDate: today10, result: "pass", siteId,
+  });
+  const webFire = await fireAt(mover, annexAlphaId);
+  expectOk("transfer: web fire check while in Alpha", webFire.status, [200, 201]);
+  expectOk("transfer: mobile fire check while in Alpha", (await fireAt(moverMobile, annexAlphaId)).status, [200, 201]);
+  expectOk("transfer: mobile AM checklist while in Alpha", (await moverMobile("POST",
+    `/daily-checklists/${annexAlphaId}/${today10}/am`, {
+      answers: [{ question: "Opening check", checked: true }],
+    })).status, [201]);
+
+  const report = async (deptId, siteId) => {
+    const res = await admin("GET", `/reports/compliance?${range}&departmentId=${deptId}${siteId ? `&siteId=${siteId}` : ""}`);
+    expectOk(`transfer: department ${deptId} report${siteId ? ` at site ${siteId}` : ""}`, res.status);
+    return res.data ?? {};
+  };
+  const fireCount = (data, siteId) =>
+    data.moduleActivity?.find(row => row.module === "FireTrack" && row.siteId === siteId)?.count ?? 0;
+  const amDays = (data, siteId) =>
+    data.dailyChecklists?.find(row => row.siteId === siteId && row.type === "am")?.submitted ?? 0;
+
+  const alphaBefore = await report(deptAlphaId, annexAlphaId);
+  check("transfer: Alpha counts web and mobile fire checks", fireCount(alphaBefore, annexAlphaId) === 2,
+    JSON.stringify(alphaBefore.moduleActivity));
+  check("transfer: Alpha counts the mobile AM checklist", amDays(alphaBefore, annexAlphaId) === 1,
+    JSON.stringify(alphaBefore.dailyChecklists));
+  check("transfer: report says how departments are attributed",
+    alphaBefore.attribution === "recorded_at_submission"
+      && alphaBefore.departmentNotRecorded?.label === "Department not recorded",
+    JSON.stringify({ attribution: alphaBefore.attribution, notRecorded: alphaBefore.departmentNotRecorded }));
+
+  expectOk("transfer: move staff to Beta", (await admin("PUT", `/users/${moverId}`, { departmentId: deptBetaId })).status);
+  expectOk("transfer: web fire check after moving to Beta", (await fireAt(mover, annexBetaId)).status, [200, 201]);
+  expectOk("transfer: mobile AM checklist after moving to Beta", (await moverMobile("POST",
+    `/daily-checklists/${annexBetaId}/${today10}/am`, {
+      answers: [{ question: "Opening check", checked: true }],
+    })).status, [201]);
+  expectOk("transfer: admin edits a pre-move record", (await admin("PUT", `/fire-safety/${webFire.data?.id}`, {
+    notes: `Edited after the move ${ts}`,
+  })).status);
+
+  const alphaAfter = await report(deptAlphaId, annexAlphaId);
+  check("transfer: Alpha's past fire total is unchanged", fireCount(alphaAfter, annexAlphaId) === 2,
+    JSON.stringify(alphaAfter.moduleActivity));
+  check("transfer: Alpha's past AM total is unchanged", amDays(alphaAfter, annexAlphaId) === 1,
+    JSON.stringify(alphaAfter.dailyChecklists));
+  const alphaAll = await report(deptAlphaId);
+  check("transfer: post-move Beta work is not counted for Alpha",
+    fireCount(alphaAll, annexBetaId) === 0 && !alphaAll.sites?.some(site => site.id === annexBetaId),
+    JSON.stringify(alphaAll.moduleActivity));
+  const betaAtAlphaAnnex = await report(deptBetaId, annexAlphaId);
+  check("transfer: pre-move Alpha work does not follow the staff member to Beta",
+    fireCount(betaAtAlphaAnnex, annexAlphaId) === 0 && amDays(betaAtAlphaAnnex, annexAlphaId) === 0,
+    JSON.stringify(betaAtAlphaAnnex));
+  const betaAnnexReport = await report(deptBetaId, annexBetaId);
+  check("transfer: Beta counts post-move web and mobile work",
+    fireCount(betaAnnexReport, annexBetaId) === 1 && amDays(betaAnnexReport, annexBetaId) === 1,
+    JSON.stringify(betaAnnexReport));
+  const alphaAtBetaAnnex = await report(deptAlphaId, annexBetaId);
+  check("transfer: Alpha filtered to a Beta site shows none of the post-move work",
+    (alphaAtBetaAnnex.moduleActivity?.length ?? -1) === 0 && amDays(alphaAtBetaAnnex, annexBetaId) === 0,
+    JSON.stringify(alphaAtBetaAnnex));
+
+  // Database checks: what was stored, that it can't be rewritten, cross-tenant
+  // authors, and rows from before departments were recorded.
+  const outsiderEmail = `dept-outsider-${ts}@test.local`;
+  const outsider = makeSession();
+  const outsiderReg = await outsider("POST", "/auth/register", {
+    name: "Other Tenant Admin", email: outsiderEmail, password: "password-123",
+  });
+  expectOk("cross-tenant: register another business", outsiderReg.status, [200, 201]);
+  if (outsiderReg.data?.verificationToken) {
+    await outsider("GET", `/auth/verify-email?token=${encodeURIComponent(outsiderReg.data.verificationToken)}`);
+    await outsider("POST", "/auth/login", { email: outsiderEmail, password: "password-123" });
+  }
+  const outsiderMe = await outsider("GET", "/auth/me");
+  const outsiderClientId = (outsiderMe.data?.user ?? outsiderMe.data)?.clientId;
+  const outsiderDept = await outsider("POST", "/departments", { name: "Other Tenant Dept" });
+  expectOk("cross-tenant: create department in the other business", outsiderDept.status, [200, 201]);
+  const outsiderStaff = await outsider("POST", "/users", {
+    name: "Other Tenant Staff", email: `dept-outsider-staff-${ts}@test.local`, password: "password-456",
+    role: "client_staff", clientId: outsiderClientId, departmentId: outsiderDept.data?.id,
+  });
+  expectOk("cross-tenant: create staff in the other business", outsiderStaff.status, [200, 201]);
+
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  try {
+    const stored = await client.query(
+      `SELECT site_id, submitter_department_id, submitter_department_source FROM fire_safety_checks
+       WHERE client_id = $1 AND created_by = $2 ORDER BY id`, [clientId, moverId]);
+    check("db: each fire check stores the department at creation",
+      JSON.stringify(stored.rows.map(r => [r.site_id, r.submitter_department_id, r.submitter_department_source]))
+        === JSON.stringify([[annexAlphaId, deptAlphaId, "recorded"], [annexAlphaId, deptAlphaId, "recorded"], [annexBetaId, deptBetaId, "recorded"]]),
+      JSON.stringify(stored.rows));
+    const mobileDaily = await client.query(
+      `SELECT site_id, submitter_department_id FROM daily_checklist_submissions
+       WHERE client_id = $1 AND submitted_by_id = $2 ORDER BY id`, [clientId, moverId]);
+    check("db: bearer daily submissions store the department at creation",
+      JSON.stringify(mobileDaily.rows.map(r => [r.site_id, r.submitter_department_id]))
+        === JSON.stringify([[annexAlphaId, deptAlphaId], [annexBetaId, deptBetaId]]),
+      JSON.stringify(mobileDaily.rows));
+
+    await client.query(
+      `UPDATE fire_safety_checks SET submitter_department_id = $1, submitter_department_source = 'not_recorded'
+       WHERE id = $2`, [deptBetaId, webFire.data?.id]);
+    const pinned = await client.query(
+      `SELECT submitter_department_id, submitter_department_source FROM fire_safety_checks WHERE id = $1`, [webFire.data?.id]);
+    check("db: a recorded department can't be rewritten",
+      pinned.rows[0]?.submitter_department_id === deptAlphaId && pinned.rows[0]?.submitter_department_source === "recorded",
+      JSON.stringify(pinned.rows));
+
+    const forged = await client.query(
+      `INSERT INTO fire_safety_checks (client_id, site_id, check_type, check_date, result, created_by,
+         submitter_department_id, submitter_department_source)
+       VALUES ($1, $2, 'alarm', $3, 'pass', $4, $5, 'not_recorded')
+       RETURNING submitter_department_id, submitter_department_source`,
+      [clientId, annexAlphaId, today10, outsiderStaff.data?.id, deptAlphaId]);
+    check("db: another business's account records no department here",
+      forged.rows[0]?.submitter_department_id === null && forged.rows[0]?.submitter_department_source === "recorded",
+      JSON.stringify(forged.rows));
+
+    // Rows written before capture began (simulated with the trigger off, inside
+    // one transaction so nothing else sees it disabled).
+    await client.query("BEGIN");
+    for (const table of ["fire_safety_checks", "daily_checklist_submissions"]) {
+      await client.query(`ALTER TABLE ${table} DISABLE TRIGGER record_submitter_department`);
+    }
+    await client.query(
+      `INSERT INTO fire_safety_checks (client_id, site_id, check_type, check_date, result, created_by,
+         submitter_department_id, submitter_department_source)
+       VALUES ($1, $2, 'alarm', $3, 'pass', $4, NULL, 'not_recorded')`,
+      [clientId, annexAlphaId, uniqueDate(1), moverId]);
+    await client.query(
+      `INSERT INTO daily_checklist_submissions (client_id, site_id, checklist_date, type, answers,
+         submitted_by_id, submitted_at, submitter_department_id, submitter_department_source)
+       VALUES ($1, $2, $3, 'pm', '[]'::jsonb, $4, now(), NULL, 'not_recorded')`,
+      [clientId, annexAlphaId, uniqueDate(1), moverId]);
+    for (const table of ["fire_safety_checks", "daily_checklist_submissions"]) {
+      await client.query(`ALTER TABLE ${table} ENABLE TRIGGER record_submitter_department`);
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    check("db: attribution checks ran", false, String(err?.message ?? err));
+  } finally {
+    await client.end();
+  }
+
+  for (const [label, deptId] of [["Alpha", deptAlphaId], ["Beta", deptBetaId]]) {
+    const data = await report(deptId, annexAlphaId);
+    const notRecorded = data.departmentNotRecorded ?? {};
+    check(`legacy: ${label} report lists older records under "Department not recorded"`,
+      notRecorded.moduleActivity?.find(row => row.module === "FireTrack" && row.siteId === annexAlphaId)?.count === 1
+        && notRecorded.dailyChecklists?.find(row => row.siteId === annexAlphaId && row.type === "pm")?.submitted === 1
+        && notRecorded.records === 2,
+      JSON.stringify(notRecorded));
+    check(`legacy: ${label} totals don't absorb older records`,
+      fireCount(data, annexAlphaId) === (label === "Alpha" ? 2 : 0)
+        && (data.dailyChecklists?.find(row => row.siteId === annexAlphaId && row.type === "pm")?.submitted ?? 0) === 0,
+      JSON.stringify({ moduleActivity: data.moduleActivity, dailyChecklists: data.dailyChecklists }));
+  }
 
   // ── Summary ───────────────────────────────────────────────────────────────────
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
