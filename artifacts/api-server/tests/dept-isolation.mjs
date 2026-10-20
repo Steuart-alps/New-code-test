@@ -1022,7 +1022,7 @@ async function main() {
   const today10 = uniqueDate(0);
   const range = `from=${uniqueDate(1)}&to=${today10}`;
   const fireAt = (session, siteId) => session("POST", "/fire-safety", {
-    checkType: "alarm", checkDate: today10, result: "pass", siteId,
+    checkType: "alarm", callPoint: "CP1", checkDate: today10, result: "pass", siteId,
   });
   const webFire = await fireAt(mover, annexAlphaId);
   expectOk("transfer: web fire check while in Alpha", webFire.status, [200, 201]);
