@@ -31,7 +31,7 @@ export default function TasksPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const isViewer = user?.role === "client_viewer";
-  const isManager = user?.role === "consultant" || user?.role === "client_admin" || (user?.role === "client_staff" && !!user.isDepartmentManager);
+  const isManager = user?.role === "consultant" || user?.role === "client_admin" || user?.role === "client_manager" || (user?.role === "client_staff" && !!user.isDepartmentManager);
   const [tab, setTab] = useState<"mine" | "all">(isManager || isViewer ? "all" : "mine");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);

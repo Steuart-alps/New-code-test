@@ -1,6 +1,6 @@
 // Inspection pack PDF (GET /reports/inspection-pack) and the due-dates
 // calendar (GET /calendar): tenant isolation, consultant client scoping,
-// department scoping, read access for viewers, entitlement-gated sections,
+// department scoping, read access for staff (Viewers are refused), entitlement-gated sections,
 // validation, and what the PDF leaves out (incident personal details).
 // Run: pnpm --filter @workspace/api-server run test:inspection-pack-calendar
 import assert from 'node:assert/strict';
@@ -140,6 +140,7 @@ try {
   const owner = await createTenant('pack');
   const foreign = await createTenant('pack-foreign');
   const consultant = await createTenant('pack-consultant');
+  await pool.query("UPDATE users SET role = 'consultant' WHERE id = $1", [consultant.userId]);
   await pool.query('INSERT INTO consultant_clients (user_id, client_id) VALUES ($1, $2)', [consultant.userId, owner.clientId]);
 
   const deptA = (await owner.request('POST', '/departments', { name: 'Front of house' })).data;
@@ -155,8 +156,10 @@ try {
   const seededB = await seedBusiness(owner.clientId, siteB, 'SiteB');
   await seedBusiness(foreign.clientId, foreignSite, 'Foreign');
 
-  const viewer = await createUser(owner, { role: 'client_viewer' });
-  const deptViewer = await createUser(owner, { role: 'client_viewer', departmentId: deptA.id });
+  // Staff read with their department's scope; Viewers see only their own training.
+  const viewer = await createUser(owner, { role: 'client_staff' });
+  const deptViewer = await createUser(owner, { role: 'client_staff', departmentId: deptA.id });
+  const trainingViewer = await createUser(owner, { role: 'client_viewer', departmentId: deptA.id });
   const ownerName = (await one('SELECT name FROM users WHERE id = $1', [owner.userId])).name;
   const businessName = (await one('SELECT name FROM clients WHERE id = $1', [owner.clientId])).name;
 
@@ -184,8 +187,8 @@ try {
   assert.ok(single.text.includes('SiteA sounder fault'));
   assert.ok(hasNoSiteB(single.text), 'a site pack has no other site records');
 
-  // ── Viewers can read; department scope applies ─────────────────────────────
-  // A viewer with no department sees only sites without a department (as on
+  // ── Staff can read; department scope applies ───────────────────────────────
+  // Staff with no department see only sites without a department (as on
   // GET /sites): here none, so only business-wide contractors.
   const viewerPack = await pack(viewer, range, 'viewer pack');
   assert.ok(viewerPack.text.includes('All sites you can access (0)'));
@@ -196,6 +199,7 @@ try {
   assert.ok(hasNoSiteB(deptPack.text), 'department viewer must not see another department’s site');
   assert.ok(deptPack.text.includes('All sites you can access (1)'));
   denied(await get(deptViewer, `/reports/inspection-pack?${range}&siteId=${siteB}`), 403, 'department viewer, other site');
+  denied(await get(trainingViewer, `/reports/inspection-pack?${range}`), 403, 'a Viewer sees only their own training');
 
   // ── Tenant isolation ───────────────────────────────────────────────────────
   const foreignPack = await pack(foreign, range, 'foreign pack');
@@ -257,6 +261,7 @@ try {
   assert.ok(!deptCalendar.entries.some(entry => entry.id === `compliance-${seededB.itemId}` || entry.id === `fix-${seededB.issueId}`),
     'department viewer must not see another department’s site');
   denied(await get(deptViewer, `/calendar?${range}&siteId=${siteB}`), 403, 'department calendar, other site');
+  denied(await get(trainingViewer, `/calendar?${range}`), 403, 'Viewer calendar');
   const siteCalendar = await calendar(owner, `${range}&siteId=${siteB}`, 'site calendar');
   assert.ok(siteCalendar.entries.every(entry => entry.siteName === null || entry.siteName === 'Lakeside Spa'));
   denied(await get(foreign, `/calendar?${range}&siteId=${siteA}`), 400, 'calendar, another business’s site');

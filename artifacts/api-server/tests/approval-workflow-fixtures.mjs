@@ -28,7 +28,7 @@ try {
   await rm(temp, { recursive: true, force: true });
 }
 export const {
-  db, sql, pool, runReminderJob, runRuntimeMigrations, decryptTokenPayload,
+  db, sql, pool, runReminderJob, runContractorComplianceReminderJob, runRuntimeMigrations, decryptTokenPayload,
   encryptTokenPayload, tokenPayloadNeedsReencryption, reencryptQueuedTokenPayloads,
 } = runtime;
 
@@ -88,9 +88,11 @@ export function currentTotp(secret) {
 }
 
 // Complete mandatory authenticator enrolment through the normal endpoints for
-// a session whose login returned `requires2faSetup`.
-async function enrolTwoFactor(request, login) {
-  assert.equal(login.data?.requires2faSetup, true, `mandatory 2FA must be enforced: ${JSON.stringify(login.data)}`);
+// a session that is held at setup. 2FA is optional by default, so the owner's
+// createTenant turns the business requirement on first.
+async function enrolTwoFactor(request) {
+  const me = await request("GET", "/auth/me");
+  assert.equal(me.data?.requires2faSetup, true, `mandatory 2FA must be enforced: ${JSON.stringify(me.data)}`);
   const setup = await request("GET", "/auth/2fa/setup");
   assert.equal(setup.status, 200, JSON.stringify(setup.data));
   const enabled = await request("POST", "/auth/2fa/enable", { code: currentTotp(setup.data.secret) });
@@ -107,7 +109,11 @@ export async function createTenant(label, { browserPolicy = false, overrideReaso
   assert.equal((await request("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`)).status, 200);
   const login = await request("POST", "/auth/login", { email, password });
   assert.equal(login.status, 200);
-  if (browserPolicy) await enrolTwoFactor(request, login);
+  if (browserPolicy) {
+    const required = await request("PUT", "/settings", { requireTwoFactor: "true" });
+    assert.equal(required.status, 200, JSON.stringify(required.data));
+    await enrolTwoFactor(request);
+  }
   const me = await request("GET", "/auth/me");
   const user = me.data.user ?? me.data;
   assert.ok(Number.isInteger(user.clientId));
@@ -131,7 +137,7 @@ export async function createUser(owner, body, { browserPolicy = false } = {}) {
   const request = requestSession({ browserPolicy });
   const login = await request("POST", "/auth/login", { email, password });
   assert.equal(login.status, 200);
-  if (browserPolicy) await enrolTwoFactor(request, login);
+  if (browserPolicy) await enrolTwoFactor(request);
   return { request, userId: created.data.id };
 }
 

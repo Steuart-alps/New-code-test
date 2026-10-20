@@ -19,6 +19,8 @@ import { appendAuditEvent } from "../lib/audit";
 import { completionFields, completionDateFromDay } from "../lib/complianceCompletion";
 import { NO_ACTION, itemActionState, itemActionStates, type ItemActionState } from "../lib/certificateOutcomes";
 import { getAccountToday } from "../lib/accountClock";
+import { recordTrackCheckFromTask } from "../lib/trackTaskLink";
+import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -103,7 +105,7 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
       .from(sitesTable)
       .where(and(
         eq(sitesTable.clientId, clientId),
-        or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+        sitesTableVisibleTo(deptId),
       ));
     conditions.push(
       or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites)) as any,
@@ -291,11 +293,11 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null && joined.item.siteId != null) {
     const [itemSite] = await db
-      .select({ departmentId: sitesTable.departmentId })
+      .select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
       .from(sitesTable)
       .where(eq(sitesTable.id, joined.item.siteId))
       .limit(1);
-    if (itemSite && itemSite.departmentId !== null && itemSite.departmentId !== deptId) {
+    if (itemSite && !(await siteVisibleToDepartment(itemSite, deptId))) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
@@ -410,6 +412,11 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     action: "updated", before: existing[0], after: joined!.item,
     ...(recurrence ? { metadata: { recurringCompletion: recurrence } } : {}),
   });
+  // Completing a task a track also keeps (emergency lighting, fire alarm and
+  // extinguisher servicing, cleaning the water tanks) records it in that track.
+  if (recurrence || (body.status === "completed" && String(joined!.item.completedAt) !== String(existing[0].completedAt))) {
+    await recordTrackCheckFromTask(req, joined!.item, joined!.item.completedAt);
+  }
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
     await itemActionState(existing[0].clientId, id)));
 });
@@ -471,11 +478,11 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null && existing[0].siteId != null) {
     const [itemSite] = await db
-      .select({ departmentId: sitesTable.departmentId })
+      .select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
       .from(sitesTable)
       .where(eq(sitesTable.id, existing[0].siteId))
       .limit(1);
-    if (itemSite && itemSite.departmentId !== null && itemSite.departmentId !== deptId) {
+    if (itemSite && !(await siteVisibleToDepartment(itemSite, deptId))) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
@@ -520,6 +527,7 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
       ? { metadata: { recurringCompletion: { completedAt: completion.fields.completedAt, nextDueDate: completion.fields.dueDate } } }
       : {}),
   });
+  if (completion) await recordTrackCheckFromTask(req, joined!.item, completion.fields.completedAt);
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
     await itemActionState(existing[0].clientId, id)));
 });
@@ -547,7 +555,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
       .from(sitesTable)
       .where(and(
         eq(sitesTable.clientId, clientId),
-        or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+        sitesTableVisibleTo(deptId),
       ));
     itemConditions.push(
       or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites)) as any,
@@ -561,7 +569,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   // Also scope the site breakdown to the user's accessible sites
   const siteConditions: ReturnType<typeof eq>[] = [eq(sitesTable.clientId, clientId)];
   if (deptId !== null) {
-    siteConditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)) as any);
+    siteConditions.push(sitesTableVisibleTo(deptId) as any);
   }
 
   const [items, contractors, certificates, sites] = await Promise.all([

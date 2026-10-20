@@ -1,12 +1,16 @@
-// Behavioural check that client_viewer accounts stay read-only.
+// Behavioural check that client_viewer accounts reach only their own
+// training records.
 //
-// tests/viewer-route-policy.mjs proves each mutation route declares a viewer
-// guard; it cannot prove the guard is reached at runtime (mount order, router
-// level middleware, a handler reached by another path). This suite signs in a
-// department viewer in a fresh tenant and:
-//   1. for one record in every module family, checks the viewer can read it,
-//      gets 403 on create, edit and delete, and leaves the record unchanged;
-//   2. sends every guarded POST/PUT/PATCH/DELETE route (found from the route
+// A Viewer is a member of staff linked to their staff roster entry: they see
+// that person's TrainTrack records and can sign them off, and nothing else
+// (middleware/viewerScope.ts). tests/viewer-route-policy.mjs proves each
+// mutation route declares a viewer guard; it cannot prove what is reached at
+// runtime. This suite signs in a department viewer in a fresh tenant and:
+//   1. checks they see only their own training records, can sign an unsigned
+//      one once, and can't sign anyone else's;
+//   2. for one record in every module family, checks the viewer gets 403 on
+//      read, create, edit and delete, and leaves the record unchanged;
+//   3. sends every guarded POST/PUT/PATCH/DELETE route (found from the route
 //      files and their mounts in src/routes/index.ts) as the viewer and
 //      expects 403.
 //
@@ -126,13 +130,48 @@ async function main() {
   expect("create site", site, [200, 201]);
   const siteId = site.data?.id;
   const viewerEmail = `viewer-ro-${suffix}@test.local`;
-  expect("create department viewer", await admin("POST", "/users", {
+  // The roster entry carries the same email, so the new Viewer is linked to it.
+  const ownEntry = await admin("POST", "/staff-roster", { name: "Read-only Viewer", email: viewerEmail, siteId });
+  const otherEntry = await admin("POST", "/staff-roster", { name: "Someone Else", siteId });
+  expect("create roster entries", ownEntry, [200, 201]);
+  expect("create second roster entry", otherEntry, [200, 201]);
+  const createdViewer = await admin("POST", "/users", {
     name: "Read-only Viewer", email: viewerEmail, password: "password-123",
     role: "client_viewer", clientId, departmentId: department.data?.id,
-  }), [200, 201]);
+  });
+  expect("create department viewer", createdViewer, [200, 201]);
+  check("viewer is linked to the roster entry with their email", createdViewer.data?.staffRosterId === ownEntry.data?.id,
+    JSON.stringify(createdViewer.data));
   const viewer = session();
   expect("login viewer", await viewer("POST", "/auth/login", { email: viewerEmail, password: "password-123" }), [200]);
   if (!Number.isInteger(siteId)) throw new Error("site setup failed");
+
+  // Their own training records, and nobody else's.
+  const training = (staffRosterId, staffName, signature) => admin("POST", "/train-track/records", {
+    recordType: "internal", staffName, staffRosterId, trainingType: "Other", trainer: "Viewer Fixture",
+    completedDate: today, siteId, signature,
+  });
+  const unsigned = await training(ownEntry.data?.id, "Read-only Viewer");
+  const signedAlready = await training(ownEntry.data?.id, "Read-only Viewer", "data:image/png;base64,AAAA");
+  const someoneElse = await training(otherEntry.data?.id, "Someone Else");
+  check("training records seeded", [unsigned, signedAlready, someoneElse].every((r) => r.status === 201),
+    [unsigned, signedAlready, someoneElse].map((r) => r.status).join(" "));
+  const mine = await viewer("GET", "/train-track/my-records");
+  expect("viewer lists their training", mine, [200]);
+  const mineIds = new Set((mine.data?.records ?? []).map((r) => r.id));
+  check("viewer sees their own records only",
+    mine.data?.linked === true && mineIds.has(unsigned.data?.id) && mineIds.has(signedAlready.data?.id) && !mineIds.has(someoneElse.data?.id),
+    JSON.stringify(mine.data)?.slice(0, 300));
+  check("signatures themselves aren't sent back", (mine.data?.records ?? []).every((r) => !("signature" in r)));
+  const signedNow = await viewer("POST", `/train-track/my-records/${unsigned.data?.id}/sign`, { signature: "data:image/png;base64,BBBB" });
+  expect("viewer signs off their own record", signedNow, [200]);
+  check("the record shows as signed", signedNow.data?.signed === true, JSON.stringify(signedNow.data));
+  expect("a signed record can't be signed again",
+    await viewer("POST", `/train-track/my-records/${signedAlready.data?.id}/sign`, { signature: "data:image/png;base64,CCCC" }), [409]);
+  expect("viewer can't sign someone else's record",
+    await viewer("POST", `/train-track/my-records/${someoneElse.data?.id}/sign`, { signature: "data:image/png;base64,CCCC" }), [404]);
+  expect("a signature is required", await viewer("POST", `/train-track/my-records/${unsigned.data?.id}/sign`, {}), [400]);
+  expect("staff and owners don't use the Viewer list", await admin("GET", "/train-track/my-records"), [403]);
 
   // One record per module family. `edit` is the body a member of staff could
   // send with `editMethod`; viewers must get 403 for it, for create and, where
@@ -142,7 +181,7 @@ async function main() {
   const room = await admin("POST", "/room-track/rooms", { roomNumber: `VIEW-${suffix}`, name: "Viewer suite", floor: "1", siteId });
   const families = [
     { family: "FireTrack check", path: "/fire-safety",
-      body: { checkType: "alarm", checkDate: today, result: "pass", performedBy: "Viewer Fixture", siteId }, edit: { notes: "viewer edit" } },
+      body: { checkType: "alarm", callPoint: "CP1", checkDate: today, result: "pass", performedBy: "Viewer Fixture", siteId }, edit: { notes: "viewer edit" } },
     { family: "Legionella check", path: "/legionella",
       body: { checkType: "calorifier_temp", checkDate: today, result: "pass", temperature: 60, performedBy: "Viewer Fixture", siteId },
       edit: { notes: "viewer edit" } },
@@ -222,10 +261,7 @@ async function main() {
     recordIds.set(path, id);
     const before = rowsOf((await admin("GET", list)).data).find((row) => idOf(row) === id);
 
-    const read = await viewer("GET", list);
-    expect(`${family}: viewer can read the list`, read, [200]);
-    check(`${family}: viewer sees the record`, rowsOf(read.data).some((row) => idOf(row) === id),
-      JSON.stringify(read.data)?.slice(0, 200));
+    expect(`${family}: viewer can't read the list`, await viewer("GET", list), [403]);
     expect(`${family}: viewer create is refused`, await viewer("POST", path, body), [403]);
     expect(`${family}: viewer ${editMethod} is refused`, await viewer(editMethod, `${path}/${id}`, edit), [403]);
     if (deletable) expect(`${family}: viewer DELETE is refused`, await viewer("DELETE", `${path}/${id}`), [403]);
@@ -234,9 +270,10 @@ async function main() {
       `before ${JSON.stringify(before)?.slice(0, 160)} after ${JSON.stringify(after)?.slice(0, 160)}`);
   }
 
-  // Shared screens a viewer should still read.
-  for (const path of ["/sites", `/sites/${siteId}`, "/dashboard/summary", "/compliance-items", `/calendar?from=${iso(-7)}&to=${iso(30)}`]) {
-    expect(`viewer can read ${path}`, await viewer("GET", path), [200]);
+  // Shared screens are closed to a viewer too.
+  for (const path of ["/sites", `/sites/${siteId}`, "/dashboard/summary", "/compliance-items", `/calendar?from=${iso(-7)}&to=${iso(30)}`,
+    "/users", "/settings", "/staff-roster", "/train-track/records", "/billing/config"]) {
+    expect(`viewer can't read ${path}`, await viewer("GET", path), [403]);
   }
   const siteBefore = (await admin("GET", `/sites/${siteId}`)).data;
   expect("Sites: viewer PATCH is refused", await viewer("PATCH", `/sites/${siteId}`, { name: "viewer edit" }), [403]);
@@ -253,6 +290,8 @@ async function main() {
   const placeholder = "2000000000";
   let notFound = 0;
   for (const route of routes) {
+    // The one write a viewer makes, checked above.
+    if (route.path === "/train-track/my-records/:id/sign") continue;
     let usedPlaceholder = false;
     const collection = route.path.replace(/\/:[^/]+.*$/, "");
     const path = route.path.replace(/:(\w+)(\([^)]*\))?\??/g, (_match, param) => {

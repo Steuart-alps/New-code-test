@@ -163,7 +163,7 @@ async function main() {
     .format(new Date(Date.now() - offset * 86400000));
 
   const fireAlpha = await admin("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(1),
     result: "pass",
     siteId: siteAlphaId,
@@ -172,7 +172,7 @@ async function main() {
   const fireAlphaId = fireAlpha.status === 201 ? fireAlpha.data?.id : null;
 
   const fireBeta = await admin("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(0),
     result: "pass",
     siteId: siteBetaId,
@@ -227,14 +227,73 @@ async function main() {
     outletId: outletBetaId, notes: `Beta reading ${ts}`,
   });
   expectOk("admin: record beta sentinel reading", betaReading.status, [201]);
-  // A historically mismatched outlet reference must not expose a Beta check
-  // through an otherwise accessible Alpha outlet.
+  // New readings can only link to an active outlet of this business at the
+  // reading's own site that takes the reading's check type.
+  const outletLinkRejections = [
+    ["another site's outlet", { siteId: siteBetaId, outletId: outletAlphaId }],
+    ["a site outlet without a site", { siteId: null, outletId: outletAlphaId }],
+    ["an incompatible check type", { siteId: siteAlphaId, outletId: outletAlphaId, checkType: "cold_sentinel_temp", temperature: 12 }],
+    ["an unknown outlet", { siteId: siteAlphaId, outletId: 2147480000 }],
+  ];
+  for (const [label, link] of outletLinkRejections) {
+    expectBlocked(`admin: reading cannot link to ${label}`, (await admin("POST", "/legionella", {
+      checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass", temperature: 54,
+      performedBy: "Dept Test Admin", notes: `Rejected outlet link ${ts}`, ...link,
+    })).status);
+  }
+  const retiredOutlet = await admin("POST", "/legionella/outlets", {
+    name: `Retired alpha sentinel ${ts}`, type: "hot", siteId: siteAlphaId,
+  });
+  expectOk("admin: retire an alpha outlet", (await admin("DELETE", `/legionella/outlets/${retiredOutlet.data?.id}`)).status, [204]);
+  expectBlocked("admin: reading cannot link to a removed outlet", (await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass", temperature: 54,
+    siteId: siteAlphaId, outletId: retiredOutlet.data?.id,
+  })).status);
+  // Edits keep the same rules: a linked reading cannot move to another site,
+  // and cannot be relinked to another site's outlet.
+  expectBlocked("admin: linked reading cannot move to another site", (await admin("PUT", `/legionella/${alphaReading.data?.id}`, {
+    siteId: siteBetaId,
+  })).status);
+  expectBlocked("admin: reading cannot be relinked to another site's outlet", (await admin("PUT", `/legionella/${alphaReading.data?.id}`, {
+    outletId: outletBetaId,
+  })).status);
+  // Valid monthly history: two readings this month and one last month on the
+  // same outlet; only this month's readings count towards its monthly test.
+  const secondAlphaReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
+    temperature: 51, performedBy: "Dept Test Admin", siteId: siteAlphaId, outletId: outletAlphaId,
+  });
+  expectOk("admin: second alpha sentinel reading this month", secondAlphaReading.status, [201]);
+  const lastMonthAlphaReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp",
+    checkDate: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15)).toISOString().slice(0, 10),
+    result: "pass", temperature: 53, performedBy: "Dept Test Admin", siteId: siteAlphaId, outletId: outletAlphaId,
+  }, { "X-Override-Reason": encodeURIComponent("Dept isolation fixture: prior-month reading") });
+  expectOk("admin: last month's alpha sentinel reading", lastMonthAlphaReading.status, [201]);
+  const alphaHistory = (await admin("GET", "/legionella/outlet-status")).data?.find?.(row => row.id === outletAlphaId);
+  const historyIds = new Set((alphaHistory?.thisMonthChecks ?? []).map(reading => reading.id));
+  check("admin: alpha outlet keeps this month's readings and leaves out last month's",
+    historyIds.has(alphaReading.data?.id) && historyIds.has(secondAlphaReading.data?.id) &&
+      !historyIds.has(lastMonthAlphaReading.data?.id), `monthly checks=${[...historyIds]}`);
+  check("admin: alpha outlet's readings stayed linked after refused edits",
+    [alphaReading.data?.id, secondAlphaReading.data?.id].every(id => historyIds.has(id)), "reading unlinked");
+
+  // A historically mismatched outlet reference (an outlet moved to another
+  // site after it was tested) must not expose a Beta check through an
+  // otherwise accessible Alpha outlet.
+  const movedOutlet = await admin("POST", "/legionella/outlets", {
+    name: `Moved sentinel ${ts}`, type: "hot", siteId: siteBetaId,
+  });
+  expectOk("admin: create beta outlet to move", movedOutlet.status, [201]);
   const crossSiteReading = await admin("POST", "/legionella", {
     checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
     temperature: 54, performedBy: "Dept Test Admin", siteId: siteBetaId,
-    outletId: outletAlphaId, notes: `Beta linked to Alpha outlet ${ts}`,
+    outletId: movedOutlet.data?.id, notes: `Beta linked to Alpha outlet ${ts}`,
   });
-  expectOk("admin: record mismatched outlet reference", crossSiteReading.status, [201]);
+  expectOk("admin: record beta reading before the outlet moves", crossSiteReading.status, [201]);
+  expectOk("admin: move tested outlet to alpha site", (await admin("PUT", `/legionella/outlets/${movedOutlet.data?.id}`, {
+    siteId: siteAlphaId,
+  })).status);
 
   // Put one module record in the most recently completed month. A trend must
   // return its count without leaking the record to another department.
@@ -242,7 +301,7 @@ async function main() {
     .toISOString().slice(0, 10);
   // Backfilling a past record needs an owner's reason.
   const priorMonthCheck = await admin("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: lastMonthDate,
     result: "pass",
     siteId: siteAlphaId,
@@ -419,7 +478,7 @@ async function main() {
   })).status);
 
   const staffFire = await staff("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(0),
     result: "pass",
     siteId: siteAlphaId,
@@ -711,6 +770,51 @@ async function main() {
           reading.id === betaReading.data?.id || reading.id === crossSiteReading.data?.id)),
     "alpha reading missing or beta outlet/reading visible");
 
+  // ── 8b-ii. Outlet create/edit/delete need access to the outlet's site ─────────
+  const betaStaffEmail = `dept-staff-beta-${ts}@test.local`;
+  expectOk("admin: create beta staff user", (await admin("POST", "/users", {
+    name: "Staff Beta", email: betaStaffEmail, password: staffPassword,
+    role: "client_staff", clientId, departmentId: deptBetaId,
+  })).status, [200, 201]);
+  const betaStaff = makeSession();
+  expectOk("beta staff: login", (await betaStaff("POST", "/auth/login", {
+    email: betaStaffEmail, password: staffPassword,
+  })).status, [200, 201]);
+  for (const [who, session, ownSiteId, otherSiteId, otherOutletId] of [
+    ["alpha staff", staff, siteAlphaId, siteBetaId, outletBetaId],
+    ["beta staff", betaStaff, siteBetaId, siteAlphaId, outletAlphaId],
+  ]) {
+    expectForbidden(`${who}: cannot add an outlet at the other department's site`,
+      (await session("POST", "/legionella/outlets", { name: `${who} cross outlet ${ts}`, type: "hot", siteId: otherSiteId })).status);
+    expectBlocked(`${who}: cannot add an outlet at an unknown site`,
+      (await session("POST", "/legionella/outlets", { name: `${who} unknown-site outlet ${ts}`, type: "hot", siteId: 2147480000 })).status);
+    expectForbidden(`${who}: cannot edit the other department's outlet`,
+      (await session("PUT", `/legionella/outlets/${otherOutletId}`, { name: `${who} renamed ${ts}` })).status);
+    expectForbidden(`${who}: cannot remove the other department's outlet`,
+      (await session("DELETE", `/legionella/outlets/${otherOutletId}`)).status);
+    const own = await session("POST", "/legionella/outlets", { name: `${who} outlet ${ts}`, type: "cold", siteId: ownSiteId });
+    expectOk(`${who}: can add an outlet at own site`, own.status, [201]);
+    expectOk(`${who}: can rename own outlet`,
+      (await session("PUT", `/legionella/outlets/${own.data?.id}`, { name: `${who} outlet renamed ${ts}` })).status);
+    expectForbidden(`${who}: cannot move own outlet to the other department's site`,
+      (await session("PUT", `/legionella/outlets/${own.data?.id}`, { siteId: otherSiteId })).status);
+    expectOk(`${who}: can remove own outlet`, (await session("DELETE", `/legionella/outlets/${own.data?.id}`)).status, [204]);
+  }
+  const outletsAfterStaff = await admin("GET", "/legionella/outlets");
+  check("admin: refused staff changes left both department outlets as they were",
+    [[outletAlphaId, siteAlphaId, `Alpha sentinel ${ts}`], [outletBetaId, siteBetaId, `Beta sentinel ${ts}`]].every(([id, site, name]) =>
+      outletsAfterStaff.data?.some?.(row => row.id === id && row.site_id === site && row.name === name)),
+    "a department outlet was renamed, moved or removed");
+  // Account-wide admins manage outlets at every site.
+  for (const [label, siteId] of [["alpha", siteAlphaId], ["beta", siteBetaId]]) {
+    const created = await admin("POST", "/legionella/outlets", { name: `Admin ${label} outlet ${ts}`, type: "hot", siteId });
+    expectOk(`admin: add outlet at ${label} site`, created.status, [201]);
+    expectOk(`admin: edit outlet at ${label} site`,
+      (await admin("PUT", `/legionella/outlets/${created.data?.id}`, { siteId: label === "alpha" ? siteBetaId : siteAlphaId })).status);
+    expectOk(`admin: remove outlet moved from ${label} site`,
+      (await admin("DELETE", `/legionella/outlets/${created.data?.id}`)).status, [204]);
+  }
+
   // ── 8c. Viewer (read-only) department scoping ─────────────────────────────────
   const viewerEmail = `dept-viewer-alpha-${ts}@test.local`;
   const viewerPassword = "password-789";
@@ -731,57 +835,18 @@ async function main() {
   });
   expectOk("viewer: login", viewerLogin.status, [200, 201]);
 
-  const viewerSiteList = await viewer("GET", "/sites");
-  expectOk("viewer: GET /sites", viewerSiteList.status);
-  const viewerSites = Array.isArray(viewerSiteList.data) ? viewerSiteList.data : [];
-  check(
-    "viewer: /sites includes alpha site",
-    viewerSites.some((s) => s.id === siteAlphaId),
-    "alpha site missing from viewer list",
-  );
-  check(
-    "viewer: /sites excludes beta site",
-    !viewerSites.some((s) => s.id === siteBetaId),
-    "beta site visible in viewer list",
-  );
-  expectOk(
-    "viewer: GET /sites/:id (own dept)",
-    (await viewer("GET", `/sites/${siteAlphaId}`)).status,
-  );
-  expectForbidden(
-    "viewer: GET /sites/:id (other dept)",
-    (await viewer("GET", `/sites/${siteBetaId}`)).status,
-  );
-
-  const viewerItemList = await viewer("GET", "/compliance-items");
-  expectOk("viewer: GET /compliance-items", viewerItemList.status);
-  const viewerItems = Array.isArray(viewerItemList.data)
-    ? viewerItemList.data
-    : viewerItemList.data?.items ?? [];
-  if (alphaItem) {
-    check(
-      "viewer: /compliance-items includes alpha item",
-      viewerItems.some((i) => i.id === alphaItem.id),
-      "alpha item missing from viewer list",
-    );
-  }
-  if (betaItem) {
-    check(
-      "viewer: /compliance-items excludes beta item",
-      !viewerItems.some((i) => i.id === betaItem.id),
-      "beta dept item visible in viewer list",
-    );
-    expectForbidden(
-      "viewer: GET /compliance-items/:id (other dept)",
-      (await viewer("GET", `/compliance-items/${betaItem.id}`)).status,
-    );
+  // Viewers see only their own training records, so even their own
+  // department's sites and items are closed to them.
+  for (const path of ["/sites", `/sites/${siteAlphaId}`, `/sites/${siteBetaId}`, "/compliance-items",
+    ...(betaItem ? [`/compliance-items/${betaItem.id}`] : [])]) {
+    expectForbidden(`viewer: GET ${path} refused`, (await viewer("GET", path)).status);
   }
 
-  // Viewers are read-only: all mutations must be rejected, even in their own dept.
+  // All viewer mutations must be rejected, even in their own dept.
   expectForbidden(
     "viewer: POST /fire-safety rejected",
     (await viewer("POST", "/fire-safety", {
-      checkType: "alarm",
+      checkType: "alarm", callPoint: "CP1",
       checkDate: uniqueDate(0),
       result: "pass",
       siteId: siteAlphaId,
@@ -801,6 +866,10 @@ async function main() {
       email, password: "password-000",
     })).status, [200, 201]);
     const scopedSites = await session("GET", "/sites");
+    if (role === "client_viewer") {
+      expectForbidden(`unassigned ${role}: GET /sites refused`, scopedSites.status);
+      continue;
+    }
     expectOk(`unassigned ${role}: GET /sites`, scopedSites.status);
     const rows = Array.isArray(scopedSites.data) ? scopedSites.data : [];
     check(`unassigned ${role}: excludes alpha department`, !rows.some(s => s.id === siteAlphaId), "alpha site visible");

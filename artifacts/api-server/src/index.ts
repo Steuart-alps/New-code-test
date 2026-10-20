@@ -29,12 +29,14 @@ import { setReadinessNote } from "./lib/readinessDetails";
 import { Sentry } from "./lib/sentry";
 import {
   ensureServicePrices,
+  ensureStoragePrice,
   getServicePricePreflight,
   getServicePriceReadinessBlocker,
   type ServicePricePreflight,
 } from "./lib/services";
 import { describeEmailConfigurationIssues, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./lib/email";
 import { runTrialEndedEmailJob, runTrialReminderJob } from "./lib/trialReminders";
+import { runStorageWarningEmailJob } from "./lib/storageWarningEmails";
 import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
 import { runDocAckReminderJob } from "./lib/docAckReminders";
 import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
@@ -42,8 +44,9 @@ import { runTwoFactorResetAlertRecovery } from "./lib/twoFactorResetAlerts";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
 import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
-import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob } from "./lib/offboarding";
+import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob, runDeletionReminderJob } from "./lib/offboarding";
 import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
+import { runCancelledStorageClassJob } from "./lib/cancelledClientStorage";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
 import { runTrackActionReminderJob } from "./lib/trackActionReminders";
@@ -96,7 +99,10 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
   logger.info("Stripe webhook configured");
 
   onStage("backfill sync");
-  await stripeSync.syncBackfill();
+  // The sync library's default (no arguments) copies nothing, so name the
+  // scope: products and prices feed the service-price catalogue check below,
+  // customers and subscriptions feed billing state.
+  await stripeSync.syncBackfill({ object: "all" });
   logger.info("Stripe data synced");
   onStage("service-price catalogue");
 
@@ -133,6 +139,14 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
   } catch (err) {
     repairFailed = true;
     logger.error({ err }, "ensureServicePrices failed — run POST /api/admin/ensure-service-prices manually");
+  }
+
+  // The extra-storage price (£1 per 10 GB) is made the same way. A failure
+  // only hides "Buy storage"; it never blocks start-up.
+  try {
+    if (await ensureStoragePrice()) logger.info("Created the Stripe extra-storage price");
+  } catch (err) {
+    logger.error({ err }, "ensureStoragePrice failed — extra storage stays unavailable until the next start");
   }
 
   // Confirm the repair result before the application becomes ready. This is
@@ -316,6 +330,13 @@ function startScheduler() {
   schedule("15 8 * * *", "trial-reminders", runTrialReminders, { daily: true });
   logger.info("Trial reminder scheduler started (daily at 08:15)");
 
+  // Email a business's managers once when its stored files pass the storage
+  // warning level set in Settings (daily at 08:10, from the usage ledger).
+  schedule("10 8 * * *", "storage-warning-emails", logged(
+    "Storage warning email job complete", () => runStorageWarningEmailJob(),
+  ), { daily: true });
+  logger.info("Storage warning email scheduler started (daily at 08:10)");
+
   // Email safety check reminders for overdue/due-soon checks (daily at 08:45)
   schedule("45 8 * * *", "check-reminder-emails", logged(
     "Check reminder email job complete", runCheckReminderEmailJob,
@@ -370,6 +391,13 @@ function startScheduler() {
   ), { daily: true });
   logger.info("Cancellation detection scheduler started (daily at 07:00)");
 
+  // One reminder, with the download link, 30 days before a cancelled
+  // business's 12-month deletion (daily at 07:15).
+  schedule("15 7 * * *", "deletion-reminders", logged(
+    "Deletion reminder job complete", () => runDeletionReminderJob(),
+  ), { daily: true });
+  logger.info("Deletion reminder scheduler started (daily at 07:15)");
+
   // Reconcile any cancellation/scheduled-cancellation webhook missed by Stripe
   // sync and warn account admins before their paid access cutoff.
   schedule("50 6 * * *", "cancellation-warnings", logged(
@@ -387,6 +415,16 @@ function startScheduler() {
     (result) => result.clientsDeleted === 0,
   ), { daily: true });
   logger.info("Data deletion scheduler started (daily at 03:00)");
+
+  // Cancelled businesses' files move to cold storage 30 days after
+  // cancellation and back again if they resubscribe (daily at 04:00, after
+  // the deletion job). Cuts what kept-but-unused files cost during the 12 months.
+  schedule("0 4 * * *", "cancelled-storage-class", logged(
+    "Cancelled storage class job complete",
+    () => runCancelledStorageClassJob(),
+    (result) => result.archived === 0 && result.restored === 0,
+  ), { daily: true });
+  logger.info("Cancelled storage class scheduler started (daily at 04:00)");
 
   // Check daily at 08:00 UK local time; the job creates new monthly mail
   // only on the 1st and resumes unfinished deliveries on subsequent days.

@@ -612,6 +612,43 @@ async function runRuntimeMigrationsOnce() {
       CREATE UNIQUE INDEX IF NOT EXISTS "UIDX_client_data_deletion_active"
         ON "client_data_deletion_requests" ("client_id") WHERE "status" IN ('pending','approved')
     `);
+    // Durable outcome of each executed account deletion (see runDataDeletionJob).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "client_data_deletion_outcomes" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE RESTRICT,
+        "request_id" integer REFERENCES "client_data_deletion_requests"("id") ON DELETE RESTRICT,
+        "reason" text NOT NULL,
+        "approved_by" integer,
+        "outcome" text NOT NULL,
+        "started_at" timestamptz NOT NULL,
+        "finished_at" timestamptz NOT NULL DEFAULT now(),
+        "rows_deleted" integer NOT NULL DEFAULT 0,
+        "objects_deleted" integer NOT NULL DEFAULT 0,
+        "objects_skipped" integer NOT NULL DEFAULT 0,
+        "error" text
+      )
+    `);
+    // Separate from CREATE TABLE so a drizzle-pushed table (production) gets them too.
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome_reason"`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome_reason" CHECK ("reason" IN ('approved_request','retention_schedule'))`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" DROP CONSTRAINT IF EXISTS "CHK_client_deletion_outcome"`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_outcomes" ADD CONSTRAINT "CHK_client_deletion_outcome" CHECK ("outcome" IN ('completed','failed'))`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_client_data_deletion_outcomes_client" ON "client_data_deletion_outcomes" ("client_id", "finished_at")`);
+    await db.execute(sql`
+      CREATE OR REPLACE FUNCTION "prevent_client_deletion_outcome_mutation"()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'Account deletion outcomes are append-only';
+      END;
+      $$
+    `);
+    await db.execute(sql`DROP TRIGGER IF EXISTS "client_data_deletion_outcomes_immutable" ON "client_data_deletion_outcomes"`);
+    await db.execute(sql`
+      CREATE TRIGGER "client_data_deletion_outcomes_immutable"
+      BEFORE UPDATE OR DELETE ON "client_data_deletion_outcomes"
+      FOR EACH ROW EXECUTE FUNCTION "prevent_client_deletion_outcome_mutation"()
+    `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "privacy_retention_schedules" (
         "id" serial PRIMARY KEY,
@@ -888,6 +925,20 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_capacity_reductions_request" ON "storage_capacity_reductions" ("request_id")`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_capacity_reductions_tenant" ON "storage_capacity_reductions" ("client_id", "subscription_id", "effective_at")`);
+    // Storage warning level emails to managers (lib/storageWarningEmails.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_warning_notices" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "threshold_bytes" bigint NOT NULL,
+        "used_bytes" bigint NOT NULL,
+        "recipient_count" integer NOT NULL,
+        "sent_at" timestamptz NOT NULL DEFAULT now(),
+        "cleared_at" timestamptz
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_storage_warning_notices_open" ON "storage_warning_notices" ("client_id") WHERE "cleared_at" IS NULL`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_warning_notices_tenant" ON "storage_warning_notices" ("client_id", "sent_at")`);
     // Bound the immutable response ledger and remove spent opaque credentials.
     await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
     await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);
@@ -2067,7 +2118,8 @@ async function runRuntimeMigrationsOnce() {
     // older column set instead and lacked the columns the routes write
     // (hot_tubs.description, hot_tub_checks.ph_value, SafeTrack description,
     // scope, version...). Add them so both paths end with the Drizzle columns.
-    // The older runtime-only columns are left in place; no code reads them.
+    // The older runtime-only columns are left in place; migrateLegacyColumnLayouts
+    // copies any values they hold into these columns once.
     await db.execute(sql`
       ALTER TABLE "hot_tubs"
         ADD COLUMN IF NOT EXISTS "description" text
@@ -2134,6 +2186,7 @@ async function runRuntimeMigrationsOnce() {
     // ---- Track owners and in-app notifications (Oct 2026) ----
     await migrateTrackOwnersAndNotifications();
     await migrateCertificateOutcomes();
+    await migrateFireCallPoints();
 
     // ---- Department recorded with each submission (Oct 2026) ----
     // After every reported table exists; see submitterDepartmentMigration.ts.
@@ -2141,6 +2194,9 @@ async function runRuntimeMigrationsOnce() {
 
     // Last: every audited table must exist by now (see auditLogMigration.ts).
     await migrateExtendedAuditLog();
+
+    // Last, so every current column exists and audited tables log the copies.
+    await migrateLegacyColumnLayouts();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -2942,6 +2998,15 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bikes_client" ON "bikes" ("client_id")`);
+  // The first BikeTrack tables (Replit, before September 2026) used other
+  // column names, so CREATE TABLE IF NOT EXISTS kept them. Add today's columns
+  // (nullable where the old rows have no value yet); migrateLegacyColumnLayouts
+  // copies the old values across. Nothing here changes a current database.
+  await db.execute(sql`
+    ALTER TABLE "bikes"
+      ADD COLUMN IF NOT EXISTS "ref" text,
+      ADD COLUMN IF NOT EXISTS "type" text NOT NULL DEFAULT 'hybrid'
+  `);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "bike_hire_records" (
@@ -2967,6 +3032,18 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_hire_client" ON "bike_hire_records" ("client_id")`);
+  await db.execute(sql`
+    ALTER TABLE "bike_hire_records"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS "guest_name" text,
+      ADD COLUMN IF NOT EXISTS "guest_contact" text,
+      ADD COLUMN IF NOT EXISTS "hire_date" date,
+      ADD COLUMN IF NOT EXISTS "return_date_expected" date,
+      ADD COLUMN IF NOT EXISTS "return_date_actual" date,
+      ADD COLUMN IF NOT EXISTS "deposit_pence" integer,
+      ADD COLUMN IF NOT EXISTS "deposit_returned" boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+  `);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notified_at" timestamp`);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notification_claim_token" text`);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notification_claimed_at" timestamp`);
@@ -3033,6 +3110,24 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_checks_bike" ON "bike_checks" ("bike_id")`);
+  await db.execute(sql`
+    ALTER TABLE "bike_checks"
+      ADD COLUMN IF NOT EXISTS "overall_result" text NOT NULL DEFAULT 'pass',
+      ADD COLUMN IF NOT EXISTS "brakes_front" text,
+      ADD COLUMN IF NOT EXISTS "brakes_rear" text,
+      ADD COLUMN IF NOT EXISTS "tyre_front" text,
+      ADD COLUMN IF NOT EXISTS "tyre_rear" text,
+      ADD COLUMN IF NOT EXISTS "chain_gears" text,
+      ADD COLUMN IF NOT EXISTS "lights_front" text,
+      ADD COLUMN IF NOT EXISTS "lights_rear" text,
+      ADD COLUMN IF NOT EXISTS "frame" text,
+      ADD COLUMN IF NOT EXISTS "saddle_seatpost" text,
+      ADD COLUMN IF NOT EXISTS "handlebars" text,
+      ADD COLUMN IF NOT EXISTS "pedals" text,
+      ADD COLUMN IF NOT EXISTS "helmet_provided" text,
+      ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()
+  `);
 }
 
 async function migrateBikeServices() {
@@ -3054,6 +3149,114 @@ async function migrateBikeServices() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_services_bike" ON "bike_services" ("bike_id")`);
+}
+
+// ---- Older column layouts (Replit era) ----
+// Some installs still hold records in columns from the first table layouts
+// (see tests/upgrade-fixtures/legacy-shapes.ts). Routes read only today's
+// columns, so those records looked empty or missing. Copy each old value into
+// its current column once, without changing or removing the old column: the
+// original stays as recorded (5-year audit), and on audited tables each copy
+// is logged with its before and after values.
+//
+// Each copy runs once per database: a comment on the old column records that
+// it was done, so a value someone clears afterwards is not copied back on the
+// next start. Databases that never had the old layout (including production,
+// built by drizzle-kit push) skip every block.
+const LEGACY_COPY_MARK = "Retired column: copied into the current column by runtime migrations";
+
+function copyLegacyColumnsOnce(table: string, oldColumns: string[], statements: string[]) {
+  const [marker] = oldColumns;
+  const present = oldColumns
+    .map((column) => `EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('public.${table}') AND attname = '${column}' AND NOT attisdropped)`)
+    .join("\n      AND ");
+  return sql.raw(`
+    DO $legacy_copy$ BEGIN
+      IF ${present}
+      AND col_description(to_regclass('public.${table}'),
+        (SELECT attnum FROM pg_attribute WHERE attrelid = to_regclass('public.${table}') AND attname = '${marker}'))
+        IS DISTINCT FROM '${LEGACY_COPY_MARK}' THEN
+        ${statements.map((statement) => `EXECUTE $stmt$${statement}$stmt$;`).join("\n        ")}
+        EXECUTE $stmt$COMMENT ON COLUMN "${table}"."${marker}" IS '${LEGACY_COPY_MARK}'$stmt$;
+      END IF;
+    END $legacy_copy$
+  `);
+}
+
+async function migrateLegacyColumnLayouts() {
+  // LegionellaTrack: temperature_c (one decimal place) became temperature.
+  await db.execute(copyLegacyColumnsOnce("legionella_checks", ["temperature_c"], [
+    `UPDATE legionella_checks SET temperature = temperature_c WHERE temperature IS NULL AND temperature_c IS NOT NULL`,
+  ]));
+  // Hot tubs: temperature_c, ph_level and a chlorine or bromine level became
+  // temperature, ph_value and sanitiser_level.
+  await db.execute(copyLegacyColumnsOnce("hot_tub_checks", ["temperature_c", "ph_level", "chlorine_level", "bromine_level"], [
+    `UPDATE hot_tub_checks SET
+       temperature = coalesce(temperature, temperature_c),
+       ph_value = coalesce(ph_value, ph_level),
+       sanitiser_level = coalesce(sanitiser_level, chlorine_level, bromine_level)
+     WHERE (temperature IS NULL AND temperature_c IS NOT NULL)
+        OR (ph_value IS NULL AND ph_level IS NOT NULL)
+        OR (sanitiser_level IS NULL AND coalesce(chlorine_level, bromine_level) IS NOT NULL)`,
+  ]));
+  // BikeTrack services: performed_by and cost (pounds) became serviced_by and
+  // cost_pence. work_carried_out and parts_replaced have no current column and
+  // stay where they are.
+  await db.execute(copyLegacyColumnsOnce("bike_services", ["performed_by", "cost"], [
+    `UPDATE bike_services SET
+       serviced_by = coalesce(serviced_by, performed_by),
+       cost_pence = coalesce(cost_pence, round(cost * 100)::integer)
+     WHERE (serviced_by IS NULL AND performed_by IS NOT NULL) OR (cost_pence IS NULL AND cost IS NOT NULL)`,
+  ]));
+  // BikeTrack bikes: the old name was the bike's label (now ref) and
+  // bike_type its type. serial_number, colour and size stay where they are.
+  await db.execute(copyLegacyColumnsOnce("bikes", ["bike_type", "name"], [
+    `ALTER TABLE bikes ALTER COLUMN name DROP NOT NULL`,
+    `UPDATE bikes SET ref = coalesce(ref, nullif(name, ''), 'Bike ' || id), type = bike_type WHERE ref IS NULL`,
+  ]));
+  // BikeTrack hires: hirer_* and the hire_start/expected_return/actual_return
+  // timestamps became guest_* and dates; deposit_taken (pounds) became pence.
+  // hire_fee and the pre/post check flags stay where they are.
+  await db.execute(copyLegacyColumnsOnce("bike_hire_records",
+    ["hirer_name", "hirer_contact", "hire_start", "expected_return", "actual_return", "deposit_taken"], [
+    `ALTER TABLE bike_hire_records ALTER COLUMN hirer_name DROP NOT NULL`,
+    `UPDATE bike_hire_records SET
+       guest_name = coalesce(guest_name, hirer_name),
+       guest_contact = coalesce(guest_contact, hirer_contact),
+       hire_date = coalesce(hire_date, hire_start::date),
+       return_date_expected = coalesce(return_date_expected, expected_return::date),
+       return_date_actual = coalesce(return_date_actual, actual_return::date),
+       deposit_pence = coalesce(deposit_pence, round(deposit_taken * 100)::integer)
+     WHERE guest_name IS NULL`,
+  ]));
+  // BikeTrack checks: result became overall_result (added with a 'pass'
+  // default above, so copy every row once). items_checked stays where it is.
+  await db.execute(copyLegacyColumnsOnce("bike_checks", ["result"], [
+    `UPDATE bike_checks SET overall_result = result WHERE overall_result IS DISTINCT FROM result`,
+  ]));
+  // KitchenTrack: the first diary held one reading per appliance per day in
+  // fixed columns. Each becomes a row in today's sections (the single daily
+  // reading shows in the AM column, tagged with its old column), and the old
+  // notes and probe-cleaned answer join the day's notes.
+  await db.execute(copyLegacyColumnsOnce("food_safety_records",
+    ["fridge1_temp", "fridge2_temp", "fridge3_temp", "freezer1_temp", "freezer2_temp", "hot_holding_temp", "probe_cleaned", "notes"], [
+    `UPDATE food_safety_records f SET
+       cold_food = f.cold_food || coalesce((
+         SELECT jsonb_agg(jsonb_build_object('unit', r.unit, 'tempAm', r.reading::text, 'tempPm', '',
+           'correctiveAction', '', '_legacyColumn', r.col) ORDER BY r.ord)
+         FROM (VALUES (1, 'Fridge 1', f.fridge1_temp, 'fridge1_temp'), (2, 'Fridge 2', f.fridge2_temp, 'fridge2_temp'),
+           (3, 'Fridge 3', f.fridge3_temp, 'fridge3_temp'), (4, 'Freezer 1', f.freezer1_temp, 'freezer1_temp'),
+           (5, 'Freezer 2', f.freezer2_temp, 'freezer2_temp')) AS r(ord, unit, reading, col)
+         WHERE r.reading IS NOT NULL), '[]'::jsonb),
+       hot_holding = f.hot_holding || CASE WHEN f.hot_holding_temp IS NULL THEN '[]'::jsonb
+         ELSE jsonb_build_array(jsonb_build_object('item', 'Hot holding', 'coreTemp', f.hot_holding_temp::text,
+           'timeOfCheck', '', '_legacyColumn', 'hot_holding_temp')) END,
+       correctives = nullif(concat_ws(E'\n', nullif(f.correctives, ''),
+         CASE WHEN nullif(f.notes, '') IS NOT NULL THEN 'Diary notes: ' || f.notes END,
+         CASE f.probe_cleaned WHEN true THEN 'Probe cleaned: yes' WHEN false THEN 'Probe cleaned: no' END), '')
+     WHERE coalesce(f.fridge1_temp, f.fridge2_temp, f.fridge3_temp, f.freezer1_temp, f.freezer2_temp, f.hot_holding_temp) IS NOT NULL
+        OR nullif(f.notes, '') IS NOT NULL OR f.probe_cleaned IS NOT NULL`,
+  ]));
 }
 
 // ---- Two-factor authentication ----
@@ -3951,7 +4154,8 @@ async function migrateFixTrackV2() {
     ON "fix_track_issue_activity" ("issue_id", "created_at")
   `);
   // Earlier installs constrained activity to status/note. The contractor mail
-  // workflow is also an audit trail, so replace that generated constraint
+  // workflow, and deleting a photo or video from a finished issue, are also
+  // part of the audit trail, so replace that generated constraint
   // explicitly rather than relying on CREATE TABLE IF NOT EXISTS.
   await db.execute(sql`
     ALTER TABLE "fix_track_issue_activity"
@@ -3963,7 +4167,8 @@ async function migrateFixTrackV2() {
       CHECK ("event_type" IN (
         'status', 'note',
         'email_requested', 'email_approved', 'email_rejected',
-        'email_invalidated', 'email_sent', 'email_failed'
+        'email_invalidated', 'email_sent', 'email_failed',
+        'media_deleted'
       ))
   `);
   await db.execute(sql`
@@ -4900,6 +5105,28 @@ async function migrateMaintenanceManager() {
     ALTER TABLE "users"
       ADD COLUMN IF NOT EXISTS "is_department_manager" boolean NOT NULL DEFAULT false
   `);
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "all_departments" boolean NOT NULL DEFAULT false
+  `);
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "user_departments" (
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "department_id" integer NOT NULL REFERENCES "departments"("id") ON DELETE CASCADE,
+      PRIMARY KEY ("user_id", "department_id")
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_user_departments_department" ON "user_departments" ("department_id")`);
+  // Departments sit under a site; existing ones keep spanning every site.
+  await db.execute(sql`
+    ALTER TABLE "departments"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_departments_site" ON "departments" ("site_id")`);
 }
 
 async function migrateMobileSessions() {
@@ -5068,7 +5295,9 @@ async function migrateOffboardingColumns() {
       ADD COLUMN IF NOT EXISTS "cancellation_warning_sent_at" timestamptz,
       ADD COLUMN IF NOT EXISTS "offboarding_email_sent_at"  timestamptz,
       ADD COLUMN IF NOT EXISTS "data_deletion_scheduled_at" timestamptz,
-      ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz
+      ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz,
+      ADD COLUMN IF NOT EXISTS "files_archived_at"          timestamptz,
+      ADD COLUMN IF NOT EXISTS "deletion_reminder_sent_at"  timestamptz
   `);
   // Per-recipient delivery state permits failed addresses to retry without
   // re-emailing successful recipients, unlike a single client-level marker.
@@ -5521,6 +5750,27 @@ async function migrateTrackOwnersAndNotifications() {
 // "not_stated" and keep behaving as satisfactory. Defects listed on a
 // certificate open FixTrack jobs and keep the check needing action until they
 // are closed. Mirrors lib/db/src/schema/certificates.ts.
+// FireTrack (Oct 2026): weekly alarm tests name the call point tested, and
+// drills record whether night staff took part. Existing records keep nulls.
+async function migrateFireCallPoints() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fire_call_points" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "name" text NOT NULL,
+      "archived_at" timestamp,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_call_points_client_site" ON "fire_call_points" ("client_id", "site_id")`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point_id" integer REFERENCES "fire_call_points"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point" text`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "night_staff" text`);
+}
+
 async function migrateCertificateOutcomes() {
   await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "outcome" text NOT NULL DEFAULT 'not_stated'`);
   await db.execute(sql`

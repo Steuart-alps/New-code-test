@@ -20,6 +20,7 @@ import {
 import { Download, RefreshCw, BarChart2, TrendingUp, AlertCircle, FileCheck, ShieldAlert, CheckCircle2, XCircle, Clock, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { InspectionPackCard } from "@/components/inspection-pack-card";
+import { departmentLabel } from "@/lib/departments";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ function fmtMonth(ym: string) {
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface Site       { id: number; name: string; departmentId?: number | null; }
-interface Department { id: number; name: string; }
+interface Department { id: number; name: string; siteName?: string | null; }
 
 interface DailyRow {
   siteId: number; siteName: string;
@@ -293,7 +294,7 @@ function FilterBar({
           <SelectContent>
             <SelectItem value="all">All departments</SelectItem>
             {departments.map(d => (
-              <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+              <SelectItem key={d.id} value={String(d.id)}>{departmentLabel(d)}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -689,7 +690,7 @@ function TrendTab({
             <SelectContent>
               <SelectItem value="all">All departments</SelectItem>
               {departments.map(d => (
-                <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+                <SelectItem key={d.id} value={String(d.id)}>{departmentLabel(d)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -914,7 +915,7 @@ function RiskTab({
             <SelectContent>
               <SelectItem value="all">All departments</SelectItem>
               {departments.map(d => (
-                <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+                <SelectItem key={d.id} value={String(d.id)}>{departmentLabel(d)}</SelectItem>
               ))}
             </SelectContent>
           </Select>

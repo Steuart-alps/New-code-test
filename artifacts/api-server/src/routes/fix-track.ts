@@ -20,6 +20,8 @@ import { getObjectAclPolicy } from "../lib/objectAcl";
 import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload, decryptTokenPayload, TokenPayloadError, isDamagedTokenPayload } from "../lib/bearerTokens";
 import { reminderDraftStillCurrent, SUPERSEDED_REMINDER_ERROR } from "../lib/reminderCycles";
+import { PortalLinkChangedError, sendPortalDraftWithCurrentLink } from "../lib/contractorPortalDrafts";
+import { recordSiteVisibleSql, siteVisibleSql, siteVisibleToDepartment, sitesTableVisibleTo, visibleSiteIdsSql } from "../lib/departmentSites";
 
 /** Claim-transaction result for a reminder withdrawn as out of date. */
 const SUPERSEDED = Symbol("superseded");
@@ -189,7 +191,7 @@ async function finalizeIssueMedia(paths: string[] | undefined, clientId: number)
     return null;
   } catch (err) {
     if (err instanceof ObjectNotFoundError) return "Uploaded media object not found";
-    if (err instanceof ObjectOwnershipError) return err.message;
+    if (err instanceof ObjectOwnershipError || err instanceof ObjectContentError) return err.message;
     return "Could not secure uploaded media";
   }
 }
@@ -202,15 +204,15 @@ function allowedSites(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
 async function canAccessSite(siteId: number | null | undefined, clientId: number, deptId: number | null) {
   if (siteId == null) return true;
-  const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable)
+  const [site] = await db.select({ id: sitesTable.id, departmentId: sitesTable.departmentId }).from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
-  return !!site && (deptId === null || site.departmentId === null || site.departmentId === deptId);
+  return !!site && await siteVisibleToDepartment(site, deptId);
 }
 
 async function verifyContractor(contractorId: number | null | undefined, clientId: number) {
@@ -555,7 +557,8 @@ router.get("/issues/:id", requireAuth, async (req, res) => {
       status: a.status,
       createdAt: a.createdAt,
     })),
-    notes: activity.filter(a => a.eventType === "note").map(a => ({
+    // Media deletions show in the notes so the issue keeps a record of them.
+    notes: activity.filter(a => a.eventType === "note" || a.eventType === "media_deleted").map(a => ({
       id: a.id,
       note: a.note,
       createdBy: a.createdBy ?? "Former user",
@@ -906,7 +909,7 @@ router.post("/issues/:id/notes", requireAuth, denyViewers, async (req, res) => {
 
   const deptId = getActiveDepartmentId(req);
   const deptClause = deptId !== null
-    ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))`
+    ? sql` AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))`
     : sql``;
 
   const stamp = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -1142,6 +1145,118 @@ router.post("/issues/:id/media", requireAuth, denyViewers, async (req, res): Pro
   res.json({ mediaUrls: result });
 });
 
+// ── Delete media from a finished issue ───────────────────────────────────────
+//
+// To save storage, owners and admins can delete a photo or video once the
+// issue is resolved or closed. The issue, its notes and its history stay, and
+// the history records who deleted which file and when. Retrying a request
+// whose file is already gone just finishes removing the reference.
+
+const MEDIA_DELETE_ROLES = new Set(["consultant", "client_admin"]);
+const FINISHED_STATUSES = new Set(["resolved", "closed"]);
+const VIDEO_PATH = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i;
+
+router.post("/issues/:id/media/delete", requireAuth, denyViewers, async (req, res): Promise<void> => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
+  if (!MEDIA_DELETE_ROLES.has(req.currentUser?.role ?? "")) {
+    res.status(403).json({ error: "Only owners and admins can delete photos and videos." });
+    return;
+  }
+  const id = Number.parseInt(req.params.id as string, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const parsed = z.object({ objectPath: z.string().min(1).max(1000) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid media object" });
+    return;
+  }
+  const { objectPath } = parsed.data;
+
+  const deptId = getActiveDepartmentId(req);
+  const conditions: any[] = [
+    eq(fixTrackIssuesTable.id, id),
+    eq(fixTrackIssuesTable.clientId, clientId),
+  ];
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any,
+    );
+  }
+  const [existing] = await db.select({ status: fixTrackIssuesTable.status, mediaUrls: fixTrackIssuesTable.mediaUrls })
+    .from(fixTrackIssuesTable)
+    .where(and(...conditions))
+    .limit(1);
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (!FINISHED_STATUSES.has(existing.status)) {
+    res.status(409).json({ error: "Photos and videos can only be deleted once the issue is resolved." });
+    return;
+  }
+  if (!(existing.mediaUrls ?? []).includes(objectPath)) {
+    res.status(404).json({ error: "That file is not attached to this issue." });
+    return;
+  }
+
+  // Another issue may carry the same file (copied media); then only this
+  // issue's reference is removed and the file stays.
+  const sharedWith = await db.execute(sql`
+    SELECT 1 FROM fix_track_issues
+     WHERE client_id = ${clientId} AND id <> ${id}
+       AND media_urls @> ${JSON.stringify([objectPath])}::jsonb
+     LIMIT 1
+  `);
+  try {
+    if (sharedWith.rows.length === 0) await storage.deleteTenantObject(objectPath, clientId);
+  } catch (err) {
+    if (err instanceof ObjectOwnershipError) {
+      res.status(403).json({ error: err.message });
+      return;
+    }
+    if (!(err instanceof ObjectNotFoundError)) {
+      respondObjectStorageUnavailable(req, res, err, "FixTrack issue media deletion");
+      return;
+    }
+    // Already gone (an earlier attempt deleted it): remove the reference.
+  }
+
+  const kind = VIDEO_PATH.test(objectPath) ? "video" : "photo";
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx.select({ mediaUrls: fixTrackIssuesTable.mediaUrls })
+      .from(fixTrackIssuesTable)
+      .where(and(...conditions))
+      .for("update")
+      .limit(1);
+    if (!current) return null;
+    const currentPaths = current.mediaUrls ?? [];
+    if (!currentPaths.includes(objectPath)) return currentPaths;
+    const mediaUrls = currentPaths.filter((path) => path !== objectPath);
+    await tx.update(fixTrackIssuesTable)
+      .set({ mediaUrls, updatedAt: new Date() })
+      .where(and(...conditions));
+    await tx.insert(fixTrackIssueActivityTable).values({
+      clientId,
+      issueId: id,
+      eventType: "media_deleted",
+      note: `Deleted a ${kind} to free up storage (${objectPath}).`,
+      createdBy: req.currentUser?.id ?? null,
+    });
+    return mediaUrls;
+  });
+  if (!result) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.json({ mediaUrls: result });
+});
+
 // ── Contractor suggestions ────────────────────────────────────────────────────
 
 router.get("/contractors/suggest", requireAuth, async (req, res) => {
@@ -1178,18 +1293,29 @@ router.get("/contractors/suggest", requireAuth, async (req, res) => {
 // ── Contractor email approval workflow ───────────────────────────────────────
 //
 // Contractor emails require manager approval: staff request a send
-// (mode "assign" or "quote"); a manager (client_admin/consultant or a
+// (mode "assign" or "quote"); a manager (owner/consultant, a Manager or a
 // maintenance manager) approves or dismisses it. A separate, manager-only
 // dispatch then crosses the outbound email boundary.
 
 function isManager(req: any): boolean {
   const u = req.currentUser;
-  return !!u && (u.role === "client_admin" || u.role === "consultant" || u.isMaintenanceManager === true);
+  return !!u && (u.role === "client_admin" || u.role === "consultant" || u.role === "client_manager"
+    || u.isMaintenanceManager === true);
+}
+
+/** The site of a queued email's item (NULL for contractor-level emails). */
+function queueSiteSql(queue: string) {
+  const q = sql.raw(queue);
+  return sql`(CASE ${q}.entity_type
+    WHEN 'fix_track' THEN (SELECT qsi.site_id FROM fix_track_issues qsi WHERE qsi.id = COALESCE(${q}.entity_id, ${q}.issue_id) AND qsi.client_id = ${q}.client_id)
+    WHEN 'compliance' THEN (SELECT qsc.site_id FROM compliance_items qsc WHERE qsc.id = ${q}.entity_id AND qsc.client_id = ${q}.client_id)
+  END)`;
 }
 
 function queueDepartmentScope(req: any) {
   const dept = getActiveDepartmentId(req);
-  return dept === null ? sql`` : sql` AND (department_id IS NULL OR department_id=${dept})`;
+  return dept === null ? sql`` : sql` AND (department_id IS NULL OR department_id=${dept})
+    AND ${recordSiteVisibleSql(queueSiteSql("contractor_email_queue"), dept)}`;
 }
 
 /** Delivery outcomes of an approved FixTrack contractor email, kept in the
@@ -1547,7 +1673,8 @@ router.get("/contractor-email-queue", requireAuth, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const dept = getActiveDepartmentId(req);
-  const extra = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})`;
+  const extra = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})
+    AND ${recordSiteVisibleSql(queueSiteSql("q"), dept)}`;
   const result = await db.execute(sql`SELECT q.*, COALESCE(i.title, ci.title) AS item_title,
     s.name AS site_name, c.name AS contractor_name,
     (SELECT json_build_object('id',qs.id,'pricePence',qs.price_pence,'status',COALESCE(qs.status,'submitted')) FROM fix_track_quote_submissions qs WHERE qs.queue_id=q.id LIMIT 1) AS quote
@@ -1595,7 +1722,8 @@ router.get("/calendar-cancellations", requireAuth, async (req, res) => {
   const contractorId = rawContractorId === undefined ? null : Number(rawContractorId);
   if (contractorId !== null && !Number.isInteger(contractorId)) return res.status(400).json({ error: "Invalid contractor" });
   const dept = getActiveDepartmentId(req);
-  const deptScope = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})`;
+  const deptScope = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})
+    AND ${recordSiteVisibleSql(sql`i.site_id`, dept)}`;
   const contractorScope = contractorId === null ? sql`` : sql` AND q.contractor_id = ${contractorId}`;
   const result = await db.execute(sql`SELECT q.id, q.entity_id, q.contractor_id, q.to_email, q.status, q.ics_content,
       q.sent_at, q.updated_at, q.last_error, i.title AS job_title, c.name AS contractor_name,
@@ -1690,6 +1818,36 @@ router.post("/contractor-email-queue/:queueId/cancel", requireAuth, denyViewers,
   res.json({ ok: true });
 });
 
+/**
+ * Send a draft this request has just claimed (status 'sending') and mark it
+ * sent. A contractor portal reminder is sent only while its portal link is
+ * still current (see lib/contractorPortalDrafts.ts); it throws
+ * PortalLinkChangedError, with nothing sent, when a manager reissued or
+ * revoked the link after the claim.
+ */
+async function sendClaimedDraft(q: any, clientId: number) {
+  const dispatch = async (row: any) => {
+    const hydrated = hydrateQueuedContent(row);
+    await dispatchStoredContractorEmail({
+      to: row.to_email,
+      subject: hydrated.subject,
+      html: hydrated.html,
+      text: hydrated.text ?? undefined,
+      cc: Array.isArray(row.cc_json) && row.cc_json.length ? row.cc_json : undefined,
+      icsAttachment: row.ics_content ?? undefined,
+      icsFilename: row.ics_filename ?? undefined,
+      clientId,
+      idempotencyKey: row.idempotency_key,
+    });
+    return hydrated;
+  };
+  if (q.entity_type === "contractor_compliance") return sendPortalDraftWithCurrentLink(db, q, dispatch);
+  const hydrated = await dispatch(q);
+  await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now()
+    WHERE id=${q.id} AND client_id=${clientId} AND status='sending'`);
+  return hydrated;
+}
+
 // Approval is atomic and idempotent: only one manager can claim a draft. A
 // draft whose credentials cannot be decrypted and validated is refused before
 // it is claimed, so a damaged draft never consumes an approval.
@@ -1727,12 +1885,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
   if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
   if (!q) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
-    const hydrated = hydrateQueuedContent(q);
-    await dispatchStoredContractorEmail({ to: q.to_email, subject: hydrated.subject, html: hydrated.html, text: hydrated.text ?? undefined,
-      cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
-      icsAttachment: q.ics_content ?? undefined, icsFilename: q.ics_filename ?? undefined,
-      clientId, idempotencyKey: q.idempotency_key });
-    await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now() WHERE id=${qid} AND status='sending'`);
+    const hydrated = await sendClaimedDraft(q, clientId);
     if (q.entity_type === "fix_track" && q.entity_id) {
       await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
         email_sent_by=${req.currentUser?.id ?? null}, email_sent_at=now(), updated_at=now()
@@ -1743,6 +1896,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
     }
     res.json({ ok: true, queueId: qid, mode: q.mode, subject: hydrated.subject, bodyHtml: hydrated.html });
   } catch (err) {
+    if (err instanceof PortalLinkChangedError) return res.status(409).json({ code: err.code, error: err.message });
     // Put the draft back exactly as it was before this attempt: pending and
     // unapproved, so a failed send consumes no approval. The idempotency key
     // is unchanged, so a retry cannot deliver twice.
@@ -1808,20 +1962,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
   if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
   if (!q) return res.status(409).json(NOT_PENDING_RESPONSE);
   try {
-    const hydrated = hydrateQueuedContent(q);
-    await dispatchStoredContractorEmail({
-      to: q.to_email,
-      subject: hydrated.subject,
-      html: hydrated.html,
-      text: hydrated.text ?? undefined,
-      cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
-      icsAttachment: q.ics_content ?? undefined,
-      icsFilename: q.ics_filename ?? undefined,
-      clientId,
-      idempotencyKey: q.idempotency_key,
-    });
-    await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now()
-      WHERE id=${qid} AND client_id=${clientId} AND status='sending'`);
+    const hydrated = await sendClaimedDraft(q, clientId);
     if (q.issue_id) {
       await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
         email_sent_by=${req.currentUser?.id ?? null}, email_sent_at=now(), updated_at=now()
@@ -1832,6 +1973,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
     }
     res.json({ ok: true, queueId: qid, subject: hydrated.subject, bodyHtml: hydrated.html, bodyText: hydrated.text });
   } catch (err) {
+    if (err instanceof PortalLinkChangedError) return res.status(409).json({ code: err.code, error: err.message });
     // The manager's edits are kept; the approval taken by this attempt is
     // returned so the draft is pending exactly as before.
     await db.transaction(async (tx) => {
@@ -1862,7 +2004,7 @@ router.post("/quotes/:quoteId/decline", requireAuth, denyViewers, async (req, re
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const id = Number(req.params.quoteId);
   const deptId = getActiveDepartmentId(req);
-  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR s.department_id=${deptId})`;
+  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR (s.department_id=${deptId} AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId)}))`;
   const r = await db.execute(sql`UPDATE fix_track_quote_submissions qs SET status='declined'
     FROM contractor_email_queue q
     JOIN fix_track_issues i ON i.id=q.issue_id AND i.client_id=q.client_id
@@ -1879,7 +2021,7 @@ router.post("/quotes/:quoteId/accept", requireAuth, denyViewers, async (req, res
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const id = Number(req.params.quoteId);
   const deptId = getActiveDepartmentId(req);
-  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR s.department_id=${deptId})`;
+  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR (s.department_id=${deptId} AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId)}))`;
   const out = await db.transaction(async (tx) => {
     const r = await tx.execute(sql`SELECT qs.*,q.*,i.title,i.description,i.location,i.issue_type,i.priority,
       i.site_id,i.target_date,s.name AS site_name,c.name AS contractor_name,q.to_email AS contractor_email,
@@ -1936,7 +2078,7 @@ router.post("/issues/:id/approve-send", requireAuth, denyViewers, async (req, re
 
   const deptId = getActiveDepartmentId(req);
   const deptClause = deptId !== null
-    ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))`
+    ? sql` AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))`
     : sql``;
   const result = await db.execute(sql`
     UPDATE fix_track_issues
@@ -2021,10 +2163,10 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
 
   const sendDeptId = getActiveDepartmentId(req);
   const sendDeptClause = sendDeptId !== null
-    ? sql` AND (fi.site_id IS NULL OR fi.site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${sendDeptId})))`
+    ? sql` AND (fi.site_id IS NULL OR fi.site_id IN (${visibleSiteIdsSql(clientId, sendDeptId)}))`
     : sql``;
   const sendUpdateDeptClause = sendDeptId !== null
-    ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${sendDeptId})))`
+    ? sql` AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, sendDeptId)}))`
     : sql``;
 
   const result = await db.execute(sql`

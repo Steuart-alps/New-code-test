@@ -69,7 +69,7 @@ async function buildZip(dir, name, failStaffRoster) {
   await out.csv("pat-track/tests.csv", async () => [{ id: 4, result: "pass" }]);
   await out.csv("premises-track/inspections.csv", async () => [{ id: 5, area: "Kitchen" }]);
   const incomplete = appendExportSummary(archive, out, {
-    now: new Date("2026-10-10T00:00:00Z"), clientId: 4242, maxBytes: 1000, usedBytes: 0, omittedForCap: 0,
+    now: new Date("2026-10-10T00:00:00Z"), clientId: 4242, maxBytes: 1000, usedBytes: 0, part: 1, parts: 1,
   });
   await archive.finalize();
   await finished(file);

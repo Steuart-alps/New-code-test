@@ -5,7 +5,7 @@ import {
   RequestUploadUrlResponse,
   GetStorageUsageResponse,
 } from "@workspace/api-zod";
-import { ObjectStorageService, ObjectNotFoundError, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, UploadTooLargeError, maxUploadBytes, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
 import {
   readStorageUsageSnapshot,
   reconcileStorageUsage,
@@ -31,6 +31,7 @@ import {
   renewingStorageGib,
   stillPaidReducedGib,
 } from "../lib/storageCapacity";
+import { storageWarningThresholdBytes } from "../lib/storageWarningEmails";
 import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
@@ -43,7 +44,6 @@ const objectStorageService = new ObjectStorageService();
 // Every ObjectStorageService instance reports tenant uploads and deletions to
 // the usage ledger once this router is loaded.
 setStorageUsageRecorder(storageUsageLedger);
-const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 
 storageDownloadRouter.get("/storage/download/:token", async (req: Request, res: Response) => {
   let resolved: Awaited<ReturnType<typeof resolveDownloadToken>> = null;
@@ -155,10 +155,7 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
     const month = utcMonth();
     const monthlyDownloadBytes = await getMonthlyDownloadBytes(clientId, month);
     const estimatedCost = await estimateStorageCost(clientId, usedBytes, monthlyDownloadBytes);
-    const configuredThreshold = Number(thresholdSetting?.value);
-    const warningThresholdBytes = Number.isSafeInteger(configuredThreshold) && configuredThreshold > 0
-      ? configuredThreshold
-      : DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES;
+    const warningThresholdBytes = storageWarningThresholdBytes(thresholdSetting?.value);
 
     res.json(GetStorageUsageResponse.parse({
       usedBytes,
@@ -201,6 +198,11 @@ router.post("/storage/uploads/request-url", requireAuth, denyViewers, async (req
     const clientId = getClientId(req);
     if (!clientId) {
       res.status(400).json({ error: "No client context" });
+      return;
+    }
+    // Refuse early; finalisation checks the stored size as well.
+    if (size > maxUploadBytes()) {
+      res.status(400).json({ error: new UploadTooLargeError().message });
       return;
     }
 

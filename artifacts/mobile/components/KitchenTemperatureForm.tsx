@@ -78,6 +78,16 @@ interface CoreTemperatureReading {
   holdSeconds?: string;
 }
 
+interface SousVideReading {
+  item: string;
+  waterTemp: string;
+  coreTemp: string;
+  timeStarted: string;
+  timeFinished: string;
+  /** Minutes held at the core temperature. */
+  holdMinutes: string;
+}
+
 interface FoodSafetyConfig extends FoodSafetyColdConfig {
   food_temperature_rules?: string | null;
   food_hot_holding_limit?: string | null;
@@ -88,6 +98,7 @@ interface FoodSafetyConfig extends FoodSafetyColdConfig {
   food_show_cooling?: string | null;
   food_show_reheating?: string | null;
   food_show_hot_holding?: string | null;
+  food_show_sous_vide?: string | null;
 }
 
 interface FoodSafetyRecord {
@@ -117,6 +128,15 @@ const EMPTY_CORE_READING: CoreTemperatureReading = {
   coreTemp: '',
   timeStart: '',
   timeFinish: '',
+};
+
+const EMPTY_SOUS_VIDE: SousVideReading = {
+  item: '',
+  waterTemp: '',
+  coreTemp: '',
+  timeStarted: '',
+  timeFinished: '',
+  holdMinutes: '',
 };
 
 function today(): string {
@@ -153,6 +173,7 @@ function KitchenTemperatureFields() {
   const [cooking, setCooking] = useState<CoreTemperatureReading>(EMPTY_CORE_READING);
   const [cooling, setCooling] = useState<CoreTemperatureReading>(EMPTY_CORE_READING);
   const [reheating, setReheating] = useState<CoreTemperatureReading>(EMPTY_CORE_READING);
+  const [sousVide, setSousVide] = useState<SousVideReading>(EMPTY_SOUS_VIDE);
   const [correctives, setCorrectives] = useState('');
   const [initialCorrectives, setInitialCorrectives] = useState<string | null>(null);
   const [loadedRecordId, setLoadedRecordId] = useState<number | null | undefined>(undefined);
@@ -221,6 +242,7 @@ function KitchenTemperatureFields() {
     setCooking(EMPTY_CORE_READING);
     setCooling(EMPTY_CORE_READING);
     setReheating(EMPTY_CORE_READING);
+    setSousVide(EMPTY_SOUS_VIDE);
     setCorrectives(existingRecord?.correctives ?? '');
     setInitialCorrectives(existingRecord?.correctives ?? null);
     setLoadedRecordId(existingRecord?.id ?? null);
@@ -246,6 +268,7 @@ function KitchenTemperatureFields() {
         setCooking({ ...EMPTY_CORE_READING, ...draft.values.cooking });
         setCooling({ ...EMPTY_CORE_READING, ...draft.values.cooling });
         setReheating({ ...EMPTY_CORE_READING, ...draft.values.reheating });
+        setSousVide({ ...EMPTY_SOUS_VIDE, ...draft.values.sousVide });
         setCorrectives(draft.values.correctives);
         draftOrigin.current = draft.origin;
         markDirty();
@@ -306,12 +329,12 @@ function KitchenTemperatureFields() {
       void saveKitchenDraft(kitchenDraftStorage, {
         version: 1, owner, siteId, recordDate: date,
         values: { coldFood, delivery: { ...delivery }, hotHolding: { ...hotHolding }, cooking: { ...cooking },
-          cooling: { ...cooling }, reheating: { ...reheating }, correctives },
+          cooling: { ...cooling }, reheating: { ...reheating }, sousVide: { ...sousVide }, correctives },
         baseline: loadedFingerprint, origin: draftOrigin.current, savedAt: new Date().toISOString(),
       }).catch(() => {});
     }, 400);
     return () => clearTimeout(timer);
-  }, [owner, siteId, date, loadedRecordId, loadedFingerprint, isDirty, coldFood, delivery, hotHolding, cooking, cooling, reheating, correctives]);
+  }, [owner, siteId, date, loadedRecordId, loadedFingerprint, isDirty, coldFood, delivery, hotHolding, cooking, cooling, reheating, sousVide, correctives]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -331,6 +354,8 @@ function KitchenTemperatureFields() {
         ? cooling : undefined;
       const reheatingRow = config?.food_show_reheating !== 'false' && hasValues(reheating)
         ? reheating : undefined;
+      const sousVideRow = config?.food_show_sous_vide !== 'false' && hasValues(sousVide)
+        ? sousVide : undefined;
       const body = loadedRecordId === null ? {
         recordDate: date,
         coldFood,
@@ -339,6 +364,7 @@ function KitchenTemperatureFields() {
         hotTemperature: cookingRow ? [cookingRow] : [],
         cooling: coolingRow ? [coolingRow] : [],
         reheating: reheatingRow ? [reheatingRow] : [],
+        sousVide: sousVideRow ? [sousVideRow] : [],
         correctives: correctives.trim(),
       } : {
         mobileTemperatureLog: {
@@ -349,6 +375,7 @@ function KitchenTemperatureFields() {
           ...(cookingRow ? { hotTemperature: cookingRow } : {}),
           ...(coolingRow ? { cooling: coolingRow } : {}),
           ...(reheatingRow ? { reheating: reheatingRow } : {}),
+          ...(sousVideRow ? { sousVide: sousVideRow } : {}),
           ...(correctives !== (initialCorrectives ?? '') ? { correctives: correctives.trim() } : {}),
           expectedCorrectives: initialCorrectives,
         },
@@ -395,6 +422,7 @@ function KitchenTemperatureFields() {
         hotTemperature: config?.food_show_hot_temperature === 'false' ? (before as Record<string, unknown>)?.hotTemperature ?? [] : append('hotTemperature', cooking),
         cooling: config?.food_show_cooling === 'false' ? (before as Record<string, unknown>)?.cooling ?? [] : append('cooling', cooling),
         reheating: config?.food_show_reheating === 'false' ? (before as Record<string, unknown>)?.reheating ?? [] : append('reheating', reheating),
+        sousVide: config?.food_show_sous_vide === 'false' ? (before as Record<string, unknown>)?.sousVide ?? [] : append('sousVide', sousVide),
       };
       const rules = parseKitchenTemperatureRules(config?.food_temperature_rules);
       return { failures: assessKitchenTemperatures(before, after, rules, units), error: '', rules };
@@ -404,13 +432,14 @@ function KitchenTemperatureFields() {
   })();
   const canSave = !temperatureAssessment.error && temperatureAssessment.failures.every(f => !!f.actionTaken)
     && !pendingForDiary && !waitingForCreatedDiary && !outbox.error && canSaveTemperatureForm(
-    { coldFood, delivery, hotHolding, cooking, cooling, reheating, correctives },
+    { coldFood, delivery, hotHolding, cooking, cooling, reheating, sousVide, correctives },
     {
       deliveries: config?.food_show_deliveries !== 'false',
       hotHolding: config?.food_show_hot_holding !== 'false',
       cooking: config?.food_show_hot_temperature !== 'false',
       cooling: config?.food_show_cooling !== 'false',
       reheating: config?.food_show_reheating !== 'false',
+      sousVide: config?.food_show_sous_vide !== 'false',
     },
   );
 
@@ -672,6 +701,11 @@ function KitchenTemperatureFields() {
           onChange={(value) => { markDirty(); setReheating(value); }}
         />
       ) : null}
+      {config?.food_show_sous_vide !== 'false' ? (
+        <SousVideCard value={sousVide} onChange={(value) => { markDirty(); setSousVide(value); }}
+          hold={temperatureAssessment.rules ? kitchenHoldRequirement(temperatureAssessment.rules, 'sousVide', sousVide.item)?.limit ?? null : null}
+          target={temperatureAssessment.rules ? `Target: core and bath ${temperatureRangeLabel(temperatureAssessment.rules.sousVide)}` : undefined} />
+      ) : null}
 
       <SectionTitle icon="tool" title="Corrective actions" color={colors.foreground} />
       {temperatureAssessment.error ? <Text accessibilityRole="alert" style={{ color: colors.destructive }}>{temperatureAssessment.error}</Text> : null}
@@ -749,6 +783,36 @@ function CoreTemperatureCard({
           <TextInputField label={hold === null ? 'Held at core temp (seconds)' : `Held at core temp (seconds, at least ${hold})`}
             value={value.holdSeconds ?? ''} onChange={(holdSeconds) => onChange((row) => ({ ...row, holdSeconds }))} placeholder="e.g. 30" compact numeric />
         ) : null}
+        {target ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>{target}</Text> : null}
+      </View>
+    </>
+  );
+}
+
+/** One sous vide reading. The hold time is the minutes the core was held at
+ *  temperature; when the site's plan sets a minimum it is shown and required. */
+function SousVideCard({ value, onChange, hold, target }: {
+  value: SousVideReading;
+  onChange: React.Dispatch<React.SetStateAction<SousVideReading>>;
+  hold: number | null;
+  target?: string;
+}) {
+  const colors = useColors();
+  return (
+    <>
+      <SectionTitle icon="droplet" title="Sous vide" color={colors.foreground} />
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <TextInputField label="Food item" value={value.item} onChange={(item) => onChange((row) => ({ ...row, item }))} />
+        <View style={styles.inputRow}>
+          <TemperatureInput label="Bath °C" value={value.waterTemp} onChange={(waterTemp) => onChange((row) => ({ ...row, waterTemp }))} />
+          <TemperatureInput label="Core °C" value={value.coreTemp} onChange={(coreTemp) => onChange((row) => ({ ...row, coreTemp }))} />
+        </View>
+        <View style={styles.inputRow}>
+          <TextInputField label="Start time" value={value.timeStarted} onChange={(timeStarted) => onChange((row) => ({ ...row, timeStarted }))} placeholder="HH:mm" compact />
+          <TextInputField label="Finish time" value={value.timeFinished} onChange={(timeFinished) => onChange((row) => ({ ...row, timeFinished }))} placeholder="HH:mm" compact />
+        </View>
+        <TextInputField label={hold === null ? 'Held at core temp (minutes)' : `Held at core temp (minutes, at least ${hold})`}
+          value={value.holdMinutes} onChange={(holdMinutes) => onChange((row) => ({ ...row, holdMinutes }))} placeholder="e.g. 60" compact numeric />
         {target ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>{target}</Text> : null}
       </View>
     </>

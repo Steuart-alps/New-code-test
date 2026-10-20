@@ -87,6 +87,12 @@ jobs:
       - name: Build API
         run: pnpm --filter @workspace/api-server run build
 
+      - name: Web dropdown option values test
+        run: pnpm --filter @workspace/compliance-tracker run test:select-item-values
+
+      - name: Weekly kitchen review result rule test
+        run: pnpm --filter @workspace/api-zod run test:kitchen-weekly
+
       - name: Build web app
         env:
           PORT: "5173"
@@ -95,6 +101,9 @@ jobs:
 
       - name: Public page SEO test
         run: pnpm --filter @workspace/compliance-tracker run test:seo-pages
+
+      - name: Training matrix and CSV formula safety test
+        run: pnpm --filter @workspace/compliance-tracker run test:training-matrix
 
       - name: Storage test-bucket safety checks
         run: pnpm --filter @workspace/api-server run test:storage-happy-path-config
@@ -105,8 +114,14 @@ jobs:
       - name: Web client override-reason retry test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-override-reason
 
+      - name: Upload size limit test
+        run: pnpm --filter @workspace/api-server run test:upload-size-limit
+
       - name: Track record lock decision tests
         run: pnpm --filter @workspace/api-server run test:track-record-lock
+
+      - name: Billing lock allowlist test
+        run: pnpm --filter @workspace/api-server run test:trial-lock-allowlist
 
       - name: Storage add-on price check test
         run: pnpm --filter @workspace/api-server run test:storage-price-check
@@ -120,6 +135,9 @@ jobs:
       - name: SafeTrack reminder schedule test
         run: pnpm --filter @workspace/api-zod run test:safe-track-reminder-schedule
 
+      - name: Stripe start-up copies Stripe data into the database
+        run: pnpm --filter @workspace/api-server run test:stripe-backfill-scope
+
       # Same as Render's pre-deploy step: base schema on the empty database.
       # The API applies its runtime migrations when each suite boots it.
       - name: Create base database schema
@@ -130,6 +148,11 @@ jobs:
 
       - name: Module route tests
         run: pnpm --filter @workspace/api-server run test:modules:ci
+
+      # Public staff sign-off link: anonymous access, expired/revoked links,
+      # one-time acknowledgements and tenant/department scope.
+      - name: Public sign-off link tests
+        run: pnpm --filter @workspace/api-server run test:sign-off-access
 
       - name: Department isolation tests
         run: pnpm --filter @workspace/api-server run test:dept-isolation:ci
@@ -179,6 +202,11 @@ jobs:
       - name: SafeTrack reminder job tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:safe-track-ack-reminders:fresh
 
+      # Older, populated databases (Replit-era table layouts) must keep every
+      # record through the runtime migrations, readable through today's routes.
+      - name: Upgrade-path fixture tests
+        run: pnpm --filter @workspace/api-server run test:schema:upgrade
+
       - name: Dashboard accuracy tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed
 
@@ -187,6 +215,9 @@ jobs:
 
       - name: Owner late-edit reason tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:owner-late-edit-reason
+
+      - name: Departments under sites tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:departments-under-sites
 
       - name: Hot tub registry search tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:hot-tub-registry:pushed
@@ -208,3 +239,52 @@ jobs:
       # Warning job and banner against synced Stripe rows in the current API shape.
       - name: Cancellation warning tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:cancellation-warnings:fresh
+
+      # Reviewed account deletion: no purge before approval, the 30-day wait or
+      # with a legal hold; only the tenant's ACL-owned files; durable outcome.
+      - name: Approved account deletion tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:approved-account-deletion
+
+      - name: Client data deletion completeness tests (fresh schema)
+        run: pnpm --filter @workspace/api-server run test:client-data-deletion-feedback
+
+      # Cancelled businesses' files: cold storage after 30 days, back on
+      # reactivation, only their own ACL-owned files.
+      - name: Cancelled business storage class tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:cancelled-storage-class
+
+      # Only the business's owner can ask for deletion, after cancelling.
+      - name: Data deletion request tests
+        run: pnpm --filter @workspace/api-server run test:data-deletion-request
+
+      # One reminder with the download link 30 days before the 12-month deletion.
+      - name: Deletion reminder email tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:deletion-reminder
+
+      # One email to owners and admins per crossing of the storage warning level.
+      - name: Storage warning email tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:storage-warning-emails
+
+      # Large exports come as numbered parts; every file is in exactly one.
+      - name: Export in parts tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:export-parts
+
+      - name: FireTrack call point and night staff tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:fire-call-points
+
+      - name: FireTrack discharge test and ComplyTrack task link tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:fire-discharge-task-link
+
+      - name: FireTrack and Water Safety contractor jobs kept in step with ComplyTrack tasks (production schema base)
+        run: pnpm --filter @workspace/api-server run test:track-task-links
+
+      # KitchenTrack numeric controls: the shared rule model and country
+      # presets, then hold-time boundaries, retries and the corrective-action
+      # follow-up, each on its own fresh database.
+      - name: KitchenTrack hold-time and temperature-action tests
+        run: |
+          pnpm --filter @workspace/api-zod run test:kitchen-temperature
+          pnpm --filter @workspace/api-zod run test:kitchen-temperature-guidance
+          pnpm --filter @workspace/api-server run test:kitchen-hold-controls
+          pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
+          pnpm --filter @workspace/api-server run test:kitchen-mobile-replay

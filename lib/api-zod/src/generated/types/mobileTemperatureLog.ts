@@ -10,6 +10,7 @@ import type { MobileTemperatureLogDelivery } from './mobileTemperatureLogDeliver
 import type { MobileTemperatureLogHotHolding } from './mobileTemperatureLogHotHolding';
 import type { MobileTemperatureLogHotTemperature } from './mobileTemperatureLogHotTemperature';
 import type { MobileTemperatureLogReheating } from './mobileTemperatureLogReheating';
+import type { MobileTemperatureLogSousVide } from './mobileTemperatureLogSousVide';
 
 export interface MobileTemperatureLog {
   coldFood: unknown[];
@@ -19,6 +20,8 @@ export interface MobileTemperatureLog {
   hotTemperature?: MobileTemperatureLogHotTemperature;
   cooling?: MobileTemperatureLogCooling;
   reheating?: MobileTemperatureLogReheating;
+  /** One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes). */
+  sousVide?: MobileTemperatureLogSousVide;
   correctives?: string;
   expectedCorrectives: string | null;
 }

@@ -141,7 +141,6 @@
     "DELETE /api/daily-track-am/:id",
     "GET /api/daily-track-am",
     "GET /api/daily-track-am/:id",
-    "GET /api/daily-track-am/history",
     "POST /api/daily-track-am",
     "PUT /api/daily-track-am/:id"
   ],

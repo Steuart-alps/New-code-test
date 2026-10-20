@@ -16,6 +16,7 @@ const PESTTRACK_RECOMMENDED_BUSINESS_TYPES = new Set([
   "restaurant_cafe_pub",
   "care_home_healthcare",
   "holiday_park_campsite",
+  "golf_club",
 ]);
 
 export default function SignupPage() {
@@ -164,6 +165,7 @@ export default function SignupPage() {
                     <option value="offices_commercial">Offices / Commercial</option>
                     <option value="retail">Retail</option>
                     <option value="pest_control">Pest Control</option>
+                    <option value="golf_club">Golf Club</option>
                     <option value="other">Other</option>
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

@@ -18,7 +18,7 @@
 - [Artifact API request rules](artifact-api-request-rules.md) — hand-written artifact fetches need the `/api` base prefix; use Drizzle `inArray` rather than interpolated arrays in SQL `ANY`.
 - [Subagent delegation pitfalls](subagent-delegation-pitfalls.md) — subagents skip getClientId/dept-scoping/shared apiFetch; spell out tenant rules in tasks, then architect-review.
 - [Mobile 2FA login](mobile-2fa.md) — stateless: /auth/mobile-login takes optional code; client re-submits email+password+code; recovery code disables 2FA.
-- [Mandatory account 2FA](mandatory-two-factor.md) — login accounts need TOTP unless every business they belong to set `requireTwoFactor` to false; use isTwoFactorRequired; passkeys are optional web sign-in.
+- [Mandatory account 2FA](mandatory-two-factor.md) — 2FA is optional unless a business they belong to sets `requireTwoFactor` to "true"; use isTwoFactorRequired; passkeys are optional web sign-in.
 - [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.
 - [Push-only Drizzle tables](push-only-tables.md) — every pgTable needs runtime CREATE TABLE; Oct 2026 audit found 5 (certificates, password_reset_tokens, two SafeTrack, unused green_machine_reconciliations).
 - [Task queue lags codebase](task-queue-lag.md) — most queued tasks already built; verify in code before implementing, brief subagents to audit first.
@@ -63,13 +63,14 @@
 - [Browser engine runtime](browser-engine-runtime.md) — Playwright WebKit needs exact native sonames that may be unavailable even after its browser archive is installed.
 - [Browser test API proxy](browser-test-api-proxy.md) — real-browser tests against a private API must enrol mandatory 2FA and strip the Vite origin from upstream requests; with enforced CSRF, rewrite it to the API origin (FRESH_SCHEMA_BROWSER_POLICY).
 - [API codegen launcher drift](api-codegen-launcher-drift.md) — a stale Orval workspace launcher can point at a missing peer variant and produce misleading generated-client diffs.
+- [Cancelled business storage class](cancelled-storage-class.md) — files move to ARCHIVE 30 days after cancellation and back on resubscription; export stays open while locked.
 - [Account erasure review](account-erasure-review.md) — independent approval, 30-day minimum and legal holds must survive every deletion entry point and request race.
 - [Drizzle transaction startup](drizzle-transaction-startup.md) — actor-context setup failures occur before Drizzle cleanup; the pool adapter must own rollback and release.
 - [Shell runtime stalls](shell-runtime-loader-hangs.md) — Historical (Replit-only): distinguish injected-loader stalls from memory pressure caused by parallel validation jobs.
 - [Staged validation runner](validation-runner.md) — validation checks run through scripts/validate.mjs: shared flock slots, memory waits, codegen lock, restart reaping, 8080 guard.
 - [Browser fault fixtures](browser-fault-fixtures.md) — hold read outages until explicit retry; test legacy pages without changing production routing.
 - [Orphaned workflow children](workflow-orphaned-children.md) — Historical (Replit-only): surviving Vite children can force restarted workflows off the registered preview port.
-- [Track release gates](track-release-gates.md) — GreenTrack's public Coming soon gate remains until an explicit activation request.
+- [Track release gates](track-release-gates.md) — GreenTrack launched 2026-10-19; how to gate a future module as "Coming soon".
 - [Required photo creation](required-photo-creation.md) — stage verified evidence before atomically creating records; creation rules do not retroactively invalidate history.
 - [Mobile staged photo evidence](mobile-staged-photo-evidence.md) — mobile mirrors the web staged-receipt flow; storage PUT never carries the bearer; receipts scoped to user+client+type.
 - [Staged photo cleanup](staged-photo-cleanup.md) — cancelled/expired receipts delete their object first, then the row, under the receipt lock with ACL and reference checks; never prune receipt rows directly.

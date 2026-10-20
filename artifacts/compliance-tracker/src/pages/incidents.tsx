@@ -411,7 +411,7 @@ export default function IncidentsPage() {
   const canAdmin = useCanAdmin();
   const clientApi = useActiveClientApi();
   // Managers read injury details, so they attach and download HSE receipts.
-  const isManager = user?.role === "client_admin" || user?.role === "consultant"
+  const isManager = user?.role === "client_admin" || user?.role === "consultant" || user?.role === "client_manager"
     || (user?.role === "client_staff" && user.isDepartmentManager === true);
   const qc = useQueryClient();
   const apiFetch = useIncidentsApi();
@@ -1160,10 +1160,10 @@ ${rows.map(r => `<tr>
                   {sites.length > 0 && (
                     <div>
                       <Label>Site</Label>
-                      <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+                      <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                         <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">No specific site</SelectItem>
+                          <SelectItem value="none">No specific site</SelectItem>
                           {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                         </SelectContent>
                       </Select>

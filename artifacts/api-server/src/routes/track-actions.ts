@@ -5,6 +5,7 @@ import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
 import { missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
+import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 
 const router = Router();
 const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room"] as const;
@@ -64,18 +65,30 @@ const fixTrackDecisionSchema = z.object({ create: z.boolean() }).strict();
 async function canAccessSite(siteId: number | null | undefined, clientId: number, departmentId: number | null) {
   if (siteId == null) return true;
   const conditions = [eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)];
-  if (departmentId != null) conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))!);
+  if (departmentId != null) conditions.push(sitesTableVisibleTo(departmentId));
   return !!(await db.select({ id: sitesTable.id }).from(sitesTable).where(and(...conditions)))[0];
 }
 async function canOwnScope(siteId: number | null | undefined, departmentId: number | null | undefined, clientId: number) {
   if (siteId != null && !await canAccessSite(siteId, clientId, null)) return false;
-  if (departmentId != null && !(await db.select({ id: departmentsTable.id }).from(departmentsTable).where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId))))[0]) return false;
-  if (siteId != null && departmentId != null && !(await db.select({ id: sitesTable.id }).from(sitesTable).where(and(eq(sitesTable.id, siteId), eq(sitesTable.departmentId, departmentId))))[0]) return false;
+  const [department] = departmentId == null ? [null] : await db.select({ siteId: departmentsTable.siteId }).from(departmentsTable).where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId)));
+  if (departmentId != null && !department) return false;
+  if (siteId != null && departmentId != null) {
+    const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable).where(eq(sitesTable.id, siteId));
+    if (!site || !departmentPairsWithSite(siteId, site.departmentId, departmentId, department!.siteId)) return false;
+  }
   return true;
+}
+// A site + department scope needs the site to be the department's: given to
+// it, or the site the department sits under. A department under one site never
+// pairs with another.
+function departmentPairsWithSite(siteId: number, siteDepartmentId: number | null, departmentId: number, departmentSite: number | null) {
+  return departmentSite == null
+    ? siteDepartmentId === departmentId
+    : departmentSite === siteId && (siteDepartmentId == null || siteDepartmentId === departmentId);
 }
 async function accessibleSiteIds(clientId: number, departmentId: number | null) {
   if (departmentId == null) return null;
-  return (await db.select({ id: sitesTable.id }).from(sitesTable).where(and(eq(sitesTable.clientId, clientId), or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))))).map(x => x.id);
+  return (await db.select({ id: sitesTable.id }).from(sitesTable).where(and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(departmentId)))).map(x => x.id);
 }
 async function scopeDepartmentId(clientId: number, siteId: number | undefined, activeDepartmentId: number | null) {
   if (activeDepartmentId != null || siteId == null) return activeDepartmentId;
@@ -120,10 +133,10 @@ router.post("/templates", requireAuth, requireClientAdmin, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" }); if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const result = await db.transaction(async (tx) => {
     const [site] = parsed.data.siteId == null ? [null] : await tx.select({ clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(eq(sitesTable.id, parsed.data.siteId)).for("update");
-    const [department] = parsed.data.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId }).from(departmentsTable).where(eq(departmentsTable.id, parsed.data.departmentId)).for("update");
+    const [department] = parsed.data.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId, siteId: departmentsTable.siteId }).from(departmentsTable).where(eq(departmentsTable.id, parsed.data.departmentId)).for("update");
     if ((parsed.data.siteId != null && site?.clientId !== clientId)
       || (parsed.data.departmentId != null && department?.clientId !== clientId)
-      || (site && parsed.data.departmentId != null && site.departmentId !== parsed.data.departmentId)) return null;
+      || (site && parsed.data.departmentId != null && !departmentPairsWithSite(parsed.data.siteId!, site.departmentId, parsed.data.departmentId, department!.siteId))) return null;
     const [row] = await tx.insert(trackActionTemplatesTable).values({ ...parsed.data, clientId, siteId: parsed.data.siteId ?? null, departmentId: parsed.data.departmentId ?? null, instruction: parsed.data.instruction, ownerDefault: parsed.data.ownerDefault ?? null }).returning();
     return row;
   });
@@ -138,10 +151,10 @@ router.patch("/templates/:id", requireAuth, requireClientAdmin, async (req, res)
     if (!current) return { status: 404 as const, error: "Template not found" };
     const next = { ...current, ...parsed.data };
     const [site] = next.siteId == null ? [null] : await tx.select({ clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(eq(sitesTable.id, next.siteId)).for("update");
-    const [department] = next.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId }).from(departmentsTable).where(eq(departmentsTable.id, next.departmentId)).for("update");
+    const [department] = next.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId, siteId: departmentsTable.siteId }).from(departmentsTable).where(eq(departmentsTable.id, next.departmentId)).for("update");
     if ((next.siteId != null && site?.clientId !== clientId)
       || (next.departmentId != null && department?.clientId !== clientId)
-      || (site && next.departmentId != null && site.departmentId !== next.departmentId)) {
+      || (site && next.departmentId != null && !departmentPairsWithSite(next.siteId!, site.departmentId, next.departmentId, department!.siteId))) {
       return { status: 400 as const, error: "Template scope must belong to this client" };
     }
     const [row] = await tx.update(trackActionTemplatesTable).set({ ...parsed.data, updatedAt: new Date() }).where(and(eq(trackActionTemplatesTable.id, id), eq(trackActionTemplatesTable.clientId, clientId))).returning();
@@ -202,11 +215,12 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     let departmentId = activeDepartmentId;
     if (parsed.data.siteId != null) {
       const [site] = await tx.select({
+        id: sitesTable.id,
         clientId: sitesTable.clientId,
         departmentId: sitesTable.departmentId,
       }).from(sitesTable).where(eq(sitesTable.id, parsed.data.siteId)).for("update");
       if (!site || site.clientId !== clientId
-        || (activeDepartmentId != null && site.departmentId != null && site.departmentId !== activeDepartmentId)) {
+        || !(await siteVisibleToDepartment(site, activeDepartmentId))) {
         return { status: 403 as const, error: "Forbidden site" };
       }
       if (activeDepartmentId == null) departmentId = site.departmentId;
@@ -271,7 +285,8 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     if (!current) return { status: 404 as const, error: "Action not found" };
     const siteIds = [...new Set([current.siteId, parsed.data.siteId].filter((value): value is number => value != null))].sort((a, b) => a - b);
     const sites = siteIds.length ? await tx.select({ id: sitesTable.id, clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(inArray(sitesTable.id, siteIds)).for("update") : [];
-    const canUse = (siteId: number | null | undefined) => siteId == null || sites.some(site => site.id === siteId && site.clientId === clientId && (departmentId == null || site.departmentId == null || site.departmentId === departmentId));
+    const departmentSite = await departmentSiteId(departmentId);
+    const canUse = (siteId: number | null | undefined) => siteId == null || sites.some(site => site.id === siteId && site.clientId === clientId && (departmentId == null || site.departmentId == null || site.departmentId === departmentId) && (departmentSite == null || site.id === departmentSite));
     // Another department's action answers exactly like a missing one; only a
     // move to a site the caller cannot use is reported as forbidden.
     if (!canUse(current.siteId)) return { status: 404 as const, error: "Action not found" };

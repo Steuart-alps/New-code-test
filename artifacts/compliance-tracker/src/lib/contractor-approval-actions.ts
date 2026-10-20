@@ -35,14 +35,30 @@ export class ApprovalAlreadyHandledError extends Error {
   }
 }
 
-async function isAlreadyHandled(response: Response) {
-  if (response.status !== 409 || typeof response.json !== "function") return false;
-  try {
-    const body = await response.json();
-    return body?.code === QUEUE_ENTRY_NOT_PENDING;
-  } catch {
-    return false;
+/** The API's codes for a contractor portal reminder whose portal link was
+ *  reissued, revoked or expired after approval: nothing was sent. */
+export const PORTAL_LINK_CHANGED_CODES = ["portal_link_reissued", "portal_link_revoked", "portal_link_invalid"] as const;
+
+/** A manager changed the contractor's portal link before this reminder was
+ *  sent, so nothing was sent. The message is the server's explanation. */
+export class ApprovalPortalLinkChangedError extends Error {
+  constructor(message: string, readonly code: string) {
+    super(message);
+    this.name = "ApprovalPortalLinkChangedError";
   }
+}
+
+async function conflictBody(response: Response): Promise<{ code?: unknown; error?: unknown } | null> {
+  if (response.status !== 409 || typeof response.json !== "function") return null;
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function isAlreadyHandled(response: Response) {
+  return (await conflictBody(response))?.code === QUEUE_ENTRY_NOT_PENDING;
 }
 
 export async function approveContractorEmail(
@@ -62,7 +78,14 @@ export async function approveContractorEmail(
     { method: "POST", body: JSON.stringify(payload) },
   );
   if (!response.ok) {
-    if (await isAlreadyHandled(response)) throw new ApprovalAlreadyHandledError("approve");
+    const conflict = await conflictBody(response);
+    if (conflict?.code === QUEUE_ENTRY_NOT_PENDING) throw new ApprovalAlreadyHandledError("approve");
+    if ((PORTAL_LINK_CHANGED_CODES as readonly unknown[]).includes(conflict?.code)) {
+      throw new ApprovalPortalLinkChangedError(
+        typeof conflict?.error === "string" ? conflict.error : "The contractor's portal link changed, so nothing was sent.",
+        String(conflict?.code),
+      );
+    }
     throw new Error("Failed to approve email");
   }
   return { confirmed: true as const, response };

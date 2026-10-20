@@ -5,6 +5,7 @@ import { dailyChecklistsTable, dailyManagerSignoffsTable, sitesTable } from "@wo
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEntitledServices, requireAnyEntitlement, SERVICES } from "../lib/services";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 import {
   accessibleDailyChecklistTypes,
   canAccessDailyChecklistType,
@@ -64,7 +65,7 @@ const signoffCreateSchema = z.object({
 
 function allowedSites(clientId: number, deptId: number) {
   return db.select({ id: sitesTable.id }).from(sitesTable).where(
-    and(eq(sitesTable.clientId, clientId), or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)))
+    and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(deptId))
   );
 }
 
@@ -75,14 +76,14 @@ async function verifySite(siteId: number | null | undefined, clientId: number) {
   return !!r;
 }
 
-// Department-scoped staff may only use sites in their department (or sites
-// with no department), on create and when a draft's site changes. Edits pass
+// Department-scoped staff may only use sites visible in their department
+// (see departmentSites), on create and when a draft's site changes. Edits pass
 // the raw body value, before parsing; the schemas reject a non-number siteId.
 async function siteInDepartment(siteId: unknown, clientId: number, deptId: number | null) {
   if (typeof siteId !== "number" || deptId === null) return true;
   const [r] = await db.select({ id: sitesTable.id }).from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)))).limit(1);
+      sitesTableVisibleTo(deptId))).limit(1);
   return !!r;
 }
 

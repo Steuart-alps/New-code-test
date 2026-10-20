@@ -6,6 +6,7 @@ import { findLiveSubscription, PER_SITE_CURRENCY } from "./billing";
 import { getUncachableStripeClient, getStripeSync } from "./stripeClient";
 import { getClientId } from "../middleware/requireAuth";
 import { logger } from "./logger";
+import { findStoragePriceId, STORAGE_PRICE_CURRENCY, STORAGE_UNIT_AMOUNT_PENCE } from "./storagePricing";
 
 /**
  * Per-site service catalog. `core` is ComplyTrack itself (always included in a
@@ -44,8 +45,9 @@ export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safe
  * Services listed in the catalogue whose module is not available yet (its page
  * shows "Coming soon"). They cannot be bought on their own: checkout and
  * add-on activation refuse them. Bundle customers get them when they launch.
+ * Empty while every module is live (GreenTrack launched 2026-10-19).
  */
-export const COMING_SOON_SERVICE_KEYS: readonly string[] = ["greentrack"];
+export const COMING_SOON_SERVICE_KEYS: readonly string[] = [];
 export const PURCHASABLE_ADDON_KEYS: readonly ServiceKey[] = ADDON_KEYS.filter(
   (key) => !COMING_SOON_SERVICE_KEYS.includes(key),
 );
@@ -368,11 +370,49 @@ export async function ensureServicePrices(): Promise<EnsurePricesResult> {
     // reads from, so getServicePrice() resolves them immediately.
     try {
       const sync = await getStripeSync();
-      await sync.syncBackfill();
+      // syncBackfill() with no arguments copies nothing; name each object.
+      await sync.syncBackfill({ object: "product" });
+      await sync.syncBackfill({ object: "price" });
     } catch (err) {
       logger.error({ err }, "Stripe backfill after price creation failed; webhook will sync eventually");
     }
   }
 
   return { created, existing: Array.from(existing) };
+}
+
+/**
+ * Ensure the extra-storage price exists: one monthly GBP price of
+ * STORAGE_UNIT_AMOUNT_PENCE per GiB (£1 per 10 GiB) tagged
+ * service_key=storage, which findStoragePriceId resolves. Idempotent; skipped
+ * when STORAGE_ADDON_PRICE_ID names a price by hand. Returns whether a price
+ * was created.
+ */
+export async function ensureStoragePrice(): Promise<boolean> {
+  if (process.env.STORAGE_ADDON_PRICE_ID?.trim()) return false;
+  if (await findStoragePriceId()) return false;
+  const stripe = await getUncachableStripeClient();
+  const product = await stripe.products.create(
+    { name: "Extra storage (per GB)", metadata: { service_key: "storage" } },
+    { idempotencyKey: "storage-product-v1" },
+  );
+  await stripe.prices.create(
+    {
+      product: product.id,
+      unit_amount: STORAGE_UNIT_AMOUNT_PENCE,
+      currency: STORAGE_PRICE_CURRENCY,
+      recurring: { interval: "month" },
+      metadata: { service_key: "storage" },
+    },
+    { idempotencyKey: `storage-price-${STORAGE_PRICE_CURRENCY}-${STORAGE_UNIT_AMOUNT_PENCE}-v1` },
+  );
+  logger.info({ unitAmount: STORAGE_UNIT_AMOUNT_PENCE }, "Created Stripe price for extra storage");
+  try {
+    const sync = await getStripeSync();
+    await sync.syncBackfill({ object: "product" });
+    await sync.syncBackfill({ object: "price" });
+  } catch (err) {
+    logger.error({ err }, "Stripe backfill after storage price creation failed; webhook will sync eventually");
+  }
+  return true;
 }

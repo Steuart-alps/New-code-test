@@ -2,17 +2,19 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
+import { kitchenWeeklyResult } from "@workspace/api-zod/kitchen-weekly";
 
 const router = Router();
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function computedWeeklyResult(checks: Record<string, "yes" | "no" | "na">): "pass" | "fail" {
-  return Object.values(checks).some((value) => value === "no") ? "fail" : "pass";
-}
+// Not every "no" is a failure ("Have any complaints been received?"): the
+// shared rule says which answer needs attention for each question.
+const computedWeeklyResult = kitchenWeeklyResult;
 
 const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(
   (value) => new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value,
@@ -36,7 +38,7 @@ async function resolveSiteId(req: any, res: any, clientId: number, raw: unknown)
   const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.id, siteId),
     eq(sitesTable.clientId, clientId),
-    ...(departmentId != null ? [or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))] : []),
+    ...(departmentId != null ? [sitesTableVisibleTo(departmentId)] : []),
   )).limit(1);
   if (!site) {
     res.status(403).json({ error: "Site not accessible" });

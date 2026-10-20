@@ -27,7 +27,7 @@ const main = async () => {
   // correction window instead of a fixed day that later ages into a locked one.
   const today = new Date().toISOString().slice(0, 10);
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-  const base = { checkType: "alarm", checkDate: today, result: "pass", performedBy: "client supplied" };
+  const base = { checkType: "alarm", callPoint: "CP1", checkDate: today, result: "pass", performedBy: "client supplied" };
   const created = await a("POST", "/fire-safety", { ...base, staffRosterId: roster.data?.id });
   check("same-tenant create", created.status === 201, `got ${created.status}`);
   check("roster id persists", created.data?.staffRosterId === roster.data?.id, JSON.stringify(created.data));
