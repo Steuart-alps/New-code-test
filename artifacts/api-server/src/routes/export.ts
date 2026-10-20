@@ -807,7 +807,11 @@ router.get(
           ["breachAssessments", sql`SELECT * FROM privacy_breaches WHERE client_id = ${cid} ORDER BY id`],
         ] as const).map(async ([key, query]) => {
           try {
-            return [[key, (await db.execute(query)).rows] as const];
+            const rows = (await db.execute(query)).rows as Record<string, unknown>[];
+            // The online form's link digest stays out; the export says whether the form is live.
+            return [[key, key === "program"
+              ? rows.map(({ intake_token_hash, ...row }) => ({ ...row, intake_enabled: Boolean(intake_token_hash) }))
+              : rows] as const];
           } catch (error) {
             out.fail(`privacy-governance.json (${key})`, error);
             return [];

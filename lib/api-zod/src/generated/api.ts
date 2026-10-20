@@ -1315,6 +1315,10 @@ export const GetPrivacyGovernanceResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })),zod.null()]),
@@ -1374,6 +1378,10 @@ export const GetPrivacyGovernanceResponse = zod.object({
   "identityVerifiedBy": zod.number().nullable(),
   "decidedAt": zod.date().nullable(),
   "decidedBy": zod.number().nullable(),
+  "source": zod.enum(['staff', 'public_intake']),
+  "publicReference": zod.string().nullable(),
+  "assignedTo": zod.number().nullable(),
+  "adminNotifiedAt": zod.date().nullable(),
   "createdBy": zod.number().nullable(),
   "updatedBy": zod.number().nullable(),
   "createdAt": zod.date(),
@@ -1475,7 +1483,11 @@ export const GetPrivacyGovernanceResponse = zod.object({
   "updatedAt": zod.date()
 })).and(zod.object({
   "kind": zod.enum(['breach'])
-})))
+}))),
+  "privacyAdministrators": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+})).describe('People who can be assigned online privacy requests')
 })
 
 
@@ -1516,9 +1528,160 @@ export const SavePrivacyProgramResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 }))
+
+
+/**
+ * Returns the new link once. Only its digest is stored, and any previous link stops working.
+ * @summary Publish the online privacy-request form, or replace its link
+ */
+export const PublishPrivacyIntakeLinkQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const PublishPrivacyIntakeLinkResponse = zod.object({
+  "url": zod.string().describe('The form link. It is not stored and is shown only in this response.'),
+  "program": zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}))
+})
+
+
+/**
+ * @summary Turn off the online privacy-request form
+ */
+export const DisablePrivacyIntakeLinkQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const DisablePrivacyIntakeLinkResponse = zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}))
+
+
+/**
+ * @summary Choose the administrator assigned to online privacy requests
+ */
+export const SetPrivacyIntakeAssigneeQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const SetPrivacyIntakeAssigneeBody = zod.object({
+  "assigneeId": zod.number().nullable().describe('An administrator of this business, or null to notify every administrator')
+})
+
+export const SetPrivacyIntakeAssigneeResponse = zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "intakeEnabled": zod.boolean(),
+  "intakePublishedAt": zod.date().nullable(),
+  "intakePublishedBy": zod.number().nullable(),
+  "intakeAssigneeId": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}))
+
+
+/**
+ * @summary Public - describe a business's online privacy-request form
+ */
+export const GetPrivacyIntakeFormParams = zod.object({
+  "token": zod.coerce.string()
+})
+
+export const GetPrivacyIntakeFormResponse = zod.object({
+  "organisationName": zod.string(),
+  "privacyNoticeUrl": zod.string().nullable(),
+  "requestTypes": zod.array(zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']))
+})
+
+
+/**
+ * @summary Public - submit a privacy rights request for staff review
+ */
+export const SubmitPrivacyIntakeRequestParams = zod.object({
+  "token": zod.coerce.string()
+})
+
+export const submitPrivacyIntakeRequestBodyNameMax = 200;
+
+export const submitPrivacyIntakeRequestBodyEmailMax = 320;
+
+export const submitPrivacyIntakeRequestBodyDetailsMax = 5000;
+
+
+
+export const SubmitPrivacyIntakeRequestBody = zod.object({
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "name": zod.string().min(1).max(submitPrivacyIntakeRequestBodyNameMax),
+  "email": zod.string().max(submitPrivacyIntakeRequestBodyEmailMax),
+  "details": zod.string().min(1).max(submitPrivacyIntakeRequestBodyDetailsMax),
+  "website": zod.string().optional().describe('Leave empty (spam trap)')
+})
+
+export const SubmitPrivacyIntakeRequestResponse = zod.object({
+  "reference": zod.string(),
+  "receivedAt": zod.date()
+})
 
 
 /**
@@ -1720,6 +1883,10 @@ export const CreatePrivacyRecordResponse = zod.union([zod.object({
   "identityVerifiedBy": zod.number().nullable(),
   "decidedAt": zod.date().nullable(),
   "decidedBy": zod.number().nullable(),
+  "source": zod.enum(['staff', 'public_intake']),
+  "publicReference": zod.string().nullable(),
+  "assignedTo": zod.number().nullable(),
+  "adminNotifiedAt": zod.date().nullable(),
   "createdBy": zod.number().nullable(),
   "updatedBy": zod.number().nullable(),
   "createdAt": zod.date(),
@@ -2016,6 +2183,10 @@ export const UpdatePrivacyRecordResponse = zod.union([zod.object({
   "identityVerifiedBy": zod.number().nullable(),
   "decidedAt": zod.date().nullable(),
   "decidedBy": zod.number().nullable(),
+  "source": zod.enum(['staff', 'public_intake']),
+  "publicReference": zod.string().nullable(),
+  "assignedTo": zod.number().nullable(),
+  "adminNotifiedAt": zod.date().nullable(),
   "createdBy": zod.number().nullable(),
   "updatedBy": zod.number().nullable(),
   "createdAt": zod.date(),

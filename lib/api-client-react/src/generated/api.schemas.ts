@@ -654,6 +654,10 @@ export type PrivacyProgram = PrivacyProgramInput & ({
   id: number;
   clientId: number;
   updatedBy: number | null;
+  intakeEnabled: boolean;
+  intakePublishedAt: string | null;
+  intakePublishedBy: number | null;
+  intakeAssigneeId: number | null;
   createdAt: string;
   updatedAt: string;
 });
@@ -814,6 +818,14 @@ export const PrivacyRightsRequestKind = {
   rights_request: 'rights_request',
 } as const;
 
+export type PrivacyRightsRequestSource = typeof PrivacyRightsRequestSource[keyof typeof PrivacyRightsRequestSource];
+
+
+export const PrivacyRightsRequestSource = {
+  staff: 'staff',
+  public_intake: 'public_intake',
+} as const;
+
 export type PrivacyRightsRequest = PrivacyRightsRequestInput & ({
   kind: PrivacyRightsRequestKind;
   id: number;
@@ -823,6 +835,10 @@ export type PrivacyRightsRequest = PrivacyRightsRequestInput & ({
   identityVerifiedBy: number | null;
   decidedAt: string | null;
   decidedBy: number | null;
+  source: PrivacyRightsRequestSource;
+  publicReference: string | null;
+  assignedTo: number | null;
+  adminNotifiedAt: string | null;
   createdBy: number | null;
   updatedBy: number | null;
   createdAt: string;
@@ -1054,6 +1070,11 @@ export type PrivacyRetentionVerification = PrivacyRetentionVerificationInput & (
   verifiedAt: string;
 });
 
+export interface PrivacyAdministrator {
+  id: number;
+  name: string;
+}
+
 export interface PrivacyGovernanceResponse {
   program: PrivacyProgram | null;
   activities: PrivacyProcessingActivity[];
@@ -1062,6 +1083,74 @@ export interface PrivacyGovernanceResponse {
   retentionVerifications: PrivacyRetentionVerification[];
   processors: PrivacyProcessor[];
   breaches: PrivacyBreach[];
+  /** People who can be assigned online privacy requests */
+  privacyAdministrators: PrivacyAdministrator[];
+}
+
+export interface PrivacyIntakeLinkResult {
+  /** The form link. It is not stored and is shown only in this response. */
+  url: string;
+  program: PrivacyProgram;
+}
+
+export interface PrivacyIntakeAssigneeInput {
+  /** An administrator of this business, or null to notify every administrator */
+  assigneeId: number | null;
+}
+
+export type PrivacyIntakeFormRequestTypesItem = typeof PrivacyIntakeFormRequestTypesItem[keyof typeof PrivacyIntakeFormRequestTypesItem];
+
+
+export const PrivacyIntakeFormRequestTypesItem = {
+  access: 'access',
+  rectification: 'rectification',
+  erasure: 'erasure',
+  restriction: 'restriction',
+  portability: 'portability',
+  objection: 'objection',
+  other: 'other',
+} as const;
+
+export interface PrivacyIntakeForm {
+  organisationName: string;
+  privacyNoticeUrl: string | null;
+  requestTypes: PrivacyIntakeFormRequestTypesItem[];
+}
+
+export type PrivacyIntakeSubmissionRequestType = typeof PrivacyIntakeSubmissionRequestType[keyof typeof PrivacyIntakeSubmissionRequestType];
+
+
+export const PrivacyIntakeSubmissionRequestType = {
+  access: 'access',
+  rectification: 'rectification',
+  erasure: 'erasure',
+  restriction: 'restriction',
+  portability: 'portability',
+  objection: 'objection',
+  other: 'other',
+} as const;
+
+export interface PrivacyIntakeSubmission {
+  requestType: PrivacyIntakeSubmissionRequestType;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /** @maxLength 320 */
+  email: string;
+  /**
+     * @minLength 1
+     * @maxLength 5000
+     */
+  details: string;
+  /** Leave empty (spam trap) */
+  website?: string;
+}
+
+export interface PrivacyIntakeReceipt {
+  reference: string;
+  receivedAt: string;
 }
 
 export interface AppSettings {
@@ -2347,6 +2436,18 @@ clientId?: number;
 };
 
 export type SavePrivacyProgramParams = {
+clientId?: number;
+};
+
+export type PublishPrivacyIntakeLinkParams = {
+clientId?: number;
+};
+
+export type DisablePrivacyIntakeLinkParams = {
+clientId?: number;
+};
+
+export type SetPrivacyIntakeAssigneeParams = {
 clientId?: number;
 };
 

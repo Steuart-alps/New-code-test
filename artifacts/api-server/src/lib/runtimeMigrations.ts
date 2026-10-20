@@ -587,6 +587,17 @@ async function runRuntimeMigrationsOnce() {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_privacy_rights_requests_client_due" ON "privacy_rights_requests" ("client_id", "due_at")`);
+    // Public rights-request form (link digest, assignee) and request source.
+    await db.execute(sql`ALTER TABLE "privacy_programs" ADD COLUMN IF NOT EXISTS "intake_token_hash" text`);
+    await db.execute(sql`ALTER TABLE "privacy_programs" ADD COLUMN IF NOT EXISTS "intake_published_at" timestamptz`);
+    await db.execute(sql`ALTER TABLE "privacy_programs" ADD COLUMN IF NOT EXISTS "intake_published_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+    await db.execute(sql`ALTER TABLE "privacy_programs" ADD COLUMN IF NOT EXISTS "intake_assignee_id" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_privacy_programs_intake_token" ON "privacy_programs" ("intake_token_hash")`);
+    await db.execute(sql`ALTER TABLE "privacy_rights_requests" ADD COLUMN IF NOT EXISTS "source" text NOT NULL DEFAULT 'staff'`);
+    await db.execute(sql`ALTER TABLE "privacy_rights_requests" ADD COLUMN IF NOT EXISTS "public_reference" text`);
+    await db.execute(sql`ALTER TABLE "privacy_rights_requests" ADD COLUMN IF NOT EXISTS "assigned_to" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+    await db.execute(sql`ALTER TABLE "privacy_rights_requests" ADD COLUMN IF NOT EXISTS "admin_notified_at" timestamptz`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_privacy_rights_requests_public_reference" ON "privacy_rights_requests" ("public_reference")`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "client_data_deletion_requests" (
         "id" serial PRIMARY KEY,

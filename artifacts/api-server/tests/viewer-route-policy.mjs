@@ -64,6 +64,7 @@ const EXCEPTIONS = {
   "fix-track-public.ts POST /:token/booked": linkToken("contractor booking", /\blookupToken\(req\.params\.token\)/),
   "fix-track-public.ts POST /:token/upload-url": linkToken("contractor upload", /\blookupToken\(req\.params\.token\)/),
   "sign-off.ts POST /:token/acknowledge": linkToken("staff document sign-off", /\bresolveClient\(req\.params\.token\b/),
+  "privacy-intake-public.ts POST /:token": linkToken("public privacy rights request", /\bresolveForm\(req\)/),
   "notifications.ts POST /:token [notificationsPublicRouter]": linkToken("contractor visit scheduling", /\bscheduleTokenDigest\(req\.params\.token\)/),
   "staff-roster.ts POST /staff/:id/set-pin": kioskToken("PIN enrollment", /\benrollmentRateLimit\b/, /\breq\.body\?\.enrollment_token\b/, /\bdigestBearerToken\(parsedToken\.data\)/),
   "staff-roster.ts POST /staff/verify-pin": kioskToken("kiosk PIN check", /\bkioskClient\(req\.header\("x-kiosk-token"\)\)/),
