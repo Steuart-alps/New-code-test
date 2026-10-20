@@ -18,6 +18,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
+import { promoteToConsultant } from "./consultant-account.mjs";
 
 const runId = resolveRunId();
 const fixtures = createFixtureOwnership({ runId, suite: "error-reports" });
@@ -153,6 +154,8 @@ async function withDsn() {
     check("test report: non-operator gets 403", denied.status === 403, `got ${denied.status}`);
 
     const operator = await registerAndLogin(api.base, operatorEmail);
+    // The route is for ALPS's consultant sign-in; sign-up makes an Owner, so promote.
+    promoteToConsultant(operatorEmail);
     const secretQuery = `token=${randomUUID()}`;
     const sent = await operator("POST", `/admin/error-reports/test?${secretQuery}`, { password: "hunter2-secret-body" }, {
       authorization: "Bearer bearer-secret-header",
