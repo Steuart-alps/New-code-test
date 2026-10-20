@@ -91,7 +91,7 @@ function frequencyDaysLabel(days: number): string {
 // ── Legionella ────────────────────────────────────────────────────────────────
 
 // HSG274 Part 2 Table 2.1
-const LEGIONELLA_CHECK_TYPES = [
+export const LEGIONELLA_CHECK_TYPES = [
   "calorifier_temp", "hot_sentinel_temp", "hot_nonsent_temp",
   "cold_tank_temp", "cold_sentinel_temp", "cold_nonsent_temp",
   "cold_tank_inspection", "cold_tank_clean",
@@ -125,7 +125,7 @@ const POOL_LABELS: Record<string, string> = {
   closing: "Pool closing check",
   weekly: "Full pool balance check",
 };
-const TUB_CHECK_TYPES = ["water_chemistry", "temperature", "filter_clean",
+export const TUB_CHECK_TYPES = ["water_chemistry", "temperature", "filter_clean",
   "cover_inspection", "drain_refill", "microbiological_test", "risk_assessment"] as const;
 const TUB_LABELS: Record<string, string> = {
   water_chemistry: "Water chemistry check", temperature: "Temperature check",

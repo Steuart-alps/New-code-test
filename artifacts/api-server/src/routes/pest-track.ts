@@ -8,7 +8,9 @@ import { createPestControlRegisterPdf } from "../lib/pestControlRegisterPdf";
 import { z } from "zod";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { sitesTableVisibleTo } from "../lib/departmentSites";
-import { addMonthsUtc } from "../lib/complianceCompletion";
+import { defaultNextVisitDate } from "../lib/pestVisitFrequency";
+import { completeLinkedTasksFromCheck } from "../lib/trackTaskLink";
+import { syncContractorVisitChecks } from "../lib/contractorVisits";
 
 const router = Router();
 
@@ -222,23 +224,16 @@ const VisitBody = z.object({
 });
 
 /** Matches the default shown on the PestTrack settings form. */
-const DEFAULT_VISIT_FREQUENCY_MONTHS = 3;
-
 /**
- * A new visit saved without a next visit date is due again after the
- * business's visit frequency (PestTrack settings), so every site keeps a due
- * date and an overdue visit shows up.
+ * A recorded visit completes the site's "Pest Control Visit" check (the
+ * contractor reminder), and the check is then due on the visit's next date.
  */
-async function defaultNextVisitDate(clientId: number, visitDate: string): Promise<string | null> {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(visitDate)) return null;
-  const [setting] = await db.select({ value: appSettingsTable.value }).from(appSettingsTable)
-    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "pest_visit_frequency_months")))
-    .limit(1);
-  const stored = Number(setting?.value);
-  const months = Number.isInteger(stored) && stored >= 1 && stored <= 24 ? stored : DEFAULT_VISIT_FREQUENCY_MONTHS;
-  const visit = new Date(`${visitDate}T00:00:00Z`);
-  if (Number.isNaN(visit.getTime())) return null;
-  return addMonthsUtc(visit, months).toISOString().slice(0, 10);
+async function keepVisitCheckInStep(req: Request, visit: typeof pestVisitsTable.$inferSelect) {
+  await completeLinkedTasksFromCheck(req, "pest", {
+    id: visit.id, clientId: visit.clientId, siteId: visit.siteId,
+    checkType: "visit", checkDate: visit.visitDate, result: "pass",
+  });
+  await syncContractorVisitChecks(visit.clientId, ["pest:visit"]);
 }
 
 router.get("/visits", requireAuth, async (req, res) => {
@@ -278,6 +273,7 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
     notes:             d.notes ?? null,
     createdBy:         req.currentUser!.id,
   } as any).returning();
+  await keepVisitCheckInStep(req, row);
   res.status(201).json(row);
 });
 
@@ -297,7 +293,7 @@ router.put("/visits/:id", requireAuth, denyViewers, async (req, res) => {
   if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
    const performer = await resolveStaffPerformerUpdate(clientId, d.signedOffByRosterId, d.signedOffBy, existingVisit.signedOffByRosterId, existingVisit.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  await db.update(pestVisitsTable).set({
+  const [updated] = await db.update(pestVisitsTable).set({
     siteId:            d.siteId ?? null,
     visitDate:         d.visitDate,
     contractorName:    d.contractorName ?? null,
@@ -311,7 +307,8 @@ router.put("/visits/:id", requireAuth, denyViewers, async (req, res) => {
      signedOffByRosterId: performer?.staffRosterId ?? null,
     notes:             d.notes ?? null,
     updatedAt:         new Date(),
-  } as any).where(and(eq(pestVisitsTable.id, id), eq(pestVisitsTable.clientId, clientId)));
+  } as any).where(and(eq(pestVisitsTable.id, id), eq(pestVisitsTable.clientId, clientId))).returning();
+  if (updated) await keepVisitCheckInStep(req, updated);
   res.json({ ok: true });
 });
 

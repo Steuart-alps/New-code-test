@@ -427,6 +427,51 @@ export const DeleteSiteResponse = zod.void()
 
 
 /**
+ * Each visit type the business's tracks cover, at each site the user can see: when the track says it is next due, and the compliance check (with its contractor) that drives the contractor reminder.
+ * @summary Contractor visits kept on the tracks, per site, with the contractor reminded
+ */
+export const ListContractorVisitsResponse = zod.object({
+  "types": zod.array(zod.object({
+  "key": zod.string(),
+  "module": zod.string(),
+  "trackLabel": zod.string(),
+  "title": zod.string().describe('Title of the linked compliance check'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "dueFrom": zod.enum(['track', 'later', 'check'])
+})),
+  "visits": zod.array(zod.object({
+  "visitKey": zod.string(),
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "trackDueDate": zod.date().nullable(),
+  "checkId": zod.number().nullable(),
+  "checkSiteId": zod.number().nullable().describe('Null for a business-wide check at a one-site business'),
+  "dueDate": zod.date().nullable(),
+  "status": zod.string().nullable(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "reminderSentAt": zod.date().nullable()
+}))
+})
+
+
+/**
+ * @summary Choose the contractor reminded about a visit at a site
+ */
+export const SetContractorVisitBody = zod.object({
+  "visitKey": zod.string(),
+  "siteId": zod.number(),
+  "contractorId": zod.number().nullable(),
+  "dueDate": zod.date().nullish().describe('Only for a visit its track gives no date for (water sampling)')
+})
+
+export const SetContractorVisitResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
  * @summary List all contractors
  */
 export const ListContractorsResponseItem = zod.object({

@@ -19,6 +19,7 @@
     "test:fire-discharge-task-link": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-discharge-task-link.mjs",
     "test:track-task-links": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-task-links.mjs",
     "test:track-due-dates": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-due-dates.mjs",
+    "test:contractor-visits": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/contractor-visits.mjs",
     "test:kitchen-hold-controls": "bash tests/run-fresh-schema.sh tests/kitchen-hold-controls.mjs",
     "test:kitchen-inspection-export": "bash tests/run-fresh-schema.sh tests/kitchen-inspection-export.mjs",
     "test:kitchen-status-site-scope": "bash tests/run-fresh-schema.sh tests/kitchen-status-site-scope.mjs",

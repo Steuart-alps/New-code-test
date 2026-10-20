@@ -490,6 +490,40 @@ paths:
         "204":
           description: Deleted
 
+  /contractor-visits:
+    get:
+      operationId: listContractorVisits
+      tags: [contractors]
+      summary: Contractor visits kept on the tracks, per site, with the contractor reminded
+      description: >
+        Each visit type the business's tracks cover, at each site the user can
+        see: when the track says it is next due, and the compliance check
+        (with its contractor) that drives the contractor reminder.
+      responses:
+        "200":
+          description: Visit types and per-site rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorVisitsResponse"
+    put:
+      operationId: setContractorVisit
+      tags: [contractors]
+      summary: Choose the contractor reminded about a visit at a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetContractorVisitRequest"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
   /contractors:
     get:
       operationId: listContractors
@@ -3119,6 +3153,54 @@ components:
           type: string
           nullable: true
 
+    ContractorVisitType:
+      type: object
+      required: [key, module, trackLabel, title, label, description, dueFrom]
+      properties:
+        key: { type: string }
+        module: { type: string }
+        trackLabel: { type: string }
+        title: { type: string, description: Title of the linked compliance check }
+        label: { type: string }
+        description: { type: string }
+        dueFrom: { type: string, enum: [track, later, check] }
+    ContractorVisit:
+      type: object
+      required: [visitKey, siteId, siteName, trackDueDate, checkId, checkSiteId, dueDate, status, contractorId, contractorName, reminderSentAt]
+      properties:
+        visitKey: { type: string }
+        siteId: { type: integer }
+        siteName: { type: string }
+        trackDueDate: { type: string, format: date, nullable: true }
+        checkId: { type: integer, nullable: true }
+        checkSiteId: { type: integer, nullable: true, description: Null for a business-wide check at a one-site business }
+        dueDate: { type: string, format: date, nullable: true }
+        status: { type: string, nullable: true }
+        contractorId: { type: integer, nullable: true }
+        contractorName: { type: string, nullable: true }
+        reminderSentAt: { type: string, format: date-time, nullable: true }
+    ContractorVisitsResponse:
+      type: object
+      required: [types, visits]
+      properties:
+        types:
+          type: array
+          items: { $ref: "#/components/schemas/ContractorVisitType" }
+        visits:
+          type: array
+          items: { $ref: "#/components/schemas/ContractorVisit" }
+    SetContractorVisitRequest:
+      type: object
+      required: [visitKey, siteId, contractorId]
+      properties:
+        visitKey: { type: string }
+        siteId: { type: integer }
+        contractorId: { type: integer, nullable: true }
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+          description: Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)
     Contractor:
       type: object
       properties:

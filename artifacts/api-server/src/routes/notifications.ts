@@ -9,6 +9,8 @@ import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 import { digestBearerToken, encryptTokenPayload } from "../lib/bearerTokens";
 import { lockReminderItem, reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
+import { logger } from "../lib/logger";
+import { syncContractorVisitChecks } from "../lib/contractorVisits";
 
 /**
  * Build the full CC list for a reminder email by combining:
@@ -149,6 +151,19 @@ async function sendReminderForItem(opts: {
 
 export async function runReminderJob(): Promise<{ queued: number; sent: number; skipped: number; errors: number }> {
   const now = new Date();
+
+  // Contractor visits kept on the tracks (pest control, water servicing and
+  // others) first take their track's due date, so the reminder is for the
+  // visit the track says is next.
+  const visitClients = await db.selectDistinct({ clientId: complianceItemsTable.clientId })
+    .from(complianceItemsTable).where(isNotNull(complianceItemsTable.contractorId));
+  for (const { clientId } of visitClients) {
+    try {
+      await syncContractorVisitChecks(clientId);
+    } catch (err) {
+      logger.error({ err, clientId }, "Contractor visit due dates could not be brought up to date");
+    }
+  }
 
   const items = await db
     .select({ item: complianceItemsTable, contractor: contractorsTable, siteDepartmentId: sitesTable.departmentId })

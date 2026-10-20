@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -496,6 +497,10 @@ function ConfigDialog({ open, onClose, config, onSaved }: {
             <Input type="number" min={1} max={24} value={form.pest_visit_frequency_months} onChange={set("pest_visit_frequency_months")} className="rounded-sm w-28" />
             <p className="text-xs text-muted-foreground">Used to calculate when the next visit is due if no date is set on the last visit record.</p>
           </div>
+          <p className="text-xs text-muted-foreground">
+            To email your pest control contractor a reminder before each visit is due, choose them under{" "}
+            <Link href="/contractors" className="underline">Contractors, Contractor visits</Link>.
+          </p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-sm">Cancel</Button>

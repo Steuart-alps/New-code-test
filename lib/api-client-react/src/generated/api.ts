@@ -30,6 +30,7 @@ import type {
   CertificateDefect,
   ComplianceItem,
   Contractor,
+  ContractorVisitsResponse,
   CreateCategoryRequest,
   CreateCertificateDefectRequest,
   CreateCertificateRequest,
@@ -131,6 +132,7 @@ import type {
   SavePrivacyProgramParams,
   SendRemindersResponse,
   SetActiveDepartment200,
+  SetContractorVisitRequest,
   SignTrainingRecordRequest,
   Site,
   StorageUsage,
@@ -1643,6 +1645,155 @@ export const useDeleteSite = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteSiteMutationOptions(options));
+    }
+
+export const getListContractorVisitsUrl = () => {
+
+
+
+
+  return `/api/contractor-visits`
+}
+
+/**
+ * Each visit type the business's tracks cover, at each site the user can see: when the track says it is next due, and the compliance check (with its contractor) that drives the contractor reminder.
+ * @summary Contractor visits kept on the tracks, per site, with the contractor reminded
+ */
+export const listContractorVisits = async ( options?: RequestInit): Promise<ContractorVisitsResponse> => {
+
+  return customFetch<ContractorVisitsResponse>(getListContractorVisitsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListContractorVisitsQueryKey = () => {
+    return [
+    `/api/contractor-visits`
+    ] as const;
+    }
+
+
+export const getListContractorVisitsQueryOptions = <TData = Awaited<ReturnType<typeof listContractorVisits>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorVisits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListContractorVisitsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listContractorVisits>>> = ({ signal }) => listContractorVisits({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listContractorVisits>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListContractorVisitsQueryResult = NonNullable<Awaited<ReturnType<typeof listContractorVisits>>>
+export type ListContractorVisitsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Contractor visits kept on the tracks, per site, with the contractor reminded
+ */
+
+export function useListContractorVisits<TData = Awaited<ReturnType<typeof listContractorVisits>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorVisits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListContractorVisitsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetContractorVisitUrl = () => {
+
+
+
+
+  return `/api/contractor-visits`
+}
+
+/**
+ * @summary Choose the contractor reminded about a visit at a site
+ */
+export const setContractorVisit = async (setContractorVisitRequest: SetContractorVisitRequest, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getSetContractorVisitUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setContractorVisitRequest)
+  }
+);}
+
+
+
+
+
+export const getSetContractorVisitMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setContractorVisit>>, TError,{data: BodyType<SetContractorVisitRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setContractorVisit>>, TError,{data: BodyType<SetContractorVisitRequest>}, TContext> => {
+
+const mutationKey = ['setContractorVisit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setContractorVisit>>, {data: BodyType<SetContractorVisitRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setContractorVisit(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetContractorVisitMutationResult = NonNullable<Awaited<ReturnType<typeof setContractorVisit>>>
+    export type SetContractorVisitMutationBody = BodyType<SetContractorVisitRequest>
+    export type SetContractorVisitMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Choose the contractor reminded about a visit at a site
+ */
+export const useSetContractorVisit = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setContractorVisit>>, TError,{data: BodyType<SetContractorVisitRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setContractorVisit>>,
+        TError,
+        {data: BodyType<SetContractorVisitRequest>},
+        TContext
+      > => {
+      return useMutation(getSetContractorVisitMutationOptions(options));
     }
 
 export const getListContractorsUrl = () => {
