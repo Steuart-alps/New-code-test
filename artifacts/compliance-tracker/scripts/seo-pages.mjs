@@ -7,6 +7,68 @@
 // text and a short static body, so /signup is not read as a copy of /. The API
 // serves those files and marks every other non-API route noindex (see
 // api-server src/app.ts). generate-seo.mjs builds sitemap.xml from this list.
+//
+// The module, template and pricing pages share their wording with the React
+// pages through src/content/public-pages.json.
+
+import { readFileSync } from "node:fs";
+
+const content = JSON.parse(
+  readFileSync(new URL("../src/content/public-pages.json", import.meta.url), "utf8"),
+);
+
+const moduleBySlug = new Map(content.modules.map((module) => [module.slug, module]));
+
+const featurePages = [
+  {
+    path: "/features",
+    title: content.index.features.title,
+    description: content.index.features.description,
+    heading: content.index.features.heading,
+    body: [content.index.features.summary],
+    links: content.modules.map((module) => ({ href: `/features/${module.slug}`, text: `${module.name}: ${module.heading}` })),
+    sitemap: { changefreq: "monthly", priority: "0.8" },
+  },
+  ...content.modules.map((module) => ({
+    path: `/features/${module.slug}`,
+    title: module.title,
+    description: module.description,
+    heading: module.heading,
+    body: [module.summary, ...(module.scotland ? [module.scotland] : [])],
+    items: [...module.records, ...module.law],
+    links: [
+      ...module.templates.map((slug) => ({ href: `/templates/${slug}`, text: content.templates.find((t) => t.slug === slug)?.name ?? slug })),
+      { href: "/pricing", text: "Pricing" },
+      { href: "/features", text: "All modules" },
+    ],
+    sitemap: { changefreq: "monthly", priority: "0.7" },
+  })),
+];
+
+const templatePages = [
+  {
+    path: "/templates",
+    title: content.index.templates.title,
+    description: content.index.templates.description,
+    heading: content.index.templates.heading,
+    body: [content.index.templates.summary],
+    links: content.templates.map((template) => ({ href: `/templates/${template.slug}`, text: template.name })),
+    sitemap: { changefreq: "monthly", priority: "0.8" },
+  },
+  ...content.templates.map((template) => ({
+    path: `/templates/${template.slug}`,
+    title: template.title,
+    description: template.description,
+    heading: template.heading,
+    body: [template.summary],
+    items: template.guidance,
+    links: [
+      { href: `/features/${template.module}`, text: `Keep this log on your phone with ${moduleBySlug.get(template.module)?.name ?? "ComplyTrack"}` },
+      { href: "/templates", text: "All free templates" },
+    ],
+    sitemap: { changefreq: "monthly", priority: "0.6" },
+  })),
+];
 
 export const publicPages = [
   {
@@ -49,6 +111,20 @@ export const publicPages = [
     body: ["How ComplyTrack collects, uses and protects personal data."],
     sitemap: { changefreq: "yearly", priority: "0.3" },
   },
+  {
+    path: "/pricing",
+    title: content.index.pricing.title,
+    description: content.index.pricing.description,
+    heading: content.index.pricing.heading,
+    body: [
+      content.index.pricing.summary,
+      "ComplyTrack Core is £10 per site per month. Each module adds £10 per site per month. ComplyTrack Complete unlocks every module for £50 per site per month. Prices exclude VAT.",
+    ],
+    links: [{ href: "/features", text: "All modules" }],
+    sitemap: { changefreq: "monthly", priority: "0.9" },
+  },
+  ...featurePages,
+  ...templatePages,
 ];
 
 function escapeHtml(value) {
@@ -99,7 +175,11 @@ export function renderPublicPageHtml(indexHtml, page, baseUrl) {
     `<p><a href="/"><strong>ComplyTrack</strong></a></p>`,
     `<h1>${escapeHtml(page.heading)}</h1>`,
     ...page.body.map((text) => `<p>${escapeHtml(text)}</p>`),
-    `<p><a href="/">ComplyTrack home</a> · <a href="/signup">Start your free trial</a> · <a href="/login">Sign in</a></p>`,
+    ...(page.items?.length ? [`<ul>${page.items.map((text) => `<li>${escapeHtml(text)}</li>`).join("")}</ul>`] : []),
+    ...(page.links?.length
+      ? [`<ul>${page.links.map((link) => `<li><a href="${escapeHtml(link.href)}">${escapeHtml(link.text)}</a></li>`).join("")}</ul>`]
+      : []),
+    `<p><a href="/">ComplyTrack home</a> · <a href="/features">Modules</a> · <a href="/pricing">Pricing</a> · <a href="/templates">Free templates</a> · <a href="/signup">Start your free trial</a> · <a href="/login">Sign in</a></p>`,
   ].join("\n        ");
   html = replaceOnce(
     html,

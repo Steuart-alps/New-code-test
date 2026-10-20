@@ -124,11 +124,18 @@ if (fs.existsSync(webIndexHtml)) {
   // compliance-tracker scripts/seo-pages.mjs). Every other client route gets
   // the home page's HTML, so it is marked noindex: otherwise search engines
   // would index app, token and unknown URLs as copies of the home page.
+  // Pages can be nested one level, such as /features/fire-safety-logbook.
   const publicPageFiles = new Map<string, string>();
-  for (const entry of fs.readdirSync(webDistDir, { withFileTypes: true })) {
-    const pageFile = path.join(webDistDir, entry.name, "index.html");
-    if (entry.isDirectory() && fs.existsSync(pageFile)) publicPageFiles.set(`/${entry.name}`, pageFile);
-  }
+  const addPublicPages = (dir: string, urlPrefix: string, depth: number) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === "assets") continue;
+      const pageDir = path.join(dir, entry.name);
+      const pageFile = path.join(pageDir, "index.html");
+      if (fs.existsSync(pageFile)) publicPageFiles.set(`${urlPrefix}/${entry.name}`, pageFile);
+      if (depth > 0) addPublicPages(pageDir, `${urlPrefix}/${entry.name}`, depth - 1);
+    }
+  };
+  addPublicPages(webDistDir, "", 1);
 
   const serveWebFiles = express.static(webDistDir, {
     index: false,
