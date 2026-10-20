@@ -83,6 +83,14 @@ function installFakeRecognition() {
 const micFor = (page, id) => page.locator(`#${id}`).locator("xpath=..").locator("[data-slot='dictation-button']");
 const valueOf = (page, id) => page.locator(`#${id}`).inputValue();
 const speak = (page, text, final = true) => page.evaluate(([t, f]) => window.__speak(t, f), [text, final]);
+const IDLE_LABEL = "Dictate (speak instead of typing)";
+// The button goes back to idle when the recogniser reports it has ended,
+// which happens just after it stops listening, so wait for it.
+async function waitForIdleMic(page, id, message) {
+  await page.waitForFunction(([boxId, label]) =>
+    document.getElementById(boxId)?.parentElement?.querySelector("[data-slot='dictation-button']")?.getAttribute("aria-label") === label,
+  [id, IDLE_LABEL], { timeout: 5000 }).catch(() => assert.fail(message));
+}
 const listeningCount = page => page.evaluate(() => window.__listeningCount());
 
 // The list dialog's site picker loads the sites.
@@ -135,7 +143,7 @@ async function checkSupported() {
   assert.equal((await valueOf(page, "state-notes")).length, 80);
   await stateMic.click();
   await page.waitForFunction(() => window.__listeningCount() === 0);
-  assert.equal(await stateMic.getAttribute("aria-label"), "Dictate (speak instead of typing)");
+  await waitForIdleMic(page, "state-notes", "stopping returns the button to idle");
 
   // react-hook-form box: the value is saved with the form.
   const formMic = micFor(page, "form-notes");
@@ -149,14 +157,14 @@ async function checkSupported() {
   await stateMic.click();
   await micFor(page, "product").click();
   await page.waitForFunction(() => window.__listeningCount() === 1);
-  assert.equal(await stateMic.getAttribute("aria-label"), "Dictate (speak instead of typing)", "starting another microphone stops the first");
+  await waitForIdleMic(page, "state-notes", "starting another microphone stops the first");
   await speak(page, "oven cleaner");
   assert.equal(await valueOf(page, "product"), "Oven cleaner");
 
   // A blocked microphone explains what to do.
   await page.evaluate(() => window.__fail("not-allowed"));
   await page.getByText("Allow the microphone for this site", { exact: false }).waitFor();
-  assert.equal(await micFor(page, "product").getAttribute("aria-label"), "Dictate (speak instead of typing)");
+  await waitForIdleMic(page, "product", "a failed microphone returns to idle");
 
   // Speak a list.
   await page.getByRole("button", { name: "Open list" }).click();
