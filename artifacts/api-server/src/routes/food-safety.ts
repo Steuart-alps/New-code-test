@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { COLD_UNIT_ID, assignColdUnitIds, effectiveColdUnits } from "../lib/coldUnits";
 import { createHash } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
 import {
@@ -308,6 +309,8 @@ const MAX_ROWS = 30;
 const MAX_LIMIT_TEXT = 200;
 
 const coldUnitSchema = z.object({
+  // Kept so a renamed unit keeps its QR label (lib/coldUnits.ts).
+  id: z.string().regex(COLD_UNIT_ID).optional(),
   name: z.string(),
   type: z.enum(["fridge", "freezer"]),
 });
@@ -340,7 +343,7 @@ function cleanColdUnits(raw: string): { value: string } | { error: string } {
   if (!Array.isArray(parsed)) return { error: "Cold units must be an array" };
   if (parsed.length > MAX_ROWS) return { error: `Cold units allows at most ${MAX_ROWS} rows` };
   const seen = new Set<string>();
-  const out: { name: string; type: "fridge" | "freezer" }[] = [];
+  const out: { id?: string; name: string; type: "fridge" | "freezer" }[] = [];
   for (const item of parsed) {
     const p = coldUnitSchema.safeParse(item);
     if (!p.success) return { error: "Each cold unit needs a name and type (fridge|freezer)" };
@@ -350,7 +353,7 @@ function cleanColdUnits(raw: string): { value: string } | { error: string } {
     const k = name.toLowerCase();
     if (seen.has(k)) return { error: "Cold unit names must be unique" };
     seen.add(k);
-    out.push({ name, type: p.data.type });
+    out.push({ ...(p.data.id ? { id: p.data.id } : {}), name, type: p.data.type });
   }
   return { value: JSON.stringify(out) };
 }
@@ -533,6 +536,15 @@ router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, 
 
   const storageKeyOf = (baseKey: string) =>
     site.siteId !== null ? siteKeyFor(site.siteId, baseKey) : baseKey;
+
+  // Every fridge and freezer keeps an id across renames, so its QR label
+  // still finds it.
+  if (validated.values.food_cold_units !== undefined) {
+    const previous = await effectiveColdUnits(clientId, site.siteId);
+    validated.values.food_cold_units = JSON.stringify(
+      assignColdUnitIds(JSON.parse(validated.values.food_cold_units), previous),
+    );
+  }
 
   // Upsert the keys that carry a value.
   for (const [baseKey, value] of Object.entries(validated.values) as [

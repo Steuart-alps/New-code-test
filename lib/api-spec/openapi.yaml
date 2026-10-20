@@ -33,6 +33,8 @@ tags:
     description: File storage operations
   - name: fire-safety
     description: Fire safety logbook operations
+  - name: equipment
+    description: Equipment list and QR labels
   - name: food-safety
     description: Kitchen / food safety diary operations
   - name: legionella
@@ -2892,6 +2894,184 @@ paths:
       responses:
         "204":
           description: Deleted
+
+  /equipment:
+    get:
+      operationId: listEquipment
+      tags: [equipment]
+      summary: List the equipment list (plant no track keeps a record of)
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for items not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+        - in: query
+          name: includeArchived
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Equipment items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EquipmentItem"
+    post:
+      operationId: createEquipment
+      tags: [equipment]
+      summary: Add an equipment item (Owners, consultants and Managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipmentItemRequest"
+      responses:
+        "201":
+          description: Created item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentItem"
+
+  /equipment/{id}:
+    put:
+      operationId: updateEquipment
+      tags: [equipment]
+      summary: Change, archive or restore an equipment item, and its linked Compliance Checks
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEquipmentItemRequest"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentItem"
+
+  /equipment/import-extinguishers:
+    post:
+      operationId: importExtinguisherPoints
+      tags: [equipment]
+      summary: Copy FireTrack's extinguisher list onto a site's equipment list
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: integer
+                  nullable: true
+      responses:
+        "200":
+          description: How many were added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added:
+                    type: integer
+                  alreadyListed:
+                    type: integer
+                required: [added, alreadyListed]
+
+  /equipment-labels:
+    get:
+      operationId: listEquipmentLabels
+      tags: [equipment]
+      summary: Everything that can carry a QR label, with its code once printed
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for items not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Labelable items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EquipmentLabelTarget"
+
+  /equipment-labels/sheet:
+    post:
+      operationId: printEquipmentLabelSheet
+      tags: [equipment]
+      summary: A PDF sheet of QR labels; items without a code get one
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipmentLabelSheetRequest"
+      responses:
+        "200":
+          description: PDF of labels
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /equipment-labels/replace:
+    post:
+      operationId: replaceEquipmentLabel
+      tags: [equipment]
+      summary: Replace a lost or damaged label; the old code stops working
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipmentLabelRef"
+      responses:
+        "200":
+          description: The item with its new code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentLabelTarget"
+
+  /equipment-labels/scan/{code}:
+    get:
+      operationId: scanEquipmentLabel
+      tags: [equipment]
+      summary: What a scanned QR label shows
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The item, whether it is in date, and what to do next
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentScan"
+        "404":
+          description: The label is not available to this person (also for unknown codes)
 
 components:
   schemas:
@@ -6108,3 +6288,261 @@ components:
         approved:
           type: boolean
       required: [profile, approved]
+
+    EquipmentType:
+      type: string
+      enum: [cold_water_tank, calorifier, boiler, water_heater, lift, hoist, lifting_equipment, pressure_system, gas_appliance, air_conditioning, fire_extinguisher, ladder, other]
+
+    EquipmentLabelKind:
+      type: string
+      enum: [green_machine, pat_appliance, hot_tub, fire_call_point, water_outlet, bike, room, cold_unit, equipment]
+
+    EquipmentLinkedCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+      required: [id, title]
+
+    EquipmentItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/EquipmentType"
+        typeLabel:
+          type: string
+        location:
+          type: string
+          nullable: true
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serialNo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        complianceItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentLinkedCheck"
+        labelCode:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, siteId, siteName, name, type, typeLabel, location, make, model, serialNo, notes, active, complianceItems, labelCode, createdAt, updatedAt]
+
+    EquipmentItemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/EquipmentType"
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serialNo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        complianceItemIds:
+          type: array
+          items:
+            type: integer
+      required: [name, type]
+
+    UpdateEquipmentItemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/EquipmentType"
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serialNo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        complianceItemIds:
+          type: array
+          items:
+            type: integer
+
+    EquipmentLabelRef:
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/EquipmentLabelKind"
+        ref:
+          type: string
+          description: The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer.
+      required: [kind, ref]
+
+    EquipmentLabelSheetRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentLabelRef"
+        size:
+          type: string
+          enum: [standard, large]
+      required: [items]
+
+    EquipmentLabelTarget:
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/EquipmentLabelKind"
+        ref:
+          type: string
+        track:
+          type: string
+        name:
+          type: string
+        detail:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        code:
+          type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+      required: [kind, ref, track, name, detail, siteId, siteName, code, url]
+
+    EquipmentScanState:
+      type: string
+      enum: [ok, due_soon, overdue, never, problem, info]
+
+    EquipmentScanStatus:
+      type: object
+      properties:
+        label:
+          type: string
+        state:
+          $ref: "#/components/schemas/EquipmentScanState"
+        text:
+          type: string
+        note:
+          type: string
+      required: [label, state, text]
+
+    EquipmentScanAction:
+      type: object
+      properties:
+        label:
+          type: string
+        href:
+          type: string
+        primary:
+          type: boolean
+      required: [label, href]
+
+    EquipmentScanHistory:
+      type: object
+      properties:
+        date:
+          type: string
+        text:
+          type: string
+        state:
+          $ref: "#/components/schemas/EquipmentScanState"
+      required: [date, text, state]
+
+    EquipmentScan:
+      type: object
+      properties:
+        code:
+          type: string
+        clientId:
+          type: integer
+        kind:
+          $ref: "#/components/schemas/EquipmentLabelKind"
+        track:
+          type: string
+        name:
+          type: string
+        detail:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentScanStatus"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentScanAction"
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentScanHistory"
+      required: [code, clientId, kind, track, name, detail, siteId, siteName, active, statuses, actions, history]

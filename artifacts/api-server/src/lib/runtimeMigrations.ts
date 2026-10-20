@@ -2198,6 +2198,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateTrackOwnersAndNotifications();
     await migrateCertificateOutcomes();
     await migrateFireCallPoints();
+    await migrateEquipmentLabels();
 
     // ---- Department recorded with each submission (Oct 2026) ----
     // After every reported table exists; see submitterDepartmentMigration.ts.
@@ -5780,6 +5781,61 @@ async function migrateFireCallPoints() {
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point_id" integer REFERENCES "fire_call_points"("id") ON DELETE SET NULL`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point" text`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "night_staff" text`);
+}
+
+// Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks
+// point at an equipment item; labels point at a record in any track.
+async function migrateEquipmentLabels() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "equipment_items" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "name" text NOT NULL,
+      "type" text NOT NULL DEFAULT 'other',
+      "location" text,
+      "make" text,
+      "model" text,
+      "serial_no" text,
+      "notes" text,
+      "active" boolean NOT NULL DEFAULT true,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_equipment_items_client_site" ON "equipment_items" ("client_id", "site_id")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "equipment_labels" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "code" text NOT NULL,
+      "kind" text NOT NULL,
+      "target_ref" text NOT NULL,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "replaced_at" timestamp
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_equipment_labels_code" ON "equipment_labels" ("code")`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_equipment_labels_active_target"
+    ON "equipment_labels" ("client_id", "kind", "target_ref") WHERE "replaced_at" IS NULL
+  `);
+  for (const table of ["legionella_checks", "compliance_items"]) {
+    await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "equipment_id" integer`));
+    // A database built by drizzle-kit push already has the plain column, so
+    // the foreign key is added on its own.
+    await db.execute(sql.raw(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${table}_equipment_id_fkey') THEN
+          ALTER TABLE "${table}" ADD CONSTRAINT "${table}_equipment_id_fkey"
+            FOREIGN KEY ("equipment_id") REFERENCES "equipment_items"("id") ON DELETE SET NULL;
+        END IF;
+      END $$
+    `));
+    await db.execute(sql.raw(`CREATE INDEX IF NOT EXISTS "IDX_${table}_equipment" ON "${table}" ("client_id", "equipment_id") WHERE "equipment_id" IS NOT NULL`));
+  }
 }
 
 async function migrateCertificateOutcomes() {

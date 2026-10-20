@@ -130,3 +130,4 @@ export * from "./consultant-branding";
 export * from "./tasks";
 
 export * from "./track-notifications";
+export * from "./equipment";

@@ -51,6 +51,12 @@ import type {
   DailyTrackHistory,
   DashboardStats,
   DisablePrivacyIntakeLinkParams,
+  EquipmentItem,
+  EquipmentItemRequest,
+  EquipmentLabelRef,
+  EquipmentLabelSheetRequest,
+  EquipmentLabelTarget,
+  EquipmentScan,
   ErrorResponse,
   FeedbackReport,
   FeedbackReportConflict,
@@ -87,6 +93,8 @@ import type {
   HotTubCheck,
   HotTubConfig,
   HotTubConfigUpdate,
+  ImportExtinguisherPoints200,
+  ImportExtinguisherPointsBody,
   IncidentConfig,
   KitchenClosedDaysCreated,
   KitchenClosedDaysInput,
@@ -96,6 +104,8 @@ import type {
   LegionellaStatus,
   ListAuditLogParams,
   ListComplianceItemsParams,
+  ListEquipmentLabelsParams,
+  ListEquipmentParams,
   ListFeedbackReportHistoryParams,
   ListFeedbackReportsParams,
   ListFireCallPointsParams,
@@ -147,6 +157,7 @@ import type {
   UpdateCategoryRequest,
   UpdateCertificateDefectRequest,
   UpdateComplianceItemRequest,
+  UpdateEquipmentItemRequest,
   UpdateFeedbackReportParams,
   UpdateFireCallPointRequest,
   UpdateFireSafetyCheckRequest,
@@ -9984,4 +9995,605 @@ export const useDeleteLegionellaCheck = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getDeleteLegionellaCheckMutationOptions(options));
     }
+
+export const getListEquipmentUrl = (params?: ListEquipmentParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/equipment?${stringifiedParams}` : `/api/equipment`
+}
+
+/**
+ * @summary List the equipment list (plant no track keeps a record of)
+ */
+export const listEquipment = async (params?: ListEquipmentParams, options?: RequestInit): Promise<EquipmentItem[]> => {
+
+  return customFetch<EquipmentItem[]>(getListEquipmentUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListEquipmentQueryKey = (params?: ListEquipmentParams,) => {
+    return [
+    `/api/equipment`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListEquipmentQueryOptions = <TData = Awaited<ReturnType<typeof listEquipment>>, TError = ErrorType<unknown>>(params?: ListEquipmentParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listEquipment>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListEquipmentQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listEquipment>>> = ({ signal }) => listEquipment(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listEquipment>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListEquipmentQueryResult = NonNullable<Awaited<ReturnType<typeof listEquipment>>>
+export type ListEquipmentQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the equipment list (plant no track keeps a record of)
+ */
+
+export function useListEquipment<TData = Awaited<ReturnType<typeof listEquipment>>, TError = ErrorType<unknown>>(
+ params?: ListEquipmentParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listEquipment>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListEquipmentQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateEquipmentUrl = () => {
+
+
+
+
+  return `/api/equipment`
+}
+
+/**
+ * @summary Add an equipment item (Owners, consultants and Managers)
+ */
+export const createEquipment = async (equipmentItemRequest: EquipmentItemRequest, options?: RequestInit): Promise<EquipmentItem> => {
+
+  return customFetch<EquipmentItem>(getCreateEquipmentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(equipmentItemRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateEquipmentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createEquipment>>, TError,{data: BodyType<EquipmentItemRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createEquipment>>, TError,{data: BodyType<EquipmentItemRequest>}, TContext> => {
+
+const mutationKey = ['createEquipment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createEquipment>>, {data: BodyType<EquipmentItemRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createEquipment(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateEquipmentMutationResult = NonNullable<Awaited<ReturnType<typeof createEquipment>>>
+    export type CreateEquipmentMutationBody = BodyType<EquipmentItemRequest>
+    export type CreateEquipmentMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Add an equipment item (Owners, consultants and Managers)
+ */
+export const useCreateEquipment = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createEquipment>>, TError,{data: BodyType<EquipmentItemRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createEquipment>>,
+        TError,
+        {data: BodyType<EquipmentItemRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateEquipmentMutationOptions(options));
+    }
+
+export const getUpdateEquipmentUrl = (id: number,) => {
+
+
+
+
+  return `/api/equipment/${id}`
+}
+
+/**
+ * @summary Change, archive or restore an equipment item, and its linked Compliance Checks
+ */
+export const updateEquipment = async (id: number,
+    updateEquipmentItemRequest: UpdateEquipmentItemRequest, options?: RequestInit): Promise<EquipmentItem> => {
+
+  return customFetch<EquipmentItem>(getUpdateEquipmentUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateEquipmentItemRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateEquipmentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateEquipment>>, TError,{id: number;data: BodyType<UpdateEquipmentItemRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateEquipment>>, TError,{id: number;data: BodyType<UpdateEquipmentItemRequest>}, TContext> => {
+
+const mutationKey = ['updateEquipment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateEquipment>>, {id: number;data: BodyType<UpdateEquipmentItemRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateEquipment(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateEquipmentMutationResult = NonNullable<Awaited<ReturnType<typeof updateEquipment>>>
+    export type UpdateEquipmentMutationBody = BodyType<UpdateEquipmentItemRequest>
+    export type UpdateEquipmentMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Change, archive or restore an equipment item, and its linked Compliance Checks
+ */
+export const useUpdateEquipment = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateEquipment>>, TError,{id: number;data: BodyType<UpdateEquipmentItemRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateEquipment>>,
+        TError,
+        {id: number;data: BodyType<UpdateEquipmentItemRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateEquipmentMutationOptions(options));
+    }
+
+export const getImportExtinguisherPointsUrl = () => {
+
+
+
+
+  return `/api/equipment/import-extinguishers`
+}
+
+/**
+ * @summary Copy FireTrack's extinguisher list onto a site's equipment list
+ */
+export const importExtinguisherPoints = async (importExtinguisherPointsBody: ImportExtinguisherPointsBody, options?: RequestInit): Promise<ImportExtinguisherPoints200> => {
+
+  return customFetch<ImportExtinguisherPoints200>(getImportExtinguisherPointsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(importExtinguisherPointsBody)
+  }
+);}
+
+
+
+
+
+export const getImportExtinguisherPointsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importExtinguisherPoints>>, TError,{data: BodyType<ImportExtinguisherPointsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importExtinguisherPoints>>, TError,{data: BodyType<ImportExtinguisherPointsBody>}, TContext> => {
+
+const mutationKey = ['importExtinguisherPoints'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importExtinguisherPoints>>, {data: BodyType<ImportExtinguisherPointsBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importExtinguisherPoints(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportExtinguisherPointsMutationResult = NonNullable<Awaited<ReturnType<typeof importExtinguisherPoints>>>
+    export type ImportExtinguisherPointsMutationBody = BodyType<ImportExtinguisherPointsBody>
+    export type ImportExtinguisherPointsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Copy FireTrack's extinguisher list onto a site's equipment list
+ */
+export const useImportExtinguisherPoints = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importExtinguisherPoints>>, TError,{data: BodyType<ImportExtinguisherPointsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importExtinguisherPoints>>,
+        TError,
+        {data: BodyType<ImportExtinguisherPointsBody>},
+        TContext
+      > => {
+      return useMutation(getImportExtinguisherPointsMutationOptions(options));
+    }
+
+export const getListEquipmentLabelsUrl = (params?: ListEquipmentLabelsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/equipment-labels?${stringifiedParams}` : `/api/equipment-labels`
+}
+
+/**
+ * @summary Everything that can carry a QR label, with its code once printed
+ */
+export const listEquipmentLabels = async (params?: ListEquipmentLabelsParams, options?: RequestInit): Promise<EquipmentLabelTarget[]> => {
+
+  return customFetch<EquipmentLabelTarget[]>(getListEquipmentLabelsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListEquipmentLabelsQueryKey = (params?: ListEquipmentLabelsParams,) => {
+    return [
+    `/api/equipment-labels`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListEquipmentLabelsQueryOptions = <TData = Awaited<ReturnType<typeof listEquipmentLabels>>, TError = ErrorType<unknown>>(params?: ListEquipmentLabelsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listEquipmentLabels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListEquipmentLabelsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listEquipmentLabels>>> = ({ signal }) => listEquipmentLabels(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listEquipmentLabels>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListEquipmentLabelsQueryResult = NonNullable<Awaited<ReturnType<typeof listEquipmentLabels>>>
+export type ListEquipmentLabelsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Everything that can carry a QR label, with its code once printed
+ */
+
+export function useListEquipmentLabels<TData = Awaited<ReturnType<typeof listEquipmentLabels>>, TError = ErrorType<unknown>>(
+ params?: ListEquipmentLabelsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listEquipmentLabels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListEquipmentLabelsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPrintEquipmentLabelSheetUrl = () => {
+
+
+
+
+  return `/api/equipment-labels/sheet`
+}
+
+/**
+ * @summary A PDF sheet of QR labels; items without a code get one
+ */
+export const printEquipmentLabelSheet = async (equipmentLabelSheetRequest: EquipmentLabelSheetRequest, options?: RequestInit): Promise<Blob> => {
+
+  return customFetch<Blob>(getPrintEquipmentLabelSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(equipmentLabelSheetRequest)
+  }
+);}
+
+
+
+
+
+export const getPrintEquipmentLabelSheetMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof printEquipmentLabelSheet>>, TError,{data: BodyType<EquipmentLabelSheetRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof printEquipmentLabelSheet>>, TError,{data: BodyType<EquipmentLabelSheetRequest>}, TContext> => {
+
+const mutationKey = ['printEquipmentLabelSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof printEquipmentLabelSheet>>, {data: BodyType<EquipmentLabelSheetRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  printEquipmentLabelSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PrintEquipmentLabelSheetMutationResult = NonNullable<Awaited<ReturnType<typeof printEquipmentLabelSheet>>>
+    export type PrintEquipmentLabelSheetMutationBody = BodyType<EquipmentLabelSheetRequest>
+    export type PrintEquipmentLabelSheetMutationError = ErrorType<unknown>
+
+    /**
+ * @summary A PDF sheet of QR labels; items without a code get one
+ */
+export const usePrintEquipmentLabelSheet = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof printEquipmentLabelSheet>>, TError,{data: BodyType<EquipmentLabelSheetRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof printEquipmentLabelSheet>>,
+        TError,
+        {data: BodyType<EquipmentLabelSheetRequest>},
+        TContext
+      > => {
+      return useMutation(getPrintEquipmentLabelSheetMutationOptions(options));
+    }
+
+export const getReplaceEquipmentLabelUrl = () => {
+
+
+
+
+  return `/api/equipment-labels/replace`
+}
+
+/**
+ * @summary Replace a lost or damaged label; the old code stops working
+ */
+export const replaceEquipmentLabel = async (equipmentLabelRef: EquipmentLabelRef, options?: RequestInit): Promise<EquipmentLabelTarget> => {
+
+  return customFetch<EquipmentLabelTarget>(getReplaceEquipmentLabelUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(equipmentLabelRef)
+  }
+);}
+
+
+
+
+
+export const getReplaceEquipmentLabelMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceEquipmentLabel>>, TError,{data: BodyType<EquipmentLabelRef>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof replaceEquipmentLabel>>, TError,{data: BodyType<EquipmentLabelRef>}, TContext> => {
+
+const mutationKey = ['replaceEquipmentLabel'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceEquipmentLabel>>, {data: BodyType<EquipmentLabelRef>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  replaceEquipmentLabel(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplaceEquipmentLabelMutationResult = NonNullable<Awaited<ReturnType<typeof replaceEquipmentLabel>>>
+    export type ReplaceEquipmentLabelMutationBody = BodyType<EquipmentLabelRef>
+    export type ReplaceEquipmentLabelMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Replace a lost or damaged label; the old code stops working
+ */
+export const useReplaceEquipmentLabel = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceEquipmentLabel>>, TError,{data: BodyType<EquipmentLabelRef>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof replaceEquipmentLabel>>,
+        TError,
+        {data: BodyType<EquipmentLabelRef>},
+        TContext
+      > => {
+      return useMutation(getReplaceEquipmentLabelMutationOptions(options));
+    }
+
+export const getScanEquipmentLabelUrl = (code: string,) => {
+
+
+
+
+  return `/api/equipment-labels/scan/${code}`
+}
+
+/**
+ * @summary What a scanned QR label shows
+ */
+export const scanEquipmentLabel = async (code: string, options?: RequestInit): Promise<EquipmentScan> => {
+
+  return customFetch<EquipmentScan>(getScanEquipmentLabelUrl(code),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getScanEquipmentLabelQueryKey = (code: string,) => {
+    return [
+    `/api/equipment-labels/scan/${code}`
+    ] as const;
+    }
+
+
+export const getScanEquipmentLabelQueryOptions = <TData = Awaited<ReturnType<typeof scanEquipmentLabel>>, TError = ErrorType<void>>(code: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof scanEquipmentLabel>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getScanEquipmentLabelQueryKey(code);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof scanEquipmentLabel>>> = ({ signal }) => scanEquipmentLabel(code, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: code !== null && code !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof scanEquipmentLabel>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ScanEquipmentLabelQueryResult = NonNullable<Awaited<ReturnType<typeof scanEquipmentLabel>>>
+export type ScanEquipmentLabelQueryError = ErrorType<void>
+
+
+/**
+ * @summary What a scanned QR label shows
+ */
+
+export function useScanEquipmentLabel<TData = Awaited<ReturnType<typeof scanEquipmentLabel>>, TError = ErrorType<void>>(
+ code: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof scanEquipmentLabel>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getScanEquipmentLabelQueryOptions(code,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 

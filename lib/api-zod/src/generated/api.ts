@@ -4254,3 +4254,222 @@ export const DeleteLegionellaCheckParams = zod.object({
 export const DeleteLegionellaCheckResponse = zod.void()
 
 
+/**
+ * @summary List the equipment list (plant no track keeps a record of)
+ */
+export const ListEquipmentQueryParams = zod.object({
+  "siteId": zod.coerce.string().optional().describe('A site id, or \"none\" for items not tied to a site. Omit for every visible site.'),
+  "includeArchived": zod.enum(['true', 'false']).optional()
+})
+
+export const ListEquipmentResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "name": zod.string(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']),
+  "typeLabel": zod.string(),
+  "location": zod.string().nullable(),
+  "make": zod.string().nullable(),
+  "model": zod.string().nullable(),
+  "serialNo": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "active": zod.boolean(),
+  "complianceItems": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string()
+})),
+  "labelCode": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListEquipmentResponse = zod.array(ListEquipmentResponseItem)
+
+
+/**
+ * @summary Add an equipment item (Owners, consultants and Managers)
+ */
+export const CreateEquipmentBody = zod.object({
+  "name": zod.string(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "make": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "serialNo": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean().optional(),
+  "complianceItemIds": zod.array(zod.number()).optional()
+})
+
+export const CreateEquipmentResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "name": zod.string(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']),
+  "typeLabel": zod.string(),
+  "location": zod.string().nullable(),
+  "make": zod.string().nullable(),
+  "model": zod.string().nullable(),
+  "serialNo": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "active": zod.boolean(),
+  "complianceItems": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string()
+})),
+  "labelCode": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Change, archive or restore an equipment item, and its linked Compliance Checks
+ */
+export const UpdateEquipmentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateEquipmentBody = zod.object({
+  "name": zod.string().optional(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']).optional(),
+  "siteId": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "make": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "serialNo": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean().optional(),
+  "complianceItemIds": zod.array(zod.number()).optional()
+})
+
+export const UpdateEquipmentResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "name": zod.string(),
+  "type": zod.enum(['cold_water_tank', 'calorifier', 'boiler', 'water_heater', 'lift', 'hoist', 'lifting_equipment', 'pressure_system', 'gas_appliance', 'air_conditioning', 'fire_extinguisher', 'ladder', 'other']),
+  "typeLabel": zod.string(),
+  "location": zod.string().nullable(),
+  "make": zod.string().nullable(),
+  "model": zod.string().nullable(),
+  "serialNo": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "active": zod.boolean(),
+  "complianceItems": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string()
+})),
+  "labelCode": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Copy FireTrack's extinguisher list onto a site's equipment list
+ */
+export const ImportExtinguisherPointsBody = zod.object({
+  "siteId": zod.number().nullish()
+})
+
+export const ImportExtinguisherPointsResponse = zod.object({
+  "added": zod.number(),
+  "alreadyListed": zod.number()
+})
+
+
+/**
+ * @summary Everything that can carry a QR label, with its code once printed
+ */
+export const ListEquipmentLabelsQueryParams = zod.object({
+  "siteId": zod.coerce.string().optional().describe('A site id, or \"none\" for items not tied to a site. Omit for every visible site.')
+})
+
+export const ListEquipmentLabelsResponseItem = zod.object({
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "ref": zod.string(),
+  "track": zod.string(),
+  "name": zod.string(),
+  "detail": zod.string().nullable(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "code": zod.string().nullable(),
+  "url": zod.string().nullable()
+})
+export const ListEquipmentLabelsResponse = zod.array(ListEquipmentLabelsResponseItem)
+
+
+/**
+ * @summary A PDF sheet of QR labels; items without a code get one
+ */
+export const PrintEquipmentLabelSheetBody = zod.object({
+  "items": zod.array(zod.object({
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "ref": zod.string().describe('The record\'s id, or \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer.')
+})),
+  "size": zod.enum(['standard', 'large']).optional()
+})
+
+export const PrintEquipmentLabelSheetResponse = zod.unknown()
+
+
+/**
+ * @summary Replace a lost or damaged label; the old code stops working
+ */
+export const ReplaceEquipmentLabelBody = zod.object({
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "ref": zod.string().describe('The record\'s id, or \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer.')
+})
+
+export const ReplaceEquipmentLabelResponse = zod.object({
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "ref": zod.string(),
+  "track": zod.string(),
+  "name": zod.string(),
+  "detail": zod.string().nullable(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "code": zod.string().nullable(),
+  "url": zod.string().nullable()
+})
+
+
+/**
+ * @summary What a scanned QR label shows
+ */
+export const ScanEquipmentLabelParams = zod.object({
+  "code": zod.coerce.string()
+})
+
+export const ScanEquipmentLabelResponse = zod.object({
+  "code": zod.string(),
+  "clientId": zod.number(),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "track": zod.string(),
+  "name": zod.string(),
+  "detail": zod.string().nullable(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "active": zod.boolean(),
+  "statuses": zod.array(zod.object({
+  "label": zod.string(),
+  "state": zod.enum(['ok', 'due_soon', 'overdue', 'never', 'problem', 'info']),
+  "text": zod.string(),
+  "note": zod.string().optional()
+})),
+  "actions": zod.array(zod.object({
+  "label": zod.string(),
+  "href": zod.string(),
+  "primary": zod.boolean().optional()
+})),
+  "history": zod.array(zod.object({
+  "date": zod.string(),
+  "text": zod.string(),
+  "state": zod.enum(['ok', 'due_soon', 'overdue', 'never', 'problem', 'info'])
+}))
+})
+
+
