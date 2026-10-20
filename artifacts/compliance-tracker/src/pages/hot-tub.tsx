@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
+import { takeLinkParams } from "@/lib/deep-link";
 import { trackInspectionPdfDownload } from "@/lib/analytics";
 import { createHotTubLogPdf, HotTubLogPdfError } from "@/lib/hot-tub-log-pdf";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -387,6 +388,25 @@ export default function HotTubPage() {
     setStaffRosterId(null);
     setShowDialog(true);
   }
+
+  // A scanned QR label opens a new check for its tub once the tubs load.
+  const [scanTubId, setScanTubId] = useState<number | null>(null);
+  useEffect(() => {
+    const link = takeLinkParams(["tub", "open"] as const);
+    const id = Number(link?.tub);
+    if (Number.isSafeInteger(id) && id > 0) setScanTubId(id);
+  }, []);
+  useEffect(() => {
+    if (scanTubId === null || !hotTubs.length) return;
+    const tub = hotTubs.find(t => t.id === scanTubId);
+    setScanTubId(null);
+    if (!tub) return;
+    setFilterTub(String(tub.id));
+    setEditItem(null);
+    setForm({ ...emptyForm(), performedBy: user?.name ?? "", hotTubId: String(tub.id), siteId: tub.siteId ? String(tub.siteId) : "" });
+    setStaffRosterId(null);
+    setShowDialog(true);
+  }, [scanTubId, hotTubs]);
 
   function openEdit(r: HotTubCheck) {
     setEditItem(r);

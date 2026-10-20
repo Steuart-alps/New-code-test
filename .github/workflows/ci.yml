@@ -309,6 +309,9 @@ jobs:
       - name: Contractor visits on every track reach the contractor reminder (production schema base)
         run: pnpm --filter @workspace/api-server run test:contractor-visits
 
+      - name: Equipment list and QR label tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:equipment-labels
+
       # KitchenTrack numeric controls: the shared rule model and country
       # presets, then hold-time boundaries, retries and the corrective-action
       # follow-up, each on its own fresh database.

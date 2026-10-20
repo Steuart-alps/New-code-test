@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
@@ -687,7 +688,7 @@ export default function FixTrackPage() {
     }
   }
 
-  function openCreate() {
+  function openCreate(prefill: { title?: string; location?: string; siteId?: number } = {}) {
     const today = new Date().toISOString().slice(0, 10);
     setEditing(null);
     setForm({
@@ -697,9 +698,22 @@ export default function FixTrackPage() {
       reportedDate: today,
       reportedBy:   user?.name ?? "",
       mediaUrls:    [],
+      ...prefill,
     });
     setDialogOpen(true);
   }
+
+  // "Report a fault" on a scanned QR label: a new report naming the item.
+  useEffect(() => {
+    const link = takeLinkParams(["report", "title", "location", "siteId"] as const);
+    if (link?.report !== "1" || !hasFixtrack) return;
+    const siteId = Number(link.siteId);
+    openCreate({
+      title: link.title?.slice(0, 200),
+      location: link.location?.slice(0, 300),
+      ...(Number.isSafeInteger(siteId) && siteId > 0 ? { siteId } : {}),
+    });
+  }, []);
 
   function openEdit(issue: Issue) {
     setEditing(issue);
@@ -960,7 +974,7 @@ export default function FixTrackPage() {
               labelFor={humanizeType}
             />
             {canEdit && (
-              <Button onClick={openCreate} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
+              <Button onClick={() => openCreate()} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
                 <Plus className="w-4 h-4" /> Report Issue
               </Button>
             )}

@@ -38,6 +38,9 @@ export const complianceItemsTable = pgTable("compliance_items", {
   scheduleToken: text("schedule_token"),
   /** SHA-256 digest of the contractor's single-use visit-scheduling token. */
   scheduleTokenHash: text("schedule_token_hash"),
+  /** Equipment list item this check is for (a boiler's gas safety, a lift's
+   *  LOLER). The foreign key to equipment_items comes from runtime migrations. */
+  equipmentId: integer("equipment_id"),
   visitScheduledAt: timestamp("visit_scheduled_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -52,6 +55,8 @@ export const insertComplianceItemSchema = createInsertSchema(complianceItemsTabl
   updatedAt: true,
   completedAt: true,
   notificationSentAt: true,
+  // Set only through the equipment list, which checks the item's business.
+  equipmentId: true,
 });
 
 export type InsertComplianceItem = z.infer<typeof insertComplianceItemSchema>;

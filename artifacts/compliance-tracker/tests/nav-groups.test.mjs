@@ -47,9 +47,15 @@ for (const href of hrefs(userGroups)) {
 const clientAdminHrefs = hrefs(getNavGroups({ isConsultant: false, canAdmin: true }));
 for (const href of clientAdminHrefs) {
   const guard = guardedRoutes.get(href);
-  assert.ok(guard === undefined || guard === "canAdmin" || guard === "canManageContractorEmails",
+  assert.ok(guard === undefined || guard === "canAdmin" || guard === "canManageUsers" || guard === "canManageContractorEmails",
     `Client admin nav links to ${href}, which App.tsx only registers when ${guard}`);
 }
+
+// Equipment and its QR labels are kept by managers and admins only.
+const managerItems = flattenGroups(getNavGroups({ isConsultant: false, canAdmin: false, canManageUsers: true }));
+assert.ok(adminItems.includes("Equipment & QR labels") && managerItems.includes("Equipment & QR labels"), "Managers and admins should see Equipment & QR labels");
+assert.ok(!userItems.includes("Equipment & QR labels"), "Staff should not see the equipment list");
+assert.equal(guardedRoutes.get("/equipment"), "canManageUsers", "App.tsx should register /equipment for managers and admins");
 
 assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Everyone should see the Calendar");
 

@@ -72,6 +72,7 @@ import consultantPortfolioRouter from "./consultant-portfolio";
 
 import setupRouter from "./setup";
 import tasksRouter from "./tasks";
+import equipmentRouter from "./equipment";
 import { requireAuth } from "../middleware/requireAuth";
 import { limitViewers } from "../middleware/viewerScope";
 import { requireService, requireAnyService } from "../lib/services";
@@ -171,6 +172,7 @@ router.use(exportRouter);
 router.use(reportsRouter);
 router.use(inspectionPackRouter);
 router.use(calendarRouter);
+router.use(equipmentRouter);
 router.use(dashboardSummaryRouter);
 router.use(complianceHubRouter);
 router.use(feedbackRouter);

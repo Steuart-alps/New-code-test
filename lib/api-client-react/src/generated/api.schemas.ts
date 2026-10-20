@@ -2331,6 +2331,8 @@ export type CreateLegionellaCheckRequest = unknown & ({
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** A cold water tank or calorifier on the equipment list (its site must match siteId). */
+  equipmentId?: number | null;
 });
 
 export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckRequestResult[keyof typeof UpdateLegionellaCheckRequestResult];
@@ -2408,6 +2410,167 @@ export type WaterMonitoringPlanResultProfile = { [key: string]: unknown };
 export interface WaterMonitoringPlanResult {
   profile: WaterMonitoringPlanResultProfile;
   approved: boolean;
+}
+
+export type EquipmentType = typeof EquipmentType[keyof typeof EquipmentType];
+
+
+export const EquipmentType = {
+  cold_water_tank: 'cold_water_tank',
+  calorifier: 'calorifier',
+  boiler: 'boiler',
+  water_heater: 'water_heater',
+  lift: 'lift',
+  hoist: 'hoist',
+  lifting_equipment: 'lifting_equipment',
+  pressure_system: 'pressure_system',
+  gas_appliance: 'gas_appliance',
+  air_conditioning: 'air_conditioning',
+  fire_extinguisher: 'fire_extinguisher',
+  ladder: 'ladder',
+  other: 'other',
+} as const;
+
+export type EquipmentLabelKind = typeof EquipmentLabelKind[keyof typeof EquipmentLabelKind];
+
+
+export const EquipmentLabelKind = {
+  green_machine: 'green_machine',
+  pat_appliance: 'pat_appliance',
+  hot_tub: 'hot_tub',
+  fire_call_point: 'fire_call_point',
+  water_outlet: 'water_outlet',
+  bike: 'bike',
+  room: 'room',
+  cold_unit: 'cold_unit',
+  equipment: 'equipment',
+} as const;
+
+export interface EquipmentLinkedCheck {
+  id: number;
+  title: string;
+}
+
+export interface EquipmentItem {
+  id: number;
+  siteId: number | null;
+  siteName: string | null;
+  name: string;
+  type: EquipmentType;
+  typeLabel: string;
+  location: string | null;
+  make: string | null;
+  model: string | null;
+  serialNo: string | null;
+  notes: string | null;
+  active: boolean;
+  complianceItems: EquipmentLinkedCheck[];
+  labelCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EquipmentItemRequest {
+  name: string;
+  type: EquipmentType;
+  siteId?: number | null;
+  location?: string | null;
+  make?: string | null;
+  model?: string | null;
+  serialNo?: string | null;
+  notes?: string | null;
+  active?: boolean;
+  complianceItemIds?: number[];
+}
+
+export interface UpdateEquipmentItemRequest {
+  name?: string;
+  type?: EquipmentType;
+  siteId?: number | null;
+  location?: string | null;
+  make?: string | null;
+  model?: string | null;
+  serialNo?: string | null;
+  notes?: string | null;
+  active?: boolean;
+  complianceItemIds?: number[];
+}
+
+export interface EquipmentLabelRef {
+  kind: EquipmentLabelKind;
+  /** The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer. */
+  ref: string;
+}
+
+export type EquipmentLabelSheetRequestSize = typeof EquipmentLabelSheetRequestSize[keyof typeof EquipmentLabelSheetRequestSize];
+
+
+export const EquipmentLabelSheetRequestSize = {
+  standard: 'standard',
+  large: 'large',
+} as const;
+
+export interface EquipmentLabelSheetRequest {
+  items: EquipmentLabelRef[];
+  size?: EquipmentLabelSheetRequestSize;
+}
+
+export interface EquipmentLabelTarget {
+  kind: EquipmentLabelKind;
+  ref: string;
+  track: string;
+  name: string;
+  detail: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  code: string | null;
+  url: string | null;
+}
+
+export type EquipmentScanState = typeof EquipmentScanState[keyof typeof EquipmentScanState];
+
+
+export const EquipmentScanState = {
+  ok: 'ok',
+  due_soon: 'due_soon',
+  overdue: 'overdue',
+  never: 'never',
+  problem: 'problem',
+  info: 'info',
+} as const;
+
+export interface EquipmentScanStatus {
+  label: string;
+  state: EquipmentScanState;
+  text: string;
+  note?: string;
+}
+
+export interface EquipmentScanAction {
+  label: string;
+  href: string;
+  primary?: boolean;
+}
+
+export interface EquipmentScanHistory {
+  date: string;
+  text: string;
+  state: EquipmentScanState;
+}
+
+export interface EquipmentScan {
+  code: string;
+  clientId: number;
+  kind: EquipmentLabelKind;
+  track: string;
+  name: string;
+  detail: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  active: boolean;
+  statuses: EquipmentScanStatus[];
+  actions: EquipmentScanAction[];
+  history: EquipmentScanHistory[];
 }
 
 export type ListFeedbackReportsParams = {
@@ -2793,5 +2956,37 @@ siteId: number;
 
 export type UpdatePoolMonitoringPlanParams = {
 siteId: number;
+};
+
+export type ListEquipmentParams = {
+/**
+ * A site id, or "none" for items not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
+includeArchived?: ListEquipmentIncludeArchived;
+};
+
+export type ListEquipmentIncludeArchived = typeof ListEquipmentIncludeArchived[keyof typeof ListEquipmentIncludeArchived];
+
+
+export const ListEquipmentIncludeArchived = {
+  true: 'true',
+  false: 'false',
+} as const;
+
+export type ImportExtinguisherPointsBody = {
+  siteId?: number | null;
+};
+
+export type ImportExtinguisherPoints200 = {
+  added: number;
+  alreadyListed: number;
+};
+
+export type ListEquipmentLabelsParams = {
+/**
+ * A site id, or "none" for items not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
 };
 
