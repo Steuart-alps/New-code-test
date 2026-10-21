@@ -1732,7 +1732,6 @@ function HourReadingDialog({
             </div>
           </div>
           <div>
-            <Label>Recorded by <span className="text-muted-foreground text-xs">optional</span></Label>
             <StaffPerformerSelect label="Recorded by" value={form.recordedBy}
               onChange={v => setForm(f => ({ ...f, recordedBy: v }))}
               onRosterIdChange={v => setForm(f => ({ ...f, recordedByRosterId: v }))} optional />
