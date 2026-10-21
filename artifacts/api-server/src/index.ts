@@ -43,6 +43,7 @@ import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
 import { runTwoFactorResetAlertRecovery } from "./lib/twoFactorResetAlerts";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
+import { runCertificateFollowUpJob } from "./lib/certificateFollowUp";
 import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
 import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob, runDeletionReminderJob } from "./lib/offboarding";
 import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
@@ -311,6 +312,14 @@ function startScheduler() {
 
   schedule("0 8 * * *", "contractor-reminders", logged("Scheduled reminder job complete", runReminderJob), { daily: true });
   logger.info("Contractor reminder scheduler started (daily at 08:00)");
+
+  // Follow up contractor visits with no certificate 3 days on: a draft for
+  // the contractor in Contractor Approvals and one email to the site's
+  // Maintenance person (daily at 08:05; once per visit).
+  schedule("5 8 * * *", "certificate-follow-up", logged(
+    "Certificate follow-up job complete", () => runCertificateFollowUpJob(),
+  ), { daily: true });
+  logger.info("Certificate follow-up scheduler started (daily at 08:05)");
 
   // Alert managers about contractor insurance, DBS/PVG and certificates.
   // Run at 08:55 London time so 60/30-day date boundaries stay predictable.

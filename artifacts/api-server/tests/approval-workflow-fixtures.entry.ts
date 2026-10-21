@@ -5,3 +5,4 @@ export { runRuntimeMigrations } from "../src/lib/runtimeMigrations";
 export { decryptTokenPayload, encryptTokenPayload, tokenPayloadNeedsReencryption } from "../src/lib/bearerTokens";
 export { reencryptQueuedTokenPayloads } from "../src/lib/runtimeMigrations";
 export { runContractorComplianceReminderJob } from "../src/lib/contractorComplianceReminders";
+export { runCertificateFollowUpJob } from "../src/lib/certificateFollowUp";

@@ -33,11 +33,14 @@ const SUPERSEDED = Symbol("superseded");
  * just before a date change must not suppress the reminder for the new date.
  */
 async function markComplianceNotified(q: any, clientId: number): Promise<void> {
+  // A certificate follow-up comes after the visit; it is not the due reminder.
+  if (q.email_type === CERTIFICATE_FOLLOW_UP_EMAIL_TYPE) return;
   await db.execute(sql`UPDATE compliance_items SET notification_sent_at = now()
     WHERE id=${q.entity_id} AND client_id=${clientId}
       AND (${q.reminder_cycle ?? null}::text IS NULL OR to_char(due_date, 'YYYY-MM-DD') = ${q.reminder_cycle ?? null}::text)`);
 }
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
+import { CERTIFICATE_FOLLOW_UP_EMAIL_TYPE } from "../lib/certificateFollowUp";
 
 const router = Router();
 
