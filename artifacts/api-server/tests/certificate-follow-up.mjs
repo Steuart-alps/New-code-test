@@ -162,6 +162,8 @@ try {
   assert.match(managerUpdate, /EICR/, 'the Manager update lists them too');
   assert.doesNotMatch(update, /LOLER Examination/, 'a visit under two weeks ago is not outstanding yet');
   assert.match(update, /Boiler Service/, 'past the 90-day chase window, it stays on the updates');
+  assert.equal(update.match(/reminders to the contractor have stopped/g)?.length, 1, 'the update says chasing has stopped, for that one only');
+  assert.match(update, /Boiler Service[^]*?reminders to the contractor have stopped/);
   await pool.query(`DELETE FROM app_settings WHERE client_id = $1 AND key = 'ownerUpdateFrequency'`, [owner.clientId]);
   console.log('ok - Owner and Manager updates list them, with no separate Owner email');
 

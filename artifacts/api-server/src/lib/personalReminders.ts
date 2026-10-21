@@ -44,7 +44,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { addCalendarDays, getAccountTimezone, localDateIn } from "./accountClock";
-import { certificateChaseOn, getVisitsAwaitingCertificate, type VisitAwaitingCertificate } from "./certificateFollowUp";
+import { LOOK_BACK_DAYS, certificateChaseOn, getVisitsAwaitingCertificate, type VisitAwaitingCertificate } from "./certificateFollowUp";
 import { getOutstandingAckSummary } from "./docAckReminders";
 import {
   DEFAULT_OVERDUE_EVERY,
@@ -367,7 +367,11 @@ function ownerUpdateHtml(update: OwnerUpdate, today: string): string {
         : ` · ${escapeHtml(formatDay(item.dueDate))}`))));
   }
   if (update.certificates.length) {
-    parts.push(heading("Certificates outstanding"), list(update.certificates.map(certificateRow)));
+    // Past the chase window the contractor is no longer reminded: say so.
+    parts.push(heading("Certificates outstanding"), list(update.certificates.map((visit) => certificateRow(visit)
+      + (daysBetween(visit.visitDay, today) >= LOOK_BACK_DAYS
+        ? ` <strong style="color:#b91c1c;">· reminders to the contractor have stopped after ${LOOK_BACK_DAYS} days; please chase them directly</strong>`
+        : ""))));
   }
   if (update.unsigned.length) {
     parts.push(heading("Documents still to be signed"), list(update.unsigned.map((doc) =>
