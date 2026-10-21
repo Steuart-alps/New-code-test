@@ -41,7 +41,7 @@ import { format } from "date-fns";
 import {
   Flame, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Filter, Pencil, Trash2, Lock, Route, Cpu, Check, X, Minus, Settings, XCircle, ShieldAlert,
-  BellRing, Lightbulb, Moon, Archive, RotateCcw, ChevronUp, ChevronDown,
+  BellRing, Lightbulb, Moon, Archive, RotateCcw, ChevronUp, ChevronDown, Footprints,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
@@ -51,6 +51,8 @@ import { AuditLog } from "@/components/audit-log";
 import { LoadError } from "@/components/load-error";
 import { takeLinkParams } from "@/lib/deep-link";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
+import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -314,6 +316,8 @@ function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled:
   const [newName, setNewName] = useState("");
   const [newLocation, setNewLocation] = useState("");
   const [editing, setEditing] = useState<Record<number, { name: string; location: string }>>({});
+  const [walkRoundOpen, setWalkRoundOpen] = useState(false);
+  const clientApiFetch = useActiveClientApi();
   const refresh = () => queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
   const fail = (err: any) => toast({ title: "Call point not saved", description: err.message, variant: "destructive" });
 
@@ -343,6 +347,22 @@ function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled:
       current ? [...ids.map(id => current.find(p => p.id === id)!), ...current.filter(p => p.archivedAt)] : current);
     orderPoints.mutate({ data: { siteId, ids } }, { onSettled: refresh, onError: fail });
   };
+  // A walk round is saved like an uploaded list: new call points join the
+  // end of the order as spoken, and ones already listed get the new location.
+  const saveWalkRound = async (walked: WalkRoundPoint[]) => {
+    const response = await clientApiFetch("/imports/fire-call-points", {
+      method: "POST",
+      body: JSON.stringify({ headers: ["Call point", "Location"], rows: walked.map(p => [p.name, p.location]), siteId, preview: false }),
+    });
+    const body = await response.json().catch(() => null) as { error?: string; rows?: Array<{ label: string; action: string; reasons: string[] }> } | null;
+    if (!response.ok) {
+      const bad = body?.rows?.find(row => row.action === "error");
+      return bad ? `${bad.label}: ${bad.reasons.join("; ")}` : body?.error ?? "The call points could not be saved";
+    }
+    await refresh();
+    toast({ title: "Call points saved", description: `${walked.length} from your walk round.` });
+    return null;
+  };
   const draft = (point: FireCallPoint) => editing[point.id] ?? { name: point.name, location: point.location ?? "" };
   const changed = (point: FireCallPoint) => {
     const value = editing[point.id];
@@ -351,9 +371,16 @@ function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled:
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => setWalkRoundOpen(true)} data-testid="button-walk-round-call-points">
+          <Footprints className="mr-1 h-4 w-4" /> Walk round and speak
+        </Button>
         <ImportCsvButton type="fire-call-points" siteId={siteId} label="Upload a list" onImported={refresh} />
       </div>
+      <WalkRoundDialog open={walkRoundOpen} onClose={() => setWalkRoundOpen(false)} kind="call_point"
+        title="Walk round and speak: call points" prefix="CP"
+        examples={["This is call point 1, by the front door", "Call point 2, kitchen fire exit"]}
+        existingNames={(points ?? []).map(p => p.name)} onSave={saveWalkRound} />
       {active.length === 0 && <p className="text-xs text-muted-foreground italic">No call points listed yet. Add them below in the order you want them tested, or upload a list.</p>}
       {active.length > 0 && <p className="text-[11px] text-muted-foreground">Tested in this order, from the top. Use the arrows to change it.</p>}
       {active.map((point, index) => (

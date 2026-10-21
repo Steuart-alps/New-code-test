@@ -357,6 +357,26 @@ try {
   await upload.getByRole("button", { name: "Cancel" }).click();
   console.log("ok - a call point list can be uploaded, with a preview first");
 
+  // ── Walk round and speak (typed here; the browser's dictation fills the same box) ──
+  await template.getByTestId("button-walk-round-call-points").click();
+  const walk = page.getByRole("dialog", { name: /Walk round and speak/ });
+  await walk.getByTestId("walk-round-examples").waitFor();
+  await walk.getByTestId("walk-round-text").fill("this is call point 6 by the lift lobby this is call point 7 in the plant room\nback stairs");
+  await walk.getByTestId("walk-round-row-2").waitFor();
+  const names = await walk.locator('[data-testid^="walk-round-row-"] input[aria-label="Name"]').evaluateAll(inputs => inputs.map(input => input.value));
+  const places = await walk.locator('[data-testid^="walk-round-row-"] input[aria-label="Location"]').evaluateAll(inputs => inputs.map(input => input.value));
+  assert.deepEqual(names, ["CP6", "CP7", "CP8"], "unnumbered points carry on from the highest number");
+  assert.deepEqual(places, ["By the lift lobby", "Plant room", "Back stairs"]);
+  await walk.getByTestId("walk-round-row-2").getByLabel("Location").fill("Back stairs, first floor");
+  await walk.getByTestId("walk-round-row-1").getByRole("button", { name: "Leave this one out" }).click();
+  await shot(page, "9-walk-round");
+  await walk.getByTestId("walk-round-save").click();
+  await walk.waitFor({ state: "hidden" });
+  const walkPost = posts.at(-1);
+  assert.equal(walkPost.path, "/api/imports/fire-call-points");
+  assert.deepEqual(walkPost.body, { headers: ["Call point", "Location"], rows: [["CP6", "By the lift lobby"], ["CP8", "Back stairs, first floor"]], siteId: 1, preview: false });
+  console.log("ok - walking round and speaking makes the call point list in the order spoken");
+
   assert.deepEqual(pageErrors, []);
   assert.deepEqual([...new Set(unexpectedRequests)], [], "every request is in the fixture");
   console.log("FireTrack browser checks passed.");

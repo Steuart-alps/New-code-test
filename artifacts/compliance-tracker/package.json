@@ -65,7 +65,8 @@
     "typecheck": "flock -s /tmp/complytrack-api-codegen.lock sh -c 'pnpm exec tsc --build ../../lib/api-client-react ../../lib/api-zod && tsc -p tsconfig.json --noEmit'",
     "test:landing-modules-browser": "node tests/landing-modules-browser.test.mjs",
     "test:dictation-text": "node tests/dictation-text.test.mjs",
-    "test:dictation-browser": "node tests/dictation-browser.test.mjs"
+    "test:dictation-browser": "node tests/dictation-browser.test.mjs",
+    "test:walk-round-text": "node tests/walk-round-text.test.mjs"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

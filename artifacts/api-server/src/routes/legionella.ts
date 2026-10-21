@@ -399,7 +399,11 @@ const OUTLET_CHECK_TYPE_MAP: Record<string, string> = {
   cold:       "cold_sentinel_temp",
   calorifier: "calorifier_temp",
   tmv:        "hot_sentinel_temp", // checked against TMV_OUTLET_MAX_C, not the hot minimum
+  little_used: "outlet_flush",     // weekly 5-minute flush, no temperature
 };
+
+/** Outlets checked weekly rather than monthly. */
+const WEEKLY_OUTLET_TYPES = new Set(["little_used"]);
 
 /**
  * Why a check cannot be linked to an outlet, or null when it can. The outlet
@@ -459,7 +463,7 @@ async function equipmentLinkError(
 
 const outletCreateSchema = z.object({
   name:      z.string().min(1).max(500),
-  type:      z.enum(["hot", "cold", "calorifier", "tmv"]),
+  type:      z.enum(["hot", "cold", "calorifier", "tmv", "little_used"]),
   location:  z.string().max(500).nullable().optional(),
   siteId:    z.number().int().nullable().optional(),
   sortOrder: z.number().int().optional(),
@@ -486,7 +490,9 @@ router.get("/outlets", requireAuth, async (req, res) => {
   res.json(rows.rows ?? []);
 });
 
-// GET /api/legionella/outlet-status — per-outlet monthly completion status
+// GET /api/legionella/outlet-status — per-outlet completion status: this
+// calendar month for sentinel outlets, the last 7 days for little-used
+// outlets (flushed weekly).
 router.get("/outlet-status", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -496,6 +502,9 @@ router.get("/outlet-status", requireAuth, async (req, res) => {
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
   const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const monthEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
+  const localDay = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const today = localDay(now);
+  const weekStart = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
 
   const rows = await db.execute(sql`
     SELECT
@@ -510,8 +519,9 @@ router.get("/outlet-status", requireAuth, async (req, res) => {
     LEFT JOIN legionella_checks c
       ON  c.outlet_id = o.id
       AND c.client_id = ${clientId}
-      AND c.check_date >= ${monthStart}
-      AND c.check_date <  ${monthEnd}
+      AND (CASE WHEN o.type = 'little_used'
+        THEN c.check_date >= ${weekStart}::date AND c.check_date <= ${today}::date
+        ELSE c.check_date >= ${monthStart}::date AND c.check_date < ${monthEnd}::date END)
       ${deptId !== null ? sql`AND (c.site_id IS NULL OR EXISTS (
         SELECT 1 FROM sites cs
         WHERE cs.id = c.site_id AND cs.client_id = c.client_id
@@ -546,6 +556,8 @@ router.get("/outlet-status", requireAuth, async (req, res) => {
 
   const result = Array.from(outletMap.values()).map(o => ({
     ...o,
+    // "this month" for sentinel outlets; the last 7 days for weekly ones.
+    period: WEEKLY_OUTLET_TYPES.has(o.type) ? "week" : "month",
     testedThisMonth: o.thisMonthChecks.length > 0,
     lastCheck: o.thisMonthChecks[0] ?? null,
     checkTypeForOutlet: OUTLET_CHECK_TYPE_MAP[o.type] ?? "hot_sentinel_temp",

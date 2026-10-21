@@ -7,6 +7,9 @@ on:
       - "artifacts/compliance-tracker/src/hooks/use-dictation.ts"
       - "artifacts/compliance-tracker/src/components/dictation-button.tsx"
       - "artifacts/compliance-tracker/src/components/coshh-speak-list-dialog.tsx"
+      - "artifacts/compliance-tracker/src/lib/walk-round.ts"
+      - "artifacts/compliance-tracker/src/components/walk-round-dialog.tsx"
+      - "artifacts/compliance-tracker/tests/walk-round-*"
       - "artifacts/compliance-tracker/src/components/ui/textarea.tsx"
       - "artifacts/compliance-tracker/src/components/ui/input.tsx"
       - "artifacts/compliance-tracker/tests/dictation-*"
@@ -21,6 +24,9 @@ on:
       - "artifacts/compliance-tracker/src/hooks/use-dictation.ts"
       - "artifacts/compliance-tracker/src/components/dictation-button.tsx"
       - "artifacts/compliance-tracker/src/components/coshh-speak-list-dialog.tsx"
+      - "artifacts/compliance-tracker/src/lib/walk-round.ts"
+      - "artifacts/compliance-tracker/src/components/walk-round-dialog.tsx"
+      - "artifacts/compliance-tracker/tests/walk-round-*"
       - "artifacts/compliance-tracker/src/components/ui/textarea.tsx"
       - "artifacts/compliance-tracker/src/components/ui/input.tsx"
       - "artifacts/compliance-tracker/tests/dictation-*"
@@ -57,6 +63,9 @@ jobs:
 
       - name: Dictation text rules
         run: pnpm --filter @workspace/compliance-tracker run test:dictation-text
+
+      - name: Walk round and speak text rules
+        run: pnpm --filter @workspace/compliance-tracker run test:walk-round-text
 
       - name: Dictation browser checks
         run: pnpm --filter @workspace/compliance-tracker run test:dictation-browser
