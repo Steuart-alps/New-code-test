@@ -357,6 +357,12 @@ registers/
   allergen-items.csv             — allergen records per dish or product
                                    (removed items included, with deleted_at)
   allergen-item-changes.csv      — allergen tick change log
+  allergen-ingredients.csv       — KitchenTrack ingredients with contains / may contain
+  allergen-ingredient-changes.csv — ingredient allergen change log
+  allergen-recipe-lines.csv      — ingredients in each dish (quantity and unit)
+  allergen-menus.csv             — menus per site
+  allergen-menu-dishes.csv       — dishes on each menu
+  allergen-chart-signoffs.csv    — who checked each allergen chart, and when
   coshh-substances.csv           — COSHH register
 coshh-track/
   assessments.csv                — COSHH assessments (removed ones included, with deleted_at)
@@ -800,6 +806,12 @@ router.get(
         // Soft-deleted rows are included: deleted_at shows when they were removed.
         await out.csv("registers/allergen-items.csv", async () => (await db.execute(sql`SELECT * FROM allergen_items WHERE client_id = ${cid} ORDER BY id`)).rows);
         await out.csv("registers/allergen-item-changes.csv", async () => (await db.execute(sql`SELECT * FROM allergen_item_changes WHERE client_id = ${cid} ORDER BY item_id, id`)).rows);
+        await out.csv("registers/allergen-ingredients.csv", async () => (await db.execute(sql`SELECT * FROM allergen_ingredients WHERE client_id = ${cid} ORDER BY id`)).rows);
+        await out.csv("registers/allergen-ingredient-changes.csv", async () => (await db.execute(sql`SELECT * FROM allergen_ingredient_changes WHERE client_id = ${cid} ORDER BY ingredient_id, id`)).rows);
+        await out.csv("registers/allergen-recipe-lines.csv", async () => (await db.execute(sql`SELECT * FROM allergen_item_ingredients WHERE client_id = ${cid} ORDER BY item_id, position, id`)).rows);
+        await out.csv("registers/allergen-menus.csv", async () => (await db.execute(sql`SELECT * FROM allergen_menus WHERE client_id = ${cid} ORDER BY id`)).rows);
+        await out.csv("registers/allergen-menu-dishes.csv", async () => (await db.execute(sql`SELECT * FROM allergen_menu_items WHERE client_id = ${cid} ORDER BY menu_id, item_id`)).rows);
+        await out.csv("registers/allergen-chart-signoffs.csv", async () => (await db.execute(sql`SELECT * FROM allergen_chart_signoffs WHERE client_id = ${cid} ORDER BY id`)).rows);
         await out.csv("registers/coshh-substances.csv", async () => (await db.execute(sql`SELECT * FROM coshh_substances WHERE client_id = ${cid} ORDER BY id`)).rows);
         await out.csv("coshh-track/assessments.csv", async () => (await db.execute(sql`SELECT * FROM coshh_assessments WHERE client_id = ${cid} ORDER BY id`)).rows);
         await out.csv("coshh-track/checks.csv", async () => (await db.execute(sql`SELECT * FROM coshh_checks WHERE client_id = ${cid} ORDER BY check_date DESC, id`)).rows);

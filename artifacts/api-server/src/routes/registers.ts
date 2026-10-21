@@ -1,7 +1,9 @@
 /**
  * Site registers, mounted at /registers:
  *  - Allergen records (KitchenTrack): dishes/products per site with the 14
- *    regulated allergens, a PPDS flag and an append-only tick change log.
+ *    regulated allergens and "may contain" traces, ticked by hand or worked
+ *    out from recipe lines, menus, a PPDS flag and an append-only tick change
+ *    log. Ingredients, menus and chart sign-offs are in allergen-recipes.ts.
  *  - COSHH register (core): hazardous substances per site with a safety data
  *    sheet, assessment and review dates, controls/PPE and status.
  *  - Asbestos (core): one current record per site (build age, survey, report,
@@ -20,13 +22,17 @@ import { db } from "@workspace/db";
 import {
   allergenItemsTable,
   allergenItemChangesTable,
+  allergenIngredientsTable,
+  allergenItemIngredientsTable,
+  allergenMenusTable,
+  allergenMenuItemsTable,
   coshhSubstancesTable,
   asbestosRecordsTable,
   asbestosRegisterEntriesTable,
   asbestosSurveyHistoryTable,
   sitesTable,
 } from "@workspace/db/schema";
-import { and, asc, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { sitesTableVisibleTo } from "../lib/departmentSites";
@@ -41,6 +47,7 @@ import {
   sendDownloadUrl,
 } from "../lib/registerDocuments";
 import { ensureUploadCapacity } from "../lib/storageLimit";
+import { ALLERGEN_KEYS, recipeSets, sameSet, splitSets, type Tx } from "../lib/allergenRecipes";
 
 const router = Router();
 
@@ -49,11 +56,8 @@ router.use("/allergens", requireService("kitchentrack"));
 
 // ── Vocabularies ──────────────────────────────────────────────────────────────
 
-/** The 14 allergens in Schedule 1 of the Food Information Regulations 2014 (retained Regulation (EU) 1169/2011, Annex II). */
-export const ALLERGEN_KEYS = [
-  "celery", "gluten", "crustaceans", "eggs", "fish", "lupin", "milk",
-  "molluscs", "mustard", "tree_nuts", "peanuts", "sesame", "soya", "sulphites",
-] as const;
+// The 14 regulated allergens live with the recipe logic.
+export { ALLERGEN_KEYS };
 
 /** GHS hazard pictograms (GB CLP). */
 export const GHS_PICTOGRAM_KEYS = [
@@ -62,12 +66,12 @@ export const GHS_PICTOGRAM_KEYS = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+export const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
   .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value), "Invalid date");
-const TEXT = (max: number) => z.string().trim().max(max);
-const OPTIONAL_TEXT = (max: number) => z.string().trim().max(max).nullish().transform((value) => value || null);
+export const TEXT = (max: number) => z.string().trim().max(max);
+export const OPTIONAL_TEXT = (max: number) => z.string().trim().max(max).nullish().transform((value) => value || null);
 
-function todayIso(): string {
+export function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
@@ -86,12 +90,12 @@ function canonical<T extends string>(values: readonly T[], vocabulary: readonly 
   return vocabulary.filter((key) => chosen.has(key));
 }
 
-function parseId(raw: string | string[] | undefined): number | null {
+export function parseId(raw: string | string[] | undefined): number | null {
   const value = Number(Array.isArray(raw) ? raw[0] : raw);
   return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-function requireClient(req: Request, res: Response): number | null {
+export function requireClient(req: Request, res: Response): number | null {
   const clientId = getClientId(req);
   if (!clientId) res.status(400).json({ error: "No client context" });
   return clientId;
@@ -101,7 +105,7 @@ function requireClient(req: Request, res: Response): number | null {
  * Department scoping for a site_id column: staff/viewers see rows for sites in
  * their department or with no department, plus rows whose site was removed.
  */
-function siteScope(req: Request, clientId: number, column: PgColumn): SQL | undefined {
+export function siteScope(req: Request, clientId: number, column: PgColumn): SQL | undefined {
   const deptId = getActiveDepartmentId(req);
   if (deptId === null) return undefined;
   const visibleSites = db.select({ id: sitesTable.id }).from(sitesTable)
@@ -110,7 +114,7 @@ function siteScope(req: Request, clientId: number, column: PgColumn): SQL | unde
 }
 
 /** The site must belong to this client and be visible to the caller. */
-async function canUseSite(req: Request, clientId: number, siteId: number): Promise<boolean> {
+export async function canUseSite(req: Request, clientId: number, siteId: number): Promise<boolean> {
   const deptId = getActiveDepartmentId(req);
   const [site] = await db.select({ id: sitesTable.id }).from(sitesTable)
     .where(and(
@@ -122,7 +126,7 @@ async function canUseSite(req: Request, clientId: number, siteId: number): Promi
   return !!site;
 }
 
-function siteFilter(req: Request, column: PgColumn): SQL | undefined | "invalid" {
+export function siteFilter(req: Request, column: PgColumn): SQL | undefined | "invalid" {
   if (req.query.siteId === undefined || req.query.siteId === "") return undefined;
   const siteId = parseId(req.query.siteId as string);
   return siteId === null ? "invalid" : eq(column, siteId);
@@ -148,25 +152,66 @@ router.post("/uploads/request-url", requireAuth, denyViewers, async (req, res) =
 });
 
 // ── Allergen records (KitchenTrack) ───────────────────────────────────────────
+// A dish either has hand ticks or recipe lines. With recipe lines its
+// allergens and "may contain" traces are worked out from the ingredients
+// (lib/allergenRecipes.ts) and any ticks sent are ignored.
+
+const RecipeLine = z.object({
+  ingredientId: z.number().int().positive(),
+  quantity: z.number().positive().max(1_000_000).nullish().transform((value) => value ?? null),
+  unit: OPTIONAL_TEXT(20),
+});
 
 const AllergenBody = z.object({
   siteId: z.number().int().positive(),
   name: TEXT(200).min(1, "Name is required"),
   description: OPTIONAL_TEXT(2000),
   allergens: z.array(z.enum(ALLERGEN_KEYS)).max(ALLERGEN_KEYS.length),
+  // Left out: kept as they are on an edit, none on a new dish.
+  mayContain: z.array(z.enum(ALLERGEN_KEYS)).max(ALLERGEN_KEYS.length).optional(),
+  ingredients: z.array(RecipeLine).max(100).optional(),
+  menuIds: z.array(z.number().int().positive()).max(50).optional(),
   ppds: z.boolean().optional().default(false),
   lastReviewedAt: DATE.nullish(),
   reviewedBy: OPTIONAL_TEXT(200),
   // Required when the allergen ticks change on an edit (recipe or supplier change).
   changeReason: OPTIONAL_TEXT(1000),
 });
+type AllergenInput = z.infer<typeof AllergenBody>;
 
-function sameSet(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((key) => b.includes(key));
+/** Thrown inside a transaction to roll it back and answer with this status. */
+class Refusal extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
 }
 
 function actorName(req: Request): string | null {
   return req.currentUser?.name ?? null;
+}
+
+/** Recipe lines and menus for each dish, for GET /allergens. */
+async function withRecipes<T extends { id: number }>(clientId: number, rows: T[]) {
+  const ids = rows.map((row) => row.id);
+  const lines = ids.length === 0 ? [] : await db.select({
+    itemId: allergenItemIngredientsTable.itemId,
+    ingredientId: allergenItemIngredientsTable.ingredientId,
+    name: allergenIngredientsTable.name,
+    quantity: allergenItemIngredientsTable.quantity,
+    unit: allergenItemIngredientsTable.unit,
+  }).from(allergenItemIngredientsTable)
+    .innerJoin(allergenIngredientsTable, eq(allergenIngredientsTable.id, allergenItemIngredientsTable.ingredientId))
+    .where(and(eq(allergenItemIngredientsTable.clientId, clientId), inArray(allergenItemIngredientsTable.itemId, ids)))
+    .orderBy(asc(allergenItemIngredientsTable.position), asc(allergenItemIngredientsTable.id));
+  const menus = ids.length === 0 ? [] : await db.select({ itemId: allergenMenuItemsTable.itemId, menuId: allergenMenuItemsTable.menuId })
+    .from(allergenMenuItemsTable)
+    .innerJoin(allergenMenusTable, eq(allergenMenusTable.id, allergenMenuItemsTable.menuId))
+    .where(and(eq(allergenMenuItemsTable.clientId, clientId), inArray(allergenMenuItemsTable.itemId, ids), isNull(allergenMenusTable.deletedAt)))
+    .orderBy(asc(allergenMenuItemsTable.menuId));
+  return rows.map((row) => ({
+    ...row,
+    ingredients: lines.filter((line) => line.itemId === row.id)
+      .map(({ ingredientId, name, quantity, unit }) => ({ ingredientId, name, quantity, unit })),
+    menuIds: menus.filter((menu) => menu.itemId === row.id).map((menu) => menu.menuId),
+  }));
 }
 
 router.get("/allergens", requireAuth, async (req, res) => {
@@ -182,7 +227,7 @@ router.get("/allergens", requireAuth, async (req, res) => {
       site,
     ))
     .orderBy(asc(allergenItemsTable.name), asc(allergenItemsTable.id));
-  res.json(rows);
+  res.json(await withRecipes(clientId, rows));
 });
 
 /** Loads a live allergen item the caller can see, or null. */
@@ -215,6 +260,94 @@ router.get("/allergens/:id/changes", requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+/**
+ * Locks the recipe's ingredients (FOR SHARE, before the dish row: see
+ * lib/allergenRecipes.ts) and checks each is live, visible to the caller and
+ * usable at the dish's site.
+ */
+async function lockRecipeIngredients(tx: Tx, req: Request, clientId: number, siteId: number, lines: AllergenInput["ingredients"]) {
+  if (!lines || lines.length === 0) return;
+  const ids = lines.map((line) => line.ingredientId);
+  if (new Set(ids).size !== ids.length) throw new Refusal(400, "List each ingredient once");
+  const found = await tx.select({ id: allergenIngredientsTable.id, siteId: allergenIngredientsTable.siteId })
+    .from(allergenIngredientsTable)
+    .where(and(
+      inArray(allergenIngredientsTable.id, ids),
+      eq(allergenIngredientsTable.clientId, clientId),
+      isNull(allergenIngredientsTable.deletedAt),
+      siteScope(req, clientId, allergenIngredientsTable.siteId),
+    ))
+    .orderBy(asc(allergenIngredientsTable.id))
+    .for("share", { of: allergenIngredientsTable });
+  if (found.length !== ids.length) throw new Refusal(400, "Choose ingredients from your ingredients list");
+  if (found.some((row) => row.siteId !== null && row.siteId !== siteId)) {
+    throw new Refusal(400, "An ingredient in this recipe belongs to a different site");
+  }
+}
+
+async function replaceRecipe(tx: Tx, clientId: number, itemId: number, lines: NonNullable<AllergenInput["ingredients"]>) {
+  await tx.delete(allergenItemIngredientsTable)
+    .where(and(eq(allergenItemIngredientsTable.itemId, itemId), eq(allergenItemIngredientsTable.clientId, clientId)));
+  if (lines.length === 0) return;
+  await tx.insert(allergenItemIngredientsTable).values(lines.map((line, position) => ({
+    clientId, itemId, ingredientId: line.ingredientId, quantity: line.quantity, unit: line.unit, position,
+  })));
+}
+
+/**
+ * Puts the dish on exactly these menus (all at its site) or, with menuIds
+ * left out, takes it off menus at any other site. Returns whether its menus
+ * changed; each menu it joined or left is marked as changed.
+ */
+async function syncMenus(tx: Tx, clientId: number, itemId: number, siteId: number, menuIds: number[] | undefined): Promise<boolean> {
+  const current = await tx.select({ menuId: allergenMenuItemsTable.menuId, siteId: allergenMenusTable.siteId })
+    .from(allergenMenuItemsTable)
+    .innerJoin(allergenMenusTable, eq(allergenMenusTable.id, allergenMenuItemsTable.menuId))
+    .where(and(eq(allergenMenuItemsTable.itemId, itemId), eq(allergenMenuItemsTable.clientId, clientId), isNull(allergenMenusTable.deletedAt)));
+  let wanted: number[];
+  if (menuIds === undefined) {
+    wanted = current.filter((row) => row.siteId === siteId).map((row) => row.menuId);
+  } else {
+    wanted = [...new Set(menuIds)];
+    if (wanted.length > 0) {
+      const valid = await tx.select({ id: allergenMenusTable.id }).from(allergenMenusTable)
+        .where(and(
+          inArray(allergenMenusTable.id, wanted),
+          eq(allergenMenusTable.clientId, clientId),
+          eq(allergenMenusTable.siteId, siteId),
+          isNull(allergenMenusTable.deletedAt),
+        ));
+      if (valid.length !== wanted.length) throw new Refusal(400, "Choose menus at the dish's site");
+    }
+  }
+  const have = current.map((row) => row.menuId);
+  const added = wanted.filter((id) => !have.includes(id));
+  const removed = have.filter((id) => !wanted.includes(id));
+  if (removed.length > 0) {
+    await tx.delete(allergenMenuItemsTable).where(and(
+      eq(allergenMenuItemsTable.itemId, itemId),
+      eq(allergenMenuItemsTable.clientId, clientId),
+      inArray(allergenMenuItemsTable.menuId, removed),
+    ));
+  }
+  if (added.length > 0) {
+    await tx.insert(allergenMenuItemsTable).values(added.map((menuId) => ({ clientId, menuId, itemId })))
+      .onConflictDoNothing();
+  }
+  const touched = [...added, ...removed];
+  if (touched.length > 0) {
+    await tx.update(allergenMenusTable).set({ contentsChangedAt: new Date() })
+      .where(and(inArray(allergenMenusTable.id, touched), eq(allergenMenusTable.clientId, clientId)));
+  }
+  return touched.length > 0;
+}
+
+function sendRefusal(res: Response, err: unknown): boolean {
+  if (!(err instanceof Refusal)) return false;
+  res.status(err.status).json({ error: err.message });
+  return true;
+}
+
 router.post("/allergens", requireAuth, denyViewers, async (req, res) => {
   const clientId = requireClient(req, res);
   if (!clientId) return;
@@ -222,32 +355,48 @@ router.post("/allergens", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid data" });
   const d = parsed.data;
   if (!(await canUseSite(req, clientId, d.siteId))) return res.status(400).json({ error: "Invalid site" });
-  const allergens = canonical(d.allergens, ALLERGEN_KEYS);
-  const row = await db.transaction(async (tx) => {
-    const [created] = await tx.insert(allergenItemsTable).values({
-      clientId,
-      siteId: d.siteId,
-      name: d.name,
-      description: d.description,
-      allergens,
-      ppds: d.ppds,
-      lastReviewedAt: d.lastReviewedAt ?? null,
-      reviewedBy: d.reviewedBy,
-      createdBy: req.currentUser!.id,
-    }).returning();
-    await tx.insert(allergenItemChangesTable).values({
-      clientId,
-      itemId: created.id,
-      changeType: "created",
-      allergensBefore: null,
-      allergensAfter: allergens,
-      reason: d.changeReason,
-      changedBy: req.currentUser!.id,
-      changedByName: actorName(req),
+  try {
+    const row = await db.transaction(async (tx) => {
+      await lockRecipeIngredients(tx, req, clientId, d.siteId, d.ingredients);
+      const hand = splitSets(d.allergens, d.mayContain ?? []);
+      const [created] = await tx.insert(allergenItemsTable).values({
+        clientId,
+        siteId: d.siteId,
+        name: d.name,
+        description: d.description,
+        allergens: hand.allergens,
+        mayContain: hand.mayContain,
+        ppds: d.ppds,
+        lastReviewedAt: d.lastReviewedAt ?? null,
+        reviewedBy: d.reviewedBy,
+        createdBy: req.currentUser!.id,
+      }).returning();
+      let saved = created;
+      if (d.ingredients && d.ingredients.length > 0) {
+        await replaceRecipe(tx, clientId, created.id, d.ingredients);
+        const sets = (await recipeSets(tx, clientId, created.id))!;
+        [saved] = await tx.update(allergenItemsTable).set({ allergens: sets.allergens, mayContain: sets.mayContain })
+          .where(eq(allergenItemsTable.id, created.id)).returning();
+      }
+      await syncMenus(tx, clientId, created.id, d.siteId, d.menuIds ?? []);
+      await tx.insert(allergenItemChangesTable).values({
+        clientId,
+        itemId: created.id,
+        changeType: "created",
+        allergensBefore: null,
+        allergensAfter: saved.allergens,
+        mayContainBefore: null,
+        mayContainAfter: saved.mayContain,
+        reason: d.changeReason,
+        changedBy: req.currentUser!.id,
+        changedByName: actorName(req),
+      });
+      return saved;
     });
-    return created;
-  });
-  res.status(201).json(row);
+    res.status(201).json((await withRecipes(clientId, [row]))[0]);
+  } catch (err) {
+    if (!sendRefusal(res, err)) throw err;
+  }
 });
 
 router.put("/allergens/:id", requireAuth, denyViewers, async (req, res) => {
@@ -260,43 +409,70 @@ router.put("/allergens/:id", requireAuth, denyViewers, async (req, res) => {
   const d = parsed.data;
   if (!(await findAllergenItem(req, clientId, id))) return res.status(404).json({ error: "Not found" });
   if (!(await canUseSite(req, clientId, d.siteId))) return res.status(400).json({ error: "Invalid site" });
-  const allergens = canonical(d.allergens, ALLERGEN_KEYS);
 
-  const outcome = await db.transaction(async (tx) => {
-    // Lock the row so the logged "before" set is the one actually replaced.
-    const existing = await findAllergenItem(req, clientId, id, tx, true);
-    if (!existing) return { status: 404 as const };
-    const changed = !sameSet(existing.allergens ?? [], allergens);
-    if (changed && !d.changeReason) return { status: 400 as const };
-    const [updated] = await tx.update(allergenItemsTable).set({
-      siteId: d.siteId,
-      name: d.name,
-      description: d.description,
-      allergens,
-      ppds: d.ppds,
-      lastReviewedAt: d.lastReviewedAt ?? null,
-      reviewedBy: d.reviewedBy,
-      updatedAt: new Date(),
-    }).where(and(eq(allergenItemsTable.id, id), eq(allergenItemsTable.clientId, clientId))).returning();
-    if (changed) {
-      await tx.insert(allergenItemChangesTable).values({
-        clientId,
-        itemId: id,
-        changeType: "allergens_changed",
-        allergensBefore: existing.allergens ?? [],
-        allergensAfter: allergens,
-        reason: d.changeReason,
-        changedBy: req.currentUser!.id,
-        changedByName: actorName(req),
-      });
-    }
-    return { status: 200 as const, row: updated };
-  });
-  if (outcome.status === 404) return res.status(404).json({ error: "Not found" });
-  if (outcome.status === 400) {
-    return res.status(400).json({ error: "Say what changed (recipe or supplier) when the allergens change" });
+  try {
+    const row = await db.transaction(async (tx) => {
+      await lockRecipeIngredients(tx, req, clientId, d.siteId, d.ingredients);
+      // Lock the row so the logged "before" set is the one actually replaced.
+      const existing = await findAllergenItem(req, clientId, id, tx, true);
+      if (!existing) throw new Refusal(404, "Not found");
+      if (d.ingredients !== undefined) {
+        await replaceRecipe(tx, clientId, id, d.ingredients);
+      } else if (d.siteId !== existing.siteId) {
+        // The kept recipe must still suit the new site.
+        const elsewhere = await tx.select({ id: allergenIngredientsTable.id }).from(allergenItemIngredientsTable)
+          .innerJoin(allergenIngredientsTable, eq(allergenIngredientsTable.id, allergenItemIngredientsTable.ingredientId))
+          .where(and(
+            eq(allergenItemIngredientsTable.itemId, id),
+            eq(allergenItemIngredientsTable.clientId, clientId),
+            isNotNull(allergenIngredientsTable.siteId),
+            ne(allergenIngredientsTable.siteId, d.siteId),
+          ))
+          .limit(1);
+        if (elsewhere.length > 0) throw new Refusal(400, "An ingredient in this recipe belongs to a different site");
+      }
+      const sets = (await recipeSets(tx, clientId, id)) ?? splitSets(d.allergens, d.mayContain ?? existing.mayContain ?? []);
+      const setsChanged = !sameSet(existing.allergens ?? [], sets.allergens) || !sameSet(existing.mayContain ?? [], sets.mayContain);
+      if (setsChanged && !d.changeReason) {
+        throw new Refusal(400, "Say what changed (recipe or supplier) when the allergens change");
+      }
+      const menusChanged = await syncMenus(tx, clientId, id, d.siteId, d.menuIds);
+      const chartChanged = setsChanged || menusChanged
+        || existing.name !== d.name || existing.description !== d.description
+        || existing.ppds !== d.ppds || existing.siteId !== d.siteId;
+      const now = new Date();
+      const [updated] = await tx.update(allergenItemsTable).set({
+        siteId: d.siteId,
+        name: d.name,
+        description: d.description,
+        allergens: sets.allergens,
+        mayContain: sets.mayContain,
+        ppds: d.ppds,
+        lastReviewedAt: d.lastReviewedAt ?? null,
+        reviewedBy: d.reviewedBy,
+        ...(chartChanged ? { chartChangedAt: now } : {}),
+        updatedAt: now,
+      }).where(and(eq(allergenItemsTable.id, id), eq(allergenItemsTable.clientId, clientId))).returning();
+      if (setsChanged) {
+        await tx.insert(allergenItemChangesTable).values({
+          clientId,
+          itemId: id,
+          changeType: "allergens_changed",
+          allergensBefore: existing.allergens ?? [],
+          allergensAfter: sets.allergens,
+          mayContainBefore: existing.mayContain ?? [],
+          mayContainAfter: sets.mayContain,
+          reason: d.changeReason,
+          changedBy: req.currentUser!.id,
+          changedByName: actorName(req),
+        });
+      }
+      return updated;
+    });
+    res.json((await withRecipes(clientId, [row]))[0]);
+  } catch (err) {
+    if (!sendRefusal(res, err)) throw err;
   }
-  res.json(outcome.row);
 });
 
 router.delete("/allergens/:id", requireAuth, denyViewers, async (req, res) => {
@@ -307,7 +483,10 @@ router.delete("/allergens/:id", requireAuth, denyViewers, async (req, res) => {
   const found = await db.transaction(async (tx) => {
     const existing = await findAllergenItem(req, clientId, id, tx, true);
     if (!existing) return false;
-    await tx.update(allergenItemsTable).set({ deletedAt: new Date(), updatedAt: new Date() })
+    const now = new Date();
+    // Recipe lines and menus stay with the removed row for the record; the
+    // chart change time marks charts it was on as changed.
+    await tx.update(allergenItemsTable).set({ deletedAt: now, chartChangedAt: now, updatedAt: now })
       .where(and(eq(allergenItemsTable.id, id), eq(allergenItemsTable.clientId, clientId)));
     await tx.insert(allergenItemChangesTable).values({
       clientId,
@@ -315,6 +494,8 @@ router.delete("/allergens/:id", requireAuth, denyViewers, async (req, res) => {
       changeType: "removed",
       allergensBefore: existing.allergens ?? [],
       allergensAfter: null,
+      mayContainBefore: existing.mayContain ?? [],
+      mayContainAfter: null,
       changedBy: req.currentUser!.id,
       changedByName: actorName(req),
     });

@@ -87,6 +87,8 @@ const INVENTORY = {
   "premises-track.ts PUT /:id": covered("scoped staff cannot move Premises inspection"),
   "track-owners.ts PUT /track-owners": adminOnly("track owners"),
   "registers.ts POST /asbestos/:id/entries": notAMove("entry belongs to an asbestos record the caller can see; no site field"),
+  "allergen-recipes.ts PUT /allergen-ingredients/:id": covered("scoped staff cannot move an ingredient to another department's site", "allergen-recipes.mjs"),
+  "allergen-recipes.ts PUT /allergen-menus/:id": notAMove("renames only; a menu stays at its site"),
   "registers.ts PUT /allergens/:id": siteMove("Allergen register item"),
   "registers.ts PUT /asbestos/:id": siteMove("Asbestos register item"),
   "registers.ts PUT /asbestos/entries/:entryId": notAMove("entry belongs to an asbestos record the caller can see; no site field"),

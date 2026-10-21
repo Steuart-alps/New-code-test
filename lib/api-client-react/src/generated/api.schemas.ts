@@ -5,6 +5,164 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+/**
+ * One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014
+ */
+export type AllergenKey = typeof AllergenKey[keyof typeof AllergenKey];
+
+
+export const AllergenKey = {
+  celery: 'celery',
+  gluten: 'gluten',
+  crustaceans: 'crustaceans',
+  eggs: 'eggs',
+  fish: 'fish',
+  lupin: 'lupin',
+  milk: 'milk',
+  molluscs: 'molluscs',
+  mustard: 'mustard',
+  tree_nuts: 'tree_nuts',
+  peanuts: 'peanuts',
+  sesame: 'sesame',
+  soya: 'soya',
+  sulphites: 'sulphites',
+} as const;
+
+export interface AllergenIngredientUse {
+  id: number;
+  name: string;
+  siteId: number | null;
+}
+
+export interface AllergenIngredient {
+  id: number;
+  /** null when every site can use it */
+  siteId: number | null;
+  name: string;
+  supplier?: string | null;
+  productCode?: string | null;
+  contains: AllergenKey[];
+  mayContain: AllergenKey[];
+  notes?: string | null;
+  lastCheckedAt?: string | null;
+  checkedBy?: string | null;
+  /** Dishes using it, at sites the caller can see */
+  usedIn: AllergenIngredientUse[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AllergenIngredientSaved = AllergenIngredient & {
+  /** Dishes whose allergens changed because of this edit */
+  dishesUpdated: number;
+};
+
+export interface AllergenIngredientInput {
+  siteId: number | null;
+  /** @maxLength 200 */
+  name: string;
+  /** @maxLength 200 */
+  supplier?: string | null;
+  /** @maxLength 100 */
+  productCode?: string | null;
+  /** @maxItems 14 */
+  contains: AllergenKey[];
+  /** @maxItems 14 */
+  mayContain?: AllergenKey[];
+  /** @maxLength 2000 */
+  notes?: string | null;
+  lastCheckedAt?: string | null;
+  /** @maxLength 200 */
+  checkedBy?: string | null;
+  /**
+     * Required when contains or may contain changes on an edit
+     * @maxLength 1000
+     */
+  changeReason?: string | null;
+}
+
+export type AllergenIngredientChangeChangeType = typeof AllergenIngredientChangeChangeType[keyof typeof AllergenIngredientChangeChangeType];
+
+
+export const AllergenIngredientChangeChangeType = {
+  created: 'created',
+  allergens_changed: 'allergens_changed',
+  removed: 'removed',
+} as const;
+
+export interface AllergenIngredientChange {
+  id: number;
+  ingredientId: number;
+  changeType: AllergenIngredientChangeChangeType;
+  containsBefore?: AllergenKey[] | null;
+  containsAfter?: AllergenKey[] | null;
+  mayContainBefore?: AllergenKey[] | null;
+  mayContainAfter?: AllergenKey[] | null;
+  reason?: string | null;
+  dishesUpdated: number;
+  changedByName?: string | null;
+  createdAt: string;
+}
+
+export interface AllergenMenu {
+  id: number;
+  siteId: number | null;
+  name: string;
+  contentsChangedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AllergenMenuInput {
+  siteId: number;
+  /** @maxLength 100 */
+  name: string;
+}
+
+export interface AllergenMenuRename {
+  /** @maxLength 100 */
+  name: string;
+}
+
+export interface AllergenChartLastSignoff {
+  id: number;
+  checkedByName: string;
+  createdAt: string;
+  note?: string | null;
+  dishCount: number;
+}
+
+export interface AllergenChart {
+  siteId: number;
+  siteName: string;
+  /** null for the whole-site chart */
+  menuId: number | null;
+  menuName: string | null;
+  dishCount: number;
+  lastSignoff: AllergenChartLastSignoff | null;
+  /** A dish on the chart changed after the latest sign-off */
+  changedSinceCheck: boolean;
+}
+
+export interface AllergenChartSignoff {
+  id: number;
+  siteId: number | null;
+  menuId: number | null;
+  dishCount: number;
+  note?: string | null;
+  checkedByName: string;
+  createdAt: string;
+}
+
+export interface AllergenChartSignoffInput {
+  siteId: number;
+  menuId?: number | null;
+  /** Must be true; the person confirms every dish was checked against current recipes and labels */
+  confirmed: boolean;
+  /** @maxLength 1000 */
+  note?: string | null;
+}
+
 export type TodayByDepartmentRowKind = typeof TodayByDepartmentRowKind[keyof typeof TodayByDepartmentRowKind];
 
 
@@ -3982,5 +4140,14 @@ export type ListCoshhSignOffs200 = {
 export type RecordCoshhSignOffs200 = {
   signed: number;
   assessment: CoshhSignOffStatus | null;
+};
+
+export type ListAllergenMenusParams = {
+siteId?: number;
+};
+
+export type ListAllergenChartSignoffsParams = {
+siteId: number;
+menuId?: number;
 };
 

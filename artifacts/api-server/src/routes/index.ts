@@ -67,6 +67,7 @@ import auditLogRouter from "./audit-log";
 import publicLinkAccessRouter from "./public-link-access";
 import analyticsRouter from "./analytics";
 import registersRouter from "./registers";
+import allergenRecipesRouter from "./allergen-recipes";
 import trackOwnersRouter from "./track-owners";
 import userNotificationsRouter from "./user-notifications";
 
@@ -170,6 +171,8 @@ router.use("/premises-track", requireAuth, requireService("premisestrack"), prem
 router.use("/room-track", requireAuth, requireService("roomtrack"), roomTrackRouter);
 // Allergen (KitchenTrack-gated inside), COSHH and asbestos registers.
 router.use("/registers", requireAuth, registersRouter);
+// KitchenTrack ingredients, menus and allergen chart sign-offs (gated inside).
+router.use("/registers", requireAuth, allergenRecipesRouter);
 router.use("/coshh-track", requireAuth, requireService("coshhtrack"), coshhTrackRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
