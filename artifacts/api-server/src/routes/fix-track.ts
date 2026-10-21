@@ -38,6 +38,7 @@ async function markComplianceNotified(q: any, clientId: number): Promise<void> {
       AND (${q.reminder_cycle ?? null}::text IS NULL OR to_char(due_date, 'YYYY-MM-DD') = ${q.reminder_cycle ?? null}::text)`);
 }
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
+import { resolveAssigneeChange } from "../lib/assignees";
 
 const router = Router();
 
@@ -432,6 +433,7 @@ const issueCreate = z.object({
   reportedBy:    z.string().min(1).max(200),
   reportedDate:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   assignedTo:    z.string().max(200).nullable().optional(),
+  assigneeUserId: z.number().int().positive().nullable().optional(),
   contractorId:  z.number().int().nullable().optional(),
   targetDate:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   resolvedDate:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
@@ -588,6 +590,10 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   }
   if (!(await canAccessSite(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   if (!(await verifyContractor(data.contractorId, clientId))) return res.status(400).json({ error: "Invalid contractor" });
+  const assignee = await resolveAssigneeChange(clientId, data.siteId ?? null, { assigneeUserId: data.assigneeUserId });
+  if (!assignee.ok) return res.status(400).json({ error: assignee.error });
+  if (assignee.assigneeUserId !== undefined) data.assigneeUserId = assignee.assigneeUserId;
+  if (assignee.name !== undefined) data.assignedTo = assignee.name;
   const mediaError = await finalizeIssueMedia(data.mediaUrls, clientId);
   if (mediaError) return res.status(403).json({ error: mediaError });
 
@@ -686,6 +692,18 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
     const isStatusChange = data.status && data.status !== current.status;
     if (isStatusChange && data.status !== nextStatus[current.status]) {
       return { kind: "invalid_transition" as const, currentStatus: current.status };
+    }
+
+    if ("assigneeUserId" in data || "assignedTo" in data || "siteId" in data) {
+      const assignee = await resolveAssigneeChange(clientId, "siteId" in data ? data.siteId ?? null : current.siteId, {
+        assigneeUserId: data.assigneeUserId,
+        name: data.assignedTo,
+      }, { assigneeUserId: current.assigneeUserId, name: current.assignedTo, siteId: current.siteId });
+      if (!assignee.ok) return { kind: "assignee_invalid" as const, error: assignee.error };
+      delete data.assigneeUserId;
+      delete data.assignedTo;
+      if (assignee.assigneeUserId !== undefined) data.assigneeUserId = assignee.assigneeUserId;
+      if (assignee.name !== undefined) data.assignedTo = assignee.name;
     }
 
     const approvalInvalidated =
@@ -865,6 +883,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   });
 
   if (transitionResult.kind === "not_found") return res.status(404).json({ error: "Not found" });
+  if (transitionResult.kind === "assignee_invalid") return res.status(400).json({ error: transitionResult.error });
   if (transitionResult.kind === "invalid_transition") {
     return res.status(409).json({
       error: `Issue must move to the next status from ${transitionResult.currentStatus}`,

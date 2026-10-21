@@ -17,6 +17,8 @@ export interface InspectionReportAction {
   severity: InspectionReportSeverity;
   status: string;
   ownerName: string | null;
+  /** The person assigned (gets the reminders) */
+  assigneeUserId?: number | null;
   dueDate: Date | null;
   draftSource: string | null;
   confirmedByName: string | null;

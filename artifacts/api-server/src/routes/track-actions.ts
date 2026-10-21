@@ -6,6 +6,7 @@ import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
 import { isInspectionReportSource, missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
 import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
+import { resolveAssigneeChange } from "../lib/assignees";
 
 const router = Router();
 // "audit" holds actions from uploaded audit and inspection reports
@@ -44,6 +45,7 @@ const oneOffFields = {
   instruction: nullableText,
   severity: severity.optional(),
   ownerName: nullableText,
+  assigneeUserId: z.number().int().positive().nullable().optional(),
   leadTimeDays: z.number().int().min(0).max(3650).optional(),
   dueDate: z.string().date().nullable().optional(),
   siteId: z.number().int().positive().nullable().optional(),
@@ -59,7 +61,8 @@ const createSchema = z.object({ templateId: z.number().int().positive().optional
 const patchSchema = z.object({
   title: z.string().trim().min(1).max(500).optional(), instruction: nullableText, severity: severity.optional(),
   status: z.enum(["open", "in_progress", "resolved"]).optional(), siteId: z.number().int().positive().nullable().optional(),
-  ownerName: nullableText, dueDate: z.string().date().nullable().optional(), remedialAction: nullableText,
+  ownerName: nullableText, assigneeUserId: z.number().int().positive().nullable().optional(),
+  dueDate: z.string().date().nullable().optional(), remedialAction: nullableText,
   evidenceReference: nullableText, resolutionNotes: nullableText,
   resolverSignature: drawnSignature.optional(),
 }).strict();
@@ -197,6 +200,8 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); const parsed = createSchema.safeParse(req.body); if (!clientId) return res.status(400).json({ error: "No client context" }); if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const activeDepartmentId = getActiveDepartmentId(req);
+  const assignee = await resolveAssigneeChange(clientId, parsed.data.siteId ?? null, { assigneeUserId: parsed.data.assigneeUserId });
+  if (!assignee.ok) return res.status(400).json({ error: assignee.error });
   const createValues = (template?: typeof trackActionTemplatesTable.$inferSelect) => {
     const leadTimeDays = template ? template.leadTimeDays : parsed.data.leadTimeDays ?? null;
     const dueDate = template
@@ -209,7 +214,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       module: parsed.data.module, title: template?.title ?? parsed.data.title!,
       instruction: template?.instruction ?? parsed.data.instruction ?? null,
       severity: template?.severity ?? parsed.data.severity!,
-      ownerName: template?.ownerDefault ?? parsed.data.ownerName ?? null,
+      ownerName: assignee.name ?? template?.ownerDefault ?? parsed.data.ownerName ?? null,
+      assigneeUserId: assignee.assigneeUserId ?? null,
       leadTimeDays, dueDate, remedialAction: parsed.data.remedialAction ?? null,
       evidenceReference: parsed.data.evidenceReference ?? null, resolutionNotes: parsed.data.resolutionNotes ?? null,
     };
@@ -269,7 +275,7 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
       description: [action.instruction, `Originating module: ${action.module}`, `Module action: ${action.id}`].filter(Boolean).join("\n"),
       priority: action.severity === "urgent" ? "urgent" : action.severity === "action_required" ? "high" : "medium",
       status: "reported", reportedBy: req.currentUser!.name, reportedDate: new Date().toISOString().slice(0, 10),
-      targetDate: action.dueDate, assignedTo: action.ownerName, createdBy: req.currentUser!.id,
+      targetDate: action.dueDate, assignedTo: action.ownerName, assigneeUserId: action.assigneeUserId, createdBy: req.currentUser!.id,
     }).returning();
     await tx.insert(fixTrackIssueActivityTable).values({ clientId, issueId: issue.id, eventType: "status", status: "reported", createdBy: req.currentUser!.id });
     const [row] = await tx.update(trackActionsTable).set({ fixTrackIssueId: issue.id, fixTrackDisposition: keptInTrack ? "parallel" : "linked", updatedAt: new Date() }).where(and(eq(trackActionsTable.id, action.id), isNull(trackActionsTable.fixTrackIssueId))).returning();
@@ -355,6 +361,17 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
       }
     }
     const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
+    if ("assigneeUserId" in parsed.data || "ownerName" in parsed.data || "siteId" in parsed.data) {
+      const assignee = await resolveAssigneeChange(clientId, "siteId" in parsed.data ? parsed.data.siteId ?? null : current.siteId, {
+        assigneeUserId: parsed.data.assigneeUserId,
+        name: parsed.data.ownerName,
+      }, { assigneeUserId: current.assigneeUserId, name: current.ownerName, siteId: current.siteId });
+      if (!assignee.ok) return { status: 400 as const, error: assignee.error };
+      delete updates.assigneeUserId;
+      delete updates.ownerName;
+      if (assignee.assigneeUserId !== undefined) updates.assigneeUserId = assignee.assigneeUserId;
+      if (assignee.name !== undefined) updates.ownerName = assignee.name;
+    }
     if (nextStatus === "resolved") {
       const resolverName = req.currentUser!.name?.trim();
       if (!resolverName) return { status: 400 as const, error: "Your account must have a name before resolving an action" };

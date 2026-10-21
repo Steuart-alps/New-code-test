@@ -2221,6 +2221,9 @@ async function runRuntimeMigrationsOnce() {
     await migrateEquipmentLabels();
     await migrateInspectionReports();
 
+    // ---- The person responsible for an action, issue or check (Oct 2026) ----
+    await migrateAssignees();
+
     // ---- Department recorded with each submission (Oct 2026) ----
     // After every reported table exists; see submitterDepartmentMigration.ts.
     await migrateSubmitterDepartments();
@@ -6005,6 +6008,23 @@ export async function migrateComplianceScheduleTokens(): Promise<number> {
  * (header bell / mobile push). Mirrors lib/db/src/schema/track-notifications.ts
  * column for column, so pushed and runtime-only databases match.
  */
+/**
+ * The person an action, FixTrack issue or compliance check is assigned to, as
+ * a user of the business (lib/assignees.ts), so their reminders reach them.
+ * The existing text name stays: it is what screens show, and it holds a typed
+ * name for someone without an account.
+ */
+async function migrateAssignees() {
+  for (const table of ["track_actions", "fix_track_issues", "compliance_items"]) {
+    await db.execute(sql.raw(
+      `ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "assignee_user_id" integer REFERENCES "users"("id") ON DELETE SET NULL`,
+    ));
+    await db.execute(sql.raw(
+      `CREATE INDEX IF NOT EXISTS "IDX_${table}_assignee" ON "${table}" ("assignee_user_id") WHERE "assignee_user_id" IS NOT NULL`,
+    ));
+  }
+}
+
 async function migrateTrackOwnersAndNotifications() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "track_owners" (

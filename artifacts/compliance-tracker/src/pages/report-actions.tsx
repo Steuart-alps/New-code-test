@@ -257,14 +257,15 @@ function CreatedActionRow({ action, options, focused, moduleLabel, siteName, onA
     if (focused) rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focused]);
   const page = TRACK_PAGES[action.module];
-  const current = action.ownerName ? options.assignees.find((person) => person.name === action.ownerName) : undefined;
-  const value = current ? String(current.id) : action.ownerName ? "typed" : NOBODY;
+  // The person (their reminders reach them), or a name typed elsewhere for someone without an account.
+  const value = action.assigneeUserId != null ? String(action.assigneeUserId) : action.ownerName ? "typed" : NOBODY;
+  const listed = action.assigneeUserId != null && options.assignees.some((person) => person.id === action.assigneeUserId);
 
   const [dueDate, setDueDate] = useState(action.dueDate?.slice(0, 10) ?? "");
   useEffect(() => { setDueDate(action.dueDate?.slice(0, 10) ?? ""); }, [action.dueDate]);
   const resolved = action.status === "resolved";
 
-  async function save(patch: { ownerName?: string | null; dueDate?: string | null }, done: string) {
+  async function save(patch: { assigneeUserId?: number | null; dueDate?: string | null }, done: string) {
     setSaving(true);
     try {
       const res = await apiFetch(`/track-actions/${action.id}`, { method: "PATCH", body: JSON.stringify(patch) });
@@ -278,7 +279,7 @@ function CreatedActionRow({ action, options, focused, moduleLabel, siteName, onA
   }
   const assign = (next: string) => {
     const person = options.assignees.find((candidate) => String(candidate.id) === next);
-    return save({ ownerName: person?.name ?? null }, person ? `Assigned to ${person.name}` : "No longer assigned");
+    return save({ assigneeUserId: person?.id ?? null }, person ? `Assigned to ${person.name}` : "No longer assigned");
   };
   const saveDueDate = () => {
     const next = dueDate || null;
@@ -323,6 +324,7 @@ function CreatedActionRow({ action, options, focused, moduleLabel, siteName, onA
             <SelectItem value={NOBODY}>Not assigned yet</SelectItem>
             {options.assignees.map((person) => <SelectItem key={person.id} value={String(person.id)}>{personLabel(person)}</SelectItem>)}
             {value === "typed" && <SelectItem value="typed">{action.ownerName}</SelectItem>}
+            {action.assigneeUserId != null && !listed && <SelectItem value={value}>{action.ownerName || "Former member"}</SelectItem>}
           </SelectContent>
         </Select>
         </div>

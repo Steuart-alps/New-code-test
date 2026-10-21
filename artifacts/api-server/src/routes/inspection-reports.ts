@@ -26,6 +26,7 @@ import { ObjectPermission } from "../lib/objectAcl";
 import { createDownloadMeter } from "../lib/downloadUsage";
 import { hasTenantAttachmentReference } from "../lib/attachmentReferences";
 import { sendReportActionPlanEmails } from "../lib/reportActionEmails";
+import { resolveAssigneeChange } from "../lib/assignees";
 
 /**
  * Uploaded audit and inspection reports (ALPS audits, Care Inspectorate, EHO,
@@ -130,8 +131,8 @@ async function aiReadsThisMonth(clientId: number, today: string) {
 
 /**
  * Check every action of a list against this business: a track it can use,
- * a site the caller can see, and an Owner or Manager of the business as the
- * assignee. Returns the reason for the first problem, or the assignees' names.
+ * a site the caller can see, and an Owner or Manager of the business who
+ * can see that site as the assignee. Returns the reason for the first problem, or the assignees' names.
  */
 async function checkDraftActions(clientId: number, departmentId: number | null, actions: z.infer<typeof draftActionSchema>[]) {
   const [sites, people, modules] = await Promise.all([visibleSites(clientId, departmentId), assignees(clientId), moduleChoices(clientId)]);
@@ -143,6 +144,11 @@ async function checkDraftActions(clientId: number, departmentId: number | null, 
     if (!moduleKeys.has(action.module)) return { error: `${which}: this business does not use that track` };
     if (action.siteId != null && !siteIds.has(action.siteId)) return { error: `${which}: site not found` };
     if (action.assignedUserId != null && !names.has(action.assignedUserId)) return { error: `${which}: assign it to an Owner or Manager of this business` };
+    if (action.assignedUserId != null) {
+      // The shared assignment rules (lib/assignees.ts): the person must be able to see the action's site.
+      const assignee = await resolveAssigneeChange(clientId, action.siteId ?? null, { assigneeUserId: action.assignedUserId });
+      if (!assignee.ok) return { error: `${which}: ${assignee.error}` };
+    }
   }
   return { names };
 }
@@ -354,6 +360,8 @@ router.post("/inspection-reports/:id/confirm", requireAuth, denyViewers, canMana
       title: action.title,
       instruction: [action.instruction?.trim(), action.reportReference?.trim() ? `Report reference: ${action.reportReference.trim()}` : null].filter(Boolean).join("\n\n") || null,
       severity: action.severity,
+      // The assigned person gets the action's reminders (lib/personalReminders.ts).
+      assigneeUserId: action.assignedUserId ?? null,
       ownerName: action.assignedUserId != null ? checked.names.get(action.assignedUserId) ?? null : null,
       dueDate: action.dueDate ?? null, status: "open", createdBy: req.currentUser!.id,
       draftSource: action.draftSource, confirmedByName: confirmer,

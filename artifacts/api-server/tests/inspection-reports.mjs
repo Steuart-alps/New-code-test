@@ -100,6 +100,8 @@ try {
   assert.equal(ok(await owner.request('GET', `/inspection-reports/${homeReport}`)).draftActions.length, 3, 'the list is kept while it is checked');
   assert.equal((await owner.request('PUT', `/inspection-reports/${homeReport}/draft`, { actions: [{ ...typed[0], assignedUserId: staff.userId }] })).status, 400,
     'Staff cannot be assigned');
+  assert.equal((await owner.request('PUT', `/inspection-reports/${homeReport}/draft`, { actions: [{ ...typed[0], assignedUserId: manager.userId }] })).status, 400,
+    "a Manager can't be assigned an action at a site their department can't see");
   assert.equal((await owner.request('PUT', `/inspection-reports/${homeReport}/draft`, { actions: [{ ...typed[0], module: 'compliance' }] })).status, 400,
     'only a track with an action list is accepted');
   assert.equal((await owner.request('PUT', `/inspection-reports/${homeReport}/draft`, { actions: [{ ...typed[0], siteId: 999999 }] })).status, 400);
@@ -137,6 +139,8 @@ try {
   assert.equal(door.draftSource, 'ai', 'AI-drafted actions say so');
   assert.equal(falls.draftSource, 'manual');
   assert.equal(door.ownerName, 'Sam Maintenance', 'the assigned person is recorded');
+  assert.equal(door.assigneeUserId, maintenance.userId, 'as a person, so their reminders reach them');
+  assert.equal(staffing.assigneeUserId, null);
   assert.equal(staffing.ownerName, null);
   assert.equal(door.severity, 'urgent');
   assert.equal(door.dueDate, isoDay(7));
