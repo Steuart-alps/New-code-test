@@ -75,7 +75,7 @@ export function fixTrackIssueTypeFor(itemTitle: string): string {
 
 export type ItemActionState = {
   needsAction: boolean;
-  needsActionReason: "unsatisfactory" | "open_defects" | null;
+  needsActionReason: "unsatisfactory" | "open_defects" | "certificate_outstanding" | null;
   openDefectCount: number;
   latestCertificateId: number | null;
   latestCertificateOutcome: string | null;
@@ -125,7 +125,45 @@ export async function itemActionStates(clientId: number, itemIds?: number[], exe
       latestCertificateOutcome: row.outcome,
     });
   }
+  // A contractor visit with no certificate since: not compliant until it is
+  // uploaded (the defect reasons above come first).
+  for (const itemId of await certificateOutstandingItemIds(clientId, itemIds, executor)) {
+    const state = result.get(itemId) ?? NO_ACTION;
+    if (state.needsAction) continue;
+    result.set(itemId, { ...state, needsAction: true, needsActionReason: "certificate_outstanding" });
+  }
   return result;
+}
+
+/**
+ * Checks whose contractor visit has happened (the check was completed, or the
+ * date the contractor booked has passed) with no certificate added on or
+ * after the visit day, or dated on or after it. The same rule as the
+ * certificate chase (lib/certificateFollowUp.ts), from the visit day on.
+ */
+export async function certificateOutstandingItemIds(clientId: number, itemIds?: number[], executor: Executor = db): Promise<number[]> {
+  const idFilter = itemIds ? sql`AND ci.id IN (${sql.join(itemIds.map((id) => sql`${id}`), sql`, `)})` : sql``;
+  const rows = (await executor.execute(sql`
+    SELECT v.item_id FROM (
+      SELECT ci.id AS item_id,
+        GREATEST(
+          (ci.completed_at AT TIME ZONE 'UTC')::date,
+          CASE WHEN (ci.visit_scheduled_at AT TIME ZONE 'UTC')::date <= CURRENT_DATE
+            THEN (ci.visit_scheduled_at AT TIME ZONE 'UTC')::date END
+        ) AS visit_day
+      FROM compliance_items ci
+      WHERE ci.client_id = ${clientId} AND ci.contractor_id IS NOT NULL
+        AND (ci.completed_at IS NOT NULL OR ci.visit_scheduled_at IS NOT NULL) ${idFilter}
+    ) v
+    WHERE v.visit_day IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM certificates c
+        WHERE c.item_id = v.item_id
+          AND ((c.created_at AT TIME ZONE 'UTC')::date >= v.visit_day
+            OR (c.issue_date AT TIME ZONE 'UTC')::date >= v.visit_day)
+      )
+  `)).rows as Array<{ item_id: number }>;
+  return rows.map((row) => Number(row.item_id));
 }
 
 export async function itemActionState(clientId: number, itemId: number): Promise<ItemActionState> {
@@ -134,6 +172,7 @@ export async function itemActionState(clientId: number, itemId: number): Promise
 
 /** Human summary used by the calendar, inspection pack and badges. */
 export function actionStateLabel(state: ItemActionState): string {
+  if (state.needsActionReason === "certificate_outstanding") return "Certificate outstanding";
   return state.needsActionReason === "unsatisfactory"
     ? "Unsatisfactory — remedial work open"
     : `Remedial work open (${state.openDefectCount} defect${state.openDefectCount === 1 ? "" : "s"})`;

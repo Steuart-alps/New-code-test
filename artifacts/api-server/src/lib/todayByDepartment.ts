@@ -27,6 +27,7 @@ import { getEntitledServices } from "./services";
 import { getAccountTimezone, localDateIn, addCalendarDays, zonedDateTimeToUtc } from "./accountClock";
 import { occursOn } from "./taskSchedule";
 import { submittedDailyChecklists } from "./dailyChecklistCompletion";
+import { certificateOutstandingItemIds } from "./certificateOutcomes";
 
 export const TODAY_BY_DEPARTMENT_ROLES_SETTING = "todayByDepartmentRoles";
 
@@ -498,6 +499,12 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
   }
 
   // ── Compliance checks due today, overdue, or completed today ───────────────
+  // A contractor visit with no certificate yet is not compliant (red) until
+  // the certificate is uploaded, however long ago it was.
+  const awaitingCertificate = new Set(await certificateOutstandingItemIds(clientId));
+  const awaitingFilter = awaitingCertificate.size
+    ? sql`OR id IN (${sql.join([...awaitingCertificate].map((id) => sql`${id}`), sql`, `)})`
+    : sql``;
   const itemRows = await db.execute(sql`
     SELECT id, title, site_id, department_id, assigned_to, due_date::date::text AS due_day,
            (status <> 'completed' AND due_date IS NOT NULL AND due_date::date <= ${today}) AS outstanding
@@ -507,6 +514,7 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
       AND (
         (status <> 'completed' AND due_date IS NOT NULL AND due_date::date <= ${today})
         OR (completed_at >= ${dayStart} AND completed_at < ${dayEnd})
+        ${awaitingFilter}
       )
   `);
   for (const row of rows<{
@@ -514,6 +522,17 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
     assigned_to: string | null; due_day: string | null; outstanding: unknown;
   }>(itemRows)) {
     const outstanding = row.outstanding === true || row.outstanding === "t";
+    if (!outstanding && awaitingCertificate.has(Number(row.id))) {
+      push({
+        siteId: row.site_id == null ? null : Number(row.site_id),
+        departmentId: row.department_id == null ? null : Number(row.department_id),
+        outcome: "failed",
+        label: row.title,
+        detail: "Certificate outstanding",
+        path: `/items/${row.id}`,
+      });
+      continue;
+    }
     const due = row.due_day === today
       ? "Due today"
       : row.due_day

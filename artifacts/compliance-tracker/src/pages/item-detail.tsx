@@ -191,7 +191,7 @@ export default function ItemDetailPage() {
                       {category.name}
                     </span>
                   )}
-                  <CheckStatusWithCertificate itemId={item.id} status={item.status}>
+                  <CheckStatusWithCertificate item={item}>
                     <StatusBadge status={item.status} />
                   </CheckStatusWithCertificate>
                   <NeedsActionBadge item={item} />
@@ -223,7 +223,9 @@ export default function ItemDetailPage() {
                 <div>
                   <p className="font-semibold">{needsActionLabel(item)}</p>
                   <p className="mt-0.5">
-                    {(item.openDefectCount ?? 0) > 0
+                    {item.needsActionReason === "certificate_outstanding"
+                      ? "The contractor has been but no certificate has been uploaded. The check counts as not compliant until it is: add the certificate below when it arrives."
+                      : (item.openDefectCount ?? 0) > 0
                       ? "This check needs action until the FixTrack jobs for its C1/C2/FI (or gas ID/AR) defects are resolved, or a new satisfactory certificate is added."
                       : "The latest certificate is unsatisfactory. Add its defects so the remedial work is tracked, or add a new satisfactory certificate once the work is done."}
                   </p>
