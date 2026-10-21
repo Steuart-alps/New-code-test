@@ -14,7 +14,10 @@ import { chromium } from "@playwright/test";
 //   - only one microphone listens at a time; blocked microphones explain why;
 //   - browsers without speech recognition show no microphone buttons;
 //   - "Speak a list" splits a spoken list into products, leaves out ones
-//     already on the register, and keeps any that failed to add.
+//     already on the register, and keeps any that failed to add;
+//   - "Say machine" listens as soon as it opens, picks a machine said by name
+//     ("fairway mower one"), offers the choices to tap when two could fit,
+//     and works at phone width.
 // DICTATION_SCREENSHOTS=<dir> saves screenshots.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const freePort = async () => {
@@ -192,8 +195,79 @@ async function checkSupported() {
   await dialog.getByRole("button", { name: "Add 2 substances" }).click();
   await dialog.getByRole("button", { name: "Add 1 substance" }).waitFor();
   assert.equal(await dialog.locator("#coshh-list-text").inputValue(), "Fail one");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "detached" });
+
+  // Say machine: one clear match is picked straight away.
+  const pick = page.getByRole("dialog", { name: "Say the machine" });
+  await page.getByRole("button", { name: "Say machine" }).click();
+  await pick.waitFor();
+  await page.waitForFunction(() => window.__listeningCount() === 1).catch(() => assert.fail("opening the dialog starts listening"));
+  await speak(page, "fairway mower", false);
+  await pick.getByText("fairway mower", { exact: true }).waitFor();
+  await speak(page, "fairway mower one");
+  await pick.waitFor({ state: "detached" });
+  assert.deepEqual(await page.evaluate(() => window.__picked), ["Fairway Mower 1"]);
+  await page.waitForFunction(() => window.__listeningCount() === 0).catch(() => assert.fail("picking stops listening"));
+
+  // Two could fit: both are offered to tap.
+  await page.getByRole("button", { name: "Say machine" }).click();
+  await pick.waitFor();
+  await page.waitForFunction(() => window.__listeningCount() === 1);
+  await speak(page, "the fairway mower");
+  await pick.getByText("Which machine did you mean?", { exact: false }).waitFor();
+  assert.deepEqual(await pick.getByTestId("list-speak-to-pick-choices").getByRole("button").allTextContents(),
+    ["Fairway Mower 1", "Fairway Mower 2"]);
+  await shot(page, "3-say-machine-choices");
+  await pick.getByRole("button", { name: "Fairway Mower 2" }).click();
+  await pick.waitFor({ state: "detached" });
+
+  // Nothing fits: say so; typing the name works too.
+  await page.getByRole("button", { name: "Say machine" }).click();
+  await pick.waitFor();
+  await page.waitForFunction(() => window.__listeningCount() === 1);
+  await speak(page, "greens mower three");
+  await pick.getByText("No machine matches that", { exact: false }).waitFor();
+  // Still listening, so the name can simply be said again.
+  assert.equal(await listeningCount(page), 1);
+  await pick.getByLabel("Or type the name").fill("tees");
+  await pick.getByLabel("Or type the name").press("Enter");
+  await pick.waitFor({ state: "detached" });
+  assert.deepEqual(await page.evaluate(() => window.__picked), ["Fairway Mower 1", "Fairway Mower 2", "Tees Mower"]);
 
   assert.deepEqual(pageErrors, []);
+  await context.close();
+}
+
+// Say machine on a phone: the dialog fits the screen and the buttons are big enough to tap.
+async function checkPhone() {
+  const context = await browser.newContext({ locale: "en-GB", viewport: { width: 375, height: 740 }, isMobile: true, hasTouch: true,
+    userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36" });
+  await routeApi(context);
+  await context.addInitScript(installFakeRecognition);
+  const page = await context.newPage();
+  await page.goto(`${baseUrl}/tests/dictation-harness.html`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Say machine" }).tap();
+  const pick = page.getByRole("dialog", { name: "Say the machine" });
+  await pick.waitFor();
+  await page.waitForFunction(() => window.__listeningCount() === 1);
+  await speak(page, "fairway mower");
+  const choice = pick.getByRole("button", { name: "Fairway Mower 1" });
+  await choice.waitFor();
+  // Measured once the opening zoom has finished.
+  await page.waitForFunction(() => {
+    const rect = document.querySelector("[data-testid='speak-to-pick-dialog']")?.getBoundingClientRect();
+    return rect && rect.left >= 0 && rect.right <= window.innerWidth;
+  }, null, { timeout: 5000 }).catch(() => assert.fail("the dialog fits a phone screen"));
+  assert.ok((await choice.boundingBox()).height >= 40, "choices are big enough to tap");
+  await shot(page, "4-say-machine-phone");
+  // Android listens to one phrase per tap, so "Try again" listens again.
+  await page.evaluate(() => window.__recognisers.at(-1).stop());
+  await pick.getByRole("button", { name: "Try again" }).tap();
+  await page.waitForFunction(() => window.__listeningCount() === 1);
+  await speak(page, "fairway mower number two");
+  await pick.waitFor({ state: "detached" });
+  assert.deepEqual(await page.evaluate(() => window.__picked), ["Fairway Mower 2"]);
   await context.close();
 }
 
@@ -210,6 +284,12 @@ async function checkUnsupported() {
   const dialog = page.getByRole("dialog", { name: "Add a list of substances" });
   await dialog.getByText("Type the product names", { exact: false }).waitFor();
   assert.equal(await dialog.getByRole("button", { name: "Start speaking" }).count(), 0);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  // Say machine still lets the name be typed.
+  await page.getByRole("button", { name: "Say machine" }).click();
+  const pick = page.getByRole("dialog", { name: "Say the machine" });
+  await pick.getByText("Type the machine's name.").waitFor();
+  assert.equal(await pick.getByTestId("button-speak-to-pick-mic").count(), 0);
   await context.close();
 }
 
@@ -217,6 +297,7 @@ try {
   await waitForVite();
   browser = await chromium.launch({ executablePath: chromiumPath() });
   await checkSupported();
+  await checkPhone();
   await checkUnsupported();
   console.log("Dictation browser checks passed.");
 } finally {
