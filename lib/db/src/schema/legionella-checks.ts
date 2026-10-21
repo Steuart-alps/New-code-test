@@ -27,6 +27,9 @@ export const legionellaChecksTable = pgTable("legionella_checks", {
   // Sentinel outlet this test was logged against. The column and its foreign key
   // to legionella_sentinel_outlets come from runtime migrations.
   outletId: integer("outlet_id"),
+  // Equipment list item (cold water tank, calorifier) the check was made on.
+  // The foreign key to equipment_items comes from runtime migrations.
+  equipmentId: integer("equipment_id"),
   // Mobile outbox entry ID and payload fingerprint: a replay of an applied
   // submission is recognised instead of creating a duplicate. Not a credential.
   clientEntryId: text("client_entry_id"),

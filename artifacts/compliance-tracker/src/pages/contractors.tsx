@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
+import { ContractorVisitsCard } from "@/components/contractor-visits-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Search, Building, Mail, Phone, ChevronRight, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
@@ -94,6 +95,8 @@ export default function ContractorsPage() {
           </Button>
         )}
       </div>
+
+      <ContractorVisitsCard contractors={contractors} />
 
       {isLoading ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" /></div>

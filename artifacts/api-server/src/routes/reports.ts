@@ -410,6 +410,9 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
         SELECT 'TreeTrack',                site_id FROM tree_inspections
           WHERE client_id = ${clientId} AND check_date      BETWEEN ${from} AND ${to}
         UNION ALL
+        SELECT 'COSHHTrack',               site_id FROM coshh_checks
+          WHERE client_id = ${clientId} AND deleted_at IS NULL AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
         SELECT 'PremisesTrack',            site_id FROM premises_inspections
           WHERE client_id = ${clientId} AND inspection_date BETWEEN ${from} AND ${to}
         UNION ALL
@@ -552,6 +555,9 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
         UNION ALL
         SELECT check_date, site_id FROM tree_inspections
           WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
+        SELECT check_date, site_id FROM coshh_checks
+          WHERE client_id = ${clientId} AND deleted_at IS NULL AND check_date BETWEEN ${from} AND ${to}
         UNION ALL
         SELECT inspection_date, site_id FROM premises_inspections
           WHERE client_id = ${clientId} AND inspection_date BETWEEN ${from} AND ${to}

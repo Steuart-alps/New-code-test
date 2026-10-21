@@ -95,6 +95,7 @@ try {
       "asbestos_survey_history.report_object_path",
       "check_photos.object_path",
       "incident_riddor_events.receipt_object_path",
+      "green_puwer_inspections.certificate_object_path",
       "staged_photo_upload_receipts.object_path",
       "fix_track_issues.media_urls",
       "fix_track_issues.completion_document_path",

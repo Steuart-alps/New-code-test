@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { apiFetch } from "@/lib/api";
+import { takeLinkParams } from "@/lib/deep-link";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -152,6 +153,12 @@ export default function RoomTrackPage() {
   const [savingId, setSavingId] = useState<number | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  // A scanned QR label shows just that room's check card.
+  const [onlyRoomId, setOnlyRoomId] = useState<number | null>(null);
+  useEffect(() => {
+    const id = Number(takeLinkParams(["room", "open"] as const)?.room);
+    if (Number.isSafeInteger(id) && id > 0) setOnlyRoomId(id);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,6 +183,7 @@ export default function RoomTrackPage() {
   useEffect(() => { load(); }, [load]);
 
   const activeRooms = rooms.filter(room => !room.archived && !room.isArchived && (siteId === "__all__" || roomSiteId(room) === Number(siteId)));
+  const shownRooms = onlyRoomId === null ? activeRooms : activeRooms.filter(room => room.id === onlyRoomId);
   const saveCheck = async (room: Room, values: CheckValues, notes: string, checkedBy: string, checkedByRosterId: number | null) => {
     setSavingId(room.id);
     try {
@@ -216,9 +224,15 @@ export default function RoomTrackPage() {
           <div className="space-y-1"><Label className="text-xs">Site</Label><Select value={siteId} onValueChange={setSiteId}><SelectTrigger className="h-9" aria-label="Filter rooms by site"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__all__">All sites</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
           <div className="flex items-end"><Button variant="outline" className="h-9" onClick={load}>Refresh</Button></div>
         </Card>
-        {loading ? <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : activeRooms.length === 0 ? (
+        {onlyRoomId !== null && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-sm border bg-muted/40 px-4 py-2.5 text-sm">
+            <span>{shownRooms.length ? "Showing the room you scanned." : loading ? "Finding the room you scanned…" : "The room you scanned isn't in today's list for this site."}</span>
+            <Button variant="outline" size="sm" onClick={() => setOnlyRoomId(null)}>Show every room</Button>
+          </div>
+        )}
+        {loading ? <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : shownRooms.length === 0 ? (
           <div className="rounded-sm border border-dashed p-12 text-center"><BedDouble className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" /><p className="text-sm font-medium text-muted-foreground">No active rooms for this selection</p>{canAdmin && <Button variant="outline" size="sm" className="mt-4" onClick={() => { setEditingRoom(null); setDialogOpen(true); }}>Add the first room</Button>}</div>
-        ) : <div className="grid gap-4 lg:grid-cols-2">{activeRooms.map(room => {
+        ) : <div className="grid gap-4 lg:grid-cols-2">{shownRooms.map(room => {
           const check = checks.find(item => checkRoomId(item) === room.id);
           return <RoomCheckCard key={room.id} room={room} check={check} disabled={savingId === room.id} defaultCheckedBy={user?.name ?? ""} canAdmin={canAdmin} onSave={saveCheck} onEdit={() => { setEditingRoom(room); setDialogOpen(true); }} onArchive={() => archive(room)} />;
         })}</div>}

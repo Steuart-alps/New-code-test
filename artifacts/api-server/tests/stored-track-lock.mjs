@@ -937,6 +937,27 @@ async function main() {
     return { oldId, currentId };
   };
 
+  // COSHHTrack checks (LEV, health checks, monitoring, briefings) are dated
+  // records; their assessments are reviewed documents and are not locked.
+  const coshhSite = await admin("POST", "/sites", { name: `Lock COSHH Site ${suffix}`, seedStarterChecks: false });
+  expect("COSHH checks: seed site", coshhSite, [200, 201]);
+  if ([200, 201].includes(coshhSite.status)) {
+    const coshhCheck = (checkDate, extra = {}) => ({
+      siteId: coshhSite.data.id, checkType: "lev_examination", checkDate, subject: `Lock booth ${suffix}`, result: "pass", ...extra,
+    });
+    await lockedSubroute({
+      label: "COSHH check", path: "/coshh-track/checks",
+      createOld: () => admin("POST", "/coshh-track/checks", coshhCheck(old)),
+      createCurrent: () => admin("POST", "/coshh-track/checks", coshhCheck(today)),
+      staffEdit: coshhCheck(old, { notes: bypassMarker }),
+      forgedEdit: coshhCheck(today, { notes: bypassMarker }),
+      adminEdit: coshhCheck(old, { notes: "admin correction" }),
+      currentEdit: coshhCheck(today, { notes: "staff edit" }),
+      backdateEdit: coshhCheck(old, { notes: "backdated" }),
+      staffCurrentPut: 200, staffCurrentDelete: 204, adminDelete: 204,
+    });
+  }
+
   // PAT: certificates, replacements and failures are retained evidence. Their
   // DELETE handlers refuse every role (405); staff hit the lock first on old rows.
   const patSite = await admin("POST", "/sites", { name: `Lock PAT Site ${suffix}`, seedStarterChecks: false });
@@ -1058,6 +1079,53 @@ async function main() {
       adminEdit: { notes: "admin correction" },
       currentEdit: { notes: "staff edit" },
       backdateEdit: { logDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
+    // Hour readings: staff record them, managers delete them. The old one is
+    // the higher reading so the "lower than an earlier reading" guard stays out
+    // of the way of the lock checks.
+    const reading = (readingDate, hours) => ({ machineId, readingDate, hours, meterReplaced: true });
+    await lockedSubroute({
+      label: "Green hour reading", path: "/green-track/hour-readings", listPath: `/green-track/hour-readings?machineId=${machineId}`,
+      createOld: () => admin("POST", "/green-track/hour-readings", reading(old, 100)),
+      createCurrent: () => admin("POST", "/green-track/hour-readings", reading(today, 120)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { readingDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { readingDate: old, notes: "backdated", meterReplaced: true },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
+    // Spraying book and stock records: staff record them, managers delete them.
+    const product = await admin("POST", "/green-track/products", { name: `Lock fungicide ${suffix}`, category: "pesticide", unit: "L" });
+    expect("Green product: seed", product, [201]);
+    const productId = product.data?.id;
+    const spraying = (applicationDate) => ({
+      applicationDate, areas: ["greens"], operatorName: "Lock Fixture", products: [{ productId, quantityUsed: 1 }],
+    });
+    await lockedSubroute({
+      label: "Green spraying record", path: "/green-track/applications",
+      createOld: () => admin("POST", "/green-track/applications", spraying(old)),
+      createCurrent: () => admin("POST", "/green-track/applications", spraying(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { applicationDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { applicationDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+    const delivery = (movementDate) => ({ productId, movementDate, kind: "delivery", quantity: 10 });
+    await lockedSubroute({
+      label: "Green stock record", path: "/green-track/stock-movements",
+      createOld: () => admin("POST", "/green-track/stock-movements", delivery(old)),
+      createCurrent: () => admin("POST", "/green-track/stock-movements", delivery(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { movementDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { movementDate: old, notes: "backdated" },
       staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
     });
 
@@ -1372,6 +1440,10 @@ async function main() {
   await siteMove({ label: "COSHH register item", createPath: "/registers/coshh",
     create: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }),
     move: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }) });
+  const coshhAssessment = (siteId) => ({ siteId, task: `Lock cleaning ${suffix}`, riskLevel: "low", assessmentDate: today });
+  await siteMove({ label: "COSHH assessment", createPath: "/coshh-track/assessments", create: coshhAssessment, move: coshhAssessment });
+  const coshhCheck = (siteId) => ({ siteId, checkType: "lev_examination", checkDate: today, subject: `Lock booth ${suffix}`, result: "pass" });
+  await siteMove({ label: "COSHH check", createPath: "/coshh-track/checks", create: coshhCheck, move: coshhCheck });
   await siteMove({ label: "Asbestos register item", createPath: "/registers/asbestos",
     create: (siteId) => ({ siteId, builtBefore2000: "unknown" }),
     move: (siteId) => ({ siteId, builtBefore2000: "unknown" }) });

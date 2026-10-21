@@ -15,7 +15,7 @@ const requiredTracks = [
   "DailyTrack AM / DailyTrack PM", "KitchenTrack", "FireTrack", "LegionellaTrack",
   "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack",
   "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack",
-  "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack",
+  "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack", "COSHHTrack",
 ];
 const allowedClassifications = new Set([
   "Legislation", "Approved Code of Practice", "Official guidance",

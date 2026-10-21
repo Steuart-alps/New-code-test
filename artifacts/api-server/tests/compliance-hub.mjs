@@ -66,7 +66,7 @@ async function run() {
     "DailyTrack AM / DailyTrack PM", "KitchenTrack", "FireTrack", "LegionellaTrack",
     "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack",
     "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack",
-    "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack",
+    "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack", "COSHHTrack",
   ];
   const coveredTracks = new Set((guide.data?.guidance ?? []).map(g => g.track));
   check("guidance: covers every operational track", requiredTracks.every(track => coveredTracks.has(track)));

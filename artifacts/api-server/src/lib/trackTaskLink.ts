@@ -1,12 +1,13 @@
 import type { Request } from "express";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { complianceItemsTable, fireSafetyChecksTable, legionellaChecksTable, sitesTable } from "@workspace/db/schema";
+import { complianceItemsTable, contractorsTable, fireSafetyChecksTable, legionellaChecksTable, pestVisitsTable, sitesTable } from "@workspace/db/schema";
 import { appendAuditEvent } from "./audit";
 import { completionDateFromDay, completionFields } from "./complianceCompletion";
 import { supersedeStaleReminderCycles } from "./reminderCycles";
 import { getActiveDepartmentId } from "../middleware/requireAuth";
 import { siteVisibleToDepartment } from "./departmentSites";
+import { defaultNextVisitDate } from "./pestVisitFrequency";
 
 /**
  * Track checks that a ComplyTrack task also covers, keyed by the task's
@@ -24,6 +25,13 @@ export const TRACK_TASK_LINKS = {
   },
   legionella: {
     cold_tank_clean: "Clean & Disinfect Water Tanks",
+    calorifier_inspection: "Calorifier Inspection",
+    calorifier_clean: "Calorifier Clean & Disinfect",
+    tmv_service: "TMV Service",
+  },
+  // A PestTrack visit; "visit" is the only kind.
+  pest: {
+    visit: "Pest Control Visit",
   },
 } as const;
 export type LinkedTrack = keyof typeof TRACK_TASK_LINKS;
@@ -31,10 +39,12 @@ export type LinkedTrack = keyof typeof TRACK_TASK_LINKS;
 const AUDIT_SOURCE_KEY: Record<LinkedTrack, string> = {
   fire: "fromFireSafetyCheck",
   legionella: "fromLegionellaCheck",
+  pest: "fromPestVisit",
 };
 const AUDIT_ENTITY_TYPE: Record<LinkedTrack, string> = {
   fire: "fire_safety_check",
   legionella: "legionella_check",
+  pest: "pest_visit",
 };
 
 const normalise = (title: string) => title.trim().toLowerCase();
@@ -88,7 +98,7 @@ export async function completeLinkedTasksFromCheck(req: Request, track: LinkedTr
     conditions.push(await soleSiteId(check.clientId) === check.siteId
       ? sql`(${complianceItemsTable.siteId} IS NULL OR ${complianceItemsTable.siteId} = ${check.siteId})`
       : eq(complianceItemsTable.siteId, check.siteId));
-  } else if (track === "legionella") {
+  } else if (track !== "fire") {
     conditions.push(isNull(complianceItemsTable.siteId));
   }
   const rows = await db
@@ -130,15 +140,17 @@ export async function completeLinkedTasksFromCheck(req: Request, track: LinkedTr
  * pass on the date done, at the task's site), unless that site already has
  * one on that date — for instance the record that completed the task. A
  * business-wide task goes in the FireTrack log with no site (covering every
- * site); in the water log, which is kept per site, it is recorded only at a
- * business with a single site. Returns the new record, if one was made.
+ * site); in the water log and PestTrack, which are kept per site, it is
+ * recorded only at a business with a single site. A pest visit recorded this
+ * way is due again after the business's visit frequency. Returns the new
+ * record, if one was made.
  */
 export async function recordTrackCheckFromTask(req: Request, task: Task, completedAt: Date | string | null) {
   const link = trackCheckForTask(task.title);
   if (!link || !completedAt) return null;
   const { track, checkType } = link;
-  const siteId = task.siteId ?? (track === "legionella" ? await soleSiteId(task.clientId) : null);
-  if (track === "legionella" && siteId == null) return null;
+  const siteId = task.siteId ?? (track !== "fire" ? await soleSiteId(task.clientId) : null);
+  if (track !== "fire" && siteId == null) return null;
   const checkDate = new Date(completedAt).toISOString().slice(0, 10);
   const values = {
     clientId: task.clientId,
@@ -160,6 +172,24 @@ export async function recordTrackCheckFromTask(req: Request, task: Task, complet
     )).limit(1);
     if (already) return null;
     [inserted] = await db.insert(fireSafetyChecksTable).values(values).returning();
+  } else if (track === "pest") {
+    const [already] = await db.select({ id: pestVisitsTable.id }).from(pestVisitsTable).where(and(
+      eq(pestVisitsTable.clientId, task.clientId),
+      eq(pestVisitsTable.visitDate, checkDate),
+      eq(pestVisitsTable.siteId, siteId!),
+    )).limit(1);
+    if (already) return null;
+    const contractor = task.contractorId == null ? undefined : (await db
+      .select({ name: contractorsTable.name, company: contractorsTable.company })
+      .from(contractorsTable)
+      .where(and(eq(contractorsTable.id, task.contractorId), eq(contractorsTable.clientId, task.clientId)))
+      .limit(1))[0];
+    [inserted] = await db.insert(pestVisitsTable).values({
+      clientId: task.clientId, siteId, visitDate: checkDate,
+      contractorName: contractor?.name ?? null, contractorCompany: contractor?.company ?? null,
+      nextVisitDate: await defaultNextVisitDate(task.clientId, checkDate),
+      notes: values.notes, createdBy: values.createdBy,
+    }).returning();
   } else {
     const [already] = await db.select({ id: legionellaChecksTable.id }).from(legionellaChecksTable).where(and(
       eq(legionellaChecksTable.clientId, task.clientId),

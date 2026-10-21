@@ -3,6 +3,7 @@ import { FoodJurisdictionOptions, KitchenGuidanceNote } from "@/components/kitch
 import { assessKitchenTemperatures, isFoodJurisdiction, kitchenFailureValue, kitchenHoldRequirement, kitchenTemperatureGuidance, parseKitchenTemperatureRules, type FoodJurisdiction, type KitchenTemperatureFailure } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { takeLinkParams } from "@/lib/deep-link";
 import { ChecklistItemRow } from "@/components/checklist-item-row";
 import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
 import { AppLayout } from "@/components/layout";
@@ -1021,6 +1022,34 @@ export function DailyDiaryTab() {
     user?.name,
   ]);
 
+  // A fridge or freezer's scanned QR label opens today's diary for its site
+  // and puts the cursor in that unit's reading (AM before noon, PM after).
+  const [scanColdUnit, setScanColdUnit] = useState<string | null>(null);
+  useEffect(() => {
+    const link = takeLinkParams(["siteId", "coldUnit"] as const);
+    if (!link?.coldUnit) return;
+    const site = Number(link.siteId);
+    applyScope({ date: format(new Date(), "yyyy-MM-dd"), siteId: Number.isSafeInteger(site) && site > 0 ? site : null });
+    setScanColdUnit(link.coldUnit.slice(0, 100));
+  }, []);
+  useEffect(() => {
+    if (!scanColdUnit || !formReady) return;
+    const name = scanColdUnit.trim().toLowerCase();
+    setScanColdUnit(null);
+    let index = coldFood.findIndex(row => row.unit.trim().toLowerCase() === name);
+    if (index < 0 && !isSubmitted) {
+      index = coldFood.length;
+      setColdFood([...coldFood, { unit: scanColdUnit.trim(), tempAm: "", tempPm: "", correctiveAction: "" }]);
+    }
+    if (index < 0) return;
+    const field = new Date().getHours() < 12 ? "am" : "pm";
+    window.setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>(`[data-cold-unit-row="${index}"][data-cold-unit-field="${field}"]`);
+      input?.scrollIntoView({ behavior: "smooth", block: "center" });
+      input?.focus({ preventScroll: true });
+    }, 200);
+  }, [scanColdUnit, formReady]);
+
   // Date and site changes replace the form, so unsaved edits need a
   // deliberate discard; "Keep editing" stays on the current day and site.
   const applyScope = (next: { date: string; siteId: number | null }) => {
@@ -1471,10 +1500,12 @@ export function DailyDiaryTab() {
                         </td>
                         <td className="px-3 py-1.5">
                           <Input value={row.tempAm} disabled={isSubmitted} onChange={e => upd("tempAm", e.target.value)}
+                            data-cold-unit-row={i} data-cold-unit-field="am" inputMode="decimal"
                             className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 3" />
                         </td>
                         <td className="px-3 py-1.5">
                           <Input value={row.tempPm} disabled={isSubmitted} onChange={e => upd("tempPm", e.target.value)}
+                            data-cold-unit-row={i} data-cold-unit-field="pm" inputMode="decimal"
                             className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 4" />
                         </td>
                         <td className="px-3 py-1.5">

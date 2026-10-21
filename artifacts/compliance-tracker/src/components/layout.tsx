@@ -14,6 +14,8 @@ import {
   ChevronRight,
   MessageSquareWarning,
   GraduationCap,
+  Pin,
+  PinOff,
   X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -53,12 +55,28 @@ const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/bike-track", moduleKey: "bike" },
   { prefix: "/hot-tub", moduleKey: "hot_tub" },
   { prefix: "/tree-track", moduleKey: "tree" },
+  { prefix: "/coshh-track", moduleKey: "coshh" },
   // GreenTrack renders its module actions in its own "Actions" tab.
   { prefix: "/swim-track", moduleKey: "swim" },
   { prefix: "/incidents", moduleKey: "incident" },
+  { prefix: "/report-actions", moduleKey: "audit" },
 ];
 
-import { getNavGroups, isNavItemActive, isNavItemAvailable, type NavGroup } from "@/lib/nav-groups";
+import {
+  getNavGroups,
+  isNavItemActive,
+  isNavItemAvailable,
+  isNavGroupInitiallyOpen,
+  isNavItemPinnable,
+  MAX_PINNED_NAV_ITEMS,
+  navGroupStorageKey,
+  parsePinnedHrefs,
+  pinnedNavStorageKey,
+  resolvePinnedNavItems,
+  togglePinnedHref,
+  type NavGroup,
+  type NavItem,
+} from "@/lib/nav-groups";
 
 const TRACK_GUIDANCE_KEY = "complytrack:trackGuidanceDismissed";
 
@@ -97,20 +115,170 @@ function useNavGroups(): NavGroup[] {
   return getNavGroups({ isConsultant, canAdmin, canManageUsers });
 }
 
-function NavSidebarGroup({ group, location, hasService, primaryColor, onNavigate, layoutIdPrefix, storageScope }: { group: NavGroup; location: string; hasService: (s: string) => boolean; primaryColor: string; onNavigate?: () => void; layoutIdPrefix: string; storageScope: string }) {
-  const storageKey = `complytrack:nav:${storageScope}:${group.id}`;
-  const hasActiveRoute = group.items.some(item => isNavItemActive(item, location));
-  const hasAvailableItems = group.items.some(item => isNavItemAvailable(item, hasService));
-  const [isOpen, setIsOpen] = useState(() => {
-    if (hasActiveRoute) return true;
-    if (!hasAvailableItems) return false;
+interface PinControls {
+  isPinned: (href: string) => boolean;
+  canPinMore: boolean;
+  toggle: (href: string) => void;
+  /** Touch screens have no hover, so the drawer always shows the pin buttons. */
+  alwaysVisible: boolean;
+}
+
+function readPinnedHrefs(key: string): string[] {
+  try {
+    return parsePinnedHrefs(window.localStorage.getItem(key));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The user's pinned sidebar links for the current business, kept in this
+ * browser only. Pins for modules the business no longer has (or links the
+ * user's role no longer shows) are dropped and the cleaned list saved back.
+ */
+function usePinnedNav(scope: string, groups: NavGroup[], hasService: (key: string) => boolean) {
+  const key = pinnedNavStorageKey(scope);
+  // Tagged with its key so a business switch never shows, or saves, the
+  // previous business's pins under the new one.
+  const [state, setState] = useState(() => ({ key, hrefs: readPinnedHrefs(key) }));
+  const stored = state.key === key ? state.hrefs : readPinnedHrefs(key);
+  const { items, hrefs } = resolvePinnedNavItems(stored, groups, hasService);
+  const storedKey = stored.join("|");
+  const hrefsKey = hrefs.join("|");
+
+  function save(next: string[]) {
+    setState({ key, hrefs: next });
     try {
-      const saved = window.localStorage.getItem(storageKey);
-      if (saved !== null) return saved === "true";
+      if (next.length === 0) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      // Storage unavailable: pins last for this page view only.
+    }
+  }
+
+  useEffect(() => {
+    if (hrefsKey !== storedKey) save(hrefs);
+    else if (state.key !== key) setState({ key, hrefs: stored });
+  }, [key, storedKey, hrefsKey]);
+
+  useEffect(() => {
+    // Keep other tabs in step when pins change in one.
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === key) setState({ key, hrefs: parsePinnedHrefs(event.newValue) });
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [key]);
+
+  return {
+    items,
+    isPinned: (href: string) => hrefs.includes(href),
+    canPinMore: hrefs.length < MAX_PINNED_NAV_ITEMS,
+    toggle: (href: string) => save(togglePinnedHref(hrefs, href)),
+  };
+}
+
+function NavItemRow({ item, location, hasService, primaryColor, onNavigate, layoutId, pin }: { item: NavItem; location: string; hasService: (s: string) => boolean; primaryColor: string; onNavigate?: () => void; layoutId: string; pin: PinControls }) {
+  const isActive = isNavItemActive(item, location);
+  const isLocked = !isNavItemAvailable(item, hasService);
+  const isComingSoon = item.comingSoon === true;
+  const pinnable = isNavItemPinnable(item, hasService);
+  const pinned = pinnable && pin.isPinned(item.href);
+  const pinDisabled = !pinned && !pin.canPinMore;
+  const inner = (
+    <div className={cn(
+      "flex items-center gap-3 px-3 py-2.5 rounded-sm font-medium transition-all duration-200 group relative",
+      isActive
+        ? "text-sidebar-foreground"
+        : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent",
+      (isLocked || isComingSoon) && "opacity-70",
+      pinnable && "pr-10"
+    )}
+    >
+      {isActive && !isComingSoon && (
+        <motion.div
+          layoutId={layoutId}
+          className="absolute inset-0 rounded-sm z-0"
+          style={{ backgroundColor: `${primaryColor}20`, borderLeft: `3px solid ${primaryColor}` }}
+          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        />
+      )}
+      <item.icon className={cn("w-4 h-4 z-10 relative", isActive && !isComingSoon ? "text-sidebar-foreground" : "text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70")} style={isActive && !isComingSoon ? { color: primaryColor } : {}} />
+      <span className="z-10 relative text-sm tracking-wide flex-1 text-left">{item.label}</span>
+      {isComingSoon ? (
+        <span className="z-10 relative text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sidebar-foreground/10 text-sidebar-foreground/50 tracking-wide">
+          Soon
+        </span>
+      ) : isLocked ? (
+        <Lock className="w-3.5 h-3.5 z-10 relative text-sidebar-foreground/40" />
+      ) : null}
+    </div>
+  );
+  return (
+    <div className="relative group/nav-row">
+      {isComingSoon ? (
+        <div className="cursor-default">{inner}</div>
+      ) : (
+        <Link href={item.href} onClick={onNavigate} className="block focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-foreground/30 rounded-sm">{inner}</Link>
+      )}
+      {/* Locked and coming-soon links can't be pinned, so they get no button. */}
+      {pinnable && (
+        <button
+          type="button"
+          onClick={() => pin.toggle(item.href)}
+          disabled={pinDisabled}
+          aria-pressed={pinned}
+          aria-label={pinned ? `Unpin ${item.label}` : `Pin ${item.label}`}
+          title={pinDisabled ? `You can pin up to ${MAX_PINNED_NAV_ITEMS} links. Unpin one first.` : pinned ? "Unpin" : "Pin to the top"}
+          data-testid={`nav-pin-${item.href.slice(1)}`}
+          className={cn(
+            "absolute right-1.5 top-1/2 -translate-y-1/2 z-20 p-1.5 rounded-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-foreground/30 disabled:cursor-not-allowed disabled:hover:bg-transparent",
+            pin.alwaysVisible ? "opacity-60" : "opacity-0 group-hover/nav-row:opacity-100",
+            pinDisabled && "group-hover/nav-row:opacity-40"
+          )}
+        >
+          {pinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PinnedNavSection({ items, location, hasService, primaryColor, onNavigate, layoutIdPrefix, pin }: { items: NavItem[]; location: string; hasService: (s: string) => boolean; primaryColor: string; onNavigate?: () => void; layoutIdPrefix: string; pin: PinControls }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="space-y-1" data-testid="nav-pinned">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground">
+        <Pin className="w-3 h-3" />
+        <span>Pinned</span>
+      </div>
+      {items.map(item => (
+        <NavItemRow
+          key={item.href}
+          item={item}
+          location={location}
+          hasService={hasService}
+          primaryColor={primaryColor}
+          onNavigate={onNavigate}
+          layoutId={`${layoutIdPrefix}-pinned-active`}
+          pin={pin}
+        />
+      ))}
+    </div>
+  );
+}
+
+function NavSidebarGroup({ group, location, hasService, primaryColor, onNavigate, layoutIdPrefix, storageScope, pin }: { group: NavGroup; location: string; hasService: (s: string) => boolean; primaryColor: string; onNavigate?: () => void; layoutIdPrefix: string; storageScope: string; pin: PinControls }) {
+  const storageKey = navGroupStorageKey(storageScope, group.id);
+  const hasActiveRoute = group.items.some(item => isNavItemActive(item, location));
+  const [isOpen, setIsOpen] = useState(() => {
+    let saved: string | null = null;
+    try {
+      saved = window.localStorage.getItem(storageKey);
     } catch {
       // Private browsing may disable storage; keep the default.
     }
-    return group.defaultOpen;
+    return isNavGroupInitiallyOpen(group, { location, hasService, saved });
   });
 
   useEffect(() => {
@@ -142,44 +310,18 @@ function NavSidebarGroup({ group, location, hasService, primaryColor, onNavigate
               transition={{ duration: 0.2, ease: "easeInOut" }}
               className="space-y-1 overflow-hidden"
             >
-              {group.items.map((item) => {
-                const isActive = isNavItemActive(item, location);
-                const isLocked = !isNavItemAvailable(item, hasService);
-                const isComingSoon = item.comingSoon === true;
-                const inner = (
-                  <div className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-sm font-medium transition-all duration-200 group relative",
-                    isActive
-                      ? "text-sidebar-foreground"
-                      : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent",
-                    (isLocked || isComingSoon) && "opacity-70"
-                  )}
-                  >
-                    {isActive && !isComingSoon && (
-                      <motion.div
-                        layoutId={`${layoutIdPrefix}-active`}
-                        className="absolute inset-0 rounded-sm z-0"
-                        style={{ backgroundColor: `${primaryColor}20`, borderLeft: `3px solid ${primaryColor}` }}
-                        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                      />
-                    )}
-                    <item.icon className={cn("w-4 h-4 z-10 relative", isActive && !isComingSoon ? "text-sidebar-foreground" : "text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70")} style={isActive && !isComingSoon ? { color: primaryColor } : {}} />
-                    <span className="z-10 relative text-sm tracking-wide flex-1 text-left">{item.label}</span>
-                    {isComingSoon ? (
-                      <span className="z-10 relative text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sidebar-foreground/10 text-sidebar-foreground/50 tracking-wide">
-                        Soon
-                      </span>
-                    ) : isLocked ? (
-                      <Lock className="w-3.5 h-3.5 z-10 relative text-sidebar-foreground/40" />
-                    ) : null}
-                  </div>
-                );
-                return isComingSoon ? (
-                  <div key={item.href} className="cursor-default">{inner}</div>
-                ) : (
-                  <Link key={item.href} href={item.href} onClick={onNavigate} className="block focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-foreground/30 rounded-sm">{inner}</Link>
-                );
-              })}
+              {group.items.map((item) => (
+                <NavItemRow
+                  key={item.href}
+                  item={item}
+                  location={location}
+                  hasService={hasService}
+                  primaryColor={primaryColor}
+                  onNavigate={onNavigate}
+                  layoutId={`${layoutIdPrefix}-active`}
+                  pin={pin}
+                />
+              ))}
             </motion.div>
           </CollapsibleContent>
         )}
@@ -194,6 +336,9 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
   const isConsultant = useIsConsultant();
   const navGroups = useNavGroups();
   const navStorageScope = `${user?.id ?? "guest"}:${activeClientId ?? client?.id ?? "none"}`;
+  const pinnedNav = usePinnedNav(navStorageScope, navGroups, hasService);
+  const desktopPin: PinControls = { ...pinnedNav, alwaysVisible: false };
+  const mobilePin: PinControls = { ...pinnedNav, alwaysVisible: true };
   const [showAppDialog, setShowAppDialog] = useState(false);
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -226,6 +371,14 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         </div>
         
         <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-6 scrollbar-hide">
+          <PinnedNavSection
+            items={pinnedNav.items}
+            location={location}
+            hasService={hasService}
+            primaryColor={primaryColor}
+            layoutIdPrefix="desktop"
+            pin={desktopPin}
+          />
           {navGroups.map((group) => (
             <NavSidebarGroup
               key={`${navStorageScope}:${group.id}`}
@@ -235,6 +388,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
               primaryColor={primaryColor}
               layoutIdPrefix="desktop"
               storageScope={navStorageScope}
+              pin={desktopPin}
             />
           ))}
         </nav>
@@ -387,6 +541,15 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                     </Link>
                   </div>
                   <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-6 scrollbar-hide">
+                    <PinnedNavSection
+                      items={pinnedNav.items}
+                      location={location}
+                      hasService={hasService}
+                      primaryColor={primaryColor}
+                      layoutIdPrefix="mobile"
+                      pin={mobilePin}
+                      onNavigate={() => setMobileMenuOpen(false)}
+                    />
                     {navGroups.map((group) => (
                       <NavSidebarGroup
                         key={`${navStorageScope}:${group.id}`}
@@ -396,6 +559,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                         primaryColor={primaryColor}
                         layoutIdPrefix="mobile"
                         storageScope={navStorageScope}
+                        pin={mobilePin}
                         onNavigate={() => setMobileMenuOpen(false)}
                       />
                     ))}

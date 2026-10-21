@@ -1,6 +1,8 @@
 export type KitchenTemplateConfig = object | null | undefined;
 
 export type ColdUnit = {
+  /** Kept by the server so the unit's QR label survives a rename. */
+  id?: string;
   name: string;
   type: "fridge" | "freezer";
 };

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { apiFetch } from "@/lib/api";
+import { takeLinkParams } from "@/lib/deep-link";
 import {
   useListLegionellaChecks,
   getListLegionellaChecksQueryKey,
@@ -629,7 +630,8 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
 
 // ── Sentinel Outlets Panel ─────────────────────────────────────────────────────
 
-function SentinelOutletsPanel({ canAdmin, siteId }: { canAdmin: boolean; siteId?: number }) {
+/** `openOutletId`: an outlet whose scanned QR label asked for a reading. */
+function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: boolean; siteId?: number; openOutletId?: number }) {
   const [outlets, setOutlets] = useState<OutletStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [logOutlet, setLogOutlet] = useState<OutletStatus | null>(null);
@@ -648,6 +650,11 @@ function SentinelOutletsPanel({ canAdmin, siteId }: { canAdmin: boolean; siteId?
   };
 
   useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    if (!openOutletId || loading) return;
+    const outlet = outlets.find(o => o.id === openOutletId);
+    if (outlet) setLogOutlet(outlet);
+  }, [openOutletId, loading]);
 
   const handleDelete = async (id: number) => {
     if (!confirm("Remove this outlet? This won't delete historical test records.")) return;
@@ -810,11 +817,14 @@ function RecordCheckDialog({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   defaultCheckType,
+  preset,
 }: {
   siteId?: number;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   defaultCheckType?: LegionellaCheckType;
+  /** A water tank or calorifier from a scanned QR label: the check is recorded against it. */
+  preset?: { equipmentId: number; name: string; siteId?: number; location?: string };
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
@@ -837,6 +847,15 @@ function RecordCheckDialog({
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [selectedSite, setSelectedSite] = useState<number | undefined>(siteId);
+  const [equipment, setEquipment] = useState<{ id: number; name: string } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!preset) { setEquipment(null); return; }
+    setEquipment({ id: preset.equipmentId, name: preset.name });
+    setSelectedSite(preset.siteId);
+    setLocation(preset.location ?? preset.name);
+  }, [open, preset]);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -872,6 +891,7 @@ function RecordCheckDialog({
       location: location || undefined,
       performedBy: performedBy || null, staffRosterId: staffRosterId,
       notes: notes || undefined,
+      equipmentId: equipment?.id ?? null,
     };
 
     createCheck.mutate(
@@ -882,6 +902,7 @@ function RecordCheckDialog({
           queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey() });
           toast({ title: "Check recorded", description: `Server outcome: ${response?.result ?? result}.` });
           setOpen(false);
+          setEquipment(null);
           setTemperature("");
           setLocation("");
           setPerformedBy(user?.name ?? "");
@@ -907,6 +928,12 @@ function RecordCheckDialog({
         <DialogHeader>
           <DialogTitle className="font-display">Record Legionella Check</DialogTitle>
         </DialogHeader>
+        {equipment && (
+          <div className="flex items-center justify-between gap-2 rounded-sm border bg-muted/40 px-3 py-2 text-sm">
+            <span>Recording for <span className="font-medium">{equipment.name}</span></span>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setEquipment(null)}>Not this item</Button>
+          </div>
+        )}
         <div className="space-y-4 py-4">
           <div className="space-y-1.5">
             <Label>Check Type</Label>
@@ -968,7 +995,7 @@ function RecordCheckDialog({
               <Label>Site (optional)</Label>
               <Select
                 value={selectedSite ? String(selectedSite) : "none"}
-                onValueChange={(v) => setSelectedSite(v === "none" ? undefined : Number(v))}
+                onValueChange={(v) => { setSelectedSite(v === "none" ? undefined : Number(v)); setEquipment(null); }}
               >
                 <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
@@ -1148,6 +1175,32 @@ export default function LegionellaPage() {
   const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<LegionellaCheckType | undefined>(undefined);
+  const [scanOutletId, setScanOutletId] = useState<number>();
+  const [scanEquipment, setScanEquipment] = useState<{ equipmentId: number; name: string; siteId?: number; location?: string }>();
+
+  // A scanned QR label: an outlet opens its reading, a tank or calorifier
+  // opens the check its button named.
+  useEffect(() => {
+    const link = takeLinkParams(["outlet", "equipment", "open"] as const);
+    if (!link) return;
+    const outletId = Number(link.outlet);
+    if (Number.isSafeInteger(outletId) && outletId > 0) { setScanOutletId(outletId); return; }
+    const equipmentId = Number(link.equipment);
+    const checkType = link.open as LegionellaCheckType | undefined;
+    if (!Number.isSafeInteger(equipmentId) || equipmentId < 1 || !checkType || !(checkType in CHECK_TYPE_LABELS)) return;
+    void (async () => {
+      const res = await apiFetch("/equipment");
+      const items = res.ok ? await res.json() as Array<{ id: number; name: string; siteId: number | null; location: string | null }> : [];
+      const item = items.find(i => i.id === equipmentId);
+      if (!item) return;
+      setScanEquipment({
+        equipmentId, name: item.name, siteId: item.siteId ?? undefined,
+        location: item.location ? `${item.name} · ${item.location}` : item.name,
+      });
+      setQuickCheckType(checkType);
+      setRecordOpen(true);
+    })();
+  }, []);
 
   const { data: status, isLoading: statusLoading, error: statusError } = useGetLegionellaStatus(
     { siteId: filterSite },
@@ -1238,7 +1291,7 @@ export default function LegionellaPage() {
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && <LegionellaConfigDialog siteId={filterSite} />}
-            <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />
+            <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={value => { setRecordOpen(value); if (!value) setScanEquipment(undefined); }} defaultCheckType={quickCheckType} preset={scanEquipment} />
           </div>
         </div>
 
@@ -1326,7 +1379,7 @@ export default function LegionellaPage() {
         ))}
 
         {/* Sentinel Outlets — per-outlet monthly tracking */}
-        <SentinelOutletsPanel canAdmin={canAdmin} siteId={filterSite} />
+        <SentinelOutletsPanel canAdmin={canAdmin} siteId={filterSite} openOutletId={scanOutletId} />
 
         {(overdueStatuses.length > 0 || dueSoonStatuses.length > 0) && (
           <div className="space-y-3">

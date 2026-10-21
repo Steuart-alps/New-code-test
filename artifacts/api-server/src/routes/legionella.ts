@@ -158,6 +158,8 @@ const createSchema = z.object({
   staffRosterId: z.number().int().positive().nullable().optional(),
   /** FK back to legionella_sentinel_outlets — links this check to a specific outlet. */
   outletId: z.number().int().nullable().optional(),
+  /** Equipment list item (cold water tank, calorifier) the check was made on. */
+  equipmentId: z.number().int().positive().nullable().optional(),
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
@@ -342,6 +344,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
 
   const outletError = await outletLinkError(clientId, data.outletId, data.checkType, data.siteId);
   if (outletError) return res.status(400).json({ error: outletError });
+  const equipmentError = await equipmentLinkError(clientId, data.equipmentId, data.checkType, data.siteId);
+  if (equipmentError) return res.status(400).json({ error: equipmentError });
 
   const userId = req.currentUser!.id;
   const entry = clientEntryFrom(data);
@@ -363,6 +367,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         temperature: data.temperature != null ? String(data.temperature) : null,
         siteId: data.siteId ?? null, location: data.location ?? null, notes: data.notes ?? null,
         performedBy: performer.performedBy, staffRosterId: performer.staffRosterId,
+        equipmentId: data.equipmentId ?? null,
         createdBy: userId,
         clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
       }).returning();
@@ -419,6 +424,36 @@ async function outletLinkError(
   if (!outlet || (requireActive && !outlet.active)) return "Outlet not found";
   if (OUTLET_CHECK_TYPE_MAP[outlet.type] !== checkType) return "This check type cannot be recorded against that outlet";
   if ((outlet.site_id == null ? null : Number(outlet.site_id)) !== (siteId ?? null)) return "The outlet belongs to a different site";
+  return null;
+}
+
+/** Water checks each equipment-list type takes (see lib/equipmentLabels.ts). */
+const EQUIPMENT_CHECK_TYPES: Record<string, readonly string[]> = {
+  cold_water_tank: ["cold_tank_temp", "cold_tank_inspection", "cold_tank_clean"],
+  calorifier: ["calorifier_temp", "calorifier_inspection", "calorifier_clean"],
+};
+
+/**
+ * Why a check cannot be linked to an equipment item, or null when it can: the
+ * item must be this business's, at the check's own site, and of a type that
+ * takes this check. As with outlets, an existing link survives archiving.
+ */
+async function equipmentLinkError(
+  clientId: number,
+  equipmentId: number | null | undefined,
+  checkType: string,
+  siteId: number | null | undefined,
+  { requireActive = true } = {},
+): Promise<string | null> {
+  if (equipmentId == null) return null;
+  const result = await db.execute(sql`
+    SELECT type, site_id, active FROM equipment_items
+    WHERE id = ${equipmentId} AND client_id = ${clientId} LIMIT 1
+  `);
+  const item = result.rows[0] as { type: string; site_id: number | null; active: boolean } | undefined;
+  if (!item || (requireActive && !item.active)) return "Equipment not found";
+  if (!(EQUIPMENT_CHECK_TYPES[item.type] ?? []).includes(checkType)) return "This check type cannot be recorded against that equipment";
+  if ((item.site_id == null ? null : Number(item.site_id)) !== (siteId ?? null)) return "The equipment belongs to a different site";
   return null;
 }
 
@@ -648,6 +683,13 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
     const outletError = await outletLinkError(clientId, nextOutletId, existing.checkType, nextSiteId,
       { requireActive: outletChanged });
     if (outletError) return res.status(400).json({ error: outletError });
+  }
+  const equipmentChanged = parsed.data.equipmentId !== undefined && parsed.data.equipmentId !== existing.equipmentId;
+  if (equipmentChanged || nextSiteId !== existing.siteId) {
+    const nextEquipmentId = parsed.data.equipmentId !== undefined ? parsed.data.equipmentId : existing.equipmentId;
+    const equipmentError = await equipmentLinkError(clientId, nextEquipmentId, existing.checkType, nextSiteId,
+      { requireActive: equipmentChanged });
+    if (equipmentError) return res.status(400).json({ error: equipmentError });
   }
 
   const { temperature, outletId: _outletId, ...rest } = parsed.data;

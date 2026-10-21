@@ -124,7 +124,8 @@ function Field({ label, value, set, type = "text", testId }: { label: string; va
   return <div><Label>{label}</Label><Input data-testid={testId} className="mt-1" type={type} value={value} onChange={e => set(e.target.value)}/></div>;
 }
 
-export function LegacyPATRegister({ view }: { view: View }) {
+/** `openTestFor`: an appliance whose scanned QR label asked for a new test. */
+export function LegacyPATRegister({ view, openTestFor }: { view: View; openTestFor?: number }) {
   const { user } = useAuth(); const canAdmin = useCanAdmin(); const { toast } = useToast(); const qc = useQueryClient(); const locked = user?.role === "client_viewer";
   const [search, setSearch] = useState(""); const [registerSiteId, setRegisterSiteId] = useState(""); const [registerStatus, setRegisterStatus] = useState<"all" | "overdue">("all"); const [downloading, setDownloading] = useState(false); const [recordOpen, setRecordOpen] = useState(false); const [testOpen, setTestOpen] = useState(false); const [presetOpen, setPresetOpen] = useState(false); const [editAppliance, setEditAppliance] = useState<Appliance | null>(null); const [editTest, setEditTest] = useState<PATTest | null>(null); const [presetId, setPresetId] = useState<number>(); const [retiring, setRetiring] = useState<number | null>(null);
   const appliancesQ = useQuery({ queryKey: ["pat-track","legacy-appliances"], queryFn: () => api<Appliance[]>("/appliances") });
@@ -133,6 +134,9 @@ export function LegacyPATRegister({ view }: { view: View }) {
   const configQ = useQuery({ queryKey: ["pat-track","legacy-config"], queryFn: () => api<Config>("/config"), enabled: canAdmin });
   const sitesQ = useQuery({ queryKey: ["pat-track","legacy-sites"], queryFn: async () => { const r = await fetch(withActiveClient(`${baseUrl}/api/sites`), { credentials: "include" }); if (!r.ok) throw new Error("Unable to load sites"); return r.json() as Promise<Site[]>; } });
   const refresh = () => { ["legacy-appliances","legacy-tests","legacy-status"].forEach(x => qc.invalidateQueries({ queryKey: ["pat-track",x] })); };
+  useEffect(() => {
+    if (openTestFor && !locked) { setEditTest(null); setPresetId(openTestFor); setTestOpen(true); }
+  }, [openTestFor]);
   const appliances = appliancesQ.data ?? [], tests = testsQ.data ?? [], q = search.toLowerCase();
   const shownAppliances = useMemo(() => appliances.filter(a => [a.name,a.appliance_type,a.location,a.asset_tag].some(x => x?.toLowerCase().includes(q))), [appliances,q]);
   const shownTests = useMemo(() => tests.filter(t => [t.appliance_name,t.tested_by,t.asset_tag,t.site_name_snapshot,t.location_snapshot].some(x => x?.toLowerCase().includes(q))), [tests,q]);

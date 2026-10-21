@@ -23,7 +23,7 @@ missing_schema="$(psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -At <<'SQL'
 WITH expected(table_name, column_name) AS (VALUES
  ('food_safety_records','record_date'),('fire_safety_checks','check_date'),
  ('legionella_checks','check_date'),('hot_tub_checks','check_date'),
- ('tree_inspections','check_date'),('pool_checks','check_date'),
+ ('tree_inspections','check_date'),('pool_checks','check_date'),('coshh_checks','check_date'),
  ('daily_checklists','check_date'),('daily_manager_signoffs','signoff_date'),
  ('incidents','incident_date'),('premises_inspections','inspection_date'),
  ('room_track_checks','check_date'),('staff_training_records','issued_at'),
@@ -34,7 +34,8 @@ WITH expected(table_name, column_name) AS (VALUES
  ('bike_hire_records','hire_date'),('bike_services','service_date'),
  ('green_pre_use_checks','check_date'),('green_service_records','service_date'),
  ('green_defects','report_date'),('green_puwer_inspections','inspection_date'),
- ('green_fuel_logs','log_date'),('pat_tests','test_date'),
+ ('green_fuel_logs','log_date'),('green_hour_readings','reading_date'),
+ ('green_applications','application_date'),('green_stock_movements','movement_date'),('pat_tests','test_date'),
  ('pat_certificates','visit_date'),('pat_replacements','replaced_on'),
  ('pat_failures','created_at'),('pest_visits','visit_date'),
  ('pest_activity','recorded_date'),('safe_training_records','completed_at'),

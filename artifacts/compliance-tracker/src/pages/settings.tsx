@@ -33,6 +33,7 @@ import {
 } from "@/lib/service-action-outcome";
 import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
 import { TrackOwnersCard } from "@/components/track-owners-card";
+import { ReminderTimingsField, parseReminderTimings, type ReminderTimings } from "@/components/reminder-timings-field";
 import { CHECKOUT_ADDONS, checkoutPerSiteTotal } from "@/lib/addon-catalog";
 interface DomainRecord {
   record?: string;
@@ -1143,6 +1144,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "train", label: "TrainTrack" },
   { key: "hot_tub", label: "TubTrack" },
   { key: "tree", label: "TreeTrack" },
+  { key: "coshh", label: "COSHHTrack" },
   { key: "bike", label: "BikeTrack" },
   { key: "green", label: "GreenTrack" },
   { key: "swim", label: "AquaTrack (sessions & safety)" },
@@ -2837,14 +2839,14 @@ export default function SettingsPage() {
     maintenanceEmail: "",
     additionalReminderEmails: "",
     notifyClientAdmins: "false",
-    safeTrackReminderFrequency: "daily",
-    safeTrackReminderTime: "08:50",
+    ownerUpdateFrequency: "weekly" as "weekly" | "daily",
     smtpFrom: "",
     smtpFromName: "",
     resendApiKey: "",
     accountTimezone: "Europe/London",
   });
 
+  const [reminderTimings, setReminderTimings] = useState<ReminderTimings>({});
   const [testEmail, setTestEmail] = useState("");
 
   useEffect(() => {
@@ -2857,13 +2859,13 @@ export default function SettingsPage() {
         maintenanceEmail: (settings as any).maintenanceEmail || "",
         additionalReminderEmails: (settings as any).additionalReminderEmails || "",
         notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
-        safeTrackReminderFrequency: (settings as any).safeTrackReminderFrequency || "daily",
-        safeTrackReminderTime: (settings as any).safeTrackReminderTime || "08:50",
+        ownerUpdateFrequency: settings.ownerUpdateFrequency === "daily" ? "daily" : "weekly",
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
         resendApiKey: (settings as any).resendApiKey || "",
         accountTimezone: settings.accountTimezone || "Europe/London",
       });
+      setReminderTimings(parseReminderTimings(settings.reminderTimings));
     }
   }, [settings]);
 
@@ -2873,7 +2875,12 @@ export default function SettingsPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings.mutateAsync({ data: formData });
+    await updateSettings.mutateAsync({
+      data: {
+        ...formData,
+        reminderTimings: Object.keys(reminderTimings).length ? JSON.stringify(reminderTimings) : null,
+      },
+    });
   };
 
   const handleTestEmail = async () => {
@@ -2899,9 +2906,9 @@ export default function SettingsPage() {
         <DataExportCard />
         <DataDeletionRequestCard />
         <DepartmentsCard />
+        {canAdmin && <TodayByDepartmentRolesCard />}
         {canAdmin && <RequiredActionTemplatesCard />}
         <TrackOwnersCard />
-        <TrackSummaryRoutingCard />
         <PhotoRequirementsCard />
         {canAdmin && <BusinessTypeCard />}
         <form onSubmit={handleSave}>
@@ -2955,65 +2962,44 @@ export default function SettingsPage() {
                 <CardTitle className="font-display">Reminder Notifications</CardTitle>
               </div>
               <CardDescription>
-                Reminders are sent automatically to contractors every day at 8am when a compliance check enters its lead-time window.
-                You can also copy in a maintenance contact on every reminder email.
+                Each person gets one email at 8am, only on days when something of theirs needs a reminder: by default the day
+                before it is due, then the day after if it goes overdue and once a week after that (change this per type below). Anything with no one assigned goes to the track's owner,
+                or to the Owners when no owner is set (Track Owners above). Urgent actions (including checks recorded as unsafe), critical
+                compliance checks and new FixTrack issues are emailed as soon as they are raised.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-5">
-              <div className="rounded-md border border-border bg-muted/30 p-4 space-y-3">
-                <div>
-                  <Label>SafeTrack acknowledgement reminders</Label>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Choose how often account admins and staff are reminded about outstanding SafeTrack sign-offs.
-                    The delivery time uses your account timezone.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="safeTrackReminderFrequency">Frequency</Label>
-                    <Select
-                      value={formData.safeTrackReminderFrequency}
-                      onValueChange={(value) =>
-                        setFormData((prev) => ({ ...prev, safeTrackReminderFrequency: value }))
-                      }
-                    >
-                      <SelectTrigger id="safeTrackReminderFrequency">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="daily">Every day</SelectItem>
-                        <SelectItem value="weekly">Once a week</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="safeTrackReminderTime">Preferred delivery time</Label>
-                    <Input
-                      id="safeTrackReminderTime"
-                      type="time"
-                      name="safeTrackReminderTime"
-                      value={formData.safeTrackReminderTime}
-                      onChange={handleChange}
-                    />
-                  </div>
-                </div>
-                <SafeTrackReminderPreview
-                  frequency={formData.safeTrackReminderFrequency}
-                  time={formData.safeTrackReminderTime}
-                  timeZone={formData.accountTimezone || "Europe/London"}
-                  lastSentAt={(settings as any)?.safeTrackReminderLastSentAt ?? null}
-                  unsaved={
-                    formData.safeTrackReminderFrequency !== ((settings as any)?.safeTrackReminderFrequency || "daily")
-                    || formData.safeTrackReminderTime !== ((settings as any)?.safeTrackReminderTime || "08:50")
-                    || (formData.accountTimezone || "Europe/London") !== (settings?.accountTimezone || "Europe/London")
+              <div className="space-y-1.5">
+                <Label htmlFor="ownerUpdateFrequency">Owner update</Label>
+                <p className="text-xs text-muted-foreground">
+                  One email to the Owners listing what was done, what is overdue and who has it, what is due, anything with no one
+                  assigned, expiries in the next 60 days and documents still to sign. Managers get one for their own departments.
+                  Sent at 8am in your account timezone.
+                </p>
+                <Select
+                  value={formData.ownerUpdateFrequency}
+                  onValueChange={(value) =>
+                    setFormData((prev) => ({ ...prev, ownerUpdateFrequency: value === "daily" ? "daily" : "weekly" }))
                   }
-                />
+                >
+                  <SelectTrigger id="ownerUpdateFrequency" className="sm:w-64">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="weekly">Weekly, on Mondays</SelectItem>
+                    <SelectItem value="daily">Every day</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+              <ReminderTimingsField
+                value={reminderTimings}
+                onChange={setReminderTimings}
+                contractorLeadDays={Number(formData.contractorComplianceLeadTimeDays) || 30}
+              />
               <div className="space-y-1.5">
                 <Label>Admin / Owner Notification Email</Label>
                 <p className="text-xs text-muted-foreground">
-                  All compliance alert emails (overdue checks, unacknowledged documents, expiring contractor insurance, training certificates)
-                  will be sent to this address. If left blank, alerts go to each admin user on your account instead.
+                  The Owner update goes to this address instead of to each Owner. If left blank, each Owner gets it.
                 </p>
                 <Input
                   type="email"
@@ -3027,7 +3013,8 @@ export default function SettingsPage() {
               <div className="space-y-1.5">
                 <Label>Contractor expiry warning lead time (days)</Label>
                 <p className="text-xs text-muted-foreground">
-                  Send insurance, DBS / PVG, and certificate warnings this many days before expiry. Existing accounts use 30 days.
+                  Insurance, DBS / PVG and certificate reminders go to your Maintenance managers (or the Owners) this many days
+                  before expiry, and again the day before. Existing accounts use 30 days.
                 </p>
                 <Input
                   type="number"
@@ -3190,6 +3177,103 @@ export default function SettingsPage() {
 }
 
 // ── Organisation two-factor requirement (managers only) ─────────────────────
+// ── Today by department: who sees the dashboard card ─────────────────────────
+
+type TodayByDepartmentRoles = { managers: boolean; maintenance: boolean; staff: boolean };
+
+// Matches DEFAULT_TODAY_BY_DEPARTMENT_ROLES in api-server lib/todayByDepartment.ts.
+const DEFAULT_TODAY_BY_DEPARTMENT_ROLES: TodayByDepartmentRoles = { managers: true, maintenance: true, staff: false };
+
+function parseTodayByDepartmentRoles(value: unknown): TodayByDepartmentRoles {
+  try {
+    const parsed = typeof value === "string" && value ? JSON.parse(value) : {};
+    const pick = (key: keyof TodayByDepartmentRoles) =>
+      typeof parsed?.[key] === "boolean" ? parsed[key] as boolean : DEFAULT_TODAY_BY_DEPARTMENT_ROLES[key];
+    return { managers: pick("managers"), maintenance: pick("maintenance"), staff: pick("staff") };
+  } catch {
+    return DEFAULT_TODAY_BY_DEPARTMENT_ROLES;
+  }
+}
+
+const TODAY_BY_DEPARTMENT_ROLE_OPTIONS: Array<{ key: keyof TodayByDepartmentRoles; label: string; help: string }> = [
+  { key: "managers", label: "Heads of Department", help: "Managers see bars for the departments they look after." },
+  { key: "maintenance", label: "Maintenance managers", help: "See bars for their own department(s)." },
+  { key: "staff", label: "Staff", help: "See their own department's bar only." },
+];
+
+function TodayByDepartmentRolesCard() {
+  const { activeClientId } = useAuth();
+  const { toast } = useToast();
+  const clientApi = useActiveClientApi();
+  const [roles, setRoles] = useState<TodayByDepartmentRoles | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRoles(null);
+    clientApi("/settings")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+        if (!cancelled) setRoles(parseTodayByDepartmentRoles(data?.todayByDepartmentRoles));
+      })
+      .catch((err: Error) => {
+        if (!cancelled) toast({ title: "Couldn't load who sees Today by department", description: err.message, variant: "destructive" });
+      });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
+
+  async function change(key: keyof TodayByDepartmentRoles, value: boolean) {
+    if (!roles) return;
+    const next = { ...roles, [key]: value };
+    setSaving(true);
+    try {
+      const res = await clientApi("/settings", {
+        method: "PUT",
+        body: JSON.stringify({ todayByDepartmentRoles: JSON.stringify(next) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+      setRoles(parseTodayByDepartmentRoles(data?.todayByDepartmentRoles));
+      toast({ title: "Saved", description: "The dashboard card follows this the next time each person opens it." });
+    } catch (err: any) {
+      toast({ title: "Couldn't save who sees Today by department", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6" data-testid="card-today-by-department-roles">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <CardTitle className="font-display text-lg flex items-center gap-2">
+          <Users className="w-4 h-4" /> Today by department on the dashboard
+        </CardTitle>
+        <CardDescription>
+          A bar for each department showing today's checks as done, not done yet or failed. Owners always see every department. Choose who else sees it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-6 space-y-4">
+        {TODAY_BY_DEPARTMENT_ROLE_OPTIONS.map((option) => (
+          <div key={option.key} className="flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <Label htmlFor={`today-by-department-${option.key}`}>{option.label}</Label>
+              <p className="text-xs text-muted-foreground">{option.help}</p>
+            </div>
+            <Switch
+              id={`today-by-department-${option.key}`}
+              checked={roles?.[option.key] ?? DEFAULT_TODAY_BY_DEPARTMENT_ROLES[option.key]}
+              disabled={roles === null || saving}
+              onCheckedChange={(checked) => void change(option.key, checked)}
+              data-testid={`switch-today-by-department-${option.key}`}
+            />
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 function TwoFactorPolicyCard() {
   const { activeClientId, refresh } = useAuth();
   const { toast } = useToast();

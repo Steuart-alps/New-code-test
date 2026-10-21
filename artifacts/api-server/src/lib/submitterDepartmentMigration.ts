@@ -23,6 +23,7 @@ export const SUBMITTER_DEPARTMENT_TABLES = [
   ["pool_checks", "created_by"],
   ["swim_sessions", "created_by"],
   ["pat_tests", "created_by"],
+  ["coshh_checks", "created_by"],
 ] as const;
 
 /**

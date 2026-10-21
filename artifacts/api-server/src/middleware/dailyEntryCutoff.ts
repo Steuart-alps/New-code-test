@@ -28,6 +28,9 @@ export const TRACK_WRITE_PREFIXES = [
   "/train-track",
   "/hot-tub",
   "/tree-track",
+  // COSHH assessments are reviewed documents, not dated records; only the
+  // checks that follow from them are locked.
+  "/coshh-track/checks",
   "/bike-track",
   "/pool-track",
   "/green-track",
@@ -71,6 +74,9 @@ const ENTRY_DATE_FIELDS = [
   "signoffDate",
   "reportedDate",
   "recordedDate",
+  "readingDate",
+  "applicationDate",
+  "movementDate",
   "hireDate",
   "replacementDate",
   "replacedOn",
@@ -178,6 +184,7 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/legionella\/\d+$/, table: "legionella_checks", date: "check_date", site: RECORD_SITE },
   { path: /^\/hot-tub\/\d+$/, table: "hot_tub_checks", date: "check_date", site: RECORD_SITE },
   { path: /^\/tree-track\/\d+$/, table: "tree_inspections", date: "check_date", site: RECORD_SITE },
+  { path: /^\/coshh-track\/checks\/\d+$/, table: "coshh_checks", date: "check_date", site: RECORD_SITE },
   { path: /^\/pool-track\/\d+$/, table: "pool_checks", date: "check_date", site: RECORD_SITE },
   { path: /^\/daily-track-am\/\d+$/, table: "daily_checklists", date: "check_date", site: RECORD_SITE },
   { path: /^\/daily-track-pm\/\d+$/, table: "daily_checklists", date: "check_date", site: RECORD_SITE },
@@ -205,6 +212,9 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/green-track\/defects\/\d+$/, table: "green_defects", date: "report_date" },
   { path: /^\/green-track\/puwer-inspections\/\d+$/, table: "green_puwer_inspections", date: "inspection_date" },
   { path: /^\/green-track\/fuel-logs\/\d+$/, table: "green_fuel_logs", date: "log_date" },
+  { path: /^\/green-track\/hour-readings\/\d+$/, table: "green_hour_readings", date: "reading_date" },
+  { path: /^\/green-track\/applications\/\d+$/, table: "green_applications", date: "application_date" },
+  { path: /^\/green-track\/stock-movements\/\d+$/, table: "green_stock_movements", date: "movement_date" },
   // PAT tests keep the department recorded with them; the others follow the
   // site recorded with the replacement, or the failure's certificate.
   { path: /^\/pat-track\/tests\/\d+$/, table: "pat_tests", date: "test_date",
@@ -242,6 +252,8 @@ export const NO_FUTURE_CHECK_DATE_ROUTES: Array<{ method: "POST" | "PUT"; path: 
   { method: "PUT", path: /^\/pool-track\/\d+$/, field: "checkDate" },
   { method: "POST", path: /^\/tree-track\/?$/, field: "checkDate" },
   { method: "PUT", path: /^\/tree-track\/\d+$/, field: "checkDate" },
+  { method: "POST", path: /^\/coshh-track\/checks\/?$/, field: "checkDate" },
+  { method: "PUT", path: /^\/coshh-track\/checks\/\d+$/, field: "checkDate" },
 ];
 
 /**
