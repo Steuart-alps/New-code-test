@@ -237,6 +237,8 @@ async function routeApi(route) {
   if (method === "POST" && path === "/api/analytics/events") return route.fulfill({ status: 204 });
   // The Contractors page's "Contractor visits" card (#155).
   if (method === "GET" && path === "/api/contractor-visits") return json(route, { types: [], visits: [] });
+  // The Contractors page's "Certificates outstanding" card and the red check badge.
+  if (method === "GET" && path === "/api/certificates-outstanding") return json(route, { followUpAfterDays: 14, chaseStopsAfterDays: 90, certificates: [] });
   // The app-wide storage limit banner (#156).
   if (method === "GET" && path === "/api/storage/status") {
     return json(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
