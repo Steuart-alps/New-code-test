@@ -37,7 +37,7 @@ import {
   Tractor, Plus, AlertTriangle, CheckCircle2, Clock, Wrench,
   Pencil, Trash2, Lock, Search, Building2, Filter, ChevronDown, X,
   ShieldAlert, XCircle, CheckCheck, Gauge, Fuel, ClipboardCheck, Droplet, Settings,
-  Upload, Download,
+  Upload, Download, SprayCan, Package,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -45,6 +45,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
+import { GreenSprayingTab, GreenStockTab } from "@/components/green-track-spraying";
 import { getApiErrorMessage } from "@/lib/api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
@@ -372,6 +373,8 @@ interface StatusData {
   /** Active sprayers with an NSTS sprayer type, and when each is next due. */
   nstsSprayers?: NstsSprayerRow[];
   nstsOverdue?: number;
+  /** Active products at or below their re-order level. */
+  lowStockProducts?: number;
 }
 
 interface NstsSprayerRow extends NstsStatus {
@@ -2013,7 +2016,7 @@ function FuelLogDialog({
   );
 }
 
-type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "hours" | "fuel" | "actions";
+type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "hours" | "spraying" | "stock" | "fuel" | "actions";
 
 export default function GreenTrackPage() {
   const { user, activeClientId } = useAuth();
@@ -2049,6 +2052,7 @@ export default function GreenTrackPage() {
   const [deleteId, setDeleteId] = useState<{ type: string; id: number } | null>(null);
   // A machine chosen by a scanned QR label, for the form the label opened.
   const [scanMachineId, setScanMachineId] = useState<string | undefined>();
+  const [sprayingFromScan, setSprayingFromScan] = useState<{ machineId?: number } | null>(null);
 
   useEffect(() => {
     const link = takeLinkParams(["machine", "open"] as const);
@@ -2061,6 +2065,7 @@ export default function GreenTrackPage() {
     else if (open === "defect") { setActiveTab("defects"); setEditDefect(null); setDefectDialog(true); }
     else if (open === "fuel") { setActiveTab("fuel"); setEditFuel(null); setFuelDialog(true); }
     else if (open === "hours") { setActiveTab("hours"); setEditReading(null); setHoursMachineId(machineId); setHoursDialog(true); }
+    else if (open === "spraying") { setActiveTab("spraying"); setSprayingFromScan({ machineId: Number(machineId) }); }
     else if (open === "service" && canAdmin) { setActiveTab("services"); setEditService(null); setServiceDialog(true); }
     else if (open === "inspection" && canAdmin) { setActiveTab("puwer"); setEditPuwer(null); setPuwerDialog(true); }
   }, []);
@@ -2200,6 +2205,8 @@ export default function GreenTrackPage() {
     { key: "defects",  label: "Defects",     icon: ShieldAlert,    count: status?.openDefects || undefined },
     { key: "puwer",    label: "Inspections", icon: ClipboardCheck, count: status?.nstsOverdue || undefined },
     { key: "hours",    label: "Hours",       icon: Gauge },
+    { key: "spraying", label: "Spraying",    icon: SprayCan },
+    { key: "stock",    label: "Stock",       icon: Package,        count: status?.lowStockProducts || undefined },
     { key: "actions",  label: "Actions",     icon: CheckCircle2 },
     ...(showFuelTab ? [{ key: "fuel" as Tab, label: "Fuel / Oil", icon: Fuel }] : []),
   ];
@@ -2233,6 +2240,19 @@ export default function GreenTrackPage() {
             </span>
             <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setActiveTab("puwer")}>
               View sprayers
+            </Button>
+          </div>
+        )}
+
+        {(status?.lowStockProducts ?? 0) > 0 && activeTab !== "stock" && (
+          <div role="status" data-testid="banner-low-stock"
+            className="flex items-center justify-between gap-3 rounded-sm border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+            <span className="flex items-center gap-2">
+              <Package className="w-4 h-4 shrink-0" />
+              {status!.lowStockProducts === 1 ? "1 product is" : `${status!.lowStockProducts} products are`} at or below the re-order level.
+            </span>
+            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setActiveTab("stock")}>
+              View stock
             </Button>
           </div>
         )}
@@ -2311,7 +2331,7 @@ export default function GreenTrackPage() {
               <Input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search…" className="pl-8 h-8 w-44 rounded-sm text-sm" />
             </div>}
-            {activeTab !== "fleet" && activeTab !== "actions" && (
+            {activeTab !== "fleet" && activeTab !== "actions" && activeTab !== "spraying" && activeTab !== "stock" && (
               <Select value={filterMachine || "_all"} onValueChange={v => setFilterMachine(v === "_all" ? "" : v)}>
                 <SelectTrigger className="h-8 rounded-sm text-sm w-44">
                   <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
@@ -2958,6 +2978,13 @@ export default function GreenTrackPage() {
             )}
           </>
         )}
+
+        {activeTab === "spraying" && (
+          <GreenSprayingTab q={q} canAdmin={canAdmin} machines={machines}
+            openNew={sprayingFromScan} onOpenNewHandled={() => setSprayingFromScan(null)} />
+        )}
+
+        {activeTab === "stock" && <GreenStockTab q={q} canAdmin={canAdmin} />}
 
         {activeTab === "actions" && (
           <ModuleActionsPanel moduleKey="green" />

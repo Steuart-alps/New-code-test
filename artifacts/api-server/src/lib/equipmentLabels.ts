@@ -444,6 +444,9 @@ export async function buildScanSummary(code: string, clientId: number, target: L
       if (record) {
         actions.push({ label: doneToday ? "Record another pre-use check" : "Start today's pre-use check", href: `/green-track?${query({ machine: id, open: "pre-use" })}`, primary: true });
         actions.push({ label: "Report a fault", href: `/green-track?${query({ machine: id, open: "defect" })}` });
+        if (target.extra?.machineType === "sprayer_spreader") {
+          actions.push({ label: "Record spraying", href: `/green-track?${query({ machine: id, open: "spraying" })}` });
+        }
         actions.push({ label: "Log hour meter reading", href: `/green-track?${query({ machine: id, open: "hours" })}` });
         actions.push({ label: "Log fuel", href: `/green-track?${query({ machine: id, open: "fuel" })}` });
         if (viewer.canAdmin) {

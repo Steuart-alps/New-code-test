@@ -98,6 +98,10 @@ import type {
   GetPoolMonitoringPlanParams,
   GetPrivacyGovernanceParams,
   GetTodayByDepartmentParams,
+  GreenTrackApplication,
+  GreenTrackApplicationInput,
+  GreenTrackApplicationSaved,
+  GreenTrackApplicationUpdate,
   GreenTrackCertificateDownload,
   GreenTrackConfig,
   GreenTrackHourReading,
@@ -105,6 +109,12 @@ import type {
   GreenTrackHourReadingRow,
   GreenTrackHourReadingUpdate,
   GreenTrackMachineHoursSummary,
+  GreenTrackProduct,
+  GreenTrackProductHistory,
+  GreenTrackProductInput,
+  GreenTrackStockMovement,
+  GreenTrackStockMovementInput,
+  GreenTrackStockMovementUpdate,
   HealthStatus,
   HotTubCheck,
   HotTubConfig,
@@ -131,7 +141,9 @@ import type {
   ListFireCallPointsParams,
   ListFireSafetyChecksParams,
   ListFoodSafetyRecordsParams,
+  ListGreenTrackApplicationsParams,
   ListGreenTrackHourReadingsParams,
+  ListGreenTrackStockMovementsParams,
   ListHotTubChecksParams,
   ListKitchenClosedDaysParams,
   ListLegionellaChecksParams,
@@ -7469,6 +7481,971 @@ export const useDeleteGreenTrackHourReading = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteGreenTrackHourReadingMutationOptions(options));
+    }
+
+export const getListGreenTrackProductsUrl = () => {
+
+
+
+
+  return `/api/green-track/products`
+}
+
+/**
+ * @summary List spraying and stock products with their stock on hand
+ */
+export const listGreenTrackProducts = async ( options?: RequestInit): Promise<GreenTrackProduct[]> => {
+
+  return customFetch<GreenTrackProduct[]>(getListGreenTrackProductsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListGreenTrackProductsQueryKey = () => {
+    return [
+    `/api/green-track/products`
+    ] as const;
+    }
+
+
+export const getListGreenTrackProductsQueryOptions = <TData = Awaited<ReturnType<typeof listGreenTrackProducts>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackProducts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListGreenTrackProductsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listGreenTrackProducts>>> = ({ signal }) => listGreenTrackProducts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackProducts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListGreenTrackProductsQueryResult = NonNullable<Awaited<ReturnType<typeof listGreenTrackProducts>>>
+export type ListGreenTrackProductsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List spraying and stock products with their stock on hand
+ */
+
+export function useListGreenTrackProducts<TData = Awaited<ReturnType<typeof listGreenTrackProducts>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackProducts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListGreenTrackProductsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateGreenTrackProductUrl = () => {
+
+
+
+
+  return `/api/green-track/products`
+}
+
+/**
+ * @summary Add a product (pesticide, fertiliser, top dressing, seed...)
+ */
+export const createGreenTrackProduct = async (greenTrackProductInput: GreenTrackProductInput, options?: RequestInit): Promise<GreenTrackProduct> => {
+
+  return customFetch<GreenTrackProduct>(getCreateGreenTrackProductUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(greenTrackProductInput)
+  }
+);}
+
+
+
+
+
+export const getCreateGreenTrackProductMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackProduct>>, TError,{data: BodyType<GreenTrackProductInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackProduct>>, TError,{data: BodyType<GreenTrackProductInput>}, TContext> => {
+
+const mutationKey = ['createGreenTrackProduct'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createGreenTrackProduct>>, {data: BodyType<GreenTrackProductInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createGreenTrackProduct(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateGreenTrackProductMutationResult = NonNullable<Awaited<ReturnType<typeof createGreenTrackProduct>>>
+    export type CreateGreenTrackProductMutationBody = BodyType<GreenTrackProductInput>
+    export type CreateGreenTrackProductMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Add a product (pesticide, fertiliser, top dressing, seed...)
+ */
+export const useCreateGreenTrackProduct = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackProduct>>, TError,{data: BodyType<GreenTrackProductInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createGreenTrackProduct>>,
+        TError,
+        {data: BodyType<GreenTrackProductInput>},
+        TContext
+      > => {
+      return useMutation(getCreateGreenTrackProductMutationOptions(options));
+    }
+
+export const getUpdateGreenTrackProductUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/products/${id}`
+}
+
+/**
+ * The unit cannot change once the product has stock or spraying records (409).
+ * @summary Update a product, or archive it with active false
+ */
+export const updateGreenTrackProduct = async (id: number,
+    greenTrackProductInput: GreenTrackProductInput, options?: RequestInit): Promise<GreenTrackProduct> => {
+
+  return customFetch<GreenTrackProduct>(getUpdateGreenTrackProductUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(greenTrackProductInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateGreenTrackProductMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackProduct>>, TError,{id: number;data: BodyType<GreenTrackProductInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackProduct>>, TError,{id: number;data: BodyType<GreenTrackProductInput>}, TContext> => {
+
+const mutationKey = ['updateGreenTrackProduct'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateGreenTrackProduct>>, {id: number;data: BodyType<GreenTrackProductInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateGreenTrackProduct(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateGreenTrackProductMutationResult = NonNullable<Awaited<ReturnType<typeof updateGreenTrackProduct>>>
+    export type UpdateGreenTrackProductMutationBody = BodyType<GreenTrackProductInput>
+    export type UpdateGreenTrackProductMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Update a product, or archive it with active false
+ */
+export const useUpdateGreenTrackProduct = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackProduct>>, TError,{id: number;data: BodyType<GreenTrackProductInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateGreenTrackProduct>>,
+        TError,
+        {id: number;data: BodyType<GreenTrackProductInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateGreenTrackProductMutationOptions(options));
+    }
+
+export const getDeleteGreenTrackProductUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/products/${id}`
+}
+
+/**
+ * @summary Delete a product with no stock or spraying records (managers)
+ */
+export const deleteGreenTrackProduct = async (id: number, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getDeleteGreenTrackProductUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteGreenTrackProductMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackProduct>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackProduct>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteGreenTrackProduct'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteGreenTrackProduct>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteGreenTrackProduct(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteGreenTrackProductMutationResult = NonNullable<Awaited<ReturnType<typeof deleteGreenTrackProduct>>>
+
+    export type DeleteGreenTrackProductMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete a product with no stock or spraying records (managers)
+ */
+export const useDeleteGreenTrackProduct = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackProduct>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteGreenTrackProduct>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteGreenTrackProductMutationOptions(options));
+    }
+
+export const getGetGreenTrackProductHistoryUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/products/${id}/history`
+}
+
+/**
+ * @summary A product's stock history, newest first, with the balance after each entry
+ */
+export const getGreenTrackProductHistory = async (id: number, options?: RequestInit): Promise<GreenTrackProductHistory> => {
+
+  return customFetch<GreenTrackProductHistory>(getGetGreenTrackProductHistoryUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGreenTrackProductHistoryQueryKey = (id: number,) => {
+    return [
+    `/api/green-track/products/${id}/history`
+    ] as const;
+    }
+
+
+export const getGetGreenTrackProductHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getGreenTrackProductHistory>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGreenTrackProductHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGreenTrackProductHistoryQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGreenTrackProductHistory>>> = ({ signal }) => getGreenTrackProductHistory(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGreenTrackProductHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGreenTrackProductHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getGreenTrackProductHistory>>>
+export type GetGreenTrackProductHistoryQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary A product's stock history, newest first, with the balance after each entry
+ */
+
+export function useGetGreenTrackProductHistory<TData = Awaited<ReturnType<typeof getGreenTrackProductHistory>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGreenTrackProductHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGreenTrackProductHistoryQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListGreenTrackStockMovementsUrl = (params?: ListGreenTrackStockMovementsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/green-track/stock-movements?${stringifiedParams}` : `/api/green-track/stock-movements`
+}
+
+/**
+ * @summary List deliveries, stock counts and write-offs
+ */
+export const listGreenTrackStockMovements = async (params?: ListGreenTrackStockMovementsParams, options?: RequestInit): Promise<GreenTrackStockMovement[]> => {
+
+  return customFetch<GreenTrackStockMovement[]>(getListGreenTrackStockMovementsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListGreenTrackStockMovementsQueryKey = (params?: ListGreenTrackStockMovementsParams,) => {
+    return [
+    `/api/green-track/stock-movements`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListGreenTrackStockMovementsQueryOptions = <TData = Awaited<ReturnType<typeof listGreenTrackStockMovements>>, TError = ErrorType<unknown>>(params?: ListGreenTrackStockMovementsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackStockMovements>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListGreenTrackStockMovementsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listGreenTrackStockMovements>>> = ({ signal }) => listGreenTrackStockMovements(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackStockMovements>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListGreenTrackStockMovementsQueryResult = NonNullable<Awaited<ReturnType<typeof listGreenTrackStockMovements>>>
+export type ListGreenTrackStockMovementsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List deliveries, stock counts and write-offs
+ */
+
+export function useListGreenTrackStockMovements<TData = Awaited<ReturnType<typeof listGreenTrackStockMovements>>, TError = ErrorType<unknown>>(
+ params?: ListGreenTrackStockMovementsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackStockMovements>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListGreenTrackStockMovementsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateGreenTrackStockMovementUrl = () => {
+
+
+
+
+  return `/api/green-track/stock-movements`
+}
+
+/**
+ * @summary Log a delivery, stock count or write-off
+ */
+export const createGreenTrackStockMovement = async (greenTrackStockMovementInput: GreenTrackStockMovementInput, options?: RequestInit): Promise<GreenTrackStockMovement> => {
+
+  return customFetch<GreenTrackStockMovement>(getCreateGreenTrackStockMovementUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(greenTrackStockMovementInput)
+  }
+);}
+
+
+
+
+
+export const getCreateGreenTrackStockMovementMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackStockMovement>>, TError,{data: BodyType<GreenTrackStockMovementInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackStockMovement>>, TError,{data: BodyType<GreenTrackStockMovementInput>}, TContext> => {
+
+const mutationKey = ['createGreenTrackStockMovement'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createGreenTrackStockMovement>>, {data: BodyType<GreenTrackStockMovementInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createGreenTrackStockMovement(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateGreenTrackStockMovementMutationResult = NonNullable<Awaited<ReturnType<typeof createGreenTrackStockMovement>>>
+    export type CreateGreenTrackStockMovementMutationBody = BodyType<GreenTrackStockMovementInput>
+    export type CreateGreenTrackStockMovementMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Log a delivery, stock count or write-off
+ */
+export const useCreateGreenTrackStockMovement = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackStockMovement>>, TError,{data: BodyType<GreenTrackStockMovementInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createGreenTrackStockMovement>>,
+        TError,
+        {data: BodyType<GreenTrackStockMovementInput>},
+        TContext
+      > => {
+      return useMutation(getCreateGreenTrackStockMovementMutationOptions(options));
+    }
+
+export const getUpdateGreenTrackStockMovementUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/stock-movements/${id}`
+}
+
+/**
+ * @summary Correct a stock record (the product and kind stay as recorded)
+ */
+export const updateGreenTrackStockMovement = async (id: number,
+    greenTrackStockMovementUpdate: GreenTrackStockMovementUpdate, options?: RequestInit): Promise<GreenTrackStockMovement> => {
+
+  return customFetch<GreenTrackStockMovement>(getUpdateGreenTrackStockMovementUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(greenTrackStockMovementUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateGreenTrackStockMovementMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackStockMovement>>, TError,{id: number;data: BodyType<GreenTrackStockMovementUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackStockMovement>>, TError,{id: number;data: BodyType<GreenTrackStockMovementUpdate>}, TContext> => {
+
+const mutationKey = ['updateGreenTrackStockMovement'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateGreenTrackStockMovement>>, {id: number;data: BodyType<GreenTrackStockMovementUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateGreenTrackStockMovement(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateGreenTrackStockMovementMutationResult = NonNullable<Awaited<ReturnType<typeof updateGreenTrackStockMovement>>>
+    export type UpdateGreenTrackStockMovementMutationBody = BodyType<GreenTrackStockMovementUpdate>
+    export type UpdateGreenTrackStockMovementMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Correct a stock record (the product and kind stay as recorded)
+ */
+export const useUpdateGreenTrackStockMovement = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackStockMovement>>, TError,{id: number;data: BodyType<GreenTrackStockMovementUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateGreenTrackStockMovement>>,
+        TError,
+        {id: number;data: BodyType<GreenTrackStockMovementUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateGreenTrackStockMovementMutationOptions(options));
+    }
+
+export const getDeleteGreenTrackStockMovementUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/stock-movements/${id}`
+}
+
+/**
+ * @summary Delete a stock record (managers)
+ */
+export const deleteGreenTrackStockMovement = async (id: number, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getDeleteGreenTrackStockMovementUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteGreenTrackStockMovementMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackStockMovement>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackStockMovement>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteGreenTrackStockMovement'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteGreenTrackStockMovement>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteGreenTrackStockMovement(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteGreenTrackStockMovementMutationResult = NonNullable<Awaited<ReturnType<typeof deleteGreenTrackStockMovement>>>
+
+    export type DeleteGreenTrackStockMovementMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a stock record (managers)
+ */
+export const useDeleteGreenTrackStockMovement = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackStockMovement>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteGreenTrackStockMovement>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteGreenTrackStockMovementMutationOptions(options));
+    }
+
+export const getListGreenTrackApplicationsUrl = (params?: ListGreenTrackApplicationsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/green-track/applications?${stringifiedParams}` : `/api/green-track/applications`
+}
+
+/**
+ * @summary The spraying book (spraying, spreading and top dressing records)
+ */
+export const listGreenTrackApplications = async (params?: ListGreenTrackApplicationsParams, options?: RequestInit): Promise<GreenTrackApplication[]> => {
+
+  return customFetch<GreenTrackApplication[]>(getListGreenTrackApplicationsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListGreenTrackApplicationsQueryKey = (params?: ListGreenTrackApplicationsParams,) => {
+    return [
+    `/api/green-track/applications`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListGreenTrackApplicationsQueryOptions = <TData = Awaited<ReturnType<typeof listGreenTrackApplications>>, TError = ErrorType<unknown>>(params?: ListGreenTrackApplicationsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackApplications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListGreenTrackApplicationsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listGreenTrackApplications>>> = ({ signal }) => listGreenTrackApplications(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackApplications>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListGreenTrackApplicationsQueryResult = NonNullable<Awaited<ReturnType<typeof listGreenTrackApplications>>>
+export type ListGreenTrackApplicationsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary The spraying book (spraying, spreading and top dressing records)
+ */
+
+export function useListGreenTrackApplications<TData = Awaited<ReturnType<typeof listGreenTrackApplications>>, TError = ErrorType<unknown>>(
+ params?: ListGreenTrackApplicationsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackApplications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListGreenTrackApplicationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateGreenTrackApplicationUrl = () => {
+
+
+
+
+  return `/api/green-track/applications`
+}
+
+/**
+ * @summary Record a spraying, spreading or top dressing; the products used come off stock
+ */
+export const createGreenTrackApplication = async (greenTrackApplicationInput: GreenTrackApplicationInput, options?: RequestInit): Promise<GreenTrackApplicationSaved> => {
+
+  return customFetch<GreenTrackApplicationSaved>(getCreateGreenTrackApplicationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(greenTrackApplicationInput)
+  }
+);}
+
+
+
+
+
+export const getCreateGreenTrackApplicationMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackApplication>>, TError,{data: BodyType<GreenTrackApplicationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackApplication>>, TError,{data: BodyType<GreenTrackApplicationInput>}, TContext> => {
+
+const mutationKey = ['createGreenTrackApplication'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createGreenTrackApplication>>, {data: BodyType<GreenTrackApplicationInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createGreenTrackApplication(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateGreenTrackApplicationMutationResult = NonNullable<Awaited<ReturnType<typeof createGreenTrackApplication>>>
+    export type CreateGreenTrackApplicationMutationBody = BodyType<GreenTrackApplicationInput>
+    export type CreateGreenTrackApplicationMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Record a spraying, spreading or top dressing; the products used come off stock
+ */
+export const useCreateGreenTrackApplication = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackApplication>>, TError,{data: BodyType<GreenTrackApplicationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createGreenTrackApplication>>,
+        TError,
+        {data: BodyType<GreenTrackApplicationInput>},
+        TContext
+      > => {
+      return useMutation(getCreateGreenTrackApplicationMutationOptions(options));
+    }
+
+export const getUpdateGreenTrackApplicationUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/applications/${id}`
+}
+
+/**
+ * @summary Correct a spraying record; sending products replaces the list
+ */
+export const updateGreenTrackApplication = async (id: number,
+    greenTrackApplicationUpdate: GreenTrackApplicationUpdate, options?: RequestInit): Promise<GreenTrackApplicationSaved> => {
+
+  return customFetch<GreenTrackApplicationSaved>(getUpdateGreenTrackApplicationUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(greenTrackApplicationUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateGreenTrackApplicationMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackApplication>>, TError,{id: number;data: BodyType<GreenTrackApplicationUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackApplication>>, TError,{id: number;data: BodyType<GreenTrackApplicationUpdate>}, TContext> => {
+
+const mutationKey = ['updateGreenTrackApplication'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateGreenTrackApplication>>, {id: number;data: BodyType<GreenTrackApplicationUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateGreenTrackApplication(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateGreenTrackApplicationMutationResult = NonNullable<Awaited<ReturnType<typeof updateGreenTrackApplication>>>
+    export type UpdateGreenTrackApplicationMutationBody = BodyType<GreenTrackApplicationUpdate>
+    export type UpdateGreenTrackApplicationMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Correct a spraying record; sending products replaces the list
+ */
+export const useUpdateGreenTrackApplication = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackApplication>>, TError,{id: number;data: BodyType<GreenTrackApplicationUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateGreenTrackApplication>>,
+        TError,
+        {id: number;data: BodyType<GreenTrackApplicationUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateGreenTrackApplicationMutationOptions(options));
+    }
+
+export const getDeleteGreenTrackApplicationUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/applications/${id}`
+}
+
+/**
+ * @summary Delete a spraying record, putting its products back on stock (managers)
+ */
+export const deleteGreenTrackApplication = async (id: number, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getDeleteGreenTrackApplicationUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteGreenTrackApplicationMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackApplication>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackApplication>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteGreenTrackApplication'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteGreenTrackApplication>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteGreenTrackApplication(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteGreenTrackApplicationMutationResult = NonNullable<Awaited<ReturnType<typeof deleteGreenTrackApplication>>>
+
+    export type DeleteGreenTrackApplicationMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a spraying record, putting its products back on stock (managers)
+ */
+export const useDeleteGreenTrackApplication = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackApplication>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteGreenTrackApplication>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteGreenTrackApplicationMutationOptions(options));
     }
 
 export const getGetGreenTrackInspectionCertificateUrlUrl = (id: number,) => {

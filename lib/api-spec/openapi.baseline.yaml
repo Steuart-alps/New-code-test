@@ -2178,6 +2178,352 @@ paths:
               schema:
                 $ref: "#/components/schemas/OkResponse"
 
+  /green-track/products:
+    get:
+      operationId: listGreenTrackProducts
+      tags: [green-track]
+      summary: List spraying and stock products with their stock on hand
+      responses:
+        "200":
+          description: Products, active first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GreenTrackProduct"
+    post:
+      operationId: createGreenTrackProduct
+      tags: [green-track]
+      summary: Add a product (pesticide, fertiliser, top dressing, seed...)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackProductInput"
+      responses:
+        "201":
+          description: Created product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackProduct"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/products/{id}:
+    put:
+      operationId: updateGreenTrackProduct
+      tags: [green-track]
+      summary: Update a product, or archive it with active false
+      description: The unit cannot change once the product has stock or spraying records (409).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackProductInput"
+      responses:
+        "200":
+          description: Updated product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackProduct"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Unit already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteGreenTrackProduct
+      tags: [green-track]
+      summary: Delete a product with no stock or spraying records (managers)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "409":
+          description: Product has records; archive it instead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/products/{id}/history:
+    get:
+      operationId: getGreenTrackProductHistory
+      tags: [green-track]
+      summary: A product's stock history, newest first, with the balance after each entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Product and its stock history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackProductHistory"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/stock-movements:
+    get:
+      operationId: listGreenTrackStockMovements
+      tags: [green-track]
+      summary: List deliveries, stock counts and write-offs
+      parameters:
+        - name: productId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Stock records, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GreenTrackStockMovement"
+    post:
+      operationId: createGreenTrackStockMovement
+      tags: [green-track]
+      summary: Log a delivery, stock count or write-off
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackStockMovementInput"
+      responses:
+        "201":
+          description: Saved stock record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackStockMovement"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/stock-movements/{id}:
+    put:
+      operationId: updateGreenTrackStockMovement
+      tags: [green-track]
+      summary: Correct a stock record (the product and kind stay as recorded)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackStockMovementUpdate"
+      responses:
+        "200":
+          description: Updated stock record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackStockMovement"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteGreenTrackStockMovement
+      tags: [green-track]
+      summary: Delete a stock record (managers)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /green-track/applications:
+    get:
+      operationId: listGreenTrackApplications
+      tags: [green-track]
+      summary: The spraying book (spraying, spreading and top dressing records)
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: productId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Records, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GreenTrackApplication"
+    post:
+      operationId: createGreenTrackApplication
+      tags: [green-track]
+      summary: Record a spraying, spreading or top dressing; the products used come off stock
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackApplicationInput"
+      responses:
+        "201":
+          description: Saved record, with any products now below zero stock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackApplicationSaved"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/applications/{id}:
+    put:
+      operationId: updateGreenTrackApplication
+      tags: [green-track]
+      summary: Correct a spraying record; sending products replaces the list
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackApplicationUpdate"
+      responses:
+        "200":
+          description: Updated record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackApplicationSaved"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteGreenTrackApplication
+      tags: [green-track]
+      summary: Delete a spraying record, putting its products back on stock (managers)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
   /green-track/puwer-inspections/{id}/certificate-url:
     get:
       operationId: getGreenTrackInspectionCertificateUrl
@@ -3980,6 +4326,499 @@ components:
         notes:
           type: string
           nullable: true
+    GreenTrackProduct:
+      type: object
+      required: [id, name, category, unit, active, stockOnHand, lowStock]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        category:
+          type: string
+          enum: [pesticide, fertiliser, top_dressing, seed, wetting_agent, other]
+        unit:
+          type: string
+          enum: [L, kg, t, bag, unit]
+        mappNumber:
+          type: string
+          nullable: true
+        activeIngredient:
+          type: string
+          nullable: true
+        supplier:
+          type: string
+          nullable: true
+        reorderLevel:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        stockOnHand:
+          type: number
+          description: Worked out from deliveries, counts, write-offs and records, in the product's unit
+        lowStock:
+          type: boolean
+        lastDeliveryDate:
+          type: string
+          format: date
+          nullable: true
+        lastCountDate:
+          type: string
+          format: date
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    GreenTrackProductInput:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+          enum: [pesticide, fertiliser, top_dressing, seed, wetting_agent, other]
+        unit:
+          type: string
+          enum: [L, kg, t, bag, unit]
+        mappNumber:
+          type: string
+          nullable: true
+        activeIngredient:
+          type: string
+          nullable: true
+        supplier:
+          type: string
+          nullable: true
+        reorderLevel:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+    GreenTrackStockLedgerEntry:
+      type: object
+      required: [key, kind, productId, date, change, balance]
+      properties:
+        key:
+          type: string
+        kind:
+          type: string
+          enum: [delivery, count, write_off, application]
+        productId:
+          type: integer
+        date:
+          type: string
+          format: date
+        change:
+          type: number
+        balance:
+          type: number
+        countedQuantity:
+          type: number
+          nullable: true
+        movementId:
+          type: integer
+          nullable: true
+        applicationId:
+          type: integer
+          nullable: true
+        detail:
+          type: string
+          nullable: true
+        recordedBy:
+          type: string
+          nullable: true
+    GreenTrackProductHistory:
+      type: object
+      required: [product, entries]
+      properties:
+        product:
+          $ref: "#/components/schemas/GreenTrackProduct"
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenTrackStockLedgerEntry"
+    GreenTrackStockMovement:
+      type: object
+      required: [id, productId, productName, unit, movementDate, kind, quantity]
+      properties:
+        id:
+          type: integer
+        productId:
+          type: integer
+        productName:
+          type: string
+        unit:
+          type: string
+        movementDate:
+          type: string
+          format: date
+        kind:
+          type: string
+          enum: [delivery, count, write_off]
+        quantity:
+          type: number
+          description: Signed change (a write-off is negative; a count is 0)
+        countedQuantity:
+          type: number
+          nullable: true
+        supplier:
+          type: string
+          nullable: true
+        batchNumber:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        recordedBy:
+          type: string
+          nullable: true
+        recordedByRosterId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    GreenTrackStockMovementInput:
+      type: object
+      required: [productId, movementDate, kind]
+      properties:
+        productId:
+          type: integer
+        movementDate:
+          type: string
+          format: date
+        kind:
+          type: string
+          enum: [delivery, count, write_off]
+        quantity:
+          type: number
+          description: Delivered or written-off quantity (above 0)
+        countedQuantity:
+          type: number
+          description: The quantity counted, for a stock count
+        supplier:
+          type: string
+          nullable: true
+        batchNumber:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        recordedBy:
+          type: string
+          nullable: true
+        recordedByRosterId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    GreenTrackStockMovementUpdate:
+      type: object
+      properties:
+        movementDate:
+          type: string
+          format: date
+        quantity:
+          type: number
+        countedQuantity:
+          type: number
+        supplier:
+          type: string
+          nullable: true
+        batchNumber:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        recordedBy:
+          type: string
+          nullable: true
+        recordedByRosterId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    GreenTrackApplicationProduct:
+      type: object
+      required: [productId, productName, category, unit, quantityUsed]
+      properties:
+        productId:
+          type: integer
+        productName:
+          type: string
+        category:
+          type: string
+        unit:
+          type: string
+        mappNumber:
+          type: string
+          nullable: true
+        ratePerHectare:
+          type: number
+          nullable: true
+        quantityUsed:
+          type: number
+    GreenTrackApplicationProductInput:
+      type: object
+      required: [productId, quantityUsed]
+      properties:
+        productId:
+          type: integer
+        ratePerHectare:
+          type: number
+          nullable: true
+        quantityUsed:
+          type: number
+          description: In the product's unit; this comes off stock
+    GreenTrackApplication:
+      type: object
+      required: [id, applicationDate, method, areas, products]
+      properties:
+        id:
+          type: integer
+        applicationDate:
+          type: string
+          format: date
+        startTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        endTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        method:
+          type: string
+          enum: [spray, granular, top_dressing, other]
+        machineId:
+          type: integer
+          nullable: true
+        areas:
+          type: array
+          items:
+            type: string
+            enum: [greens, tees, fairways, approaches, surrounds, bunkers, rough, practice, other]
+        areaDetails:
+          type: string
+          nullable: true
+        areaHectares:
+          type: number
+          nullable: true
+        waterVolumeLitres:
+          type: number
+          nullable: true
+        nozzle:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        operatorName:
+          type: string
+          nullable: true
+        operatorRosterId:
+          type: integer
+          nullable: true
+        operatorCertificate:
+          type: string
+          nullable: true
+        weather:
+          type: string
+          nullable: true
+        wind:
+          type: string
+          nullable: true
+        temperatureC:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        machineName:
+          type: string
+          nullable: true
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenTrackApplicationProduct"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    GreenTrackStockWarning:
+      type: object
+      required: [productId, productName, unit, stockOnHand]
+      properties:
+        productId:
+          type: integer
+        productName:
+          type: string
+        unit:
+          type: string
+        stockOnHand:
+          type: number
+    GreenTrackApplicationSaved:
+      allOf:
+        - $ref: "#/components/schemas/GreenTrackApplication"
+        - type: object
+          required: [stockWarnings]
+          properties:
+            stockWarnings:
+              type: array
+              items:
+                $ref: "#/components/schemas/GreenTrackStockWarning"
+    GreenTrackApplicationInput:
+      type: object
+      required: [applicationDate, products]
+      properties:
+        applicationDate:
+          type: string
+          format: date
+        startTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        endTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        method:
+          type: string
+          enum: [spray, granular, top_dressing, other]
+        machineId:
+          type: integer
+          nullable: true
+        areas:
+          type: array
+          items:
+            type: string
+            enum: [greens, tees, fairways, approaches, surrounds, bunkers, rough, practice, other]
+        areaDetails:
+          type: string
+          nullable: true
+        areaHectares:
+          type: number
+          nullable: true
+        waterVolumeLitres:
+          type: number
+          nullable: true
+        nozzle:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        operatorName:
+          type: string
+          nullable: true
+        operatorRosterId:
+          type: integer
+          nullable: true
+        operatorCertificate:
+          type: string
+          nullable: true
+        weather:
+          type: string
+          nullable: true
+        wind:
+          type: string
+          nullable: true
+        temperatureC:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        products:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/GreenTrackApplicationProductInput"
+    GreenTrackApplicationUpdate:
+      type: object
+      properties:
+        applicationDate:
+          type: string
+          format: date
+        startTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        endTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        method:
+          type: string
+          enum: [spray, granular, top_dressing, other]
+        machineId:
+          type: integer
+          nullable: true
+        areas:
+          type: array
+          items:
+            type: string
+            enum: [greens, tees, fairways, approaches, surrounds, bunkers, rough, practice, other]
+        areaDetails:
+          type: string
+          nullable: true
+        areaHectares:
+          type: number
+          nullable: true
+        waterVolumeLitres:
+          type: number
+          nullable: true
+        nozzle:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        operatorName:
+          type: string
+          nullable: true
+        operatorRosterId:
+          type: integer
+          nullable: true
+        operatorCertificate:
+          type: string
+          nullable: true
+        weather:
+          type: string
+          nullable: true
+        wind:
+          type: string
+          nullable: true
+        temperatureC:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        products:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/GreenTrackApplicationProductInput"
     GreenTrackHourReadingInput:
       type: object
       required: [machineId, readingDate, hours]

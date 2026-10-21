@@ -13,6 +13,7 @@ import {
   type AllowedUploadType,
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable } from "../lib/objectStorageUnavailable";
+import { greenLowStockCount } from "../lib/greenStock";
 import {
   NSTS_TEST_INSPECTION_TYPE, isNstsSprayerCategory, nstsNextTestDate, nstsStatus,
 } from "@workspace/api-zod/nsts-sprayer-tests";
@@ -1278,7 +1279,7 @@ router.get("/status", async (req, res) => {
     const clientId = getClientId(req);
     const today = new Date().toISOString().split("T")[0];
 
-    const [machinesResult, defectsResult, preUseResult, serviceResult, sprayersResult, hours] = await Promise.all([
+    const [machinesResult, defectsResult, preUseResult, serviceResult, sprayersResult, hours, lowStockProducts] = await Promise.all([
       db.execute(sql`
         SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE active) AS active
         FROM green_machines WHERE client_id = ${clientId}
@@ -1323,6 +1324,7 @@ router.get("/status", async (req, res) => {
         ORDER BY m.name
       `),
       machineHours(clientId!, today),
+      greenLowStockCount(clientId!),
     ]);
 
     const machines = rows(machinesResult)[0] as any;
@@ -1355,6 +1357,7 @@ router.get("/status", async (req, res) => {
       overdueServiceByHours: overdueByHours.length,
       nstsSprayers,
       nstsOverdue: nstsSprayers.filter((s) => s.state === "overdue").length,
+      lowStockProducts,
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch status" });

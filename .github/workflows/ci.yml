@@ -244,6 +244,9 @@ jobs:
       - name: GreenTrack hour meter readings (production schema base)
         run: pnpm --filter @workspace/api-server run test:green-hours
 
+      - name: GreenTrack spraying book and stock (production schema base)
+        run: pnpm --filter @workspace/api-server run test:green-spraying
+
       - name: Checklist results and FixTrack job tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:checklist-results-fixtrack
 
