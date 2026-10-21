@@ -17,7 +17,7 @@ Wednesday 28 October.
 
 | # | Item | When | Extra running cost | Waiting on |
 |---|---|---|---|---|
-| 1 | Greens vehicle maintenance (GreenTrack) | After launch | None | Hour meters and spraying book stock finishing first (under way) |
+| 1 | Greens vehicle maintenance (GreenTrack) | After launch | None | Your go-ahead (hour meters and spraying book are now live, #164) |
 | 2 | Scanning certificates for key dates and contractor details | After launch | About 0.1p per certificate read | Anthropic key on Render; your go-ahead |
 | 3 | Reminders to the right person, weekly Owner update | After launch | None | Your go-ahead |
 | 4 | Phone apps: iPhone first, then Android | After launch | Apple £79 a year, Google $25 once | Trying draft #101 on a phone |
@@ -29,6 +29,7 @@ Wednesday 28 October.
 | 10 | Offline working | After launch | None for the recommended route | Phone app first |
 | 11 | Actions from uploaded audit and inspection reports | After launch | Pennies per report (being worked out) | Plan in its own thread |
 | 12 | CareTrack (care homes and care services) | Later | Not yet known | Scope from you |
+| 13 | Stock control in kitchens (KitchenTrack) | After launch | None | Ingredients list from the allergen charts work |
 
 My suggested order after launch is the order of the table, with 2, 5 and 11
 built together because they share the same set-up (one AI key and one
@@ -48,8 +49,8 @@ record services (date, hours, work done, who did it, cost), PUWER and LOLER
 thorough examinations, and NSTS sprayer tests (#158). Every machine can have a
 QR label (#159) that opens its record when scanned.
 
-**Under way now (not part of this roadmap).** The "Reviving GreenTrack" thread
-is building two things you asked for this morning:
+**Done since this roadmap was started (#164).** The "Reviving GreenTrack"
+thread has built two things you asked for this morning:
 
 - hour meter readings and services due by hours (for example "next service at
   500 hours");
@@ -371,6 +372,37 @@ should it keep day to day?
 
 ---
 
+## 13. Stock control in kitchens (KitchenTrack)
+
+**When:** after launch.
+
+Kitchens keep track of what they have in: deliveries in, stock counts, waste
+and write-offs, and a "running low" list when an item reaches its re-order
+level.
+
+**Reuses what already exists.** GreenTrack's stock control went live in #164
+(products, deliveries, stock counts, write-offs and re-order levels, with stock
+worked out from the history so corrections put it right). Kitchen stock should
+use the same approach rather than a second, different system.
+
+**Links to the allergen charts work.** The thread "KitchenTrack allergen
+charts" is planning an ingredients list and recipes now. Kitchen stock items
+should be those same ingredients, so each one carries its allergens once.
+Later, recording that a recipe was made could take its ingredients off stock,
+in the same way a spray takes product off stock in GreenTrack.
+
+**Useful extras to consider:** use-by dates on deliveries (oldest first, and a
+warning before stock goes out of date), and the supplier on each delivery,
+which supports food traceability.
+
+**Cost:** none. No extra hosting.
+
+**Questions for you:** should a kitchen count stock by whole items (cases,
+bottles) or by weight and volume? Is taking stock off automatically when a
+recipe is made wanted, or are regular stock counts enough?
+
+---
+
 ## Before launch (already in hand, listed for completeness)
 
 These are handled in the "Launch plan for 26 October" thread and are not new
@@ -399,6 +431,7 @@ work:
 | Offline working (recommended route) | None |
 | Actions from audit reports | Pennies per report (being worked out) |
 | CareTrack | Not yet known; likely none for hosting |
+| Kitchen stock control | None |
 
 Hosting stays on the one Render web service and database in Frankfurt for
 everything above.
