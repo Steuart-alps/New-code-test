@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { FileWarning } from "lucide-react";
@@ -24,17 +24,11 @@ interface CertificatesOutstanding {
   certificates: CertificateOutstanding[];
 }
 
-/**
- * Contractor visits still waiting for their certificate, oldest first. The
- * contractor is chased every two weeks (through Contractor Approvals) until
- * chaseStopsAfterDays after the visit; after that it is up to the business.
- * Hidden when nothing is outstanding.
- */
-export function CertificatesOutstandingCard() {
+/** Outstanding certificates for the active business (shared by the card and the badges). */
+export function useCertificatesOutstanding() {
   const { activeClientId } = useAuth();
   const clientApiFetch = useActiveClientApi();
-
-  const { data, isError } = useQuery<CertificatesOutstanding>({
+  return useQuery<CertificatesOutstanding>({
     queryKey: ["certificates-outstanding", activeClientId],
     queryFn: async () => {
       const response = await clientApiFetch("/certificates-outstanding");
@@ -43,6 +37,47 @@ export function CertificatesOutstandingCard() {
     },
     enabled: !!activeClientId,
   });
+}
+
+/**
+ * A check whose contractor visit has no certificate two weeks on shows red
+ * until the certificate is uploaded. Display only: the check's status and the
+ * compliance figures are unchanged.
+ */
+function CertificateOutstandingBadge({ row }: { row: CertificateOutstanding }) {
+  return (
+    <span
+      title={row.chasing
+        ? `Visited ${formatDay(row.visitDate)}; the contractor is being chased for the certificate`
+        : `Visited ${formatDay(row.visitDate)}; reminders to the contractor have stopped, please chase them directly`}
+      className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-300"
+    >
+      <FileWarning aria-hidden="true" className="w-3 h-3" /> Certificate outstanding
+    </span>
+  );
+}
+
+/**
+ * A check's status badge (children), shown red as "Certificate outstanding"
+ * while its certificate is outstanding: in place of "Completed", or beside
+ * the status when the check has moved on to its next due date.
+ */
+export function CheckStatusWithCertificate({ itemId, status, children }: { itemId: number; status: string; children: ReactNode }) {
+  const { data } = useCertificatesOutstanding();
+  const row = data?.certificates.find(certificate => certificate.itemId === itemId);
+  if (!row) return <>{children}</>;
+  if (status === "completed") return <CertificateOutstandingBadge row={row} />;
+  return <>{children}<CertificateOutstandingBadge row={row} /></>;
+}
+
+/**
+ * Contractor visits still waiting for their certificate, oldest first. The
+ * contractor is chased every two weeks (through Contractor Approvals) until
+ * chaseStopsAfterDays after the visit; after that it is up to the business.
+ * Hidden when nothing is outstanding.
+ */
+export function CertificatesOutstandingCard() {
+  const { data, isError } = useCertificatesOutstanding();
   const showSite = useMemo(
     () => new Set(data?.certificates.map(certificate => certificate.siteId)).size > 1,
     [data],
