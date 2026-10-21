@@ -3578,6 +3578,166 @@ export interface EquipmentScan {
   history: EquipmentScanHistory[];
 }
 
+export type InspectionReportType = typeof InspectionReportType[keyof typeof InspectionReportType];
+
+
+export const InspectionReportType = {
+  alps_audit: 'alps_audit',
+  care_inspectorate: 'care_inspectorate',
+  eho: 'eho',
+  fire_officer: 'fire_officer',
+  hse: 'hse',
+  insurer: 'insurer',
+  other: 'other',
+} as const;
+
+export type InspectionReportSeverity = typeof InspectionReportSeverity[keyof typeof InspectionReportSeverity];
+
+
+export const InspectionReportSeverity = {
+  monitor: 'monitor',
+  action_required: 'action_required',
+  urgent: 'urgent',
+} as const;
+
+export type InspectionReportOptionsReportTypesItem = {
+  key: InspectionReportType;
+  label: string;
+};
+
+export type InspectionReportOptionsModulesItem = {
+  key: string;
+  label: string;
+};
+
+export type InspectionReportOptionsSitesItem = {
+  id: number;
+  name: string;
+};
+
+export type InspectionReportOptionsAssigneesItem = {
+  id: number;
+  name: string;
+  role: string;
+  isMaintenanceManager: boolean;
+};
+
+export type InspectionReportOptionsReading = {
+  available: boolean;
+  monthlyLimit: number;
+  usedThisMonth: number;
+};
+
+export interface InspectionReportOptions {
+  reportTypes: InspectionReportOptionsReportTypesItem[];
+  modules: InspectionReportOptionsModulesItem[];
+  sites: InspectionReportOptionsSitesItem[];
+  assignees: InspectionReportOptionsAssigneesItem[];
+  reading: InspectionReportOptionsReading;
+}
+
+export interface InspectionReportSummary {
+  id: number;
+  siteId: number | null;
+  reportType: InspectionReportType;
+  title: string;
+  reportDate: string | null;
+  fileName: string | null;
+  aiStatus: string;
+  uploadedByName: string;
+  createdAt: string;
+  draftCount: number;
+  actionCount: number;
+  openCount: number;
+}
+
+export type InspectionReportDraftActionDraftSource = typeof InspectionReportDraftActionDraftSource[keyof typeof InspectionReportDraftActionDraftSource];
+
+
+export const InspectionReportDraftActionDraftSource = {
+  ai: 'ai',
+  manual: 'manual',
+} as const;
+
+export interface InspectionReportDraftAction {
+  title: string;
+  instruction?: string | null;
+  module: string;
+  severity: InspectionReportSeverity;
+  siteId?: number | null;
+  dueDate?: string | null;
+  assignedUserId?: number | null;
+  reportReference?: string | null;
+  draftSource?: InspectionReportDraftActionDraftSource;
+}
+
+export interface InspectionReportDraftRequest {
+  actions: InspectionReportDraftAction[];
+}
+
+export interface InspectionReport {
+  id: number;
+  siteId: number | null;
+  reportType: InspectionReportType;
+  title: string;
+  reportDate: string | null;
+  fileName: string | null;
+  fileSize?: number | null;
+  mimeType?: string | null;
+  readable: boolean;
+  draftActions: InspectionReportDraftAction[];
+  aiStatus: string;
+  aiSummary: string | null;
+  aiError: string | null;
+  aiReadCount: number;
+  uploadedByName: string;
+  createdAt: string;
+}
+
+export type InspectionReportActionDueDateChangesItem = {
+  changedAt: string;
+  changedByName: string | null;
+  from: string | null;
+  to: string | null;
+};
+
+export interface InspectionReportAction {
+  id: number;
+  siteId: number | null;
+  module: string;
+  title: string;
+  instruction: string | null;
+  severity: InspectionReportSeverity;
+  status: string;
+  ownerName: string | null;
+  /** The person assigned (gets the reminders) */
+  assigneeUserId?: number | null;
+  dueDate: string | null;
+  draftSource: string | null;
+  confirmedByName: string | null;
+  createdAt: string;
+  /** Due date changes after the action was created (report detail only), oldest first */
+  dueDateChanges?: InspectionReportActionDueDateChangesItem[];
+}
+
+export type InspectionReportDetail = InspectionReport & {
+  actions: InspectionReportAction[];
+};
+
+export interface InspectionReportReading {
+  aiSummary: string | null;
+  draftActions: InspectionReportDraftAction[];
+}
+
+export interface CreateInspectionReportRequest {
+  title: string;
+  reportType: InspectionReportType;
+  reportDate?: string | null;
+  siteId?: number | null;
+  objectPath: string;
+  fileName: string;
+}
+
 export type ListFeedbackReportsParams = {
 clientId?: number;
 category?: ListFeedbackReportsCategory;
@@ -4053,5 +4213,15 @@ export type ListCoshhSignOffs200 = {
 export type RecordCoshhSignOffs200 = {
   signed: number;
   assessment: CoshhSignOffStatus | null;
+};
+
+export type SaveInspectionReportDraft200 = {
+  draftActions: InspectionReportDraftAction[];
+};
+
+export type ConfirmInspectionReportActions201 = {
+  actions: InspectionReportAction[];
+  /** Owners and Managers emailed the action plan */
+  emailedTo: string[];
 };
 

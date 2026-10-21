@@ -4,12 +4,15 @@ import { auditEventsTable, departmentsTable, fixTrackIssueActivityTable, fixTrac
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
-import { missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
+import { isInspectionReportSource, missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
 import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 import { resolveAssigneeChange } from "../lib/assignees";
 
 const router = Router();
-const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room"] as const;
+// "audit" holds actions from uploaded audit and inspection reports
+// (routes/inspection-reports.ts) that belong to no other track.
+export const TRACK_ACTION_MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room", "audit"] as const;
+const MODULES = TRACK_ACTION_MODULES;
 const severity = z.enum(["monitor", "action_required", "urgent"]);
 const nullableText = z.string().trim().max(10_000).nullable().optional();
 const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
@@ -297,13 +300,20 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     // move to a site the caller cannot use is reported as forbidden.
     if (!canUse(current.siteId)) return { status: 404 as const, error: "Action not found" };
     if ("siteId" in parsed.data && !canUse(parsed.data.siteId)) return { status: 403 as const, error: "Forbidden site" };
-    if (current.sourceKind && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
+    // A report's actions are typed from the report, so their site can be corrected.
+    if (current.sourceKind && !isInspectionReportSource(current.sourceKind) && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
       return { status: 409 as const, error: "The source record controls this action's site" };
     }
     const kitchenFailure = current.module === "kitchen" && current.sourceKind?.startsWith("kitchen_temperature_");
     if (kitchenFailure) {
       if (!["client_admin", "consultant"].includes(req.currentUser!.role)) return { status: 403 as const, error: "A manager must assign, resolve and verify failed-temperature actions" };
       if ("instruction" in parsed.data || "title" in parsed.data || "severity" in parsed.data) return { status: 409 as const, error: "The failed temperature and original control rule are immutable" };
+    }
+    // A report's due dates come from the inspector or auditor: only Owners, Managers and ALPS move them.
+    // Every change is kept in the audit log (who, when, from and to).
+    if (isInspectionReportSource(current.sourceKind) && "dueDate" in parsed.data && (parsed.data.dueDate ?? null) !== (current.dueDate ?? null)
+      && !["client_admin", "client_manager", "consultant"].includes(req.currentUser!.role)) {
+      return { status: 403 as const, error: "Only an Owner or Manager can change the due date of an action from a report" };
     }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();

@@ -124,6 +124,10 @@ async function candidates(clientId: number, since: Date): Promise<Candidate[]> {
     FROM track_actions a LEFT JOIN sites s ON s.id = a.site_id AND s.client_id = a.client_id
     WHERE a.client_id = ${clientId} AND a.severity = 'urgent' AND a.status <> 'resolved'
       AND GREATEST(a.created_at, a.updated_at) >= ${from}::timestamptz
+      -- Actions just created from an uploaded report were in its action plan
+      -- email (lib/reportActionEmails.ts); a later change (an assignment, a
+      -- new priority) alerts as usual.
+      AND NOT (coalesce(a.source_kind, '') LIKE 'inspection_report:%' AND a.updated_at <= a.created_at + interval '1 minute')
     UNION ALL
     SELECT 'fix', f.id, 'fix', f.title, f.site_id, s.name, f.priority = 'urgent',
            f.assignee_user_id, f.assigned_to, f.created_by

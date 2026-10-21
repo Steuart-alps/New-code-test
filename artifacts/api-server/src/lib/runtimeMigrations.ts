@@ -2219,6 +2219,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateCertificateOutcomes();
     await migrateFireCallPoints();
     await migrateEquipmentLabels();
+    await migrateInspectionReports();
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
@@ -6181,4 +6182,43 @@ async function migrateCertificateOutcomes() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_certificate" ON "certificate_defects" ("client_id", "certificate_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_fix_track_issue" ON "certificate_defects" ("fix_track_issue_id")`);
+}
+
+// Uploaded audit and inspection reports whose required actions become track
+// actions (source_kind 'inspection_report:...'), plus who drafted and confirmed them.
+async function migrateInspectionReports() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "inspection_reports" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "report_type" text NOT NULL,
+      "title" text NOT NULL,
+      "report_date" date,
+      "object_path" text NOT NULL,
+      "file_name" text,
+      "file_size" bigint,
+      "mime_type" text,
+      "draft_actions" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "ai_status" text NOT NULL DEFAULT 'not_requested',
+      "ai_summary" text,
+      "ai_model" text,
+      "ai_error" text,
+      "ai_requested_at" timestamp,
+      "ai_read_count" integer NOT NULL DEFAULT 0,
+      "ai_input_tokens" integer,
+      "ai_output_tokens" integer,
+      "uploaded_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "uploaded_by_name" text NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_inspection_reports_client" ON "inspection_reports" ("client_id", "created_at")`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "draft_source" text`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "confirmed_by_name" text`);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_track_actions_inspection_report"
+    ON "track_actions" ("client_id", "source_record_id") WHERE "source_kind" LIKE 'inspection_report:%'
+  `);
 }

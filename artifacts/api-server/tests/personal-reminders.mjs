@@ -349,6 +349,9 @@ try {
       VALUES ($1, $2, 'Dripping tap in the bar', 'Bar', 'low', 'reported', 'Tom Staff', CURRENT_DATE, $3) RETURNING id`, [A, blueBoar.id, tom.userId]);
     await q(`INSERT INTO fix_track_issues (client_id, site_id, title, location, priority, status, reported_by, reported_date, created_by, assignee_user_id, assigned_to)
       VALUES ($1, $2, 'Gas smell in the cellar', 'Cellar', 'urgent', 'reported', 'Owner', CURRENT_DATE, $3, $4, 'Tom Staff')`, [A, redLion.id, owner.userId, tom.userId]);
+    // Just created from an uploaded report: its action plan email has told the Owners and Managers.
+    await q(`INSERT INTO track_actions (client_id, site_id, module, title, severity, status, source_kind, source_record_id, provenance)
+      VALUES ($1, $2, 'audit', 'Inspector: repair the cellar door', 'urgent', 'open', 'inspection_report:fixture', 1, 'one_off')`, [A, redLion.id]);
     const result = await runUrgentAlertJob({ clientIds: [A, B], send, sendPush });
     assert.equal(result.errors, 0);
 
@@ -358,6 +361,7 @@ try {
     assert.match(ownerAlert.html, /Kitchen extinguisher missing/);
     assert.doesNotMatch(ownerAlert.html, /Gas smell in the cellar/, "nobody is told about an issue they raised themselves");
     assert.doesNotMatch(ownerAlert.html, /Replace fire door closer/, "only urgent actions go straight away");
+    assert.doesNotMatch(ownerAlert.html, /Inspector: repair the cellar door/, "a report's new actions were in its action plan email");
 
     const [tomAlert] = to(tom.email);
     assert.ok(tomAlert, "an urgent FixTrack issue goes to the person it is assigned to");

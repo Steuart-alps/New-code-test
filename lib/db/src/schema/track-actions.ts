@@ -48,6 +48,10 @@ export const trackActionsTable = pgTable("track_actions", {
   resolutionNotes: text("resolution_notes"),
   status: text("status").notNull(),
   createdBy: integer("created_by"),
+  // Actions taken from an uploaded report: "ai" when ComplyTrack suggested
+  // the wording, "manual" when a person typed it; and who confirmed it.
+  draftSource: text("draft_source"),
+  confirmedByName: text("confirmed_by_name"),
   resolvedBy: integer("resolved_by"),
   resolvedByName: text("resolved_by_name"),
   resolverSignature: text("resolver_signature"),
