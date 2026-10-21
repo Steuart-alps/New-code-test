@@ -27,9 +27,12 @@ Wednesday 28 October.
 | 8 | International: Ireland first, then AU/NZ/Canada, US last | After launch | None for hosting; higher card fees abroad | Your answers to 6 questions |
 | 9 | Error reports (Sentry) | Before launch if you have 10 minutes | None (free plan) | Your set-up steps |
 | 10 | Offline working | After launch | None for the recommended route | Phone app first |
+| 11 | Actions from uploaded audit and inspection reports | After launch | Pennies per report (being worked out) | Plan in its own thread |
+| 12 | CareTrack (care homes and care services) | Later | Not yet known | Scope from you |
 
-My suggested order after launch is the order of the table, with 2 and 5
-built together because they share the same set-up. Tell me if you want a
+My suggested order after launch is the order of the table, with 2, 5 and 11
+built together because they share the same set-up (one AI key and one
+"read a document, a person confirms" screen). Tell me if you want a
 different order.
 
 ---
@@ -328,6 +331,46 @@ signing certificate (a few hundred pounds a year) and support time.
 
 ---
 
+## 11. Actions from uploaded audit and inspection reports
+
+**When:** after launch. **Status:** being planned now in the thread "Actions
+from uploaded audit reports"; this is a summary only.
+
+A manager or ALPS uploads an audit, an inspection report (for example from the
+Care Inspectorate) or a similar report. ComplyTrack reads the required actions
+out of it and turns each one into an action in the Compliance Hub, with a due
+date, assigned to the right manager or the maintenance manager. As with
+certificates, a person checks the list before anything is created.
+
+It uses the same AI set-up and the same "check and confirm" screen as
+certificate scanning (item 2) and the COSHH drafts (item 5), so all three
+should be built together. The actions follow your notification rule: they go
+to the person they are assigned to, and the Owner sees them in the weekly
+update (item 3).
+
+**Cost:** pennies per report; the exact figure is being worked out in that
+thread. No extra hosting.
+
+---
+
+## 12. CareTrack
+
+**When:** later, after the items above.
+
+A new module for care homes and care services, to be built later. Item 11 is
+the first step towards it: Care Inspectorate reports can already turn into
+actions before CareTrack exists, and CareTrack can then build on those
+actions.
+
+**Questions for you, when you're ready:** which care services first (care
+homes, care at home, nurseries)? Scotland only to start (Care Inspectorate),
+or England (CQC), Wales (CIW) and Northern Ireland (RQIA) too? Which records
+should it keep day to day?
+
+**Cost:** not yet known; likely none for hosting, like the other tracks.
+
+---
+
 ## Before launch (already in hand, listed for completeness)
 
 These are handled in the "Launch plan for 26 October" thread and are not new
@@ -354,6 +397,8 @@ work:
 | International | None for hosting; higher card fees abroad; optional regional server later |
 | Error reports | None (free plan) |
 | Offline working (recommended route) | None |
+| Actions from audit reports | Pennies per report (being worked out) |
+| CareTrack | Not yet known; likely none for hosting |
 
 Hosting stays on the one Render web service and database in Frankfurt for
 everything above.
