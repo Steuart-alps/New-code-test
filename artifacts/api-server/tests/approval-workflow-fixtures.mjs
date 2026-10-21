@@ -28,7 +28,7 @@ try {
   await rm(temp, { recursive: true, force: true });
 }
 export const {
-  db, sql, pool, runReminderJob, runContractorComplianceReminderJob, runCertificateFollowUpJob, runRuntimeMigrations, decryptTokenPayload,
+  db, sql, pool, runReminderJob, runContractorComplianceReminderJob, runCertificateFollowUpJob, runPersonalReminderJob, runRuntimeMigrations, decryptTokenPayload,
   encryptTokenPayload, tokenPayloadNeedsReencryption, reencryptQueuedTokenPayloads,
 } = runtime;
 

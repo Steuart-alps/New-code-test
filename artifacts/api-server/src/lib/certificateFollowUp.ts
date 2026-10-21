@@ -7,26 +7,26 @@
  * passed. A certificate counts when it was added to the check on or after the
  * visit day, or is dated (issue date) on or after it.
  *
- * Once per visit, FOLLOW_UP_AFTER_DAYS after it:
- *   - the contractor gets a follow-up asking for the certificate, drafted into
- *     Contractor Approvals like the visit reminder (a manager sends it); a
- *     draft still waiting when the certificate arrives is withdrawn;
- *   - the site's Maintenance person is emailed directly (else its Managers,
- *     else the Owner of a business with neither), one email per person per
- *     day listing every visit waiting.
+ * FOLLOW_UP_AFTER_DAYS after the visit:
+ *   - the contractor gets one follow-up asking for the certificate, drafted
+ *     into Contractor Approvals like the visit reminder (a manager sends it);
+ *     a draft still waiting when the certificate arrives is withdrawn;
+ *   - the person responsible (lib/dueItems.ts responsibleForCertificate: the
+ *     person assigned, else the site's Maintenance managers, else its
+ *     Managers, else the Owners) sees it under "Certificates still to come" in
+ *     their 08:00 personal reminder that day and once a week after, and the
+ *     Owner update lists every one still waiting. No separate email.
  * Only visits from the last LOOK_BACK_DAYS are followed up, so older history
  * never produces a burst of emails.
  */
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { escapeHtml, emailButton, getPublicAppUrl, parseEmailList, sendEmail } from "./email";
+import { loadResponsibilityContext, responsibleForCertificate, type ResponsibilityContext } from "./dueItems";
+import { escapeHtml, parseEmailList } from "./email";
 import { logger } from "./logger";
-import { claimEmailDelivery, markEmailDeliverySent, settleEmailDelivery, type EmailDeliveryClaim } from "./emailDeliveryClaims";
-import { siteVisibleSql } from "./departmentSites";
 
 export const FOLLOW_UP_AFTER_DAYS = 3;
 export const LOOK_BACK_DAYS = 30;
-const JOB = "certificate-follow-up";
 export const CERTIFICATE_FOLLOW_UP_EMAIL_TYPE = "certificate_followup";
 
 const rowsOf = <T>(result: unknown): T[] => ((result as { rows?: T[] }).rows ?? []);
@@ -49,6 +49,8 @@ export interface VisitAwaitingCertificate {
   contractorName: string;
   contractorCompany: string | null;
   contractorEmail: string | null;
+  /** The person picked on the check ("Assigned to"). */
+  assigneeUserId: number | null;
 }
 
 /**
@@ -57,12 +59,11 @@ export interface VisitAwaitingCertificate {
  */
 export async function getVisitsAwaitingCertificate(
   clientId: number | null,
-  { afterDays = FOLLOW_UP_AFTER_DAYS, now = new Date() }: { afterDays?: number; now?: Date } = {},
+  { afterDays = FOLLOW_UP_AFTER_DAYS, today = new Date().toISOString().slice(0, 10) }: { afterDays?: number; today?: string } = {},
 ): Promise<VisitAwaitingCertificate[]> {
-  const today = now.toISOString().slice(0, 10);
   const result = await db.execute(sql`
     SELECT * FROM (
-      SELECT ci.id AS item_id, ci.client_id, ci.title, ci.site_id, s.name AS site_name,
+      SELECT ci.id AS item_id, ci.client_id, ci.title, ci.site_id, s.name AS site_name, ci.assignee_user_id,
         s.department_id AS site_department_id, ci.department_id,
         GREATEST(
           (ci.completed_at AT TIME ZONE 'UTC')::date,
@@ -100,60 +101,8 @@ export async function getVisitsAwaitingCertificate(
     contractorName: String(row.contractor_name),
     contractorCompany: (row.contractor_company as string | null) ?? null,
     contractorEmail: (row.contractor_email as string | null)?.trim() || null,
+    assigneeUserId: row.assignee_user_id == null ? null : Number(row.assignee_user_id),
   }));
-}
-
-interface Person { id: number; email: string; role: string; isMaintenanceManager: boolean }
-
-/**
- * Who hears about a visit's missing certificate: the Maintenance people who
- * cover its site (and the business's maintenance email in Settings), else
- * its Managers, else the Owner when the business
- * has neither. A person covers a site when one of their departments can see
- * it; someone with no department, or a Manager over every department, covers
- * every site.
- */
-export async function certificateFollowUpRecipients(
-  clientId: number,
-  visit: Pick<VisitAwaitingCertificate, "siteId">,
-  maintenanceEmailSetting?: string | null,
-): Promise<string[]> {
-  const siteClause = visit.siteId == null ? sql`TRUE` : sql`(
-    (u.department_id IS NULL AND NOT EXISTS (SELECT 1 FROM user_departments ud0 WHERE ud0.user_id = u.id))
-    OR (u.role = 'client_manager' AND u.all_departments)
-    OR EXISTS (
-      SELECT 1 FROM sites s
-      JOIN (
-        SELECT u.department_id AS department_id
-        UNION SELECT ud.department_id FROM user_departments ud WHERE ud.user_id = u.id AND u.role = 'client_manager'
-      ) d ON d.department_id IS NOT NULL
-      WHERE s.id = ${visit.siteId} AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, sql`d.department_id`)}
-    )
-  )`;
-  const people = rowsOf<{ id: number; email: string; role: string; is_maintenance_manager: boolean }>(
-    await db.execute(sql`
-      SELECT u.id, u.email, u.role, u.is_maintenance_manager
-      FROM users u
-      WHERE u.client_id = ${clientId} AND u.active = true
-        AND u.role IN ('client_admin', 'client_manager', 'client_staff')
-        AND ${siteClause}
-      ORDER BY u.id
-    `),
-  ).map((row): Person => ({
-    id: Number(row.id), email: row.email, role: row.role,
-    isMaintenanceManager: row.is_maintenance_manager === true,
-  }));
-  const emails = (list: string[]) => [...new Set(list.map((email) => email.trim().toLowerCase()).filter(Boolean))];
-
-  const maintenance = emails([
-    ...parseEmailList(maintenanceEmailSetting),
-    ...people.filter((p) => p.isMaintenanceManager).map((p) => p.email),
-  ]);
-  if (maintenance.length) return maintenance;
-  const managers = emails(people.filter((p) => p.role === "client_manager").map((p) => p.email));
-  if (managers.length) return managers;
-  // A business with neither: its Owner is the one who deals with contractors.
-  return emails(people.filter((p) => p.role === "client_admin").map((p) => p.email));
 }
 
 function contractorFollowUpEmail(visit: VisitAwaitingCertificate, companyName: string, replyTo: string | null) {
@@ -184,32 +133,6 @@ function contractorFollowUpEmail(visit: VisitAwaitingCertificate, companyName: s
   return { subject: `Certificate needed: ${visit.title}`, html, text };
 }
 
-function staffFollowUpEmail(visits: VisitAwaitingCertificate[]) {
-  const appUrl = getPublicAppUrl();
-  const rows = visits.map((visit) => {
-    const where = visit.siteName ? `${visit.siteName} · ` : "";
-    const who = [visit.contractorName, visit.contractorCompany].filter(Boolean).join(", ");
-    return `<li style="margin:0 0 10px;"><a href="${escapeHtml(`${appUrl}/items/${visit.itemId}`)}" style="color:#2563eb;font-weight:600;">${escapeHtml(visit.title)}</a><br/>
-      <span style="color:#64748b;font-size:13px;">${escapeHtml(where)}visited ${escapeHtml(longDate(visit.visitDay))} by ${escapeHtml(who)}</span></li>`;
-  }).join("");
-  const count = visits.length === 1 ? "A contractor visit has" : `${visits.length} contractor visits have`;
-  const html = `
-    <h2 style="color:#1e293b;margin:0 0 16px;">Certificates still to come</h2>
-    <p>${count} no certificate uploaded ${FOLLOW_UP_AFTER_DAYS} days on:</p>
-    <ul style="padding-left:20px;margin:16px 0;">${rows}</ul>
-    <p>The contractor has a follow-up waiting in Contractor Approvals. When the certificate arrives, upload it on the check.</p>
-    <p style="text-align:center;margin:24px 0;">${emailButton(escapeHtml(`${appUrl}/contractor-approvals`), "Open Contractor Approvals")}</p>
-  `;
-  const text = [
-    "Certificates still to come", "",
-    `${count} no certificate uploaded ${FOLLOW_UP_AFTER_DAYS} days on:`, "",
-    ...visits.map((visit) => `- ${visit.title}${visit.siteName ? ` (${visit.siteName})` : ""}, visited ${longDate(visit.visitDay)}: ${appUrl}/items/${visit.itemId}`),
-    "", "The contractor has a follow-up waiting in Contractor Approvals. When the certificate arrives, upload it on the check.",
-  ].join("\n");
-  const subject = visits.length === 1 ? `Certificate still to come: ${visits[0].title}` : `${visits.length} certificates still to come`;
-  return { subject, html, text };
-}
-
 async function clientSettings(clientId: number): Promise<Record<string, string>> {
   const result = await db.execute(sql`SELECT key, value FROM app_settings WHERE client_id = ${clientId}`);
   return Object.fromEntries(rowsOf<{ key: string; value: string | null }>(result)
@@ -237,30 +160,28 @@ async function withdrawAnsweredDrafts(): Promise<number> {
   return rowsOf(result).length;
 }
 
-export interface CertificateFollowUpResult { visits: number; drafted: number; staffEmails: number; withdrawn: number; errors: number }
+export interface CertificateFollowUpResult { visits: number; drafted: number; withdrawn: number; errors: number }
 
-type Claimed = { visit: VisitAwaitingCertificate; claim: EmailDeliveryClaim; recipients: string[] };
+/** The addresses a business's follow-up names: who the contractor sends the certificate to, then the rest copied in. */
+function certificateAddresses(ctx: ResponsibilityContext, visit: VisitAwaitingCertificate, maintenanceEmail: string | undefined): string[] {
+  const people = responsibleForCertificate(ctx, visit).map((id) => ctx.eligible.get(id)?.email ?? "");
+  // A check given to someone goes to them; otherwise the business's maintenance inbox comes first.
+  const shared = visit.assigneeUserId == null ? parseEmailList(maintenanceEmail) : [];
+  return [...new Set([...shared, ...people].map((email) => email.trim().toLowerCase()).filter(Boolean))];
+}
 
-async function followUpBusiness(
-  clientId: number, visits: VisitAwaitingCertificate[], claimed: Claimed[],
-  send: typeof sendEmail, result: CertificateFollowUpResult,
-): Promise<void> {
-  const settings = await clientSettings(clientId);
+async function followUpBusiness(clientId: number, visits: VisitAwaitingCertificate[], result: CertificateFollowUpResult): Promise<void> {
+  const [settings, ctx] = await Promise.all([clientSettings(clientId), loadResponsibilityContext(clientId)]);
   const companyName = settings["companyName"] ?? "ComplyTrack";
-  // Each visit is followed up once: its claim is the permanent marker.
+  // Contractor follow-ups wait in Contractor Approvals, once per visit (the
+  // idempotency key). A check holds one waiting draft at a time, so while a
+  // reminder for the same check is still waiting the follow-up is added on a
+  // later run instead.
   for (const visit of visits) {
-    const claim = await claimEmailDelivery(JOB, `${visit.itemId}:${visit.visitDay}`);
-    if (!claim) continue;
-    claimed.push({ visit, claim, recipients: await certificateFollowUpRecipients(clientId, visit, settings["maintenanceEmail"]) });
-  }
-
-  // Contractor follow-ups wait in Contractor Approvals. A check holds one
-  // waiting draft at a time, so a follow-up is not added while a reminder
-  // for the same check is still waiting.
-  for (const { visit, recipients } of claimed) {
     if (!visit.contractorEmail) continue;
-    const email = contractorFollowUpEmail(visit, companyName, recipients[0] ?? null);
-    const cc = recipients.filter((address) => address !== visit.contractorEmail!.toLowerCase());
+    const addresses = certificateAddresses(ctx, visit, settings["maintenanceEmail"]);
+    const email = contractorFollowUpEmail(visit, companyName, addresses[0] ?? null);
+    const cc = addresses.filter((address) => address !== visit.contractorEmail!.toLowerCase());
     const queued = await db.execute(sql`
       INSERT INTO contractor_email_queue
         (client_id, entity_type, entity_id, department_id, contractor_id, email_type, mode,
@@ -275,54 +196,27 @@ async function followUpBusiness(
     `);
     if (rowsOf(queued).length) result.drafted++;
   }
-
-  // Staff: one email per person listing every visit waiting.
-  const byRecipient = new Map<string, VisitAwaitingCertificate[]>();
-  for (const { visit, recipients } of claimed) {
-    for (const address of recipients) byRecipient.set(address, [...(byRecipient.get(address) ?? []), visit]);
-  }
-  const failed = new Set<number>();
-  for (const [address, list] of byRecipient) {
-    const email = staffFollowUpEmail(list);
-    try {
-      await send({
-        to: address, subject: email.subject, html: email.html, text: email.text, clientId,
-        idempotencyKey: `${JOB}:${clientId}:${address}:${list.map((visit) => `${visit.itemId}@${visit.visitDay}`).join(",")}`,
-      });
-      result.staffEmails++;
-    } catch (err) {
-      result.errors++;
-      logger.error({ err, clientId }, "Certificate follow-up email failed");
-      for (const visit of list) failed.add(visit.itemId);
-    }
-  }
-  // A visit whose staff email failed is tried again tomorrow; its contractor
-  // draft is not duplicated (same idempotency key).
-  for (const { visit, claim } of claimed) {
-    if (failed.has(visit.itemId)) await settleEmailDelivery(claim);
-    else await markEmailDeliverySent(claim);
-  }
 }
 
-export async function runCertificateFollowUpJob(
-  { now = new Date(), send = sendEmail }: { now?: Date; send?: typeof sendEmail } = {},
-): Promise<CertificateFollowUpResult> {
-  const result: CertificateFollowUpResult = { visits: 0, drafted: 0, staffEmails: 0, withdrawn: 0, errors: 0 };
+/**
+ * Draft the contractor follow-ups due today and withdraw those answered. The
+ * person responsible hears in their 08:00 personal reminder
+ * (lib/personalReminders.ts), not from this job.
+ */
+export async function runCertificateFollowUpJob({ now = new Date() }: { now?: Date } = {}): Promise<CertificateFollowUpResult> {
+  const result: CertificateFollowUpResult = { visits: 0, drafted: 0, withdrawn: 0, errors: 0 };
   result.withdrawn = await withdrawAnsweredDrafts();
-  const visits = await getVisitsAwaitingCertificate(null, { now });
+  const visits = await getVisitsAwaitingCertificate(null, { today: now.toISOString().slice(0, 10) });
   result.visits = visits.length;
   const byClient = new Map<number, VisitAwaitingCertificate[]>();
   for (const visit of visits) byClient.set(visit.clientId, [...(byClient.get(visit.clientId) ?? []), visit]);
 
   for (const [clientId, clientVisits] of byClient) {
-    const claimed: Claimed[] = [];
     try {
-      await followUpBusiness(clientId, clientVisits, claimed, send, result);
+      await followUpBusiness(clientId, clientVisits, result);
     } catch (err) {
       result.errors++;
       logger.error({ err, clientId }, "Certificate follow-up failed for a business");
-      // Nothing is marked done, so tomorrow's run tries these visits again.
-      for (const { claim } of claimed) await settleEmailDelivery(claim).catch(() => {});
     }
   }
   return result;
