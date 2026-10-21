@@ -17,7 +17,7 @@ Wednesday 28 October.
 
 | # | Item | When | Extra running cost | Waiting on |
 |---|---|---|---|---|
-| 1 | Greens vehicle maintenance (GreenTrack) | After launch | None | Hour meters finishing first (under way) |
+| 1 | Greens vehicle maintenance (GreenTrack) | After launch | None | Hour meters and spraying book stock finishing first (under way) |
 | 2 | Scanning certificates for key dates and contractor details | After launch | About 0.1p per certificate read | Anthropic key on Render; your go-ahead |
 | 3 | Reminders to the right person, weekly Owner update | After launch | None | Your go-ahead |
 | 4 | Phone apps: iPhone first, then Android | After launch | Apple £79 a year, Google $25 once | Trying draft #101 on a phone |
@@ -46,9 +46,15 @@ thorough examinations, and NSTS sprayer tests (#158). Every machine can have a
 QR label (#159) that opens its record when scanned.
 
 **Under way now (not part of this roadmap).** The "Reviving GreenTrack" thread
-is adding hour meter readings and services due by hours (for example "next
-service at 500 hours"), as you asked this morning. Everything below builds on
-that and does not repeat it.
+is building two things you asked for this morning:
+
+- hour meter readings and services due by hours (for example "next service at
+  500 hours");
+- a greens spraying book (what was sprayed, who sprayed it, when) with stock
+  control for pesticides, fertiliser and top dressing, where each spray takes
+  the product off stock.
+
+Everything below builds on that work and does not repeat it.
 
 **What comes next**, in the order I'd suggest:
 
@@ -75,8 +81,9 @@ that and does not repeat it.
    live in #155. Record the warranty end date, with a reminder before it runs
    out.
 6. **Later options**, only if you want them:
-   - A simple parts store: stock levels and a "running low" list for the
-     shed's common parts.
+   - A parts store: stock levels and a "running low" list for the shed's
+     common parts, reusing the stock control being built for the spraying
+     book, with parts taken off stock when a service or repair uses them.
    - Road-going utility vehicles: MOT, road tax and insurance dates for
      machines with a registration number.
    - Who may drive what: link each machine to the operators trained on it in
