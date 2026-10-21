@@ -2805,6 +2805,9 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2824,7 +2827,10 @@ export const CreateFireSafetyCheckBody = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
 
 export const CreateFireSafetyCheckResponse = zod.object({
@@ -2840,6 +2846,9 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2881,6 +2890,7 @@ export const ListFireCallPointsResponseItem = zod.object({
   "name": zod.string(),
   "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
   "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
   "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
   "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
@@ -2895,7 +2905,8 @@ export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseIt
 export const CreateFireCallPointBody = zod.object({
   "siteId": zod.number().nullable(),
   "name": zod.string(),
-  "location": zod.string().nullish()
+  "location": zod.string().nullish(),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas (75 dB at the bedhead).')
 })
 
 export const CreateFireCallPointResponse = zod.object({
@@ -2904,6 +2915,7 @@ export const CreateFireCallPointResponse = zod.object({
   "name": zod.string(),
   "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
   "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
   "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
   "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
@@ -2925,6 +2937,7 @@ export const OrderFireCallPointsResponseItem = zod.object({
   "name": zod.string(),
   "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
   "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
   "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
   "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
@@ -2981,6 +2994,7 @@ export const UpdateFireCallPointParams = zod.object({
 export const UpdateFireCallPointBody = zod.object({
   "name": zod.string().optional(),
   "location": zod.string().nullish(),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas (75 dB at the bedhead).'),
   "archived": zod.boolean().optional()
 })
 
@@ -2990,6 +3004,7 @@ export const UpdateFireCallPointResponse = zod.object({
   "name": zod.string(),
   "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
   "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
   "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
   "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
@@ -3013,7 +3028,10 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
 
 export const UpdateFireSafetyCheckResponse = zod.object({
@@ -3029,6 +3047,9 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })

@@ -6122,6 +6122,12 @@ async function migrateFireCallPoints() {
     ) n
     WHERE n.id = p.id AND n.highest = 0
   `);
+  // Oct 2026: the sound level heard on a weekly alarm test, and call points
+  // near sleeping areas (75 dB at the bedhead). Existing rows stay blank.
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "sleeping_area" boolean NOT NULL DEFAULT false`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_db" real`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_method" text`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_bedhead" boolean`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks

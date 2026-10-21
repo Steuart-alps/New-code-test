@@ -42,7 +42,7 @@ import { format } from "date-fns";
 import {
   Flame, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Filter, Pencil, Trash2, Lock, Route, Cpu, Check, X, Minus, Settings, XCircle, ShieldAlert,
-  BellRing, Lightbulb, Moon, Archive, RotateCcw, ChevronUp, ChevronDown,
+  BellRing, Lightbulb, Moon, Archive, RotateCcw, ChevronUp, ChevronDown, Footprints,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
@@ -52,6 +52,13 @@ import { AuditLog } from "@/components/audit-log";
 import { LoadError } from "@/components/load-error";
 import { takeLinkParams } from "@/lib/deep-link";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
+import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  EMPTY_SOUND_LEVEL, parseSoundLevel, SoundLevelField, soundLevelRequest, SoundLevelVerdictText, type SoundLevelValue,
+} from "@/components/sound-level-field";
+import { SOUND_LEVEL_MIN_DB } from "@/lib/fire-sound-level";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -220,7 +227,8 @@ function CallPointPicker({
   open: boolean;
   callPointId: number | null;
   callPoint: string;
-  onChange: (value: { callPointId: number | null; callPoint: string }) => void;
+  /** `sleepingArea` is set when a call point is picked from the list. */
+  onChange: (value: { callPointId: number | null; callPoint: string; sleepingArea?: boolean }) => void;
   onSiteChange: (siteId: number | undefined) => void;
   optional?: boolean;
   /** An archived call point already on this record stays selectable. */
@@ -240,7 +248,7 @@ function CallPointPicker({
   // Suggest the next call point in the rotation when nothing is chosen yet.
   useEffect(() => {
     if (!open || optional || callPointId != null || callPoint || !suggested) return;
-    onChange({ callPointId: suggested.id, callPoint: callPointLabel(suggested) });
+    onChange({ callPointId: suggested.id, callPoint: callPointLabel(suggested), sleepingArea: suggested.sleepingArea ?? false });
   }, [open, suggested?.id, callPointId, callPoint]);
 
   return (
@@ -257,7 +265,7 @@ function CallPointPicker({
           onValueChange={v => {
             const p = points.find(x => String(x.id) === v);
             if (!p) return;
-            onChange({ callPointId: p.id, callPoint: callPointLabel(p) });
+            onChange({ callPointId: p.id, callPoint: callPointLabel(p), sleepingArea: p.sleepingArea ?? false });
             if (anySite) onSiteChange(p.siteId ?? undefined);
           }}>
           <SelectTrigger className="rounded-sm" data-testid="select-call-point"><SelectValue placeholder="Choose the call point" /></SelectTrigger>
@@ -315,6 +323,8 @@ function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled:
   const [newName, setNewName] = useState("");
   const [newLocation, setNewLocation] = useState("");
   const [editing, setEditing] = useState<Record<number, { name: string; location: string }>>({});
+  const [walkRoundOpen, setWalkRoundOpen] = useState(false);
+  const clientApiFetch = useActiveClientApi();
   const refresh = () => queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
   const fail = (err: any) => toast({ title: "Call point not saved", description: err.message, variant: "destructive" });
 
@@ -326,7 +336,7 @@ function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled:
       onError: fail,
     });
   };
-  const save = (point: FireCallPoint, data: { name?: string; location?: string | null; archived?: boolean }) =>
+  const save = (point: FireCallPoint, data: { name?: string; location?: string | null; sleepingArea?: boolean; archived?: boolean }) =>
     updatePoint.mutate({ id: point.id, data }, {
       onSuccess: () => { setEditing(({ [point.id]: _, ...rest }) => rest); refresh(); },
       onError: fail,
@@ -344,6 +354,22 @@ function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled:
       current ? [...ids.map(id => current.find(p => p.id === id)!), ...current.filter(p => p.archivedAt)] : current);
     orderPoints.mutate({ data: { siteId, ids } }, { onSettled: refresh, onError: fail });
   };
+  // A walk round is saved like an uploaded list: new call points join the
+  // end of the order as spoken, and ones already listed get the new location.
+  const saveWalkRound = async (walked: WalkRoundPoint[]) => {
+    const response = await clientApiFetch("/imports/fire-call-points", {
+      method: "POST",
+      body: JSON.stringify({ headers: ["Call point", "Location"], rows: walked.map(p => [p.name, p.location]), siteId, preview: false }),
+    });
+    const body = await response.json().catch(() => null) as { error?: string; rows?: Array<{ label: string; action: string; reasons: string[] }> } | null;
+    if (!response.ok) {
+      const bad = body?.rows?.find(row => row.action === "error");
+      return bad ? `${bad.label}: ${bad.reasons.join("; ")}` : body?.error ?? "The call points could not be saved";
+    }
+    await refresh();
+    toast({ title: "Call points saved", description: `${walked.length} from your walk round.` });
+    return null;
+  };
   const draft = (point: FireCallPoint) => editing[point.id] ?? { name: point.name, location: point.location ?? "" };
   const changed = (point: FireCallPoint) => {
     const value = editing[point.id];
@@ -352,9 +378,16 @@ function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled:
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => setWalkRoundOpen(true)} data-testid="button-walk-round-call-points">
+          <Footprints className="mr-1 h-4 w-4" /> Walk round and speak
+        </Button>
         <ImportCsvButton type="fire-call-points" siteId={siteId} label="Upload a list" onImported={refresh} />
       </div>
+      <WalkRoundDialog open={walkRoundOpen} onClose={() => setWalkRoundOpen(false)} kind="call_point"
+        title="Walk round and speak: call points" prefix="CP"
+        examples={["This is call point 1, by the front door", "Call point 2, kitchen fire exit"]}
+        existingNames={(points ?? []).map(p => p.name)} onSave={saveWalkRound} />
       {active.length === 0 && <p className="text-xs text-muted-foreground italic">No call points listed yet. Add them below in the order you want them tested, or upload a list.</p>}
       {active.length > 0 && <p className="text-[11px] text-muted-foreground">Tested in this order, from the top. Use the arrows to change it.</p>}
       {active.map((point, index) => (
@@ -390,6 +423,12 @@ function CallPointsEditor({ siteId, enabled }: { siteId: number | null; enabled:
           <div className="flex flex-wrap gap-1.5 items-center pl-7 text-[11px] text-muted-foreground">
             <span>{point.lastTestedDate ? `Tested ${format(new Date(point.lastTestedDate), "dd/MM/yyyy")}` : "Not tested yet"}</span>
             <RotationTags point={point} />
+            <label className="ml-auto flex items-center gap-1.5 cursor-pointer" title={`The alarm must reach ${SOUND_LEVEL_MIN_DB.bedhead} dB at the bedhead`}>
+              <Checkbox checked={!!point.sleepingArea} disabled={updatePoint.isPending} aria-label="Near a sleeping area"
+                data-testid={`checkbox-sleeping-area-${point.id}`}
+                onCheckedChange={checked => save(point, { sleepingArea: checked === true })} />
+              Sleeping area ({SOUND_LEVEL_MIN_DB.bedhead} dB)
+            </label>
           </div>
         </div>
       ))}
@@ -965,6 +1004,12 @@ function RecordCheckDialog({
   // Weekly alarm test: the call point used. Drills: whether night staff took part.
   const [callPointChoice, setCallPointChoice] = useState<{ callPointId: number | null; callPoint: string }>({ callPointId: null, callPoint: "" });
   const [nightStaff, setNightStaff] = useState<NightStaff | null>(null);
+  const [soundLevel, setSoundLevel] = useState<SoundLevelValue>(EMPTY_SOUND_LEVEL);
+  // A call point near a sleeping area sets the 75 dB bedhead limit.
+  const chooseCallPoint = (value: { callPointId: number | null; callPoint: string; sleepingArea?: boolean }) => {
+    setCallPointChoice({ callPointId: value.callPointId, callPoint: value.callPoint });
+    if (value.sleepingArea !== undefined) setSoundLevel(current => ({ ...current, bedhead: value.sleepingArea! }));
+  };
   // A call point belongs to one site, so choosing another site clears it.
   const changeSite = (value: number | undefined) => {
     if (value !== selectedSite) setCallPointChoice({ callPointId: null, callPoint: "" });
@@ -1047,11 +1092,12 @@ function RecordCheckDialog({
   function reset() {
     setCheckDate(todayIso()); setResult("pass"); setLocation(""); setPerformedBy(user?.name ?? ""); setNotes("");
     setRoutes([]); setPanelStatus("normal"); setFaultsFound(""); setZonesTested(""); setActionsTaken("");
-    setCallPointChoice({ callPointId: null, callPoint: "" }); setNightStaff(null);
+    setCallPointChoice({ callPointId: null, callPoint: "" }); setNightStaff(null); setSoundLevel(EMPTY_SOUND_LEVEL);
   }
 
   const missing = checkType === "alarm" && !callPointChoice.callPointId && !callPointChoice.callPoint.trim()
     ? "Choose the call point tested"
+    : checkType === "alarm" && soundLevel.db.trim() && parseSoundLevel(soundLevel.db) === null ? "Enter a sound level between 20 and 140 dB"
     : checkType === "fire_drill" && !nightStaff ? "Say whether night staff took part" : null;
 
   const handleSubmit = async () => {
@@ -1067,6 +1113,7 @@ function RecordCheckDialog({
       ...(checkType === "alarm" ? {
         callPointId: callPointChoice.callPointId,
         callPoint: callPointChoice.callPointId ? null : callPointChoice.callPoint.trim(),
+        ...soundLevelRequest(soundLevel),
       } : {}),
       ...(checkType === "fire_drill" ? { nightStaff } : {}),
     };
@@ -1141,8 +1188,11 @@ function RecordCheckDialog({
           )}
 
           {checkType === "alarm" && (
-            <CallPointPicker siteId={selectedSite} sites={sites} open={open} callPointId={callPointChoice.callPointId}
-              callPoint={callPointChoice.callPoint} onChange={setCallPointChoice} onSiteChange={setSelectedSite} />
+            <>
+              <CallPointPicker siteId={selectedSite} sites={sites} open={open} callPointId={callPointChoice.callPointId}
+                callPoint={callPointChoice.callPoint} onChange={chooseCallPoint} onSiteChange={setSelectedSite} />
+              <SoundLevelField value={soundLevel} onChange={setSoundLevel} />
+            </>
           )}
 
           {checkType === "emergency_lights" && <FlickTestGuide />}
@@ -1290,6 +1340,17 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
   // answer can be changed but not removed.
   const [callPointChoice, setCallPointChoice] = useState({ callPointId: check.callPointId ?? null, callPoint: check.callPoint ?? "" });
   const [nightStaff, setNightStaff] = useState<NightStaff | null>((check.nightStaff as NightStaff | null) ?? null);
+  const [soundLevel, setSoundLevel] = useState<SoundLevelValue>(check.soundLevelDb == null ? EMPTY_SOUND_LEVEL : {
+    db: String(check.soundLevelDb), method: check.soundLevelMethod === "phone" ? "phone" : "meter", bedhead: !!check.soundLevelBedhead,
+  });
+  const chooseCallPoint = (value: { callPointId: number | null; callPoint: string; sleepingArea?: boolean }) => {
+    setCallPointChoice({ callPointId: value.callPointId, callPoint: value.callPoint });
+    // Only a call point chosen here changes the limit; the stored one stays as recorded.
+    if (value.sleepingArea !== undefined && value.callPointId !== check.callPointId) {
+      setSoundLevel(current => ({ ...current, bedhead: value.sleepingArea! }));
+    }
+  };
+  const soundLevelInvalid = isAlarm && !!soundLevel.db.trim() && parseSoundLevel(soundLevel.db) === null;
   const changeSite = (value: number | undefined) => {
     if (value !== selectedSite && callPointChoice.callPointId) setCallPointChoice({ callPointId: null, callPoint: "" });
     setSelectedSite(value);
@@ -1324,6 +1385,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
           ...(isAlarm ? {
             callPointId: callPointChoice.callPointId,
             callPoint: callPointChoice.callPointId ? null : callPointChoice.callPoint.trim() || null,
+            ...soundLevelRequest(soundLevel),
           } : {}),
           ...(isDrill ? { nightStaff } : {}),
         } as any,
@@ -1379,9 +1441,10 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
 
           {isAlarm && (
             <CallPointPicker siteId={selectedSite} sites={sites} open={open} callPointId={callPointChoice.callPointId}
-              callPoint={callPointChoice.callPoint} onChange={setCallPointChoice} onSiteChange={setSelectedSite}
+              callPoint={callPointChoice.callPoint} onChange={chooseCallPoint} onSiteChange={setSelectedSite}
               optional={!check.callPoint} keepId={check.callPointId} />
           )}
+          {isAlarm && <SoundLevelField value={soundLevel} onChange={setSoundLevel} />}
 
           {isDrill && <NightStaffPicker value={nightStaff} onChange={setNightStaff} optional={!check.nightStaff} />}
 
@@ -1473,7 +1536,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={updateCheck.isPending
+          <Button onClick={handleSubmit} disabled={updateCheck.isPending || soundLevelInvalid
             || (isAlarm && !!check.callPoint && !callPointChoice.callPointId && !callPointChoice.callPoint.trim())
             || (isDrill && !!check.nightStaff && !nightStaff)}>
             {updateCheck.isPending ? "Saving…" : "Update"}
@@ -1781,6 +1844,13 @@ export default function FireSafetyPage() {
                             {check.performedBy && <div><span className="font-medium">Performed by:</span> {check.performedBy}</div>}
                             {check.callPoint && <div><span className="font-medium">Call point:</span> {check.callPoint}</div>}
                             {check.location && <div><span className="font-medium">{check.checkType === "alarm" && !check.callPoint ? "Location / Call Point" : "Location"}:</span> {check.location}</div>}
+                            {check.soundLevelDb != null && (
+                              <div data-testid={`sound-level-${check.id}`}>
+                                <span className="font-medium">Sound level:</span> {Math.round(check.soundLevelDb)} dB
+                                {check.soundLevelBedhead ? " at a bedhead" : ""}{check.soundLevelMethod === "phone" ? " (phone, rough guide)" : " (sound meter)"}
+                                <SoundLevelVerdictText db={check.soundLevelDb} bedhead={check.soundLevelBedhead} method={check.soundLevelMethod} className="text-[11px]" />
+                              </div>
+                            )}
                             {check.nightStaff && (
                               <div className={cn(check.nightStaff === "not_included" && "text-amber-700")}>
                                 <span className="font-medium">Night staff:</span> {NIGHT_STAFF_LABELS[check.nightStaff as NightStaff] ?? check.nightStaff}

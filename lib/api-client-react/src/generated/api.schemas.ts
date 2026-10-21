@@ -1993,6 +1993,17 @@ export const FireSafetyCheckNightStaff = {
   no_night_staff: 'no_night_staff',
 } as const;
 
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type FireSafetyCheckSoundLevelMethod = typeof FireSafetyCheckSoundLevelMethod[keyof typeof FireSafetyCheckSoundLevelMethod] | null;
+
+
+export const FireSafetyCheckSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface FireSafetyCheck {
   id: number;
   clientId: number;
@@ -2009,6 +2020,12 @@ export interface FireSafetyCheck {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: FireSafetyCheckNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: FireSafetyCheckSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -2033,6 +2050,17 @@ export const CreateFireSafetyCheckRequestNightStaff = {
   no_night_staff: 'no_night_staff',
 } as const;
 
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type CreateFireSafetyCheckRequestSoundLevelMethod = typeof CreateFireSafetyCheckRequestSoundLevelMethod[keyof typeof CreateFireSafetyCheckRequestSoundLevelMethod] | null;
+
+
+export const CreateFireSafetyCheckRequestSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface CreateFireSafetyCheckRequest {
   checkType: FireCheckType;
   checkDate: string;
@@ -2047,6 +2075,12 @@ export interface CreateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: CreateFireSafetyCheckRequestNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: CreateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
 }
 
 export type UpdateFireSafetyCheckRequestResult = typeof UpdateFireSafetyCheckRequestResult[keyof typeof UpdateFireSafetyCheckRequestResult];
@@ -2069,6 +2103,17 @@ export const UpdateFireSafetyCheckRequestNightStaff = {
   no_night_staff: 'no_night_staff',
 } as const;
 
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type UpdateFireSafetyCheckRequestSoundLevelMethod = typeof UpdateFireSafetyCheckRequestSoundLevelMethod[keyof typeof UpdateFireSafetyCheckRequestSoundLevelMethod] | null;
+
+
+export const UpdateFireSafetyCheckRequestSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface UpdateFireSafetyCheckRequest {
   checkDate?: string;
   result?: UpdateFireSafetyCheckRequestResult;
@@ -2082,6 +2127,12 @@ export interface UpdateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: UpdateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
 }
 
 export interface FireCallPoint {
@@ -2092,6 +2143,8 @@ export interface FireCallPoint {
   location: string | null;
   /** Place in the site's test rotation (1 = first). */
   sortOrder: number;
+  /** Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB. */
+  sleepingArea?: boolean;
   archivedAt: string | null;
   /** Date of the latest alarm test that used this call point. */
   lastTestedDate: string | null;
@@ -2105,11 +2158,15 @@ export interface CreateFireCallPointRequest {
   siteId: number | null;
   name: string;
   location?: string | null;
+  /** Near bedrooms or other sleeping areas (75 dB at the bedhead). */
+  sleepingArea?: boolean;
 }
 
 export interface UpdateFireCallPointRequest {
   name?: string;
   location?: string | null;
+  /** Near bedrooms or other sleeping areas (75 dB at the bedhead). */
+  sleepingArea?: boolean;
   archived?: boolean;
 }
 

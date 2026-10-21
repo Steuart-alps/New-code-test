@@ -14,6 +14,8 @@ export interface FireCallPoint {
   location: string | null;
   /** Place in the site's test rotation (1 = first). */
   sortOrder: number;
+  /** Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB. */
+  sleepingArea?: boolean;
   archivedAt: Date | null;
   /** Date of the latest alarm test that used this call point. */
   lastTestedDate: string | null;

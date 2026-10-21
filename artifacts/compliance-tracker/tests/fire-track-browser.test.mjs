@@ -67,7 +67,7 @@ const SITE = { id: 1, name: "Harbour Hotel" };
 
 const FREQUENCIES = { alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365, alarm_service: 180, extinguisher_service: 365 };
 const callPoints = [
-  { id: 11, siteId: 1, name: "CP1 – Reception", location: null, sortOrder: 1, archivedAt: null, lastTestedDate: localDate(-7) },
+  { id: 11, siteId: 1, name: "CP1 – Reception", location: null, sortOrder: 1, sleepingArea: true, archivedAt: null, lastTestedDate: localDate(-7) },
   { id: 12, siteId: 1, name: "CP2 – Kitchen", location: null, sortOrder: 2, archivedAt: null, lastTestedDate: null },
   { id: 13, siteId: 1, name: "CP3 – Old wing", location: null, sortOrder: 3, archivedAt: "2026-09-01T09:00:00.000Z", lastTestedDate: localDate(-30) },
 ];
@@ -160,6 +160,9 @@ async function routeApi(route) {
       callPointId: body.checkType === "alarm" ? body.callPointId ?? null : null,
       callPoint: body.checkType === "alarm" ? point?.name ?? body.callPoint ?? null : null,
       nightStaff: body.checkType === "fire_drill" ? body.nightStaff ?? null : null,
+      soundLevelDb: body.checkType === "alarm" ? body.soundLevelDb ?? null : null,
+      soundLevelMethod: body.checkType === "alarm" ? body.soundLevelMethod ?? null : null,
+      soundLevelBedhead: body.checkType === "alarm" ? body.soundLevelBedhead ?? null : null,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     if (created.callPointId && point) { point.lastTestedDate = created.checkDate; lastTestedPointId = point.id; }
@@ -208,7 +211,7 @@ async function openRecordDialog(page, checkTypeLabel) {
 
 try {
   await waitForVite();
-  browser = await chromium.launch({ headless: true, args: ["--no-sandbox"], executablePath: chromiumPath() });
+  browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"], executablePath: chromiumPath() });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "en-GB", timezoneId: "Europe/London" });
   const page = await context.newPage();
   page.setDefaultTimeout(20000);
@@ -246,13 +249,39 @@ try {
   assert.match(options[0], /CP1 – Reception · last tested/);
   await shot(page, "2-alarm-call-point");
   await page.getByRole("option", { name: /CP1 – Reception/ }).click();
+
+  // Sound level: CP1 is near a sleeping area, so the 75 dB bedhead limit applies.
+  const bedhead = dialog.getByTestId("checkbox-sound-level-bedhead");
+  assert.equal(await bedhead.getAttribute("data-state"), "checked", "a sleeping-area call point sets the bedhead limit");
+  const measure = dialog.getByTestId("button-measure-sound");
+  await measure.click();
+  await page.waitForFunction(() => /^\d+$/.test(document.querySelector('[data-testid="input-sound-level"]')?.value ?? ""), null, { timeout: 15_000 });
+  assert.match(await dialog.getByTestId("select-sound-level-method").innerText(), /phone \(rough guide\)/);
+  assert.match(await dialog.getByTestId("sound-level-field").innerText(), /isn't set up yet/);
+  await dialog.getByTestId("input-sound-level").fill("70");
+  await dialog.getByTestId("select-sound-level-method").click();
+  await page.getByRole("option", { name: "From a sound meter" }).click();
+  const verdict = dialog.getByTestId("sound-level-verdict");
+  assert.equal(await verdict.getAttribute("data-verdict"), "low");
+  assert.match(await verdict.innerText(), /Too quiet: needs at least 75 dB/);
+  await bedhead.click();
+  assert.equal(await verdict.getAttribute("data-verdict"), "ok", "70 dB is enough in a general area");
+  await bedhead.click();
+  await dialog.getByTestId("input-sound-level").fill("7");
+  assert.equal(await dialog.getByRole("button", { name: "Record Check" }).isDisabled(), true, "an impossible level cannot be saved");
+  await dialog.getByTestId("input-sound-level").fill("70");
+  await shot(page, "2b-alarm-sound-level");
   await dialog.getByRole("button", { name: "Record Check" }).click();
   await dialog.waitFor({ state: "hidden" });
   const alarmPost = posts.at(-1);
   assert.equal(alarmPost.body.checkType, "alarm");
   assert.equal(alarmPost.body.callPointId, 11);
   assert.equal(alarmPost.body.siteId, 1, "a one-site business records against its site");
-  console.log("ok - the alarm test picks the next call point in the order and sends the one chosen");
+  assert.deepEqual([alarmPost.body.soundLevelDb, alarmPost.body.soundLevelMethod, alarmPost.body.soundLevelBedhead], [70, "meter", true]);
+  const soundLine = page.getByTestId(`sound-level-${checks.at(-1).id}`);
+  await soundLine.waitFor();
+  assert.match(await soundLine.innerText(), /Sound level: 70 dB at a bedhead \(sound meter\)\s*Too quiet: needs at least 75 dB/);
+  console.log("ok - the alarm test picks the next call point in the order, measures or takes a typed sound level, and flags a quiet one");
 
   // ── Emergency lighting: the 5 minute flick test ──────────────────────────
   dialog = await openRecordDialog(page, "Monthly emergency lighting flick test");
@@ -356,6 +385,26 @@ try {
   await shot(page, "8-upload-call-points");
   await upload.getByRole("button", { name: "Cancel" }).click();
   console.log("ok - a call point list can be uploaded, with a preview first");
+
+  // ── Walk round and speak (typed here; the browser's dictation fills the same box) ──
+  await template.getByTestId("button-walk-round-call-points").click();
+  const walk = page.getByRole("dialog", { name: /Walk round and speak/ });
+  await walk.getByTestId("walk-round-examples").waitFor();
+  await walk.getByTestId("walk-round-text").fill("this is call point 6 by the lift lobby this is call point 7 in the plant room\nback stairs");
+  await walk.getByTestId("walk-round-row-2").waitFor();
+  const names = await walk.locator('[data-testid^="walk-round-row-"] input[aria-label="Name"]').evaluateAll(inputs => inputs.map(input => input.value));
+  const places = await walk.locator('[data-testid^="walk-round-row-"] input[aria-label="Location"]').evaluateAll(inputs => inputs.map(input => input.value));
+  assert.deepEqual(names, ["CP6", "CP7", "CP8"], "unnumbered points carry on from the highest number");
+  assert.deepEqual(places, ["By the lift lobby", "Plant room", "Back stairs"]);
+  await walk.getByTestId("walk-round-row-2").getByLabel("Location").fill("Back stairs, first floor");
+  await walk.getByTestId("walk-round-row-1").getByRole("button", { name: "Leave this one out" }).click();
+  await shot(page, "9-walk-round");
+  await walk.getByTestId("walk-round-save").click();
+  await walk.waitFor({ state: "hidden" });
+  const walkPost = posts.at(-1);
+  assert.equal(walkPost.path, "/api/imports/fire-call-points");
+  assert.deepEqual(walkPost.body, { headers: ["Call point", "Location"], rows: [["CP6", "By the lift lobby"], ["CP8", "Back stairs, first floor"]], siteId: 1, preview: false });
+  console.log("ok - walking round and speaking makes the call point list in the order spoken");
 
   assert.deepEqual(pageErrors, []);
   assert.deepEqual([...new Set(unexpectedRequests)], [], "every request is in the fixture");

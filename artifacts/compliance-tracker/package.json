@@ -66,6 +66,7 @@
     "test:landing-modules-browser": "node tests/landing-modules-browser.test.mjs",
     "test:dictation-text": "node tests/dictation-text.test.mjs",
     "test:dictation-browser": "node tests/dictation-browser.test.mjs",
+    "test:walk-round-text": "node tests/walk-round-text.test.mjs",
     "test:voice-log-reader": "node tests/voice-log-reader.test.mjs",
     "test:voice-log-browser": "node tests/voice-log-browser.test.mjs"
   },

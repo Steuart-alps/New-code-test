@@ -36,12 +36,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X, XCircle, ShieldAlert } from "lucide-react";
+import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X, XCircle, ShieldAlert, Footprints } from "lucide-react";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
+import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -394,6 +395,8 @@ type OutletStatus = {
   location: string | null;
   siteId: number | null;
   sortOrder: number;
+  /** "month" for sentinel outlets; "week" (the last 7 days) for little-used outlets. */
+  period?: "week" | "month";
   testedThisMonth: boolean;
   checkTypeForOutlet: LegionellaCheckType;
   lastCheck: {
@@ -406,8 +409,8 @@ type OutletStatus = {
   } | null;
 };
 
-type OutletType = "hot" | "cold" | "calorifier" | "tmv";
-const OUTLET_TYPE_LABEL: Record<string, string> = { hot: "Hot", cold: "Cold", calorifier: "Calorifier", tmv: "TMV" };
+type OutletType = "hot" | "cold" | "calorifier" | "tmv" | "little_used";
+const OUTLET_TYPE_LABEL: Record<string, string> = { hot: "Hot", cold: "Cold", calorifier: "Calorifier", tmv: "TMV", little_used: "Little used" };
 // TMV outlets (vulnerable users) are checked against a maximum, not the hot
 // minimum: HSG274 Part 2 / HTM 04-01. The server applies the same limit.
 const TMV_OUTLET_MAX_C = 44;
@@ -417,6 +420,7 @@ const OUTLET_TYPE_CLS: Record<string, string> = {
   cold:       "bg-sky-100 text-sky-700 border-sky-200",
   calorifier: "bg-amber-100 text-amber-700 border-amber-200",
   tmv:        "bg-violet-100 text-violet-700 border-violet-200",
+  little_used: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
 // ── Add Outlet Dialog ─────────────────────────────────────────────────────────
@@ -458,7 +462,7 @@ function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-display">Add Sentinel Outlet</DialogTitle>
+          <DialogTitle className="font-display">Add Outlet</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
@@ -475,6 +479,7 @@ function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
                 <SelectItem value="cold">Cold water</SelectItem>
                 <SelectItem value="calorifier">Calorifier</SelectItem>
                 <SelectItem value="tmv">TMV / thermostatic mixing valve outlet</SelectItem>
+                <SelectItem value="little_used">Little-used outlet (weekly flush)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -570,7 +575,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
     <Dialog open onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">Log Sentinel Test</DialogTitle>
+          <DialogTitle className="font-display">{checkType === "outlet_flush" ? "Log Weekly Flush" : "Log Sentinel Test"}</DialogTitle>
           <p className="text-sm text-muted-foreground">{locationStr}</p>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -637,6 +642,9 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
   const [loading, setLoading] = useState(true);
   const [logOutlet, setLogOutlet] = useState<OutletStatus | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [walkRoundOpen, setWalkRoundOpen] = useState(false);
+  const [walkSite, setWalkSite] = useState<number | undefined>(undefined);
+  const { data: sites } = useListSites();
   const { toast } = useToast();
 
   const refresh = async () => {
@@ -656,6 +664,30 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
     const outlet = outlets.find(o => o.id === openOutletId);
     if (outlet) setLogOutlet(outlet);
   }, [openOutletId, loading]);
+
+  // A walk round adds the outlets in the order spoken, after those listed.
+  // "Hot and cold" at one basin becomes a hot and a cold outlet.
+  const saveWalkRound = async (points: WalkRoundPoint[]): Promise<string | null> => {
+    let sortOrder = Math.max(0, ...outlets.map(o => Number(o.sortOrder) || 0)) + 1;
+    let saved = 0;
+    for (const point of points) {
+      for (const type of point.types) {
+        const r = await apiFetch("/legionella/outlets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: point.name, type, location: point.location || null, siteId: siteId ?? walkSite ?? null, sortOrder: sortOrder++ }),
+        });
+        if (!r.ok) {
+          await refresh();
+          return `${point.name} could not be saved${saved ? ` (${saved} saved before it)` : ""}. Remove the saved ones from this list and try again.`;
+        }
+        saved++;
+      }
+    }
+    toast({ title: "Outlets added", description: `${saved} from your walk round, in the order you walked.` });
+    await refresh();
+    return null;
+  };
 
   const handleDelete = async (id: number) => {
     if (!confirm("Remove this outlet? This won't delete historical test records.")) return;
@@ -682,7 +714,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
         <div className="flex items-center justify-between gap-4">
           <div>
             <CardTitle className="font-display text-base flex items-center gap-2">
-              Sentinel Outlets
+              Sentinel and little-used outlets
               {total > 0 && (
                 <span className={cn(
                   "text-xs px-2 py-0.5 rounded-full font-semibold border",
@@ -690,16 +722,21 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
                     ? "bg-emerald-100 text-emerald-700 border-emerald-200"
                     : "bg-amber-100 text-amber-700 border-amber-200"
                 )}>
-                  {done}/{total} tested — {monthName}
+                  {done}/{total} done — {monthName}
                 </span>
               )}
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">Monitoring points and frequency should match this site's risk assessment and written scheme.</p>
           </div>
           {canAdmin && (
-            <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Outlet
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setWalkRoundOpen(true)} data-testid="button-walk-round-outlets">
+                <Footprints className="w-3.5 h-3.5 mr-1.5" /> Walk round and speak
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Outlet
+              </Button>
+            </div>
           )}
         </div>
       </CardHeader>
@@ -711,7 +748,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
         ) : total === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Droplets className="w-10 h-10 mx-auto mb-3 opacity-20" />
-            <p className="text-sm">No sentinel outlets defined yet.</p>
+            <p className="text-sm">No outlets listed yet.</p>
             {canAdmin && (
               <Button variant="link" size="sm" className="mt-1 h-auto p-0 text-primary"
                 onClick={() => setAddOpen(true)}>
@@ -764,7 +801,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
                         "font-medium",
                         outlet.lastCheck?.result === "pass" ? "text-emerald-700" : "text-red-700"
                       )}>
-                          {outlet.lastCheck?.result === "pass" ? "Passed" : "Failed"}
+                          {outlet.lastCheck?.result === "pass" ? (outlet.period === "week" ? "Flushed" : "Passed") : "Failed"}
                         {outlet.lastCheck?.temperature && ` (${outlet.lastCheck.temperature}°C)`}
                         {outlet.lastCheck?.checkDate && ` — ${format(new Date(outlet.lastCheck.checkDate), "dd MMM")}`}
                       </span>
@@ -772,7 +809,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
                   ) : (
                     <>
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span className="text-amber-700 font-medium">Not tested this month</span>
+                      <span className="text-amber-700 font-medium">{outlet.period === "week" ? "Not flushed in the last 7 days" : "Not tested this month"}</span>
                     </>
                   )}
                 </div>
@@ -783,7 +820,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
                   className="w-full"
                   onClick={() => setLogOutlet(outlet)}>
                   <Plus className="w-3 h-3 mr-1.5" />
-                  {outlet.testedThisMonth ? "Log another" : "Log Test"}
+                  {outlet.testedThisMonth ? "Log another" : outlet.period === "week" ? "Log Flush" : "Log Test"}
                 </Button>
               </div>
             ))}
@@ -799,6 +836,29 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
         />
       )}
 
+      {canAdmin && (
+        <WalkRoundDialog open={walkRoundOpen} onClose={() => setWalkRoundOpen(false)} kind="outlet"
+          title="Walk round and speak: water outlets" prefix="Outlet "
+          examples={[
+            "Outlet 1, ground floor ladies toilet basin, sentinel, hot and cold",
+            "Outlet 2, plant room hose, little used",
+            "Outlet 3, assisted bathroom, TMV",
+          ]}
+          existingNames={outlets.map(o => o.name)}
+          before={siteId == null && (sites?.length ?? 0) > 0 ? (
+            <div className="space-y-1.5">
+              <Label>Site</Label>
+              <Select value={walkSite ? String(walkSite) : "none"} onValueChange={v => setWalkSite(v === "none" ? undefined : Number(v))}>
+                <SelectTrigger data-testid="walk-round-site"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific site</SelectItem>
+                  {sites?.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : undefined}
+          onSave={saveWalkRound} />
+      )}
       {canAdmin && addOpen && (
         <AddOutletDialog
           siteId={siteId}
