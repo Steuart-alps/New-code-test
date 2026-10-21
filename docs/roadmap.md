@@ -31,6 +31,7 @@ Wednesday 28 October.
 | 12 | CareTrack (care homes and care services) | Later | Not yet known | Scope from you |
 | 13 | Kitchens: stock, costings, GP, recipe spec sheets, supplier details, voice | After launch | None, except a few pence per spec sheet read | Allergen charts built, parked as draft #169 |
 | 14 | Label scanning (chemicals, food, GreenTrack products, equipment plates) | After launch | About 1-2p per label read; more when it also finds a data sheet and drafts COSHH | Anthropic key on Render |
+| 15 | FireTrack: sound level meter for fire alarm tests | After launch (with the iPhone app) | None | Phone app; your check of the dB limits |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -520,6 +521,51 @@ the Live AI plan. Needs the Anthropic key on Render.
 
 ---
 
+## 15. FireTrack: sound level meter for fire alarm tests
+
+**When:** after launch, as part of the ComplyTrack phone app (iPhone first).
+Nothing has been built yet.
+
+**The idea.** During each weekly call point test, the phone measures how loud
+the alarm is and saves the reading (in dB) on that test. It shows a red flag
+if the alarm is too quiet:
+
+- below 65 dB in general areas;
+- below 75 dB at the bedhead in rooms where people sleep.
+
+The limit is set on each call point's location. These are the BS 5839-1
+figures as quoted second-hand, so please check them against your copy of the
+current standard. The call point locations and test order this hangs off went
+live in #165, and draft #174 adds the walk round.
+
+**Why it has to be our own app.** Decibel X and the other phone apps have no
+link we can use, only a CSV file or a picture to share. Professional meters
+with a network link (B&K 2245, Larson Davis 831C and LxT, NoiseMeters
+NoiseAPI) are expensive, and a website can't reach them. Cirrus, Casella/TSI
+and Pulsar meters only talk over Bluetooth to their own apps, and a web page
+can't use Bluetooth on an iPhone. A browser can hear the microphone, but its
+readings can be 5 to 10 dB out, so it belongs in the phone app.
+
+**Limits to be honest about.**
+
+- Phone microphones aren't calibrated, so each phone needs a one-off
+  adjustment set against a proper meter.
+- Even then the readings are a good indication, not evidence-grade
+  measurements.
+- A phone can max out when it's right next to a sounder.
+
+**Steps along the way.**
+
+1. **Quick win (could come sooner):** a typed "Sound level (dB)" box on each
+   call point test, with the same red flag, for anyone reading a meter.
+2. **Meter upload:** upload the CSV from a Cirrus or Casella meter for clients
+   who own one.
+3. **The phone app meter** described above.
+
+**Cost:** no extra hosting.
+
+---
+
 ## Before launch (already in hand, listed for completeness)
 
 These are handled in the "Launch plan for 26 October" thread and are not new
@@ -552,6 +598,7 @@ work:
 | Recipe spec sheet reading | A few pence per sheet |
 | Supplier allergens and prices | Pennies per invoice or product read; nothing for a supplier file |
 | Kitchen voice input | None |
+| FireTrack sound level meter | None |
 | Label scanning | About 1-2p per label; about 40p for a chemical including its data sheet and COSHH draft (mostly in the Live AI plan already) |
 
 Hosting stays on the one Render web service and database in Frankfurt for
