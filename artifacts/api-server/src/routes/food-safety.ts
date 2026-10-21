@@ -9,7 +9,7 @@ import {
 import { KitchenTemperatureError, recordKitchenTemperatureActions } from "../lib/kitchenTemperatureActions";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
+import { foodSafetyRecordsTable, appSettingsTable, sitesTable, auditEventsTable } from "@workspace/db/schema";
 import { eq, and, sql, inArray, isNull } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
 import { sitesTableVisibleTo } from "../lib/departmentSites";
@@ -1149,11 +1149,13 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
     row: rowSchema,
     entryId: z.string().regex(/^[A-Za-z0-9_-]{12,100}$/).optional(),
     recordedAt: z.string().datetime({ offset: true }).optional(),
+    // "Say it": the words that were heard, kept with the row as evidence.
+    spoken: spokenSchema.optional(),
   });
   const parsed = appendSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
-  const { recordDate, section, row, entryId, recordedAt } = parsed.data;
+  const { recordDate, section, row, entryId, recordedAt, spoken } = parsed.data;
   if (recordedAt && recordedAt.slice(0, 10) !== recordDate) {
     return res.status(400).json({ error: "recordDate must match the local date in recordedAt" });
   }
@@ -1162,6 +1164,7 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
     ...row,
     ...(entryId ? { _entryId: entryId } : {}),
     ...(recordedAt ? { _recordedAt: recordedAt } : {}),
+    ...(spoken ? spokenStamp(req, spoken) : {}),
   };
   const rowJson = JSON.stringify(storedRow);
   const userId = req.currentUser?.id ?? null;
@@ -1219,9 +1222,112 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   if (!updated) throw new Error("Could not append record");
   const [after] = await tx.select().from(foodSafetyRecordsTable).where(eq(foodSafetyRecordsTable.id, before.id));
   await recordKitchenTemperatureActions(tx, before, after, clientId, siteId, req.currentUser!.id);
+  if (spoken) await tx.insert(auditEventsTable).values({
+    clientId, actorId: req.currentUser!.id, entityType: "food_safety_record", entityId: before.id,
+    action: "voice_reading", metadata: { section, row: storedRow, spoken },
+  });
   return { status: 201, record: updated };
   });
   res.status(outcome.status).json(outcome.record);
+});
+
+// ── "Say it" fridge and freezer readings ─────────────────────────────────────
+// A spoken reading fills one unit's AM or PM reading in the day's diary. It
+// never overwrites a reading already there: the person is told instead.
+
+const spokenSchema = z.string().trim().min(1).max(500);
+/** Hidden row fields that mark a reading as spoken, and by whom. */
+function spokenStamp(req: Request, spoken: string, suffix = "") {
+  return {
+    [`_spoken${suffix}`]: spoken,
+    [`_spokenBy${suffix}`]: (req.currentUser?.name ?? req.currentUser?.email ?? "").slice(0, 200),
+  };
+}
+
+const coldReadingSchema = z.object({
+  recordDate: calendarDateSchema,
+  unit: z.string().trim().min(1).max(200),
+  slot: z.enum(["am", "pm"]),
+  temperature: z.number().finite().min(-100).max(100),
+  correctiveAction: z.string().trim().max(2000).optional(),
+  recordedAt: z.string().datetime({ offset: true }).optional(),
+  spoken: spokenSchema.optional(),
+});
+
+// POST /api/food-safety/cold-reading[?siteId=N]
+router.post("/cold-reading", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+  const parsed = coldReadingSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const { recordDate, unit, slot, temperature, correctiveAction, recordedAt, spoken } = parsed.data;
+  if (recordedAt && recordedAt.slice(0, 10) !== recordDate) {
+    return res.status(400).json({ error: "recordDate must match the local date in recordedAt" });
+  }
+
+  const units = await effectiveColdUnits(clientId, siteId);
+  const known = units.find((u) => u.name.toLowerCase() === unit.toLowerCase());
+  if (!known) return res.status(400).json({ error: `${unit} is not on this kitchen's fridge and freezer list`, code: "UNKNOWN_COLD_UNIT" });
+  const limits = await resolveDiaryLimits(clientId, siteId);
+  const userId = req.currentUser!.id;
+  // A new day's diary starts with every fridge and freezer on the list, as
+  // the diary page does, so the others are still there to fill in.
+  const blankRows = JSON.stringify(units.map((u) => ({ unit: u.name, tempAm: "", tempPm: "", correctiveAction: "" })));
+
+  const outcome = await db.transaction(async (tx) => {
+    if (siteId === null) {
+      await tx.execute(sql`
+        INSERT INTO food_safety_records (client_id, record_date, cold_food, cooking_limit, cooling_limit, reheating_limit, hot_holding_limit, created_by)
+        VALUES (${clientId}, ${recordDate}, ${blankRows}::jsonb, ${limits.cookingLimit}, ${limits.coolingLimit}, ${limits.reheatingLimit}, ${limits.hotHoldingLimit}, ${userId})
+        ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
+      `);
+    } else {
+      await tx.execute(sql`
+        INSERT INTO food_safety_records (client_id, site_id, record_date, cold_food, cooking_limit, cooling_limit, reheating_limit, hot_holding_limit, created_by)
+        VALUES (${clientId}, ${siteId}, ${recordDate}, ${blankRows}::jsonb, ${limits.cookingLimit}, ${limits.coolingLimit}, ${limits.reheatingLimit}, ${limits.hotHoldingLimit}, ${userId})
+        ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
+      `);
+    }
+    const [before] = await tx.select().from(foodSafetyRecordsTable).where(and(
+      eq(foodSafetyRecordsTable.clientId, clientId),
+      eq(foodSafetyRecordsTable.recordDate, recordDate), siteScopeCond(siteId),
+    )).for("update");
+    if (before.submittedAt) {
+      return { status: 409, body: { error: "This day's diary has been submitted. Open the diary to add to it.", code: "DIARY_SUBMITTED" } };
+    }
+    const rows = (Array.isArray(before.coldFood) ? before.coldFood : []) as Array<Record<string, unknown>>;
+    const field = slot === "am" ? "tempAm" : "tempPm";
+    const index = rows.findIndex((row) => String(row.unit ?? "").trim().toLowerCase() === known.name.toLowerCase());
+    const existing = index >= 0 ? rows[index] : null;
+    if (existing && String(existing[field] ?? "").trim() !== "") {
+      return { status: 409, body: {
+        error: `${known.name} already has ${slot === "am" ? "an AM" : "a PM"} reading of ${existing[field]}°C today.`,
+        code: "READING_ALREADY_RECORDED",
+      } };
+    }
+    const previousAction = String(existing?.correctiveAction ?? "").trim();
+    const updatedRow: Record<string, unknown> = {
+      ...(existing ?? { unit: known.name, tempAm: "", tempPm: "", correctiveAction: "" }),
+      [field]: String(temperature),
+      ...(correctiveAction ? { correctiveAction: previousAction ? `${previousAction}; ${correctiveAction}` : correctiveAction } : {}),
+      ...(recordedAt ? { [`_recordedAt${slot === "am" ? "Am" : "Pm"}`]: recordedAt } : {}),
+      ...(spoken ? spokenStamp(req, spoken, slot === "am" ? "Am" : "Pm") : {}),
+    };
+    const nextRows = index >= 0 ? rows.map((row, i) => (i === index ? updatedRow : row)) : [...rows, updatedRow];
+    const [after] = await tx.update(foodSafetyRecordsTable)
+      .set({ coldFood: nextRows, updatedAt: new Date() })
+      .where(eq(foodSafetyRecordsTable.id, before.id))
+      .returning();
+    await recordKitchenTemperatureActions(tx, before, after, clientId, siteId, userId);
+    await tx.insert(auditEventsTable).values({
+      clientId, actorId: userId, entityType: "food_safety_record", entityId: before.id,
+      action: spoken ? "voice_reading" : "cold_reading", metadata: { section: "coldFood", unit: known.name, slot, temperature, spoken: spoken ?? null },
+    });
+    return { status: 201, body: after };
+  });
+  res.status(outcome.status).json(outcome.body);
 });
 
 // PUT /api/food-safety/:id
