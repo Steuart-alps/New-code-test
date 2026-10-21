@@ -470,7 +470,8 @@ export async function runPersonalRemindersForClient(
   const today = localDateIn(timeZone, now);
   const [{ items, urgent }, certificates, ctx, services, settingRows, clientRows] = await Promise.all([
     collectDueItems(clientId, today, now),
-    getVisitsAwaitingCertificate(clientId, { today }).catch((err) => {
+    // Every one outstanding, however old: chases stop after 90 days, the updates keep listing them.
+    getVisitsAwaitingCertificate(clientId, { today, lookBackDays: null }).catch((err) => {
       logger.warn({ err, clientId }, "Personal reminders: could not read outstanding certificates");
       return [] as VisitAwaitingCertificate[];
     }),

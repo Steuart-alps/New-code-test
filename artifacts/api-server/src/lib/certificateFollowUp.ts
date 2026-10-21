@@ -21,7 +21,7 @@
  *     department; with none, its Managers, else the Owners) see it under
  *     "Certificates outstanding" in their 08:00 personal reminder that day.
  * Every Owner and Manager update lists the certificates outstanding for the
- * sites it covers. No separate email.
+ * sites it covers, however old, until they are uploaded. No separate email.
  * Only visits from the last LOOK_BACK_DAYS are chased (six chases), so older
  * history never produces a burst of emails.
  */
@@ -39,7 +39,7 @@ export const CERTIFICATE_FOLLOW_UP_EMAIL_TYPE = "certificate_followup";
 /** The chase due `today` for a visit (1 = the first), or null on other days. */
 export function certificateChaseOn(visitDay: string, today: string): number | null {
   const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${visitDay}T00:00:00Z`)) / 86_400_000);
-  if (days < FOLLOW_UP_AFTER_DAYS || (days - FOLLOW_UP_AFTER_DAYS) % FOLLOW_UP_EVERY_DAYS !== 0) return null;
+  if (days < FOLLOW_UP_AFTER_DAYS || days >= LOOK_BACK_DAYS || (days - FOLLOW_UP_AFTER_DAYS) % FOLLOW_UP_EVERY_DAYS !== 0) return null;
   return (days - FOLLOW_UP_AFTER_DAYS) / FOLLOW_UP_EVERY_DAYS + 1;
 }
 
@@ -74,12 +74,15 @@ export interface VisitAwaitingCertificate {
 }
 
 /**
- * Visits that happened between LOOK_BACK_DAYS and `afterDays` days ago with
- * no certificate yet (afterDays 0 lists every waiting visit, for display).
+ * Visits that happened at least `afterDays` days ago with no certificate yet:
+ * within `lookBackDays` (default LOOK_BACK_DAYS, the chase window), or of any
+ * age with `lookBackDays: null` (the Owner and Manager updates).
  */
 export async function getVisitsAwaitingCertificate(
   clientId: number | null,
-  { afterDays = FOLLOW_UP_AFTER_DAYS, today = new Date().toISOString().slice(0, 10) }: { afterDays?: number; today?: string } = {},
+  {
+    afterDays = FOLLOW_UP_AFTER_DAYS, today = new Date().toISOString().slice(0, 10), lookBackDays = LOOK_BACK_DAYS,
+  }: { afterDays?: number; today?: string; lookBackDays?: number | null } = {},
 ): Promise<VisitAwaitingCertificate[]> {
   const result = await db.execute(sql`
     SELECT * FROM (
@@ -99,7 +102,7 @@ export async function getVisitsAwaitingCertificate(
     ) v
     WHERE v.visit_day IS NOT NULL
       AND v.visit_day <= ${today}::date - ${afterDays}::int
-      AND v.visit_day > ${today}::date - ${LOOK_BACK_DAYS}::int
+      ${lookBackDays == null ? sql`` : sql`AND v.visit_day > ${today}::date - ${lookBackDays}::int`}
       AND NOT EXISTS (
         SELECT 1 FROM certificates c
         WHERE c.item_id = v.item_id

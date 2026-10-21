@@ -121,6 +121,7 @@ try {
   assert.match(only(managerEmail), /EICR/, 'site B has no Maintenance person, so its Manager hears');
   assert.equal(to(ownerEmail).length, 0, 'the Owner is not emailed');
   for (const email of sent) assert.doesNotMatch(email.html, /LOLER Examination|Fire Alarm Maintenance|Boiler Service/);
+  assert.equal((await drafts(old.id)).length, 0, 'no chase after 90 days');
   console.log('ok - the assigned person, Maintenance and HoD for the site hear, else the Manager; never the Owner');
 
   await remind([owner.clientId], 1);
@@ -160,6 +161,7 @@ try {
   assert.match(managerUpdate, /Certificates outstanding/);
   assert.match(managerUpdate, /EICR/, 'the Manager update lists them too');
   assert.doesNotMatch(update, /LOLER Examination/, 'a visit under two weeks ago is not outstanding yet');
+  assert.match(update, /Boiler Service/, 'past the 90-day chase window, it stays on the updates');
   await pool.query(`DELETE FROM app_settings WHERE client_id = $1 AND key = 'ownerUpdateFrequency'`, [owner.clientId]);
   console.log('ok - Owner and Manager updates list them, with no separate Owner email');
 
