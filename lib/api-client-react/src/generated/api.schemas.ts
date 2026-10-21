@@ -297,6 +297,46 @@ export interface FixTrackMediaDeleteRequest {
   objectPath: string;
 }
 
+export interface FixTrackNewContractor {
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /** @maxLength 200 */
+  company?: string | null;
+  /**
+     * @minLength 3
+     * @maxLength 320
+     */
+  email: string;
+  /** @maxLength 50 */
+  phone?: string | null;
+}
+
+/**
+ * Exactly one of contractorId and newContractor.
+ */
+export interface FixTrackAssignContractorRequest {
+  contractorId?: number;
+  newContractor?: FixTrackNewContractor;
+  /** Left out keeps the issue's target date; null clears it. */
+  targetDate?: string | null;
+  /** Confirms replacing a job already emailed to a contractor. */
+  replace?: boolean;
+}
+
+export interface FixTrackAssignContractorResult {
+  ok: boolean;
+  queueId: number;
+  mode?: string;
+  subject?: string;
+  bodyHtml?: string;
+  contractorId: number;
+  contractorName: string;
+  message: string;
+}
+
 export interface FixTrackIssueMediaList {
   mediaUrls: string[];
 }

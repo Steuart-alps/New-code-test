@@ -2223,6 +2223,9 @@ async function runRuntimeMigrationsOnce() {
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
 
+    // ---- FixTrack contractor visit date and completion (Oct 2026) ----
+    await migrateFixTrackContractorProgress();
+
     // ---- Department recorded with each submission (Oct 2026) ----
     // After every reported table exists; see submitterDepartmentMigration.ts.
     await migrateSubmitterDepartments();
@@ -6022,6 +6025,16 @@ async function migrateAssignees() {
       `CREATE INDEX IF NOT EXISTS "IDX_${table}_assignee" ON "${table}" ("assignee_user_id") WHERE "assignee_user_id" IS NOT NULL`,
     ));
   }
+}
+
+/**
+ * A contractor emailed a FixTrack job picks their visit date from the email,
+ * and marks it done the same way; both are shown on the issue. Mirrors
+ * lib/db/src/schema/fix-track.ts.
+ */
+async function migrateFixTrackContractorProgress() {
+  await db.execute(sql`ALTER TABLE "fix_track_issues" ADD COLUMN IF NOT EXISTS "contractor_visit_date" date`);
+  await db.execute(sql`ALTER TABLE "fix_track_issues" ADD COLUMN IF NOT EXISTS "contractor_completed_at" timestamp`);
 }
 
 async function migrateTrackOwnersAndNotifications() {
