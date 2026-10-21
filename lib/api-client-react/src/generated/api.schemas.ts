@@ -3627,6 +3627,13 @@ export interface InspectionReport {
   createdAt: string;
 }
 
+export type InspectionReportActionDueDateChangesItem = {
+  changedAt: string;
+  changedByName: string | null;
+  from: string | null;
+  to: string | null;
+};
+
 export interface InspectionReportAction {
   id: number;
   siteId: number | null;
@@ -3640,6 +3647,8 @@ export interface InspectionReportAction {
   draftSource: string | null;
   confirmedByName: string | null;
   createdAt: string;
+  /** Due date changes after the action was created (report detail only), oldest first */
+  dueDateChanges?: InspectionReportActionDueDateChangesItem[];
 }
 
 export type InspectionReportDetail = InspectionReport & {
@@ -4139,5 +4148,7 @@ export type SaveInspectionReportDraft200 = {
 
 export type ConfirmInspectionReportActions201 = {
   actions: InspectionReportAction[];
+  /** Owners and Managers emailed the action plan */
+  emailedTo: string[];
 };
 

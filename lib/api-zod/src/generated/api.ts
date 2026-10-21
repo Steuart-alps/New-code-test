@@ -6002,7 +6002,13 @@ export const GetInspectionReportResponse = zod.object({
   "dueDate": zod.date().nullable(),
   "draftSource": zod.string().nullable(),
   "confirmedByName": zod.string().nullable(),
-  "createdAt": zod.date()
+  "createdAt": zod.date(),
+  "dueDateChanges": zod.array(zod.object({
+  "changedAt": zod.date(),
+  "changedByName": zod.string().nullable(),
+  "from": zod.date().nullable(),
+  "to": zod.date().nullable()
+})).optional().describe('Due date changes after the action was created (report detail only), oldest first')
 }))
 }))
 
@@ -6111,8 +6117,15 @@ export const ConfirmInspectionReportActionsResponse = zod.object({
   "dueDate": zod.date().nullable(),
   "draftSource": zod.string().nullable(),
   "confirmedByName": zod.string().nullable(),
-  "createdAt": zod.date()
-}))
+  "createdAt": zod.date(),
+  "dueDateChanges": zod.array(zod.object({
+  "changedAt": zod.date(),
+  "changedByName": zod.string().nullable(),
+  "from": zod.date().nullable(),
+  "to": zod.date().nullable()
+})).optional().describe('Due date changes after the action was created (report detail only), oldest first')
+})),
+  "emailedTo": zod.array(zod.string()).describe('Owners and Managers emailed the action plan')
 })
 
 

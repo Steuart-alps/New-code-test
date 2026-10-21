@@ -4131,7 +4131,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/InspectionReportAction"
-                required: [actions]
+                  emailedTo:
+                    type: array
+                    description: Owners and Managers emailed the action plan
+                    items:
+                      type: string
+                required: [actions, emailedTo]
 
   /inspection-reports/{id}/file:
     get:
@@ -8992,6 +8997,17 @@ components:
         draftSource: { type: string, nullable: true }
         confirmedByName: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
+        dueDateChanges:
+          type: array
+          description: Due date changes after the action was created (report detail only), oldest first
+          items:
+            type: object
+            properties:
+              changedAt: { type: string, format: date-time }
+              changedByName: { type: string, nullable: true }
+              from: { type: string, format: date, nullable: true }
+              to: { type: string, format: date, nullable: true }
+            required: [changedAt, changedByName, from, to]
       required: [id, siteId, module, title, instruction, severity, status, ownerName, dueDate, draftSource, confirmedByName, createdAt]
 
     InspectionReportDetail:

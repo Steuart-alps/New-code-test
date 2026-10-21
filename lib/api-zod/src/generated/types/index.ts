@@ -205,6 +205,7 @@ export * from './importExtinguisherPointsBody';
 export * from './incidentConfig';
 export * from './inspectionReport';
 export * from './inspectionReportAction';
+export * from './inspectionReportActionDueDateChangesItem';
 export * from './inspectionReportDetail';
 export * from './inspectionReportDraftAction';
 export * from './inspectionReportDraftActionDraftSource';

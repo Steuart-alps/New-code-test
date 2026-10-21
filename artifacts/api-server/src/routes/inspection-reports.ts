@@ -25,6 +25,7 @@ import {
 import { ObjectPermission } from "../lib/objectAcl";
 import { createDownloadMeter } from "../lib/downloadUsage";
 import { hasTenantAttachmentReference } from "../lib/attachmentReferences";
+import { sendReportActionPlanEmails } from "../lib/reportActionEmails";
 
 /**
  * Uploaded audit and inspection reports (ALPS audits, Care Inspectorate, EHO,
@@ -235,8 +236,26 @@ router.get("/inspection-reports/:id", requireAuth, canManageReports, async (req,
   const actions = await db.select().from(trackActionsTable).where(and(
     eq(trackActionsTable.clientId, clientId), fromReport, eq(trackActionsTable.sourceRecordId, id),
   )).orderBy(asc(trackActionsTable.id));
+  // Due dates moved after confirming, from the audit log (who, when, from and to).
+  const moves = actions.length ? (await db.execute(sql`
+    SELECT a.row_id, a.changed_at, u.name AS changed_by_name,
+      a.diff->'due_date'->>'before' AS due_from, a.diff->'due_date'->>'after' AS due_to
+    FROM audit_log a LEFT JOIN users u ON u.id = a.changed_by
+    WHERE a.client_id = ${clientId} AND a.table_name = 'track_actions' AND a.action = 'update'
+      AND a.row_id IN (${sql.join(actions.map((action) => sql`${action.id}`), sql`, `)}) AND a.diff ? 'due_date'
+    ORDER BY a.changed_at, a.id
+  `)).rows as Array<{ row_id: number; changed_at: Date | string; changed_by_name: string | null; due_from: string | null; due_to: string | null }> : [];
   const { objectPath: _objectPath, ...visible } = report;
-  res.json({ ...visible, readable: canReadReportType(report.mimeType), actions });
+  res.json({
+    ...visible, readable: canReadReportType(report.mimeType),
+    actions: actions.map((action) => ({
+      ...action,
+      dueDateChanges: moves.filter((move) => Number(move.row_id) === action.id).map((move) => ({
+        changedAt: new Date(move.changed_at).toISOString(), changedByName: move.changed_by_name ?? null,
+        from: move.due_from?.slice(0, 10) ?? null, to: move.due_to?.slice(0, 10) ?? null,
+      })),
+    })),
+  });
 });
 
 // Ask ComplyTrack to read the report and suggest actions. The suggestions
@@ -319,7 +338,8 @@ router.post("/inspection-reports/:id/confirm", requireAuth, denyViewers, canMana
   const confirmer = req.currentUser!.name?.trim();
   if (!confirmer) return res.status(400).json({ error: "Your account must have a name before confirming actions" });
   const departmentId = getActiveDepartmentId(req);
-  if (!await loadReport(clientId, id, departmentId)) return res.status(404).json({ error: "Report not found" });
+  const report = await loadReport(clientId, id, departmentId);
+  if (!report) return res.status(404).json({ error: "Report not found" });
   const checked = await checkDraftActions(clientId, departmentId, parsed.data.actions);
   if ("error" in checked) return res.status(400).json({ error: checked.error });
 
@@ -342,7 +362,16 @@ router.post("/inspection-reports/:id/confirm", requireAuth, denyViewers, canMana
     return rows;
   });
   if (!created) return res.status(404).json({ error: "Report not found" });
-  res.status(201).json({ actions: created });
+  // Same day: the Owners and Managers get the action plan, with a button to assign each action.
+  const emailedTo = await sendReportActionPlanEmails({
+    clientId, reportId: id, reportTitle: report.title, reportTypeLabel: REPORT_TYPE_LABELS[report.reportType],
+    reportDate: report.reportDate, summary: report.aiSummary, confirmedByUserId: req.currentUser!.id, confirmedBy: confirmer,
+    actions: created.map((action) => ({
+      id: action.id, title: action.title, severity: action.severity as "urgent" | "action_required" | "monitor",
+      siteId: action.siteId, module: action.module, dueDate: action.dueDate, ownerName: action.ownerName,
+    })),
+  });
+  res.status(201).json({ actions: created, emailedTo });
 });
 
 router.get("/inspection-reports/:id/file", requireAuth, canManageReports, async (req, res) => {

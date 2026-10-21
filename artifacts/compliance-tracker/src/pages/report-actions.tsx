@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   InspectionReportDetail, InspectionReportDraftAction, InspectionReportOptions, InspectionReportSummary, InspectionReportType,
@@ -243,7 +243,97 @@ function DraftRow({ action, index, options, onChange, onRemove }: {
   );
 }
 
-function ReportDetail({ reportId, options, onRemoved }: { reportId: number; options: InspectionReportOptions; onRemoved: () => void }) {
+type CreatedAction = InspectionReportDetail["actions"][number];
+
+/** An action made from the report, with its "Assigned to" picker (the action plan email's buttons open here). */
+function CreatedActionRow({ action, options, focused, moduleLabel, siteName, onAssigned }: {
+  action: CreatedAction; options: InspectionReportOptions; focused: boolean;
+  moduleLabel: (key: string) => string; siteName: (siteId: number | null | undefined) => string; onAssigned: () => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (focused) rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focused]);
+  const page = TRACK_PAGES[action.module];
+  const current = action.ownerName ? options.assignees.find((person) => person.name === action.ownerName) : undefined;
+  const value = current ? String(current.id) : action.ownerName ? "typed" : NOBODY;
+
+  const [dueDate, setDueDate] = useState(action.dueDate?.slice(0, 10) ?? "");
+  useEffect(() => { setDueDate(action.dueDate?.slice(0, 10) ?? ""); }, [action.dueDate]);
+  const resolved = action.status === "resolved";
+
+  async function save(patch: { ownerName?: string | null; dueDate?: string | null }, done: string) {
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/track-actions/${action.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "Couldn't save the change"));
+      toast({ title: done });
+      onAssigned();
+    } catch (err) {
+      toast({ title: "Not saved", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+      setDueDate(action.dueDate?.slice(0, 10) ?? "");
+    } finally { setSaving(false); }
+  }
+  const assign = (next: string) => {
+    const person = options.assignees.find((candidate) => String(candidate.id) === next);
+    return save({ ownerName: person?.name ?? null }, person ? `Assigned to ${person.name}` : "No longer assigned");
+  };
+  const saveDueDate = () => {
+    const next = dueDate || null;
+    if (next === (action.dueDate?.slice(0, 10) ?? null)) return;
+    void save({ dueDate: next }, next ? `Due date changed to ${formatDate(next)}` : "Due date removed");
+  };
+  const lastMove = action.dueDateChanges?.at(-1);
+
+  return (
+    <li ref={rowRef} className={`flex flex-col gap-2 p-3 text-sm sm:flex-row sm:items-center sm:justify-between ${focused ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : ""}`}>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">{action.title}</span>
+          <Badge variant="outline" className={SEVERITY_STYLES[action.severity]}>{SEVERITY_LABELS[action.severity]}</Badge>
+          <Badge variant="outline" className="capitalize">{action.status.replace("_", " ")}</Badge>
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {[moduleLabel(action.module), siteName(action.siteId),
+            action.confirmedByName && `${action.draftSource === "ai" ? "AI-drafted, confirmed by" : "Confirmed by"} ${action.confirmedByName}`].filter(Boolean).join(" · ")}
+        </p>
+        {lastMove && (
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Due date changed from {formatDate(lastMove.from) ?? "none"} to {formatDate(lastMove.to) ?? "none"}
+            {lastMove.changedByName && ` by ${lastMove.changedByName}`} on {formatDate(lastMove.changedAt)}
+            {action.dueDateChanges!.length > 1 && ` (changed ${action.dueDateChanges!.length} times)`}
+          </p>
+        )}
+        {page && <a href={page} className="mt-1 inline-block text-xs font-medium underline underline-offset-2">Open {moduleLabel(action.module)}</a>}
+      </div>
+      <div className="grid w-full shrink-0 grid-cols-2 gap-2 sm:w-[26rem] sm:grid-cols-[10rem_1fr]">
+        <div className="space-y-1">
+          <Label htmlFor={`due-${action.id}`} className="text-xs">Due date</Label>
+          <Input id={`due-${action.id}`} type="date" className="h-9" value={dueDate} disabled={saving || resolved}
+            onChange={(event) => setDueDate(event.target.value)} onBlur={saveDueDate}
+            onKeyDown={(event) => { if (event.key === "Enter") saveDueDate(); }} />
+        </div>
+        <div className="space-y-1">
+        <Label htmlFor={`assign-${action.id}`} className="text-xs">Assigned to</Label>
+        <Select value={value} defaultOpen={focused && !action.ownerName} disabled={saving || resolved} onValueChange={(next) => { if (next !== value && next !== "typed") void assign(next); }}>
+          <SelectTrigger id={`assign-${action.id}`} className="h-9">{saving ? <span className="flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" />Saving…</span> : <SelectValue />}</SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NOBODY}>Not assigned yet</SelectItem>
+            {options.assignees.map((person) => <SelectItem key={person.id} value={String(person.id)}>{personLabel(person)}</SelectItem>)}
+            {value === "typed" && <SelectItem value="typed">{action.ownerName}</SelectItem>}
+          </SelectContent>
+        </Select>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function ReportDetail({ reportId, options, focusActionId, onRemoved }: {
+  reportId: number; options: InspectionReportOptions; focusActionId: number | null; onRemoved: () => void;
+}) {
   const { activeClientId } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -307,7 +397,13 @@ function ReportDetail({ reportId, options, onRemoved }: { reportId: number; opti
     setDrafts([]);
     setDirty(false);
     setChecked(false);
-    toast({ title: `${actionsText(result.actions.length)} created`, description: "Each one is in its track's action list." });
+    const emailed: string[] = result.emailedTo ?? [];
+    toast({
+      title: `${actionsText(result.actions.length)} created`,
+      description: emailed.length
+        ? `The action plan was emailed to ${emailed.join(", ")}, with a button to assign each action.`
+        : "Each one is in its track's action list.",
+    });
     refresh();
     void queryClient.invalidateQueries();
   }, "Couldn't create the actions");
@@ -403,25 +499,10 @@ function ReportDetail({ reportId, options, onRemoved }: { reportId: number; opti
         <section className="space-y-2">
           <h3 className="font-medium text-[#162D42]">Actions created from this report</h3>
           <ul className="divide-y rounded-sm border">
-            {report.actions.map((action) => {
-              const page = TRACK_PAGES[action.module];
-              return (
-                <li key={action.id} className="flex flex-col gap-1 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{action.title}</span>
-                      <Badge variant="outline" className={SEVERITY_STYLES[action.severity]}>{SEVERITY_LABELS[action.severity]}</Badge>
-                      <Badge variant="outline" className="capitalize">{action.status.replace("_", " ")}</Badge>
-                    </div>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {[moduleLabel(action.module), siteName(action.siteId), action.ownerName && `Assigned to ${action.ownerName}`, action.dueDate && `Due ${formatDate(action.dueDate)}`,
-                        action.confirmedByName && `${action.draftSource === "ai" ? "AI-drafted, confirmed by" : "Confirmed by"} ${action.confirmedByName}`].filter(Boolean).join(" · ")}
-                    </p>
-                  </div>
-                  {page && <a href={page} className="shrink-0 text-xs font-medium underline underline-offset-2">Open {moduleLabel(action.module)}</a>}
-                </li>
-              );
-            })}
+            {report.actions.map((action) => (
+              <CreatedActionRow key={action.id} action={action} options={options} focused={action.id === focusActionId}
+                moduleLabel={moduleLabel} siteName={siteName} onAssigned={refresh} />
+            ))}
           </ul>
           <p className="text-xs text-muted-foreground">Actions in "Report actions" are listed at the bottom of this page, where they are started and signed off.</p>
         </section>
@@ -447,10 +528,13 @@ export default function ReportActionsPage() {
   const { activeClientId } = useAuth();
   const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(false);
-  const [selected, setSelected] = useState<number | null>(() => {
-    const linked = Number(takeLinkParams(["report"] as const)?.report);
-    return Number.isInteger(linked) && linked > 0 ? linked : null;
+  // The action plan email links to /report-actions?report=ID&action=ID.
+  const [link] = useState(() => {
+    const params = takeLinkParams(["report", "action"] as const);
+    const id = (value: string | undefined) => { const n = Number(value); return Number.isInteger(n) && n > 0 ? n : null; };
+    return { report: id(params?.report), action: id(params?.action) };
   });
+  const [selected, setSelected] = useState<number | null>(link.report);
   const { data: options, error: optionsError } = useQuery({
     queryKey: ["inspection-report-options", activeClientId],
     queryFn: () => readJson<InspectionReportOptions>("/inspection-reports/options", "Couldn't load the report settings"),
@@ -513,7 +597,8 @@ export default function ReportActionsPage() {
           )}
         </Card>
 
-        {selected && options && <ReportDetail key={selected} reportId={selected} options={options} onRemoved={() => setSelected(null)} />}
+        {selected && options && <ReportDetail key={selected} reportId={selected} options={options}
+          focusActionId={selected === link.report ? link.action : null} onRemoved={() => setSelected(null)} />}
         {options && <UploadDialog open={uploading} onClose={() => setUploading(false)} options={options}
           onUploaded={(id) => { setUploading(false); setSelected(id); void queryClient.invalidateQueries({ queryKey: ["inspection-reports"] }); }} />}
       </div>

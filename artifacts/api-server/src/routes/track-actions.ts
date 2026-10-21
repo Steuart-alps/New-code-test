@@ -303,6 +303,12 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
       if (!["client_admin", "consultant"].includes(req.currentUser!.role)) return { status: 403 as const, error: "A manager must assign, resolve and verify failed-temperature actions" };
       if ("instruction" in parsed.data || "title" in parsed.data || "severity" in parsed.data) return { status: 409 as const, error: "The failed temperature and original control rule are immutable" };
     }
+    // A report's due dates come from the inspector or auditor: only Owners, Managers and ALPS move them.
+    // Every change is kept in the audit log (who, when, from and to).
+    if (isInspectionReportSource(current.sourceKind) && "dueDate" in parsed.data && (parsed.data.dueDate ?? null) !== (current.dueDate ?? null)
+      && !["client_admin", "client_manager", "consultant"].includes(req.currentUser!.role)) {
+      return { status: 403 as const, error: "Only an Owner or Manager can change the due date of an action from a report" };
+    }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
     if (nextStatus === "resolved" && current.fixTrackIssueId && current.fixTrackDisposition !== "parallel") return { status: 409 as const, error: "Resolve the linked FixTrack issue to complete this action" };

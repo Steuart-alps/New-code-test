@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixtures.mjs';
 
 // Uploaded audit and inspection reports turned into track actions. Owners,
@@ -9,6 +10,11 @@ import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixt
 // database here. Run:
 //   FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/inspection-reports.mjs
 
+const outbox = () => {
+  try {
+    return readFileSync(process.env.TEST_EMAIL_CAPTURE_PATH, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  } catch { return []; }
+};
 const ok = (result, status = 200) => {
   assert.equal(result.status, status, JSON.stringify(result.data));
   return result.data;
@@ -118,7 +124,8 @@ try {
 
   // ── Confirming creates the actions ───────────────────────────────────────
   assert.equal((await owner.request('POST', `/inspection-reports/${homeReport}/confirm`, { actions: [] })).status, 400);
-  const { actions } = ok(await owner.request('POST', `/inspection-reports/${homeReport}/confirm`, { actions: typed }), 201);
+  const sentBefore = outbox().length;
+  const { actions, emailedTo } = ok(await owner.request('POST', `/inspection-reports/${homeReport}/confirm`, { actions: typed }), 201);
   assert.equal(actions.length, 3);
   for (const action of actions) {
     assert.match(action.sourceKind, /^inspection_report:/);
@@ -142,6 +149,36 @@ try {
   assert.equal(listed.openCount, 3);
   assert.ok(ok(await owner.request('GET', '/track-actions?module=audit')).some((a) => a.id === door.id), 'the actions are on the Report actions list');
   console.log('ok - confirming creates open actions linked to the report, marked AI-drafted or typed, with who confirmed them');
+
+  // ── The action plan email goes out the same day ──────────────────────────
+  assert.deepEqual([...emailedTo].sort(), ['Morgan Manager', 'Sam Maintenance'],
+    'Owners and Managers get the plan, not the person who confirmed it');
+  const plans = outbox().slice(sentBefore).filter((email) => email.subject.startsWith('Action plan: Care Inspectorate inspection'));
+  assert.equal(plans.length, 2, 'one email per person');
+  const toSam = plans.find((email) => email.html.includes('Hi Sam Maintenance'));
+  const toMorgan = plans.find((email) => email.html.includes('Hi Morgan Manager'));
+  assert.ok(toSam && toMorgan);
+  assert.match(toSam.subject, /3 actions, 1 to assign/);
+  for (const action of [door, falls, staffing]) assert.ok(toSam.html.includes(action.title), 'Sam sees every action at the sites he covers');
+  assert.ok(toSam.html.includes(`/report-actions?report=${homeReport}&amp;action=${staffing.id}`), 'each action links to its picker');
+  assert.match(toSam.html, /Assign to…/);
+  assert.match(toSam.html, /Assigned to <strong>Sam Maintenance<\/strong>/);
+  assert.ok(toSam.html.indexOf(door.title) < toSam.html.indexOf(staffing.title), 'urgent actions come first');
+  assert.ok(!toMorgan.html.includes(door.title) && toMorgan.html.includes(staffing.title),
+    "a Manager is sent only the actions at sites they can see");
+  assert.match(toSam.text, new RegExp(`Assign to someone: \\S+report=${homeReport}&action=${staffing.id}`));
+  console.log('ok - the action plan is emailed the same day to Owners and Managers, with a link to assign each action');
+
+  // ── Due dates on report actions ──────────────────────────────────────────
+  assert.equal((await staff.request('PATCH', `/track-actions/${door.id}`, { dueDate: isoDay(30) })).status, 403,
+    'Staff cannot move the due date of an action from a report');
+  ok(await maintenance.request('PATCH', `/track-actions/${door.id}`, { dueDate: isoDay(14) }));
+  ok(await owner.request('PATCH', `/track-actions/${door.id}`, { ownerName: 'Morgan Manager' }));
+  const moves = ok(await owner.request('GET', `/inspection-reports/${homeReport}`)).actions.find((a) => a.id === door.id).dueDateChanges;
+  assert.equal(moves.length, 1, 'only due date changes are listed');
+  assert.deepEqual({ ...moves[0], changedAt: undefined }, { changedAt: undefined, changedByName: 'Sam Maintenance', from: isoDay(7), to: isoDay(14) },
+    'who moved the due date, from and to, is kept');
+  console.log('ok - Owners and Managers change a report action\'s due date, and every change is kept');
 
   // ── Report actions behave like other actions ─────────────────────────────
   const moved = ok(await owner.request('PATCH', `/track-actions/${falls.id}`, { siteId: siteB.id }));

@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { InspectionReportActionDueDateChangesItem } from './inspectionReportActionDueDateChangesItem';
 import type { InspectionReportSeverity } from './inspectionReportSeverity';
 
 export interface InspectionReportAction {
@@ -20,4 +21,6 @@ export interface InspectionReportAction {
   draftSource: string | null;
   confirmedByName: string | null;
   createdAt: Date;
+  /** Due date changes after the action was created (report detail only), oldest first */
+  dueDateChanges?: InspectionReportActionDueDateChangesItem[];
 }
