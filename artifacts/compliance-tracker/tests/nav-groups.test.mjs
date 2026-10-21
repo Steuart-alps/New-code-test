@@ -67,12 +67,17 @@ assert.ok(adminItems.includes("Equipment & QR labels") && managerItems.includes(
 assert.ok(!userItems.includes("Equipment & QR labels"), "Staff should not see the equipment list");
 assert.equal(guardedRoutes.get("/equipment"), "canManageUsers", "App.tsx should register /equipment for managers and admins");
 
+// Audit and inspection reports are turned into actions by Owners, Managers and ALPS only.
+assert.ok(adminItems.includes("Report actions") && managerItems.includes("Report actions"), "Managers and admins should see Report actions");
+assert.ok(!userItems.includes("Report actions"), "Staff should not see Report actions");
+assert.equal(guardedRoutes.get("/report-actions"), "canManageUsers", "App.tsx should register /report-actions for managers and admins");
+
 assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Everyone should see the Calendar");
 
 // Section membership: a nav edit that moves, drops or duplicates a link fails here.
 const membership = groups => Object.fromEntries(groups.map(g => [g.id, g.items.map(i => i.href)]));
 assert.deepEqual(membership(adminGroups), {
-  core: ["/dashboard", "/portfolio", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors", "/categories", "/equipment"],
+  core: ["/dashboard", "/portfolio", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors", "/categories", "/equipment", "/report-actions"],
   safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/coshh", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
   operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],

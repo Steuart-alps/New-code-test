@@ -4,11 +4,14 @@ import { auditEventsTable, departmentsTable, fixTrackIssueActivityTable, fixTrac
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
-import { missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
+import { isInspectionReportSource, missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
 import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 
 const router = Router();
-const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room"] as const;
+// "audit" holds actions from uploaded audit and inspection reports
+// (routes/inspection-reports.ts) that belong to no other track.
+export const TRACK_ACTION_MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room", "audit"] as const;
+const MODULES = TRACK_ACTION_MODULES;
 const severity = z.enum(["monitor", "action_required", "urgent"]);
 const nullableText = z.string().trim().max(10_000).nullable().optional();
 const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
@@ -291,7 +294,8 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     // move to a site the caller cannot use is reported as forbidden.
     if (!canUse(current.siteId)) return { status: 404 as const, error: "Action not found" };
     if ("siteId" in parsed.data && !canUse(parsed.data.siteId)) return { status: 403 as const, error: "Forbidden site" };
-    if (current.sourceKind && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
+    // A report's actions are typed from the report, so their site can be corrected.
+    if (current.sourceKind && !isInspectionReportSource(current.sourceKind) && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
       return { status: 409 as const, error: "The source record controls this action's site" };
     }
     const kitchenFailure = current.module === "kitchen" && current.sourceKind?.startsWith("kitchen_temperature_");

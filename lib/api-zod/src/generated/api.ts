@@ -5863,3 +5863,266 @@ export const RecordCoshhSignOffsResponse = zod.object({
 })
 
 
+/**
+ * @summary Report types, tracks, sites and people for the report screens, and whether reports can be read
+ */
+export const GetInspectionReportOptionsResponse = zod.object({
+  "reportTypes": zod.array(zod.object({
+  "key": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "label": zod.string()
+})),
+  "modules": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string()
+})),
+  "sites": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+})),
+  "assignees": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "role": zod.string(),
+  "isMaintenanceManager": zod.boolean()
+})),
+  "reading": zod.object({
+  "available": zod.boolean(),
+  "monthlyLimit": zod.number(),
+  "usedThisMonth": zod.number()
+})
+})
+
+
+/**
+ * @summary Uploaded audit and inspection reports (Owners, Managers for their sites, consultants)
+ */
+export const ListInspectionReportsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "title": zod.string(),
+  "reportDate": zod.date().nullable(),
+  "fileName": zod.string().nullable(),
+  "aiStatus": zod.string(),
+  "uploadedByName": zod.string(),
+  "createdAt": zod.date(),
+  "draftCount": zod.number(),
+  "actionCount": zod.number(),
+  "openCount": zod.number()
+})
+export const ListInspectionReportsResponse = zod.array(ListInspectionReportsResponseItem)
+
+
+/**
+ * @summary Register a report uploaded through /storage/uploads/request-url
+ */
+export const CreateInspectionReportBody = zod.object({
+  "title": zod.string(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "reportDate": zod.date().nullish(),
+  "siteId": zod.number().nullish(),
+  "objectPath": zod.string(),
+  "fileName": zod.string()
+})
+
+export const CreateInspectionReportResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "title": zod.string(),
+  "reportDate": zod.date().nullable(),
+  "fileName": zod.string().nullable(),
+  "fileSize": zod.number().nullish(),
+  "mimeType": zod.string().nullish(),
+  "readable": zod.boolean(),
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+})),
+  "aiStatus": zod.string(),
+  "aiSummary": zod.string().nullable(),
+  "aiError": zod.string().nullable(),
+  "aiReadCount": zod.number(),
+  "uploadedByName": zod.string(),
+  "createdAt": zod.date()
+})
+
+
+/**
+ * @summary A report, the list being checked, and the actions created from it
+ */
+export const GetInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetInspectionReportResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "title": zod.string(),
+  "reportDate": zod.date().nullable(),
+  "fileName": zod.string().nullable(),
+  "fileSize": zod.number().nullish(),
+  "mimeType": zod.string().nullish(),
+  "readable": zod.boolean(),
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+})),
+  "aiStatus": zod.string(),
+  "aiSummary": zod.string().nullable(),
+  "aiError": zod.string().nullable(),
+  "aiReadCount": zod.number(),
+  "uploadedByName": zod.string(),
+  "createdAt": zod.date()
+}).and(zod.object({
+  "actions": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "module": zod.string(),
+  "title": zod.string(),
+  "instruction": zod.string().nullable(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "status": zod.string(),
+  "ownerName": zod.string().nullable(),
+  "dueDate": zod.date().nullable(),
+  "draftSource": zod.string().nullable(),
+  "confirmedByName": zod.string().nullable(),
+  "createdAt": zod.date()
+}))
+}))
+
+
+/**
+ * @summary Remove a report uploaded by mistake (only while no actions come from it)
+ */
+export const DeleteInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteInspectionReportResponse = zod.void()
+
+
+/**
+ * Replaces the list being checked with suggestions. Nothing is created until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit.
+ * @summary Have ComplyTrack read the report and suggest actions (needs ANTHROPIC_API_KEY)
+ */
+export const ReadInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ReadInspectionReportResponse = zod.object({
+  "aiSummary": zod.string().nullable(),
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+
+/**
+ * @summary Save the list of actions being checked
+ */
+export const SaveInspectionReportDraftParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SaveInspectionReportDraftBody = zod.object({
+  "actions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+export const SaveInspectionReportDraftResponse = zod.object({
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+
+/**
+ * @summary Create the checked actions as open track actions linked to the report
+ */
+export const ConfirmInspectionReportActionsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ConfirmInspectionReportActionsBody = zod.object({
+  "actions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+export const ConfirmInspectionReportActionsResponse = zod.object({
+  "actions": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "module": zod.string(),
+  "title": zod.string(),
+  "instruction": zod.string().nullable(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "status": zod.string(),
+  "ownerName": zod.string().nullable(),
+  "dueDate": zod.date().nullable(),
+  "draftSource": zod.string().nullable(),
+  "confirmedByName": zod.string().nullable(),
+  "createdAt": zod.date()
+}))
+})
+
+
+/**
+ * @summary Download the uploaded report
+ */
+export const DownloadInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DownloadInspectionReportResponse = zod.unknown()
+
+

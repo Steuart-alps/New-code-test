@@ -17,6 +17,8 @@
     "test:departments-under-sites": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/departments-under-sites.mjs",
     "test:fire-call-points": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-call-points.mjs",
     "test:equipment-labels": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/equipment-labels.mjs",
+    "test:inspection-reports": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/inspection-reports.mjs",
+    "test:report-reading": "bash tests/run-bundled-unit.sh tests/report-reading.ts esm",
     "test:fire-discharge-task-link": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-discharge-task-link.mjs",
     "test:track-task-links": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-task-links.mjs",
     "test:track-due-dates": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-due-dates.mjs",
@@ -207,6 +209,7 @@
     "test:monthly-compliance-summary": "node tests/monthly-compliance-summary.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@google-cloud/storage": "^7.19.0",
     "@sentry/node": "^10.70.0",
     "@simplewebauthn/server": "^14.0.1",
@@ -216,6 +219,7 @@
     "archiver": "^8.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2",
+    "fflate": "0.8.3",
     "drizzle-orm": "catalog:",
     "express": "^5.2.1",
     "google-auth-library": "^10.6.2",

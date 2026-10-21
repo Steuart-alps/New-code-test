@@ -29,6 +29,7 @@ import type {
   Certificate,
   CertificateDefect,
   ComplianceItem,
+  ConfirmInspectionReportActions201,
   Contractor,
   ContractorVisitsResponse,
   CoshhAssessment,
@@ -48,6 +49,7 @@ import type {
   CreateFoodSafetyRecordParams,
   CreateFoodSafetyRecordRequest,
   CreateHotTubCheckRequest,
+  CreateInspectionReportRequest,
   CreateItemCertificateRequest,
   CreateKitchenClosedDaysParams,
   CreateLegionellaCheckRequest,
@@ -122,6 +124,12 @@ import type {
   ImportExtinguisherPoints200,
   ImportExtinguisherPointsBody,
   IncidentConfig,
+  InspectionReport,
+  InspectionReportDetail,
+  InspectionReportDraftRequest,
+  InspectionReportOptions,
+  InspectionReportReading,
+  InspectionReportSummary,
   KitchenClosedDaysCreated,
   KitchenClosedDaysInput,
   KitchenClosedDaysList,
@@ -179,6 +187,7 @@ import type {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
+  SaveInspectionReportDraft200,
   SavePATPresetTemplateBody,
   SavePrivacyProgramParams,
   SendRemindersResponse,
@@ -13503,4 +13512,670 @@ export const useRecordCoshhSignOffs = <TError = ErrorType<void>,
       > => {
       return useMutation(getRecordCoshhSignOffsMutationOptions(options));
     }
+
+export const getGetInspectionReportOptionsUrl = () => {
+
+
+
+
+  return `/api/inspection-reports/options`
+}
+
+/**
+ * @summary Report types, tracks, sites and people for the report screens, and whether reports can be read
+ */
+export const getInspectionReportOptions = async ( options?: RequestInit): Promise<InspectionReportOptions> => {
+
+  return customFetch<InspectionReportOptions>(getGetInspectionReportOptionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetInspectionReportOptionsQueryKey = () => {
+    return [
+    `/api/inspection-reports/options`
+    ] as const;
+    }
+
+
+export const getGetInspectionReportOptionsQueryOptions = <TData = Awaited<ReturnType<typeof getInspectionReportOptions>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInspectionReportOptions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetInspectionReportOptionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getInspectionReportOptions>>> = ({ signal }) => getInspectionReportOptions({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getInspectionReportOptions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetInspectionReportOptionsQueryResult = NonNullable<Awaited<ReturnType<typeof getInspectionReportOptions>>>
+export type GetInspectionReportOptionsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Report types, tracks, sites and people for the report screens, and whether reports can be read
+ */
+
+export function useGetInspectionReportOptions<TData = Awaited<ReturnType<typeof getInspectionReportOptions>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInspectionReportOptions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetInspectionReportOptionsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListInspectionReportsUrl = () => {
+
+
+
+
+  return `/api/inspection-reports`
+}
+
+/**
+ * @summary Uploaded audit and inspection reports (Owners, Managers for their sites, consultants)
+ */
+export const listInspectionReports = async ( options?: RequestInit): Promise<InspectionReportSummary[]> => {
+
+  return customFetch<InspectionReportSummary[]>(getListInspectionReportsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListInspectionReportsQueryKey = () => {
+    return [
+    `/api/inspection-reports`
+    ] as const;
+    }
+
+
+export const getListInspectionReportsQueryOptions = <TData = Awaited<ReturnType<typeof listInspectionReports>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInspectionReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListInspectionReportsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listInspectionReports>>> = ({ signal }) => listInspectionReports({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listInspectionReports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListInspectionReportsQueryResult = NonNullable<Awaited<ReturnType<typeof listInspectionReports>>>
+export type ListInspectionReportsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Uploaded audit and inspection reports (Owners, Managers for their sites, consultants)
+ */
+
+export function useListInspectionReports<TData = Awaited<ReturnType<typeof listInspectionReports>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listInspectionReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListInspectionReportsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateInspectionReportUrl = () => {
+
+
+
+
+  return `/api/inspection-reports`
+}
+
+/**
+ * @summary Register a report uploaded through /storage/uploads/request-url
+ */
+export const createInspectionReport = async (createInspectionReportRequest: CreateInspectionReportRequest, options?: RequestInit): Promise<InspectionReport> => {
+
+  return customFetch<InspectionReport>(getCreateInspectionReportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createInspectionReportRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateInspectionReportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInspectionReport>>, TError,{data: BodyType<CreateInspectionReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createInspectionReport>>, TError,{data: BodyType<CreateInspectionReportRequest>}, TContext> => {
+
+const mutationKey = ['createInspectionReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createInspectionReport>>, {data: BodyType<CreateInspectionReportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createInspectionReport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateInspectionReportMutationResult = NonNullable<Awaited<ReturnType<typeof createInspectionReport>>>
+    export type CreateInspectionReportMutationBody = BodyType<CreateInspectionReportRequest>
+    export type CreateInspectionReportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Register a report uploaded through /storage/uploads/request-url
+ */
+export const useCreateInspectionReport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInspectionReport>>, TError,{data: BodyType<CreateInspectionReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createInspectionReport>>,
+        TError,
+        {data: BodyType<CreateInspectionReportRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateInspectionReportMutationOptions(options));
+    }
+
+export const getGetInspectionReportUrl = (id: number,) => {
+
+
+
+
+  return `/api/inspection-reports/${id}`
+}
+
+/**
+ * @summary A report, the list being checked, and the actions created from it
+ */
+export const getInspectionReport = async (id: number, options?: RequestInit): Promise<InspectionReportDetail> => {
+
+  return customFetch<InspectionReportDetail>(getGetInspectionReportUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetInspectionReportQueryKey = (id: number,) => {
+    return [
+    `/api/inspection-reports/${id}`
+    ] as const;
+    }
+
+
+export const getGetInspectionReportQueryOptions = <TData = Awaited<ReturnType<typeof getInspectionReport>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInspectionReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetInspectionReportQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getInspectionReport>>> = ({ signal }) => getInspectionReport(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getInspectionReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetInspectionReportQueryResult = NonNullable<Awaited<ReturnType<typeof getInspectionReport>>>
+export type GetInspectionReportQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary A report, the list being checked, and the actions created from it
+ */
+
+export function useGetInspectionReport<TData = Awaited<ReturnType<typeof getInspectionReport>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInspectionReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetInspectionReportQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDeleteInspectionReportUrl = (id: number,) => {
+
+
+
+
+  return `/api/inspection-reports/${id}`
+}
+
+/**
+ * @summary Remove a report uploaded by mistake (only while no actions come from it)
+ */
+export const deleteInspectionReport = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteInspectionReportUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteInspectionReportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInspectionReport>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteInspectionReport>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteInspectionReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteInspectionReport>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteInspectionReport(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteInspectionReportMutationResult = NonNullable<Awaited<ReturnType<typeof deleteInspectionReport>>>
+
+    export type DeleteInspectionReportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Remove a report uploaded by mistake (only while no actions come from it)
+ */
+export const useDeleteInspectionReport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteInspectionReport>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteInspectionReport>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteInspectionReportMutationOptions(options));
+    }
+
+export const getReadInspectionReportUrl = (id: number,) => {
+
+
+
+
+  return `/api/inspection-reports/${id}/read`
+}
+
+/**
+ * Replaces the list being checked with suggestions. Nothing is created until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit.
+ * @summary Have ComplyTrack read the report and suggest actions (needs ANTHROPIC_API_KEY)
+ */
+export const readInspectionReport = async (id: number, options?: RequestInit): Promise<InspectionReportReading> => {
+
+  return customFetch<InspectionReportReading>(getReadInspectionReportUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getReadInspectionReportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readInspectionReport>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readInspectionReport>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['readInspectionReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readInspectionReport>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  readInspectionReport(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReadInspectionReportMutationResult = NonNullable<Awaited<ReturnType<typeof readInspectionReport>>>
+
+    export type ReadInspectionReportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Have ComplyTrack read the report and suggest actions (needs ANTHROPIC_API_KEY)
+ */
+export const useReadInspectionReport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readInspectionReport>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof readInspectionReport>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getReadInspectionReportMutationOptions(options));
+    }
+
+export const getSaveInspectionReportDraftUrl = (id: number,) => {
+
+
+
+
+  return `/api/inspection-reports/${id}/draft`
+}
+
+/**
+ * @summary Save the list of actions being checked
+ */
+export const saveInspectionReportDraft = async (id: number,
+    inspectionReportDraftRequest: InspectionReportDraftRequest, options?: RequestInit): Promise<SaveInspectionReportDraft200> => {
+
+  return customFetch<SaveInspectionReportDraft200>(getSaveInspectionReportDraftUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(inspectionReportDraftRequest)
+  }
+);}
+
+
+
+
+
+export const getSaveInspectionReportDraftMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveInspectionReportDraft>>, TError,{id: number;data: BodyType<InspectionReportDraftRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveInspectionReportDraft>>, TError,{id: number;data: BodyType<InspectionReportDraftRequest>}, TContext> => {
+
+const mutationKey = ['saveInspectionReportDraft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveInspectionReportDraft>>, {id: number;data: BodyType<InspectionReportDraftRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  saveInspectionReportDraft(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveInspectionReportDraftMutationResult = NonNullable<Awaited<ReturnType<typeof saveInspectionReportDraft>>>
+    export type SaveInspectionReportDraftMutationBody = BodyType<InspectionReportDraftRequest>
+    export type SaveInspectionReportDraftMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Save the list of actions being checked
+ */
+export const useSaveInspectionReportDraft = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveInspectionReportDraft>>, TError,{id: number;data: BodyType<InspectionReportDraftRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveInspectionReportDraft>>,
+        TError,
+        {id: number;data: BodyType<InspectionReportDraftRequest>},
+        TContext
+      > => {
+      return useMutation(getSaveInspectionReportDraftMutationOptions(options));
+    }
+
+export const getConfirmInspectionReportActionsUrl = (id: number,) => {
+
+
+
+
+  return `/api/inspection-reports/${id}/confirm`
+}
+
+/**
+ * @summary Create the checked actions as open track actions linked to the report
+ */
+export const confirmInspectionReportActions = async (id: number,
+    inspectionReportDraftRequest: InspectionReportDraftRequest, options?: RequestInit): Promise<ConfirmInspectionReportActions201> => {
+
+  return customFetch<ConfirmInspectionReportActions201>(getConfirmInspectionReportActionsUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(inspectionReportDraftRequest)
+  }
+);}
+
+
+
+
+
+export const getConfirmInspectionReportActionsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmInspectionReportActions>>, TError,{id: number;data: BodyType<InspectionReportDraftRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmInspectionReportActions>>, TError,{id: number;data: BodyType<InspectionReportDraftRequest>}, TContext> => {
+
+const mutationKey = ['confirmInspectionReportActions'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmInspectionReportActions>>, {id: number;data: BodyType<InspectionReportDraftRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  confirmInspectionReportActions(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmInspectionReportActionsMutationResult = NonNullable<Awaited<ReturnType<typeof confirmInspectionReportActions>>>
+    export type ConfirmInspectionReportActionsMutationBody = BodyType<InspectionReportDraftRequest>
+    export type ConfirmInspectionReportActionsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create the checked actions as open track actions linked to the report
+ */
+export const useConfirmInspectionReportActions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmInspectionReportActions>>, TError,{id: number;data: BodyType<InspectionReportDraftRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof confirmInspectionReportActions>>,
+        TError,
+        {id: number;data: BodyType<InspectionReportDraftRequest>},
+        TContext
+      > => {
+      return useMutation(getConfirmInspectionReportActionsMutationOptions(options));
+    }
+
+export const getDownloadInspectionReportUrl = (id: number,) => {
+
+
+
+
+  return `/api/inspection-reports/${id}/file`
+}
+
+/**
+ * @summary Download the uploaded report
+ */
+export const downloadInspectionReport = async (id: number, options?: RequestInit): Promise<Blob> => {
+
+  return customFetch<Blob>(getDownloadInspectionReportUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadInspectionReportQueryKey = (id: number,) => {
+    return [
+    `/api/inspection-reports/${id}/file`
+    ] as const;
+    }
+
+
+export const getDownloadInspectionReportQueryOptions = <TData = Awaited<ReturnType<typeof downloadInspectionReport>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadInspectionReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadInspectionReportQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadInspectionReport>>> = ({ signal }) => downloadInspectionReport(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadInspectionReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type DownloadInspectionReportQueryResult = NonNullable<Awaited<ReturnType<typeof downloadInspectionReport>>>
+export type DownloadInspectionReportQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Download the uploaded report
+ */
+
+export function useDownloadInspectionReport<TData = Awaited<ReturnType<typeof downloadInspectionReport>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadInspectionReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getDownloadInspectionReportQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 

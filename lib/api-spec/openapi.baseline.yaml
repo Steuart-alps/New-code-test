@@ -35,6 +35,8 @@ tags:
     description: Fire safety logbook operations
   - name: equipment
     description: Equipment list and QR labels
+  - name: inspection-reports
+    description: Uploaded audit and inspection reports turned into track actions
   - name: food-safety
     description: Kitchen / food safety diary operations
   - name: legionella
@@ -3958,6 +3960,194 @@ paths:
                 required: [signed, assessment]
         "404":
           description: Not a current assessment the caller can see
+
+  /inspection-reports/options:
+    get:
+      operationId: getInspectionReportOptions
+      tags: [inspection-reports]
+      summary: Report types, tracks, sites and people for the report screens, and whether reports can be read
+      responses:
+        "200":
+          description: Choices for the upload and checking screens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionReportOptions"
+
+  /inspection-reports:
+    get:
+      operationId: listInspectionReports
+      tags: [inspection-reports]
+      summary: Uploaded audit and inspection reports (Owners, Managers for their sites, consultants)
+      responses:
+        "200":
+          description: Reports, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InspectionReportSummary"
+    post:
+      operationId: createInspectionReport
+      tags: [inspection-reports]
+      summary: Register a report uploaded through /storage/uploads/request-url
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInspectionReportRequest"
+      responses:
+        "201":
+          description: Registered report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionReport"
+        "403":
+          description: Not this business's upload, or a site the caller cannot use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspection-reports/{id}:
+    get:
+      operationId: getInspectionReport
+      tags: [inspection-reports]
+      summary: A report, the list being checked, and the actions created from it
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionReportDetail"
+        "404":
+          description: Not found, or another department's report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteInspectionReport
+      tags: [inspection-reports]
+      summary: Remove a report uploaded by mistake (only while no actions come from it)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204":
+          description: Removed
+        "409":
+          description: Actions were created from it, so it is kept as their evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspection-reports/{id}/read:
+    post:
+      operationId: readInspectionReport
+      tags: [inspection-reports]
+      summary: Have ComplyTrack read the report and suggest actions (needs ANTHROPIC_API_KEY)
+      description: >
+        Replaces the list being checked with suggestions. Nothing is created
+        until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key
+        is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Suggested actions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionReportReading"
+        "429":
+          description: Reading limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Reading reports is not switched on
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspection-reports/{id}/draft:
+    put:
+      operationId: saveInspectionReportDraft
+      tags: [inspection-reports]
+      summary: Save the list of actions being checked
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InspectionReportDraftRequest"
+      responses:
+        "200":
+          description: Saved list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draftActions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InspectionReportDraftAction"
+                required: [draftActions]
+
+  /inspection-reports/{id}/confirm:
+    post:
+      operationId: confirmInspectionReportActions
+      tags: [inspection-reports]
+      summary: Create the checked actions as open track actions linked to the report
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InspectionReportDraftRequest"
+      responses:
+        "201":
+          description: Created actions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  actions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InspectionReportAction"
+                required: [actions]
+
+  /inspection-reports/{id}/file:
+    get:
+      operationId: downloadInspectionReport
+      tags: [inspection-reports]
+      summary: Download the uploaded report
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The report file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
 
 components:
   schemas:
@@ -8668,3 +8858,170 @@ components:
           items:
             $ref: "#/components/schemas/EquipmentScanHistory"
       required: [code, clientId, kind, track, name, detail, siteId, siteName, active, statuses, actions, history]
+
+    InspectionReportType:
+      type: string
+      enum: [alps_audit, care_inspectorate, eho, fire_officer, hse, insurer, other]
+
+    InspectionReportSeverity:
+      type: string
+      enum: [monitor, action_required, urgent]
+
+    InspectionReportOptions:
+      type: object
+      properties:
+        reportTypes:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { $ref: "#/components/schemas/InspectionReportType" }
+              label: { type: string }
+            required: [key, label]
+        modules:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              label: { type: string }
+            required: [key, label]
+        sites:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+            required: [id, name]
+        assignees:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+              role: { type: string }
+              isMaintenanceManager: { type: boolean }
+            required: [id, name, role, isMaintenanceManager]
+        reading:
+          type: object
+          properties:
+            available: { type: boolean }
+            monthlyLimit: { type: integer }
+            usedThisMonth: { type: integer }
+          required: [available, monthlyLimit, usedThisMonth]
+      required: [reportTypes, modules, sites, assignees, reading]
+
+    InspectionReportSummary:
+      type: object
+      properties:
+        id: { type: integer }
+        siteId: { type: integer, nullable: true }
+        reportType: { $ref: "#/components/schemas/InspectionReportType" }
+        title: { type: string }
+        reportDate: { type: string, format: date, nullable: true }
+        fileName: { type: string, nullable: true }
+        aiStatus: { type: string }
+        uploadedByName: { type: string }
+        createdAt: { type: string, format: date-time }
+        draftCount: { type: integer }
+        actionCount: { type: integer }
+        openCount: { type: integer }
+      required: [id, siteId, reportType, title, reportDate, fileName, aiStatus, uploadedByName, createdAt, draftCount, actionCount, openCount]
+
+    InspectionReportDraftAction:
+      type: object
+      properties:
+        title: { type: string }
+        instruction: { type: string, nullable: true }
+        module: { type: string }
+        severity: { $ref: "#/components/schemas/InspectionReportSeverity" }
+        siteId: { type: integer, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+        assignedUserId: { type: integer, nullable: true }
+        reportReference: { type: string, nullable: true }
+        draftSource: { type: string, enum: [ai, manual] }
+      required: [title, module, severity]
+
+    InspectionReportDraftRequest:
+      type: object
+      properties:
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InspectionReportDraftAction"
+      required: [actions]
+
+    InspectionReport:
+      type: object
+      properties:
+        id: { type: integer }
+        siteId: { type: integer, nullable: true }
+        reportType: { $ref: "#/components/schemas/InspectionReportType" }
+        title: { type: string }
+        reportDate: { type: string, format: date, nullable: true }
+        fileName: { type: string, nullable: true }
+        fileSize: { type: integer, nullable: true }
+        mimeType: { type: string, nullable: true }
+        readable: { type: boolean }
+        draftActions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InspectionReportDraftAction"
+        aiStatus: { type: string }
+        aiSummary: { type: string, nullable: true }
+        aiError: { type: string, nullable: true }
+        aiReadCount: { type: integer }
+        uploadedByName: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, siteId, reportType, title, reportDate, fileName, readable, draftActions, aiStatus, aiSummary, aiError, aiReadCount, uploadedByName, createdAt]
+
+    InspectionReportAction:
+      type: object
+      properties:
+        id: { type: integer }
+        siteId: { type: integer, nullable: true }
+        module: { type: string }
+        title: { type: string }
+        instruction: { type: string, nullable: true }
+        severity: { $ref: "#/components/schemas/InspectionReportSeverity" }
+        status: { type: string }
+        ownerName: { type: string, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+        draftSource: { type: string, nullable: true }
+        confirmedByName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, siteId, module, title, instruction, severity, status, ownerName, dueDate, draftSource, confirmedByName, createdAt]
+
+    InspectionReportDetail:
+      allOf:
+        - $ref: "#/components/schemas/InspectionReport"
+        - type: object
+          properties:
+            actions:
+              type: array
+              items:
+                $ref: "#/components/schemas/InspectionReportAction"
+          required: [actions]
+
+    InspectionReportReading:
+      type: object
+      properties:
+        aiSummary: { type: string, nullable: true }
+        draftActions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InspectionReportDraftAction"
+      required: [aiSummary, draftActions]
+
+    CreateInspectionReportRequest:
+      type: object
+      properties:
+        title: { type: string }
+        reportType: { $ref: "#/components/schemas/InspectionReportType" }
+        reportDate: { type: string, format: date, nullable: true }
+        siteId: { type: integer, nullable: true }
+        objectPath: { type: string }
+        fileName: { type: string }
+      required: [title, reportType, objectPath, fileName]
