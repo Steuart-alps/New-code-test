@@ -124,9 +124,12 @@ export * from "./analytics-events";
 export * from "./scheduled-jobs";
 
 export * from "./registers";
+export * from "./coshh-track";
 
 export * from "./consultant-branding";
 
 export * from "./tasks";
 
 export * from "./track-notifications";
+export * from "./equipment";
+export * from "./inspection-reports";

@@ -10,6 +10,8 @@ import type { NextFunction, Request, Response } from "express";
 const VIEWER_ROUTES: Array<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/train-track\/my-records\/?$/ },
   { method: "POST", path: /^\/train-track\/my-records\/\d+\/sign\/?$/ },
+  { method: "GET", path: /^\/train-track\/my-coshh\/?$/ },
+  { method: "POST", path: /^\/train-track\/my-coshh\/\d+\/sign\/?$/ },
   { method: "POST", path: /^\/feedback\/?$/ },
   { method: "POST", path: /^\/mobile\/push-token\/?$/ },
   { method: "DELETE", path: /^\/mobile\/push-token\/?$/ },

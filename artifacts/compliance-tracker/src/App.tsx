@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/auth-context";
 
 import { trackModuleFirstUse } from "@/lib/analytics";
+import { pendingScanPath, rememberScanPath } from "@/lib/scan-return";
 
 // Each page is its own chunk so the landing and sign-in pages stay small and a
 // page's code is only downloaded when someone opens it.
@@ -48,6 +49,7 @@ const DocTrackPage = lazy(() => import("@/pages/doc-track"));
 const TrainTrackPage = lazy(() => import("@/pages/train-track"));
 const HotTubPage = lazy(() => import("@/pages/hot-tub"));
 const TreeTrackPage = lazy(() => import("@/pages/tree-track"));
+const CoshhTrackPage = lazy(() => import("@/pages/coshh-track"));
 const BikeTrackPage = lazy(() => import("@/pages/bike-track"));
 const AquaTrackPage = lazy(() => import("@/pages/aqua-track"));
 const GreenTrackPage = lazy(() => import("@/pages/green-track"));
@@ -84,6 +86,9 @@ const CalendarPage = lazy(() => import("@/pages/calendar"));
 const WaterSafetyPage = lazy(() => import("@/pages/safety-summary").then(m => ({ default: m.WaterSafetyPage })));
 const KioskPage = lazy(() => import("@/pages/staff-kiosk"));
 const StaffSetPinPage = lazy(() => import("@/pages/staff-kiosk").then(m => ({ default: m.StaffSetPinPage })));
+const ScanPage = lazy(() => import("@/pages/scan"));
+const EquipmentPage = lazy(() => import("@/pages/equipment"));
+const ReportActionsPage = lazy(() => import("@/pages/report-actions"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -125,6 +130,7 @@ function ProtectedRoutes() {
       ["/train-track", "traintrack"],
       ["/hot-tub", "hottubtrack"],
       ["/tree-track", "treetrack"],
+      ["/coshh-track", "coshhtrack"],
       ["/bike-track", "biketrack"],
       ["/aqua-track", "aquatrack"],
       ["/pool-track", "pooltrack"],
@@ -169,6 +175,11 @@ function ProtectedRoutes() {
     if (location === "/login") return <LoginPage />;
     // Show landing page at root when not logged in
     if (location === "/" || location === "") return <LandingPage />;
+    // A scanned equipment label: sign in, then come back to it.
+    if (location.startsWith("/q/")) {
+      rememberScanPath(location);
+      return <Redirect to="/login" />;
+    }
     return <Redirect to="/" />;
   }
 
@@ -194,12 +205,16 @@ function ProtectedRoutes() {
 
   // A Viewer only ever sees their own training records.
   if (user.role === "client_viewer") {
+    // A scanned label tells a Viewer it isn't available rather than bouncing.
+    if (location.startsWith("/q/")) return <Route path="/q/:code" component={ScanPage} />;
     if (location !== "/my-training") return <Redirect to="/my-training" />;
     return <MyTrainingPage />;
   }
 
   // Logged in — redirect away from public pages
   if (location === "/login" || location === "/") {
+    const scanPath = pendingScanPath();
+    if (scanPath) return <Redirect to={scanPath} />;
     // Consultants land on their portfolio, which forwards to the dashboard
     // unless they manage two or more businesses.
     return <Redirect to={user.role === "consultant" ? "/portfolio?from=landing" : "/dashboard"} />;
@@ -219,6 +234,9 @@ function ProtectedRoutes() {
       <Route path="/external" component={ExternalChecksPage} />
       <Route path="/external-checks" component={ExternalChecksPage} />
       <Route path="/items/:id" component={ItemDetailPage} />
+      <Route path="/q/:code" component={ScanPage} />
+      {canManageUsers && <Route path="/equipment" component={EquipmentPage} />}
+      {canManageUsers && <Route path="/report-actions" component={ReportActionsPage} />}
       <Route path="/fire-safety" component={FireSafetyPage} />
       <Route path="/kitchen" component={KitchenPage} />
       <Route path="/allergens" component={AllergensPage} />
@@ -232,6 +250,7 @@ function ProtectedRoutes() {
       <Route path="/train-track" component={TrainTrackPage} />
       <Route path="/hot-tub" component={HotTubPage} />
       <Route path="/tree-track" component={TreeTrackPage} />
+      <Route path="/coshh-track" component={CoshhTrackPage} />
       <Route path="/bike-track" component={BikeTrackPage} />
       <Route path="/aqua-track"  component={AquaTrackPage} />
       {/* Legacy URLs redirect to the combined AquaTrack page */}

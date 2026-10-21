@@ -42,6 +42,7 @@ export const MODULE_INFO: Record<string, { label: string; href: string; hint: st
   pesttrack: { label: "PestTrack", href: "/pest-track", hint: "Pest control visits and sightings" },
   premisestrack: { label: "PremisesTrack", href: "/premises-track", hint: "Premises inspections" },
   roomtrack: { label: "RoomTrack", href: "/room-track", hint: "Room checks" },
+  coshhtrack: { label: "COSHHTrack", href: "/coshh-track", hint: "COSHH assessments and extraction tests" },
   dailytrack_am: { label: "DailyTrack AM", href: "/daily-track-am", hint: "Opening checklist" },
   dailytrack_pm: { label: "DailyTrack PM", href: "/daily-track-pm", hint: "Closing checklist" },
 };
@@ -83,7 +84,7 @@ export const DEPARTMENT_SUGGESTIONS: Record<string, string[]> = {
 export const FIRST_RECORD_PRIORITY = [
   "dailytrack_am", "kitchentrack", "firetrack", "legionellatrack", "aquatrack", "hottubtrack", "premisestrack",
   "roomtrack", "pattrack", "pesttrack", "incidenttrack", "fixtrack", "traintrack", "doctrack",
-  "treetrack", "biketrack", "greentrack", "dailytrack_pm",
+  "treetrack", "biketrack", "greentrack", "coshhtrack", "dailytrack_pm",
 ];
 
 export function moduleLabel(key: string | null | undefined): string | null {

@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api";
 import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
 import { KitchenStatusPill } from "@/components/kitchen-status-pill";
 import { ComplianceChecksDue } from "@/components/compliance-checks-due";
+import { TodayByDepartmentCard } from "@/components/today-by-department";
 import { RegisterReviewsDue } from "@/components/register-reviews-due";
 import { DashboardStartCards } from "@/components/dashboard-start-cards";
 import { cn } from "@/lib/utils";
@@ -383,9 +384,13 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
     : "";
 
   return (
-    <div className={cn(
+    <section aria-label="Today's checklists" className={cn(
       "rounded-lg border border-border/60 bg-card px-4 py-3",
-      allDone
+      // While a site's totals load, show no status colour: the previous
+      // site's colour would read as the new site's result.
+      loading
+        ? "border-l-4 border-l-muted-foreground/30"
+        : allDone
         ? "border-l-4 border-l-emerald-500"
         : !totals?.available
         ? "border-l-4 border-l-rose-500"
@@ -439,7 +444,7 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
           </Link>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -495,6 +500,9 @@ export default function Dashboard() {
   const [pendingEmailsCount, setPendingEmailsCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by Retry so a retry goes through the effect below and is cancelled
+  // like any other summary request when the site changes.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!canManageContractorEmails) return;
@@ -521,6 +529,10 @@ export default function Dashboard() {
     setLoading(true);
     setChecklistLoading(true);
     setError(null);
+    // Drop the previous site's results so nothing on the page describes it
+    // while this site loads.
+    setTracks([]);
+    setChecklistTotals(null);
     try {
       const params = siteId !== "all" ? `?siteId=${siteId}` : "";
       const res = await apiFetch(`/dashboard/summary${params}`, { signal });
@@ -549,7 +561,7 @@ export default function Dashboard() {
     const controller = new AbortController();
     load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [load, reloadKey]);
 
   const enabledTracks   = tracks.filter((t) => t.enabled && !t.otherModule);
   const otherTracks     = tracks.filter((t) => t.enabled && t.otherModule);
@@ -653,12 +665,15 @@ export default function Dashboard() {
           <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
             <span>We couldn't load the dashboard: {error}</span>
             <button type="button" className="rounded-sm border border-rose-300 bg-white px-3 py-1 font-medium hover:bg-rose-100"
-              onClick={() => void load(new AbortController().signal)}>Retry</button>
+              onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
           </div>
         )}
 
         {/* DailyTrack snapshot */}
         {hasDailytrack && <DailyTrackSnapshotCard totals={checklistTotals} loading={checklistLoading} />}
+
+        {/* Today by department (Owners; other roles as chosen in Settings) */}
+        <TodayByDepartmentCard siteId={siteId === "all" ? null : Number(siteId)} />
 
         {/* Summary bar */}
         {!loading && !error && tracks.length > 0 && (

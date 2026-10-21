@@ -66,11 +66,17 @@ if (!basePath) {
 
 export default defineConfig({
   base: basePath,
-  // Forward the server-side SENTRY_DSN secret to the client bundle under the
-  // VITE_ prefix.  The Sentry DSN is intentionally public (it's designed to
-  // be embedded in client code) so this is safe.
+  // Forward the server-side SENTRY_DSN to the client bundle under the VITE_
+  // prefix, so one Render variable covers both (it must be set before the
+  // build). The Sentry DSN is intentionally public (it's designed to be
+  // embedded in client code) so this is safe. The environment tag follows
+  // SENTRY_ENVIRONMENT, else the build mode; the release is the commit.
   define: {
-    "import.meta.env.VITE_SENTRY_DSN": JSON.stringify(process.env.SENTRY_DSN ?? ""),
+    "import.meta.env.VITE_SENTRY_DSN": JSON.stringify(process.env.SENTRY_DSN?.trim() ?? ""),
+    "import.meta.env.VITE_SENTRY_ENVIRONMENT": JSON.stringify(process.env.SENTRY_ENVIRONMENT?.trim() ?? ""),
+    "import.meta.env.VITE_SENTRY_RELEASE": JSON.stringify(
+      process.env.SENTRY_RELEASE?.trim() || process.env.RENDER_GIT_COMMIT?.trim() || "",
+    ),
   },
   plugins: [
     react(),

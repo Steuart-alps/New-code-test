@@ -2,7 +2,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { Link, useLocation } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Users, Bell, FileText, ArrowRight, Star, Zap, Lock,
-  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, BookOpen, Waves, TreePine, Bug,
+  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, BookOpen, Waves, TreePine, Bug, Beaker,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -241,6 +241,25 @@ const MODULES = [
       "Severity rating (low / medium / high) per incident",
       "Open / resolved status for each activity record",
       "Next visit due tracking with overdue alerts",
+    ],
+  },
+  {
+    key: "coshhtrack",
+    label: "COSHHTrack",
+    price: 10,
+    icon: Beaker,
+    color: "text-orange-700",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    required: false,
+    description: "COSHH logbook — assessments for each hazardous substance or task, built on your COSHH register and safety data sheets, with the checks that follow from them.",
+    features: [
+      "COSHH assessments: who is at risk, exposure routes, controls and PPE",
+      "Risk level and review dates with reminders",
+      "LEV thorough examination records (at least every 14 months)",
+      "Health surveillance and exposure monitoring records",
+      "Staff briefing records for each assessment",
+      "Reports and certificates attached to each record",
     ],
   },
 ];

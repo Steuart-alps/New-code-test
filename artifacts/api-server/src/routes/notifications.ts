@@ -9,6 +9,8 @@ import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 import { digestBearerToken, encryptTokenPayload } from "../lib/bearerTokens";
 import { lockReminderItem, reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
+import { logger } from "../lib/logger";
+import { syncContractorVisitChecks } from "../lib/contractorVisits";
 
 /**
  * Build the full CC list for a reminder email by combining:
@@ -150,6 +152,19 @@ async function sendReminderForItem(opts: {
 export async function runReminderJob(): Promise<{ queued: number; sent: number; skipped: number; errors: number }> {
   const now = new Date();
 
+  // Contractor visits kept on the tracks (pest control, water servicing and
+  // others) first take their track's due date, so the reminder is for the
+  // visit the track says is next.
+  const visitClients = await db.selectDistinct({ clientId: complianceItemsTable.clientId })
+    .from(complianceItemsTable).where(isNotNull(complianceItemsTable.contractorId));
+  for (const { clientId } of visitClients) {
+    try {
+      await syncContractorVisitChecks(clientId);
+    } catch (err) {
+      logger.error({ err, clientId }, "Contractor visit due dates could not be brought up to date");
+    }
+  }
+
   const items = await db
     .select({ item: complianceItemsTable, contractor: contractorsTable, siteDepartmentId: sitesTable.departmentId })
     .from(complianceItemsTable)
@@ -167,21 +182,25 @@ export async function runReminderJob(): Promise<{ queued: number; sent: number; 
   let errors = 0;
 
   for (const { item, contractor, siteDepartmentId } of items) {
-    if (!contractor?.email || !item.dueDate || item.status === "completed") { skipped++; continue; }
-
-    const leadTimeDays = item.leadTimeDays ?? 30;
-    const dueDate = new Date(item.dueDate);
-    const notifyDate = new Date(dueDate.getTime() - leadTimeDays * 24 * 60 * 60 * 1000);
-
-    if (now < notifyDate || item.notificationSentAt) { skipped++; continue; }
+    if (!contractor?.email || !item.dueDate || item.status === "completed" || item.notificationSentAt) { skipped++; continue; }
 
     if (!settingsCache[item.clientId]) {
       settingsCache[item.clientId] = await getClientSettings(item.clientId);
     }
     const settings = settingsCache[item.clientId];
+    const parsedLeadTime = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
+    const defaultLeadTimeDays = Number.isFinite(parsedLeadTime) && parsedLeadTime >= 0 ? parsedLeadTime : 30;
+
+    // A check without its own lead time uses the business's default, as the
+    // manual send and the email text do.
+    const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
+    const dueDate = new Date(item.dueDate);
+    const notifyDate = new Date(dueDate.getTime() - leadTimeDays * 24 * 60 * 60 * 1000);
+
+    if (now < notifyDate) { skipped++; continue; }
+
     const companyName = settings["companyName"] ?? "ComplyTrack";
     const fromEmail = getSenderEmail(settings);
-    const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
     const ccList = await buildReminderCcList({
       clientId: item.clientId,
       settings,

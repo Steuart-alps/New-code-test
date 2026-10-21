@@ -39,7 +39,7 @@ async function waitForVite() {
 
 const MODULE_KEYS = [
   "core", "firetrack", "kitchentrack", "legionellatrack", "fixtrack", "safetrack",
-  "premisestrack", "traintrack", "hottubtrack", "treetrack", "pattrack", "pesttrack",
+  "premisestrack", "traintrack", "hottubtrack", "treetrack", "pattrack", "pesttrack", "coshhtrack",
 ];
 
 try {

@@ -85,6 +85,9 @@ export async function getDepartmentComplianceReport({
         SELECT 'TreeTrack', site_id, submitter_department_id, submitter_department_source FROM tree_inspections
           WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
         UNION ALL
+        SELECT 'COSHHTrack', site_id, submitter_department_id, submitter_department_source FROM coshh_checks
+          WHERE client_id = ${clientId} AND deleted_at IS NULL AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
         SELECT 'PremisesTrack', site_id, submitter_department_id, submitter_department_source FROM premises_inspections
           WHERE client_id = ${clientId} AND inspection_date BETWEEN ${from} AND ${to}
         UNION ALL

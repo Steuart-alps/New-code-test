@@ -12,6 +12,10 @@ export {
   kitchenTemperatureGuidanceRules, type FoodJurisdiction, type KitchenTemperatureGuidance,
 } from '@workspace/api-zod/kitchen-temperature';
 export {
+  NSTS_SPRAYER_CATEGORIES, NSTS_TEST_INSPECTION_TYPE, isNstsSprayerCategory, nstsNextTestDate, nstsFirstTestDueDate,
+  nstsStatus, type NstsSprayerCategory, type NstsStatus,
+} from '@workspace/api-zod/nsts-sprayer-tests';
+export {
   kitchenWeeklyAttentionAnswer, kitchenWeeklyNeedsAttention, kitchenWeeklyResult,
 } from '@workspace/api-zod/kitchen-weekly';
 export * from './generated/api';

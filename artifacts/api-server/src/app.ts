@@ -13,7 +13,7 @@ import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./mid
 import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
 import { WebhookHandlers } from "./lib/webhookHandlers";
-import { Sentry } from "./lib/sentry";
+import { Sentry, isErrorReportingEnabled } from "./lib/sentry";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 import { csrfProtection } from "./middleware/csrf";
 import { computeReadiness, getBillingReadiness } from "./lib/stripeStartup";
@@ -254,7 +254,7 @@ app.use("/api", (_req: Request, res: Response) => {
 
 // Sentry error handler — must come after all routes and before other error
 // handlers so it has access to the full request context and error details.
-if (process.env.SENTRY_DSN) {
+if (isErrorReportingEnabled()) {
   Sentry.setupExpressErrorHandler(app);
 }
 

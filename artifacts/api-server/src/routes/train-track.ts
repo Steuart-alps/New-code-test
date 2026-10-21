@@ -5,6 +5,9 @@ import { sql } from "drizzle-orm";
 import { requireAuth, requireRole, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionState, type StoredOptionState } from "../lib/formOptions";
 import { siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
+import { getEntitledServices, isEntitled } from "../lib/services";
+import { getAccountToday } from "../lib/accountClock";
+import { findSignOffAssessment, getMyCoshhSignOffs, recordCoshhSignOffs } from "../lib/coshhSignOffs";
 
 const router = Router();
 
@@ -231,6 +234,45 @@ router.post("/my-records/:id/sign", requireAuth, requireRole("client_viewer"), a
     WHERE r.id = ${id} AND r.client_id = ${user.clientId}
   `);
   res.json((updated.rows ?? [])[0]);
+});
+
+// ── A Viewer's COSHH assessments to read and sign (COSHHTrack) ───────────────
+// Current COSHH assessments for the Viewer's site (and department, when the
+// assessment names departments). Signing writes a TrainTrack sign-off for
+// their roster entry; see lib/coshhSignOffs.ts.
+
+router.get("/my-coshh", requireAuth, requireRole("client_viewer"), async (req, res) => {
+  const user = req.currentUser!;
+  if (user.clientId == null || user.staffRosterId == null
+    || !isEntitled(await getEntitledServices(user.clientId), "coshhtrack")) {
+    return res.json({ linked: user.staffRosterId != null, pending: [], signed: [] });
+  }
+  res.json({ linked: true, ...await getMyCoshhSignOffs(user.clientId, user.staffRosterId) });
+});
+
+router.post("/my-coshh/:id/sign", requireAuth, requireRole("client_viewer"), async (req, res) => {
+  const user = req.currentUser!;
+  const id = Number(req.params.id);
+  const parsed = z.object({ signature: z.string().min(1).max(500000) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A signature is required" });
+  if (!Number.isSafeInteger(id) || user.clientId == null || user.staffRosterId == null
+    || !isEntitled(await getEntitledServices(user.clientId), "coshhtrack")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const mine = await getMyCoshhSignOffs(user.clientId, user.staffRosterId);
+  if (mine.signed.some((item) => item.id === id)) return res.status(409).json({ error: "You have already signed this assessment" });
+  if (!mine.pending.some((item) => item.id === id)) return res.status(404).json({ error: "Not found" });
+  const assessment = await findSignOffAssessment(user.clientId, id, null);
+  if (!assessment) return res.status(404).json({ error: "Not found" });
+  await recordCoshhSignOffs({
+    clientId: user.clientId,
+    assessment,
+    entries: [{ staffRosterId: user.staffRosterId, signature: parsed.data.signature }],
+    userId: user.id,
+    today: await getAccountToday(user.clientId),
+    callerDepartmentId: null,
+  });
+  res.json({ linked: true, ...await getMyCoshhSignOffs(user.clientId, user.staffRosterId) });
 });
 
 // ── Create record ─────────────────────────────────────────────────────────────

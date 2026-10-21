@@ -21,6 +21,7 @@ import { NO_ACTION, itemActionState, itemActionStates, type ItemActionState } fr
 import { getAccountToday } from "../lib/accountClock";
 import { recordTrackCheckFromTask } from "../lib/trackTaskLink";
 import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
+import { listAssignees, resolveAssigneeChange } from "../lib/assignees";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -235,6 +236,25 @@ router.post("/compliance-items", requireAuth, denyViewers, requireClientAdmin, a
     }
   }
 
+  // The person responsible: for "All Sites" they must be able to see every site.
+  if (body.assigneeUserId != null) {
+    if (applyToAllSites) {
+      const sites = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.clientId, clientId));
+      for (const site of sites) {
+        if (!(await listAssignees(clientId, site.id)).some((person) => person.id === body.assigneeUserId)) {
+          res.status(400).json({ error: "The person assigned can't access every site; choose someone who can, or assign each site's check separately" });
+          return;
+        }
+      }
+    }
+    const assignee = await resolveAssigneeChange(clientId, applyToAllSites ? null : body.siteId ?? null, { assigneeUserId: body.assigneeUserId });
+    if (!assignee.ok) {
+      res.status(400).json({ error: assignee.error });
+      return;
+    }
+    body.assignedTo = assignee.name ?? null;
+  }
+
   // A check created as already completed is a completion like any other.
   const createCompletion = body.status === "completed" ? completionFields(body.frequencyMonths, new Date()).fields : {};
 
@@ -365,6 +385,21 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
   }
 
   const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
+  if ("assigneeUserId" in body || "assignedTo" in body || "siteId" in body) {
+    const assignee = await resolveAssigneeChange(existing[0].clientId,
+      "siteId" in body ? body.siteId ?? null : existing[0].siteId, {
+        assigneeUserId: body.assigneeUserId,
+        name: body.assignedTo,
+      }, { assigneeUserId: existing[0].assigneeUserId, name: existing[0].assignedTo, siteId: existing[0].siteId });
+    if (!assignee.ok) {
+      res.status(400).json({ error: assignee.error });
+      return;
+    }
+    delete updateData.assigneeUserId;
+    delete updateData.assignedTo;
+    if (assignee.assigneeUserId !== undefined) updateData.assigneeUserId = assignee.assigneeUserId;
+    if (assignee.name !== undefined) updateData.assignedTo = assignee.name;
+  }
   let recurrence: { completedAt: Date; nextDueDate: Date } | null = null;
   if (body.status === "completed") {
     // An explicit date done (YYYY-MM-DD, never in the future) wins. Otherwise

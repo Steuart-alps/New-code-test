@@ -17,6 +17,8 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   reportedBy: text("reported_by").notNull(),
   reportedDate: date("reported_date").notNull(),
   assignedTo: text("assigned_to"),
+  /** The person responsible, when picked from the business's users (see track_actions). */
+  assigneeUserId: integer("assignee_user_id").references(() => usersTable.id, { onDelete: "set null" }),
   contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "set null" }),
   targetDate: date("target_date"),
   resolvedDate: date("resolved_date"),
@@ -38,6 +40,10 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   // different authorised manager can perform the resulting dispatch.
   emailSentBy: integer("email_sent_by").references(() => usersTable.id, { onDelete: "set null" }),
   emailSentAt: timestamp("email_sent_at"),
+  // Picked by the contractor from the job email's "pick a visit date" link.
+  contractorVisitDate: date("contractor_visit_date"),
+  // When the contractor marked the job done from the job email.
+  contractorCompletedAt: timestamp("contractor_completed_at"),
   mediaUrls: jsonb("media_urls").default([]).$type<string[]>(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   // Submitter's department when the row was created, set by a database
