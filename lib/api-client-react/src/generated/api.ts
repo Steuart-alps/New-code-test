@@ -75,6 +75,8 @@ import type {
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
+  FixTrackAssignContractorRequest,
+  FixTrackAssignContractorResult,
   FixTrackIssueMediaList,
   FixTrackMediaDeleteRequest,
   FoodSafetyConfig,
@@ -5329,6 +5331,79 @@ export const useDeleteFixTrackIssueMedia = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getDeleteFixTrackIssueMediaMutationOptions(options));
+    }
+
+export const getAssignFixTrackContractorUrl = (id: number,) => {
+
+
+
+
+  return `/api/fix-track/issues/${id}/assign-contractor`
+}
+
+/**
+ * A manager picks a contractor from the business's list, or adds a new one, and the job email (details, photos, a link to pick a visit date and a "job done" link) is sent straight away. The manager's choice is the approval, so the email does not wait in Contractor Approvals. If sending fails, the email stays in Contractor Approvals to retry.
+ * @summary Give a job to a contractor and email it to them (managers)
+ */
+export const assignFixTrackContractor = async (id: number,
+    fixTrackAssignContractorRequest: FixTrackAssignContractorRequest, options?: RequestInit): Promise<FixTrackAssignContractorResult> => {
+
+  return customFetch<FixTrackAssignContractorResult>(getAssignFixTrackContractorUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fixTrackAssignContractorRequest)
+  }
+);}
+
+
+
+
+
+export const getAssignFixTrackContractorMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof assignFixTrackContractor>>, TError,{id: number;data: BodyType<FixTrackAssignContractorRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof assignFixTrackContractor>>, TError,{id: number;data: BodyType<FixTrackAssignContractorRequest>}, TContext> => {
+
+const mutationKey = ['assignFixTrackContractor'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof assignFixTrackContractor>>, {id: number;data: BodyType<FixTrackAssignContractorRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  assignFixTrackContractor(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AssignFixTrackContractorMutationResult = NonNullable<Awaited<ReturnType<typeof assignFixTrackContractor>>>
+    export type AssignFixTrackContractorMutationBody = BodyType<FixTrackAssignContractorRequest>
+    export type AssignFixTrackContractorMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Give a job to a contractor and email it to them (managers)
+ */
+export const useAssignFixTrackContractor = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof assignFixTrackContractor>>, TError,{id: number;data: BodyType<FixTrackAssignContractorRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof assignFixTrackContractor>>,
+        TError,
+        {id: number;data: BodyType<FixTrackAssignContractorRequest>},
+        TContext
+      > => {
+      return useMutation(getAssignFixTrackContractorMutationOptions(options));
     }
 
 export const getListFireSafetyChecksUrl = (params?: ListFireSafetyChecksParams,) => {

@@ -1589,6 +1589,67 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /fix-track/issues/{id}/assign-contractor:
+    post:
+      operationId: assignFixTrackContractor
+      tags: [fix-track]
+      summary: Give a job to a contractor and email it to them (managers)
+      description: >
+        A manager picks a contractor from the business's list, or adds a new
+        one, and the job email (details, photos, a link to pick a visit date
+        and a "job done" link) is sent straight away. The manager's choice is
+        the approval, so the email does not wait in Contractor Approvals. If
+        sending fails, the email stays in Contractor Approvals to retry.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FixTrackAssignContractorRequest"
+      responses:
+        "200":
+          description: The job was emailed to the contractor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FixTrackAssignContractorResult"
+        "400":
+          description: No contractor chosen, an unknown contractor, or one without an email address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a manager (staff ask for approval instead)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The issue is resolved, an email is being sent, or the job was already emailed and replace was not set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The email could not be sent; it waits in Contractor Approvals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /fire-safety:
     get:
       operationId: listFireSafetyChecks
@@ -4260,6 +4321,62 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
+    FixTrackAssignContractorRequest:
+      type: object
+      description: Exactly one of contractorId and newContractor.
+      properties:
+        contractorId:
+          type: integer
+        newContractor:
+          $ref: "#/components/schemas/FixTrackNewContractor"
+        targetDate:
+          type: string
+          format: date
+          nullable: true
+          description: Left out keeps the issue's target date; null clears it.
+        replace:
+          type: boolean
+          description: Confirms replacing a job already emailed to a contractor.
+    FixTrackNewContractor:
+      type: object
+      required: [name, email]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        company:
+          type: string
+          nullable: true
+          maxLength: 200
+        email:
+          type: string
+          minLength: 3
+          maxLength: 320
+        phone:
+          type: string
+          nullable: true
+          maxLength: 50
+    FixTrackAssignContractorResult:
+      type: object
+      required: [ok, queueId, contractorId, contractorName, message]
+      properties:
+        ok:
+          type: boolean
+        queueId:
+          type: integer
+        mode:
+          type: string
+        subject:
+          type: string
+        bodyHtml:
+          type: string
+        contractorId:
+          type: integer
+        contractorName:
+          type: string
+        message:
+          type: string
     FixTrackIssueMediaList:
       type: object
       required: [mediaUrls]

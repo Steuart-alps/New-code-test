@@ -234,7 +234,7 @@ async function main() {
     const firstAction = await fetch(`${BASE}/fix-track/action/${bookedMatch[1]}`);
     const firstActionHtml = await firstAction.text();
     check("hashed contractor action token resolves", firstAction.status === 200, String(firstAction.status));
-    check("GET only displays an explicit booking confirmation", firstActionHtml.includes("Confirm booking"));
+    check("GET only displays an explicit booking confirmation", firstActionHtml.includes("Confirm visit date"));
     const unchangedIssue = await owner("GET", `/fix-track/issues/${retryId}`);
     check("email scanner GET leaves the issue reported", unchangedIssue.data?.status === "reported",
       JSON.stringify(unchangedIssue.data));
@@ -694,7 +694,7 @@ async function main() {
   check("legacy contractor action tokens are backfilled then scrubbed",
     migrations.includes("token_hash=${digestBearerToken(row.token)}, token=NULL"));
   check("quote content says it is not an assignment", templates.includes("This is a request for a quote only — the job has not been assigned."));
-  check("assignment content contains contractor action links", templates.includes("Mark as Booked") && templates.includes("Mark as Completed"));
+  check("assignment content contains contractor action links", templates.includes("Pick a visit date") && templates.includes("Job done"));
   const route = await readFile(new URL("../src/routes/fix-track.ts", import.meta.url), "utf8");
   check("concurrent dispatches may claim only one pending queue row",
     route.includes("WHERE status='pending' AND id=(SELECT id FROM contractor_email_queue"));
@@ -706,7 +706,7 @@ async function main() {
   check("quote token lookup binds issue and client",
     publicRoute.includes("i.id=q.issue_id AND i.client_id=q.client_id"));
   check("quote decisions enforce active department scope",
-    route.includes("AND (i.site_id IS NULL OR s.department_id=${deptId})") &&
+    route.includes("AND (i.site_id IS NULL OR (s.department_id=${deptId}") &&
     route.includes("'fix_track',${q.issue_id},${q.department_id},${q.contractor_id}"));
   check("updates refuse a row already claimed for sending",
     route.includes('current.emailRequestStatus === "sending"'));

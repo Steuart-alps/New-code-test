@@ -28,6 +28,7 @@ import { format } from "date-fns";
 import { elapsedBoardDays, FixTrackBoard, type FixTrackBoardIssue } from "@/components/fix-track-board";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,9 @@ interface Issue extends FixTrackBoardIssue {
   emailRequestMode?: string | null;
   emailRequestStatus?: string | null;
   emailRequestedAt?: string | null;
+  emailSentAt?: string | null;
+  contractorVisitDate?: string | null;
+  contractorCompletedAt?: string | null;
   quote?: {
     id: number;
     status: string;
@@ -627,6 +631,7 @@ export default function FixTrackPage() {
   const [saving, setSaving]         = useState(false);
   const [notifying, setNotifying]         = useState<Record<number, boolean>>({});
   const [renotifyIssue, setRenotifyIssue] = useState<Issue | null>(null);
+  const [assigningIssue, setAssigningIssue] = useState<Issue | null>(null);
   const [signingIssue, setSigningIssue]   = useState<Issue | null>(null);
   const [signingBusy, setSigningBusy]     = useState(false);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
@@ -1166,6 +1171,8 @@ export default function FixTrackPage() {
                             </Badge>
                           )}
                           {issue.assignedTo && <span>Assigned: <span className="font-medium">{issue.assignedTo}</span></span>}
+                          {issue.contractorVisitDate && <span>Contractor visit: <span className="font-medium">{format(new Date(issue.contractorVisitDate), "dd/MM/yyyy")}</span></span>}
+                          {issue.contractorCompletedAt && <span className="text-emerald-700">Contractor marked done {format(new Date(issue.contractorCompletedAt), "dd/MM/yyyy")}</span>}
                           {issue.targetDate && <span>Target: {format(new Date(issue.targetDate), "dd/MM/yyyy")}</span>}
                           {issue.resolvedDate && <span>Resolved: {format(new Date(issue.resolvedDate), "dd/MM/yyyy")}</span>}
                         </div>
@@ -1270,20 +1277,25 @@ export default function FixTrackPage() {
                             </Button>
                         </>
                       )}
-                      {canEdit && issue.contractorId && canAdmin && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
+                      {/* A manager's own choice of contractor is the approval,
+                          so the job is emailed straight away. */}
+                      {canEdit && canAdmin && ["reported", "in_progress"].includes(issue.status) && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
                         <>
                           <Button variant="outline" size="sm"
-                            onClick={() => handleRequestSend(issue, "assign")}
+                            onClick={() => setAssigningIssue(issue)}
                             disabled={notifying[issue.id]}
-                            className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50">
-                            Request assign
+                            className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50 gap-1"
+                            data-testid={`button-assign-contractor-${issue.id}`}>
+                            <Send className="w-3 h-3" /> Assign contractor
                           </Button>
-                          <Button variant="outline" size="sm"
-                            onClick={() => handleRequestSend(issue, "quote")}
-                            disabled={notifying[issue.id]}
-                            className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50">
-                            Request quote
-                          </Button>
+                          {issue.contractorId && (
+                            <Button variant="outline" size="sm"
+                              onClick={() => handleRequestSend(issue, "quote")}
+                              disabled={notifying[issue.id]}
+                              className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50">
+                              Request quote
+                            </Button>
+                          )}
                         </>
                       )}
                       {issue.contractorId && canAdmin && issue.emailRequestStatus === "approved" && (
@@ -1345,6 +1357,13 @@ export default function FixTrackPage() {
       </div>
 
       {/* Re-notify confirmation dialog */}
+      <AssignContractorDialog
+        issue={assigningIssue}
+        open={!!assigningIssue}
+        onOpenChange={open => !open && setAssigningIssue(null)}
+        onAssigned={load}
+      />
+
       <Dialog open={!!renotifyIssue} onOpenChange={open => !open && setRenotifyIssue(null)}>
         <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>

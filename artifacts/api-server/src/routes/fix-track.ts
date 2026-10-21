@@ -39,6 +39,7 @@ async function markComplianceNotified(q: any, clientId: number): Promise<void> {
 }
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
 import { resolveAssigneeChange } from "../lib/assignees";
+import { filterName } from "../lib/contentFilter";
 
 const router = Router();
 
@@ -343,6 +344,19 @@ async function siteDocumentsForContractorEmail(
   return documents.filter((document): document is { name: string; url: string } => document !== null);
 }
 
+/** The issue's photos and videos as 30-day links for the contractor's job email. */
+async function issueMediaForContractorEmail(
+  mediaUrls: unknown,
+  clientId: number,
+): Promise<{ url: string; isVideo: boolean }[]> {
+  const paths = Array.isArray(mediaUrls) ? mediaUrls.filter((path): path is string => typeof path === "string") : [];
+  const media = await Promise.all(paths.slice(0, 20).map(async (path) => {
+    const url = await authorisedSiteDocumentUrl(storage.normalizeObjectEntityPath(path), clientId);
+    return url ? { url, isVideo: /\.(mp4|mov|webm|m4v|3gp|avi|mpeg|ogv|mkv|ts)$/i.test(path) } : null;
+  }));
+  return media.filter((item): item is { url: string; isVideo: boolean } => item !== null);
+}
+
 // Gas is one issue type but three distinct trades.
 const GAS_SUBTRADES = ["gas_kitchen", "gas_fireplace", "gas_heating", "gas"];
 
@@ -436,6 +450,9 @@ const issueCreate = z.object({
   assigneeUserId: z.number().int().positive().nullable().optional(),
   contractorId:  z.number().int().nullable().optional(),
   targetDate:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  // Normally picked by the contractor from the job email; a manager can set it
+  // when the contractor phones instead.
+  contractorVisitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   resolvedDate:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   solutionNotes: z.string().max(5000).nullable().optional(),
   mediaUrls:     z.array(z.string().max(1000)).optional(),
@@ -1359,17 +1376,18 @@ function calendarEventDate(ics: unknown): string | null {
   return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }
 
-// Staff: request that a contractor email be sent (needs manager approval)
-router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, res) => {
-  const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+type QueueOutcome = { status: number; body: Record<string, unknown>; queueId?: number };
 
-  const id = parseInt(req.params.id as string);
-  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-
-  const parsed = z.object({ mode: z.enum(["assign", "quote"]), force: z.boolean().optional() }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
-  const force = parsed.data.force === true || req.query.force === "true";
+/**
+ * Store the exact contractor email for an issue as a pending draft in the
+ * approval queue (Contractor Approvals), replacing any older pending draft.
+ * Staff requests stop there; a manager's direct assignment approves and sends
+ * the draft straight away (POST /issues/:id/assign-contractor).
+ */
+async function queueContractorEmail(
+  req: any, clientId: number, id: number, mode: "assign" | "quote", force: boolean,
+): Promise<QueueOutcome> {
+  const parsed = { data: { mode } };
 
   const requestConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
   const requestDeptId = getActiveDepartmentId(req);
@@ -1383,22 +1401,22 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     contractorId: fixTrackIssuesTable.contractorId,
     emailRequestStatus: fixTrackIssuesTable.emailRequestStatus,
   }).from(fixTrackIssuesTable).where(and(...requestConditions)).limit(1);
-  if (!existing) return res.status(404).json({ error: "Not found" });
-  if (!existing.contractorId) return res.status(400).json({ error: "No contractor assigned to this issue" });
+  if (!existing) return { status: 404, body: { error: "Not found" } };
+  if (!existing.contractorId) return { status: 400, body: { error: "No contractor assigned to this issue" } };
   if (existing.emailRequestStatus === "sending") {
-    return res.status(409).json({ error: "A contractor email has already been sent for this issue" });
+    return { status: 409, body: { error: "A contractor email has already been sent for this issue" } };
   }
   if (existing.emailRequestStatus === "sent" && !force) {
-    return res.status(409).json({
+    return { status: 409, body: {
       error: "A contractor email has already been sent for this issue",
       alreadySent: true,
-    });
+    } };
   }
 
   // Persist the exact draft that will cross the email boundary. Approval is
   // for these stored bytes, not for a later re-render of a changed issue.
   const draftResult = await db.execute(sql`
-     SELECT i.title, i.description, i.location, i.priority, i.issue_type, i.site_id, i.target_date,
+     SELECT i.title, i.description, i.location, i.priority, i.issue_type, i.site_id, i.target_date, i.media_urls,
            s.name AS site_name, c.name AS contractor_name, c.email AS contractor_email,
             cl.name AS company_name,
             (SELECT ics_content FROM contractor_email_queue
@@ -1412,10 +1430,13 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     LIMIT 1
   `);
   const draft = (draftResult.rows as any[])[0];
-  if (!draft?.contractor_email) return res.status(400).json({ error: "Contractor has no email address" });
+  if (!draft?.contractor_email) return { status: 400, body: { error: "Contractor has no email address" } };
   const quoteToken = parsed.data.mode === "quote" ? newBearerToken() : null;
   const siteDocuments = parsed.data.mode === "assign"
     ? await siteDocumentsForContractorEmail(draft.site_id, clientId)
+    : [];
+  const issueMedia = parsed.data.mode === "assign"
+    ? await issueMediaForContractorEmail(draft.media_urls, clientId)
     : [];
   const quoteUrl = quoteToken ? `${getPublicAppUrl()}/contractor-quote/${quoteToken}` : null;
   let previewSubject = parsed.data.mode === "quote"
@@ -1463,7 +1484,8 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
       issueTitle: draft.title, issueType: draft.issue_type, issuePriority: draft.priority,
       issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
       companyName: draft.company_name, bookedToken: tokens.bookedToken, completedToken: tokens.completedToken,
-      baseUrl: getPublicAppUrl(), clientId, siteDocuments,
+      baseUrl: getPublicAppUrl(), clientId, siteDocuments, issueMedia,
+      targetDate: dateOnly(draft.target_date),
       icsAttachment: icsContent ?? undefined, icsFilename: icsFilename ?? undefined, previewOnly: true,
     });
     previewSubject = rendered.subject;
@@ -1542,7 +1564,7 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
       clientId, issueId: id, eventType: "email_requested", note: parsed.data.mode,
       createdBy: req.currentUser?.id ?? null,
     });
-    await tx.execute(sql`
+    const inserted = await tx.execute(sql`
     INSERT INTO contractor_email_queue
       (client_id, issue_id, entity_type, entity_id, department_id, contractor_id, mode, email_type, to_email,
         subject, body_html, body_text, ics_content, ics_filename, email_preview_json, quote_token, quote_token_hash, quote_token_expires_at, encrypted_token_payload,
@@ -1559,13 +1581,151 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     JOIN contractors c ON c.id = i.contractor_id
     WHERE i.id = ${id} AND i.client_id = ${clientId}
     ON CONFLICT DO NOTHING
+    RETURNING id
   `);
-    return true;
+    return Number((inserted.rows as any[])[0]?.id) || undefined;
   });
-  if (!requestQueued) {
-    return res.status(409).json({ error: "This issue cannot be re-requested while its approved contractor email is sending" });
+  if (requestQueued === false) {
+    return { status: 409, body: { error: "This issue cannot be re-requested while its approved contractor email is sending" } };
   }
-  res.json({ ok: true, message: "Approval requested" });
+  return { status: 200, body: { ok: true, message: "Approval requested" }, queueId: requestQueued };
+}
+
+// Staff: request that a contractor email be sent (needs manager approval)
+router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const parsed = z.object({ mode: z.enum(["assign", "quote"]), force: z.boolean().optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const force = parsed.data.force === true || req.query.force === "true";
+  const outcome = await queueContractorEmail(req, clientId, id, parsed.data.mode, force);
+  res.status(outcome.status).json(outcome.body);
+});
+
+const assignContractorBody = z.object({
+  contractorId: z.number().int().positive().optional(),
+  // Added to the business's Contractors list as part of the assignment.
+  newContractor: z.object({
+    name: z.string().trim().min(1).max(200),
+    company: z.string().trim().max(200).nullable().optional(),
+    email: z.string().trim().email().max(320),
+    phone: z.string().trim().max(50).nullable().optional(),
+  }).optional(),
+  // Left out: unchanged. null clears it.
+  targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  // Confirms replacing a job that was already emailed to a contractor.
+  replace: z.boolean().optional(),
+}).refine((body) => (body.contractorId != null) !== (body.newContractor != null), {
+  message: "Choose a contractor or add a new one",
+});
+
+// Manager: give the job to a contractor and email it to them straight away.
+// The manager choosing the contractor here is the approval, so the email does
+// not wait in Contractor Approvals (staff still use request-send).
+router.post("/issues/:id/assign-contractor", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) {
+    return res.status(403).json({ error: "Only a manager can assign a contractor directly. Use \"Request assign\" instead." });
+  }
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const parsed = assignContractorBody.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid data" });
+  }
+  const body = parsed.data;
+
+  const conditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any,
+    );
+  }
+  const [issue] = await db.select().from(fixTrackIssuesTable).where(and(...conditions)).limit(1);
+  if (!issue) return res.status(404).json({ error: "Not found" });
+  if (issue.status === "resolved" || issue.status === "closed") {
+    return res.status(409).json({ error: "This issue is already resolved, so it cannot be sent to a contractor" });
+  }
+  if (issue.emailRequestStatus === "sending") {
+    return res.status(409).json({ error: "A contractor email for this issue is being sent; try again in a moment" });
+  }
+  // A sent quote request can be followed by the job; a sent job is replaced
+  // only when the manager confirms it.
+  const alreadySent = issue.emailRequestStatus === "sent";
+  if (alreadySent && issue.emailRequestMode !== "quote" && !body.replace) {
+    const [current] = issue.contractorId == null ? [] : await db.select({ name: contractorsTable.name })
+      .from(contractorsTable).where(and(eq(contractorsTable.id, issue.contractorId), eq(contractorsTable.clientId, clientId)));
+    return res.status(409).json({
+      error: "This job was already emailed to a contractor",
+      alreadySent: true,
+      contractorName: current?.name ?? null,
+    });
+  }
+
+  let contractor: { id: number; name: string; email: string | null } | undefined;
+  if (body.newContractor) {
+    for (const value of [body.newContractor.name, body.newContractor.company]) {
+      if (!value) continue;
+      const check = filterName(value);
+      if (!check.ok) return res.status(400).json({ error: check.message });
+    }
+    // The issue's type becomes the new contractor's trade when it is one, so
+    // the next job of this type suggests them.
+    const trades = (await getEffectiveOptionList(clientId, "fixtrack_trades")).includes(issue.issueType) ? [issue.issueType] : [];
+    [contractor] = await db.insert(contractorsTable).values({
+      clientId,
+      name: body.newContractor.name,
+      company: body.newContractor.company || null,
+      email: body.newContractor.email,
+      phone: body.newContractor.phone || null,
+      trades,
+      updatedAt: new Date(),
+    }).returning({ id: contractorsTable.id, name: contractorsTable.name, email: contractorsTable.email });
+  } else {
+    [contractor] = await db.select({ id: contractorsTable.id, name: contractorsTable.name, email: contractorsTable.email })
+      .from(contractorsTable)
+      .where(and(eq(contractorsTable.id, body.contractorId!), eq(contractorsTable.clientId, clientId)))
+      .limit(1);
+    if (!contractor) return res.status(400).json({ error: "Invalid contractor" });
+  }
+  if (!contractor?.email) return res.status(400).json({ error: "This contractor has no email address. Add one on the Contractors page first." });
+
+  const changed = await db.update(fixTrackIssuesTable).set({
+    contractorId: contractor.id,
+    ...(body.targetDate !== undefined ? { targetDate: body.targetDate } : {}),
+    // A new contractor picks their own visit date.
+    ...(contractor.id !== issue.contractorId ? { contractorVisitDate: null, contractorCompletedAt: null } : {}),
+    updatedAt: new Date(),
+  }).where(and(
+    ...conditions,
+    or(isNull(fixTrackIssuesTable.emailRequestStatus), ne(fixTrackIssuesTable.emailRequestStatus, "sending")),
+  )).returning({ id: fixTrackIssuesTable.id });
+  if (!changed[0]) {
+    return res.status(409).json({ error: "A contractor email for this issue is being sent; try again in a moment" });
+  }
+  await db.insert(fixTrackIssueActivityTable).values({
+    clientId, issueId: id, eventType: "note",
+    note: `Assigned to contractor ${contractor.name} by ${req.currentUser?.name ?? "a manager"}`,
+    createdBy: req.currentUser?.id ?? null,
+  });
+
+  const queued = await queueContractorEmail(req, clientId, id, "assign", alreadySent);
+  if (queued.status !== 200 || !queued.queueId) {
+    return res.status(queued.status === 200 ? 409 : queued.status).json(queued.status === 200
+      ? { error: "The job email could not be prepared; try again" }
+      : queued.body);
+  }
+  await approveAndSendQueued(req, res, clientId, queued.queueId, {
+    contractorId: contractor.id,
+    contractorName: contractor.name,
+    message: `Job emailed to ${contractor.name}`,
+  });
 });
 
 // Staff: request a calendar cancellation for an assignment that was already
@@ -1874,10 +2034,18 @@ async function sendClaimedDraft(q: any, clientId: number) {
 // it is claimed, so a damaged draft never consumes an approval.
 router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
-  const scope = queueDepartmentScope(req);
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const qid = Number(req.params.queueId);
   if (!Number.isInteger(qid)) return res.status(400).json({ error: "Invalid queue entry" });
+  await approveAndSendQueued(req, res, clientId, qid);
+});
+
+/**
+ * A manager approves a pending draft and it is sent at once. On a failed send
+ * the draft goes back to pending, unapproved, in Contractor Approvals.
+ */
+async function approveAndSendQueued(req: any, res: any, clientId: number, qid: number, extra: Record<string, unknown> = {}) {
+  const scope = queueDepartmentScope(req);
   const pending = (await db.execute(sql`SELECT * FROM contractor_email_queue
     WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} LIMIT 1`)).rows[0] as any;
   if (!pending) return res.status(409).json(NOT_PENDING_RESPONSE);
@@ -1915,7 +2083,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
     } else if (q.entity_type === "compliance" && q.entity_id) {
       await markComplianceNotified(q, clientId);
     }
-    res.json({ ok: true, queueId: qid, mode: q.mode, subject: hydrated.subject, bodyHtml: hydrated.html });
+    res.json({ ok: true, queueId: qid, mode: q.mode, subject: hydrated.subject, bodyHtml: hydrated.html, ...extra });
   } catch (err) {
     if (err instanceof PortalLinkChangedError) return res.status(409).json({ code: err.code, error: err.message });
     // Put the draft back exactly as it was before this attempt: pending and
@@ -1930,7 +2098,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
     });
     sendFailureResponse(res, err);
   }
-});
+}
 
 router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
