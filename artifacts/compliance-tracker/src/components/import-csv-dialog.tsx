@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors";
+export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points";
 
 const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string }> = {
   "pat-appliances": {
@@ -40,6 +40,15 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Company, Phone, Address, Trades (separate with ;), Gas Safe number, Public liability expiry (DD/MM/YYYY), Notes",
     matching: "Rows match existing contractors by email address.",
     template: "contractors-template.csv",
+  },
+  "fire-call-points": {
+    title: "Upload call points",
+    noun: "call points",
+    one: "call point",
+    required: "Call point",
+    optional: "Location, Site (leave blank for the site chosen here)",
+    matching: "List them in the order you want them tested: new call points join the end of the rotation in file order. Rows match existing call points by site and call point name.",
+    template: "firetrack-call-points-template.csv",
   },
 };
 
@@ -74,8 +83,10 @@ async function readSpreadsheet(file: File): Promise<{ headers: string[]; rows: s
   return { headers: headers.map(value => String(value ?? "")), rows: rows.map(row => row.map(value => String(value ?? ""))) };
 }
 
-export function ImportCsvDialog({ type, open, onOpenChange, onImported }: {
+export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }: {
   type: ImportCsvType; open: boolean; onOpenChange: (open: boolean) => void; onImported?: () => void;
+  /** FireTrack call points: the site for rows whose Site cell is blank. */
+  siteId?: number | null;
 }) {
   const config = IMPORTS[type];
   const { activeClientId } = useAuth();
@@ -100,7 +111,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported }: {
   }
 
   async function send(data: { headers: string[]; rows: string[][] }, preview: boolean) {
-    const response = await clientApiFetch(`/imports/${type}`, { method: "POST", body: JSON.stringify({ ...data, preview }) });
+    const response = await clientApiFetch(`/imports/${type}`, { method: "POST", body: JSON.stringify({ ...data, preview, ...(siteId !== undefined ? { siteId } : {}) }) });
     const body = await response.json().catch(() => null) as (ImportResult & { error?: string }) | null;
     if (body?.rows) setResult(body);
     if (!response.ok) throw new Error(body?.error ?? await getApiErrorMessage(response, "The import could not be checked"));
@@ -256,7 +267,9 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported }: {
  * the API would refuse: viewers, and staff other than PATTrack department
  * managers.
  */
-export function ImportCsvButton({ type, onImported, className }: { type: ImportCsvType; onImported?: () => void; className?: string }) {
+export function ImportCsvButton({ type, onImported, className, siteId, label = "Import CSV" }: {
+  type: ImportCsvType; onImported?: () => void; className?: string; siteId?: number | null; label?: string;
+}) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const isAdmin = user?.role === "consultant" || user?.role === "client_admin";
@@ -265,9 +278,9 @@ export function ImportCsvButton({ type, onImported, className }: { type: ImportC
   return (
     <>
       <Button type="button" variant="outline" size="sm" className={className} onClick={() => setOpen(true)} data-testid={`button-import-${type}`}>
-        <Upload className="mr-1 h-4 w-4" /> Import CSV
+        <Upload className="mr-1 h-4 w-4" /> {label}
       </Button>
-      <ImportCsvDialog type={type} open={open} onOpenChange={setOpen} onImported={onImported} />
+      <ImportCsvDialog type={type} open={open} onOpenChange={setOpen} onImported={onImported} siteId={siteId} />
     </>
   );
 }

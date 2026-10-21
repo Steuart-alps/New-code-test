@@ -6074,6 +6074,20 @@ async function migrateFireCallPoints() {
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point_id" integer REFERENCES "fire_call_points"("id") ON DELETE SET NULL`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point" text`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "night_staff" text`);
+  // Oct 2026: each call point's location and its place in the site's test
+  // rotation. Sites whose call points have no order yet are numbered
+  // alphabetically, the order the list showed before.
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "location" text`);
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "sort_order" integer NOT NULL DEFAULT 0`);
+  await db.execute(sql`
+    UPDATE "fire_call_points" p SET "sort_order" = n.position
+    FROM (
+      SELECT id, row_number() OVER (PARTITION BY client_id, site_id ORDER BY name, id) AS position,
+             max(sort_order) OVER (PARTITION BY client_id, site_id) AS highest
+      FROM "fire_call_points"
+    ) n
+    WHERE n.id = p.id AND n.highest = 0
+  `);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks

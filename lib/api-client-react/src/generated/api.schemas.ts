@@ -2002,19 +2002,77 @@ export interface FireCallPoint {
   id: number;
   siteId: number | null;
   name: string;
+  /** Where the call point is, e.g. "Kitchen fire exit, ground floor". */
+  location: string | null;
+  /** Place in the site's test rotation (1 = first). */
+  sortOrder: number;
   archivedAt: string | null;
   /** Date of the latest alarm test that used this call point. */
   lastTestedDate: string | null;
+  /** The call point to test next at its site (the one after the call point tested last, in rotation order). */
+  nextInTurn: boolean;
+  /** In use but never tested, or not tested within one full round (call points in use x the alarm test frequency). */
+  notTestedThisRound: boolean;
 }
 
 export interface CreateFireCallPointRequest {
   siteId: number | null;
   name: string;
+  location?: string | null;
 }
 
 export interface UpdateFireCallPointRequest {
   name?: string;
+  location?: string | null;
   archived?: boolean;
+}
+
+export interface OrderFireCallPointsRequest {
+  siteId: number | null;
+  /** Every call point in use at the site, first to last. */
+  ids: number[];
+}
+
+export interface FireCallPointImportRequest {
+  headers: string[];
+  rows: string[][];
+  preview?: boolean;
+  /** The site for rows whose Site cell is blank. */
+  siteId?: number | null;
+}
+
+export type FireCallPointImportResultSummary = {
+  total: number;
+  create: number;
+  update: number;
+  skip: number;
+  error: number;
+};
+
+export type FireCallPointImportResultRowsItemAction = typeof FireCallPointImportResultRowsItemAction[keyof typeof FireCallPointImportResultRowsItemAction];
+
+
+export const FireCallPointImportResultRowsItemAction = {
+  create: 'create',
+  update: 'update',
+  skip: 'skip',
+  error: 'error',
+} as const;
+
+export type FireCallPointImportResultRowsItem = {
+  row: number;
+  action: FireCallPointImportResultRowsItemAction;
+  label: string;
+  reasons: string[];
+};
+
+export interface FireCallPointImportResult {
+  preview: boolean;
+  committed: boolean;
+  summary: FireCallPointImportResultSummary;
+  rows: FireCallPointImportResultRowsItem[];
+  ignoredHeaders: string[];
+  error?: string;
 }
 
 export type FireSafetyStatusLastResult = typeof FireSafetyStatusLastResult[keyof typeof FireSafetyStatusLastResult] | null;

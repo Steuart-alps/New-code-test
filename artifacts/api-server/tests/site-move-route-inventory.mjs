@@ -48,6 +48,7 @@ const INVENTORY = {
   "equipment.ts PUT /equipment/:id": covered("scoped manager cannot move equipment to another department's site", "equipment-labels.mjs"),
   "fire-safety.ts PUT /:id": siteMove("Fire check"),
   "fire-safety.ts PUT /call-points/:id": notAMove("renames or archives; the call point keeps its site"),
+  "fire-safety.ts PUT /call-points/order": notAMove("reorders one site's call points, access-checked; none changes site"),
   "fire-safety.ts PUT /config": notAMove("per-site settings selected by query"),
   "fix-track.ts POST /quotes/:quoteId/accept": notAMove("accepts a quote on an issue the caller's department can see; the issue keeps its site"),
   "fix-track.ts POST /issues/:id/media": notAMove("workflow action on the issue's stored site"),

@@ -38,11 +38,14 @@ const importBody = z.object({
   headers: z.array(cell).min(1).max(CSV_IMPORT_MAX_COLUMNS),
   rows: z.array(z.array(cell).max(CSV_IMPORT_MAX_COLUMNS)).max(CSV_IMPORT_MAX_ROWS, `The maximum is ${CSV_IMPORT_MAX_ROWS} rows per import`),
   preview: z.boolean().default(true),
+  // FireTrack call points: the site a row with a blank Site cell belongs to
+  // (the one chosen on the page the file is uploaded from).
+  siteId: z.number().int().positive().nullable().optional(),
 });
 
 // PATTrack lets staff add appliances, so department managers may import into
-// their own department's sites; RoomTrack rooms and contractors are admin-only
-// registers, exactly as their single-record routes are.
+// their own department's sites; RoomTrack rooms, contractors and FireTrack call
+// points are admin-only registers, exactly as their single-record routes are.
 const requirePatImporter: RequestHandler = (req, res, next) => {
   const user = req.currentUser;
   if (user && (user.role === "client_admin" || user.role === "consultant" || isDepartmentLead(user))) return next();
@@ -279,6 +282,67 @@ async function planContractors(tx: Tx, clientId: number, rows: MappedRow[]): Pro
   });
 }
 
+async function planFireCallPoints(
+  tx: Tx, clientId: number, departmentId: number | null, userId: number, defaultSiteId: number | null | undefined, rows: MappedRow[],
+): Promise<PlannedRow[]> {
+  const resolveSite = await siteResolver(tx, clientId, departmentId);
+  const siteRows = rowsOf(await tx.execute(sql`SELECT id FROM sites WHERE client_id = ${clientId}`));
+  const siteAllowed = await departmentSiteCheck(tx, clientId, departmentId);
+  // A blank Site cell means the site chosen on the page, or the only site.
+  let blankSite: { siteId: number | null; error?: string };
+  if (defaultSiteId != null) {
+    blankSite = siteRows.some((row) => Number(row.id) === defaultSiteId) && siteAllowed(defaultSiteId)
+      ? { siteId: defaultSiteId } : { siteId: null, error: "The chosen site is not one of this business's sites" };
+  } else if (siteRows.length > 1) {
+    blankSite = { siteId: null, error: "Site is required: this business has more than one site" };
+  } else {
+    const onlySite = siteRows.length ? Number(siteRows[0].id) : null;
+    blankSite = siteAllowed(onlySite) ? { siteId: onlySite } : { siteId: null, error: "The site is outside your department" };
+  }
+  const existing = rowsOf(await tx.execute(sql`
+    SELECT id, site_id, name, location, archived_at IS NOT NULL AS archived
+    FROM fire_call_points WHERE client_id = ${clientId} ORDER BY id FOR UPDATE
+  `));
+  const duplicate = duplicateGuard();
+  return rows.map((input): PlannedRow => {
+    const v = input.values;
+    const label = [v.name, v.location].filter(Boolean).join(" · ") || `Row ${input.row}`;
+    const errors = [...input.errors];
+    const site = v.site ? resolveSite(v.site) : blankSite;
+    if (site.error) errors.push(site.error);
+    if (errors.length) return { row: input.row, action: "error", label, reasons: errors };
+
+    const repeated = duplicate(`${site.siteId ?? ""}|${normaliseKey(v.name)}`, input.row);
+    if (repeated) return { row: input.row, action: "error", label, reasons: [repeated] };
+    const matches = existing.filter((item) => Number(item.site_id ?? 0) === Number(site.siteId ?? 0)
+      && normaliseKey(item.name) === normaliseKey(v.name));
+    const match = matches.find((item) => !item.archived);
+    if (!match) {
+      if (matches.length) return { row: input.row, action: "skip", label, reasons: ["Matches an archived call point; restore it under Template, Call points instead"] };
+      return {
+        row: input.row, action: "create", label, reasons: [],
+        // Each new call point joins the end of its site's rotation, in file order.
+        write: async (t) => { await t.execute(sql`
+          INSERT INTO fire_call_points (client_id, site_id, name, location, sort_order, created_by)
+          VALUES (${clientId}, ${site.siteId}, ${v.name}, ${v.location},
+            (SELECT coalesce(max(sort_order), 0) + 1 FROM fire_call_points
+             WHERE client_id = ${clientId} AND site_id IS NOT DISTINCT FROM ${site.siteId}::integer),
+            ${userId})
+        `); },
+      };
+    }
+    const changes = changedFields([["location", match.location, v.location ?? undefined]]);
+    if (!changes.length) return { row: input.row, action: "skip", label, reasons: ["Already listed with the same details"] };
+    return {
+      row: input.row, action: "update", label, reasons: [`Updates ${changes.join(", ")}`],
+      write: async (t) => { await t.execute(sql`
+        UPDATE fire_call_points SET location = ${v.location ?? match.location}, updated_at = now()
+        WHERE id = ${match.id} AND client_id = ${clientId}
+      `); },
+    };
+  });
+}
+
 function handleImport(type: CsvImportType): RequestHandler {
   return async (req: Request, res) => {
     const clientId = getClientId(req);
@@ -303,7 +367,9 @@ function handleImport(type: CsvImportType): RequestHandler {
         ? await planPatAppliances(tx, clientId, departmentId, mapped.rows)
         : type === "room-track-rooms"
           ? await planRooms(tx, clientId, departmentId, req.currentUser!.id, mapped.rows)
-          : await planContractors(tx, clientId, mapped.rows);
+          : type === "fire-call-points"
+            ? await planFireCallPoints(tx, clientId, departmentId, req.currentUser!.id, parsed.data.siteId, mapped.rows)
+            : await planContractors(tx, clientId, mapped.rows);
       const summary = {
         total: planned.length,
         create: planned.filter((row) => row.action === "create").length,
@@ -340,5 +406,8 @@ router.post("/imports/room-track-rooms", requireAuth, denyViewers, requireClient
 
 router.get("/imports/contractors/template", requireAuth, requireClientAdmin, sendTemplate("contractors", "contractors-template.csv"));
 router.post("/imports/contractors", requireAuth, denyViewers, requireClientAdmin, handleImport("contractors"));
+
+router.get("/imports/fire-call-points/template", requireAuth, requireClientAdmin, requireService("firetrack"), sendTemplate("fire-call-points", "firetrack-call-points-template.csv"));
+router.post("/imports/fire-call-points", requireAuth, denyViewers, requireClientAdmin, requireService("firetrack"), handleImport("fire-call-points"));
 
 export default router;

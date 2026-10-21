@@ -2787,8 +2787,12 @@ export const ListFireCallPointsResponseItem = zod.object({
   "id": zod.number(),
   "siteId": zod.number().nullable(),
   "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
   "archivedAt": zod.date().nullable(),
-  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
 })
 export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseItem)
 
@@ -2798,20 +2802,85 @@ export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseIt
  */
 export const CreateFireCallPointBody = zod.object({
   "siteId": zod.number().nullable(),
-  "name": zod.string()
+  "name": zod.string(),
+  "location": zod.string().nullish()
 })
 
 export const CreateFireCallPointResponse = zod.object({
   "id": zod.number(),
   "siteId": zod.number().nullable(),
   "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
   "archivedAt": zod.date().nullable(),
-  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
 })
 
 
 /**
- * @summary Rename, archive or restore a call point (managers)
+ * @summary Set a site's call point rotation order (managers)
+ */
+export const OrderFireCallPointsBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "ids": zod.array(zod.number()).describe('Every call point in use at the site, first to last.')
+})
+
+export const OrderFireCallPointsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+})
+export const OrderFireCallPointsResponse = zod.array(OrderFireCallPointsResponseItem)
+
+
+/**
+ * @summary Download the CSV template for uploading a call point list (managers)
+ */
+export const GetFireCallPointImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. New call points join the end of their site's rotation in file order.
+ * @summary Preview or import a spreadsheet of call points (managers)
+ */
+export const ImportFireCallPointsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportFireCallPointsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Rename, move, archive or restore a call point (managers)
  */
 export const UpdateFireCallPointParams = zod.object({
   "id": zod.coerce.number()
@@ -2819,6 +2888,7 @@ export const UpdateFireCallPointParams = zod.object({
 
 export const UpdateFireCallPointBody = zod.object({
   "name": zod.string().optional(),
+  "location": zod.string().nullish(),
   "archived": zod.boolean().optional()
 })
 
@@ -2826,8 +2896,12 @@ export const UpdateFireCallPointResponse = zod.object({
   "id": zod.number(),
   "siteId": zod.number().nullable(),
   "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
   "archivedAt": zod.date().nullable(),
-  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
 })
 
 
