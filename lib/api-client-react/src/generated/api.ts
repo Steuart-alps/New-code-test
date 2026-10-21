@@ -82,6 +82,7 @@ import type {
   FixTrackAssignContractorResult,
   FixTrackIssueMediaList,
   FixTrackMediaDeleteRequest,
+  FoodSafetyColdReadingRequest,
   FoodSafetyConfig,
   FoodSafetyMissingDatesResponse,
   FoodSafetyMonthlySummary,
@@ -189,6 +190,7 @@ import type {
   PublicLinkAccessPage,
   PublishPrivacyIntakeLinkParams,
   RecordCoshhSignOffs200,
+  RecordFoodSafetyColdReadingParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
@@ -10727,6 +10729,86 @@ export const useCreateFoodSafetyRecord = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateFoodSafetyRecordMutationOptions(options));
+    }
+
+export const getRecordFoodSafetyColdReadingUrl = (params?: RecordFoodSafetyColdReadingParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/food-safety/cold-reading?${stringifiedParams}` : `/api/food-safety/cold-reading`
+}
+
+/**
+ * Fills one unit's AM or PM reading in the day's diary, creating the diary (with every fridge and freezer on the list) when needed. Used by "Say it" voice logging. A reading already recorded is never overwritten (409 READING_ALREADY_RECORDED), a submitted diary is not changed (409 DIARY_SUBMITTED), and a reading outside the limits needs the corrective action taken (400 KITCHEN_CORRECTIVE_ACTION_REQUIRED).
+ * @summary Record one fridge or freezer reading in the day's diary
+ */
+export const recordFoodSafetyColdReading = async (foodSafetyColdReadingRequest: FoodSafetyColdReadingRequest,
+    params?: RecordFoodSafetyColdReadingParams, options?: RequestInit): Promise<FoodSafetyRecord> => {
+
+  return customFetch<FoodSafetyRecord>(getRecordFoodSafetyColdReadingUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(foodSafetyColdReadingRequest)
+  }
+);}
+
+
+
+
+
+export const getRecordFoodSafetyColdReadingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordFoodSafetyColdReading>>, TError,{data: BodyType<FoodSafetyColdReadingRequest>;params?: RecordFoodSafetyColdReadingParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordFoodSafetyColdReading>>, TError,{data: BodyType<FoodSafetyColdReadingRequest>;params?: RecordFoodSafetyColdReadingParams}, TContext> => {
+
+const mutationKey = ['recordFoodSafetyColdReading'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordFoodSafetyColdReading>>, {data: BodyType<FoodSafetyColdReadingRequest>;params?: RecordFoodSafetyColdReadingParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  recordFoodSafetyColdReading(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordFoodSafetyColdReadingMutationResult = NonNullable<Awaited<ReturnType<typeof recordFoodSafetyColdReading>>>
+    export type RecordFoodSafetyColdReadingMutationBody = BodyType<FoodSafetyColdReadingRequest>
+    export type RecordFoodSafetyColdReadingMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Record one fridge or freezer reading in the day's diary
+ */
+export const useRecordFoodSafetyColdReading = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordFoodSafetyColdReading>>, TError,{data: BodyType<FoodSafetyColdReadingRequest>;params?: RecordFoodSafetyColdReadingParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof recordFoodSafetyColdReading>>,
+        TError,
+        {data: BodyType<FoodSafetyColdReadingRequest>;params?: RecordFoodSafetyColdReadingParams},
+        TContext
+      > => {
+      return useMutation(getRecordFoodSafetyColdReadingMutationOptions(options));
     }
 
 export const getGetFoodSafetyRecordByDateUrl = (date: string,
