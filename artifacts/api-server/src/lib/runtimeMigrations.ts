@@ -4044,7 +4044,7 @@ async function migrateGreenTrack() {
       "reading_date"          date NOT NULL,
       "hours"                 double precision NOT NULL,
       "recorded_by"           text,
-      "recorded_by_roster_id" integer,
+      "recorded_by_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
       "notes"                 text,
       "created_by"            integer REFERENCES "users"("id") ON DELETE SET NULL,
       "created_at"            timestamp NOT NULL DEFAULT now(),
