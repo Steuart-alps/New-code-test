@@ -881,6 +881,24 @@ export interface ContractorVisitsResponse {
   visits: ContractorVisit[];
 }
 
+export interface CertificateOutstanding {
+  itemId: number;
+  title: string;
+  siteId: number | null;
+  siteName: string | null;
+  visitDate: string;
+  daysSinceVisit: number;
+  contractorName: string;
+  /** False once the contractor is no longer reminded (chaseStopsAfterDays after the visit) */
+  chasing: boolean;
+}
+
+export interface CertificatesOutstandingResponse {
+  followUpAfterDays: number;
+  chaseStopsAfterDays: number;
+  certificates: CertificateOutstanding[];
+}
+
 export interface SetContractorVisitRequest {
   visitKey: string;
   siteId: number;

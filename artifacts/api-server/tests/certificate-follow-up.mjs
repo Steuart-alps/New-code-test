@@ -167,6 +167,17 @@ try {
   await pool.query(`DELETE FROM app_settings WHERE client_id = $1 AND key = 'ownerUpdateFrequency'`, [owner.clientId]);
   console.log('ok - Owner and Manager updates list them, with no separate Owner email');
 
+  // ── The app lists them too, by the sites each person can see ───────────────
+  const listed = ok(await owner.request('GET', '/certificates-outstanding'));
+  const titles = (list) => list.certificates.map((row) => row.title).sort();
+  assert.deepEqual(titles(listed), ['Boiler Service', 'EICR', 'Emergency Lighting Test', 'Gas Safety Inspection']);
+  assert.equal(listed.certificates.find((row) => row.title === 'Boiler Service').chasing, false, 'past 90 days the chase has stopped');
+  assert.equal(listed.certificates.find((row) => row.title === 'Gas Safety Inspection').chasing, true);
+  const siteAOnly = ok(await maintenanceA.request('GET', '/certificates-outstanding'));
+  assert.ok(!titles(siteAOnly).includes('EICR'), "site B's certificate is not shown to site A staff");
+  assert.ok(titles(siteAOnly).includes('Gas Safety Inspection'));
+  console.log('ok - the app lists certificates outstanding for the sites each person can see');
+
   // ── A certificate withdraws the waiting draft ──────────────────────────────
   ok(await owner.request('POST', `/items/${gas.id}/certificates`, { name: 'Gas Safe certificate' }), 201);
   result = await followUp();

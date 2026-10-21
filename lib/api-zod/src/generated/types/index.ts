@@ -23,6 +23,8 @@ export * from './certificate';
 export * from './certificateDefect';
 export * from './certificateDefectCode';
 export * from './certificateOutcome';
+export * from './certificateOutstanding';
+export * from './certificatesOutstandingResponse';
 export * from './complianceItem';
 export * from './complianceItemNeedsActionReason';
 export * from './complianceItemPriority';

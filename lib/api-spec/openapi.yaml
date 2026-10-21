@@ -597,6 +597,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/OkResponse"
 
+  /certificates-outstanding:
+    get:
+      operationId: listCertificatesOutstanding
+      tags: [contractors]
+      summary: Contractor visits still waiting for their certificate
+      description: >
+        Compliance checks whose contractor visit happened at least
+        followUpAfterDays ago with no certificate uploaded since, however old,
+        at the sites the user can see. The contractor is chased every two
+        weeks until chaseStopsAfterDays after the visit (chasing false after).
+      responses:
+        "200":
+          description: Certificates outstanding, oldest visit first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificatesOutstandingResponse"
+
   /contractors:
     get:
       operationId: listContractors
@@ -5373,6 +5391,29 @@ components:
         visits:
           type: array
           items: { $ref: "#/components/schemas/ContractorVisit" }
+    CertificateOutstanding:
+      type: object
+      required: [itemId, title, siteId, siteName, visitDate, daysSinceVisit, contractorName, chasing]
+      properties:
+        itemId: { type: integer }
+        title: { type: string }
+        siteId: { type: integer, nullable: true }
+        siteName: { type: string, nullable: true }
+        visitDate: { type: string, format: date }
+        daysSinceVisit: { type: integer }
+        contractorName: { type: string }
+        chasing:
+          type: boolean
+          description: False once the contractor is no longer reminded (chaseStopsAfterDays after the visit)
+    CertificatesOutstandingResponse:
+      type: object
+      required: [followUpAfterDays, chaseStopsAfterDays, certificates]
+      properties:
+        followUpAfterDays: { type: integer }
+        chaseStopsAfterDays: { type: integer }
+        certificates:
+          type: array
+          items: { $ref: "#/components/schemas/CertificateOutstanding" }
     SetContractorVisitRequest:
       type: object
       required: [visitKey, siteId, contractorId]

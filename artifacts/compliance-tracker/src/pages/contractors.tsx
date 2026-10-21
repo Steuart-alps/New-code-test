@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
+import { CertificatesOutstandingCard } from "@/components/certificates-outstanding-card";
 import { ContractorVisitsCard } from "@/components/contractor-visits-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,6 +97,7 @@ export default function ContractorsPage() {
         )}
       </div>
 
+      <CertificatesOutstandingCard />
       <ContractorVisitsCard contractors={contractors} />
 
       {isLoading ? (

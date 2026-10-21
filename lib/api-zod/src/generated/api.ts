@@ -620,6 +620,26 @@ export const SetContractorVisitResponse = zod.object({
 
 
 /**
+ * Compliance checks whose contractor visit happened at least followUpAfterDays ago with no certificate uploaded since, however old, at the sites the user can see. The contractor is chased every two weeks until chaseStopsAfterDays after the visit (chasing false after).
+ * @summary Contractor visits still waiting for their certificate
+ */
+export const ListCertificatesOutstandingResponse = zod.object({
+  "followUpAfterDays": zod.number(),
+  "chaseStopsAfterDays": zod.number(),
+  "certificates": zod.array(zod.object({
+  "itemId": zod.number(),
+  "title": zod.string(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "visitDate": zod.date(),
+  "daysSinceVisit": zod.number(),
+  "contractorName": zod.string(),
+  "chasing": zod.boolean().describe('False once the contractor is no longer reminded (chaseStopsAfterDays after the visit)')
+}))
+})
+
+
+/**
  * @summary List all contractors
  */
 export const ListContractorsResponseItem = zod.object({
