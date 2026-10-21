@@ -17,6 +17,8 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   reportedBy: text("reported_by").notNull(),
   reportedDate: date("reported_date").notNull(),
   assignedTo: text("assigned_to"),
+  /** The person responsible, when picked from the business's users (see track_actions). */
+  assigneeUserId: integer("assignee_user_id").references(() => usersTable.id, { onDelete: "set null" }),
   contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "set null" }),
   targetDate: date("target_date"),
   resolvedDate: date("resolved_date"),

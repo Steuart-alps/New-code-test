@@ -1028,6 +1028,8 @@ export interface ComplianceItem {
   contractorName?: string | null;
   contractorEmail?: string | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -1046,6 +1048,12 @@ export interface ComplianceItem {
   openDefectCount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Assignee {
+  id: number;
+  name: string;
+  role: string;
 }
 
 export type CreateComplianceItemRequestStatus = typeof CreateComplianceItemRequestStatus[keyof typeof CreateComplianceItemRequestStatus];
@@ -1077,6 +1085,8 @@ export interface CreateComplianceItemRequest {
   categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -1117,6 +1127,8 @@ export interface UpdateComplianceItemRequest {
   categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -1710,6 +1722,17 @@ export const AppSettingsStorageAutoTopUp = {
   false: 'false',
 } as const;
 
+/**
+ * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
+ */
+export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequency[keyof typeof AppSettingsOwnerUpdateFrequency] | null;
+
+
+export const AppSettingsOwnerUpdateFrequency = {
+  weekly: 'weekly',
+  daily: 'daily',
+} as const;
+
 export interface AppSettings {
   smtpHost?: string | null;
   smtpPort?: string | null;
@@ -1725,6 +1748,8 @@ export interface AppSettings {
   storageWarningThresholdBytes?: string | null;
   /** "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there. */
   storageAutoTopUp?: AppSettingsStorageAutoTopUp;
+  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays). */
+  ownerUpdateFrequency?: AppSettingsOwnerUpdateFrequency;
 }
 
 /**
@@ -3613,6 +3638,10 @@ export const ListPublicLinkAccessActionType = {
   view: 'view',
   submit: 'submit',
 } as const;
+
+export type ListAssigneesParams = {
+siteId?: number;
+};
 
 export type ListComplianceItemsParams = {
 status?: ListComplianceItemsStatus;

@@ -14,6 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
+import { AssigneeField, assigneeFields, emptyAssignee, type AssigneeValue } from "@/components/assignee-field";
 import { format } from "date-fns";
 import { ComplianceItem, useListCategories, useListSites, useListContractors } from "@workspace/api-client-react";
 
@@ -63,6 +64,7 @@ export function ItemFormDialog({
   // Completing an existing check through this form asks for the date done,
   // like the "Mark done" dialog; the next due date is counted from it.
   const [completedDay, setCompletedDay] = useState(localToday());
+  const [assignee, setAssignee] = useState<AssigneeValue>(emptyAssignee);
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -96,6 +98,7 @@ export function ItemFormDialog({
         dueDate: "", leadTimeDays: 7, frequencyMonths: null, notes: "",
       });
     }
+    setAssignee(item ? { assigneeUserId: item.assigneeUserId ?? null, name: item.assignedTo ?? "" } : emptyAssignee);
     setCompletedDay(localToday());
   }, [item, isOpen, form, defaultCategoryId, defaultSiteId]);
 
@@ -122,7 +125,7 @@ export function ItemFormDialog({
         contractorId: data.contractorId || null,
         leadTimeDays: data.leadTimeDays || null,
         frequencyMonths: data.frequencyMonths ?? null,
-        assignedTo: null,
+        ...assigneeFields(assignee, "assignedTo"),
         dueDate: data.dueDate ? new Date(data.dueDate).toISOString() : null,
       };
 
@@ -142,8 +145,9 @@ export function ItemFormDialog({
         if (isAllSites) {
           const otherSites = sites.filter((s) => s.id !== item.siteId);
           for (const s of otherSites) {
+            // Copies start unassigned: the person picked may not see every site.
             await createItem.mutateAsync({
-              data: { ...basePayload, siteId: s.id } as any,
+              data: { ...basePayload, assigneeUserId: null, assignedTo: null, siteId: s.id } as any,
             });
           }
         }
@@ -289,6 +293,19 @@ export function ItemFormDialog({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="item-assignee" className="text-xs font-medium">Assigned to</Label>
+              <AssigneeField
+                id="item-assignee"
+                siteId={(() => {
+                  const site = form.watch("siteId");
+                  return site && site !== ALL_SITES ? parseInt(site, 10) : null;
+                })()}
+                value={assignee}
+                onChange={setAssignee}
+              />
             </div>
 
             <div className="space-y-1">

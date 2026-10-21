@@ -9,7 +9,9 @@
 export * from './activeDepartmentRequest';
 export * from './addPrivacyRetentionVerificationParams';
 export * from './appSettings';
+export * from './appSettingsOwnerUpdateFrequency';
 export * from './appSettingsStorageAutoTopUp';
+export * from './assignee';
 export * from './auditFieldChange';
 export * from './auditLogEntry';
 export * from './auditLogEntryAction';
@@ -217,6 +219,7 @@ export * from './legionellaControlProfileUkNation';
 export * from './legionellaStatus';
 export * from './legionellaStatusLastResult';
 export * from './legionellaStatusStatus';
+export * from './listAssigneesParams';
 export * from './listAuditLogModule';
 export * from './listAuditLogParams';
 export * from './listComplianceItemsParams';

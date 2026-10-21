@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { AppSettingsOwnerUpdateFrequency } from './appSettingsOwnerUpdateFrequency';
 import type { AppSettingsStorageAutoTopUp } from './appSettingsStorageAutoTopUp';
 
 export interface AppSettings {
@@ -22,4 +23,6 @@ export interface AppSettings {
   storageWarningThresholdBytes?: string | null;
   /** "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there. */
   storageAutoTopUp?: AppSettingsStorageAutoTopUp;
+  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays). */
+  ownerUpdateFrequency?: AppSettingsOwnerUpdateFrequency;
 }

@@ -2838,8 +2838,7 @@ export default function SettingsPage() {
     maintenanceEmail: "",
     additionalReminderEmails: "",
     notifyClientAdmins: "false",
-    safeTrackReminderFrequency: "daily",
-    safeTrackReminderTime: "08:50",
+    ownerUpdateFrequency: "weekly" as "weekly" | "daily",
     smtpFrom: "",
     smtpFromName: "",
     resendApiKey: "",
@@ -2858,8 +2857,7 @@ export default function SettingsPage() {
         maintenanceEmail: (settings as any).maintenanceEmail || "",
         additionalReminderEmails: (settings as any).additionalReminderEmails || "",
         notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
-        safeTrackReminderFrequency: (settings as any).safeTrackReminderFrequency || "daily",
-        safeTrackReminderTime: (settings as any).safeTrackReminderTime || "08:50",
+        ownerUpdateFrequency: settings.ownerUpdateFrequency === "daily" ? "daily" : "weekly",
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
         resendApiKey: (settings as any).resendApiKey || "",
@@ -2903,7 +2901,6 @@ export default function SettingsPage() {
         {canAdmin && <TodayByDepartmentRolesCard />}
         {canAdmin && <RequiredActionTemplatesCard />}
         <TrackOwnersCard />
-        <TrackSummaryRoutingCard />
         <PhotoRequirementsCard />
         {canAdmin && <BusinessTypeCard />}
         <form onSubmit={handleSave}>
@@ -2957,65 +2954,39 @@ export default function SettingsPage() {
                 <CardTitle className="font-display">Reminder Notifications</CardTitle>
               </div>
               <CardDescription>
-                Reminders are sent automatically to contractors every day at 8am when a compliance check enters its lead-time window.
-                You can also copy in a maintenance contact on every reminder email.
+                Each person gets one email at 8am on the day before something of theirs is due, and only on those days.
+                Overdue items are included the day after, then once a week. Anything with no one assigned goes to the track's owner,
+                or to the Owners when no owner is set (Track Owners above). Failed or unsafe checks and urgent FixTrack issues go to
+                the person responsible and the Owners in the next morning's email.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-5">
-              <div className="rounded-md border border-border bg-muted/30 p-4 space-y-3">
-                <div>
-                  <Label>SafeTrack acknowledgement reminders</Label>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Choose how often account admins and staff are reminded about outstanding SafeTrack sign-offs.
-                    The delivery time uses your account timezone.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="safeTrackReminderFrequency">Frequency</Label>
-                    <Select
-                      value={formData.safeTrackReminderFrequency}
-                      onValueChange={(value) =>
-                        setFormData((prev) => ({ ...prev, safeTrackReminderFrequency: value }))
-                      }
-                    >
-                      <SelectTrigger id="safeTrackReminderFrequency">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="daily">Every day</SelectItem>
-                        <SelectItem value="weekly">Once a week</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="safeTrackReminderTime">Preferred delivery time</Label>
-                    <Input
-                      id="safeTrackReminderTime"
-                      type="time"
-                      name="safeTrackReminderTime"
-                      value={formData.safeTrackReminderTime}
-                      onChange={handleChange}
-                    />
-                  </div>
-                </div>
-                <SafeTrackReminderPreview
-                  frequency={formData.safeTrackReminderFrequency}
-                  time={formData.safeTrackReminderTime}
-                  timeZone={formData.accountTimezone || "Europe/London"}
-                  lastSentAt={(settings as any)?.safeTrackReminderLastSentAt ?? null}
-                  unsaved={
-                    formData.safeTrackReminderFrequency !== ((settings as any)?.safeTrackReminderFrequency || "daily")
-                    || formData.safeTrackReminderTime !== ((settings as any)?.safeTrackReminderTime || "08:50")
-                    || (formData.accountTimezone || "Europe/London") !== (settings?.accountTimezone || "Europe/London")
+              <div className="space-y-1.5">
+                <Label htmlFor="ownerUpdateFrequency">Owner update</Label>
+                <p className="text-xs text-muted-foreground">
+                  One email to the Owners listing what was done, what is overdue and who has it, what is due, anything with no one
+                  assigned, expiries in the next 60 days and documents still to sign. Managers get one for their own departments.
+                  Sent at 8am in your account timezone.
+                </p>
+                <Select
+                  value={formData.ownerUpdateFrequency}
+                  onValueChange={(value) =>
+                    setFormData((prev) => ({ ...prev, ownerUpdateFrequency: value === "daily" ? "daily" : "weekly" }))
                   }
-                />
+                >
+                  <SelectTrigger id="ownerUpdateFrequency" className="sm:w-64">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="weekly">Weekly, on Mondays</SelectItem>
+                    <SelectItem value="daily">Every day</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label>Admin / Owner Notification Email</Label>
                 <p className="text-xs text-muted-foreground">
-                  All compliance alert emails (overdue checks, unacknowledged documents, expiring contractor insurance, training certificates)
-                  will be sent to this address. If left blank, alerts go to each admin user on your account instead.
+                  The Owner update goes to this address instead of to each Owner. If left blank, each Owner gets it.
                 </p>
                 <Input
                   type="email"
@@ -3029,7 +3000,8 @@ export default function SettingsPage() {
               <div className="space-y-1.5">
                 <Label>Contractor expiry warning lead time (days)</Label>
                 <p className="text-xs text-muted-foreground">
-                  Send insurance, DBS / PVG, and certificate warnings this many days before expiry. Existing accounts use 30 days.
+                  Insurance, DBS / PVG and certificate reminders go to your Maintenance managers (or the Owners) this many days
+                  before expiry, and again the day before. Existing accounts use 30 days.
                 </p>
                 <Input
                   type="number"

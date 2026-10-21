@@ -23,6 +23,7 @@ import type {
   ActiveDepartmentRequest,
   AddPrivacyRetentionVerificationParams,
   AppSettings,
+  Assignee,
   AuditLogEntry,
   BikeTrackConfig,
   Category,
@@ -128,6 +129,7 @@ import type {
   LegionellaCheck,
   LegionellaConfig,
   LegionellaStatus,
+  ListAssigneesParams,
   ListAuditLogParams,
   ListComplianceItemsParams,
   ListCoshhAssessmentsParams,
@@ -1103,6 +1105,91 @@ export function useListPublicLinkAccess<TData = Awaited<ReturnType<typeof listPu
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListPublicLinkAccessQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListAssigneesUrl = (params?: ListAssigneesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/assignees?${stringifiedParams}` : `/api/assignees`
+}
+
+/**
+ * Active members of the business (not viewers) who can see the site. Names only; reminders for assigned work go to that person.
+ * @summary People who can be assigned an action, FixTrack issue or compliance check
+ */
+export const listAssignees = async (params?: ListAssigneesParams, options?: RequestInit): Promise<Assignee[]> => {
+
+  return customFetch<Assignee[]>(getListAssigneesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAssigneesQueryKey = (params?: ListAssigneesParams,) => {
+    return [
+    `/api/assignees`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAssigneesQueryOptions = <TData = Awaited<ReturnType<typeof listAssignees>>, TError = ErrorType<void>>(params?: ListAssigneesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAssignees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAssigneesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAssignees>>> = ({ signal }) => listAssignees(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAssignees>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAssigneesQueryResult = NonNullable<Awaited<ReturnType<typeof listAssignees>>>
+export type ListAssigneesQueryError = ErrorType<void>
+
+
+/**
+ * @summary People who can be assigned an action, FixTrack issue or compliance check
+ */
+
+export function useListAssignees<TData = Awaited<ReturnType<typeof listAssignees>>, TError = ErrorType<void>>(
+ params?: ListAssigneesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAssignees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAssigneesQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

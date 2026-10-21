@@ -15,6 +15,8 @@ tags:
     description: Privacy-safe history of public link use
   - name: compliance-items
     description: Compliance item operations
+  - name: assignees
+    description: People who can be assigned work
   - name: categories
     description: Category operations
   - name: sites
@@ -354,6 +356,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/PublicLinkAccessPage"
 
+  /assignees:
+    get:
+      operationId: listAssignees
+      tags: [assignees]
+      summary: People who can be assigned an action, FixTrack issue or compliance check
+      description: Active members of the business (not viewers) who can see the site. Names only; reminders for assigned work go to that person.
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: People who can be assigned
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Assignee"
+        "404":
+          description: The site is not in the business, or not in the caller's department
   /categories:
     get:
       operationId: listCategories
@@ -5373,6 +5398,10 @@ components:
         assignedTo:
           type: string
           nullable: true
+        assigneeUserId:
+          type: integer
+          nullable: true
+          description: The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.
         dueDate:
           type: string
           format: date-time
@@ -5421,6 +5450,17 @@ components:
         - createdAt
         - updatedAt
 
+    Assignee:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        role:
+          type: string
+      required: [id, name, role]
+
     CreateComplianceItemRequest:
       type: object
       properties:
@@ -5449,6 +5489,10 @@ components:
         assignedTo:
           type: string
           nullable: true
+        assigneeUserId:
+          type: integer
+          nullable: true
+          description: The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.
         dueDate:
           type: string
           format: date-time
@@ -5494,6 +5538,10 @@ components:
         assignedTo:
           type: string
           nullable: true
+        assigneeUserId:
+          type: integer
+          nullable: true
+          description: The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.
         dueDate:
           type: string
           format: date-time
@@ -6309,6 +6357,11 @@ components:
           enum: ["true", "false"]
           nullable: true
           description: '"true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'
+        ownerUpdateFrequency:
+          type: string
+          enum: ["weekly", "daily"]
+          nullable: true
+          description: How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
 
     StorageLimitState:
       type: string
