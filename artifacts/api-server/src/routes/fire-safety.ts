@@ -10,7 +10,9 @@ import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentS
 import { completeLinkedTasksFromCheck } from "../lib/trackTaskLink";
 import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
-import { FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
+import { FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, effectiveFireFrequencies, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
+import { getAccountToday } from "../lib/accountClock";
+import { callPointLabel, callPointRotation } from "../lib/fireCallPointRotation";
 
 const router = Router();
 
@@ -87,7 +89,7 @@ async function resolveFireDetails(
       const kept = existing?.callPointId === callPointId;
       if (!point || (point.archivedAt && !kept)) return { error: "Choose a call point from this site's list" };
       if ((point.siteId ?? null) !== siteId) return { error: "That call point is at a different site" };
-      callPoint = kept && existing?.callPoint ? existing.callPoint : point.name;
+      callPoint = kept && existing?.callPoint ? existing.callPoint : callPointLabel(point);
     }
     if (!callPoint && (!existing || existing.callPoint)) return { error: "Say which call point was tested" };
     details.callPointId = callPointId;
@@ -354,16 +356,28 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
 // tests that name them keep their link (records are kept for five years).
 
 const callPointNameSchema = z.string().trim().min(1).max(200);
+const callPointLocationSchema = z.string().trim().max(200).nullable().optional()
+  .transform(value => value === undefined ? undefined : value || null);
 const createCallPointSchema = z.object({
   siteId: z.number().int().positive().nullable(),
   name: callPointNameSchema,
+  location: callPointLocationSchema,
 }).strict();
 const updateCallPointSchema = z.object({
   name: callPointNameSchema.optional(),
+  location: callPointLocationSchema,
   archived: z.boolean().optional(),
 }).strict();
+const orderCallPointsSchema = z.object({
+  siteId: z.number().int().positive().nullable(),
+  ids: z.array(z.number().int().positive()).min(1).max(1000),
+}).strict();
 
-/** Call points with when each was last used for an alarm test. */
+/**
+ * Call points in rotation order, with when each was last used for an alarm
+ * test, which one is next in turn at its site, and which have not been tested
+ * within one full round (see fireCallPointRotation).
+ */
 async function listCallPoints(clientId: number, conditions: ReturnType<typeof eq>[]) {
   const lastTest = db.select({
     callPointId: fireSafetyChecksTable.callPointId,
@@ -376,14 +390,73 @@ async function listCallPoints(clientId: number, conditions: ReturnType<typeof eq
     id: fireCallPointsTable.id,
     siteId: fireCallPointsTable.siteId,
     name: fireCallPointsTable.name,
+    location: fireCallPointsTable.location,
+    sortOrder: fireCallPointsTable.sortOrder,
     archivedAt: fireCallPointsTable.archivedAt,
     createdAt: fireCallPointsTable.createdAt,
     lastTestedDate: lastTest.lastTestedDate,
   }).from(fireCallPointsTable)
     .leftJoin(lastTest, eq(lastTest.callPointId, fireCallPointsTable.id))
     .where(and(eq(fireCallPointsTable.clientId, clientId), ...conditions))
-    .orderBy(fireCallPointsTable.name, fireCallPointsTable.id);
-  return rows.map(row => ({ ...row, lastTestedDate: row.lastTestedDate ? String(row.lastTestedDate).slice(0, 10) : null }));
+    .orderBy(fireCallPointsTable.sortOrder, fireCallPointsTable.name, fireCallPointsTable.id);
+  if (!rows.length) return [];
+
+  // The rotation is worked out over each site's whole list, whatever the
+  // filter, so a single call point still knows whether it is next in turn.
+  const siteIds = [...new Set(rows.map(row => row.siteId).filter((id): id is number => id != null))];
+  const siteCondition = siteIds.length
+    ? sql`(p.site_id IS NULL OR p.site_id IN (${sql.join(siteIds.map(id => sql`${id}`), sql`, `)}))`
+    : sql`p.site_id IS NULL`;
+  const [pointRows, latestRows, settingRows, profileRows, today] = await Promise.all([
+    db.execute(sql`
+      SELECT p.id, p.site_id, p.sort_order, p.archived_at IS NOT NULL AS archived,
+             (SELECT max(c.check_date)::text FROM fire_safety_checks c
+              WHERE c.client_id = p.client_id AND c.check_type = 'alarm' AND c.call_point_id = p.id) AS last_tested_date
+      FROM fire_call_points p WHERE p.client_id = ${clientId} AND ${siteCondition}
+    `),
+    db.execute(sql`
+      SELECT DISTINCT ON (p.site_id) p.site_id, c.call_point_id
+      FROM fire_safety_checks c JOIN fire_call_points p ON p.id = c.call_point_id AND p.client_id = c.client_id
+      WHERE c.client_id = ${clientId} AND c.check_type = 'alarm' AND ${siteCondition}
+      ORDER BY p.site_id, c.check_date DESC, c.id DESC
+    `),
+    db.select({ value: appSettingsTable.value }).from(appSettingsTable)
+      .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "fire_frequency_days"))).limit(1),
+    siteIds.length ? db.select({ siteId: trackControlProfilesTable.siteId, profile: trackControlProfilesTable.profile })
+      .from(trackControlProfilesTable)
+      .where(and(eq(trackControlProfilesTable.clientId, clientId), eq(trackControlProfilesTable.module, FIRE_PROFILE_MODULE),
+        inArray(trackControlProfilesTable.siteId, siteIds)))
+      : Promise.resolve([]),
+    getAccountToday(clientId),
+  ]);
+  const profiles = new Map(profileRows.map(row => [row.siteId, row.profile]));
+  const lastPointBySite = new Map(((latestRows.rows ?? []) as { site_id: number | null; call_point_id: number }[])
+    .map(row => [row.site_id == null ? null : Number(row.site_id), Number(row.call_point_id)]));
+  const rotation = callPointRotation(
+    ((pointRows.rows ?? []) as { id: number; site_id: number | null; sort_order: number; archived: boolean; last_tested_date: string | null }[])
+      .map(row => ({
+        id: Number(row.id), siteId: row.site_id == null ? null : Number(row.site_id), sortOrder: Number(row.sort_order),
+        archived: Boolean(row.archived), lastTestedDate: row.last_tested_date ? String(row.last_tested_date).slice(0, 10) : null,
+      })),
+    lastPointBySite,
+    siteId => effectiveFireFrequencies(settingRows[0]?.value ?? null, siteId == null ? null : profiles.get(siteId) ?? null).alarm,
+    today,
+  );
+  return rows.map(row => ({
+    ...row,
+    lastTestedDate: row.lastTestedDate ? String(row.lastTestedDate).slice(0, 10) : null,
+    nextInTurn: rotation.nextIds.has(row.id),
+    notTestedThisRound: rotation.notTestedThisRound.has(row.id),
+  }));
+}
+
+/** The next free place at the end of a site's rotation. */
+async function nextSortOrder(clientId: number, siteId: number | null) {
+  const [row] = await db.select({ highest: sql<number>`coalesce(max(${fireCallPointsTable.sortOrder}), 0)` })
+    .from(fireCallPointsTable)
+    .where(and(eq(fireCallPointsTable.clientId, clientId),
+      siteId == null ? isNull(fireCallPointsTable.siteId) : eq(fireCallPointsTable.siteId, siteId)));
+  return Number(row?.highest ?? 0) + 1;
 }
 
 async function duplicateCallPoint(clientId: number, siteId: number | null, name: string, exceptId?: number) {
@@ -420,13 +493,13 @@ router.get("/call-points", requireAuth, async (req, res) => {
   res.json(await listCallPoints(clientId, conditions));
 });
 
-// POST /api/fire-safety/call-points
+// POST /api/fire-safety/call-points — added at the end of the site's rotation.
 router.post("/call-points", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const parsed = createCallPointSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Give the call point a name" });
-  const { siteId, name } = parsed.data;
+  const { siteId, name, location } = parsed.data;
   const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
   if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
@@ -434,14 +507,51 @@ router.post("/call-points", requireAuth, denyViewers, requireClientAdmin, async 
     return res.status(409).json({ error: "This site already has a call point with that name" });
   }
   const [created] = await db.insert(fireCallPointsTable)
-    .values({ clientId, siteId, name, createdBy: req.currentUser!.id })
+    .values({ clientId, siteId, name, location: location ?? null, sortOrder: await nextSortOrder(clientId, siteId), createdBy: req.currentUser!.id })
     .returning();
   await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: created.id, action: "created", after: created });
-  res.status(201).json({ ...created, lastTestedDate: null });
+  const [withRotation] = await listCallPoints(clientId, [eq(fireCallPointsTable.id, created.id)]);
+  res.status(201).json(withRotation ?? { ...created, lastTestedDate: null, nextInTurn: false, notTestedThisRound: true });
 });
 
-// PUT /api/fire-safety/call-points/:id — rename, archive or restore. The site
-// is fixed: a call point at another site is a different call point.
+// PUT /api/fire-safety/call-points/order — the site's rotation order: every
+// call point still in use at the site, first to last. Archived ones keep their
+// old place and a restored one goes to the end.
+router.put("/call-points/order", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = orderCallPointsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid order" });
+  const { siteId, ids } = parsed.data;
+  const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const siteCondition = siteId == null ? isNull(fireCallPointsTable.siteId) : eq(fireCallPointsTable.siteId, siteId);
+  const updated = await db.transaction(async (tx) => {
+    const current = await tx.select({ id: fireCallPointsTable.id, sortOrder: fireCallPointsTable.sortOrder })
+      .from(fireCallPointsTable)
+      .where(and(eq(fireCallPointsTable.clientId, clientId), siteCondition, isNull(fireCallPointsTable.archivedAt)))
+      .for("update");
+    const currentIds = new Set(current.map(row => row.id));
+    if (ids.length !== currentIds.size || new Set(ids).size !== ids.length || ids.some(id => !currentIds.has(id))) return null;
+    const before = Object.fromEntries(current.map(row => [row.id, row.sortOrder]));
+    for (const [index, id] of ids.entries()) {
+      if (before[id] === index + 1) continue;
+      await tx.update(fireCallPointsTable).set({ sortOrder: index + 1, updatedAt: new Date() })
+        .where(and(eq(fireCallPointsTable.id, id), eq(fireCallPointsTable.clientId, clientId)));
+    }
+    return { before, after: Object.fromEntries(ids.map((id, index) => [id, index + 1])) };
+  });
+  if (!updated) return res.status(409).json({ error: "The call point list has changed. Refresh and try again." });
+  await appendAuditEvent(req, {
+    clientId, entityType: "fire_call_point_order", entityId: siteId ?? 0, action: "updated",
+    before: { siteId, order: updated.before }, after: { siteId, order: updated.after },
+  });
+  res.json(await listCallPoints(clientId, [siteCondition as any, isNull(fireCallPointsTable.archivedAt) as any]));
+});
+
+// PUT /api/fire-safety/call-points/:id — rename, move, archive or restore. The
+// site is fixed: a call point at another site is a different call point.
 router.put("/call-points/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -456,18 +566,21 @@ router.put("/call-points/:id", requireAuth, denyViewers, requireClientAdmin, asy
     return res.status(404).json({ error: "Not found" });
   }
   const name = parsed.data.name ?? existing.name;
+  const location = parsed.data.location === undefined ? existing.location : parsed.data.location;
   const archivedAt = parsed.data.archived === undefined ? existing.archivedAt
     : parsed.data.archived ? existing.archivedAt ?? new Date() : null;
   if (!archivedAt && await duplicateCallPoint(clientId, existing.siteId, name, id)) {
     return res.status(409).json({ error: "This site already has a call point with that name" });
   }
+  // A restored call point rejoins the rotation at the end.
+  const sortOrder = existing.archivedAt && !archivedAt ? await nextSortOrder(clientId, existing.siteId) : existing.sortOrder;
   const [updated] = await db.update(fireCallPointsTable)
-    .set({ name, archivedAt, updatedAt: new Date() })
+    .set({ name, location, archivedAt, sortOrder, updatedAt: new Date() })
     .where(and(eq(fireCallPointsTable.id, id), eq(fireCallPointsTable.clientId, clientId)))
     .returning();
   await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: id, action: "updated", before: existing, after: updated });
-  const [withLast] = await listCallPoints(clientId, [eq(fireCallPointsTable.id, id)]);
-  res.json(withLast ?? { ...updated, lastTestedDate: null });
+  const [withRotation] = await listCallPoints(clientId, [eq(fireCallPointsTable.id, id)]);
+  res.json(withRotation ?? { ...updated, lastTestedDate: null, nextInTurn: false, notTestedThisRound: false });
 });
 
 // ── Template config ───────────────────────────────────────────────────────────

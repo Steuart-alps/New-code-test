@@ -17,6 +17,11 @@ export const fireCallPointsTable = pgTable("fire_call_points", {
     .references(() => clientsTable.id, { onDelete: "cascade" }),
   siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  // Where it is, e.g. "Kitchen fire exit, ground floor".
+  location: text("location"),
+  // Position in the site's test rotation (1 = first). Weekly alarm tests
+  // suggest the next call point after the one tested last.
+  sortOrder: integer("sort_order").notNull().default(0),
   archivedAt: timestamp("archived_at"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),

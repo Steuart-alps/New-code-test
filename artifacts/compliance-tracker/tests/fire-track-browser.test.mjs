@@ -7,14 +7,16 @@ import { chromium } from "@playwright/test";
 // Browser regression for FireTrack's schedule wording, call points and drills
 // (src/pages/fire-safety.tsx):
 //   - status cards say Weekly / Monthly / At least every 6 months;
-//   - a weekly alarm test suggests the call point tested longest ago (never
-//     tested first), sends it, and cannot be saved without a call point;
+//   - a weekly alarm test picks the next call point in the site's order (after
+//     the one tested last), sends the one chosen, and cannot be saved without
+//     a call point; the page shows the next one and any not tested this round;
 //   - the emergency lighting test explains the 5 minute flick test;
 //   - the annual discharge test and the contractor services say they are kept
 //     in step with their ComplyTrack tasks;
 //   - a drill cannot be saved until it says whether night staff took part;
 //   - history shows the call point and night staff answers;
-//   - managers add call points under Template, Call points.
+//   - managers add call points with a location under Template, Call points,
+//     change their order with the arrows, and upload a list.
 // The /api/fire-safety fixture mirrors artifacts/api-server/src/routes/fire-safety.ts.
 // FIRE_TRACK_SCREENSHOTS=<dir> saves screenshots of each step.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -65,10 +67,24 @@ const SITE = { id: 1, name: "Harbour Hotel" };
 
 const FREQUENCIES = { alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365, alarm_service: 180, extinguisher_service: 365 };
 const callPoints = [
-  { id: 11, siteId: 1, name: "CP1 – Reception", archivedAt: null, lastTestedDate: localDate(-7) },
-  { id: 12, siteId: 1, name: "CP2 – Kitchen", archivedAt: null, lastTestedDate: null },
-  { id: 13, siteId: 1, name: "CP3 – Old wing", archivedAt: "2026-09-01T09:00:00.000Z", lastTestedDate: localDate(-30) },
+  { id: 11, siteId: 1, name: "CP1 – Reception", location: null, sortOrder: 1, archivedAt: null, lastTestedDate: localDate(-7) },
+  { id: 12, siteId: 1, name: "CP2 – Kitchen", location: null, sortOrder: 2, archivedAt: null, lastTestedDate: null },
+  { id: 13, siteId: 1, name: "CP3 – Old wing", location: null, sortOrder: 3, archivedAt: "2026-09-01T09:00:00.000Z", lastTestedDate: localDate(-30) },
 ];
+// The call point used on the latest alarm test (lib/fireCallPointRotation.ts).
+let lastTestedPointId = 11;
+const byOrder = (a, b) => a.sortOrder - b.sortOrder || a.id - b.id;
+function withRotation(point) {
+  const active = callPoints.filter(p => !p.archivedAt).sort(byOrder);
+  const last = callPoints.find(p => p.id === lastTestedPointId);
+  const next = last ? active.find(p => byOrder(p, last) > 0) ?? active[0] : active[0];
+  const roundDays = active.length * FREQUENCIES.alarm;
+  const daysAgo = point.lastTestedDate ? Math.round((Date.parse(TODAY) - Date.parse(point.lastTestedDate)) / 86_400_000) : null;
+  return {
+    ...point, nextInTurn: !point.archivedAt && next?.id === point.id,
+    notTestedThisRound: !point.archivedAt && (daysAgo === null || daysAgo > roundDays),
+  };
+}
 let nextId = 500;
 const checks = [
   {
@@ -101,6 +117,7 @@ async function routeApi(route) {
       case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
       case "/api/managed-by": return json(route, null);
       case "/api/sites": return json(route, [SITE]);
+      case "/api/storage/status": return json(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
       case "/api/photos":
       case "/api/photos/requirements":
       case "/api/staff-roster":
@@ -129,7 +146,7 @@ async function routeApi(route) {
         const siteParam = url.searchParams.get("siteId");
         const rows = callPoints.filter(p => (siteParam === "none" ? p.siteId == null : !siteParam || p.siteId === Number(siteParam))
           && (url.searchParams.get("includeArchived") === "true" || !p.archivedAt));
-        return json(route, [...rows].sort((a, b) => a.name.localeCompare(b.name)));
+        return json(route, [...rows].sort(byOrder).map(withRotation));
       }
     }
   }
@@ -145,16 +162,34 @@ async function routeApi(route) {
       nightStaff: body.checkType === "fire_drill" ? body.nightStaff ?? null : null,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
-    if (created.callPointId && point) point.lastTestedDate = created.checkDate;
+    if (created.callPointId && point) { point.lastTestedDate = created.checkDate; lastTestedPointId = point.id; }
     checks.push(created);
     return json(route, created, 201);
   }
   if (method === "POST" && path === "/api/fire-safety/call-points") {
     const body = JSON.parse(request.postData() ?? "{}");
     posts.push({ path, body });
-    const created = { id: nextId++, siteId: body.siteId, name: body.name, archivedAt: null, lastTestedDate: null };
+    const created = {
+      id: nextId++, siteId: body.siteId, name: body.name, location: body.location ?? null,
+      sortOrder: Math.max(0, ...callPoints.map(p => p.sortOrder)) + 1, archivedAt: null, lastTestedDate: null,
+    };
     callPoints.push(created);
-    return json(route, created, 201);
+    return json(route, withRotation(created), 201);
+  }
+  if (method === "PUT" && path === "/api/fire-safety/call-points/order") {
+    const body = JSON.parse(request.postData() ?? "{}");
+    posts.push({ path, body });
+    body.ids.forEach((id, index) => { callPoints.find(p => p.id === id).sortOrder = index + 1; });
+    return json(route, callPoints.filter(p => !p.archivedAt).sort(byOrder).map(withRotation));
+  }
+  if (method === "POST" && path === "/api/imports/fire-call-points") {
+    const body = JSON.parse(request.postData() ?? "{}");
+    posts.push({ path, body });
+    return json(route, {
+      preview: body.preview, committed: false, ignoredHeaders: [],
+      summary: { total: body.rows.length, create: body.rows.length, update: 0, skip: 0, error: 0 },
+      rows: body.rows.map((row, index) => ({ row: index + 2, action: "create", label: row.filter(Boolean).join(" · "), reasons: [] })),
+    });
   }
   unexpectedRequests.push(`${method} ${path}`);
   return method === "GET" ? json(route, []) : json(route, { error: "Not in the FireTrack fixture" }, 404);
@@ -191,6 +226,11 @@ try {
   // ── History shows call points and night staff ────────────────────────────
   assert.match(cardText, /Call point: CP1 – Reception/);
   assert.match(cardText, /Night staff: Night staff did not take part/);
+  // ── The rotation card names the next call point and any behind ─────────
+  const rotationCard = page.getByTestId("call-point-rotation");
+  await rotationCard.waitFor();
+  assert.match(await rotationCard.innerText(), /Next to test: CP2 – Kitchen \(not tested yet\)/);
+  assert.doesNotMatch(await rotationCard.innerText(), /Every call point has been tested/, "CP2 has never been tested");
   await shot(page, "1-status-and-history");
   console.log("ok - status cards say weekly, monthly and at least every 6 months; history shows call point and night staff");
 
@@ -212,7 +252,7 @@ try {
   assert.equal(alarmPost.body.checkType, "alarm");
   assert.equal(alarmPost.body.callPointId, 11);
   assert.equal(alarmPost.body.siteId, 1, "a one-site business records against its site");
-  console.log("ok - the alarm test suggests the call point tested longest ago and sends the one picked");
+  console.log("ok - the alarm test picks the next call point in the order and sends the one chosen");
 
   // ── Emergency lighting: the 5 minute flick test ──────────────────────────
   dialog = await openRecordDialog(page, "Monthly emergency lighting flick test");
@@ -278,12 +318,44 @@ try {
   const template = page.getByRole("dialog");
   await template.getByTestId("tab-fire-call-points").click();
   await template.getByText("No call points listed yet.").waitFor();
-  await template.getByPlaceholder('e.g. "CP1 – Reception"').fill("CP4 – Bar");
+  await template.getByPlaceholder('Call point, e.g. "CP1"').fill("CP4");
+  await template.getByPlaceholder("Location, e.g. Reception, main entrance").fill("Bar");
   await template.getByRole("button", { name: "Add" }).click();
-  await template.locator('input[value="CP4 – Bar"]').waitFor();
-  assert.deepEqual(posts.at(-1), { path: "/api/fire-safety/call-points", body: { siteId: 1, name: "CP4 – Bar" } });
+  await template.locator('input[value="CP4"]').waitFor();
+  assert.deepEqual(posts.at(-1), { path: "/api/fire-safety/call-points", body: { siteId: 1, name: "CP4", location: "Bar" } });
+  await template.getByPlaceholder('Call point, e.g. "CP1"').fill("CP5");
+  await template.getByRole("button", { name: "Add" }).click();
+  await template.locator('input[value="CP5"]').waitFor();
+  console.log("ok - managers add a site's call points with their location under Template");
+
+  // ── The order changes with the arrows ────────────────────────────────────
+  const cp5Row = template.locator('[data-testid^="call-point-row-"]').nth(1);
+  await cp5Row.getByRole("button", { name: "Move up" }).click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid^="call-point-row-"] input[aria-label="Call point name"]')[0]?.value === "CP5");
+  const orderPost = posts.at(-1);
+  assert.equal(orderPost.path, "/api/fire-safety/call-points/order");
+  assert.equal(orderPost.body.siteId, 1);
+  assert.equal(orderPost.body.ids.length, 2);
+  assert.equal(callPoints.find(p => p.id === orderPost.body.ids[0]).name, "CP5");
+  await template.getByText("Tested in this order, from the top.").waitFor();
   await shot(page, "5-template-call-points");
-  console.log("ok - managers add a site's call points under Template");
+  console.log("ok - managers change the test order with the arrows");
+
+  // ── A list can be uploaded from a spreadsheet ────────────────────────────
+  await template.getByTestId("button-import-fire-call-points").click();
+  const upload = page.getByRole("dialog", { name: "Upload call points" });
+  await upload.getByText("List them in the order you want them tested").waitFor();
+  await upload.getByTestId("input-fire-call-points-file").setInputFiles({
+    name: "call-points.csv", mimeType: "text/csv", buffer: Buffer.from("Call point,Location\r\nCP6,Lift lobby\r\nCP7,Plant room\r\n"),
+  });
+  await upload.getByTestId("import-summary").waitFor();
+  const uploadPost = posts.at(-1);
+  assert.equal(uploadPost.path, "/api/imports/fire-call-points");
+  assert.deepEqual(uploadPost.body, { headers: ["Call point", "Location"], rows: [["CP6", "Lift lobby"], ["CP7", "Plant room"]], preview: true, siteId: 1 });
+  assert.match(await upload.getByTestId("button-confirm-fire-call-points-import").innerText(), /Import 2 call points/);
+  await shot(page, "8-upload-call-points");
+  await upload.getByRole("button", { name: "Cancel" }).click();
+  console.log("ok - a call point list can be uploaded, with a preview first");
 
   assert.deepEqual(pageErrors, []);
   assert.deepEqual([...new Set(unexpectedRequests)], [], "every request is in the fixture");

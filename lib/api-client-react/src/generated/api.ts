@@ -75,6 +75,8 @@ import type {
   FeedbackReportUpdate,
   FeedbackReviewEvent,
   FireCallPoint,
+  FireCallPointImportRequest,
+  FireCallPointImportResult,
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
@@ -167,6 +169,7 @@ import type {
   ListPublicLinkAccessParams,
   MyCoshhSignOffs,
   OkResponse,
+  OrderFireCallPointsRequest,
   OwnTrainingRecord,
   PATAppliance,
   PATTest,
@@ -5890,6 +5893,226 @@ export const useCreateFireCallPoint = <TError = ErrorType<void>,
       return useMutation(getCreateFireCallPointMutationOptions(options));
     }
 
+export const getOrderFireCallPointsUrl = () => {
+
+
+
+
+  return `/api/fire-safety/call-points/order`
+}
+
+/**
+ * @summary Set a site's call point rotation order (managers)
+ */
+export const orderFireCallPoints = async (orderFireCallPointsRequest: OrderFireCallPointsRequest, options?: RequestInit): Promise<FireCallPoint[]> => {
+
+  return customFetch<FireCallPoint[]>(getOrderFireCallPointsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(orderFireCallPointsRequest)
+  }
+);}
+
+
+
+
+
+export const getOrderFireCallPointsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof orderFireCallPoints>>, TError,{data: BodyType<OrderFireCallPointsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof orderFireCallPoints>>, TError,{data: BodyType<OrderFireCallPointsRequest>}, TContext> => {
+
+const mutationKey = ['orderFireCallPoints'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof orderFireCallPoints>>, {data: BodyType<OrderFireCallPointsRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  orderFireCallPoints(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type OrderFireCallPointsMutationResult = NonNullable<Awaited<ReturnType<typeof orderFireCallPoints>>>
+    export type OrderFireCallPointsMutationBody = BodyType<OrderFireCallPointsRequest>
+    export type OrderFireCallPointsMutationError = ErrorType<void>
+
+    /**
+ * @summary Set a site's call point rotation order (managers)
+ */
+export const useOrderFireCallPoints = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof orderFireCallPoints>>, TError,{data: BodyType<OrderFireCallPointsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof orderFireCallPoints>>,
+        TError,
+        {data: BodyType<OrderFireCallPointsRequest>},
+        TContext
+      > => {
+      return useMutation(getOrderFireCallPointsMutationOptions(options));
+    }
+
+export const getGetFireCallPointImportTemplateUrl = () => {
+
+
+
+
+  return `/api/imports/fire-call-points/template`
+}
+
+/**
+ * @summary Download the CSV template for uploading a call point list (managers)
+ */
+export const getFireCallPointImportTemplate = async ( options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getGetFireCallPointImportTemplateUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFireCallPointImportTemplateQueryKey = () => {
+    return [
+    `/api/imports/fire-call-points/template`
+    ] as const;
+    }
+
+
+export const getGetFireCallPointImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getFireCallPointImportTemplate>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireCallPointImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFireCallPointImportTemplateQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFireCallPointImportTemplate>>> = ({ signal }) => getFireCallPointImportTemplate({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFireCallPointImportTemplate>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFireCallPointImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getFireCallPointImportTemplate>>>
+export type GetFireCallPointImportTemplateQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Download the CSV template for uploading a call point list (managers)
+ */
+
+export function useGetFireCallPointImportTemplate<TData = Awaited<ReturnType<typeof getFireCallPointImportTemplate>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireCallPointImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFireCallPointImportTemplateQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getImportFireCallPointsUrl = () => {
+
+
+
+
+  return `/api/imports/fire-call-points`
+}
+
+/**
+ * The browser sends the spreadsheet's header row and cell text. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. New call points join the end of their site's rotation in file order.
+ * @summary Preview or import a spreadsheet of call points (managers)
+ */
+export const importFireCallPoints = async (fireCallPointImportRequest: FireCallPointImportRequest, options?: RequestInit): Promise<FireCallPointImportResult> => {
+
+  return customFetch<FireCallPointImportResult>(getImportFireCallPointsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fireCallPointImportRequest)
+  }
+);}
+
+
+
+
+
+export const getImportFireCallPointsMutationOptions = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importFireCallPoints>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importFireCallPoints>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext> => {
+
+const mutationKey = ['importFireCallPoints'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importFireCallPoints>>, {data: BodyType<FireCallPointImportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importFireCallPoints(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportFireCallPointsMutationResult = NonNullable<Awaited<ReturnType<typeof importFireCallPoints>>>
+    export type ImportFireCallPointsMutationBody = BodyType<FireCallPointImportRequest>
+    export type ImportFireCallPointsMutationError = ErrorType<void | FireCallPointImportResult>
+
+    /**
+ * @summary Preview or import a spreadsheet of call points (managers)
+ */
+export const useImportFireCallPoints = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importFireCallPoints>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importFireCallPoints>>,
+        TError,
+        {data: BodyType<FireCallPointImportRequest>},
+        TContext
+      > => {
+      return useMutation(getImportFireCallPointsMutationOptions(options));
+    }
+
 export const getUpdateFireCallPointUrl = (id: number,) => {
 
 
@@ -5899,7 +6122,7 @@ export const getUpdateFireCallPointUrl = (id: number,) => {
 }
 
 /**
- * @summary Rename, archive or restore a call point (managers)
+ * @summary Rename, move, archive or restore a call point (managers)
  */
 export const updateFireCallPoint = async (id: number,
     updateFireCallPointRequest: UpdateFireCallPointRequest, options?: RequestInit): Promise<FireCallPoint> => {
@@ -5949,7 +6172,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateFireCallPointMutationError = ErrorType<unknown>
 
     /**
- * @summary Rename, archive or restore a call point (managers)
+ * @summary Rename, move, archive or restore a call point (managers)
  */
 export const useUpdateFireCallPoint = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireCallPoint>>, TError,{id: number;data: BodyType<UpdateFireCallPointRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}

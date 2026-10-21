@@ -1781,11 +1781,79 @@ paths:
         "409":
           description: The site already has a call point with that name
 
+  /fire-safety/call-points/order:
+    put:
+      operationId: orderFireCallPoints
+      tags: [fire-safety]
+      summary: Set a site's call point rotation order (managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderFireCallPointsRequest"
+      responses:
+        "200":
+          description: The site's call points in use, in their new order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireCallPoint"
+        "409":
+          description: The list does not match the site's call points in use (it changed meanwhile)
+
+  /imports/fire-call-points/template:
+    get:
+      operationId: getFireCallPointImportTemplate
+      tags: [fire-safety]
+      summary: Download the CSV template for uploading a call point list (managers)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/fire-call-points:
+    post:
+      operationId: importFireCallPoints
+      tags: [fire-safety]
+      summary: Preview or import a spreadsheet of call points (managers)
+      description: >-
+        The browser sends the spreadsheet's header row and cell text. With
+        preview true (the default) nothing is written; otherwise every row is
+        written in one go, only when no row has an error. New call points join
+        the end of their site's rotation in file order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file is missing a required column or has no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
   /fire-safety/call-points/{id}:
     put:
       operationId: updateFireCallPoint
       tags: [fire-safety]
-      summary: Rename, archive or restore a call point (managers)
+      summary: Rename, move, archive or restore a call point (managers)
       parameters:
         - in: path
           name: id
@@ -7090,6 +7158,13 @@ components:
           nullable: true
         name:
           type: string
+        location:
+          type: string
+          nullable: true
+          description: Where the call point is, e.g. "Kitchen fire exit, ground floor".
+        sortOrder:
+          type: integer
+          description: Place in the site's test rotation (1 = first).
         archivedAt:
           type: string
           format: date-time
@@ -7098,12 +7173,22 @@ components:
           type: string
           nullable: true
           description: Date of the latest alarm test that used this call point.
+        nextInTurn:
+          type: boolean
+          description: The call point to test next at its site (the one after the call point tested last, in rotation order).
+        notTestedThisRound:
+          type: boolean
+          description: In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).
       required:
         - id
         - siteId
         - name
+        - location
+        - sortOrder
         - archivedAt
         - lastTestedDate
+        - nextInTurn
+        - notTestedThisRound
 
     CreateFireCallPointRequest:
       type: object
@@ -7113,6 +7198,9 @@ components:
           nullable: true
         name:
           type: string
+        location:
+          type: string
+          nullable: true
       required:
         - siteId
         - name
@@ -7122,8 +7210,100 @@ components:
       properties:
         name:
           type: string
+        location:
+          type: string
+          nullable: true
         archived:
           type: boolean
+
+    OrderFireCallPointsRequest:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        ids:
+          type: array
+          description: Every call point in use at the site, first to last.
+          items:
+            type: integer
+      required:
+        - siteId
+        - ids
+
+    FireCallPointImportRequest:
+      type: object
+      properties:
+        headers:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        preview:
+          type: boolean
+        siteId:
+          type: integer
+          nullable: true
+          description: The site for rows whose Site cell is blank.
+      required:
+        - headers
+        - rows
+
+    FireCallPointImportResult:
+      type: object
+      properties:
+        preview:
+          type: boolean
+        committed:
+          type: boolean
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            create:
+              type: integer
+            update:
+              type: integer
+            skip:
+              type: integer
+            error:
+              type: integer
+          required: [total, create, update, skip, error]
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              row:
+                type: integer
+              action:
+                type: string
+                enum: [create, update, skip, error]
+              label:
+                type: string
+              reasons:
+                type: array
+                items:
+                  type: string
+            required: [row, action, label, reasons]
+        ignoredHeaders:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+      required:
+        - preview
+        - committed
+        - summary
+        - rows
+        - ignoredHeaders
 
     FireSafetyStatus:
       type: object
