@@ -137,6 +137,92 @@ try {
   assert.equal((await noSites.request('GET', '/fire-safety/call-points?siteId=abc')).status, 400);
   console.log('ok - a business without sites lists call points without a site');
 
+  // ── Locations, rotation order and the next call point in turn ──────────
+  const rotation = (await owner.request('POST', '/sites', { name: 'Rotation site', seedStarterChecks: false })).data;
+  const addPoint = async (name, location) => {
+    const created = await owner.request('POST', '/fire-safety/call-points', { siteId: rotation.id, name, location });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    return created.data;
+  };
+  const r1 = await addPoint('CP1', 'Reception');
+  const r2 = await addPoint('CP2', 'Kitchen fire exit, ground floor');
+  const r3 = await addPoint('CP3', null);
+  assert.deepEqual([r1, r2, r3].map(p => [p.sortOrder, p.location]), [[1, 'Reception'], [2, 'Kitchen fire exit, ground floor'], [3, null]],
+    'new call points join the end of the rotation');
+  const rotationList = async () => (await staff.request('GET', `/fire-safety/call-points?siteId=${rotation.id}`)).data;
+  const nextName = async () => (await rotationList()).filter(p => p.nextInTurn).map(p => p.name);
+  assert.deepEqual(await nextName(), ['CP1'], 'with nothing tested, the first in the order is next');
+  assert.ok((await rotationList()).every(p => p.notTestedThisRound), 'untested call points are flagged');
+
+  const test1 = await staff.request('POST', '/fire-safety', alarm(rotation.id, { callPointId: r1.id }));
+  assert.equal(test1.status, 201, JSON.stringify(test1.data));
+  assert.equal(test1.data.callPoint, 'CP1 – Reception', 'the test records the call point and its location');
+  assert.deepEqual(await nextName(), ['CP2'], 'the next one after the call point tested last');
+
+  assert.equal((await staff.request('PUT', '/fire-safety/call-points/order', { siteId: rotation.id, ids: [r3.id, r1.id, r2.id] })).status, 403);
+  assert.equal((await viewer.request('PUT', '/fire-safety/call-points/order', { siteId: rotation.id, ids: [r3.id, r1.id, r2.id] })).status, 403);
+  const reordered = await owner.request('PUT', '/fire-safety/call-points/order', { siteId: rotation.id, ids: [r3.id, r1.id, r2.id] });
+  assert.equal(reordered.status, 200, JSON.stringify(reordered.data));
+  assert.deepEqual(reordered.data.map(p => p.name), ['CP3', 'CP1', 'CP2'], 'the list comes back in the new order');
+  assert.deepEqual(await nextName(), ['CP2'], 'after CP1 in the new order');
+  assert.equal((await owner.request('PUT', '/fire-safety/call-points/order', { siteId: rotation.id, ids: [r3.id, r1.id] })).status, 409,
+    'the order must list every call point in use');
+  assert.equal((await owner.request('PUT', '/fire-safety/call-points/order', { siteId: siteA.id, ids: [r3.id, r1.id, r2.id] })).status, 409,
+    "another site's call points cannot be ordered here");
+  assert.equal((await other.request('PUT', '/fire-safety/call-points/order', { siteId: rotation.id, ids: [r3.id, r1.id, r2.id] })).status, 400);
+
+  assert.equal((await staff.request('POST', '/fire-safety', alarm(rotation.id, { callPointId: r2.id }))).status, 201);
+  assert.deepEqual(await nextName(), ['CP3'], 'after the last one, the rotation wraps round to the first');
+  // A test for an earlier date (an old record) does not move the rotation on.
+  await pool.query(
+    `INSERT INTO fire_safety_checks (client_id, site_id, check_type, check_date, result, call_point_id, call_point)
+     VALUES ($1, $2, 'alarm', $3, 'pass', $4, 'CP3')`, [owner.clientId, rotation.id, isoDay(-30), r3.id]);
+  assert.deepEqual(await nextName(), ['CP3']);
+  const behind = (await rotationList()).filter(p => p.notTestedThisRound).map(p => p.name);
+  assert.deepEqual(behind, ['CP3'], '3 call points tested weekly: one not tested in 21 days is behind');
+
+  assert.equal((await owner.request('PUT', `/fire-safety/call-points/${r3.id}`, { archived: true })).status, 200);
+  assert.deepEqual(await nextName(), ['CP1'], 'archived call points are skipped');
+  const restored = await owner.request('PUT', `/fire-safety/call-points/${r3.id}`, { archived: false, location: ' Bar ' });
+  assert.equal(restored.status, 200, JSON.stringify(restored.data));
+  assert.equal(restored.data.location, 'Bar');
+  assert.equal(restored.data.sortOrder, 4, 'a restored call point rejoins at the end');
+  assert.deepEqual((await rotationList()).map(p => p.name), ['CP1', 'CP2', 'CP3']);
+  assert.deepEqual(await nextName(), ['CP3']);
+  assert.equal((await owner.request('PUT', `/fire-safety/call-points/${r3.id}`, { location: null })).data.location, null);
+  console.log('ok - call points have locations and an order; the next one after the last tested is suggested, wrapping round');
+
+  // ── Uploading a list ────────────────────────────────────────────────────
+  const upload = (rows, extra = {}) => owner.request('POST', '/imports/fire-call-points',
+    { headers: ['Call point', 'Location'], rows, siteId: rotation.id, ...extra });
+  const preview = await upload([['CP4', 'Bar'], ['cp1', 'Front door'], ['CP5', ''], ['CP2', 'Kitchen fire exit, ground floor']]);
+  assert.equal(preview.status, 200, JSON.stringify(preview.data));
+  assert.deepEqual(preview.data.summary, { total: 4, create: 2, update: 1, skip: 1, error: 0 });
+  assert.equal(preview.data.committed, false);
+  assert.equal((await rotationList()).length, 3, 'a preview changes nothing');
+  const committed = await upload([['CP4', 'Bar'], ['cp1', 'Front door'], ['CP5', '']], { preview: false });
+  assert.equal(committed.status, 200, JSON.stringify(committed.data));
+  assert.equal(committed.data.committed, true);
+  assert.deepEqual((await rotationList()).map(p => [p.name, p.location]),
+    [['CP1', 'Front door'], ['CP2', 'Kitchen fire exit, ground floor'], ['CP3', null], ['CP4', 'Bar'], ['CP5', null]],
+    'new call points join the end in file order; a matching one gets its new location');
+  const repeated = await upload([['CP6', ''], ['cp6', 'Somewhere']], { preview: false });
+  assert.equal(repeated.status, 409, JSON.stringify(repeated.data));
+  assert.equal((await rotationList()).length, 5, 'nothing is imported while a row has an error');
+  assert.equal((await owner.request('POST', '/imports/fire-call-points', { headers: ['Location'], rows: [['Bar']] })).status, 400);
+  const bySiteName = await owner.request('POST', '/imports/fire-call-points',
+    { headers: ['Site', 'Call point'], rows: [['Call point site B', 'CP9'], ['', 'CP10']], preview: true });
+  assert.equal(bySiteName.data.rows[0].action, 'create', JSON.stringify(bySiteName.data));
+  assert.equal(bySiteName.data.rows[1].action, 'error', 'a business with several sites must say which site');
+  assert.equal((await staff.request('POST', '/imports/fire-call-points', { headers: ['Call point'], rows: [['CP7']], siteId: rotation.id })).status, 403);
+  assert.equal((await viewer.request('POST', '/imports/fire-call-points', { headers: ['Call point'], rows: [['CP7']], siteId: rotation.id })).status, 403);
+  const foreignUpload = await other.request('POST', '/imports/fire-call-points', { headers: ['Call point'], rows: [['CP7']], siteId: rotation.id });
+  assert.equal(foreignUpload.data.summary.error, 1, "another business cannot upload to this site");
+  const template = await owner.request('GET', '/imports/fire-call-points/template', undefined, 'buffer');
+  assert.equal(template.status, 200);
+  assert.match(template.data.toString('utf8'), /"Call point","Location","Site"/);
+  console.log('ok - managers upload a call point list from a spreadsheet, with a preview and a template');
+
   console.log('FireTrack call point tests passed.');
 } finally {
   await pool.end();

@@ -1,5 +1,6 @@
 /**
- * Register CSV imports (PATTrack appliances, RoomTrack rooms, contractors).
+ * Register CSV imports (PATTrack appliances, RoomTrack rooms, contractors,
+ * FireTrack call points).
  *
  * Mirrors the staff-roster reconciliation: the browser reads the spreadsheet
  * (Excel or CSV) and sends its header row and cell text; the API maps the
@@ -10,7 +11,7 @@
  */
 import { PAT_APPLIANCE_TYPES } from "@workspace/db/schema";
 
-export const CSV_IMPORT_TYPES = ["pat-appliances", "room-track-rooms", "contractors"] as const;
+export const CSV_IMPORT_TYPES = ["pat-appliances", "room-track-rooms", "contractors", "fire-call-points"] as const;
 export type CsvImportType = (typeof CSV_IMPORT_TYPES)[number];
 
 export function isCsvImportType(value: unknown): value is CsvImportType {
@@ -61,6 +62,13 @@ export const CSV_IMPORT_COLUMNS: Record<CsvImportType, CsvImportColumn[]> = {
     { key: "publicLiabilityExpiry", label: "Public liability expiry", aliases: ["publicliabilityexpiry", "plexpiry", "publicliability", "insuranceexpiry"], max: 20, kind: "date", example: "31/03/2027" },
     { key: "notes", label: "Notes", aliases: ["notes", "note", "comments"], max: 2000, example: "" },
   ],
+  // Rows are listed in rotation order: new call points join the end of their
+  // site's rotation in the order the file gives them.
+  "fire-call-points": [
+    { key: "name", label: "Call point", aliases: ["callpoint", "callpointname", "callpointref", "callpointreference", "callpointnumber", "callpointno", "name", "reference", "ref", "cp", "cpno", "cpnumber", "cpref", "number"], required: true, max: 200, example: "CP1" },
+    { key: "location", label: "Location", aliases: ["location", "callpointlocation", "where", "area", "position", "description"], max: 200, example: "Reception, main entrance" },
+    { key: "site", label: "Site", aliases: ["site", "sitename"], max: 200, example: "" },
+  ],
 };
 
 /** The natural key each register is matched on, for the template help text. */
@@ -68,6 +76,7 @@ export const CSV_IMPORT_KEYS: Record<CsvImportType, string> = {
   "pat-appliances": "Asset tag, or appliance name + site + location when there is no asset tag",
   "room-track-rooms": "Site + room number",
   contractors: "Email",
+  "fire-call-points": "Site + call point",
 };
 
 export const normaliseHeader = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");

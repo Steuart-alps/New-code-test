@@ -8,5 +8,6 @@
 
 export interface UpdateFireCallPointRequest {
   name?: string;
+  location?: string | null;
   archived?: boolean;
 }

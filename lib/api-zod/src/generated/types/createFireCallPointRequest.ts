@@ -9,4 +9,5 @@
 export interface CreateFireCallPointRequest {
   siteId: number | null;
   name: string;
+  location?: string | null;
 }
