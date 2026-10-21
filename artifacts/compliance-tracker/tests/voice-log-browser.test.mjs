@@ -144,7 +144,9 @@ async function sayAndWaitForCard(page, dialog, text) {
   await page.waitForFunction(() => window.__listeningCount() === 1);
   await speak(page, text);
   await page.waitForFunction(() => window.__listeningCount() === 0);
-  assert.equal(await dialog.locator("#voice-log-heard").inputValue(), text);
+  // The recogniser stops at once; React shows the words on its next render.
+  await page.waitForFunction(t => document.getElementById("voice-log-heard")?.value === t, text, { timeout: 5000 })
+    .catch(async () => assert.equal(await dialog.locator("#voice-log-heard").inputValue(), text));
 }
 
 async function checkSayIt() {
