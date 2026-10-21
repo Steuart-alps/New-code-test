@@ -14,8 +14,8 @@
  *     about tracks they own, so ALPS is not copied in on every business;
  *   - contractor documents go to the Maintenance managers, else the Owners;
  *   - a missing certificate after a contractor visit goes to the person
- *     assigned, else the site's Maintenance managers, else its Managers, else
- *     the Owners (responsibleForCertificate).
+ *     assigned, the site's Maintenance managers and its heads of department;
+ *     with none, its Managers, else the Owners (responsibleForCertificate).
  *
  * A compliance check linked to a track visit (lib/contractorVisits.ts) stands
  * in for the track's own date, so a visit is listed once.
@@ -492,19 +492,23 @@ export interface ResponsibilityContext extends OwnerContext {
   ownerIds: number[];
   /** Active Maintenance managers. */
   maintenanceManagerIds: number[];
+  /** Active heads of department (HoD). */
+  departmentManagerIds: number[];
 }
 
 /** Who may be reminded at a business: track owners, Owners and Maintenance managers. */
 export async function loadResponsibilityContext(clientId: number): Promise<ResponsibilityContext> {
   const ctx = await loadOwnerContext(clientId);
-  const managers = rowsOf<{ id: number }>(await db.execute(sql`
-    SELECT id FROM users
-    WHERE client_id = ${clientId} AND active = true AND is_maintenance_manager = true
+  const flagged = rowsOf<{ id: number; is_maintenance_manager: boolean; is_department_manager: boolean }>(await db.execute(sql`
+    SELECT id, is_maintenance_manager, is_department_manager FROM users
+    WHERE client_id = ${clientId} AND active = true AND (is_maintenance_manager = true OR is_department_manager = true)
       AND role IN ('client_admin', 'client_manager', 'client_staff')
     ORDER BY id
-  `)).map((row) => Number(row.id)).filter((id) => ctx.eligible.has(id));
+  `)).filter((row) => ctx.eligible.has(Number(row.id)));
+  const managers = flagged.filter((row) => row.is_maintenance_manager).map((row) => Number(row.id));
+  const heads = flagged.filter((row) => row.is_department_manager).map((row) => Number(row.id));
   const ownerIds = [...ctx.eligible.values()].filter((user) => user.role === "client_admin").map((user) => user.id);
-  return { ...ctx, ownerIds, maintenanceManagerIds: managers };
+  return { ...ctx, ownerIds, maintenanceManagerIds: managers, departmentManagerIds: heads };
 }
 
 export function canSee(ctx: OwnerContext, userId: number, siteId: number | null): boolean {
@@ -548,14 +552,18 @@ export function responsibleFor(ctx: ResponsibilityContext, item: Pick<DueItem, "
 }
 
 /**
- * Who chases a certificate still to come after a contractor visit: the person
- * assigned to the check, else the Maintenance managers who can see its site,
- * else its Managers, else the Owners.
+ * Who chases a certificate still outstanding after a contractor visit: the
+ * person assigned to the check together with the Maintenance managers and
+ * heads of department (HoD) who can see its site; with none of those, its
+ * Managers, else the Owners.
  */
 export function responsibleForCertificate(ctx: ResponsibilityContext, item: { siteId: number | null; assigneeUserId: number | null }): number[] {
-  if (item.assigneeUserId != null && canSee(ctx, item.assigneeUserId, item.siteId)) return [item.assigneeUserId];
-  const maintenance = ctx.maintenanceManagerIds.filter((id) => canSee(ctx, id, item.siteId));
-  if (maintenance.length) return maintenance;
+  const people = new Set<number>();
+  if (item.assigneeUserId != null && canSee(ctx, item.assigneeUserId, item.siteId)) people.add(item.assigneeUserId);
+  for (const id of [...ctx.maintenanceManagerIds, ...ctx.departmentManagerIds]) {
+    if (canSee(ctx, id, item.siteId)) people.add(id);
+  }
+  if (people.size) return [...people];
   const managers = [...ctx.eligible.values()]
     .filter((user) => user.role === "client_manager" && canSee(ctx, user.id, item.siteId)).map((user) => user.id);
   return managers.length ? managers : ownersOf(ctx);
