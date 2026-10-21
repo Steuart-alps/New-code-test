@@ -297,6 +297,46 @@ export interface FixTrackMediaDeleteRequest {
   objectPath: string;
 }
 
+export interface FixTrackNewContractor {
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /** @maxLength 200 */
+  company?: string | null;
+  /**
+     * @minLength 3
+     * @maxLength 320
+     */
+  email: string;
+  /** @maxLength 50 */
+  phone?: string | null;
+}
+
+/**
+ * Exactly one of contractorId and newContractor.
+ */
+export interface FixTrackAssignContractorRequest {
+  contractorId?: number;
+  newContractor?: FixTrackNewContractor;
+  /** Left out keeps the issue's target date; null clears it. */
+  targetDate?: string | null;
+  /** Confirms replacing a job already emailed to a contractor. */
+  replace?: boolean;
+}
+
+export interface FixTrackAssignContractorResult {
+  ok: boolean;
+  queueId: number;
+  mode?: string;
+  subject?: string;
+  bodyHtml?: string;
+  contractorId: number;
+  contractorName: string;
+  message: string;
+}
+
 export interface FixTrackIssueMediaList {
   mediaUrls: string[];
 }
@@ -1028,6 +1068,8 @@ export interface ComplianceItem {
   contractorName?: string | null;
   contractorEmail?: string | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -1046,6 +1088,12 @@ export interface ComplianceItem {
   openDefectCount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Assignee {
+  id: number;
+  name: string;
+  role: string;
 }
 
 export type CreateComplianceItemRequestStatus = typeof CreateComplianceItemRequestStatus[keyof typeof CreateComplianceItemRequestStatus];
@@ -1077,6 +1125,8 @@ export interface CreateComplianceItemRequest {
   categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -1117,6 +1167,8 @@ export interface UpdateComplianceItemRequest {
   categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -1710,6 +1762,17 @@ export const AppSettingsStorageAutoTopUp = {
   false: 'false',
 } as const;
 
+/**
+ * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
+ */
+export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequency[keyof typeof AppSettingsOwnerUpdateFrequency] | null;
+
+
+export const AppSettingsOwnerUpdateFrequency = {
+  weekly: 'weekly',
+  daily: 'daily',
+} as const;
+
 export interface AppSettings {
   smtpHost?: string | null;
   smtpPort?: string | null;
@@ -1725,6 +1788,10 @@ export interface AppSettings {
   storageWarningThresholdBytes?: string | null;
   /** "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there. */
   storageAutoTopUp?: AppSettingsStorageAutoTopUp;
+  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays). */
+  ownerUpdateFrequency?: AppSettingsOwnerUpdateFrequency;
+  /** JSON object keyed by reminder type (track module, "tasks", "contractors", "train"), each {"daysBefore": number|"next_week"|null, "overdueEvery": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; "next_week" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue. */
+  reminderTimings?: string | null;
 }
 
 /**
@@ -3569,6 +3636,166 @@ export interface EquipmentScan {
   history: EquipmentScanHistory[];
 }
 
+export type InspectionReportType = typeof InspectionReportType[keyof typeof InspectionReportType];
+
+
+export const InspectionReportType = {
+  alps_audit: 'alps_audit',
+  care_inspectorate: 'care_inspectorate',
+  eho: 'eho',
+  fire_officer: 'fire_officer',
+  hse: 'hse',
+  insurer: 'insurer',
+  other: 'other',
+} as const;
+
+export type InspectionReportSeverity = typeof InspectionReportSeverity[keyof typeof InspectionReportSeverity];
+
+
+export const InspectionReportSeverity = {
+  monitor: 'monitor',
+  action_required: 'action_required',
+  urgent: 'urgent',
+} as const;
+
+export type InspectionReportOptionsReportTypesItem = {
+  key: InspectionReportType;
+  label: string;
+};
+
+export type InspectionReportOptionsModulesItem = {
+  key: string;
+  label: string;
+};
+
+export type InspectionReportOptionsSitesItem = {
+  id: number;
+  name: string;
+};
+
+export type InspectionReportOptionsAssigneesItem = {
+  id: number;
+  name: string;
+  role: string;
+  isMaintenanceManager: boolean;
+};
+
+export type InspectionReportOptionsReading = {
+  available: boolean;
+  monthlyLimit: number;
+  usedThisMonth: number;
+};
+
+export interface InspectionReportOptions {
+  reportTypes: InspectionReportOptionsReportTypesItem[];
+  modules: InspectionReportOptionsModulesItem[];
+  sites: InspectionReportOptionsSitesItem[];
+  assignees: InspectionReportOptionsAssigneesItem[];
+  reading: InspectionReportOptionsReading;
+}
+
+export interface InspectionReportSummary {
+  id: number;
+  siteId: number | null;
+  reportType: InspectionReportType;
+  title: string;
+  reportDate: string | null;
+  fileName: string | null;
+  aiStatus: string;
+  uploadedByName: string;
+  createdAt: string;
+  draftCount: number;
+  actionCount: number;
+  openCount: number;
+}
+
+export type InspectionReportDraftActionDraftSource = typeof InspectionReportDraftActionDraftSource[keyof typeof InspectionReportDraftActionDraftSource];
+
+
+export const InspectionReportDraftActionDraftSource = {
+  ai: 'ai',
+  manual: 'manual',
+} as const;
+
+export interface InspectionReportDraftAction {
+  title: string;
+  instruction?: string | null;
+  module: string;
+  severity: InspectionReportSeverity;
+  siteId?: number | null;
+  dueDate?: string | null;
+  assignedUserId?: number | null;
+  reportReference?: string | null;
+  draftSource?: InspectionReportDraftActionDraftSource;
+}
+
+export interface InspectionReportDraftRequest {
+  actions: InspectionReportDraftAction[];
+}
+
+export interface InspectionReport {
+  id: number;
+  siteId: number | null;
+  reportType: InspectionReportType;
+  title: string;
+  reportDate: string | null;
+  fileName: string | null;
+  fileSize?: number | null;
+  mimeType?: string | null;
+  readable: boolean;
+  draftActions: InspectionReportDraftAction[];
+  aiStatus: string;
+  aiSummary: string | null;
+  aiError: string | null;
+  aiReadCount: number;
+  uploadedByName: string;
+  createdAt: string;
+}
+
+export type InspectionReportActionDueDateChangesItem = {
+  changedAt: string;
+  changedByName: string | null;
+  from: string | null;
+  to: string | null;
+};
+
+export interface InspectionReportAction {
+  id: number;
+  siteId: number | null;
+  module: string;
+  title: string;
+  instruction: string | null;
+  severity: InspectionReportSeverity;
+  status: string;
+  ownerName: string | null;
+  /** The person assigned (gets the reminders) */
+  assigneeUserId?: number | null;
+  dueDate: string | null;
+  draftSource: string | null;
+  confirmedByName: string | null;
+  createdAt: string;
+  /** Due date changes after the action was created (report detail only), oldest first */
+  dueDateChanges?: InspectionReportActionDueDateChangesItem[];
+}
+
+export type InspectionReportDetail = InspectionReport & {
+  actions: InspectionReportAction[];
+};
+
+export interface InspectionReportReading {
+  aiSummary: string | null;
+  draftActions: InspectionReportDraftAction[];
+}
+
+export interface CreateInspectionReportRequest {
+  title: string;
+  reportType: InspectionReportType;
+  reportDate?: string | null;
+  siteId?: number | null;
+  objectPath: string;
+  fileName: string;
+}
+
 export type ListFeedbackReportsParams = {
 clientId?: number;
 category?: ListFeedbackReportsCategory;
@@ -3671,6 +3898,10 @@ export const ListPublicLinkAccessActionType = {
   view: 'view',
   submit: 'submit',
 } as const;
+
+export type ListAssigneesParams = {
+siteId?: number;
+};
 
 export type ListComplianceItemsParams = {
 status?: ListComplianceItemsStatus;
@@ -4040,5 +4271,15 @@ export type ListCoshhSignOffs200 = {
 export type RecordCoshhSignOffs200 = {
   signed: number;
   assessment: CoshhSignOffStatus | null;
+};
+
+export type SaveInspectionReportDraft200 = {
+  draftActions: InspectionReportDraftAction[];
+};
+
+export type ConfirmInspectionReportActions201 = {
+  actions: InspectionReportAction[];
+  /** Owners and Managers emailed the action plan */
+  emailedTo: string[];
 };
 

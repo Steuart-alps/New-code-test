@@ -59,6 +59,7 @@ const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   // GreenTrack renders its module actions in its own "Actions" tab.
   { prefix: "/swim-track", moduleKey: "swim" },
   { prefix: "/incidents", moduleKey: "incident" },
+  { prefix: "/report-actions", moduleKey: "audit" },
 ];
 
 import {
