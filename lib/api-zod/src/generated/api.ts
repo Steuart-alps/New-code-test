@@ -2722,6 +2722,49 @@ export const DeleteFixTrackIssueMediaResponse = zod.object({
 
 
 /**
+ * A manager picks a contractor from the business's list, or adds a new one, and the job email (details, photos, a link to pick a visit date and a "job done" link) is sent straight away. The manager's choice is the approval, so the email does not wait in Contractor Approvals. If sending fails, the email stays in Contractor Approvals to retry.
+ * @summary Give a job to a contractor and email it to them (managers)
+ */
+export const AssignFixTrackContractorParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const assignFixTrackContractorBodyNewContractorNameMax = 200;
+
+export const assignFixTrackContractorBodyNewContractorCompanyMax = 200;
+
+export const assignFixTrackContractorBodyNewContractorEmailMin = 3;
+export const assignFixTrackContractorBodyNewContractorEmailMax = 320;
+
+export const assignFixTrackContractorBodyNewContractorPhoneMax = 50;
+
+
+
+export const AssignFixTrackContractorBody = zod.object({
+  "contractorId": zod.number().optional(),
+  "newContractor": zod.object({
+  "name": zod.string().min(1).max(assignFixTrackContractorBodyNewContractorNameMax),
+  "company": zod.string().max(assignFixTrackContractorBodyNewContractorCompanyMax).nullish(),
+  "email": zod.string().min(assignFixTrackContractorBodyNewContractorEmailMin).max(assignFixTrackContractorBodyNewContractorEmailMax),
+  "phone": zod.string().max(assignFixTrackContractorBodyNewContractorPhoneMax).nullish()
+}).optional(),
+  "targetDate": zod.date().nullish().describe('Left out keeps the issue\'s target date; null clears it.'),
+  "replace": zod.boolean().optional().describe('Confirms replacing a job already emailed to a contractor.')
+}).describe('Exactly one of contractorId and newContractor.')
+
+export const AssignFixTrackContractorResponse = zod.object({
+  "ok": zod.boolean(),
+  "queueId": zod.number(),
+  "mode": zod.string().optional(),
+  "subject": zod.string().optional(),
+  "bodyHtml": zod.string().optional(),
+  "contractorId": zod.number(),
+  "contractorName": zod.string(),
+  "message": zod.string()
+})
+
+
+/**
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({

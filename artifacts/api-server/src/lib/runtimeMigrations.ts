@@ -1644,7 +1644,7 @@ async function runRuntimeMigrationsOnce() {
       DROP CONSTRAINT IF EXISTS "contractor_email_queue_email_type_check"`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
       ADD CONSTRAINT "contractor_email_queue_email_type_check"
-      CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation'))`);
+      CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation','certificate_followup'))`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "quote_token" DROP NOT NULL`);
     await migrateComplianceScheduleTokens();
     // This credential-scrubbing migration assumes one application instance starts
@@ -2223,6 +2223,9 @@ async function runRuntimeMigrationsOnce() {
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
+
+    // ---- FixTrack contractor visit date and completion (Oct 2026) ----
+    await migrateFixTrackContractorProgress();
 
     // ---- Department recorded with each submission (Oct 2026) ----
     // After every reported table exists; see submitterDepartmentMigration.ts.
@@ -6023,6 +6026,16 @@ async function migrateAssignees() {
       `CREATE INDEX IF NOT EXISTS "IDX_${table}_assignee" ON "${table}" ("assignee_user_id") WHERE "assignee_user_id" IS NOT NULL`,
     ));
   }
+}
+
+/**
+ * A contractor emailed a FixTrack job picks their visit date from the email,
+ * and marks it done the same way; both are shown on the issue. Mirrors
+ * lib/db/src/schema/fix-track.ts.
+ */
+async function migrateFixTrackContractorProgress() {
+  await db.execute(sql`ALTER TABLE "fix_track_issues" ADD COLUMN IF NOT EXISTS "contractor_visit_date" date`);
+  await db.execute(sql`ALTER TABLE "fix_track_issues" ADD COLUMN IF NOT EXISTS "contractor_completed_at" timestamp`);
 }
 
 async function migrateTrackOwnersAndNotifications() {

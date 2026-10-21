@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type ChangeEvent } from "react";
 import { useRoute, useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
 
@@ -48,6 +49,9 @@ interface Issue {
   emailRequestMode?: string | null;
   emailRequestStatus?: string | null;
   emailRequestedAt?: string | null;
+  emailSentAt?: string | null;
+  contractorVisitDate?: string | null;
+  contractorCompletedAt?: string | null;
   mediaUrls: string[];
   siteId?: number | null;
   siteName?: string | null;
@@ -324,6 +328,60 @@ function MediaGallery({ urls, clientId, onDelete }: {
   );
 }
 
+// ── Contractor job ────────────────────────────────────────────────────────────
+
+/** Who has the job outside the business: the contractor, their visit date and whether they finished. */
+function ContractorJobCard({ issue, canAssign, onAssign }: { issue: Issue; canAssign: boolean; onAssign: () => void }) {
+  const day = (value: string) => format(new Date(value), "d MMM yyyy");
+  const jobSent = issue.emailRequestStatus === "sent" && issue.emailRequestMode !== "quote";
+  const waitingApproval = issue.emailRequestStatus === "pending" || issue.emailRequestStatus === "approved";
+  if (!jobSent && !waitingApproval && !canAssign) return null;
+
+  return (
+    <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-3" data-testid="card-contractor-job">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Wrench className="w-4 h-4 text-muted-foreground" /> Contractor
+        </h3>
+        {canAssign && !waitingApproval && issue.emailRequestStatus !== "sending" && (
+          <Button size="sm" variant={jobSent ? "outline" : "default"} onClick={onAssign} className="gap-1.5" data-testid="button-open-assign-contractor">
+            <Send className="w-3.5 h-3.5" /> {jobSent ? "Assign a different contractor" : "Assign a contractor"}
+          </Button>
+        )}
+      </div>
+      {jobSent ? (
+        <ul className="text-sm space-y-1.5">
+          <li>
+            Assigned to <span className="font-medium">{issue.contractorName ?? "a contractor"}</span>
+            {issue.emailSentAt && <span className="text-muted-foreground"> · emailed {day(issue.emailSentAt)}</span>}
+          </li>
+          <li className="flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+            {issue.contractorVisitDate
+              ? <>Visit date: <span className="font-medium">{day(issue.contractorVisitDate)}</span></>
+              : <span className="text-muted-foreground">Waiting for the contractor to pick a visit date</span>}
+          </li>
+          {issue.contractorCompletedAt && (
+            <li className="flex items-center gap-1.5 text-emerald-700">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Contractor marked it done on {day(issue.contractorCompletedAt)}
+            </li>
+          )}
+        </ul>
+      ) : waitingApproval ? (
+        <p className="text-sm text-muted-foreground">
+          The email to {issue.contractorName ?? "the contractor"} is waiting for a manager in Contractor Approvals.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {issue.contractorName
+            ? `${issue.contractorName} is chosen for this job but hasn't been sent it yet.`
+            : "No contractor has this job yet."} Assign one and they get it by email, with a link to pick their visit date.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page Component ───────────────────────────────────────────────────────
 
 export default function FixTrackDetailPage() {
@@ -334,6 +392,11 @@ export default function FixTrackDetailPage() {
   const canEdit = user?.role !== "client_viewer";
   // Owners and admins can delete photos and videos once an issue is finished.
   const canDeleteMedia = user?.role === "consultant" || user?.role === "client_admin";
+  // Owners, Managers and Maintenance managers give jobs to contractors.
+  const isOwner = useCanAdmin();
+  const isMaintenance = useIsMaintenanceManager();
+  const canAssignContractor = (isOwner || isMaintenance) && canEdit;
+  const [assignOpen, setAssignOpen] = useState(false);
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
@@ -663,6 +726,13 @@ export default function FixTrackDetailPage() {
             </div>
           </div>
         </div>
+
+        <ContractorJobCard
+          issue={issue}
+          canAssign={canAssignContractor && (issue.status === "reported" || issue.status === "in_progress")}
+          onAssign={() => setAssignOpen(true)}
+        />
+        <AssignContractorDialog issue={issue} open={assignOpen} onOpenChange={setAssignOpen} onAssigned={loadIssue} />
 
         {/* Description & Media */}
         <div className="space-y-6">
