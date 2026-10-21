@@ -29,7 +29,7 @@ Wednesday 28 October.
 | 10 | Offline working | After launch | None for the recommended route | Phone app first |
 | 11 | Actions from uploaded audit and inspection reports | After launch | Pennies per report (being worked out) | Plan in its own thread |
 | 12 | CareTrack (care homes and care services) | Later | Not yet known | Scope from you |
-| 13 | Kitchens: stock, costings, GP, recipe spec sheets, supplier details, voice | After launch | None, except a few pence per spec sheet read | Ingredients and recipes from the allergen charts work |
+| 13 | Kitchens: stock, costings, GP, recipe spec sheets, supplier details, voice | After launch | None, except a few pence per spec sheet read | Allergen charts built, parked as draft #169 |
 
 My suggested order after launch is the order of the table, with 2, 5 and 11
 built together because they share the same set-up (one AI key and one
@@ -376,8 +376,16 @@ should it keep day to day?
 
 **When:** after launch.
 
-All the parts below share one list of ingredients and recipes, which the thread
-"KitchenTrack allergen charts" is planning now, so they belong together.
+All the parts below share one list of ingredients and recipes, so they belong
+together.
+
+### Allergen charts (built, parked as draft #169)
+
+KitchenTrack allergen charts, with the ingredients list and recipes everything
+below builds on, have been built in the thread "KitchenTrack allergen charts".
+On 21 October you decided to keep it parked as draft #169 for now while the
+core service is launched. It is the first kitchen item to switch on when you're
+ready.
 
 ### Stock control
 
@@ -390,9 +398,8 @@ level.
 worked out from the history so corrections put it right). Kitchen stock should
 use the same approach rather than a second, different system.
 
-**Links to the allergen charts work.** The thread "KitchenTrack allergen
-charts" is planning an ingredients list and recipes now. Kitchen stock items
-should be those same ingredients, so each one carries its allergens once.
+**Links to the allergen charts (#169).** Kitchen stock items should be the
+same ingredients as the allergen charts' ingredients list, so each one carries its allergens once.
 Later, recording that a recipe was made could take its ingredients off stock,
 in the same way a spray takes product off stock in GreenTrack.
 
