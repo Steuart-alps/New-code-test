@@ -1,7 +1,7 @@
 // "Assigned to" people and the personal reminders: the assignee API and its
 // checks on track actions and compliance checks, the due-tomorrow email to
 // the person responsible (once a day, overdue on day 1 then weekly, group
-// tasks on the bell only), the Owner update (Mondays, or daily by setting;
+// tasks on the bell only), per-type reminder timings, the Owner update (Mondays, or daily by setting;
 // Managers see only their departments' sites), and the same-day alerts for
 // urgent actions and new FixTrack issues.
 //
@@ -289,6 +289,56 @@ try {
     assert.ok(update, "a daily Owner update on a Tuesday");
     assert.match(update.subject, /^Daily update for /);
     ok("Owners can switch the update to daily");
+  }
+
+  // ── Reminder timings per type ─────────────────────────────────────────────
+  {
+    const bad = [
+      { nope: { daysBefore: 1, overdueEvery: 7 } },
+      { fire: { daysBefore: 400, overdueEvery: 7 } },
+      { train: { daysBefore: "next_week", overdueEvery: 7 } },
+    ];
+    for (const timings of bad) {
+      const refused = await asOwner("PUT", "/settings", { reminderTimings: JSON.stringify(timings) });
+      assert.equal(refused.status, 400, `${JSON.stringify(timings)}: ${refused.text}`);
+    }
+    assert.equal((await asTom("PUT", "/settings", { reminderTimings: "{}" })).status, 403, "only Owners change it");
+    const saved = await asOwner("PUT", "/settings", { reminderTimings: JSON.stringify({
+      fire: { daysBefore: 3, overdueEvery: 0 },
+      pest: { daysBefore: "next_week", overdueEvery: 7 },
+      compliance: { daysBefore: null, overdueEvery: 7 },
+    }) });
+    assert.equal(saved.status, 200, saved.text);
+    assert.deepEqual(JSON.parse(saved.data.reminderTimings).fire, { daysBefore: 3, overdueEvery: 0 });
+
+    // Friday 2026-10-23, 08:15 BST.
+    await q(`INSERT INTO track_actions (client_id, site_id, module, title, severity, status, due_date, assignee_user_id, owner_name)
+             VALUES ($1, $2, 'fire', 'Service the alarm panel', 'action_required', 'open', '2026-10-26', $3, 'Tom Staff'),
+                    ($1, $2, 'fire', 'Fire drill tomorrow', 'action_required', 'open', '2026-10-24', $3, 'Tom Staff'),
+                    ($1, $2, 'pest', 'Seal the cellar hatch', 'action_required', 'open', '2026-10-28', $3, 'Tom Staff'),
+                    ($1, $2, 'pest', 'Bait station this weekend', 'action_required', 'open', '2026-10-24', $3, 'Tom Staff')`,
+      [A, redLion.id, tom.userId]);
+    await q(`INSERT INTO compliance_items (client_id, site_id, title, status, priority, due_date, assignee_user_id, assigned_to)
+             VALUES ($1, $2, 'Boiler service', 'pending', 'high', '2026-10-24T10:00:00Z', $3, 'Tom Staff')`, [A, redLion.id, tom.userId]);
+    sent.length = 0;
+    const result = await run("2026-10-23T07:15:00Z");
+    assert.equal(result.errors, 0);
+    const [tomMail, ...tomExtra] = to(tom.email);
+    assert.ok(tomMail, "Tom gets his reminders");
+    assert.equal(tomExtra.length, 0);
+    assert.match(tomMail.subject, /^Coming up: 1 item at /);
+    assert.match(tomMail.html, /Coming up[\s\S]*Service the alarm panel/, "FireTrack set to 3 days before");
+    assert.doesNotMatch(tomMail.html, /Fire drill tomorrow/, "not the default day before");
+    assert.match(tomMail.html, /Due next week[\s\S]*Seal the cellar hatch/, "PestTrack set to the Friday email of next week");
+    assert.doesNotMatch(tomMail.html, /Bait station this weekend/, "this weekend was in last Friday's email");
+    assert.doesNotMatch(tomMail.html, /Boiler service/, "compliance check reminders switched off");
+    assert.doesNotMatch(tomMail.html, /Replace fire door closer/, "overdue only once, the day after, when set to once");
+
+    const cleared = await asOwner("PUT", "/settings", { reminderTimings: null });
+    assert.equal(cleared.status, 200, cleared.text);
+    await q(`DELETE FROM track_actions WHERE module = 'pest' OR title IN ('Service the alarm panel', 'Fire drill tomorrow')`);
+    await q(`DELETE FROM compliance_items WHERE title = 'Boiler service'`);
+    ok("Owners set each type's reminder timing, including a Friday email of next week or off");
   }
 
   // ── Same-day alerts ───────────────────────────────────────────────────────
