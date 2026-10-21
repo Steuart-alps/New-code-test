@@ -32,6 +32,7 @@ const MandatoryTwoFactorPage = lazy(() => import("@/pages/mandatory-two-factor")
 const TrialEndedPage = lazy(() => import("@/pages/trial-ended"));
 const TermsPage = lazy(() => import("@/pages/terms"));
 const PrivacyPage = lazy(() => import("@/pages/privacy"));
+const PublicSitePage = lazy(() => import("@/pages/public-site"));
 const PrivacyGovernancePage = lazy(() => import("@/pages/privacy-governance"));
 const VerifyEmailPage = lazy(() => import("@/pages/verify-email"));
 const SchedulePage = lazy(() => import("@/pages/schedule"));
@@ -154,6 +155,8 @@ function ProtectedRoutes() {
   if (location === "/signup") return <SignupPage />;
   if (location === "/terms") return <TermsPage />;
   if (location === "/privacy") return <PrivacyPage />;
+  // Modules, free templates and pricing (see pages/public-site.tsx).
+  if (/^\/(pricing|features|templates)(\/[^/]+)?\/?$/.test(location)) return <PublicSitePage location={location} />;
   if (location.startsWith("/verify-email")) return <VerifyEmailPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
