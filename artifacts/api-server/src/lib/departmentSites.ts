@@ -14,16 +14,17 @@ import { sql, type SQL } from "drizzle-orm";
 // halves stay together.
 
 /** D's site, as SQL (NULL when D spans every site or does not exist). */
-export function departmentSiteIdSql(departmentId: number): SQL {
+export function departmentSiteIdSql(departmentId: number | SQL): SQL {
   return sql`(SELECT dsite.site_id FROM departments dsite WHERE dsite.id = ${departmentId})`;
 }
 
 /**
  * Boolean SQL: the site whose id and department_id columns are given is visible
  * to department `departmentId`. Pass raw column references, e.g.
- * siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId).
+ * siteVisibleSql(sql`s.id`, sql`s.department_id`, deptId). The department can
+ * also be a column, e.g. sql`d.department_id`.
  */
-export function siteVisibleSql(siteIdColumn: SQL, siteDepartmentColumn: SQL, departmentId: number): SQL {
+export function siteVisibleSql(siteIdColumn: SQL, siteDepartmentColumn: SQL, departmentId: number | SQL): SQL {
   // The columns stay outside the departments subquery, so an unqualified
   // column name can't be read as the departments table's own id or site_id.
   return sql`((${siteDepartmentColumn} IS NULL OR ${siteDepartmentColumn} = ${departmentId})
