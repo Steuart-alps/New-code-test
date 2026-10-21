@@ -7,6 +7,7 @@
  */
 import type { CreateFireSafetyCheckRequestNightStaff } from './createFireSafetyCheckRequestNightStaff';
 import type { CreateFireSafetyCheckRequestResult } from './createFireSafetyCheckRequestResult';
+import type { CreateFireSafetyCheckRequestSoundLevelMethod } from './createFireSafetyCheckRequestSoundLevelMethod';
 import type { FireCheckType } from './fireCheckType';
 
 export interface CreateFireSafetyCheckRequest {
@@ -23,4 +24,10 @@ export interface CreateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: CreateFireSafetyCheckRequestNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: CreateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
 }

@@ -223,6 +223,45 @@ try {
   assert.match(template.data.toString('utf8'), /"Call point","Location","Site"/);
   console.log('ok - managers upload a call point list from a spreadsheet, with a preview and a template');
 
+  // ── Sound levels and sleeping areas ─────────────────────────────────────
+  const bedroom = await owner.request('POST', '/fire-safety/call-points', { siteId: rotation.id, name: 'CP8', location: 'Bedroom corridor', sleepingArea: true });
+  assert.equal(bedroom.status, 201, JSON.stringify(bedroom.data));
+  assert.equal(bedroom.data.sleepingArea, true);
+  assert.equal(r1.sleepingArea, false, 'call points are general areas unless set');
+  assert.equal((await owner.request('PUT', `/fire-safety/call-points/${r1.id}`, { sleepingArea: true })).data.sleepingArea, true);
+  assert.equal((await owner.request('PUT', `/fire-safety/call-points/${r1.id}`, { location: 'Reception' })).data.sleepingArea, true,
+    'an edit that does not mention it keeps the setting');
+  assert.equal((await owner.request('PUT', `/fire-safety/call-points/${r1.id}`, { sleepingArea: false })).data.sleepingArea, false);
+  assert.equal((await staff.request('PUT', `/fire-safety/call-points/${r1.id}`, { sleepingArea: true })).status, 403);
+
+  const quiet = await staff.request('POST', '/fire-safety', alarm(rotation.id, {
+    callPointId: bedroom.data.id, soundLevelDb: 71.26, soundLevelMethod: 'phone', soundLevelBedhead: true,
+  }));
+  assert.equal(quiet.status, 201, JSON.stringify(quiet.data));
+  assert.deepEqual([quiet.data.soundLevelDb, quiet.data.soundLevelMethod, quiet.data.soundLevelBedhead], [71.3, 'phone', true]);
+  const typedLevel = await staff.request('POST', '/fire-safety', alarm(rotation.id, { callPointId: r2.id, soundLevelDb: 84 }));
+  assert.deepEqual([typedLevel.data.soundLevelDb, typedLevel.data.soundLevelMethod, typedLevel.data.soundLevelBedhead], [84, 'meter', false],
+    'a typed level is from a sound meter in a general area unless said otherwise');
+  const noLevel = await staff.request('POST', '/fire-safety', alarm(rotation.id, { callPointId: r2.id, soundLevelMethod: 'phone', soundLevelBedhead: true }));
+  assert.deepEqual([noLevel.data.soundLevelDb, noLevel.data.soundLevelMethod, noLevel.data.soundLevelBedhead], [null, null, null],
+    'the sound level is optional and nothing is stored without one');
+  for (const bad of [{ soundLevelDb: 5 }, { soundLevelDb: 200 }, { soundLevelDb: '70' }, { soundLevelDb: 70, soundLevelMethod: 'app' }]) {
+    assert.equal((await staff.request('POST', '/fire-safety', alarm(rotation.id, { callPointId: r2.id, ...bad }))).status, 400, JSON.stringify(bad));
+  }
+  const notesEdit = await staff.request('PUT', `/fire-safety/${quiet.data.id}`, { notes: 'Bedroom 4' });
+  assert.equal(notesEdit.data.soundLevelDb, 71.3, 'an edit that does not touch the sound level keeps it');
+  const remeasured = await staff.request('PUT', `/fire-safety/${quiet.data.id}`, { soundLevelDb: 77, soundLevelMethod: 'meter' });
+  assert.deepEqual([remeasured.data.soundLevelDb, remeasured.data.soundLevelMethod, remeasured.data.soundLevelBedhead], [77, 'meter', true]);
+  const clearedLevel = await staff.request('PUT', `/fire-safety/${typedLevel.data.id}`, { soundLevelDb: null });
+  assert.deepEqual([clearedLevel.data.soundLevelDb, clearedLevel.data.soundLevelMethod, clearedLevel.data.soundLevelBedhead], [null, null, null]);
+  const lightsLevel = await owner.request('POST', '/fire-safety', {
+    checkType: 'emergency_lights', checkDate: today, result: 'pass', siteId: rotation.id, soundLevelDb: 80,
+  });
+  assert.equal(lightsLevel.data.soundLevelDb, null, 'only alarm tests store a sound level');
+  const { rows: [legacyLevel] } = await pool.query('SELECT sound_level_db FROM fire_safety_checks WHERE id = $1', [legacy.id]);
+  assert.equal(legacyLevel.sound_level_db, null, 'older records have no sound level');
+  console.log('ok - alarm tests store an optional sound level, how it was taken and whether at a bedhead');
+
   console.log('FireTrack call point tests passed.');
 } finally {
   await pool.end();

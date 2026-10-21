@@ -7027,6 +7027,19 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        soundLevelDb:
+          type: number
+          nullable: true
+          description: Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).
+        soundLevelMethod:
+          type: string
+          nullable: true
+          enum: [meter, phone]
+          description: How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+        soundLevelBedhead:
+          type: boolean
+          nullable: true
+          description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
         createdAt:
           type: string
           format: date-time
@@ -7077,6 +7090,19 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        soundLevelDb:
+          type: number
+          nullable: true
+          description: Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).
+        soundLevelMethod:
+          type: string
+          nullable: true
+          enum: [meter, phone]
+          description: How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+        soundLevelBedhead:
+          type: boolean
+          nullable: true
+          description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
       required:
         - checkType
         - checkDate
@@ -7115,6 +7141,19 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        soundLevelDb:
+          type: number
+          nullable: true
+          description: Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).
+        soundLevelMethod:
+          type: string
+          nullable: true
+          enum: [meter, phone]
+          description: How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+        soundLevelBedhead:
+          type: boolean
+          nullable: true
+          description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
 
     FireCallPoint:
       type: object
@@ -7133,6 +7172,9 @@ components:
         sortOrder:
           type: integer
           description: Place in the site's test rotation (1 = first).
+        sleepingArea:
+          type: boolean
+          description: Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.
         archivedAt:
           type: string
           format: date-time
@@ -7169,6 +7211,9 @@ components:
         location:
           type: string
           nullable: true
+        sleepingArea:
+          type: boolean
+          description: Near bedrooms or other sleeping areas (75 dB at the bedhead).
       required:
         - siteId
         - name
@@ -7181,6 +7226,9 @@ components:
         location:
           type: string
           nullable: true
+        sleepingArea:
+          type: boolean
+          description: Near bedrooms or other sleeping areas (75 dB at the bedhead).
         archived:
           type: boolean
 

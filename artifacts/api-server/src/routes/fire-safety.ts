@@ -13,6 +13,7 @@ import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staff
 import { FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, effectiveFireFrequencies, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
 import { callPointLabel, callPointRotation } from "../lib/fireCallPointRotation";
+import { SOUND_LEVEL_METHODS } from "../lib/fireSoundLevel";
 
 const router = Router();
 
@@ -54,12 +55,20 @@ const createSchema = z.object({
   callPoint: z.string().trim().max(200).nullable().optional(),
   // Fire drills only.
   nightStaff: z.enum(NIGHT_STAFF_VALUES).nullable().optional(),
+  // Weekly alarm tests, optional: the sound level heard (lib/fireSoundLevel).
+  soundLevelDb: z.number().min(20).max(140).nullable().optional(),
+  soundLevelMethod: z.enum(SOUND_LEVEL_METHODS).nullable().optional(),
+  soundLevelBedhead: z.boolean().nullable().optional(),
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
 
-type FireDetails = Pick<FireSafetyCheck, "callPointId" | "callPoint" | "nightStaff">;
-type FireDetailInput = { callPointId?: number | null; callPoint?: string | null; nightStaff?: FireDetails["nightStaff"] };
+type FireDetails = Pick<FireSafetyCheck,
+  "callPointId" | "callPoint" | "nightStaff" | "soundLevelDb" | "soundLevelMethod" | "soundLevelBedhead">;
+type FireDetailInput = {
+  callPointId?: number | null; callPoint?: string | null; nightStaff?: FireDetails["nightStaff"];
+  soundLevelDb?: number | null; soundLevelMethod?: FireDetails["soundLevelMethod"]; soundLevelBedhead?: boolean | null;
+};
 
 /**
  * The call point and night-staff fields a check stores. A weekly alarm test
@@ -72,7 +81,9 @@ async function resolveFireDetails(
   clientId: number, checkType: string, siteId: number | null, input: FireDetailInput,
   existing?: FireSafetyCheck,
 ): Promise<FireDetails | { error: string }> {
-  const details: FireDetails = { callPointId: null, callPoint: null, nightStaff: null };
+  const details: FireDetails = {
+    callPointId: null, callPoint: null, nightStaff: null, soundLevelDb: null, soundLevelMethod: null, soundLevelBedhead: null,
+  };
   if (checkType === "alarm") {
     let callPointId = existing?.callPointId ?? null;
     let callPoint = existing?.callPoint ?? null;
@@ -94,6 +105,13 @@ async function resolveFireDetails(
     if (!callPoint && (!existing || existing.callPoint)) return { error: "Say which call point was tested" };
     details.callPointId = callPointId;
     details.callPoint = callPoint;
+    // The sound level is optional. Sending a blank level clears all three.
+    const soundLevelDb = input.soundLevelDb !== undefined ? input.soundLevelDb : existing?.soundLevelDb ?? null;
+    if (soundLevelDb != null) {
+      details.soundLevelDb = Math.round(soundLevelDb * 10) / 10;
+      details.soundLevelMethod = (input.soundLevelMethod !== undefined ? input.soundLevelMethod : existing?.soundLevelMethod) ?? "meter";
+      details.soundLevelBedhead = (input.soundLevelBedhead !== undefined ? input.soundLevelBedhead : existing?.soundLevelBedhead) ?? false;
+    }
   }
   if (checkType === "fire_drill") {
     const nightStaff = input.nightStaff !== undefined ? input.nightStaff : existing?.nightStaff ?? null;
@@ -306,9 +324,10 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const performer = await resolveStaffPerformerUpdate(clientId, parsed.data.staffRosterId, parsed.data.performedBy,
     existing.staffRosterId, existing.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  const { callPointId, callPoint, nightStaff, ...changes } = parsed.data;
+  const { callPointId, callPoint, nightStaff, soundLevelDb, soundLevelMethod, soundLevelBedhead, ...changes } = parsed.data;
   const siteId = "siteId" in parsed.data ? parsed.data.siteId ?? null : existing.siteId;
-  const details = await resolveFireDetails(clientId, existing.checkType, siteId, { callPointId, callPoint, nightStaff }, existing);
+  const details = await resolveFireDetails(clientId, existing.checkType, siteId,
+    { callPointId, callPoint, nightStaff, soundLevelDb, soundLevelMethod, soundLevelBedhead }, existing);
   if ("error" in details) return res.status(400).json({ error: details.error });
 
   const [updated] = await db
@@ -362,10 +381,12 @@ const createCallPointSchema = z.object({
   siteId: z.number().int().positive().nullable(),
   name: callPointNameSchema,
   location: callPointLocationSchema,
+  sleepingArea: z.boolean().optional(),
 }).strict();
 const updateCallPointSchema = z.object({
   name: callPointNameSchema.optional(),
   location: callPointLocationSchema,
+  sleepingArea: z.boolean().optional(),
   archived: z.boolean().optional(),
 }).strict();
 const orderCallPointsSchema = z.object({
@@ -392,6 +413,7 @@ async function listCallPoints(clientId: number, conditions: ReturnType<typeof eq
     name: fireCallPointsTable.name,
     location: fireCallPointsTable.location,
     sortOrder: fireCallPointsTable.sortOrder,
+    sleepingArea: fireCallPointsTable.sleepingArea,
     archivedAt: fireCallPointsTable.archivedAt,
     createdAt: fireCallPointsTable.createdAt,
     lastTestedDate: lastTest.lastTestedDate,
@@ -499,7 +521,7 @@ router.post("/call-points", requireAuth, denyViewers, requireClientAdmin, async 
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const parsed = createCallPointSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Give the call point a name" });
-  const { siteId, name, location } = parsed.data;
+  const { siteId, name, location, sleepingArea } = parsed.data;
   const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
   if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
@@ -507,7 +529,10 @@ router.post("/call-points", requireAuth, denyViewers, requireClientAdmin, async 
     return res.status(409).json({ error: "This site already has a call point with that name" });
   }
   const [created] = await db.insert(fireCallPointsTable)
-    .values({ clientId, siteId, name, location: location ?? null, sortOrder: await nextSortOrder(clientId, siteId), createdBy: req.currentUser!.id })
+    .values({
+      clientId, siteId, name, location: location ?? null, sleepingArea: sleepingArea ?? false,
+      sortOrder: await nextSortOrder(clientId, siteId), createdBy: req.currentUser!.id,
+    })
     .returning();
   await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: created.id, action: "created", after: created });
   const [withRotation] = await listCallPoints(clientId, [eq(fireCallPointsTable.id, created.id)]);
@@ -567,6 +592,7 @@ router.put("/call-points/:id", requireAuth, denyViewers, requireClientAdmin, asy
   }
   const name = parsed.data.name ?? existing.name;
   const location = parsed.data.location === undefined ? existing.location : parsed.data.location;
+  const sleepingArea = parsed.data.sleepingArea ?? existing.sleepingArea;
   const archivedAt = parsed.data.archived === undefined ? existing.archivedAt
     : parsed.data.archived ? existing.archivedAt ?? new Date() : null;
   if (!archivedAt && await duplicateCallPoint(clientId, existing.siteId, name, id)) {
@@ -575,7 +601,7 @@ router.put("/call-points/:id", requireAuth, denyViewers, requireClientAdmin, asy
   // A restored call point rejoins the rotation at the end.
   const sortOrder = existing.archivedAt && !archivedAt ? await nextSortOrder(clientId, existing.siteId) : existing.sortOrder;
   const [updated] = await db.update(fireCallPointsTable)
-    .set({ name, location, archivedAt, sortOrder, updatedAt: new Date() })
+    .set({ name, location, sleepingArea, archivedAt, sortOrder, updatedAt: new Date() })
     .where(and(eq(fireCallPointsTable.id, id), eq(fireCallPointsTable.clientId, clientId)))
     .returning();
   await appendAuditEvent(req, { clientId, entityType: "fire_call_point", entityId: id, action: "updated", before: existing, after: updated });
