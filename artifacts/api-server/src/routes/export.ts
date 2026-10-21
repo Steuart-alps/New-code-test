@@ -326,6 +326,8 @@ green-track/
   puwer-inspections.csv          — PUWER inspections and NSTS sprayer tests
   service-records.csv            — machinery service records
   defects.csv                    — machinery defects
+  hour-readings.csv              — hour meter readings (daily checks, fuel
+                                   logs and services keep their own)
 tree-track/
   inspections.csv                — tree inspection records
 bike-track/
@@ -727,6 +729,8 @@ router.get(
         await out.csv("green-track/service-records.csv", async () => (await db.execute(sql`SELECT * FROM green_service_records WHERE client_id = ${cid} ORDER BY service_date DESC, id`)).rows);
 
         await out.csv("green-track/defects.csv", async () => (await db.execute(sql`SELECT * FROM green_defects WHERE client_id = ${cid} ORDER BY report_date DESC, id`)).rows);
+
+        await out.csv("green-track/hour-readings.csv", async () => (await db.execute(sql`SELECT * FROM green_hour_readings WHERE client_id = ${cid} ORDER BY reading_date DESC, id`)).rows);
 
         // ── TreeTrack ─────────────────────────────────────────────────────────
         await out.csv("tree-track/inspections.csv", () => db.select().from(treeInspectionsTable).where(eq(treeInspectionsTable.clientId, cid)));

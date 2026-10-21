@@ -209,6 +209,7 @@ async function main() {
     "room-track/rooms.csv", "room-track/checks.csv",
     "swim-track/first-aid-checks.csv",
     "green-track/puwer-inspections.csv", "green-track/service-records.csv", "green-track/defects.csv",
+    "green-track/hour-readings.csv",
     "incidents/riddor-events.csv",
   ];
   try {

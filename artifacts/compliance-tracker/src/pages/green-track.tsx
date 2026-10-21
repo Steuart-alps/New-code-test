@@ -286,6 +286,7 @@ interface PreUseCheck {
     note?: string;
   }> | null;
   fuelLevel: string | null;
+  hourMeter?: number | null;
   submittedAt: string | null;
 }
 
@@ -366,6 +367,8 @@ interface StatusData {
   criticalDefects: number;
   checkedTodayCount: number;
   overdueService: number;
+  /** Machines whose hour meter has reached the latest service's "next service at" hours. */
+  overdueServiceByHours?: number;
   /** Active sprayers with an NSTS sprayer type, and when each is next due. */
   nstsSprayers?: NstsSprayerRow[];
   nstsOverdue?: number;
@@ -877,7 +880,7 @@ function PreUseDialog({
     fluidLevelsOk: null as boolean | null, tyresOk: null as boolean | null,
     bladesOk: null as boolean | null, guardsOk: null as boolean | null,
     controlsOk: null as boolean | null, lightsOk: null as boolean | null,
-    cleanlinessOk: null as boolean | null, notes: "",
+    cleanlinessOk: null as boolean | null, notes: "", hourMeter: "",
   };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
@@ -895,6 +898,7 @@ function PreUseDialog({
       bladesOk: check.bladesOk, guardsOk: check.guardsOk,
       controlsOk: check.controlsOk, lightsOk: check.lightsOk,
       cleanlinessOk: check.cleanlinessOk, notes: check.notes ?? "",
+      hourMeter: (check.hourMeter ?? (check as any).hour_meter) != null ? String(check.hourMeter ?? (check as any).hour_meter) : "",
     } : { ...blank, machineId: presetMachineId ?? "" });
   };
 
@@ -920,6 +924,7 @@ function PreUseDialog({
         ...vals,
         defectNoted: vals.guardsOk === false || vals.bladesOk === false || autoResult === "fail",
         result: autoResult, notes: form.notes.trim() || null,
+        hourMeter: form.hourMeter.trim() ? Number(form.hourMeter) : null,
       };
       if (check) {
         await apiFetch(`/green-track/pre-use-checks/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -972,6 +977,12 @@ function PreUseDialog({
                     onRosterIdChange={(value) => setForm(f => ({ ...f, operatorRosterId: value }))} />
                 );
               })()}
+            </div>
+            <div>
+              <Label>Hour meter reading <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Input type="number" step="0.1" min="0" inputMode="decimal" className="mt-1 rounded-sm" value={form.hourMeter}
+                data-testid="input-pre-use-hour-meter"
+                onChange={e => setForm(f => ({ ...f, hourMeter: e.target.value }))} placeholder="e.g. 1234.5" />
             </div>
           </div>
 
@@ -1597,6 +1608,288 @@ function NstsSprayerPanel({ sprayers, hasSprayers, canAdmin, onLogTest }: {
   );
 }
 
+// ─── Hour meter readings ──────────────────────────────────────────────────────
+
+interface MachineHours {
+  machineId: number;
+  machineName: string;
+  machineType: string;
+  currentHours: number | null;
+  lastReadingDate: string | null;
+  hoursLast7Days: number | null;
+  hoursLast30Days: number | null;
+  lastServiceDate: string | null;
+  nextServiceHours: number | null;
+  hoursToService: number | null;
+  serviceHoursState: "overdue" | "due_soon" | "ok" | "none";
+}
+
+interface HourReading {
+  id: number | null;
+  key: string;
+  source: "reading" | "pre_use_check" | "fuel_log" | "service";
+  sourceLabel: string;
+  machineId: number;
+  machineName: string;
+  readingDate: string;
+  hours: number;
+  recordedBy: string | null;
+  recordedByRosterId: number | null;
+  notes: string | null;
+}
+
+const hoursText = (value: number | null | undefined) =>
+  value == null ? "—" : `${value.toLocaleString("en-GB", { maximumFractionDigits: 1 })} h`;
+
+function HourReadingDialog({
+  open, onClose, reading, machines, hours, onSaved, presetMachineId,
+}: {
+  open: boolean; onClose: () => void;
+  reading?: HourReading | null;
+  machines: Machine[];
+  hours: MachineHours[];
+  onSaved: () => void;
+  presetMachineId?: string;
+}) {
+  const { toast } = useToast();
+  const request = useActiveClientApi();
+  const today = new Date().toISOString().split("T")[0];
+  const blank = { machineId: "", readingDate: today, hours: "", recordedBy: "", recordedByRosterId: null as number | null, notes: "" };
+  const [form, setForm] = useState(blank);
+  const [saving, setSaving] = useState(false);
+  // Set when the server says the reading is lower than an earlier one.
+  const [lowerWarning, setLowerWarning] = useState<string | null>(null);
+  const [meterReplaced, setMeterReplaced] = useState(false);
+  const last = hours.find(h => String(h.machineId) === form.machineId) ?? null;
+
+  const reset = () => {
+    setLowerWarning(null);
+    setMeterReplaced(false);
+    setForm(reading ? {
+      machineId: String(reading.machineId), readingDate: reading.readingDate, hours: String(reading.hours),
+      recordedBy: reading.recordedBy ?? "", recordedByRosterId: reading.recordedByRosterId, notes: reading.notes ?? "",
+    } : { ...blank, machineId: presetMachineId ?? "" });
+  };
+
+  const handleSave = async () => {
+    if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
+    if (!form.hours.trim() || !(Number(form.hours) >= 0)) { toast({ title: "Enter the hour meter reading", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const body = {
+        machineId: parseInt(form.machineId, 10), readingDate: form.readingDate, hours: Number(form.hours),
+        recordedBy: form.recordedBy.trim() || null, recordedByRosterId: form.recordedByRosterId,
+        notes: form.notes.trim() || null, meterReplaced,
+      };
+      const response = await request(reading ? `/green-track/hour-readings/${reading.id}` : "/green-track/hour-readings", {
+        method: reading ? "PUT" : "POST", body: JSON.stringify(body),
+      });
+      if (response.status === 409) {
+        const data = await response.json().catch(() => null);
+        if (data?.code === "HOURS_LOWER_THAN_EARLIER") { setLowerWarning(data.error); return; }
+      }
+      if (!response.ok) throw new Error(await getApiErrorMessage(response, "Could not save the reading"));
+      toast({ title: reading ? "Reading updated" : "Hour meter reading saved" });
+      onSaved(); onClose();
+    } catch (err: any) {
+      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
+        <DialogHeader>
+          <DialogTitle>{reading ? "Edit Hour Meter Reading" : "Log Hour Meter Reading"}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-1">
+          <div>
+            <Label>Machine *</Label>
+            <Select value={form.machineId || "_none"} disabled={!!reading}
+              onValueChange={v => { setLowerWarning(null); setForm(f => ({ ...f, machineId: v === "_none" ? "" : v })); }}>
+              <SelectTrigger className="mt-1 rounded-sm" data-testid="select-hours-machine"><SelectValue placeholder="Select machine" /></SelectTrigger>
+              <SelectContent>
+                {machines.filter(m => m.active).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {!reading && last?.currentHours != null && (
+              <p className="text-xs text-muted-foreground mt-1" data-testid="text-last-reading">
+                Last reading {hoursText(last.currentHours)} on {fmt(last.lastReadingDate)}
+              </p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Date *</Label>
+              <Input type="date" className="mt-1 rounded-sm" value={form.readingDate}
+                onChange={e => { setLowerWarning(null); setForm(f => ({ ...f, readingDate: e.target.value })); }} />
+            </div>
+            <div>
+              <Label>Hour meter *</Label>
+              <Input type="number" step="0.1" min="0" inputMode="decimal" className="mt-1 rounded-sm" value={form.hours}
+                data-testid="input-hours" placeholder="e.g. 1234.5"
+                onChange={e => { setLowerWarning(null); setForm(f => ({ ...f, hours: e.target.value })); }} />
+            </div>
+          </div>
+          <div>
+            <Label>Recorded by <span className="text-muted-foreground text-xs">optional</span></Label>
+            <StaffPerformerSelect label="Recorded by" value={form.recordedBy}
+              onChange={v => setForm(f => ({ ...f, recordedBy: v }))}
+              onRosterIdChange={v => setForm(f => ({ ...f, recordedByRosterId: v }))} optional />
+          </div>
+          <div>
+            <Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label>
+            <Textarea className="mt-1 rounded-sm" value={form.notes} rows={2}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+          {lowerWarning && (
+            <div role="alert" className="rounded-sm border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200" data-testid="alert-hours-lower">
+              <p>{lowerWarning}</p>
+              <label className="mt-2 flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={meterReplaced} onChange={e => setMeterReplaced(e.target.checked)} data-testid="checkbox-meter-replaced" />
+                The hour meter was replaced or reset
+              </label>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSave} disabled={saving || (!!lowerWarning && !meterReplaced)}>
+            {saving ? "Saving…" : reading ? "Save changes" : "Save reading"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const SERVICE_HOURS_STYLES: Record<string, string> = {
+  overdue:  "text-destructive font-medium",
+  due_soon: "text-amber-600 dark:text-amber-400 font-medium",
+  ok:       "",
+  none:     "text-muted-foreground",
+};
+
+function HoursTab({ hours, readings, loading, filterMachine, q, canAdmin, onLog, onEdit, onDelete }: {
+  hours: MachineHours[];
+  readings: HourReading[];
+  loading: boolean;
+  filterMachine: string;
+  q: string;
+  canAdmin: boolean;
+  onLog: (machineId?: number) => void;
+  onEdit: (reading: HourReading) => void;
+  onDelete: (reading: HourReading) => void;
+}) {
+  const shownMachines = hours.filter(h =>
+    (!filterMachine || String(h.machineId) === filterMachine) && h.machineName.toLowerCase().includes(q));
+  const shownReadings = readings.filter(r => r.machineName.toLowerCase().includes(q) || (r.recordedBy ?? "").toLowerCase().includes(q));
+  if (loading) return <div className="py-10 text-center text-sm text-muted-foreground animate-pulse">Loading hours…</div>;
+  return (
+    <>
+      <div className="text-xs text-muted-foreground bg-muted/40 rounded-sm px-3 py-2 flex items-start gap-2">
+        <Gauge className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+        <span>Hours come from readings logged here, on pre-use checks, fuel logs and services. Fill in "Next service (hours)" when you log a service and GreenTrack shows when those hours are reached.</span>
+      </div>
+      {shownMachines.length === 0 ? (
+        <div className="text-center py-10 border border-dashed rounded-sm">
+          <Gauge className="w-8 h-8 mx-auto text-muted-foreground/30 mb-2" />
+          <p className="text-sm text-muted-foreground">No active machines.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" data-testid="table-machine-hours">
+            <thead>
+              <tr className="border-b text-muted-foreground text-xs">
+                <th className="text-left font-medium py-2 pr-4">Machine</th>
+                <th className="text-left font-medium py-2 pr-4">Hour meter</th>
+                <th className="text-left font-medium py-2 pr-4 hidden md:table-cell">Last reading</th>
+                <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Last 7 days</th>
+                <th className="text-left font-medium py-2 pr-4 hidden sm:table-cell">Last 30 days</th>
+                <th className="text-left font-medium py-2 pr-4">Next service</th>
+                <th className="w-24" />
+              </tr>
+            </thead>
+            <tbody>
+              {shownMachines.map(h => (
+                <tr key={h.machineId} className="border-b last:border-0" data-testid={`hours-row-${h.machineId}`}>
+                  <td className="py-2 pr-4 font-medium">{h.machineName}</td>
+                  <td className="py-2 pr-4 tabular-nums" data-testid={`hours-current-${h.machineId}`}>{hoursText(h.currentHours)}</td>
+                  <td className="py-2 pr-4 tabular-nums hidden md:table-cell">{fmt(h.lastReadingDate)}</td>
+                  <td className="py-2 pr-4 tabular-nums hidden sm:table-cell" data-testid={`hours-7-${h.machineId}`}>{hoursText(h.hoursLast7Days)}</td>
+                  <td className="py-2 pr-4 tabular-nums hidden sm:table-cell">{hoursText(h.hoursLast30Days)}</td>
+                  <td className={cn("py-2 pr-4 tabular-nums", SERVICE_HOURS_STYLES[h.serviceHoursState])} data-testid={`hours-service-${h.machineId}`}>
+                    {h.nextServiceHours == null ? "—" : (
+                      <>
+                        {h.serviceHoursState === "overdue" && <AlertTriangle className="inline w-3 h-3 mr-1" />}
+                        at {hoursText(h.nextServiceHours)}
+                        {h.hoursToService != null && (h.hoursToService > 0
+                          ? ` (${hoursText(h.hoursToService)} to go)`
+                          : ` (overdue by ${hoursText(-h.hoursToService)})`)}
+                      </>
+                    )}
+                  </td>
+                  <td className="py-2 text-right">
+                    <Button size="sm" variant="outline" className="h-7 text-xs rounded-sm" onClick={() => onLog(h.machineId)}>
+                      Log reading
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="space-y-2">
+        <p className="text-sm font-semibold">Readings</p>
+        {shownReadings.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No hour meter readings yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" data-testid="table-hour-readings">
+              <thead>
+                <tr className="border-b text-muted-foreground text-xs">
+                  <th className="text-left font-medium py-2 pr-4">Date</th>
+                  <th className="text-left font-medium py-2 pr-4">Machine</th>
+                  <th className="text-left font-medium py-2 pr-4">Hours</th>
+                  <th className="text-left font-medium py-2 pr-4">From</th>
+                  <th className="text-left font-medium py-2 pr-4 hidden md:table-cell">Recorded by</th>
+                  <th className="w-16" />
+                </tr>
+              </thead>
+              <tbody>
+                {shownReadings.map(r => (
+                  <tr key={r.key} className="border-b last:border-0">
+                    <td className="py-2 pr-4 tabular-nums">{fmt(r.readingDate)}</td>
+                    <td className="py-2 pr-4">{r.machineName}</td>
+                    <td className="py-2 pr-4 tabular-nums">{hoursText(r.hours)}</td>
+                    <td className="py-2 pr-4 text-xs text-muted-foreground">{r.sourceLabel}</td>
+                    <td className="py-2 pr-4 text-muted-foreground hidden md:table-cell">{r.recordedBy ?? "—"}</td>
+                    <td className="py-2 text-right whitespace-nowrap">
+                      {r.id != null && (
+                        <>
+                          <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Edit reading" onClick={() => onEdit(r)}>
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          {canAdmin && (
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" aria-label="Delete reading" onClick={() => onDelete(r)}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 // ─── Fuel log dialog ──────────────────────────────────────────────────────────
 
 function FuelLogDialog({
@@ -1721,7 +2014,7 @@ function FuelLogDialog({
   );
 }
 
-type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "fuel" | "actions";
+type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "hours" | "fuel" | "actions";
 
 export default function GreenTrackPage() {
   const { user, activeClientId } = useAuth();
@@ -1751,6 +2044,9 @@ export default function GreenTrackPage() {
   const [puwerDefaults, setPuwerDefaults] = useState<{ machineId: number; inspectionType: string } | null>(null);
   const [fuelDialog, setFuelDialog] = useState(false);
   const [editFuel, setEditFuel] = useState<FuelLog | null>(null);
+  const [hoursDialog, setHoursDialog] = useState(false);
+  const [editReading, setEditReading] = useState<HourReading | null>(null);
+  const [hoursMachineId, setHoursMachineId] = useState<string | undefined>();
   const [deleteId, setDeleteId] = useState<{ type: string; id: number } | null>(null);
   // A machine chosen by a scanned QR label, for the form the label opened.
   const [scanMachineId, setScanMachineId] = useState<string | undefined>();
@@ -1765,6 +2061,7 @@ export default function GreenTrackPage() {
     if (open === "pre-use") { setActiveTab("pre-use"); setEditPreUse(null); setPreUseDialog(true); }
     else if (open === "defect") { setActiveTab("defects"); setEditDefect(null); setDefectDialog(true); }
     else if (open === "fuel") { setActiveTab("fuel"); setEditFuel(null); setFuelDialog(true); }
+    else if (open === "hours") { setActiveTab("hours"); setEditReading(null); setHoursMachineId(machineId); setHoursDialog(true); }
     else if (open === "service" && canAdmin) { setActiveTab("services"); setEditService(null); setServiceDialog(true); }
     else if (open === "inspection" && canAdmin) { setActiveTab("puwer"); setEditPuwer(null); setPuwerDialog(true); }
   }, []);
@@ -1802,6 +2099,16 @@ export default function GreenTrackPage() {
     queryFn: () => apiFetch<PuwerInspection[]>(`/green-track/puwer-inspections${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "puwer",
   });
+  const { data: machineHours, isLoading: hoursLoading } = useQuery({
+    queryKey: ["green-hours", activeClientId],
+    queryFn: () => apiFetch<{ dueSoonHours: number; machines: MachineHours[] }>("/green-track/hours"),
+    enabled: activeTab === "hours" || hoursDialog,
+  });
+  const { data: hourReadings = [] } = useQuery({
+    queryKey: ["green-hour-readings", activeClientId, filterMachine],
+    queryFn: () => apiFetch<HourReading[]>(`/green-track/hour-readings${filterMachine ? `?machineId=${filterMachine}` : ""}`),
+    enabled: activeTab === "hours",
+  });
   const { data: fuelLogs = [], isLoading: fuelLoading } = useQuery({
     queryKey: ["green-fuel", activeClientId, filterMachine],
     queryFn: () => apiFetch<FuelLog[]>(`/green-track/fuel-logs${filterMachine ? `?machineId=${filterMachine}` : ""}`),
@@ -1816,6 +2123,8 @@ export default function GreenTrackPage() {
     queryClient.invalidateQueries({ queryKey: ["green-puwer"] });
     queryClient.invalidateQueries({ queryKey: ["green-fuel"] });
     queryClient.invalidateQueries({ queryKey: ["green-status"] });
+    queryClient.invalidateQueries({ queryKey: ["green-hours"] });
+    queryClient.invalidateQueries({ queryKey: ["green-hour-readings"] });
   };
 
   // Delete handler
@@ -1826,6 +2135,9 @@ export default function GreenTrackPage() {
       preUse: `/green-track/pre-use-checks/${deleteId.id}`,
       service: `/green-track/service-records/${deleteId.id}`,
       defect: `/green-track/defects/${deleteId.id}`,
+      "puwer-inspections": `/green-track/puwer-inspections/${deleteId.id}`,
+      "fuel-logs": `/green-track/fuel-logs/${deleteId.id}`,
+      "hour-readings": `/green-track/hour-readings/${deleteId.id}`,
     };
     try {
       await apiFetch(paths[deleteId.type], { method: "DELETE" });
@@ -1888,6 +2200,7 @@ export default function GreenTrackPage() {
     { key: "services", label: "Services",    icon: Wrench },
     { key: "defects",  label: "Defects",     icon: ShieldAlert,    count: status?.openDefects || undefined },
     { key: "puwer",    label: "Inspections", icon: ClipboardCheck, count: status?.nstsOverdue || undefined },
+    { key: "hours",    label: "Hours",       icon: Gauge },
     { key: "actions",  label: "Actions",     icon: CheckCircle2 },
     ...(showFuelTab ? [{ key: "fuel" as Tab, label: "Fuel / Oil", icon: Fuel }] : []),
   ];
@@ -1953,7 +2266,7 @@ export default function GreenTrackPage() {
               {
                 label: "Services overdue",
                 value: status.overdueService,
-                sub: "past next-service date",
+                sub: status.overdueServiceByHours ? `past next-service date or hours (${status.overdueServiceByHours} by hours)` : "past next-service date or hours",
                 icon: Gauge,
                 cls: status.overdueService > 0 ? "text-amber-600" : "text-emerald-600",
               },
@@ -2040,6 +2353,11 @@ export default function GreenTrackPage() {
             {activeTab === "puwer" && canAdmin && (
               <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditPuwer(null); setPuwerDialog(true); }}>
                 <Plus className="w-3.5 h-3.5" /> Log inspection
+              </Button>
+            )}
+            {activeTab === "hours" && (
+              <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditReading(null); setHoursMachineId(filterMachine || undefined); setHoursDialog(true); }}>
+                <Plus className="w-3.5 h-3.5" /> Log hours
               </Button>
             )}
             {activeTab === "fuel" && (
@@ -2560,6 +2878,17 @@ export default function GreenTrackPage() {
           </>
         )}
 
+        {/* ── Hours tab ──────────────────────────────────────────────────── */}
+        {activeTab === "hours" && (
+          <HoursTab
+            hours={machineHours?.machines ?? []} readings={hourReadings} loading={hoursLoading}
+            filterMachine={filterMachine} q={q} canAdmin={canAdmin}
+            onLog={(machineId) => { setEditReading(null); setHoursMachineId(machineId ? String(machineId) : undefined); setHoursDialog(true); }}
+            onEdit={(reading) => { setEditReading(reading); setHoursDialog(true); }}
+            onDelete={(reading) => reading.id != null && setDeleteId({ type: "hour-readings", id: reading.id })}
+          />
+        )}
+
         {/* ── Fuel / Oil log tab ─────────────────────────────────────────── */}
         {activeTab === "fuel" && (
           <>
@@ -2660,6 +2989,10 @@ export default function GreenTrackPage() {
       <FuelLogDialog open={fuelDialog} onClose={() => { setFuelDialog(false); setEditFuel(null); setScanMachineId(undefined); }}
         presetMachineId={scanMachineId}
         log={editFuel} machines={machines} onSaved={invalidate} />
+
+      <HourReadingDialog open={hoursDialog}
+        onClose={() => { setHoursDialog(false); setEditReading(null); setHoursMachineId(undefined); setScanMachineId(undefined); }}
+        reading={editReading} presetMachineId={hoursMachineId} machines={machines} hours={machineHours?.machines ?? []} onSaved={invalidate} />
 
       <AlertDialog open={!!deleteId} onOpenChange={v => { if (!v) setDeleteId(null); }}>
         <AlertDialogContent className="rounded-sm">

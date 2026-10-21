@@ -3461,6 +3461,112 @@ export const UpdateGreenTrackConfigResponse = zod.object({
 
 
 /**
+ * Current hours are the latest reading (by date) from standalone hour readings, pre-use checks, fuel logs and service records.
+ * @summary Each active machine's hour meter, hours used and service due by hours
+ */
+export const GetGreenTrackMachineHoursResponse = zod.object({
+  "dueSoonHours": zod.number(),
+  "machines": zod.array(zod.object({
+  "machineId": zod.number(),
+  "machineName": zod.string(),
+  "machineType": zod.string(),
+  "siteId": zod.number().nullish(),
+  "currentHours": zod.number().nullable(),
+  "lastReadingDate": zod.string().nullable(),
+  "hoursLast7Days": zod.number().nullable(),
+  "hoursLast30Days": zod.number().nullable(),
+  "lastServiceDate": zod.string().nullable(),
+  "nextServiceHours": zod.number().nullable(),
+  "hoursToService": zod.number().nullable(),
+  "serviceHoursState": zod.enum(['overdue', 'due_soon', 'ok', 'none'])
+}))
+})
+
+
+/**
+ * @summary List hour meter readings from every source, newest first
+ */
+export const ListGreenTrackHourReadingsQueryParams = zod.object({
+  "machineId": zod.coerce.number().optional(),
+  "limit": zod.coerce.number().optional()
+})
+
+export const ListGreenTrackHourReadingsResponseItem = zod.object({
+  "id": zod.number().nullish().describe('Set only for standalone readings, which are edited on this route'),
+  "key": zod.string(),
+  "source": zod.enum(['reading', 'pre_use_check', 'fuel_log', 'service']),
+  "sourceLabel": zod.string(),
+  "sourceId": zod.number(),
+  "machineId": zod.number(),
+  "machineName": zod.string(),
+  "machineType": zod.string().optional(),
+  "readingDate": zod.string(),
+  "hours": zod.number(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+export const ListGreenTrackHourReadingsResponse = zod.array(ListGreenTrackHourReadingsResponseItem)
+
+
+/**
+ * @summary Log an hour meter reading
+ */
+export const CreateGreenTrackHourReadingBody = zod.object({
+  "machineId": zod.number(),
+  "readingDate": zod.date(),
+  "hours": zod.number(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "meterReplaced": zod.boolean().optional().describe('Confirms a reading lower than an earlier one (meter replaced or reset)')
+})
+
+export const CreateGreenTrackHourReadingResponse = zod.object({
+  "id": zod.number().optional(),
+  "machine_id": zod.number().optional(),
+  "reading_date": zod.string().optional(),
+  "hours": zod.number().optional()
+}).describe('The stored reading (database column names)')
+
+
+/**
+ * @summary Correct a standalone hour meter reading
+ */
+export const UpdateGreenTrackHourReadingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackHourReadingBody = zod.object({
+  "readingDate": zod.date().optional(),
+  "hours": zod.number().optional(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "meterReplaced": zod.boolean().optional()
+})
+
+export const UpdateGreenTrackHourReadingResponse = zod.object({
+  "id": zod.number().optional(),
+  "machine_id": zod.number().optional(),
+  "reading_date": zod.string().optional(),
+  "hours": zod.number().optional()
+}).describe('The stored reading (database column names)')
+
+
+/**
+ * @summary Delete a standalone hour meter reading (managers)
+ */
+export const DeleteGreenTrackHourReadingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackHourReadingResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
  * Covers PUWER and LOLER examinations and NSTS sprayer tests. The link expires after 15 minutes.
  * @summary Get a short-lived download link for an inspection's uploaded certificate
  */

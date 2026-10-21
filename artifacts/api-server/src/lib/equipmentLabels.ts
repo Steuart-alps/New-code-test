@@ -8,6 +8,7 @@ import { effectiveColdUnits } from "./coldUnits";
 import { getAccountToday } from "./accountClock";
 import { approvedFrequencies } from "./waterMonitoringPlan";
 import { getFireSiteStatuses } from "./checkReminders";
+import { greenCurrentHoursLateral, greenServiceHoursState } from "./greenHours";
 
 /**
  * QR labels on equipment. Each label carries a random code; scanning it opens
@@ -411,9 +412,18 @@ export async function buildScanSummary(code: string, clientId: number, target: L
         } else statuses.push(dueStatus(label, isoDay(row.next_inspection_date), today, done));
       }
       const [service] = rowsOf(await db.execute(sql`
-        SELECT service_date, next_service_date FROM green_service_records
+        SELECT service_date, next_service_date, next_service_hours FROM green_service_records
         WHERE client_id = ${clientId} AND machine_id = ${id} ORDER BY service_date DESC, id DESC LIMIT 1`));
       statuses.push(dueStatus("Service", isoDay(service?.next_service_date), today, isoDay(service?.service_date), 14));
+      const [meter] = rowsOf(await db.execute(sql`SELECT hours, to_char(day, 'YYYY-MM-DD') AS day FROM ${greenCurrentHoursLateral(sql`${id}`, sql`${clientId}`)} cur`));
+      const currentHours = meter?.hours == null ? null : Number(meter.hours);
+      const nextServiceHours = service?.next_service_hours == null ? null : Number(service.next_service_hours);
+      const byHours = greenServiceHoursState(currentHours, nextServiceHours);
+      statuses.push(currentHours == null
+        ? { label: "Hour meter", state: "never", text: "No reading yet" }
+        : byHours === "overdue" || byHours === "due_soon"
+          ? { label: "Hour meter", state: byHours, text: `${currentHours} hours on ${formatDay(meter.day)}: service ${byHours === "overdue" ? "overdue" : "due"} at ${nextServiceHours} hours` }
+          : { label: "Hour meter", state: "info", text: `${currentHours} hours on ${formatDay(meter.day)}${nextServiceHours != null ? `; next service at ${nextServiceHours}` : ""}` });
       const [defects] = rowsOf(await db.execute(sql`
         SELECT count(*)::int AS open, bool_or(out_of_service) AS out_of_service FROM green_defects
         WHERE client_id = ${clientId} AND machine_id = ${id} AND status NOT IN ('resolved', 'closed')`));
@@ -434,6 +444,7 @@ export async function buildScanSummary(code: string, clientId: number, target: L
       if (record) {
         actions.push({ label: doneToday ? "Record another pre-use check" : "Start today's pre-use check", href: `/green-track?${query({ machine: id, open: "pre-use" })}`, primary: true });
         actions.push({ label: "Report a fault", href: `/green-track?${query({ machine: id, open: "defect" })}` });
+        actions.push({ label: "Log hour meter reading", href: `/green-track?${query({ machine: id, open: "hours" })}` });
         actions.push({ label: "Log fuel", href: `/green-track?${query({ machine: id, open: "fuel" })}` });
         if (viewer.canAdmin) {
           actions.push({ label: "Record a service", href: `/green-track?${query({ machine: id, open: "service" })}` });

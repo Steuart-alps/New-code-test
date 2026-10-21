@@ -100,6 +100,11 @@ import type {
   GetTodayByDepartmentParams,
   GreenTrackCertificateDownload,
   GreenTrackConfig,
+  GreenTrackHourReading,
+  GreenTrackHourReadingInput,
+  GreenTrackHourReadingRow,
+  GreenTrackHourReadingUpdate,
+  GreenTrackMachineHoursSummary,
   HealthStatus,
   HotTubCheck,
   HotTubConfig,
@@ -126,6 +131,7 @@ import type {
   ListFireCallPointsParams,
   ListFireSafetyChecksParams,
   ListFoodSafetyRecordsParams,
+  ListGreenTrackHourReadingsParams,
   ListHotTubChecksParams,
   ListKitchenClosedDaysParams,
   ListLegionellaChecksParams,
@@ -7087,6 +7093,382 @@ export const useUpdateGreenTrackConfig = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateGreenTrackConfigMutationOptions(options));
+    }
+
+export const getGetGreenTrackMachineHoursUrl = () => {
+
+
+
+
+  return `/api/green-track/hours`
+}
+
+/**
+ * Current hours are the latest reading (by date) from standalone hour readings, pre-use checks, fuel logs and service records.
+ * @summary Each active machine's hour meter, hours used and service due by hours
+ */
+export const getGreenTrackMachineHours = async ( options?: RequestInit): Promise<GreenTrackMachineHoursSummary> => {
+
+  return customFetch<GreenTrackMachineHoursSummary>(getGetGreenTrackMachineHoursUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGreenTrackMachineHoursQueryKey = () => {
+    return [
+    `/api/green-track/hours`
+    ] as const;
+    }
+
+
+export const getGetGreenTrackMachineHoursQueryOptions = <TData = Awaited<ReturnType<typeof getGreenTrackMachineHours>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGreenTrackMachineHours>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGreenTrackMachineHoursQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGreenTrackMachineHours>>> = ({ signal }) => getGreenTrackMachineHours({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGreenTrackMachineHours>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGreenTrackMachineHoursQueryResult = NonNullable<Awaited<ReturnType<typeof getGreenTrackMachineHours>>>
+export type GetGreenTrackMachineHoursQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Each active machine's hour meter, hours used and service due by hours
+ */
+
+export function useGetGreenTrackMachineHours<TData = Awaited<ReturnType<typeof getGreenTrackMachineHours>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGreenTrackMachineHours>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGreenTrackMachineHoursQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListGreenTrackHourReadingsUrl = (params?: ListGreenTrackHourReadingsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/green-track/hour-readings?${stringifiedParams}` : `/api/green-track/hour-readings`
+}
+
+/**
+ * @summary List hour meter readings from every source, newest first
+ */
+export const listGreenTrackHourReadings = async (params?: ListGreenTrackHourReadingsParams, options?: RequestInit): Promise<GreenTrackHourReading[]> => {
+
+  return customFetch<GreenTrackHourReading[]>(getListGreenTrackHourReadingsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListGreenTrackHourReadingsQueryKey = (params?: ListGreenTrackHourReadingsParams,) => {
+    return [
+    `/api/green-track/hour-readings`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListGreenTrackHourReadingsQueryOptions = <TData = Awaited<ReturnType<typeof listGreenTrackHourReadings>>, TError = ErrorType<unknown>>(params?: ListGreenTrackHourReadingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackHourReadings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListGreenTrackHourReadingsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listGreenTrackHourReadings>>> = ({ signal }) => listGreenTrackHourReadings(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackHourReadings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListGreenTrackHourReadingsQueryResult = NonNullable<Awaited<ReturnType<typeof listGreenTrackHourReadings>>>
+export type ListGreenTrackHourReadingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List hour meter readings from every source, newest first
+ */
+
+export function useListGreenTrackHourReadings<TData = Awaited<ReturnType<typeof listGreenTrackHourReadings>>, TError = ErrorType<unknown>>(
+ params?: ListGreenTrackHourReadingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listGreenTrackHourReadings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListGreenTrackHourReadingsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateGreenTrackHourReadingUrl = () => {
+
+
+
+
+  return `/api/green-track/hour-readings`
+}
+
+/**
+ * @summary Log an hour meter reading
+ */
+export const createGreenTrackHourReading = async (greenTrackHourReadingInput: GreenTrackHourReadingInput, options?: RequestInit): Promise<GreenTrackHourReadingRow> => {
+
+  return customFetch<GreenTrackHourReadingRow>(getCreateGreenTrackHourReadingUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(greenTrackHourReadingInput)
+  }
+);}
+
+
+
+
+
+export const getCreateGreenTrackHourReadingMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackHourReading>>, TError,{data: BodyType<GreenTrackHourReadingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackHourReading>>, TError,{data: BodyType<GreenTrackHourReadingInput>}, TContext> => {
+
+const mutationKey = ['createGreenTrackHourReading'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createGreenTrackHourReading>>, {data: BodyType<GreenTrackHourReadingInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createGreenTrackHourReading(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateGreenTrackHourReadingMutationResult = NonNullable<Awaited<ReturnType<typeof createGreenTrackHourReading>>>
+    export type CreateGreenTrackHourReadingMutationBody = BodyType<GreenTrackHourReadingInput>
+    export type CreateGreenTrackHourReadingMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Log an hour meter reading
+ */
+export const useCreateGreenTrackHourReading = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGreenTrackHourReading>>, TError,{data: BodyType<GreenTrackHourReadingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createGreenTrackHourReading>>,
+        TError,
+        {data: BodyType<GreenTrackHourReadingInput>},
+        TContext
+      > => {
+      return useMutation(getCreateGreenTrackHourReadingMutationOptions(options));
+    }
+
+export const getUpdateGreenTrackHourReadingUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/hour-readings/${id}`
+}
+
+/**
+ * @summary Correct a standalone hour meter reading
+ */
+export const updateGreenTrackHourReading = async (id: number,
+    greenTrackHourReadingUpdate: GreenTrackHourReadingUpdate, options?: RequestInit): Promise<GreenTrackHourReadingRow> => {
+
+  return customFetch<GreenTrackHourReadingRow>(getUpdateGreenTrackHourReadingUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(greenTrackHourReadingUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateGreenTrackHourReadingMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackHourReading>>, TError,{id: number;data: BodyType<GreenTrackHourReadingUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackHourReading>>, TError,{id: number;data: BodyType<GreenTrackHourReadingUpdate>}, TContext> => {
+
+const mutationKey = ['updateGreenTrackHourReading'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateGreenTrackHourReading>>, {id: number;data: BodyType<GreenTrackHourReadingUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateGreenTrackHourReading(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateGreenTrackHourReadingMutationResult = NonNullable<Awaited<ReturnType<typeof updateGreenTrackHourReading>>>
+    export type UpdateGreenTrackHourReadingMutationBody = BodyType<GreenTrackHourReadingUpdate>
+    export type UpdateGreenTrackHourReadingMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Correct a standalone hour meter reading
+ */
+export const useUpdateGreenTrackHourReading = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackHourReading>>, TError,{id: number;data: BodyType<GreenTrackHourReadingUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateGreenTrackHourReading>>,
+        TError,
+        {id: number;data: BodyType<GreenTrackHourReadingUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateGreenTrackHourReadingMutationOptions(options));
+    }
+
+export const getDeleteGreenTrackHourReadingUrl = (id: number,) => {
+
+
+
+
+  return `/api/green-track/hour-readings/${id}`
+}
+
+/**
+ * @summary Delete a standalone hour meter reading (managers)
+ */
+export const deleteGreenTrackHourReading = async (id: number, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getDeleteGreenTrackHourReadingUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteGreenTrackHourReadingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackHourReading>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackHourReading>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteGreenTrackHourReading'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteGreenTrackHourReading>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteGreenTrackHourReading(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteGreenTrackHourReadingMutationResult = NonNullable<Awaited<ReturnType<typeof deleteGreenTrackHourReading>>>
+
+    export type DeleteGreenTrackHourReadingMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a standalone hour meter reading (managers)
+ */
+export const useDeleteGreenTrackHourReading = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteGreenTrackHourReading>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteGreenTrackHourReading>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteGreenTrackHourReadingMutationOptions(options));
     }
 
 export const getGetGreenTrackInspectionCertificateUrlUrl = (id: number,) => {

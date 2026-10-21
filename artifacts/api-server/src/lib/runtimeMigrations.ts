@@ -4032,6 +4032,29 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_fuel_client_machine"
     ON "green_fuel_logs" ("client_id", "machine_id")
   `);
+
+  // Hour meter readings: logged on their own, or on the daily pre-use check.
+  // Fuel logs and service records already carry their own engine hours.
+  await db.execute(sql`ALTER TABLE "green_pre_use_checks" ADD COLUMN IF NOT EXISTS "hour_meter" double precision`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_hour_readings" (
+      "id"                    serial PRIMARY KEY,
+      "client_id"             integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "machine_id"            integer NOT NULL REFERENCES "green_machines"("id") ON DELETE CASCADE,
+      "reading_date"          date NOT NULL,
+      "hours"                 double precision NOT NULL,
+      "recorded_by"           text,
+      "recorded_by_roster_id" integer,
+      "notes"                 text,
+      "created_by"            integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"            timestamp NOT NULL DEFAULT now(),
+      "updated_at"            timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_hour_readings_client_machine"
+    ON "green_hour_readings" ("client_id", "machine_id", "reading_date")
+  `);
 }
 
 // ---- SwimTrack ----

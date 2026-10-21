@@ -74,6 +74,7 @@ const ENTRY_DATE_FIELDS = [
   "signoffDate",
   "reportedDate",
   "recordedDate",
+  "readingDate",
   "hireDate",
   "replacementDate",
   "replacedOn",
@@ -209,6 +210,7 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/green-track\/defects\/\d+$/, table: "green_defects", date: "report_date" },
   { path: /^\/green-track\/puwer-inspections\/\d+$/, table: "green_puwer_inspections", date: "inspection_date" },
   { path: /^\/green-track\/fuel-logs\/\d+$/, table: "green_fuel_logs", date: "log_date" },
+  { path: /^\/green-track\/hour-readings\/\d+$/, table: "green_hour_readings", date: "reading_date" },
   // PAT tests keep the department recorded with them; the others follow the
   // site recorded with the replacement, or the failure's certificate.
   { path: /^\/pat-track\/tests\/\d+$/, table: "pat_tests", date: "test_date",

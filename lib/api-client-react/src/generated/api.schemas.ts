@@ -301,6 +301,94 @@ export interface FixTrackIssueMediaList {
   mediaUrls: string[];
 }
 
+export type GreenTrackMachineHoursServiceHoursState = typeof GreenTrackMachineHoursServiceHoursState[keyof typeof GreenTrackMachineHoursServiceHoursState];
+
+
+export const GreenTrackMachineHoursServiceHoursState = {
+  overdue: 'overdue',
+  due_soon: 'due_soon',
+  ok: 'ok',
+  none: 'none',
+} as const;
+
+export interface GreenTrackMachineHours {
+  machineId: number;
+  machineName: string;
+  machineType: string;
+  siteId?: number | null;
+  currentHours: number | null;
+  lastReadingDate: string | null;
+  hoursLast7Days: number | null;
+  hoursLast30Days: number | null;
+  lastServiceDate: string | null;
+  nextServiceHours: number | null;
+  hoursToService: number | null;
+  serviceHoursState: GreenTrackMachineHoursServiceHoursState;
+}
+
+export interface GreenTrackMachineHoursSummary {
+  dueSoonHours: number;
+  machines: GreenTrackMachineHours[];
+}
+
+export type GreenTrackHourReadingSource = typeof GreenTrackHourReadingSource[keyof typeof GreenTrackHourReadingSource];
+
+
+export const GreenTrackHourReadingSource = {
+  reading: 'reading',
+  pre_use_check: 'pre_use_check',
+  fuel_log: 'fuel_log',
+  service: 'service',
+} as const;
+
+export interface GreenTrackHourReading {
+  /** Set only for standalone readings, which are edited on this route */
+  id?: number | null;
+  key: string;
+  source: GreenTrackHourReadingSource;
+  sourceLabel: string;
+  sourceId: number;
+  machineId: number;
+  machineName: string;
+  machineType?: string;
+  readingDate: string;
+  hours: number;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+}
+
+export interface GreenTrackHourReadingInput {
+  machineId: number;
+  readingDate: string;
+  hours: number;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+  /** Confirms a reading lower than an earlier one (meter replaced or reset) */
+  meterReplaced?: boolean;
+}
+
+export interface GreenTrackHourReadingUpdate {
+  readingDate?: string;
+  hours?: number;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+  meterReplaced?: boolean;
+}
+
+/**
+ * The stored reading (database column names)
+ */
+export interface GreenTrackHourReadingRow {
+  id?: number;
+  machine_id?: number;
+  reading_date?: string;
+  hours?: number;
+  [key: string]: unknown;
+ }
+
 export interface GreenTrackCertificateDownload {
   downloadUrl: string;
   fileName?: string | null;
@@ -3329,6 +3417,11 @@ export type UpdateHotTubConfigParams = {
  * Save the site-specific HotTubTrack control profile.
  */
 siteId: number;
+};
+
+export type ListGreenTrackHourReadingsParams = {
+machineId?: number;
+limit?: number;
 };
 
 export type ListPATTestsParams = {
