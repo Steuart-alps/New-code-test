@@ -178,12 +178,29 @@ try {
   assert.ok(titles(siteAOnly).includes('Gas Safety Inspection'));
   console.log('ok - the app lists certificates outstanding for the sites each person can see');
 
+  // ── Not compliant from the visit until the certificate is uploaded ─────────
+  const state = async (item) => ok(await owner.request('GET', `/compliance-items/${item.id}`));
+  for (const item of [gas, recent, old]) {
+    const got = await state(item);
+    assert.equal(got.needsAction, true, `${item.title} needs action`);
+    assert.equal(got.needsActionReason, 'certificate_outstanding');
+  }
+  assert.equal((await state(certified)).needsAction, false, 'a check with its certificate is compliant');
+  const today = ok(await owner.request('GET', '/dashboard/today-by-department'));
+  const redItems = today.groups.flatMap((group) => group.rows).flatMap((row) => row.items)
+    .filter((item) => item.detail === 'Certificate outstanding');
+  assert.ok(redItems.some((item) => item.label === 'Gas Safety Inspection'), 'the department bars show it red');
+  const failed = today.groups.flatMap((group) => group.rows).reduce((sum, row) => sum + row.failed, 0);
+  assert.ok(failed >= redItems.length);
+  console.log('ok - a check counts as not compliant from the visit until its certificate is uploaded');
+
   // ── A certificate withdraws the waiting draft ──────────────────────────────
   ok(await owner.request('POST', `/items/${gas.id}/certificates`, { name: 'Gas Safe certificate' }), 201);
   result = await followUp();
   const withdrawn = (await drafts(gas.id)).at(-1);
   assert.equal(withdrawn.status, 'cancelled');
   assert.equal(withdrawn.last_error, 'Certificate received');
+  assert.equal((await state(gas)).needsAction, false, 'compliant again once the certificate is in');
   await remind([owner.clientId]);
   assert.doesNotMatch(to(maintenanceAEmail)[0]?.html ?? '', /Gas Safety Inspection/, 'no reminder once the certificate is in');
   console.log('ok - uploading the certificate withdraws the follow-up and stops the reminder');

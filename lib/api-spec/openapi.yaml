@@ -5849,11 +5849,15 @@ components:
           nullable: true
         needsAction:
           type: boolean
-          description: The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date.
+          description: >
+            The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR
+            defects, or the contractor visit has happened with no certificate
+            uploaded since (certificate_outstanding), so the check needs action
+            and is not compliant whatever its due date.
         needsActionReason:
           type: string
           nullable: true
-          enum: [unsatisfactory, open_defects]
+          enum: [unsatisfactory, open_defects, certificate_outstanding]
         openDefectCount:
           type: integer
           description: Open C1/C2/FI/ID/AR defects on the newest certificate.

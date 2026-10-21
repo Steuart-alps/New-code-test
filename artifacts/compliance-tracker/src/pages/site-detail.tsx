@@ -331,7 +331,7 @@ export default function SiteDetailPage() {
                         {item.priority}
                       </span>
                     )}
-                    <CheckStatusWithCertificate itemId={item.id} status={item.status}>
+                    <CheckStatusWithCertificate item={item}>
                       <span className={cn("inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border", meta.className)}>
                         <Icon className="w-3 h-3" />
                         {meta.label}
