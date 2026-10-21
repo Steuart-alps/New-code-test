@@ -1,0 +1,352 @@
+# ComplyTrack roadmap: future developments
+
+Written 21 October 2026 for Steuart. This is a plan only; nothing in it has
+been built yet unless it says so.
+
+The web launch is **Monday 26 October 2026** (website only; the phone apps
+follow). Every item is marked:
+
+- **Before launch**: needed or useful by 26 October.
+- **After launch**: starts once the website is live and settled.
+
+A change freeze is suggested from Friday 23 October evening to Tuesday
+27 October (fixes only), so new features below start no earlier than
+Wednesday 28 October.
+
+## At a glance
+
+| # | Item | When | Extra running cost | Waiting on |
+|---|---|---|---|---|
+| 1 | Greens vehicle maintenance (GreenTrack) | After launch | None | Hour meters finishing first (under way) |
+| 2 | Scanning certificates for key dates and contractor details | After launch | About 0.1p per certificate read | Anthropic key on Render; your go-ahead |
+| 3 | Reminders to the right person, weekly Owner update | After launch | None | Your go-ahead |
+| 4 | Phone apps: iPhone first, then Android | After launch | Apple £79 a year, Google $25 once | Trying draft #101 on a phone |
+| 5 | Live AI: COSHH drafts from safety data sheets | After launch | About 23p per draft | Your pick of first AI feature; Anthropic key |
+| 6 | Live AI: help chat for users | After launch | About £35 a month at 500 chats | A help guide written first |
+| 7 | Track summary recipient preview (#125) | After launch | None | Re-doing for the new Manager roles |
+| 8 | International: Ireland first, then AU/NZ/Canada, US last | After launch | None for hosting; higher card fees abroad | Your answers to 6 questions |
+| 9 | Error reports (Sentry) | Before launch if you have 10 minutes | None (free plan) | Your set-up steps |
+| 10 | Offline working | After launch | None for the recommended route | Phone app first |
+
+My suggested order after launch is the order of the table, with 2 and 5
+built together because they share the same set-up. Tell me if you want a
+different order.
+
+---
+
+## 1. Greens vehicle maintenance (GreenTrack)
+
+**When:** after launch.
+
+**What already exists.** GreenTrack is live. Each machine (mower, tractor,
+utility vehicle) has its own record with make, model, serial and registration
+number. Staff do daily pre-use checks, report defects and log fuel. Managers
+record services (date, hours, work done, who did it, cost), PUWER and LOLER
+thorough examinations, and NSTS sprayer tests (#158). Every machine can have a
+QR label (#159) that opens its record when scanned.
+
+**Under way now (not part of this roadmap).** The "Reviving GreenTrack" thread
+is adding hour meter readings and services due by hours (for example "next
+service at 500 hours"), as you asked this morning. Everything below builds on
+that and does not repeat it.
+
+**What comes next**, in the order I'd suggest:
+
+1. **Service schedules from the maker's intervals.** Set a schedule per machine
+   or machine type (for example a 50-hour check, 250-hour service and 500-hour
+   major service), each with its own task list: oil and filters, belts, grease
+   points, blade sharpening or backlapping for cylinder mowers, tyre pressures.
+   The mechanic ticks the tasks off, so the service record shows exactly what
+   was done, not just "serviced".
+2. **Repair jobs (a workshop job card).** A failed pre-use check or a reported
+   defect turns into a repair job with a status: waiting for parts, in the
+   workshop, with the dealer, back in service. The machine stays marked "out
+   of service" until someone signs it back in. This reuses the existing defect
+   records rather than starting a second list.
+3. **Parts used.** Record the parts on every service and repair: part number,
+   description, supplier, quantity and price. Common parts (oil, filters,
+   blades, bedknives) can be picked from a short list each business builds up.
+4. **Running cost per machine.** Add up services, repairs, parts and fuel for
+   each machine, per year and per hour of use. This helps with "repair or
+   replace?" decisions and next year's budget. It reuses the costs already
+   recorded on service records and the fuel log.
+5. **Dealers and warranty.** Link each machine to its dealer from the existing
+   Contractors list, so dealer services join the contractor reminders that went
+   live in #155. Record the warranty end date, with a reminder before it runs
+   out.
+6. **Later options**, only if you want them:
+   - A simple parts store: stock levels and a "running low" list for the
+     shed's common parts.
+   - Road-going utility vehicles: MOT, road tax and insurance dates for
+     machines with a registration number.
+   - Who may drive what: link each machine to the operators trained on it in
+     TrainTrack, and warn when someone untrained does a pre-use check.
+
+**Phone.** The mechanic should be able to scan a machine's QR label and log a
+service or repair on the spot. The phone screens for GreenTrack service records
+are already in draft #101, so this joins the phone app work (item 4).
+
+**Notifications.** Follows your rule: service and repair reminders go only to
+the person responsible for the machine, and the Owner sees them in the weekly
+update (item 3), not as extra daily emails.
+
+**Cost:** no extra hosting. Photos of receipts and parts count towards each
+business's file storage allowance.
+
+**Questions for you:** does a parts store matter to your clients, or is
+"parts used per job" enough? Do any of them run utility vehicles on public
+roads?
+
+---
+
+## 2. Scanning certificates for key dates and contractor details
+
+**When:** after launch.
+
+**The idea.** A manager uploads a certificate (PDF) or takes a photo of it:
+gas safety, EICR, LOLER, fire alarm service, emergency lighting, extinguisher
+service, legionella risk assessment or water sample, NSTS sprayer test, PAT,
+a contractor's insurance or Gas Safe registration. ComplyTrack reads it and
+fills in the details for them:
+
+- type of certificate and what it covers (site, equipment or machine)
+- date of the visit or test, and the next due or expiry date
+- the result (pass or fail, satisfactory or unsatisfactory, any defect codes
+  such as C1/C2 on an EICR)
+- the contractor's company name, engineer, registration number (for example
+  Gas Safe or NICEIC), phone, email and address
+
+**The person stays in charge.** Nothing is saved until they see the details
+side by side with the certificate and press "Confirm". The record shows that it
+was read automatically and who confirmed it. This is the same rule as the Live
+AI plan: the AI never approves anything on its own.
+
+**What happens when they confirm:**
+
+- The certificate file is stored against the right check, piece of equipment
+  or machine.
+- The next due date moves, so the existing contractor reminder (#155) fires at
+  the right time and asks that contractor to book the next visit.
+- The contractor is matched to the Contractors list, or added if they are new,
+  with their phone and email filled in. Insurance and registration expiry
+  dates feed the existing contractor document reminders.
+- A failed or unsatisfactory result raises an action, or a FixTrack issue, for
+  the person responsible.
+
+**Where it would appear:** Compliance Hub checks, the Contractors page
+(documents), the Equipment list (#159), GreenTrack examinations and NSTS tests,
+FireTrack services and LegionellaTrack. One shared "Scan certificate" button,
+not a different one per track.
+
+**Links to other work.**
+
+- It is feature 2 in the Live AI plan ("read certificates and contractor
+  documents"). It uses the cheapest model, so it costs far less than the COSHH
+  drafts.
+- It shares its set-up with the COSHH drafts (item 5): one Anthropic key on
+  Render, one privacy page line naming Anthropic as a supplier, and the same
+  "hidden until the key is set" switch already used for Stripe. Building the
+  two together saves doing that work twice.
+- Taking a photo with the phone app comes with the phone app work (item 4).
+
+**Cost:** about 0.1p for a typical certificate, according to the Live AI plan.
+Long reports (a 20-page EICR) cost more, but still only pennies. Even at
+100 businesses scanning 50 certificates a year each, that is a few pounds a
+year. No extra hosting: files already go to Google Cloud Storage. I'd still set
+a monthly spending limit with the AI provider and a fair-use limit per
+business.
+
+**You'd need to:** create an Anthropic Console account and key (the Live AI
+thread has the steps) and add it on Render.
+
+**Question for you:** should scanning be free for every business (it is cheap
+and makes the reminders work better) or only for paying track customers, like
+the other AI features?
+
+---
+
+## 3. Reminders to the right person, and a weekly Owner update
+
+**When:** after launch. **Status:** plan written, waiting for your go-ahead.
+
+Every task, action, FixTrack issue and compliance check gets an "Assigned to"
+person chosen from the business's users, not typed text. That person gets at
+most one "due tomorrow" email a day, only on days something of theirs is due.
+The Owner gets one weekly update instead of about 25 emails a week.
+
+Plan: `plans/reminders-to-the-right-person.md` in the project files.
+
+**Cost:** none (fewer emails, if anything).
+
+---
+
+## 4. Phone apps: iPhone first, then Android
+
+**When:** after launch.
+
+- **iPhone first, then Google Play.** Finish the full phone build (groups 1
+  and 2 of `mobile/app-gap-list.md` in the project files) before the App Store
+  steps.
+- **Draft #101** has every missing phone screen built (PestTrack,
+  PremisesTrack, RoomTrack, TreeTrack, BikeTrack, kitchen and pool extras,
+  GreenTrack extras, plus manager screens). It has not been tried on a phone
+  yet.
+- **Draft #77** (sign in with a passkey) needs your phone to test.
+- Follow-ups already noted: the phone's scanner should open the new QR labels
+  (#159), and "Speak a list" for COSHH.
+- The smoke test to run is `mobile/iphone-smoke-test.md` in the project files.
+
+**Cost:** Apple Developer £79 a year; Google Play $25 once. No extra hosting.
+
+---
+
+## 5. Live AI: COSHH drafts from safety data sheets
+
+**When:** after launch. **Status:** plan written, waiting for you to pick the
+first feature and create the Anthropic key.
+
+Upload a safety data sheet and get a draft COSHH assessment in the COSHHTrack
+form (#150) for a competent person to check and approve. Your idea of starting
+from a spoken or typed substance list and finding each data sheet is in the
+plan as an option (about 40p a substance in total).
+
+Plan: the Live AI page shared in the "Live AI in ComplyTrack" thread.
+
+**Cost:** about 23p per draft; roughly £105 a month at 100 businesses once
+settled, plus about £700 one-off while businesses load their existing
+chemicals. Caps keep it in check.
+
+---
+
+## 6. Live AI: help chat for users
+
+**When:** after launch, after item 5.
+
+A help chat that answers "how do I…" questions about settings, billing and
+sign-in from a written help guide, with a "Talk to a person" button that emails
+ALPS. It never changes records, never sees record contents and never gives
+binding legal advice. The help guide has to be written first; there isn't one
+in the app yet.
+
+**Cost:** about 7p a chat, so about £35 a month at 500 chats. Needs
+`ADMIN_EMAIL` (or a support address) set on Render.
+
+---
+
+## 7. Track summary recipient preview (#125)
+
+**When:** after launch.
+
+Settings shows exactly who receives each track's daily summary email before
+you rely on it. It was left out of release #160 because it was written before
+the new Manager roles (Head of Department, Maintenance) and needs re-doing for
+them. Worth doing together with item 3, since both decide who gets which email.
+
+**Cost:** none.
+
+---
+
+## 8. International: English-speaking countries first
+
+**When:** after launch. The decisions (Phase 0) can be made any time.
+
+Full plan: `plans/worldwide-english-speaking-plan.md` in the project files.
+Translation into other languages is left out.
+
+- **Phase 0, decide and prepare.** Your answers to the 6 questions below, and
+  a VAT and data-protection check for Ireland with your accountant.
+- **Phase 1, Ireland and a "general" mode.** A country on every business,
+  reminders at 08:00 local time for every business, euro prices and the right
+  VAT wording, a "general" mode for any English-speaking country (UK law
+  references hidden), and an Irish rule pack (Health and Safety Authority,
+  FSAI food rules, accident reporting instead of RIDDOR). About 5 to 7
+  changes.
+- **Phase 2, Australia, New Zealand, Canada.** Mostly content: each country's
+  rules, local prices, "test and tag" instead of PAT for AU/NZ.
+- **Phase 3, United States.** The biggest: °F, US date order, Letter-size PDFs,
+  OSHA instead of RIDDOR, state-by-state rules.
+
+**Six questions waiting for you:**
+
+1. First country after the UK? (Recommended: Ireland.)
+2. Prices in local money or in pounds? (Recommended: local money.)
+3. Country rule packs, a general mode, or both? (Recommended: both.)
+4. Who checks each country's guidance? Do you have a contact in Ireland?
+5. Legal and tax check for Ireland: shall I draft the questions for your
+   accountant?
+6. US now or later? (Recommended: later.)
+
+**Cost:** no extra hosting; the Frankfurt server serves Ireland well. Card fees
+are higher abroad (about 2.5% for EU cards against 1.5% for UK cards). A
+second server in Asia for Australian customers would roughly double hosting
+for them, so only if enough of them find it slow. A possible EU representative
+fee if the Irish check says one is needed.
+
+---
+
+## 9. Error reports (Sentry)
+
+**When:** before launch if you have 10 minutes; otherwise straight after.
+
+Already built (#122). When switched on, ComplyTrack tells us about errors on the
+live site, with personal details removed, so we can fix problems before
+customers report them. It needs only your set-up steps:
+`release/sentry-setup.md` in the project files (free plan, EU region, one
+setting on Render).
+
+**Cost:** none on the free plan.
+
+---
+
+## 10. Offline working
+
+**When:** after launch.
+
+A separate "local" edition installed on customer computers is **not
+recommended**: it is a second product to install, back up and support, and
+syncing it back is hard. Plan and reasons: `plans/offline-local-edition-336.md`
+in the project files.
+
+The cheaper route:
+
+1. **Phone app offline sending** (comes with item 4): staff record checks with
+   no signal and they send when back in range. Many checks already work this
+   way.
+2. **Website offline for recording checks** (later): tablets and laptops on
+   site keep working without signal. About a third of the size of a local
+   edition, with nothing to install.
+
+**Cost:** none for the recommended route. A local edition would add a code
+signing certificate (a few hundred pounds a year) and support time.
+
+---
+
+## Before launch (already in hand, listed for completeness)
+
+These are handled in the "Launch plan for 26 October" thread and are not new
+work:
+
+- Your launch musts: `ADMIN_EMAIL` on Render, Stripe "Include tax in prices"
+  set to No, the £12 billing test, the two Terms questions (extra site charged
+  straight away; company number and registered office), and the 15-minute live
+  test.
+- Waiting for "merge": #161 (public SEO pages), then #162 (sign-up alert email
+  and the Terms and Privacy fixes).
+
+## Running cost summary
+
+| Item | Extra running cost |
+|---|---|
+| Greens vehicle maintenance | None |
+| Scanning certificates | About 0.1p each; a few pounds a year at 100 businesses |
+| Reminders to the right person | None |
+| Phone apps | Apple £79 a year, Google $25 once |
+| COSHH drafts | About £105 a month at 100 businesses, plus about £700 one-off |
+| Help chat | About £35 a month at 500 chats |
+| Track summary preview | None |
+| International | None for hosting; higher card fees abroad; optional regional server later |
+| Error reports | None (free plan) |
+| Offline working (recommended route) | None |
+
+Hosting stays on the one Render web service and database in Frankfurt for
+everything above.
