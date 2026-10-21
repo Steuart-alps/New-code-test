@@ -40,39 +40,28 @@ export function useCertificatesOutstanding() {
 }
 
 /**
- * A check whose contractor visit has no certificate two weeks on shows red
- * until the certificate is uploaded. Display only: the check's status and the
- * compliance figures are unchanged.
+ * A check's status badge (children). While its contractor visit has no
+ * certificate (needsActionReason "certificate_outstanding", which also counts
+ * it as not compliant) it shows red "Certificate outstanding": in place of
+ * "Completed", or beside the status once the check has moved on to its next
+ * due date.
  */
-function CertificateOutstandingBadge({ row }: { row: CertificateOutstanding }) {
-  return (
-    <span
-      title={row.chasing
-        ? `Visited ${formatDay(row.visitDate)}; the contractor is being chased for the certificate`
-        : `Visited ${formatDay(row.visitDate)}; reminders to the contractor have stopped, please chase them directly`}
-      className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-300"
-    >
+export function CheckStatusWithCertificate({ item, children }: {
+  item: { status: string; needsActionReason?: string | null };
+  children: ReactNode;
+}) {
+  if (item.needsActionReason !== "certificate_outstanding") return <>{children}</>;
+  const badge = (
+    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-300">
       <FileWarning aria-hidden="true" className="w-3 h-3" /> Certificate outstanding
     </span>
   );
-}
-
-/**
- * A check's status badge (children), shown red as "Certificate outstanding"
- * while its certificate is outstanding: in place of "Completed", or beside
- * the status when the check has moved on to its next due date.
- */
-export function CheckStatusWithCertificate({ itemId, status, children }: { itemId: number; status: string; children: ReactNode }) {
-  const { data } = useCertificatesOutstanding();
-  const row = data?.certificates.find(certificate => certificate.itemId === itemId);
-  if (!row) return <>{children}</>;
-  if (status === "completed") return <CertificateOutstandingBadge row={row} />;
-  return <>{children}<CertificateOutstandingBadge row={row} /></>;
+  return item.status === "completed" ? badge : <>{children}{badge}</>;
 }
 
 /**
  * Contractor visits still waiting for their certificate, oldest first. The
- * contractor is chased every two weeks (through Contractor Approvals) until
+ * contractor is emailed every two weeks, automatically, until
  * chaseStopsAfterDays after the visit; after that it is up to the business.
  * Hidden when nothing is outstanding.
  */
@@ -93,7 +82,7 @@ export function CertificatesOutstandingCard() {
       </h2>
       <p className="text-sm text-muted-foreground mt-1 mb-4 max-w-2xl">
         The contractor has been but no certificate has been uploaded {data.followUpAfterDays} days on. Certificates are often held
-        until the invoice is paid. The contractor is chased every two weeks through Contractor Approvals, for {data.chaseStopsAfterDays} days.
+        until the invoice is paid. ComplyTrack emails the contractor every two weeks to ask for it, for {data.chaseStopsAfterDays} days.
         Upload the certificate on the check when it arrives.
       </p>
       <ul className="divide-y divide-border/60 rounded-sm border border-border/60">

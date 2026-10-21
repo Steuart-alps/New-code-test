@@ -26,6 +26,7 @@ import {
   FireCallPoint,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { SayItButton } from "@/components/say-it-button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -1599,7 +1600,8 @@ export default function FireSafetyPage() {
               Fire safety logbook: weekly alarm tests by call point, monthly emergency lighting, 6-monthly drills, fire walks and panel checks
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {canEdit && <SayItButton siteId={filterSite} />}
             {canAdmin && <FireConfigDialog siteId={filterSite} />}
             {canEdit && <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={value => { setRecordOpen(value); if (!value) setScanPreset(undefined); }} defaultCheckType={quickCheckType} preset={scanPreset} />}
           </div>

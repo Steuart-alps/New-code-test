@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
+import { SayItButton } from "@/components/say-it-button";
 import { useListSites } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
 import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
@@ -611,6 +612,8 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        <SayItButton siteId={siteId === "all" ? null : Number(siteId)} className="w-full sm:w-auto h-11" />
 
         <DashboardStartCards />
         <ComplianceChecksDue siteId={siteId === "all" ? null : Number(siteId)} />

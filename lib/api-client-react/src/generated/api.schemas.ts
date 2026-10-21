@@ -1069,6 +1069,7 @@ export type ComplianceItemNeedsActionReason = typeof ComplianceItemNeedsActionRe
 export const ComplianceItemNeedsActionReason = {
   unsatisfactory: 'unsatisfactory',
   open_defects: 'open_defects',
+  certificate_outstanding: 'certificate_outstanding',
 } as const;
 
 export interface ComplianceItem {
@@ -1099,7 +1100,7 @@ export interface ComplianceItem {
   notificationSentAt?: string | null;
   completedAt?: string | null;
   notes?: string | null;
-  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date. */
+  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
   needsAction?: boolean;
   needsActionReason?: ComplianceItemNeedsActionReason;
   /** Open C1/C2/FI/ID/AR defects on the newest certificate. */
@@ -3246,6 +3247,28 @@ export interface FoodSafetyRecord {
   updatedAt: string;
 }
 
+export type FoodSafetyColdReadingRequestSlot = typeof FoodSafetyColdReadingRequestSlot[keyof typeof FoodSafetyColdReadingRequestSlot];
+
+
+export const FoodSafetyColdReadingRequestSlot = {
+  am: 'am',
+  pm: 'pm',
+} as const;
+
+export interface FoodSafetyColdReadingRequest {
+  /** The diary's local calendar date (YYYY-MM-DD). */
+  recordDate: string;
+  /** The fridge or freezer's name on the kitchen's list. */
+  unit: string;
+  slot: FoodSafetyColdReadingRequestSlot;
+  temperature: number;
+  /** Required when the reading is outside the unit's limits. */
+  correctiveAction?: string;
+  recordedAt?: string;
+  /** The words heard when the reading was spoken ("Say it"), kept as evidence. */
+  spoken?: string;
+}
+
 export interface CreateFoodSafetyRecordRequest {
   /**
      * Stable device submission identifier retained across retries.
@@ -4146,6 +4169,13 @@ date?: string;
 export type CreateFoodSafetyRecordParams = {
 /**
  * Scope the new record to a site. Omit for the whole-organisation diary.
+ */
+siteId?: number;
+};
+
+export type RecordFoodSafetyColdReadingParams = {
+/**
+ * Scope to a site's diary. Omit for the whole-organisation diary.
  */
 siteId?: number;
 };

@@ -1178,8 +1178,8 @@ export const ListComplianceItemsResponseItem = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1238,8 +1238,8 @@ export const CreateComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1279,8 +1279,8 @@ export const GetComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1340,8 +1340,8 @@ export const UpdateComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1399,8 +1399,8 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -4795,6 +4795,45 @@ export const CreateFoodSafetyRecordBody = zod.object({
 })
 
 export const CreateFoodSafetyRecordResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "recordDate": zod.string(),
+  "deliveries": zod.array(zod.unknown()).optional(),
+  "coldFood": zod.array(zod.unknown()).optional(),
+  "hotTemperature": zod.array(zod.unknown()).optional(),
+  "hotHolding": zod.array(zod.unknown()).optional(),
+  "cookingLimit": zod.string().optional(),
+  "coolingLimit": zod.string().optional(),
+  "reheatingLimit": zod.string().optional(),
+  "hotHoldingLimit": zod.string().optional(),
+  "correctives": zod.string().nullish(),
+  "managerSignature": zod.string().nullish(),
+  "submittedAt": zod.date().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * Fills one unit's AM or PM reading in the day's diary, creating the diary (with every fridge and freezer on the list) when needed. Used by "Say it" voice logging. A reading already recorded is never overwritten (409 READING_ALREADY_RECORDED), a submitted diary is not changed (409 DIARY_SUBMITTED), and a reading outside the limits needs the corrective action taken (400 KITCHEN_CORRECTIVE_ACTION_REQUIRED).
+ * @summary Record one fridge or freezer reading in the day's diary
+ */
+export const RecordFoodSafetyColdReadingQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const RecordFoodSafetyColdReadingBody = zod.object({
+  "recordDate": zod.string().describe('The diary\'s local calendar date (YYYY-MM-DD).'),
+  "unit": zod.string().describe('The fridge or freezer\'s name on the kitchen\'s list.'),
+  "slot": zod.enum(['am', 'pm']),
+  "temperature": zod.number(),
+  "correctiveAction": zod.string().optional().describe('Required when the reading is outside the unit\'s limits.'),
+  "recordedAt": zod.date().optional(),
+  "spoken": zod.string().optional().describe('The words heard when the reading was spoken (\"Say it\"), kept as evidence.')
+})
+
+export const RecordFoodSafetyColdReadingResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),

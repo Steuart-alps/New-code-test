@@ -3254,6 +3254,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/FoodSafetyRecord"
 
+  /food-safety/cold-reading:
+    post:
+      operationId: recordFoodSafetyColdReading
+      tags: [food-safety]
+      summary: Record one fridge or freezer reading in the day's diary
+      description: >-
+        Fills one unit's AM or PM reading in the day's diary, creating the
+        diary (with every fridge and freezer on the list) when needed. Used by
+        "Say it" voice logging. A reading already recorded is never
+        overwritten (409 READING_ALREADY_RECORDED), a submitted diary is not
+        changed (409 DIARY_SUBMITTED), and a reading outside the limits needs
+        the corrective action taken (400 KITCHEN_CORRECTIVE_ACTION_REQUIRED).
+      parameters:
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FoodSafetyColdReadingRequest"
+      responses:
+        "201":
+          description: The diary with the reading added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyRecord"
+
   /food-safety/by-date/{date}:
     get:
       operationId: getFoodSafetyRecordByDate
@@ -5849,11 +5881,15 @@ components:
           nullable: true
         needsAction:
           type: boolean
-          description: The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date.
+          description: >
+            The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR
+            defects, or the contractor visit has happened with no certificate
+            uploaded since (certificate_outstanding), so the check needs action
+            and is not compliant whatever its due date.
         needsActionReason:
           type: string
           nullable: true
-          enum: [unsatisfactory, open_defects]
+          enum: [unsatisfactory, open_defects, certificate_outstanding]
         openDefectCount:
           type: integer
           description: Open C1/C2/FI/ID/AR defects on the newest certificate.
@@ -8651,6 +8687,30 @@ components:
         - createdAt
         - updatedAt
 
+    FoodSafetyColdReadingRequest:
+      type: object
+      required: [recordDate, unit, slot, temperature]
+      properties:
+        recordDate:
+          type: string
+          description: The diary's local calendar date (YYYY-MM-DD).
+        unit:
+          type: string
+          description: The fridge or freezer's name on the kitchen's list.
+        slot:
+          type: string
+          enum: [am, pm]
+        temperature:
+          type: number
+        correctiveAction:
+          type: string
+          description: Required when the reading is outside the unit's limits.
+        recordedAt:
+          type: string
+          format: date-time
+        spoken:
+          type: string
+          description: The words heard when the reading was spoken ("Say it"), kept as evidence.
     CreateFoodSafetyRecordRequest:
       type: object
       properties:
