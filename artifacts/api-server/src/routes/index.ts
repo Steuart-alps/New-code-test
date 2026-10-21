@@ -29,6 +29,7 @@ import coshhTrackRouter from "./coshh-track";
 import bikeTrackRouter from "./bike-track";
 import poolTrackRouter from "./pool-track";
 import greenTrackRouter from "./green-track";
+import greenTrackSprayingRouter from "./green-track-spraying";
 import swimTrackRouter from "./swim-track";
 import photosRouter from "./photos";
 import staffRosterRouter from "./staff-roster";
@@ -145,6 +146,7 @@ router.use("/tree-track", requireAuth, requireService("treetrack"), treeTrackRou
 router.use("/bike-track", requireAuth, requireService("biketrack"), bikeTrackRouter);
 router.use("/pool-track",   requireAuth, requireAnyService("pooltrack", "aquatrack"),  poolTrackRouter);
 router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackRouter);
+router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackSprayingRouter);
 router.use("/swim-track",   requireAuth, requireAnyService("swimtrack", "aquatrack"),  swimTrackRouter);
 router.use("/photos", requireAuth, photosRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);

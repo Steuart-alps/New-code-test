@@ -4032,6 +4032,128 @@ async function migrateGreenTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_green_fuel_client_machine"
     ON "green_fuel_logs" ("client_id", "machine_id")
   `);
+
+  // Hour meter readings: logged on their own, or on the daily pre-use check.
+  // Fuel logs and service records already carry their own engine hours.
+  await db.execute(sql`ALTER TABLE "green_pre_use_checks" ADD COLUMN IF NOT EXISTS "hour_meter" double precision`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_hour_readings" (
+      "id"                    serial PRIMARY KEY,
+      "client_id"             integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "machine_id"            integer NOT NULL REFERENCES "green_machines"("id") ON DELETE CASCADE,
+      "reading_date"          date NOT NULL,
+      "hours"                 double precision NOT NULL,
+      "recorded_by"           text,
+      "recorded_by_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "notes"                 text,
+      "created_by"            integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"            timestamp NOT NULL DEFAULT now(),
+      "updated_at"            timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_hour_readings_client_machine"
+    ON "green_hour_readings" ("client_id", "machine_id", "reading_date")
+  `);
+
+  // Spraying book and stock: products (pesticides, fertiliser, top dressing,
+  // seed...), deliveries, stock counts and write-offs, and application records
+  // whose product quantities come off stock. Stock on hand is worked out from
+  // the movements less the quantities applied, so nothing is stored twice.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_products" (
+      "id"                serial PRIMARY KEY,
+      "client_id"         integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "name"              text NOT NULL,
+      "category"          text NOT NULL DEFAULT 'other',
+      "unit"              text NOT NULL DEFAULT 'L',
+      "mapp_number"       text,
+      "active_ingredient" text,
+      "supplier"          text,
+      "reorder_level"     double precision,
+      "notes"             text,
+      "active"            boolean NOT NULL DEFAULT true,
+      "created_by"        integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"        timestamp NOT NULL DEFAULT now(),
+      "updated_at"        timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_green_products_client" ON "green_products" ("client_id")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_stock_movements" (
+      "id"                    serial PRIMARY KEY,
+      "client_id"             integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "product_id"            integer NOT NULL REFERENCES "green_products"("id") ON DELETE CASCADE,
+      "movement_date"         date NOT NULL,
+      "kind"                  text NOT NULL,
+      "quantity"              double precision NOT NULL,
+      "counted_quantity"      double precision,
+      "supplier"              text,
+      "batch_number"          text,
+      "reference"             text,
+      "recorded_by"           text,
+      "recorded_by_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "notes"                 text,
+      "created_by"            integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"            timestamp NOT NULL DEFAULT now(),
+      "updated_at"            timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_stock_movements_client_product"
+    ON "green_stock_movements" ("client_id", "product_id", "movement_date")
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_applications" (
+      "id"                    serial PRIMARY KEY,
+      "client_id"             integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "application_date"      date NOT NULL,
+      "start_time"            text,
+      "end_time"              text,
+      "method"                text NOT NULL DEFAULT 'spray',
+      "machine_id"            integer REFERENCES "green_machines"("id") ON DELETE SET NULL,
+      "areas"                 jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "area_details"          text,
+      "area_hectares"         double precision,
+      "water_volume_litres"   double precision,
+      "nozzle"                text,
+      "reason"                text,
+      "operator_name"         text,
+      "operator_roster_id"    integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "operator_certificate"  text,
+      "weather"               text,
+      "wind"                  text,
+      "temperature_c"         double precision,
+      "notes"                 text,
+      "created_by"            integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"            timestamp NOT NULL DEFAULT now(),
+      "updated_at"            timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_applications_client_date"
+    ON "green_applications" ("client_id", "application_date")
+  `);
+  // A product used in an application cannot be deleted (archive it instead).
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_application_products" (
+      "id"             serial PRIMARY KEY,
+      "client_id"      integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "application_id" integer NOT NULL REFERENCES "green_applications"("id") ON DELETE CASCADE,
+      "product_id"     integer NOT NULL REFERENCES "green_products"("id") ON DELETE RESTRICT,
+      "rate_per_hectare" double precision,
+      "quantity_used"  double precision NOT NULL,
+      "created_at"     timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_application_products_application"
+    ON "green_application_products" ("application_id")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_green_application_products_client_product"
+    ON "green_application_products" ("client_id", "product_id")
+  `);
 }
 
 // ---- SwimTrack ----

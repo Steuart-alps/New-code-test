@@ -301,6 +301,452 @@ export interface FixTrackIssueMediaList {
   mediaUrls: string[];
 }
 
+export type GreenTrackMachineHoursServiceHoursState = typeof GreenTrackMachineHoursServiceHoursState[keyof typeof GreenTrackMachineHoursServiceHoursState];
+
+
+export const GreenTrackMachineHoursServiceHoursState = {
+  overdue: 'overdue',
+  due_soon: 'due_soon',
+  ok: 'ok',
+  none: 'none',
+} as const;
+
+export interface GreenTrackMachineHours {
+  machineId: number;
+  machineName: string;
+  machineType: string;
+  siteId?: number | null;
+  currentHours: number | null;
+  lastReadingDate: string | null;
+  hoursLast7Days: number | null;
+  hoursLast30Days: number | null;
+  lastServiceDate: string | null;
+  nextServiceHours: number | null;
+  hoursToService: number | null;
+  serviceHoursState: GreenTrackMachineHoursServiceHoursState;
+}
+
+export interface GreenTrackMachineHoursSummary {
+  dueSoonHours: number;
+  machines: GreenTrackMachineHours[];
+}
+
+export type GreenTrackHourReadingSource = typeof GreenTrackHourReadingSource[keyof typeof GreenTrackHourReadingSource];
+
+
+export const GreenTrackHourReadingSource = {
+  reading: 'reading',
+  pre_use_check: 'pre_use_check',
+  fuel_log: 'fuel_log',
+  service: 'service',
+} as const;
+
+export interface GreenTrackHourReading {
+  /** Set only for standalone readings, which are edited on this route */
+  id?: number | null;
+  key: string;
+  source: GreenTrackHourReadingSource;
+  sourceLabel: string;
+  sourceId: number;
+  machineId: number;
+  machineName: string;
+  machineType?: string;
+  readingDate: string;
+  hours: number;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+}
+
+export type GreenTrackProductCategory = typeof GreenTrackProductCategory[keyof typeof GreenTrackProductCategory];
+
+
+export const GreenTrackProductCategory = {
+  pesticide: 'pesticide',
+  fertiliser: 'fertiliser',
+  top_dressing: 'top_dressing',
+  seed: 'seed',
+  wetting_agent: 'wetting_agent',
+  other: 'other',
+} as const;
+
+export type GreenTrackProductUnit = typeof GreenTrackProductUnit[keyof typeof GreenTrackProductUnit];
+
+
+export const GreenTrackProductUnit = {
+  L: 'L',
+  kg: 'kg',
+  t: 't',
+  bag: 'bag',
+  unit: 'unit',
+} as const;
+
+export interface GreenTrackProduct {
+  id: number;
+  name: string;
+  category: GreenTrackProductCategory;
+  unit: GreenTrackProductUnit;
+  mappNumber?: string | null;
+  activeIngredient?: string | null;
+  supplier?: string | null;
+  reorderLevel?: number | null;
+  notes?: string | null;
+  active: boolean;
+  /** Worked out from deliveries, counts, write-offs and records, in the product's unit */
+  stockOnHand: number;
+  lowStock: boolean;
+  lastDeliveryDate?: string | null;
+  lastCountDate?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type GreenTrackProductInputCategory = typeof GreenTrackProductInputCategory[keyof typeof GreenTrackProductInputCategory];
+
+
+export const GreenTrackProductInputCategory = {
+  pesticide: 'pesticide',
+  fertiliser: 'fertiliser',
+  top_dressing: 'top_dressing',
+  seed: 'seed',
+  wetting_agent: 'wetting_agent',
+  other: 'other',
+} as const;
+
+export type GreenTrackProductInputUnit = typeof GreenTrackProductInputUnit[keyof typeof GreenTrackProductInputUnit];
+
+
+export const GreenTrackProductInputUnit = {
+  L: 'L',
+  kg: 'kg',
+  t: 't',
+  bag: 'bag',
+  unit: 'unit',
+} as const;
+
+export interface GreenTrackProductInput {
+  name?: string;
+  category?: GreenTrackProductInputCategory;
+  unit?: GreenTrackProductInputUnit;
+  mappNumber?: string | null;
+  activeIngredient?: string | null;
+  supplier?: string | null;
+  reorderLevel?: number | null;
+  notes?: string | null;
+  active?: boolean;
+}
+
+export type GreenTrackStockLedgerEntryKind = typeof GreenTrackStockLedgerEntryKind[keyof typeof GreenTrackStockLedgerEntryKind];
+
+
+export const GreenTrackStockLedgerEntryKind = {
+  delivery: 'delivery',
+  count: 'count',
+  write_off: 'write_off',
+  application: 'application',
+} as const;
+
+export interface GreenTrackStockLedgerEntry {
+  key: string;
+  kind: GreenTrackStockLedgerEntryKind;
+  productId: number;
+  date: string;
+  change: number;
+  balance: number;
+  countedQuantity?: number | null;
+  movementId?: number | null;
+  applicationId?: number | null;
+  detail?: string | null;
+  recordedBy?: string | null;
+}
+
+export interface GreenTrackProductHistory {
+  product: GreenTrackProduct;
+  entries: GreenTrackStockLedgerEntry[];
+}
+
+export type GreenTrackStockMovementKind = typeof GreenTrackStockMovementKind[keyof typeof GreenTrackStockMovementKind];
+
+
+export const GreenTrackStockMovementKind = {
+  delivery: 'delivery',
+  count: 'count',
+  write_off: 'write_off',
+} as const;
+
+export interface GreenTrackStockMovement {
+  id: number;
+  productId: number;
+  productName: string;
+  unit: string;
+  movementDate: string;
+  kind: GreenTrackStockMovementKind;
+  /** Signed change (a write-off is negative; a count is 0) */
+  quantity: number;
+  countedQuantity?: number | null;
+  supplier?: string | null;
+  batchNumber?: string | null;
+  reference?: string | null;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+}
+
+export type GreenTrackStockMovementInputKind = typeof GreenTrackStockMovementInputKind[keyof typeof GreenTrackStockMovementInputKind];
+
+
+export const GreenTrackStockMovementInputKind = {
+  delivery: 'delivery',
+  count: 'count',
+  write_off: 'write_off',
+} as const;
+
+export interface GreenTrackStockMovementInput {
+  productId: number;
+  movementDate: string;
+  kind: GreenTrackStockMovementInputKind;
+  /** Delivered or written-off quantity (above 0) */
+  quantity?: number;
+  /** The quantity counted, for a stock count */
+  countedQuantity?: number;
+  supplier?: string | null;
+  batchNumber?: string | null;
+  reference?: string | null;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+}
+
+export interface GreenTrackStockMovementUpdate {
+  movementDate?: string;
+  quantity?: number;
+  countedQuantity?: number;
+  supplier?: string | null;
+  batchNumber?: string | null;
+  reference?: string | null;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+}
+
+export interface GreenTrackApplicationProduct {
+  productId: number;
+  productName: string;
+  category: string;
+  unit: string;
+  mappNumber?: string | null;
+  ratePerHectare?: number | null;
+  quantityUsed: number;
+}
+
+export interface GreenTrackApplicationProductInput {
+  productId: number;
+  ratePerHectare?: number | null;
+  /** In the product's unit; this comes off stock */
+  quantityUsed: number;
+}
+
+export type GreenTrackApplicationMethod = typeof GreenTrackApplicationMethod[keyof typeof GreenTrackApplicationMethod];
+
+
+export const GreenTrackApplicationMethod = {
+  spray: 'spray',
+  granular: 'granular',
+  top_dressing: 'top_dressing',
+  other: 'other',
+} as const;
+
+export type GreenTrackApplicationAreasItem = typeof GreenTrackApplicationAreasItem[keyof typeof GreenTrackApplicationAreasItem];
+
+
+export const GreenTrackApplicationAreasItem = {
+  greens: 'greens',
+  tees: 'tees',
+  fairways: 'fairways',
+  approaches: 'approaches',
+  surrounds: 'surrounds',
+  bunkers: 'bunkers',
+  rough: 'rough',
+  practice: 'practice',
+  other: 'other',
+} as const;
+
+export interface GreenTrackApplication {
+  id: number;
+  applicationDate: string;
+  /** HH:MM */
+  startTime?: string | null;
+  /** HH:MM */
+  endTime?: string | null;
+  method: GreenTrackApplicationMethod;
+  machineId?: number | null;
+  areas: GreenTrackApplicationAreasItem[];
+  areaDetails?: string | null;
+  areaHectares?: number | null;
+  waterVolumeLitres?: number | null;
+  nozzle?: string | null;
+  reason?: string | null;
+  operatorName?: string | null;
+  operatorRosterId?: number | null;
+  operatorCertificate?: string | null;
+  weather?: string | null;
+  wind?: string | null;
+  temperatureC?: number | null;
+  notes?: string | null;
+  machineName?: string | null;
+  products: GreenTrackApplicationProduct[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface GreenTrackStockWarning {
+  productId: number;
+  productName: string;
+  unit: string;
+  stockOnHand: number;
+}
+
+export type GreenTrackApplicationSaved = GreenTrackApplication & {
+  stockWarnings: GreenTrackStockWarning[];
+};
+
+export type GreenTrackApplicationInputMethod = typeof GreenTrackApplicationInputMethod[keyof typeof GreenTrackApplicationInputMethod];
+
+
+export const GreenTrackApplicationInputMethod = {
+  spray: 'spray',
+  granular: 'granular',
+  top_dressing: 'top_dressing',
+  other: 'other',
+} as const;
+
+export type GreenTrackApplicationInputAreasItem = typeof GreenTrackApplicationInputAreasItem[keyof typeof GreenTrackApplicationInputAreasItem];
+
+
+export const GreenTrackApplicationInputAreasItem = {
+  greens: 'greens',
+  tees: 'tees',
+  fairways: 'fairways',
+  approaches: 'approaches',
+  surrounds: 'surrounds',
+  bunkers: 'bunkers',
+  rough: 'rough',
+  practice: 'practice',
+  other: 'other',
+} as const;
+
+export interface GreenTrackApplicationInput {
+  applicationDate: string;
+  /** HH:MM */
+  startTime?: string | null;
+  /** HH:MM */
+  endTime?: string | null;
+  method?: GreenTrackApplicationInputMethod;
+  machineId?: number | null;
+  areas?: GreenTrackApplicationInputAreasItem[];
+  areaDetails?: string | null;
+  areaHectares?: number | null;
+  waterVolumeLitres?: number | null;
+  nozzle?: string | null;
+  reason?: string | null;
+  operatorName?: string | null;
+  operatorRosterId?: number | null;
+  operatorCertificate?: string | null;
+  weather?: string | null;
+  wind?: string | null;
+  temperatureC?: number | null;
+  notes?: string | null;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  products: GreenTrackApplicationProductInput[];
+}
+
+export type GreenTrackApplicationUpdateMethod = typeof GreenTrackApplicationUpdateMethod[keyof typeof GreenTrackApplicationUpdateMethod];
+
+
+export const GreenTrackApplicationUpdateMethod = {
+  spray: 'spray',
+  granular: 'granular',
+  top_dressing: 'top_dressing',
+  other: 'other',
+} as const;
+
+export type GreenTrackApplicationUpdateAreasItem = typeof GreenTrackApplicationUpdateAreasItem[keyof typeof GreenTrackApplicationUpdateAreasItem];
+
+
+export const GreenTrackApplicationUpdateAreasItem = {
+  greens: 'greens',
+  tees: 'tees',
+  fairways: 'fairways',
+  approaches: 'approaches',
+  surrounds: 'surrounds',
+  bunkers: 'bunkers',
+  rough: 'rough',
+  practice: 'practice',
+  other: 'other',
+} as const;
+
+export interface GreenTrackApplicationUpdate {
+  applicationDate?: string;
+  /** HH:MM */
+  startTime?: string | null;
+  /** HH:MM */
+  endTime?: string | null;
+  method?: GreenTrackApplicationUpdateMethod;
+  machineId?: number | null;
+  areas?: GreenTrackApplicationUpdateAreasItem[];
+  areaDetails?: string | null;
+  areaHectares?: number | null;
+  waterVolumeLitres?: number | null;
+  nozzle?: string | null;
+  reason?: string | null;
+  operatorName?: string | null;
+  operatorRosterId?: number | null;
+  operatorCertificate?: string | null;
+  weather?: string | null;
+  wind?: string | null;
+  temperatureC?: number | null;
+  notes?: string | null;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  products?: GreenTrackApplicationProductInput[];
+}
+
+export interface GreenTrackHourReadingInput {
+  machineId: number;
+  readingDate: string;
+  hours: number;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+  /** Confirms a reading lower than an earlier one (meter replaced or reset) */
+  meterReplaced?: boolean;
+}
+
+export interface GreenTrackHourReadingUpdate {
+  readingDate?: string;
+  hours?: number;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+  meterReplaced?: boolean;
+}
+
+/**
+ * The stored reading (database column names)
+ */
+export interface GreenTrackHourReadingRow {
+  id?: number;
+  machine_id?: number;
+  reading_date?: string;
+  hours?: number;
+  [key: string]: unknown;
+ }
+
 export interface GreenTrackCertificateDownload {
   downloadUrl: string;
   fileName?: string | null;
@@ -3329,6 +3775,31 @@ export type UpdateHotTubConfigParams = {
  * Save the site-specific HotTubTrack control profile.
  */
 siteId: number;
+};
+
+export type ListGreenTrackHourReadingsParams = {
+machineId?: number;
+limit?: number;
+};
+
+export type ListGreenTrackStockMovementsParams = {
+productId?: number;
+/**
+ * @minimum 1
+ * @maximum 1000
+ */
+limit?: number;
+};
+
+export type ListGreenTrackApplicationsParams = {
+from?: string;
+to?: string;
+productId?: number;
+/**
+ * @minimum 1
+ * @maximum 1000
+ */
+limit?: number;
 };
 
 export type ListPATTestsParams = {

@@ -1082,6 +1082,53 @@ async function main() {
       staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
     });
 
+    // Hour readings: staff record them, managers delete them. The old one is
+    // the higher reading so the "lower than an earlier reading" guard stays out
+    // of the way of the lock checks.
+    const reading = (readingDate, hours) => ({ machineId, readingDate, hours, meterReplaced: true });
+    await lockedSubroute({
+      label: "Green hour reading", path: "/green-track/hour-readings", listPath: `/green-track/hour-readings?machineId=${machineId}`,
+      createOld: () => admin("POST", "/green-track/hour-readings", reading(old, 100)),
+      createCurrent: () => admin("POST", "/green-track/hour-readings", reading(today, 120)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { readingDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { readingDate: old, notes: "backdated", meterReplaced: true },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
+    // Spraying book and stock records: staff record them, managers delete them.
+    const product = await admin("POST", "/green-track/products", { name: `Lock fungicide ${suffix}`, category: "pesticide", unit: "L" });
+    expect("Green product: seed", product, [201]);
+    const productId = product.data?.id;
+    const spraying = (applicationDate) => ({
+      applicationDate, areas: ["greens"], operatorName: "Lock Fixture", products: [{ productId, quantityUsed: 1 }],
+    });
+    await lockedSubroute({
+      label: "Green spraying record", path: "/green-track/applications",
+      createOld: () => admin("POST", "/green-track/applications", spraying(old)),
+      createCurrent: () => admin("POST", "/green-track/applications", spraying(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { applicationDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { applicationDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+    const delivery = (movementDate) => ({ productId, movementDate, kind: "delivery", quantity: 10 });
+    await lockedSubroute({
+      label: "Green stock record", path: "/green-track/stock-movements",
+      createOld: () => admin("POST", "/green-track/stock-movements", delivery(old)),
+      createCurrent: () => admin("POST", "/green-track/stock-movements", delivery(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { movementDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { movementDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
     const puwer = (inspectionDate, extra = {}) => ({
       machineId, inspectionDate, nextInspectionDate: iso(300), inspectorName: "Lock Fixture", ...extra,
     });

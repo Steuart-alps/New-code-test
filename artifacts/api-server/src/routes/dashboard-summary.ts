@@ -19,6 +19,7 @@ import { addCalendarDays, getAccountToday } from "../lib/accountClock";
 import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
 import { getPickedModules } from "./setup";
 import { siteVisibleSql, visibleSiteIdsSql } from "../lib/departmentSites";
+import { greenCurrentHoursLateral } from "../lib/greenHours";
 
 const router = Router();
 
@@ -1152,15 +1153,19 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = scopedSiteClause(sql`m.site_id`);
+        // A service is overdue by its date, or once the hour meter reaches
+        // the latest service's "next service at" hours.
         const overdueServiceFrom = sql`
           FROM green_machines m
           JOIN LATERAL (
-            SELECT next_service_date FROM green_service_records
+            SELECT next_service_date, next_service_hours FROM green_service_records
             WHERE machine_id = m.id AND client_id = m.client_id
             ORDER BY service_date DESC, id DESC LIMIT 1
           ) s ON true
+          LEFT JOIN LATERAL ${greenCurrentHoursLateral(sql.raw("m.id"), sql.raw("m.client_id"))} h ON true
           WHERE m.client_id = ${clientId} AND m.active = true ${siteClause}
-            AND s.next_service_date IS NOT NULL AND s.next_service_date < ${today}
+            AND ((s.next_service_date IS NOT NULL AND s.next_service_date < ${today})
+              OR (s.next_service_hours IS NOT NULL AND h.hours >= s.next_service_hours))
         `;
         // Statutory (PUWER / LOLER) examinations: a machine's latest one of
         // each kind sets when the next of that kind is due.
@@ -1201,7 +1206,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             WHERE c.client_id = ${clientId} AND c.check_date = ${today} ${siteClause}
           `),
           // Machines with overdue service
-          db.execute(sql`SELECT m.id, m.name ${overdueServiceFrom} ORDER BY s.next_service_date ASC LIMIT 10`),
+          db.execute(sql`SELECT m.id, m.name, s.next_service_date, s.next_service_hours, h.hours ${overdueServiceFrom} ORDER BY s.next_service_date ASC NULLS LAST LIMIT 10`),
           db.execute(sql`SELECT count(*)::int AS overdue ${overdueServiceFrom}`),
           db.execute(overdueExamination),
           db.execute(untestedSprayers),
@@ -1228,7 +1233,12 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             overdueNstsCount > 0 ? `${plural(overdueNstsCount, "NSTS test")} overdue` : null,
           ].filter(Boolean).join(", ");
           for (const m of rows(overdueService)) {
-            items.push({ label: m.name, detail: "Service overdue", path: "/green-track" });
+            const byHours = m.next_service_hours != null && m.hours != null && Number(m.hours) >= Number(m.next_service_hours);
+            items.push({
+              label: m.name,
+              detail: byHours ? `Service overdue: ${Number(m.hours)} hours, due at ${Number(m.next_service_hours)}` : "Service overdue",
+              path: "/green-track",
+            });
           }
           for (const m of rows(overdueExaminations).slice(0, 10)) {
             const kind = isNsts(m) ? "NSTS test" : /examination/.test(String(m.inspection_type)) ? "Thorough examination" : "Inspection";

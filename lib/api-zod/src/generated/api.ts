@@ -3461,6 +3461,596 @@ export const UpdateGreenTrackConfigResponse = zod.object({
 
 
 /**
+ * Current hours are the latest reading (by date) from standalone hour readings, pre-use checks, fuel logs and service records.
+ * @summary Each active machine's hour meter, hours used and service due by hours
+ */
+export const GetGreenTrackMachineHoursResponse = zod.object({
+  "dueSoonHours": zod.number(),
+  "machines": zod.array(zod.object({
+  "machineId": zod.number(),
+  "machineName": zod.string(),
+  "machineType": zod.string(),
+  "siteId": zod.number().nullish(),
+  "currentHours": zod.number().nullable(),
+  "lastReadingDate": zod.string().nullable(),
+  "hoursLast7Days": zod.number().nullable(),
+  "hoursLast30Days": zod.number().nullable(),
+  "lastServiceDate": zod.string().nullable(),
+  "nextServiceHours": zod.number().nullable(),
+  "hoursToService": zod.number().nullable(),
+  "serviceHoursState": zod.enum(['overdue', 'due_soon', 'ok', 'none'])
+}))
+})
+
+
+/**
+ * @summary List hour meter readings from every source, newest first
+ */
+export const ListGreenTrackHourReadingsQueryParams = zod.object({
+  "machineId": zod.coerce.number().optional(),
+  "limit": zod.coerce.number().optional()
+})
+
+export const ListGreenTrackHourReadingsResponseItem = zod.object({
+  "id": zod.number().nullish().describe('Set only for standalone readings, which are edited on this route'),
+  "key": zod.string(),
+  "source": zod.enum(['reading', 'pre_use_check', 'fuel_log', 'service']),
+  "sourceLabel": zod.string(),
+  "sourceId": zod.number(),
+  "machineId": zod.number(),
+  "machineName": zod.string(),
+  "machineType": zod.string().optional(),
+  "readingDate": zod.string(),
+  "hours": zod.number(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+export const ListGreenTrackHourReadingsResponse = zod.array(ListGreenTrackHourReadingsResponseItem)
+
+
+/**
+ * @summary Log an hour meter reading
+ */
+export const CreateGreenTrackHourReadingBody = zod.object({
+  "machineId": zod.number(),
+  "readingDate": zod.date(),
+  "hours": zod.number(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "meterReplaced": zod.boolean().optional().describe('Confirms a reading lower than an earlier one (meter replaced or reset)')
+})
+
+export const CreateGreenTrackHourReadingResponse = zod.object({
+  "id": zod.number().optional(),
+  "machine_id": zod.number().optional(),
+  "reading_date": zod.string().optional(),
+  "hours": zod.number().optional()
+}).describe('The stored reading (database column names)')
+
+
+/**
+ * @summary Correct a standalone hour meter reading
+ */
+export const UpdateGreenTrackHourReadingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackHourReadingBody = zod.object({
+  "readingDate": zod.date().optional(),
+  "hours": zod.number().optional(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "meterReplaced": zod.boolean().optional()
+})
+
+export const UpdateGreenTrackHourReadingResponse = zod.object({
+  "id": zod.number().optional(),
+  "machine_id": zod.number().optional(),
+  "reading_date": zod.string().optional(),
+  "hours": zod.number().optional()
+}).describe('The stored reading (database column names)')
+
+
+/**
+ * @summary Delete a standalone hour meter reading (managers)
+ */
+export const DeleteGreenTrackHourReadingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackHourReadingResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary List spraying and stock products with their stock on hand
+ */
+export const ListGreenTrackProductsResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean(),
+  "stockOnHand": zod.number().describe('Worked out from deliveries, counts, write-offs and records, in the product\'s unit'),
+  "lowStock": zod.boolean(),
+  "lastDeliveryDate": zod.date().nullish(),
+  "lastCountDate": zod.date().nullish(),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+})
+export const ListGreenTrackProductsResponse = zod.array(ListGreenTrackProductsResponseItem)
+
+
+/**
+ * @summary Add a product (pesticide, fertiliser, top dressing, seed...)
+ */
+export const CreateGreenTrackProductBody = zod.object({
+  "name": zod.string().optional(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']).optional(),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']).optional(),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean().optional()
+})
+
+export const CreateGreenTrackProductResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean(),
+  "stockOnHand": zod.number().describe('Worked out from deliveries, counts, write-offs and records, in the product\'s unit'),
+  "lowStock": zod.boolean(),
+  "lastDeliveryDate": zod.date().nullish(),
+  "lastCountDate": zod.date().nullish(),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+})
+
+
+/**
+ * The unit cannot change once the product has stock or spraying records (409).
+ * @summary Update a product, or archive it with active false
+ */
+export const UpdateGreenTrackProductParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackProductBody = zod.object({
+  "name": zod.string().optional(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']).optional(),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']).optional(),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean().optional()
+})
+
+export const UpdateGreenTrackProductResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean(),
+  "stockOnHand": zod.number().describe('Worked out from deliveries, counts, write-offs and records, in the product\'s unit'),
+  "lowStock": zod.boolean(),
+  "lastDeliveryDate": zod.date().nullish(),
+  "lastCountDate": zod.date().nullish(),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+})
+
+
+/**
+ * @summary Delete a product with no stock or spraying records (managers)
+ */
+export const DeleteGreenTrackProductParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackProductResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary A product's stock history, newest first, with the balance after each entry
+ */
+export const GetGreenTrackProductHistoryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGreenTrackProductHistoryResponse = zod.object({
+  "product": zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "category": zod.enum(['pesticide', 'fertiliser', 'top_dressing', 'seed', 'wetting_agent', 'other']),
+  "unit": zod.enum(['L', 'kg', 't', 'bag', 'unit']),
+  "mappNumber": zod.string().nullish(),
+  "activeIngredient": zod.string().nullish(),
+  "supplier": zod.string().nullish(),
+  "reorderLevel": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "active": zod.boolean(),
+  "stockOnHand": zod.number().describe('Worked out from deliveries, counts, write-offs and records, in the product\'s unit'),
+  "lowStock": zod.boolean(),
+  "lastDeliveryDate": zod.date().nullish(),
+  "lastCountDate": zod.date().nullish(),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+}),
+  "entries": zod.array(zod.object({
+  "key": zod.string(),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'application']),
+  "productId": zod.number(),
+  "date": zod.date(),
+  "change": zod.number(),
+  "balance": zod.number(),
+  "countedQuantity": zod.number().nullish(),
+  "movementId": zod.number().nullish(),
+  "applicationId": zod.number().nullish(),
+  "detail": zod.string().nullish(),
+  "recordedBy": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary List deliveries, stock counts and write-offs
+ */
+export const listGreenTrackStockMovementsQueryLimitMax = 1000;
+
+
+
+export const ListGreenTrackStockMovementsQueryParams = zod.object({
+  "productId": zod.coerce.number().optional(),
+  "limit": zod.coerce.number().min(1).max(listGreenTrackStockMovementsQueryLimitMax).optional()
+})
+
+export const ListGreenTrackStockMovementsResponseItem = zod.object({
+  "id": zod.number(),
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "movementDate": zod.date(),
+  "kind": zod.enum(['delivery', 'count', 'write_off']),
+  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "countedQuantity": zod.number().nullish(),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+export const ListGreenTrackStockMovementsResponse = zod.array(ListGreenTrackStockMovementsResponseItem)
+
+
+/**
+ * @summary Log a delivery, stock count or write-off
+ */
+export const CreateGreenTrackStockMovementBody = zod.object({
+  "productId": zod.number(),
+  "movementDate": zod.date(),
+  "kind": zod.enum(['delivery', 'count', 'write_off']),
+  "quantity": zod.number().optional().describe('Delivered or written-off quantity (above 0)'),
+  "countedQuantity": zod.number().optional().describe('The quantity counted, for a stock count'),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+export const CreateGreenTrackStockMovementResponse = zod.object({
+  "id": zod.number(),
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "movementDate": zod.date(),
+  "kind": zod.enum(['delivery', 'count', 'write_off']),
+  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "countedQuantity": zod.number().nullish(),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+
+/**
+ * @summary Correct a stock record (the product and kind stay as recorded)
+ */
+export const UpdateGreenTrackStockMovementParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackStockMovementBody = zod.object({
+  "movementDate": zod.date().optional(),
+  "quantity": zod.number().optional(),
+  "countedQuantity": zod.number().optional(),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+export const UpdateGreenTrackStockMovementResponse = zod.object({
+  "id": zod.number(),
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "movementDate": zod.date(),
+  "kind": zod.enum(['delivery', 'count', 'write_off']),
+  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "countedQuantity": zod.number().nullish(),
+  "supplier": zod.string().nullish(),
+  "batchNumber": zod.string().nullish(),
+  "reference": zod.string().nullish(),
+  "recordedBy": zod.string().nullish(),
+  "recordedByRosterId": zod.number().nullish(),
+  "notes": zod.string().nullish()
+})
+
+
+/**
+ * @summary Delete a stock record (managers)
+ */
+export const DeleteGreenTrackStockMovementParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackStockMovementResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary The spraying book (spraying, spreading and top dressing records)
+ */
+export const listGreenTrackApplicationsQueryLimitMax = 1000;
+
+
+
+export const ListGreenTrackApplicationsQueryParams = zod.object({
+  "from": zod.date().optional(),
+  "to": zod.date().optional(),
+  "productId": zod.coerce.number().optional(),
+  "limit": zod.coerce.number().min(1).max(listGreenTrackApplicationsQueryLimitMax).optional()
+})
+
+export const ListGreenTrackApplicationsResponseItem = zod.object({
+  "id": zod.number(),
+  "applicationDate": zod.date(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "machineName": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "category": zod.string(),
+  "unit": zod.string(),
+  "mappNumber": zod.string().nullish(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number()
+})),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+})
+export const ListGreenTrackApplicationsResponse = zod.array(ListGreenTrackApplicationsResponseItem)
+
+
+/**
+ * @summary Record a spraying, spreading or top dressing; the products used come off stock
+ */
+export const createGreenTrackApplicationBodyProductsMax = 20;
+
+
+
+export const CreateGreenTrackApplicationBody = zod.object({
+  "applicationDate": zod.date(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']).optional(),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])).optional(),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number().describe('In the product\'s unit; this comes off stock')
+})).min(1).max(createGreenTrackApplicationBodyProductsMax)
+})
+
+export const CreateGreenTrackApplicationResponse = zod.object({
+  "id": zod.number(),
+  "applicationDate": zod.date(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "machineName": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "category": zod.string(),
+  "unit": zod.string(),
+  "mappNumber": zod.string().nullish(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number()
+})),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+}).and(zod.object({
+  "stockWarnings": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "stockOnHand": zod.number()
+}))
+}))
+
+
+/**
+ * @summary Correct a spraying record; sending products replaces the list
+ */
+export const UpdateGreenTrackApplicationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateGreenTrackApplicationBodyProductsMax = 20;
+
+
+
+export const UpdateGreenTrackApplicationBody = zod.object({
+  "applicationDate": zod.date().optional(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']).optional(),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])).optional(),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number().describe('In the product\'s unit; this comes off stock')
+})).min(1).max(updateGreenTrackApplicationBodyProductsMax).optional()
+})
+
+export const UpdateGreenTrackApplicationResponse = zod.object({
+  "id": zod.number(),
+  "applicationDate": zod.date(),
+  "startTime": zod.string().nullish().describe('HH:MM'),
+  "endTime": zod.string().nullish().describe('HH:MM'),
+  "method": zod.enum(['spray', 'granular', 'top_dressing', 'other']),
+  "machineId": zod.number().nullish(),
+  "areas": zod.array(zod.enum(['greens', 'tees', 'fairways', 'approaches', 'surrounds', 'bunkers', 'rough', 'practice', 'other'])),
+  "areaDetails": zod.string().nullish(),
+  "areaHectares": zod.number().nullish(),
+  "waterVolumeLitres": zod.number().nullish(),
+  "nozzle": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "operatorName": zod.string().nullish(),
+  "operatorRosterId": zod.number().nullish(),
+  "operatorCertificate": zod.string().nullish(),
+  "weather": zod.string().nullish(),
+  "wind": zod.string().nullish(),
+  "temperatureC": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "machineName": zod.string().nullish(),
+  "products": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "category": zod.string(),
+  "unit": zod.string(),
+  "mappNumber": zod.string().nullish(),
+  "ratePerHectare": zod.number().nullish(),
+  "quantityUsed": zod.number()
+})),
+  "createdAt": zod.date().optional(),
+  "updatedAt": zod.date().optional()
+}).and(zod.object({
+  "stockWarnings": zod.array(zod.object({
+  "productId": zod.number(),
+  "productName": zod.string(),
+  "unit": zod.string(),
+  "stockOnHand": zod.number()
+}))
+}))
+
+
+/**
+ * @summary Delete a spraying record, putting its products back on stock (managers)
+ */
+export const DeleteGreenTrackApplicationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackApplicationResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
  * Covers PUWER and LOLER examinations and NSTS sprayer tests. The link expires after 15 minutes.
  * @summary Get a short-lived download link for an inspection's uploaded certificate
  */

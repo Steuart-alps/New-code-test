@@ -326,6 +326,13 @@ green-track/
   puwer-inspections.csv          — PUWER inspections and NSTS sprayer tests
   service-records.csv            — machinery service records
   defects.csv                    — machinery defects
+  hour-readings.csv              — hour meter readings (daily checks, fuel
+                                   logs and services keep their own)
+  fuel-logs.csv                  — fuel and oil logs
+  products.csv                   — spraying and stock products
+  stock-records.csv              — deliveries, stock counts and write-offs
+  spraying-records.csv           — spraying, spreading and top dressing records
+  spraying-record-products.csv   — products and quantities on each record
 tree-track/
   inspections.csv                — tree inspection records
 bike-track/
@@ -727,6 +734,18 @@ router.get(
         await out.csv("green-track/service-records.csv", async () => (await db.execute(sql`SELECT * FROM green_service_records WHERE client_id = ${cid} ORDER BY service_date DESC, id`)).rows);
 
         await out.csv("green-track/defects.csv", async () => (await db.execute(sql`SELECT * FROM green_defects WHERE client_id = ${cid} ORDER BY report_date DESC, id`)).rows);
+
+        await out.csv("green-track/hour-readings.csv", async () => (await db.execute(sql`SELECT * FROM green_hour_readings WHERE client_id = ${cid} ORDER BY reading_date DESC, id`)).rows);
+
+        await out.csv("green-track/fuel-logs.csv", async () => (await db.execute(sql`SELECT * FROM green_fuel_logs WHERE client_id = ${cid} ORDER BY log_date DESC, id`)).rows);
+
+        await out.csv("green-track/products.csv", async () => (await db.execute(sql`SELECT * FROM green_products WHERE client_id = ${cid} ORDER BY name, id`)).rows);
+
+        await out.csv("green-track/stock-records.csv", async () => (await db.execute(sql`SELECT m.*, p.name AS product_name, p.unit FROM green_stock_movements m JOIN green_products p ON p.id = m.product_id AND p.client_id = m.client_id WHERE m.client_id = ${cid} ORDER BY m.movement_date DESC, m.id`)).rows);
+
+        await out.csv("green-track/spraying-records.csv", async () => (await db.execute(sql`SELECT * FROM green_applications WHERE client_id = ${cid} ORDER BY application_date DESC, id`)).rows);
+
+        await out.csv("green-track/spraying-record-products.csv", async () => (await db.execute(sql`SELECT ap.*, p.name AS product_name, p.unit, p.mapp_number FROM green_application_products ap JOIN green_products p ON p.id = ap.product_id AND p.client_id = ap.client_id WHERE ap.client_id = ${cid} ORDER BY ap.application_id DESC, ap.id`)).rows);
 
         // ── TreeTrack ─────────────────────────────────────────────────────────
         await out.csv("tree-track/inspections.csv", () => db.select().from(treeInspectionsTable).where(eq(treeInspectionsTable.clientId, cid)));
