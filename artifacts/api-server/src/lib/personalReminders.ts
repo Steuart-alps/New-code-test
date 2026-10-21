@@ -8,11 +8,15 @@
  *
  * "Due tomorrow" email: at most one per person per day, only on days when
  * something of theirs needs it. It lists, across every track
- * (lib/dueItems.ts, which also decides who is responsible):
- *   - what is due tomorrow;
- *   - anything gone overdue: the day after it was due, then once a week;
- *   - expiries: the early reminder (30 days for training, the contractor lead
- *     time for contractor documents) and 1 day before;
+ * (lib/dueItems.ts, which also decides who is responsible), with the timing
+ * per type set in Settings → Reminder Notifications
+ * (@workspace/api-zod/reminder-timings):
+ *   - what is due tomorrow (by default), or on Fridays what is due the next
+ *     Monday to Sunday for types set to "Weekly";
+ *   - anything gone overdue: the day after it was due, then once a week (by
+ *     default);
+ *   - expiries: the early reminder (by default 30 days for training, the
+ *     contractor lead time for contractor documents) and 1 day before;
  *   - documents they still have to sign (by their staff roster email), added
  *     when an email is going anyway, and on Mondays.
  * Tasks assigned to a group ("Staff" or "Managers") go on that group's bell
@@ -37,6 +41,14 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { addCalendarDays, getAccountTimezone, localDateIn } from "./accountClock";
 import { getOutstandingAckSummary } from "./docAckReminders";
+import {
+  DEFAULT_OVERDUE_EVERY,
+  NEXT_WEEK,
+  REMINDER_TIMINGS_SETTING,
+  defaultReminderTiming,
+  validateReminderTimings,
+  type ReminderTiming,
+} from "@workspace/api-zod/reminder-timings";
 import {
   CONTRACTORS_MODULE,
   collectDueItems,
@@ -145,25 +157,68 @@ function formatDay(iso: string): string {
   });
 }
 
+/** "today", "tomorrow" or the date. */
+function dueWhen(today: string, date: string): string {
+  if (date === today) return "today";
+  if (date === addCalendarDays(today, 1)) return "tomorrow";
+  return formatDay(date);
+}
+
+/**
+ * Whether an item is in today's personal email under its type's timing, and
+ * in which section. Types with no stored timing use the defaults; an expiry's
+ * default early reminder is its own lead time (training 30 days, the
+ * contractor lead time).
+ */
+export function reminderSection(
+  item: Pick<DueItem, "kind" | "dueDate" | "leadDays">,
+  timing: ReminderTiming | undefined,
+  today: string,
+): "upcoming" | "nextWeek" | "overdue" | "expiring" | null {
+  const { daysBefore, overdueEvery } = timing
+    ?? (item.kind === "expiry" && item.leadDays != null
+      ? { daysBefore: item.leadDays, overdueEvery: DEFAULT_OVERDUE_EVERY }
+      : defaultReminderTiming({ expiry: item.kind === "expiry" }));
+  if (daysBefore == null) return null; // switched off for this type
+  if (daysBefore === NEXT_WEEK) {
+    if (item.kind === "due" && isFriday(today)) {
+      const ahead = daysBetween(today, item.dueDate);
+      if (ahead >= 3 && ahead <= 9) return "nextWeek"; // the following Monday to Sunday
+    }
+  }
+  if (item.kind === "expiry") {
+    const left = daysBetween(today, item.dueDate);
+    return left === daysBefore || left === 1 ? "expiring" : null;
+  }
+  const late = daysBetween(item.dueDate, today);
+  if (typeof daysBefore === "number" && late === -daysBefore) return "upcoming";
+  if (late === 1 || (late > 1 && overdueEvery > 0 && (late - 1) % overdueEvery === 0)) return "overdue";
+  return null;
+}
+
 const isMonday = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay() === 1;
+const isFriday = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay() === 5;
 
 // ── Content ──────────────────────────────────────────────────────────────────
 
 interface SignOff { title: string; docType: string; siteName: string | null }
 
 interface PersonalSections {
-  tomorrow: DueItem[];
+  /** Due soon, at each type's "days before" timing (tomorrow by default). */
+  upcoming: DueItem[];
+  /** Fridays: due next Monday to Sunday, for types set to the weekly email. */
+  nextWeek: DueItem[];
   overdue: DueItem[];
   expiring: DueItem[];
   urgent: UrgentItem[];
   signOffs: SignOff[];
 }
 
-const emptySections = (): PersonalSections => ({ tomorrow: [], overdue: [], expiring: [], urgent: [], signOffs: [] });
+const emptySections = (): PersonalSections => ({ upcoming: [], nextWeek: [], overdue: [], expiring: [], urgent: [], signOffs: [] });
 
 /** Whether anything in the sections needs an email on its own (sign-offs ride along). */
 const hasReminders = (sections: PersonalSections) =>
-  sections.tomorrow.length + sections.overdue.length + sections.expiring.length + sections.urgent.length > 0;
+  sections.upcoming.length + sections.nextWeek.length + sections.overdue.length + sections.expiring.length + sections.urgent.length > 0;
 
 interface ActivityRow { track: string; person: string; count: number }
 
@@ -212,8 +267,21 @@ function personalHtml(sections: PersonalSections, today: string): string {
   if (sections.urgent.length) {
     parts.push(heading("Needs action now", "#b91c1c"), list(sections.urgent.map(urgentRow)));
   }
-  if (sections.tomorrow.length) {
-    parts.push(heading(`Due tomorrow (${formatDay(addCalendarDays(today, 1))})`), list(sections.tomorrow.map((item) => itemRow(item))));
+  if (sections.upcoming.length) {
+    const tomorrow = addCalendarDays(today, 1);
+    if (sections.upcoming.every((item) => item.dueDate === tomorrow)) {
+      parts.push(heading(`Due tomorrow (${formatDay(tomorrow)})`), list(sections.upcoming.map((item) => itemRow(item))));
+    } else {
+      const sorted = [...sections.upcoming].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+      parts.push(heading("Coming up"), list(sorted.map((item) => itemRow(item, ` · due ${escapeHtml(dueWhen(today, item.dueDate))}`))));
+    }
+  }
+  if (sections.nextWeek.length) {
+    const sorted = [...sections.nextWeek].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    parts.push(
+      heading(`Due next week (${formatDay(addCalendarDays(today, 3))} to ${formatDay(addCalendarDays(today, 9))})`),
+      list(sorted.map((item) => itemRow(item, ` · ${escapeHtml(formatDay(item.dueDate))}`))),
+    );
   }
   if (sections.overdue.length) {
     parts.push(heading("Overdue", "#b45309"), list(sections.overdue.map((item) =>
@@ -376,14 +444,13 @@ export async function runPersonalRemindersForClient(
 
   const send = options.send ?? sendEmail;
   const today = localDateIn(timeZone, now);
-  const tomorrow = addCalendarDays(today, 1);
   const [{ items, urgent }, ctx, services, settingRows, clientRows] = await Promise.all([
     collectDueItems(clientId, today, now),
     loadResponsibilityContext(clientId),
     getEntitledServices(clientId),
     db.execute(sql`
       SELECT key, value FROM app_settings
-      WHERE client_id = ${clientId} AND key IN (${OWNER_UPDATE_FREQUENCY_SETTING}, 'notificationEmail')
+      WHERE client_id = ${clientId} AND key IN (${OWNER_UPDATE_FREQUENCY_SETTING}, ${REMINDER_TIMINGS_SETTING}, 'notificationEmail')
     `),
     db.execute(sql`SELECT name FROM clients WHERE id = ${clientId}`),
   ]);
@@ -391,6 +458,8 @@ export async function runPersonalRemindersForClient(
   const businessName = rowsOf<{ name: string }>(clientRows)[0]?.name ?? "your business";
   const frequency = parseOwnerUpdateFrequency(settings.get(OWNER_UPDATE_FREQUENCY_SETTING));
   const updateDay = frequency === "daily" || isMonday(today);
+  const storedTimings = validateReminderTimings(settings.get(REMINDER_TIMINGS_SETTING) ?? {});
+  const timings: Record<string, ReminderTiming> = storedTimings.ok ? storedTimings.value : {};
 
   const recipients = new Map<string, Recipient>();
   const recipientFor = (email: string, user?: { id: number; name: string } | null) => {
@@ -408,32 +477,24 @@ export async function runPersonalRemindersForClient(
     return user?.email ? recipientFor(user.email, user) : null;
   };
 
-  // Personal reminders, and the bell for group tasks due tomorrow.
+  // Personal reminders, and the bell for group tasks coming up.
   const responsibility = new Map<string, Responsibility>();
   const bell: NewUserNotification[] = [];
   for (const item of items) {
     const who = responsibleFor(ctx, item);
     responsibility.set(item.id, who);
+    const section = reminderSection(item, timings[item.module], today);
     if (item.groupRole) {
-      if (item.dueDate !== tomorrow) continue;
+      if (section !== "upcoming" && section !== "nextWeek") continue;
       for (const userId of who.bellUserIds) {
         bell.push({
           clientId, userId, module: null, siteId: item.siteId, kind: "task_due",
-          title: `Task due tomorrow: ${item.title}`,
+          title: `Task due ${dueWhen(today, item.dueDate)}: ${item.title}`,
           body: item.siteName ? `At ${item.siteName}.` : null,
           linkPath: item.linkPath, dedupeKey: `task_due:${item.id}`,
         });
       }
       continue;
-    }
-    let section: keyof Pick<PersonalSections, "tomorrow" | "overdue" | "expiring"> | null = null;
-    if (item.kind === "due") {
-      const late = daysBetween(item.dueDate, today);
-      if (item.dueDate === tomorrow) section = "tomorrow";
-      else if (late >= 1 && late % 7 === 1) section = "overdue";
-    } else {
-      const left = daysBetween(today, item.dueDate);
-      if (left === 1 || left === item.leadDays) section = "expiring";
     }
     if (!section) continue;
     for (const userId of who.userIds) userRecipient(userId)?.sections[section].push(item);
@@ -539,11 +600,14 @@ export async function runPersonalRemindersForClient(
         + (personal ? `${heading("Yours to do", "#4f46e5")}${personalHtml(recipient.sections, today)}` : "")
         + ownerUpdateHtml(update, today);
     } else {
-      const tomorrowCount = recipient.sections.tomorrow.length;
+      const upcoming = recipient.sections.upcoming;
+      const allTomorrow = upcoming.every((item) => item.dueDate === addCalendarDays(today, 1));
       subject = recipient.sections.urgent.length
         ? `Needs action now at ${businessName} — ComplyTrack`
-        : tomorrowCount
-          ? `Due tomorrow: ${plural(tomorrowCount, "item")} at ${businessName} — ComplyTrack`
+        : upcoming.length
+          ? `${allTomorrow ? "Due tomorrow" : "Coming up"}: ${plural(upcoming.length, "item")} at ${businessName} — ComplyTrack`
+          : recipient.sections.nextWeek.length
+            ? `Due next week: ${plural(recipient.sections.nextWeek.length, "item")} at ${businessName} — ComplyTrack`
           : `Your reminders for ${businessName} — ComplyTrack`;
       body = greeting
         + `<p style="margin:0 0 8px;">This is what needs doing at ${escapeHtml(businessName)}.</p>`

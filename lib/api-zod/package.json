@@ -9,7 +9,8 @@
     "./safe-track-reminder-schedule": "./src/safe-track-reminder-schedule.ts",
     "./kitchen-weekly": "./src/kitchen-weekly.ts",
     "./nsts-sprayer-tests": "./src/nsts-sprayer-tests.ts",
-    "./error-report-scrub": "./src/error-report-scrub.ts"
+    "./error-report-scrub": "./src/error-report-scrub.ts",
+    "./reminder-timings": "./src/reminder-timings.ts"
   },
   "scripts": {
     "test:kitchen-temperature": "node tests/kitchen-temperature.mjs",
