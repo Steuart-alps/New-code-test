@@ -33,6 +33,7 @@ import {
 } from "@/lib/service-action-outcome";
 import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
 import { TrackOwnersCard } from "@/components/track-owners-card";
+import { ReminderTimingsField, parseReminderTimings, type ReminderTimings } from "@/components/reminder-timings-field";
 import { CHECKOUT_ADDONS, checkoutPerSiteTotal } from "@/lib/addon-catalog";
 interface DomainRecord {
   record?: string;
@@ -2845,6 +2846,7 @@ export default function SettingsPage() {
     accountTimezone: "Europe/London",
   });
 
+  const [reminderTimings, setReminderTimings] = useState<ReminderTimings>({});
   const [testEmail, setTestEmail] = useState("");
 
   useEffect(() => {
@@ -2863,6 +2865,7 @@ export default function SettingsPage() {
         resendApiKey: (settings as any).resendApiKey || "",
         accountTimezone: settings.accountTimezone || "Europe/London",
       });
+      setReminderTimings(parseReminderTimings(settings.reminderTimings));
     }
   }, [settings]);
 
@@ -2872,7 +2875,12 @@ export default function SettingsPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings.mutateAsync({ data: formData });
+    await updateSettings.mutateAsync({
+      data: {
+        ...formData,
+        reminderTimings: Object.keys(reminderTimings).length ? JSON.stringify(reminderTimings) : null,
+      },
+    });
   };
 
   const handleTestEmail = async () => {
@@ -2954,8 +2962,8 @@ export default function SettingsPage() {
                 <CardTitle className="font-display">Reminder Notifications</CardTitle>
               </div>
               <CardDescription>
-                Each person gets one email at 8am on the day before something of theirs is due, and only on those days.
-                Overdue items are included the day after, then once a week. Anything with no one assigned goes to the track's owner,
+                Each person gets one email at 8am, only on days when something of theirs needs a reminder: by default the day
+                before it is due, then the day after if it goes overdue and once a week after that (change this per type below). Anything with no one assigned goes to the track's owner,
                 or to the Owners when no owner is set (Track Owners above). Urgent actions (including checks recorded as unsafe), critical
                 compliance checks and new FixTrack issues are emailed as soon as they are raised.
               </CardDescription>
@@ -2983,6 +2991,11 @@ export default function SettingsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <ReminderTimingsField
+                value={reminderTimings}
+                onChange={setReminderTimings}
+                contractorLeadDays={Number(formData.contractorComplianceLeadTimeDays) || 30}
+              />
               <div className="space-y-1.5">
                 <Label>Admin / Owner Notification Email</Label>
                 <p className="text-xs text-muted-foreground">
