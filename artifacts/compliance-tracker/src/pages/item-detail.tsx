@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { CertificateFormDialog } from "@/components/certificate-form-dialog";
 import { StatusBadge, PriorityBadge, ExpiryBadge, NeedsActionBadge, needsActionLabel } from "@/components/badges";
+import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
 import { CompleteCheckDialog } from "@/components/complete-check-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -190,7 +191,9 @@ export default function ItemDetailPage() {
                       {category.name}
                     </span>
                   )}
-                  <StatusBadge status={item.status} />
+                  <CheckStatusWithCertificate itemId={item.id} status={item.status}>
+                    <StatusBadge status={item.status} />
+                  </CheckStatusWithCertificate>
                   <NeedsActionBadge item={item} />
                   <PriorityBadge priority={item.priority} />
                 </div>

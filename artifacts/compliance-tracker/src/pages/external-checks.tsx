@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAppMutations } from "@/hooks/use-app-data";
 import { toast } from "sonner";
 import { StatusBadge, PriorityBadge, NeedsActionBadge } from "@/components/badges";
+import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
 import { CompleteCheckDialog } from "@/components/complete-check-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { format } from "date-fns";
@@ -269,7 +270,9 @@ export default function ExternalChecksPage() {
             </td>
             <td className="px-6 py-4">
               <div className="flex flex-col gap-1.5 items-start">
-                <StatusBadge status={item.status} />
+                <CheckStatusWithCertificate itemId={item.id} status={item.status}>
+                  <StatusBadge status={item.status} />
+                </CheckStatusWithCertificate>
                 <NeedsActionBadge item={item} />
                 <PriorityBadge priority={item.priority} />
               </div>

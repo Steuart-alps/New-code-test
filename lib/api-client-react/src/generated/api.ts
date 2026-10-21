@@ -29,6 +29,7 @@ import type {
   Category,
   Certificate,
   CertificateDefect,
+  CertificatesOutstandingResponse,
   ComplianceItem,
   ConfirmInspectionReportActions201,
   Contractor,
@@ -2097,6 +2098,84 @@ export const useSetContractorVisit = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getSetContractorVisitMutationOptions(options));
     }
+
+export const getListCertificatesOutstandingUrl = () => {
+
+
+
+
+  return `/api/certificates-outstanding`
+}
+
+/**
+ * Compliance checks whose contractor visit happened at least followUpAfterDays ago with no certificate uploaded since, however old, at the sites the user can see. The contractor is chased every two weeks until chaseStopsAfterDays after the visit (chasing false after).
+ * @summary Contractor visits still waiting for their certificate
+ */
+export const listCertificatesOutstanding = async ( options?: RequestInit): Promise<CertificatesOutstandingResponse> => {
+
+  return customFetch<CertificatesOutstandingResponse>(getListCertificatesOutstandingUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCertificatesOutstandingQueryKey = () => {
+    return [
+    `/api/certificates-outstanding`
+    ] as const;
+    }
+
+
+export const getListCertificatesOutstandingQueryOptions = <TData = Awaited<ReturnType<typeof listCertificatesOutstanding>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCertificatesOutstanding>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCertificatesOutstandingQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCertificatesOutstanding>>> = ({ signal }) => listCertificatesOutstanding({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCertificatesOutstanding>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCertificatesOutstandingQueryResult = NonNullable<Awaited<ReturnType<typeof listCertificatesOutstanding>>>
+export type ListCertificatesOutstandingQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Contractor visits still waiting for their certificate
+ */
+
+export function useListCertificatesOutstanding<TData = Awaited<ReturnType<typeof listCertificatesOutstanding>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCertificatesOutstanding>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCertificatesOutstandingQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getListContractorsUrl = () => {
 

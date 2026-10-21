@@ -175,6 +175,8 @@ export function CertificateFormDialog({
           await createCertificate.mutateAsync({ contractorId, data: payload });
         }
       }
+      // A certificate on a check clears it from "Certificates outstanding".
+      if (itemId) queryClient.invalidateQueries({ queryKey: ["certificates-outstanding"] });
       toast({
         title: certificate ? "Certificate updated" : "Certificate uploaded",
         description: defectPayload.length

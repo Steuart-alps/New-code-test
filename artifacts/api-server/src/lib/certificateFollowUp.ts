@@ -1,23 +1,29 @@
 /**
  * Certificate follow-up: a contractor visit that has happened but has no
- * certificate on its compliance check a few days later.
+ * certificate on its compliance check two weeks later. Certificates often
+ * aren't issued until the contractor's invoice is paid, so the first chase
+ * waits FOLLOW_UP_AFTER_DAYS.
  *
  * A visit has happened when its check (one with a contractor) was completed,
  * or when the date the contractor booked through the reminder link has
  * passed. A certificate counts when it was added to the check on or after the
  * visit day, or is dated (issue date) on or after it.
  *
- * FOLLOW_UP_AFTER_DAYS after the visit:
- *   - the contractor gets one follow-up asking for the certificate, drafted
- *     into Contractor Approvals like the visit reminder (a manager sends it);
- *     a draft still waiting when the certificate arrives is withdrawn;
- *   - the person responsible (lib/dueItems.ts responsibleForCertificate: the
- *     person assigned, else the site's Maintenance managers, else its
- *     Managers, else the Owners) sees it under "Certificates still to come" in
- *     their 08:00 personal reminder that day and once a week after, and the
- *     Owner update lists every one still waiting. No separate email.
- * Only visits from the last LOOK_BACK_DAYS are followed up, so older history
- * never produces a burst of emails.
+ * FOLLOW_UP_AFTER_DAYS after the visit, then every FOLLOW_UP_EVERY_DAYS
+ * while it is still missing:
+ *   - the contractor gets a follow-up asking for the certificate, drafted
+ *     into Contractor Approvals like the visit reminder (a manager sends it)
+ *     with the people responsible copied in; a draft still waiting when the
+ *     certificate arrives is withdrawn, and a new one is not added while the
+ *     last is still waiting;
+ *   - the people responsible (lib/dueItems.ts responsibleForCertificate: the
+ *     person assigned, the site's Maintenance managers and heads of
+ *     department; with none, its Managers, else the Owners) see it under
+ *     "Certificates outstanding" in their 08:00 personal reminder that day.
+ * Every Owner and Manager update lists the certificates outstanding for the
+ * sites it covers, however old, until they are uploaded. No separate email.
+ * Only visits from the last LOOK_BACK_DAYS are chased (six chases), so older
+ * history never produces a burst of emails.
  */
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -25,9 +31,23 @@ import { loadResponsibilityContext, responsibleForCertificate, type Responsibili
 import { escapeHtml, parseEmailList } from "./email";
 import { logger } from "./logger";
 
-export const FOLLOW_UP_AFTER_DAYS = 3;
-export const LOOK_BACK_DAYS = 30;
+export const FOLLOW_UP_AFTER_DAYS = 14;
+export const FOLLOW_UP_EVERY_DAYS = 14;
+export const LOOK_BACK_DAYS = 90;
 export const CERTIFICATE_FOLLOW_UP_EMAIL_TYPE = "certificate_followup";
+
+/** The chase due `today` for a visit (1 = the first), or null on other days. */
+export function certificateChaseOn(visitDay: string, today: string): number | null {
+  const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${visitDay}T00:00:00Z`)) / 86_400_000);
+  if (days < FOLLOW_UP_AFTER_DAYS || days >= LOOK_BACK_DAYS || (days - FOLLOW_UP_AFTER_DAYS) % FOLLOW_UP_EVERY_DAYS !== 0) return null;
+  return (days - FOLLOW_UP_AFTER_DAYS) / FOLLOW_UP_EVERY_DAYS + 1;
+}
+
+/** The latest chase a visit is owed by `today` (1 = the first). */
+function chasesOwed(visitDay: string, today: string): number {
+  const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${visitDay}T00:00:00Z`)) / 86_400_000);
+  return Math.floor((days - FOLLOW_UP_AFTER_DAYS) / FOLLOW_UP_EVERY_DAYS) + 1;
+}
 
 const rowsOf = <T>(result: unknown): T[] => ((result as { rows?: T[] }).rows ?? []);
 const day = (value: unknown) =>
@@ -54,12 +74,15 @@ export interface VisitAwaitingCertificate {
 }
 
 /**
- * Visits that happened between LOOK_BACK_DAYS and `afterDays` days ago with
- * no certificate yet (afterDays 0 lists every waiting visit, for display).
+ * Visits that happened at least `afterDays` days ago with no certificate yet:
+ * within `lookBackDays` (default LOOK_BACK_DAYS, the chase window), or of any
+ * age with `lookBackDays: null` (the Owner and Manager updates).
  */
 export async function getVisitsAwaitingCertificate(
   clientId: number | null,
-  { afterDays = FOLLOW_UP_AFTER_DAYS, today = new Date().toISOString().slice(0, 10) }: { afterDays?: number; today?: string } = {},
+  {
+    afterDays = FOLLOW_UP_AFTER_DAYS, today = new Date().toISOString().slice(0, 10), lookBackDays = LOOK_BACK_DAYS,
+  }: { afterDays?: number; today?: string; lookBackDays?: number | null } = {},
 ): Promise<VisitAwaitingCertificate[]> {
   const result = await db.execute(sql`
     SELECT * FROM (
@@ -79,7 +102,7 @@ export async function getVisitsAwaitingCertificate(
     ) v
     WHERE v.visit_day IS NOT NULL
       AND v.visit_day <= ${today}::date - ${afterDays}::int
-      AND v.visit_day > ${today}::date - ${LOOK_BACK_DAYS}::int
+      ${lookBackDays == null ? sql`` : sql`AND v.visit_day > ${today}::date - ${lookBackDays}::int`}
       AND NOT EXISTS (
         SELECT 1 FROM certificates c
         WHERE c.item_id = v.item_id
@@ -119,6 +142,7 @@ function contractorFollowUpEmail(visit: VisitAwaitingCertificate, companyName: s
       <strong style="color:#1e293b;">${escapeHtml(visit.title)}</strong>
     </div>
     <p>We haven't received the certificate or report for this visit yet. ${sendTo}</p>
+    <p>If it is waiting for your invoice to be paid, please let us know so we can sort that out.</p>
     <p>If the visit didn't go ahead, please let us know so we can rearrange it.</p>
     <p>Best regards,<br><strong>${escapeHtml(companyName)}</strong></p>
   `;
@@ -127,6 +151,7 @@ function contractorFollowUpEmail(visit: VisitAwaitingCertificate, companyName: s
     `Dear ${visit.contractorName},`, "",
     `Thank you for your visit${where} on ${when} for: ${visit.title}`, "",
     `We haven't received the certificate or report for this visit yet. ${replyTo ? `Please email it to ${replyTo}.` : "Please reply with it attached."}`, "",
+    "If it is waiting for your invoice to be paid, please let us know so we can sort that out.", "",
     "If the visit didn't go ahead, please let us know so we can rearrange it.", "",
     "Best regards,", companyName,
   ].join("\n");
@@ -153,7 +178,7 @@ async function withdrawAnsweredDrafts(): Promise<number> {
         SELECT 1 FROM certificates c
         WHERE c.item_id = q.entity_id
           AND GREATEST((c.created_at AT TIME ZONE 'UTC')::date, (c.issue_date AT TIME ZONE 'UTC')::date)
-            >= substring(q.idempotency_key from '([0-9]{4}-[0-9]{2}-[0-9]{2})$')::date
+            >= substring(q.idempotency_key from '([0-9]{4}-[0-9]{2}-[0-9]{2})(-[0-9]+)?$')::date
       )
     RETURNING q.id
   `);
@@ -170,15 +195,18 @@ function certificateAddresses(ctx: ResponsibilityContext, visit: VisitAwaitingCe
   return [...new Set([...shared, ...people].map((email) => email.trim().toLowerCase()).filter(Boolean))];
 }
 
-async function followUpBusiness(clientId: number, visits: VisitAwaitingCertificate[], result: CertificateFollowUpResult): Promise<void> {
+async function followUpBusiness(
+  clientId: number, visits: VisitAwaitingCertificate[], today: string, result: CertificateFollowUpResult,
+): Promise<void> {
   const [settings, ctx] = await Promise.all([clientSettings(clientId), loadResponsibilityContext(clientId)]);
   const companyName = settings["companyName"] ?? "ComplyTrack";
-  // Contractor follow-ups wait in Contractor Approvals, once per visit (the
-  // idempotency key). A check holds one waiting draft at a time, so while a
-  // reminder for the same check is still waiting the follow-up is added on a
-  // later run instead.
+  // Contractor follow-ups wait in Contractor Approvals, one per chase (the
+  // idempotency key ends in the visit day and chase number). A check holds
+  // one waiting draft at a time, so while the last follow-up (or a reminder)
+  // for the same check is still waiting, the next is added on a later run.
   for (const visit of visits) {
     if (!visit.contractorEmail) continue;
+    const chase = chasesOwed(visit.visitDay, today);
     const addresses = certificateAddresses(ctx, visit, settings["maintenanceEmail"]);
     const email = contractorFollowUpEmail(visit, companyName, addresses[0] ?? null);
     const cc = addresses.filter((address) => address !== visit.contractorEmail!.toLowerCase());
@@ -190,7 +218,7 @@ async function followUpBusiness(clientId: number, visits: VisitAwaitingCertifica
         ${visit.contractorId}, ${CERTIFICATE_FOLLOW_UP_EMAIL_TYPE}, 'assign', ${visit.contractorEmail},
         ${email.subject}, ${email.html}, ${email.text}, ${JSON.stringify(cc)}::jsonb,
         ${JSON.stringify({ subject: email.subject, html: email.html, text: email.text })}::jsonb,
-        ${`certificate-followup-${clientId}-${visit.itemId}-${visit.visitDay}`})
+        ${`certificate-followup-${clientId}-${visit.itemId}-${visit.visitDay}-${chase}`})
       ON CONFLICT DO NOTHING
       RETURNING id
     `);
@@ -206,14 +234,15 @@ async function followUpBusiness(clientId: number, visits: VisitAwaitingCertifica
 export async function runCertificateFollowUpJob({ now = new Date() }: { now?: Date } = {}): Promise<CertificateFollowUpResult> {
   const result: CertificateFollowUpResult = { visits: 0, drafted: 0, withdrawn: 0, errors: 0 };
   result.withdrawn = await withdrawAnsweredDrafts();
-  const visits = await getVisitsAwaitingCertificate(null, { today: now.toISOString().slice(0, 10) });
+  const today = now.toISOString().slice(0, 10);
+  const visits = await getVisitsAwaitingCertificate(null, { today });
   result.visits = visits.length;
   const byClient = new Map<number, VisitAwaitingCertificate[]>();
   for (const visit of visits) byClient.set(visit.clientId, [...(byClient.get(visit.clientId) ?? []), visit]);
 
   for (const [clientId, clientVisits] of byClient) {
     try {
-      await followUpBusiness(clientId, clientVisits, result);
+      await followUpBusiness(clientId, clientVisits, today, result);
     } catch (err) {
       result.errors++;
       logger.error({ err, clientId }, "Certificate follow-up failed for a business");

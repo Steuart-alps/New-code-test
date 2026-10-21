@@ -10,6 +10,8 @@ import { supersedeStaleReminderCycles } from "../lib/reminderCycles";
 import {
   entitledVisitTypes, linkedVisitChecks, syncContractorVisitChecks, trackDueDates,
 } from "../lib/contractorVisits";
+import { FOLLOW_UP_AFTER_DAYS, LOOK_BACK_DAYS, getVisitsAwaitingCertificate } from "../lib/certificateFollowUp";
+import { getAccountTimezone, localDateIn } from "../lib/accountClock";
 
 /**
  * Contractor visits kept on the tracks, one row per visit type and site, with
@@ -60,6 +62,46 @@ router.get("/contractor-visits", requireAuth, async (req, res) => {
     types: types.map(({ key, module, trackLabel, title, label, description, dueFrom }) =>
       ({ key, module, trackLabel, title, label, description, dueFrom })),
     visits,
+  });
+});
+
+/**
+ * Contractor visits with no certificate FOLLOW_UP_AFTER_DAYS on, however old,
+ * at the sites the user can see (lib/certificateFollowUp.ts). `chasing` is
+ * false once the contractor is no longer reminded (LOOK_BACK_DAYS).
+ */
+router.get("/certificates-outstanding", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const departmentId = getActiveDepartmentId(req);
+  const today = localDateIn(await getAccountTimezone(clientId), new Date());
+  const [visits, sites] = await Promise.all([
+    getVisitsAwaitingCertificate(clientId, { today, lookBackDays: null }),
+    db.select({ id: sitesTable.id }).from(sitesTable).where(and(
+      eq(sitesTable.clientId, clientId),
+      departmentId === null ? undefined : sitesTableVisibleTo(departmentId),
+    )),
+  ]);
+  const visible = new Set(sites.map((site) => site.id));
+  const daysSince = (visitDay: string) =>
+    Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${visitDay}T00:00:00Z`)) / 86_400_000);
+
+  res.json({
+    followUpAfterDays: FOLLOW_UP_AFTER_DAYS,
+    chaseStopsAfterDays: LOOK_BACK_DAYS,
+    certificates: visits
+      .filter((visit) => visit.siteId == null || visible.has(visit.siteId))
+      .map((visit) => ({
+        itemId: visit.itemId,
+        title: visit.title,
+        siteId: visit.siteId,
+        siteName: visit.siteName,
+        visitDate: visit.visitDay,
+        daysSinceVisit: daysSince(visit.visitDay),
+        contractorName: [visit.contractorName, visit.contractorCompany].filter(Boolean).join(", "),
+        chasing: daysSince(visit.visitDay) < LOOK_BACK_DAYS,
+      })),
   });
 });
 
