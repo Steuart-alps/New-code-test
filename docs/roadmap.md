@@ -29,7 +29,7 @@ Wednesday 28 October.
 | 10 | Offline working | After launch | None for the recommended route | Phone app first |
 | 11 | Actions from uploaded audit and inspection reports | After launch | Pennies per report (being worked out) | Plan in its own thread |
 | 12 | CareTrack (care homes and care services) | Later | Not yet known | Scope from you |
-| 13 | Kitchens: stock control, meal costings, GP and recipe spec sheets | After launch | None, except a few pence per spec sheet read | Ingredients and recipes from the allergen charts work |
+| 13 | Kitchens: stock, costings, GP, recipe spec sheets, supplier details, voice | After launch | None, except a few pence per spec sheet read | Ingredients and recipes from the allergen charts work |
 
 My suggested order after launch is the order of the table, with 2, 5 and 11
 built together because they share the same set-up (one AI key and one
@@ -372,11 +372,11 @@ should it keep day to day?
 
 ---
 
-## 13. Kitchens: stock control, meal costings, GP and recipe spec sheets
+## 13. Kitchens: stock, costings, GP, recipe spec sheets, supplier details and voice
 
 **When:** after launch.
 
-All four parts share one list of ingredients and recipes, which the thread
+All the parts below share one list of ingredients and recipes, which the thread
 "KitchenTrack allergen charts" is planning now, so they belong together.
 
 ### Stock control
@@ -424,7 +424,32 @@ if new. As with certificates, a person checks everything before it is saved,
 and above all the allergens, which must never be taken on trust from an
 automatic read. This uses the same AI set-up as items 2, 5 and 11.
 
-**Cost:** none for stock, costings and GP. Reading spec sheets would cost a
+### Allergens and prices from suppliers
+
+Fill in an ingredient's allergens and price from the supplier (for example
+Brakes, Bidfood or Booker) instead of typing them. A person checks the details
+before they are saved, and allergens are never taken on trust.
+
+How we get the details matters. Some supplier websites forbid automatic
+copying ("scraping") in their terms, and their pages change without warning,
+which breaks it. So the order of preference is:
+
+1. **The supplier's own product or price file**, or a download from the
+   kitchen's account with that supplier (many wholesalers offer spreadsheets of
+   products, prices and allergen data to account customers).
+2. **The kitchen's invoices or delivery notes**, read in the same way as
+   certificates (item 2), which also keeps prices up to date for costings.
+3. **Reading a supplier's public product page** only where its terms allow it,
+   and always with a person confirming the result.
+
+### Voice
+
+Speak things in rather than typing: a list of ingredients, a recipe, or a
+stock count ("12 tins of chopped tomatoes, 3 bags of flour"). This reuses the
+free dictation microphone that is already on every notes box and the COSHH
+"Speak a list" button (#151), so it costs nothing extra.
+
+**Cost:** none for stock, costings, GP and voice. Reading spec sheets would cost a
 few pence each with the live AI (the exact figure to be worked out with the
 Live AI plan). No extra hosting.
 
@@ -436,6 +461,8 @@ Live AI plan). No extra hosting.
    regular stock counts enough?
 3. Should costings use the latest delivery price or an average price?
 4. What GP target do your clients usually work to?
+5. Which suppliers do your kitchen clients mostly use? That decides which
+   product files to look at first.
 
 ---
 
@@ -469,6 +496,8 @@ work:
 | CareTrack | Not yet known; likely none for hosting |
 | Kitchen stock, costings and GP | None |
 | Recipe spec sheet reading | A few pence per sheet |
+| Supplier allergens and prices | Pennies per invoice or product read; nothing for a supplier file |
+| Kitchen voice input | None |
 
 Hosting stays on the one Render web service and database in Frankfurt for
 everything above.
