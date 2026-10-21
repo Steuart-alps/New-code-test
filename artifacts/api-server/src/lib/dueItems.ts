@@ -74,7 +74,7 @@ export interface DueItem {
   linkPath: string;
 }
 
-/** Something needing action today: a failed or unsafe check, or a new urgent FixTrack issue. */
+/** Something still needing action now: an unsafe or failed check result, or an open urgent item. */
 export interface UrgentItem {
   id: string;
   module: string;
@@ -135,7 +135,7 @@ async function contractorLeadDays(clientId: number): Promise<number> {
 
 /**
  * Collect every open item due (or expiring) up to DUE_ITEMS_HORIZON_DAYS
- * after `today`, overdue ones included, and today's urgent items.
+ * after `today`, overdue ones included, and the urgent items still open.
  */
 export async function collectDueItems(clientId: number, today: string, now: Date): Promise<DueItemsSnapshot> {
   const horizon = addCalendarDays(today, DUE_ITEMS_HORIZON_DAYS);
@@ -444,23 +444,31 @@ export async function collectDueItems(clientId: number, today: string, now: Date
     });
   }
 
-  // Urgent FixTrack issues raised since yesterday's reminders.
-  if (entitledTo(services, "fix")) {
-    for (const row of await source(clientId, "urgent fixtrack", async () => rowsOf<{
-      id: number; title: string; site_id: number | null; location: string | null; raised: string; assignee_user_id: number | null;
-    }>(await db.execute(sql`
-      SELECT id, title, site_id, location, created_at::date::text AS raised, assignee_user_id
-      FROM fix_track_issues
-      WHERE client_id = ${clientId} AND priority = 'urgent' AND status IN ('reported', 'in_progress')
-        AND created_at >= ${new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()}::timestamptz
-    `)))) {
-      urgent.push({
-        id: `urgent-fix:${row.id}`, module: "fix", trackLabel: moduleLabel("fix"), siteId: num(row.site_id),
-        siteName: siteName(num(row.site_id)), title: row.title,
-        detail: `Urgent FixTrack issue${row.location ? ` at ${row.location}` : ""}`,
-        raisedOn: day(row.raised)!, assigneeUserId: num(row.assignee_user_id), linkPath: `/fix-track/${row.id}`,
-      });
-    }
+  // Still open and marked urgent: track actions (a check recorded as unsafe
+  // raises one), FixTrack issues and critical compliance checks. Each was
+  // emailed when it was raised (lib/urgentAlerts.ts); the Owner update lists
+  // them until they are dealt with.
+  for (const row of await source(clientId, "urgent", async () => rowsOf<{
+    kind: string; id: number; module: string; title: string; site_id: number | null; raised: string; assignee_user_id: number | null;
+  }>(await db.execute(sql`
+    SELECT 'action' AS kind, id, module, title, site_id, created_at::date::text AS raised, assignee_user_id
+    FROM track_actions WHERE client_id = ${clientId} AND severity = 'urgent' AND status <> 'resolved'
+    UNION ALL
+    SELECT 'fix', id, 'fix', title, site_id, created_at::date::text, assignee_user_id
+    FROM fix_track_issues WHERE client_id = ${clientId} AND priority = 'urgent' AND status IN ('reported', 'in_progress')
+    UNION ALL
+    SELECT 'compliance', id, 'compliance', title, site_id, created_at::date::text, assignee_user_id
+    FROM compliance_items WHERE client_id = ${clientId} AND priority = 'critical' AND status <> 'completed'
+  `)))) {
+    if (!getTrackModule(row.module) || !entitledTo(services, row.module)) continue;
+    const siteId = num(row.site_id);
+    const label = row.kind === "fix" ? "Urgent FixTrack issue" : row.kind === "compliance" ? "Critical compliance check" : `Urgent ${moduleLabel(row.module)} action`;
+    urgent.push({
+      id: `urgent-${row.kind}:${row.id}`, module: row.module, trackLabel: moduleLabel(row.module), siteId,
+      siteName: siteName(siteId), title: row.title, detail: label, raisedOn: day(row.raised)!,
+      assigneeUserId: num(row.assignee_user_id),
+      linkPath: row.kind === "fix" ? `/fix-track/${row.id}` : row.kind === "compliance" ? "/external" : modulePath(row.module),
+    });
   }
 
   items.sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.trackLabel.localeCompare(b.trackLabel) || a.title.localeCompare(b.title));
@@ -486,6 +494,7 @@ export interface ResponsibilityContext extends OwnerContext {
   maintenanceManagerIds: number[];
 }
 
+/** Who may be reminded at a business: track owners, Owners and Maintenance managers. */
 export async function loadResponsibilityContext(clientId: number): Promise<ResponsibilityContext> {
   const ctx = await loadOwnerContext(clientId);
   const managers = rowsOf<{ id: number }>(await db.execute(sql`
@@ -498,7 +507,7 @@ export async function loadResponsibilityContext(clientId: number): Promise<Respo
   return { ...ctx, ownerIds, maintenanceManagerIds: managers };
 }
 
-function canSee(ctx: OwnerContext, userId: number, siteId: number | null): boolean {
+export function canSee(ctx: OwnerContext, userId: number, siteId: number | null): boolean {
   const candidate = ctx.eligible.get(userId);
   if (!candidate) return false;
   return siteId == null || candidateCanSeeSite(candidate, ctx.siteDepartments.get(siteId), siteId);

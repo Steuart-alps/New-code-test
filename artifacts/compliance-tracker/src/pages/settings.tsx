@@ -2956,8 +2956,8 @@ export default function SettingsPage() {
               <CardDescription>
                 Each person gets one email at 8am on the day before something of theirs is due, and only on those days.
                 Overdue items are included the day after, then once a week. Anything with no one assigned goes to the track's owner,
-                or to the Owners when no owner is set (Track Owners above). Failed or unsafe checks and urgent FixTrack issues go to
-                the person responsible and the Owners in the next morning's email.
+                or to the Owners when no owner is set (Track Owners above). Urgent actions (including checks recorded as unsafe), critical
+                compliance checks and new FixTrack issues are emailed as soon as they are raised.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-5">

@@ -13,8 +13,6 @@
  *   - anything gone overdue: the day after it was due, then once a week;
  *   - expiries: the early reminder (30 days for training, the contractor lead
  *     time for contractor documents) and 1 day before;
- *   - "Needs action now": a failed or unsafe check result, and an urgent
- *     FixTrack issue raised since the last run;
  *   - "Certificates still to come": a contractor visit with no certificate
  *     3 days on (lib/certificateFollowUp.ts), then once a week while it is
  *     still missing;
@@ -22,6 +20,8 @@
  *     when an email is going anyway, and on Mondays.
  * Tasks assigned to a group ("Staff" or "Managers") go on that group's bell
  * only.
+ * Anything marked urgent, and every new FixTrack issue, is emailed the same
+ * day as it is raised instead (lib/urgentAlerts.ts).
  *
  * Owner update: Mondays (or every day, with Settings "Owner update" set to
  * Daily) to the business's Owners, or to its Notification email when one is
@@ -465,13 +465,6 @@ export async function runPersonalRemindersForClient(
     }
     if (!section) continue;
     for (const userId of who.userIds) userRecipient(userId)?.sections[section].push(item);
-  }
-  for (const item of urgent) {
-    const since = daysBetween(item.raisedOn, today);
-    const fresh = item.id.startsWith("urgent-fix:") || (since >= 1 && since % 7 === 1);
-    if (!fresh) continue;
-    const who = responsibleFor(ctx, { module: item.module, siteId: item.siteId, assigneeUserId: item.assigneeUserId, assigneeName: null });
-    for (const userId of new Set([...who.userIds, ...ctx.ownerIds])) userRecipient(userId)?.sections.urgent.push(item);
   }
   // A missing certificate: the day the contractor's follow-up is drafted, then weekly.
   for (const visit of certificates) {
