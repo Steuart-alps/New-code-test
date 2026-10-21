@@ -29,7 +29,7 @@ Wednesday 28 October.
 | 10 | Offline working | After launch | None for the recommended route | Phone app first |
 | 11 | Actions from uploaded audit and inspection reports | After launch | Pennies per report (being worked out) | Plan in its own thread |
 | 12 | CareTrack (care homes and care services) | Later | Not yet known | Scope from you |
-| 13 | Stock control in kitchens (KitchenTrack) | After launch | None | Ingredients list from the allergen charts work |
+| 13 | Kitchens: stock control, meal costings, GP and recipe spec sheets | After launch | None, except a few pence per spec sheet read | Ingredients and recipes from the allergen charts work |
 
 My suggested order after launch is the order of the table, with 2, 5 and 11
 built together because they share the same set-up (one AI key and one
@@ -372,9 +372,14 @@ should it keep day to day?
 
 ---
 
-## 13. Stock control in kitchens (KitchenTrack)
+## 13. Kitchens: stock control, meal costings, GP and recipe spec sheets
 
 **When:** after launch.
+
+All four parts share one list of ingredients and recipes, which the thread
+"KitchenTrack allergen charts" is planning now, so they belong together.
+
+### Stock control
 
 Kitchens keep track of what they have in: deliveries in, stock counts, waste
 and write-offs, and a "running low" list when an item reaches its re-order
@@ -395,11 +400,42 @@ in the same way a spray takes product off stock in GreenTrack.
 warning before stock goes out of date), and the supplier on each delivery,
 which supports food traceability.
 
-**Cost:** none. No extra hosting.
+### Meal costings
 
-**Questions for you:** should a kitchen count stock by whole items (cases,
-bottles) or by weight and volume? Is taking stock off automatically when a
-recipe is made wanted, or are regular stock counts enough?
+The cost of each dish, worked out from its recipe: each ingredient's quantity
+times its price. Prices come from deliveries (the latest price, or an average),
+so when a supplier puts a price up, every dish using that ingredient shows its
+new cost straight away. Cost per portion as well as per batch.
+
+### GP (gross profit) calculation
+
+Enter each dish's selling price and ComplyTrack shows the gross profit in
+pounds and as a percentage, with VAT taken off the selling price first. Set a
+target GP (for example 70%), and dishes that fall below it are flagged, along
+with the selling price needed to hit the target. A menu view lists every dish
+with its cost, price and GP.
+
+### Recipe spec sheet upload
+
+Upload a recipe spec sheet (PDF, photo or document) and ComplyTrack reads it
+into a recipe: dish name, ingredients and quantities, portions, method and
+allergens. Ingredients are matched to the kitchen's ingredients list, or added
+if new. As with certificates, a person checks everything before it is saved,
+and above all the allergens, which must never be taken on trust from an
+automatic read. This uses the same AI set-up as items 2, 5 and 11.
+
+**Cost:** none for stock, costings and GP. Reading spec sheets would cost a
+few pence each with the live AI (the exact figure to be worked out with the
+Live AI plan). No extra hosting.
+
+**Questions for you:**
+
+1. Should a kitchen count stock by whole items (cases, bottles) or by weight
+   and volume?
+2. Is taking stock off automatically when a recipe is made wanted, or are
+   regular stock counts enough?
+3. Should costings use the latest delivery price or an average price?
+4. What GP target do your clients usually work to?
 
 ---
 
@@ -431,7 +467,8 @@ work:
 | Offline working (recommended route) | None |
 | Actions from audit reports | Pennies per report (being worked out) |
 | CareTrack | Not yet known; likely none for hosting |
-| Kitchen stock control | None |
+| Kitchen stock, costings and GP | None |
+| Recipe spec sheet reading | A few pence per sheet |
 
 Hosting stays on the one Render web service and database in Frankfurt for
 everything above.
