@@ -18,7 +18,6 @@ import { pool } from "@workspace/db";
 import { getContractorTokenProblem } from "./lib/runtimeMigrations";
 import {
   captureJobFailure,
-  getJobLastSuccess,
   loadJobRunHistory,
   registerDailyJob,
   runMonitoredJob,
@@ -37,21 +36,17 @@ import {
 import { describeEmailConfigurationIssues, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./lib/email";
 import { runTrialEndedEmailJob, runTrialReminderJob } from "./lib/trialReminders";
 import { runStorageWarningEmailJob } from "./lib/storageWarningEmails";
-import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
-import { runDocAckReminderJob } from "./lib/docAckReminders";
 import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
 import { runTwoFactorResetAlertRecovery } from "./lib/twoFactorResetAlerts";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
-import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
 import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob, runDeletionReminderJob } from "./lib/offboarding";
 import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
 import { runCancelledStorageClassJob } from "./lib/cancelledClientStorage";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
-import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
-import { runTrackActionReminderJob } from "./lib/trackActionReminders";
+import { runPersonalReminderJob } from "./lib/personalReminders";
+import { runUrgentAlertJob } from "./lib/urgentAlerts";
 import { runTrackReminderJob } from "./lib/trackReminders";
-import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
 import { runStripeTaxCheck, STRIPE_TAX_CHECK_CRON } from "./lib/stripeTaxCheck";
 import { runScheduledStoragePriceAudit, STORAGE_PRICE_AUDIT_CRON } from "./lib/storagePriceAudit";
@@ -260,31 +255,6 @@ function logged<T>(message: string, run: () => Promise<T>, quiet?: (result: T) =
   };
 }
 
-const CONTRACTOR_INSURANCE_JOB = "contractor-insurance-expiry-weekly";
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
-/**
- * The weekly insurance digest runs on Mondays only. If the process was down at
- * that moment, run it once at start-up: its per-client weekly delivery claims
- * stop a second digest in the same week.
- */
-async function catchUpWeeklyInsuranceDigest() {
-  let last: Date | null;
-  try {
-    last = await getJobLastSuccess(CONTRACTOR_INSURANCE_JOB);
-  } catch (err) {
-    logger.warn({ err }, "Could not read contractor insurance digest history; skipping catch-up");
-    return;
-  }
-  // Never run on this database: wait for the regular Monday schedule.
-  if (!last || Date.now() - last.getTime() <= WEEK_MS) return;
-  logger.info({ lastSuccess: last.toISOString() }, "Weekly contractor insurance digest was missed — catching up");
-  await runMonitoredJob(CONTRACTOR_INSURANCE_JOB, logged(
-    "Contractor insurance expiry reminder job complete",
-    runContractorInsuranceExpiryReminderJob,
-  ));
-}
-
 function startScheduler() {
   // Deliver queued two-factor reset security alerts that a provider outage or
   // restart left undelivered: at boot, then every minute (due rows only).
@@ -304,27 +274,38 @@ function startScheduler() {
   schedule("20 3 * * *", "analytics-retention-purge", runAnalyticsRetentionPurge, { daily: true });
   logger.info("Analytics retention purge scheduler started (daily at 03:20)");
 
-  schedule("35 8 * * *", "operational-action-reminders", logged(
-    "Operational action reminder job complete", runTrackActionReminderJob,
+  // Reminders to the person responsible (a "due tomorrow" email) and the
+  // Owner update (Mondays, or daily). Urgent items go out the same day below. Hourly; each business is handled at its
+  // own local 08:00. This replaces the daily digests to Owners: the track
+  // summary, safety check, FixTrack, DocTrack, SafeTrack, contractor and
+  // training expiry emails (their jobs are no longer scheduled).
+  schedule("10 * * * *", "personal-reminders", logged(
+    "Personal reminder job complete", () => runPersonalReminderJob(),
+    (result) => result.personalEmails + result.ownerUpdates + result.bellNotifications === 0 && result.errors === 0,
   ), { daily: true });
-  logger.info("Operational action reminder scheduler started (daily at 08:35)");
+  logger.info("Personal reminder scheduler started (hourly at :10)");
+
+  // Same-day alerts: urgent track actions, critical compliance checks and new
+  // FixTrack issues, emailed within minutes to the person responsible (and,
+  // for urgent ones, the Managers covering the site and the Owners).
+  schedule("*/10 * * * *", "urgent-alerts", logged(
+    "Urgent alert job complete", () => runUrgentAlertJob(),
+    (result) => result.emailsSent === 0 && result.errors === 0,
+  ));
+  logger.info("Urgent alert scheduler started (every 10 minutes)");
 
   schedule("0 8 * * *", "contractor-reminders", logged("Scheduled reminder job complete", runReminderJob), { daily: true });
   logger.info("Contractor reminder scheduler started (daily at 08:00)");
 
-  // Alert managers about contractor insurance, DBS/PVG and certificates.
-  // Run at 08:55 London time so 60/30-day date boundaries stay predictable.
+  // Queue the contractors' own reminders (insurance, DBS/PVG, certificates)
+  // for approval in Contractor Approvals. Run at 08:55 London time so 60/30-day
+  // date boundaries stay predictable. Managers hear about these expiries in
+  // the personal reminders, not a digest from this job.
   schedule("55 8 * * *", "contractor-compliance-reminders", logged(
-    "Contractor compliance reminder job complete", runContractorComplianceReminderJob,
+    "Contractor portal reminder job complete",
+    () => runContractorComplianceReminderJob(undefined, undefined, undefined, { managerAlerts: false }),
   ), { daily: true });
-  logger.info("Contractor compliance reminder scheduler started (daily at 08:55)");
-
-  // Alert managers when staff training certificates are expiring within 30 days
-  // or have already expired (daily at 09:00; deduped per record milestone).
-  schedule("0 9 * * *", "training-expiry-reminders", logged(
-    "Training expiry reminder job complete", () => runTrainingExpiryReminderJob(),
-  ), { daily: true });
-  logger.info("Training expiry reminder scheduler started (daily at 09:00)");
+  logger.info("Contractor portal reminder scheduler started (daily at 08:55)");
 
   // Reconcile Stripe subscription quantities daily so any billing drift from
   // missed webhooks or transient Stripe failures self-heals.
@@ -343,29 +324,10 @@ function startScheduler() {
   ), { daily: true });
   logger.info("Storage warning email scheduler started (daily at 08:10)");
 
-  // Email safety check reminders for overdue/due-soon checks (daily at 08:45)
-  schedule("45 8 * * *", "check-reminder-emails", logged(
-    "Check reminder email job complete", runCheckReminderEmailJob,
-  ), { daily: true });
-  logger.info("Check reminder scheduler started (daily at 08:45)");
-
-  // Remind managers about outstanding document acknowledgements (daily at
-  // 08:50; each client gets at most one email per 7 days).
-  schedule("50 8 * * *", "doc-ack-reminders", logged(
-    "Doc acknowledgement reminder job complete", runDocAckReminderJob,
-  ), { daily: true });
-  logger.info("Doc acknowledgement reminder scheduler started (daily at 08:50)");
-
-  // Email managers a digest of overdue/stale urgent FixTrack issues
-  // (daily at 08:40; each client gets at most one email per day).
-  schedule("40 8 * * *", "fixtrack-overdue-alerts", logged(
-    "FixTrack overdue alert job complete", () => runFixTrackOverdueAlertJob(),
-  ), { daily: true });
-  logger.info("FixTrack overdue alert scheduler started (daily at 08:40)");
-
-  // Recovery-only reconciliation resumes persisted pending/sending snapshots
-  // with their original provider idempotency key. It never creates a new
-  // digest, so manager alerts still originate only from the daily schedule.
+  // The FixTrack overdue digest is no longer scheduled (the personal
+  // reminders replace it). Recovery-only reconciliation still resumes any
+  // persisted pending/sending snapshot with its original provider
+  // idempotency key; it never creates a new digest.
   schedule("*/5 * * * *", "fixtrack-alert-recovery", logged(
     "FixTrack alert recovery complete",
     () => runFixTrackOverdueAlertJob(undefined, { recoverOnly: true }),
@@ -438,20 +400,6 @@ function startScheduler() {
     "Monthly compliance summary job complete", () => runMonthlyComplianceSummaryJob(),
   ), { daily: true });
   logger.info("Monthly compliance summary scheduler started (daily at 08:00 Europe/London)");
-
-  // Alert client admins weekly (Monday 09:00) when contractor public liability
-  // insurance is expiring within 30 days or has already expired. Missed runs
-  // are caught up at start-up (catchUpWeeklyInsuranceDigest).
-  schedule("0 9 * * 1", CONTRACTOR_INSURANCE_JOB, logged(
-    "Contractor insurance expiry reminder job complete", runContractorInsuranceExpiryReminderJob,
-  ));
-  logger.info("Contractor insurance expiry reminder scheduler started (weekly Monday at 09:00)");
-
-  // Check tenant-specific SafeTrack acknowledgement reminder settings every
-  // five minutes. Each account chooses daily or weekly cadence and local time.
-  registerSafeTrackAckReminderSchedule((expression, task) =>
-    schedule(expression, "safetrack-ack-reminders", async () => { await task(); }));
-  logger.info("SafeTrack acknowledgement reminder scheduler started (every five minutes)");
 
   // Read-only audit of the synced Stripe price catalogue, so a price or
   // product archived after startup is reported before a client's add-on
@@ -706,7 +654,6 @@ async function startApplication() {
   setTimeout(() => {
     void runMonitoredJob("fixtrack-alert-recovery", () => runFixTrackOverdueAlertJob(undefined, { recoverOnly: true }));
   }, 25_000);
-  setTimeout(() => void catchUpWeeklyInsuranceDigest(), 45_000);
 }
 
 // ── Graceful shutdown ───────────────────────────────────────────────────────

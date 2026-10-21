@@ -40,6 +40,7 @@
     "test:analytics": "bash tests/run-fresh-schema.sh tests/analytics.mjs",
     "test:track-notifications": "bash tests/run-fresh-schema.sh tests/track-notifications.mjs",
     "test:track-notifications:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-notifications.mjs",
+    "test:personal-reminders": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/personal-reminders.mjs",
     "test:client-data-deletion-feedback": "bash tests/run-fresh-schema.sh tests/client-data-deletion-feedback.mjs",
     "test:retention-clock": "bash tests/run-fresh-schema.sh tests/retention-clock.mjs",
     "test:cancelled-storage-class": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/cancelled-storage-class.mjs",

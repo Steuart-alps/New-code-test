@@ -387,6 +387,22 @@ export const ListPublicLinkAccessResponse = zod.object({
 
 
 /**
+ * Active members of the business (not viewers) who can see the site. Names only; reminders for assigned work go to that person.
+ * @summary People who can be assigned an action, FixTrack issue or compliance check
+ */
+export const ListAssigneesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListAssigneesResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "role": zod.string()
+})
+export const ListAssigneesResponse = zod.array(ListAssigneesResponseItem)
+
+
+/**
  * @summary List all categories
  */
 export const ListCategoriesResponseItem = zod.object({
@@ -1135,6 +1151,7 @@ export const ListComplianceItemsResponseItem = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(listComplianceItemsResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
@@ -1168,6 +1185,7 @@ export const CreateComplianceItemBody = zod.object({
   "categoryId": zod.number().nullish(),
   "contractorId": zod.number().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(createComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
@@ -1193,6 +1211,7 @@ export const CreateComplianceItemResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(createComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
@@ -1233,6 +1252,7 @@ export const GetComplianceItemResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(getComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
@@ -1267,6 +1287,7 @@ export const UpdateComplianceItemBody = zod.object({
   "categoryId": zod.number().nullish(),
   "contractorId": zod.number().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
@@ -1292,6 +1313,7 @@ export const UpdateComplianceItemResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
@@ -1350,6 +1372,7 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemStatusResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
@@ -1433,7 +1456,9 @@ export const GetSettingsResponse = zod.object({
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
-  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.')
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
+  "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
 
@@ -1455,7 +1480,9 @@ export const UpdateSettingsBody = zod.object({
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish(),
-  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.')
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
+  "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
 export const updateSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
@@ -1473,7 +1500,9 @@ export const UpdateSettingsResponse = zod.object({
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
-  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.')
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
+  "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
 
