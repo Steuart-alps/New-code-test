@@ -24,6 +24,8 @@ export interface ComplianceItem {
   contractorName?: string | null;
   contractorEmail?: string | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: Date | null;
   leadTimeDays?: number | null;
   /**

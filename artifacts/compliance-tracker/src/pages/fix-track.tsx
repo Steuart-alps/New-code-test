@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { AssigneeField, assigneeFields } from "@/components/assignee-field";
 import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
@@ -96,6 +97,7 @@ interface Issue extends FixTrackBoardIssue {
   reportedBy: string;
   reportedDate: string;
   assignedTo?: string | null;
+  assigneeUserId?: number | null;
   contractorId?: number | null;
   contractorEmail?: string | null;
   resolvedDate?: string | null;
@@ -343,8 +345,12 @@ function IssueForm({ form, setForm, issueId, isNew }: {
 
       <div className="grid grid-cols-2 gap-4">
         <F label="Assigned To (internal)">
-          <Input value={form.assignedTo ?? ""} onChange={e => setForm({ ...form, assignedTo: e.target.value })}
-            placeholder="Internal person responsible" />
+          <AssigneeField
+            id="fix-track-assignee"
+            siteId={form.siteId ? Number(form.siteId) : null}
+            value={{ assigneeUserId: form.assigneeUserId ?? null, name: form.assignedTo ?? "" }}
+            onChange={value => setForm({ ...form, assigneeUserId: value.assigneeUserId, assignedTo: value.name })}
+          />
         </F>
         <F label="Target Date">
           <Input type="date" value={form.targetDate ?? ""} onChange={e => setForm({ ...form, targetDate: e.target.value })} />
@@ -732,7 +738,7 @@ export default function FixTrackPage() {
         ...form,
         siteId:        form.siteId        || null,
         contractorId:  form.contractorId  ? Number(form.contractorId) : null,
-        assignedTo:    form.assignedTo    || null,
+        ...assigneeFields({ assigneeUserId: form.assigneeUserId ?? null, name: form.assignedTo ?? "" }, "assignedTo"),
         targetDate:    form.targetDate    || null,
         description:   form.description   || null,
         solutionNotes: form.solutionNotes || null,

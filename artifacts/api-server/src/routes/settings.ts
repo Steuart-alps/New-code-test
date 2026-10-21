@@ -21,6 +21,7 @@ import {
   getSafeTrackReminderLastSentAt,
 } from "../lib/safeTrackAckReminders";
 import { REQUIRE_TWO_FACTOR_SETTING } from "../lib/twoFactorPolicy";
+import { OWNER_UPDATE_FREQUENCIES, OWNER_UPDATE_FREQUENCY_SETTING } from "../lib/personalReminders";
 import { isAllowedTenantSender, sanitizeSenderName } from "../lib/email";
 import { STORAGE_AUTO_TOP_UP_SETTING } from "../lib/storageFull";
 import { TODAY_BY_DEPARTMENT_ROLES_SETTING, normalizeTodayByDepartmentRoles } from "../lib/todayByDepartment";
@@ -68,6 +69,9 @@ const SETTING_KEYS = [
   // JSON {managers, maintenance, staff}: who besides Owners sees the
   // dashboard's "Today by department" card (lib/todayByDepartment.ts).
   TODAY_BY_DEPARTMENT_ROLES_SETTING,
+  // "weekly" (default) or "daily": when Owners get their update email
+  // (lib/personalReminders.ts).
+  OWNER_UPDATE_FREQUENCY_SETTING,
 ] as const;
 
 // Secrets are write-only: GET /settings reports only whether one is set.
@@ -240,6 +244,11 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     }
     rawBody.fixTrackStaleDays = String(parsed);
+  }
+  if (rawBody[OWNER_UPDATE_FREQUENCY_SETTING] !== undefined && rawBody[OWNER_UPDATE_FREQUENCY_SETTING] !== null
+    && !(OWNER_UPDATE_FREQUENCIES as readonly string[]).includes(rawBody[OWNER_UPDATE_FREQUENCY_SETTING]!)) {
+    res.status(400).json({ error: "Owner update must be weekly or daily" });
+    return;
   }
   if (rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING] !== undefined) {
     const rawLeadDays = rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING];

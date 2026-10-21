@@ -541,6 +541,11 @@ export async function runContractorComplianceReminderJob(
   send: EmailSender = sendEmail,
   sendPush: PushSender = sendPushToUsers,
   now: Date = new Date(),
+  /**
+   * false: only queue the contractors' own portal reminders. The managers'
+   * digest is replaced by the personal reminders (lib/personalReminders.ts).
+   */
+  options: { managerAlerts?: boolean } = {},
 ): Promise<ContractorComplianceJobResult> {
   const result: ContractorComplianceJobResult = {
     clientsChecked: 0,
@@ -567,6 +572,7 @@ export async function runContractorComplianceReminderJob(
         result.errors++;
         logger.error({ err: portalErr, clientId: client.id }, "Contractor portal reminder queue failed");
       }
+      if (options.managerAlerts === false) continue;
       const leadDays = await getClientContractorComplianceLeadDays(client.id);
       const candidates = await getContractorComplianceAlerts(client.id, now, leadDays);
       if (candidates.length === 0) continue;
