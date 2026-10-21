@@ -61,7 +61,7 @@ export function CheckStatusWithCertificate({ item, children }: {
 
 /**
  * Contractor visits still waiting for their certificate, oldest first. The
- * contractor is chased every two weeks (through Contractor Approvals) until
+ * contractor is emailed every two weeks, automatically, until
  * chaseStopsAfterDays after the visit; after that it is up to the business.
  * Hidden when nothing is outstanding.
  */
@@ -82,7 +82,7 @@ export function CertificatesOutstandingCard() {
       </h2>
       <p className="text-sm text-muted-foreground mt-1 mb-4 max-w-2xl">
         The contractor has been but no certificate has been uploaded {data.followUpAfterDays} days on. Certificates are often held
-        until the invoice is paid. The contractor is chased every two weeks through Contractor Approvals, for {data.chaseStopsAfterDays} days.
+        until the invoice is paid. ComplyTrack emails the contractor every two weeks to ask for it, for {data.chaseStopsAfterDays} days.
         Upload the certificate on the check when it arrives.
       </p>
       <ul className="divide-y divide-border/60 rounded-sm border border-border/60">

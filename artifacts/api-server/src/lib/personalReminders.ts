@@ -308,7 +308,7 @@ function personalHtml(sections: PersonalSections, today: string): string {
   if (sections.certificates.length) {
     parts.push(
       heading("Certificates outstanding"),
-      `<p style="margin:0 0 8px;color:#64748b;">The contractor has been and no certificate has been uploaded. Certificates are often held until the invoice is paid. A follow-up to the contractor is waiting in ${link("/contractor-approvals", "Contractor Approvals")}; when the certificate arrives, upload it on the check.</p>`,
+      `<p style="margin:0 0 8px;color:#64748b;">The contractor has been and no certificate has been uploaded. Certificates are often held until the invoice is paid. The contractor is emailed today asking for it, with you copied in. When the certificate arrives, upload it on the check.</p>`,
       list(sections.certificates.map(certificateRow)),
     );
   }
