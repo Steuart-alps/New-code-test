@@ -17,6 +17,9 @@
  *     default);
  *   - expiries: the early reminder (by default 30 days for training, the
  *     contractor lead time for contractor documents) and 1 day before;
+ *   - "Certificates still to come": a contractor visit with no certificate
+ *     3 days on (lib/certificateFollowUp.ts), then once a week while it is
+ *     still missing;
  *   - documents they still have to sign (by their staff roster email), added
  *     when an email is going anyway, and on Mondays.
  * Tasks assigned to a group ("Staff" or "Managers") go on that group's bell
@@ -29,8 +32,9 @@
  * set. Managers get one covering the sites their departments can see. It
  * lists the last week's completed work by track and by person, what is
  * overdue and who has it, what is due this week, anything nobody has been
- * given, expiries in the next 60 days, documents still to sign and
- * contractor reminders waiting in Contractor Approvals. On those days an
+ * given, expiries in the next 60 days, certificates still to come after a
+ * contractor visit, documents still to sign and contractor reminders waiting
+ * in Contractor Approvals. On those days an
  * Owner's own due-tomorrow list is folded in, so they get one email.
  *
  * Each email is claimed per business, day and address before it is sent
@@ -40,6 +44,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { addCalendarDays, getAccountTimezone, localDateIn } from "./accountClock";
+import { FOLLOW_UP_AFTER_DAYS, getVisitsAwaitingCertificate, type VisitAwaitingCertificate } from "./certificateFollowUp";
 import { getOutstandingAckSummary } from "./docAckReminders";
 import {
   DEFAULT_OVERDUE_EVERY,
@@ -54,6 +59,7 @@ import {
   collectDueItems,
   loadResponsibilityContext,
   responsibleFor,
+  responsibleForCertificate,
   type DueItem,
   type Responsibility,
   type UrgentItem,
@@ -211,14 +217,16 @@ interface PersonalSections {
   overdue: DueItem[];
   expiring: DueItem[];
   urgent: UrgentItem[];
+  certificates: VisitAwaitingCertificate[];
   signOffs: SignOff[];
 }
 
-const emptySections = (): PersonalSections => ({ upcoming: [], nextWeek: [], overdue: [], expiring: [], urgent: [], signOffs: [] });
+const emptySections = (): PersonalSections => ({ upcoming: [], nextWeek: [], overdue: [], expiring: [], urgent: [], certificates: [], signOffs: [] });
 
 /** Whether anything in the sections needs an email on its own (sign-offs ride along). */
 const hasReminders = (sections: PersonalSections) =>
-  sections.upcoming.length + sections.nextWeek.length + sections.overdue.length + sections.expiring.length + sections.urgent.length > 0;
+  sections.upcoming.length + sections.nextWeek.length + sections.overdue.length + sections.expiring.length + sections.urgent.length
+    + sections.certificates.length > 0;
 
 interface ActivityRow { track: string; person: string; count: number }
 
@@ -229,6 +237,7 @@ interface OwnerUpdate {
   dueSoon: Array<{ item: DueItem; holder: string | null }>;
   unassigned: DueItem[];
   expiring: DueItem[];
+  certificates: VisitAwaitingCertificate[];
   unsigned: Array<{ title: string; docType: string; outstanding: number }>;
   contractorDrafts: number;
   /** Omitted for Managers (it covers the whole business). */
@@ -262,6 +271,11 @@ function urgentRow(item: UrgentItem): string {
   return `<strong>${link(item.linkPath, item.title)}</strong> <span style="color:#64748b;">· ${escapeHtml(item.detail)}${where(item)} · ${escapeHtml(formatDay(item.raisedOn))}</span>`;
 }
 
+function certificateRow(visit: VisitAwaitingCertificate): string {
+  const who = [visit.contractorName, visit.contractorCompany].filter(Boolean).join(", ");
+  return `<strong>${link(`/items/${visit.itemId}`, visit.title)}</strong> <span style="color:#64748b;">· visited ${escapeHtml(formatDay(visit.visitDay))} by ${escapeHtml(who)}${where(visit)}</span>`;
+}
+
 function personalHtml(sections: PersonalSections, today: string): string {
   const parts: string[] = [];
   if (sections.urgent.length) {
@@ -290,6 +304,13 @@ function personalHtml(sections: PersonalSections, today: string): string {
   if (sections.expiring.length) {
     parts.push(heading("Expiring"), list(sections.expiring.map((item) =>
       itemRow(item, ` · expires ${escapeHtml(formatDay(item.dueDate))}`))));
+  }
+  if (sections.certificates.length) {
+    parts.push(
+      heading("Certificates still to come"),
+      `<p style="margin:0 0 8px;color:#64748b;">The contractor has been and no certificate has been uploaded. A follow-up to the contractor is waiting in ${link("/contractor-approvals", "Contractor Approvals")}; when the certificate arrives, upload it on the check.</p>`,
+      list(sections.certificates.map(certificateRow)),
+    );
   }
   if (sections.signOffs.length) {
     parts.push(heading(`${plural(sections.signOffs.length, "document")} to read and sign`), list(sections.signOffs.map((doc) =>
@@ -345,6 +366,9 @@ function ownerUpdateHtml(update: OwnerUpdate, today: string): string {
         ? ` · <strong style="color:#b91c1c;">expired ${escapeHtml(formatDay(item.dueDate))}</strong>`
         : ` · ${escapeHtml(formatDay(item.dueDate))}`))));
   }
+  if (update.certificates.length) {
+    parts.push(heading("Certificates still to come"), list(update.certificates.map(certificateRow)));
+  }
   if (update.unsigned.length) {
     parts.push(heading("Documents still to be signed"), list(update.unsigned.map((doc) =>
       `${escapeHtml(doc.title)} <span style="color:#64748b;">· ${escapeHtml(doc.docType)} · ${plural(doc.outstanding, "person", "people")} still to sign</span>`)));
@@ -360,7 +384,7 @@ function ownerUpdateHtml(update: OwnerUpdate, today: string): string {
 
 function ownerUpdateHasContent(update: OwnerUpdate): boolean {
   return update.urgent.length + update.overdue.length + update.dueSoon.length + update.unassigned.length
-    + update.expiring.length + update.unsigned.length + update.contractorDrafts > 0
+    + update.expiring.length + update.certificates.length + update.unsigned.length + update.contractorDrafts > 0
     || (update.activity?.length ?? 0) > 0;
 }
 
@@ -444,8 +468,12 @@ export async function runPersonalRemindersForClient(
 
   const send = options.send ?? sendEmail;
   const today = localDateIn(timeZone, now);
-  const [{ items, urgent }, ctx, services, settingRows, clientRows] = await Promise.all([
+  const [{ items, urgent }, certificates, ctx, services, settingRows, clientRows] = await Promise.all([
     collectDueItems(clientId, today, now),
+    getVisitsAwaitingCertificate(clientId, { today }).catch((err) => {
+      logger.warn({ err, clientId }, "Personal reminders: could not read certificates still to come");
+      return [] as VisitAwaitingCertificate[];
+    }),
     loadResponsibilityContext(clientId),
     getEntitledServices(clientId),
     db.execute(sql`
@@ -499,6 +527,12 @@ export async function runPersonalRemindersForClient(
     if (!section) continue;
     for (const userId of who.userIds) userRecipient(userId)?.sections[section].push(item);
   }
+  // A missing certificate: the day the contractor's follow-up is drafted, then weekly.
+  for (const visit of certificates) {
+    if ((daysBetween(visit.visitDay, today) - FOLLOW_UP_AFTER_DAYS) % 7 !== 0) continue;
+    for (const userId of responsibleForCertificate(ctx, visit)) userRecipient(userId)?.sections.certificates.push(visit);
+  }
+
   // Documents to sign, by staff roster email.
   const signs = isEntitled(services, "safetrack") || isEntitled(services, "doctrack");
   if (signs) {
@@ -547,6 +581,7 @@ export async function runPersonalRemindersForClient(
         unassigned: mine.filter((item) => item.kind === "due" && item.dueDate <= addCalendarDays(today, 13)
           && responsibility.get(item.id)?.unassigned),
         expiring: mine.filter((item) => item.kind === "expiry"),
+        certificates: certificates.filter((visit) => visible(visit.siteId)),
         unsigned: full ? unsigned : [],
         contractorDrafts: full ? drafts : 0,
         activity: full ? activity : null,
@@ -602,12 +637,17 @@ export async function runPersonalRemindersForClient(
     } else {
       const upcoming = recipient.sections.upcoming;
       const allTomorrow = upcoming.every((item) => item.dueDate === addCalendarDays(today, 1));
+      const certificateCount = recipient.sections.certificates.length;
+      const onlyCertificates = certificateCount > 0 && !recipient.sections.nextWeek.length
+        && !recipient.sections.overdue.length && !recipient.sections.expiring.length;
       subject = recipient.sections.urgent.length
         ? `Needs action now at ${businessName} — ComplyTrack`
         : upcoming.length
           ? `${allTomorrow ? "Due tomorrow" : "Coming up"}: ${plural(upcoming.length, "item")} at ${businessName} — ComplyTrack`
           : recipient.sections.nextWeek.length
             ? `Due next week: ${plural(recipient.sections.nextWeek.length, "item")} at ${businessName} — ComplyTrack`
+          : onlyCertificates
+            ? `${certificateCount === 1 ? "A certificate" : "Certificates"} still to come at ${businessName} — ComplyTrack`
           : `Your reminders for ${businessName} — ComplyTrack`;
       body = greeting
         + `<p style="margin:0 0 8px;">This is what needs doing at ${escapeHtml(businessName)}.</p>`

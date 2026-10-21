@@ -329,6 +329,9 @@ jobs:
       - name: Contractor visits on every track reach the contractor reminder (production schema base)
         run: pnpm --filter @workspace/api-server run test:contractor-visits
 
+      - name: Certificate follow-up after a contractor visit (production schema base)
+        run: pnpm --filter @workspace/api-server run test:certificate-follow-up
+
       - name: Equipment list and QR label tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:equipment-labels
 

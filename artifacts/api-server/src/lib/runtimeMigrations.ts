@@ -1644,7 +1644,7 @@ async function runRuntimeMigrationsOnce() {
       DROP CONSTRAINT IF EXISTS "contractor_email_queue_email_type_check"`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
       ADD CONSTRAINT "contractor_email_queue_email_type_check"
-      CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation'))`);
+      CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation','certificate_followup'))`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "quote_token" DROP NOT NULL`);
     await migrateComplianceScheduleTokens();
     // This credential-scrubbing migration assumes one application instance starts

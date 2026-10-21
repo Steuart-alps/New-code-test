@@ -12,7 +12,10 @@
  *   - otherwise the track's owner for the site (lib/trackOwners.ts), and with
  *     no owner set, the business's Owners. Consultants are reminded only
  *     about tracks they own, so ALPS is not copied in on every business;
- *   - contractor documents go to the Maintenance managers, else the Owners.
+ *   - contractor documents go to the Maintenance managers, else the Owners;
+ *   - a missing certificate after a contractor visit goes to the person
+ *     assigned, else the site's Maintenance managers, else its Managers, else
+ *     the Owners (responsibleForCertificate).
  *
  * A compliance check linked to a track visit (lib/contractorVisits.ts) stands
  * in for the track's own date, so a visit is listed once.
@@ -542,4 +545,18 @@ export function responsibleFor(ctx: ResponsibilityContext, item: Pick<DueItem, "
   }
   // A typed name with no account: shown as the holder, reminded through the Owners.
   return { userIds: ownersOf(ctx), bellUserIds: [], holder: typed, unassigned: typed == null };
+}
+
+/**
+ * Who chases a certificate still to come after a contractor visit: the person
+ * assigned to the check, else the Maintenance managers who can see its site,
+ * else its Managers, else the Owners.
+ */
+export function responsibleForCertificate(ctx: ResponsibilityContext, item: { siteId: number | null; assigneeUserId: number | null }): number[] {
+  if (item.assigneeUserId != null && canSee(ctx, item.assigneeUserId, item.siteId)) return [item.assigneeUserId];
+  const maintenance = ctx.maintenanceManagerIds.filter((id) => canSee(ctx, id, item.siteId));
+  if (maintenance.length) return maintenance;
+  const managers = [...ctx.eligible.values()]
+    .filter((user) => user.role === "client_manager" && canSee(ctx, user.id, item.siteId)).map((user) => user.id);
+  return managers.length ? managers : ownersOf(ctx);
 }

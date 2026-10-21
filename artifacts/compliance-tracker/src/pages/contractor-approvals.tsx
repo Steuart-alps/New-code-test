@@ -729,7 +729,9 @@ export default function ContractorApprovalsPage() {
                                           ? "Requesting Quote"
                                           : item.emailType === "reminder"
                                             ? "Reminder"
-                                            : "Assigning Job"}
+                                            : item.emailType === "certificate_followup"
+                                              ? "Certificate follow-up"
+                                              : "Assigning Job"}
                                     </span>
                                     {isNewRequest && (
                                       <span
