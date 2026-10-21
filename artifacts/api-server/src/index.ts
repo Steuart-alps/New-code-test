@@ -45,6 +45,7 @@ import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
 import { runCancelledStorageClassJob } from "./lib/cancelledClientStorage";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runPersonalReminderJob } from "./lib/personalReminders";
+import { runUrgentAlertJob } from "./lib/urgentAlerts";
 import { runTrackReminderJob } from "./lib/trackReminders";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
 import { runStripeTaxCheck, STRIPE_TAX_CHECK_CRON } from "./lib/stripeTaxCheck";
@@ -274,7 +275,7 @@ function startScheduler() {
   logger.info("Analytics retention purge scheduler started (daily at 03:20)");
 
   // Reminders to the person responsible (a "due tomorrow" email) and the
-  // Owner update (Mondays, or daily). Hourly; each business is handled at its
+  // Owner update (Mondays, or daily). Urgent items go out the same day below. Hourly; each business is handled at its
   // own local 08:00. This replaces the daily digests to Owners: the track
   // summary, safety check, FixTrack, DocTrack, SafeTrack, contractor and
   // training expiry emails (their jobs are no longer scheduled).
@@ -283,6 +284,15 @@ function startScheduler() {
     (result) => result.personalEmails + result.ownerUpdates + result.bellNotifications === 0 && result.errors === 0,
   ), { daily: true });
   logger.info("Personal reminder scheduler started (hourly at :10)");
+
+  // Same-day alerts: urgent track actions, critical compliance checks and new
+  // FixTrack issues, emailed within minutes to the person responsible (and,
+  // for urgent ones, the Managers covering the site and the Owners).
+  schedule("*/10 * * * *", "urgent-alerts", logged(
+    "Urgent alert job complete", () => runUrgentAlertJob(),
+    (result) => result.emailsSent === 0 && result.errors === 0,
+  ));
+  logger.info("Urgent alert scheduler started (every 10 minutes)");
 
   schedule("0 8 * * *", "contractor-reminders", logged("Scheduled reminder job complete", runReminderJob), { daily: true });
   logger.info("Contractor reminder scheduler started (daily at 08:00)");

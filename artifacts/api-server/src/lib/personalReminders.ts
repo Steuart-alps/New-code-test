@@ -13,12 +13,12 @@
  *   - anything gone overdue: the day after it was due, then once a week;
  *   - expiries: the early reminder (30 days for training, the contractor lead
  *     time for contractor documents) and 1 day before;
- *   - "Needs action now": a failed or unsafe check result, and an urgent
- *     FixTrack issue raised since the last run;
  *   - documents they still have to sign (by their staff roster email), added
  *     when an email is going anyway, and on Mondays.
  * Tasks assigned to a group ("Staff" or "Managers") go on that group's bell
  * only.
+ * Anything marked urgent, and every new FixTrack issue, is emailed the same
+ * day as it is raised instead (lib/urgentAlerts.ts).
  *
  * Owner update: Mondays (or every day, with Settings "Owner update" set to
  * Daily) to the business's Owners, or to its Notification email when one is
@@ -40,10 +40,10 @@ import { getOutstandingAckSummary } from "./docAckReminders";
 import {
   CONTRACTORS_MODULE,
   collectDueItems,
+  loadResponsibilityContext,
   responsibleFor,
   type DueItem,
   type Responsibility,
-  type ResponsibilityContext,
   type UrgentItem,
 } from "./dueItems";
 import {
@@ -59,7 +59,7 @@ import { sendPushToUsers } from "./pushNotifications";
 import { getOutstandingSafeTrackAcknowledgements, getOutstandingSafeTrackStaffReminders } from "./safeTrackAckReminders";
 import { getEntitledServices, isEntitled } from "./services";
 import { localHourIn } from "./trackReminders";
-import { candidateCanSeeSite, loadOwnerContext } from "./trackOwners";
+import { candidateCanSeeSite } from "./trackOwners";
 import { isClientBillingLocked } from "./trialLock";
 import { createUserNotifications, type NewUserNotification } from "./userNotifications";
 
@@ -298,18 +298,6 @@ function ownerUpdateHasContent(update: OwnerUpdate): boolean {
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 
-async function responsibilityContext(clientId: number): Promise<ResponsibilityContext> {
-  const ctx = await loadOwnerContext(clientId);
-  const managers = rowsOf<{ id: number }>(await db.execute(sql`
-    SELECT id FROM users
-    WHERE client_id = ${clientId} AND active = true AND is_maintenance_manager = true
-      AND role IN ('client_admin', 'client_manager', 'client_staff')
-    ORDER BY id
-  `)).map((row) => Number(row.id)).filter((id) => ctx.eligible.has(id));
-  const ownerIds = [...ctx.eligible.values()].filter((user) => user.role === "client_admin").map((user) => user.id);
-  return { ...ctx, ownerIds, maintenanceManagerIds: managers };
-}
-
 /** DocTrack documents each staff member (with a roster email) still has to sign. */
 async function docTrackSignOffs(clientId: number): Promise<Array<{ email: string; title: string }>> {
   return rowsOf<{ email: string; title: string }>(await db.execute(sql`
@@ -391,7 +379,7 @@ export async function runPersonalRemindersForClient(
   const tomorrow = addCalendarDays(today, 1);
   const [{ items, urgent }, ctx, services, settingRows, clientRows] = await Promise.all([
     collectDueItems(clientId, today, now),
-    responsibilityContext(clientId),
+    loadResponsibilityContext(clientId),
     getEntitledServices(clientId),
     db.execute(sql`
       SELECT key, value FROM app_settings
@@ -450,14 +438,6 @@ export async function runPersonalRemindersForClient(
     if (!section) continue;
     for (const userId of who.userIds) userRecipient(userId)?.sections[section].push(item);
   }
-  for (const item of urgent) {
-    const since = daysBetween(item.raisedOn, today);
-    const fresh = item.id.startsWith("urgent-fix:") || (since >= 1 && since % 7 === 1);
-    if (!fresh) continue;
-    const who = responsibleFor(ctx, { module: item.module, siteId: item.siteId, assigneeUserId: item.assigneeUserId, assigneeName: null });
-    for (const userId of new Set([...who.userIds, ...ctx.ownerIds])) userRecipient(userId)?.sections.urgent.push(item);
-  }
-
   // Documents to sign, by staff roster email.
   const signs = isEntitled(services, "safetrack") || isEntitled(services, "doctrack");
   if (signs) {

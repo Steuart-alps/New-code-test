@@ -1,8 +1,9 @@
 // "Assigned to" people and the personal reminders: the assignee API and its
 // checks on track actions and compliance checks, the due-tomorrow email to
 // the person responsible (once a day, overdue on day 1 then weekly, group
-// tasks on the bell only), and the Owner update (Mondays, or daily by
-// setting; Managers see only their departments' sites).
+// tasks on the bell only), the Owner update (Mondays, or daily by setting;
+// Managers see only their departments' sites), and the same-day alerts for
+// urgent actions and new FixTrack issues.
 //
 // Runs the real app in-process against the fresh-schema harness's disposable
 // database and calls the job directly with an injected clock and mailer.
@@ -41,7 +42,7 @@ try {
   });
   const entry = await import(pathToFileURL(outfile).href);
   pool = entry.pool;
-  const { app, runPersonalReminderJob, hashPassword } = entry;
+  const { app, runPersonalReminderJob, runUrgentAlertJob, hashPassword } = entry;
 
   server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
@@ -288,6 +289,43 @@ try {
     assert.ok(update, "a daily Owner update on a Tuesday");
     assert.match(update.subject, /^Daily update for /);
     ok("Owners can switch the update to daily");
+  }
+
+  // ── Same-day alerts ───────────────────────────────────────────────────────
+  {
+    sent.length = 0;
+    // Raised just now (created_at defaults to the database clock).
+    const [newIssue] = await q(`INSERT INTO fix_track_issues (client_id, site_id, title, location, priority, status, reported_by, reported_date, created_by)
+      VALUES ($1, $2, 'Dripping tap in the bar', 'Bar', 'low', 'reported', 'Tom Staff', CURRENT_DATE, $3) RETURNING id`, [A, blueBoar.id, tom.userId]);
+    await q(`INSERT INTO fix_track_issues (client_id, site_id, title, location, priority, status, reported_by, reported_date, created_by, assignee_user_id, assigned_to)
+      VALUES ($1, $2, 'Gas smell in the cellar', 'Cellar', 'urgent', 'reported', 'Owner', CURRENT_DATE, $3, $4, 'Tom Staff')`, [A, redLion.id, owner.userId, tom.userId]);
+    const result = await runUrgentAlertJob({ clientIds: [A, B], send, sendPush });
+    assert.equal(result.errors, 0);
+
+    const [ownerAlert, ...ownerExtra] = to(owner.email);
+    assert.ok(ownerAlert, "an urgent action goes to the Owners straight away");
+    assert.equal(ownerExtra.length, 0, "one email per person per run");
+    assert.match(ownerAlert.html, /Kitchen extinguisher missing/);
+    assert.doesNotMatch(ownerAlert.html, /Gas smell in the cellar/, "nobody is told about an issue they raised themselves");
+    assert.doesNotMatch(ownerAlert.html, /Replace fire door closer/, "only urgent actions go straight away");
+
+    const [tomAlert] = to(tom.email);
+    assert.ok(tomAlert, "an urgent FixTrack issue goes to the person it is assigned to");
+    assert.match(tomAlert.subject, /^Urgent FixTrack issue: Gas smell in the cellar/);
+    assert.doesNotMatch(tomAlert.html, /Dripping tap/, "Tom raised the tap himself");
+
+    const [miaAlert] = to(mia.email);
+    assert.ok(miaAlert, "a new FixTrack issue nobody has been given goes to the Manager covering the site");
+    assert.match(miaAlert.html, /Dripping tap in the bar/);
+    assert.doesNotMatch(miaAlert.html, /Kitchen extinguisher|Gas smell/, "not urgent items at sites outside her departments");
+
+    const [bell] = await q(`SELECT * FROM user_notifications WHERE user_id = $1 AND dedupe_key = $2`, [mia.userId, `urgent:fix:${newIssue.id}`]);
+    assert.ok(bell, "same-day alerts also go on the bell");
+
+    const count = sent.length;
+    await runUrgentAlertJob({ clientIds: [A, B], send, sendPush });
+    assert.equal(sent.length, count, "each item is alerted once");
+    ok("urgent actions and new FixTrack issues are emailed the same day, once, to the right people");
   }
 
   console.log(`\n${passed} personal reminder checks passed`);
