@@ -30,9 +30,10 @@ Wednesday 28 October.
 | 11 | Actions from uploaded audit and inspection reports | After launch | Pennies per report (being worked out) | Plan in its own thread |
 | 12 | CareTrack (care homes and care services) | Later | Not yet known | Scope from you |
 | 13 | Kitchens: stock, costings, GP, recipe spec sheets, supplier details, voice | After launch | None, except a few pence per spec sheet read | Allergen charts built, parked as draft #169 |
+| 14 | Label scanning (chemicals, food, GreenTrack products, equipment plates) | After launch | About 1-2p per label read; more when it also finds a data sheet and drafts COSHH | Anthropic key on Render |
 
-My suggested order after launch is the order of the table, with 2, 5 and 11
-built together because they share the same set-up (one AI key and one
+My suggested order after launch is the order of the table, with 2, 5, 11 and
+14 built together because they share the same set-up (one AI key and one
 "read a document, a person confirms" screen). Tell me if you want a
 different order.
 
@@ -473,6 +474,52 @@ Live AI plan). No extra hosting.
 
 ---
 
+## 14. Label scanning
+
+**When:** after launch. Plan page:
+https://claude.ai/artifact/Y3EchSXLiwpxAg1QQHRg3G
+
+Staff photograph a label with their phone (in the phone's web browser, so it
+doesn't wait for the store apps) and ComplyTrack reads it. A person always
+checks the result before it is saved.
+
+**Chemicals first.** Photograph a chemical's label and ComplyTrack:
+
+1. reads the product name and maker (about 1-2p);
+2. finds the safety data sheet (about 15p), and a person confirms it is the
+   right one; anything not found goes on a "not found" list, with an email to
+   the supplier asking for the sheet;
+3. adds the product to the COSHH Register and drafts the COSHHTrack assessment
+   (about 23p, the same as item 5).
+
+A manager must tick "checked against the safety data sheet" before the
+assessment is saved. Once it is current it appears in TrainTrack's COSHH tab
+for staff to read and sign. Hot tub, pool and pest control chemicals are
+covered by the same scan.
+
+**Then the other tracks, in this order:**
+
+- **GreenTrack product labels:** pesticides and fertiliser for the spraying
+  book (#164), picking up the MAPP number and active ingredient as well as the
+  COSHH details.
+- **Certificates:** this is item 2, using the same photo screen.
+- **Food labels (KitchenTrack):** ingredients, allergens and "may contain"
+  warnings (about 1-2p), checked by a manager, landing in the ingredients list
+  from the parked allergen charts (#169). So this waits for #169 and pairs with
+  supplier allergens and prices in item 13.
+- **Equipment data plates:** make, model and serial number for PUWER, LOLER
+  and PAT records, linked to the equipment's QR label (#159). Also FireTrack
+  extinguisher service labels.
+
+**Links to other items.** It uses the same AI set-up and "check and confirm"
+screen as items 2, 5, 11 and the kitchen spec sheets in item 13, so they should
+be built as one family.
+
+**Cost:** no extra hosting. The AI costs above are mostly already counted in
+the Live AI plan. Needs the Anthropic key on Render.
+
+---
+
 ## Before launch (already in hand, listed for completeness)
 
 These are handled in the "Launch plan for 26 October" thread and are not new
@@ -505,6 +552,7 @@ work:
 | Recipe spec sheet reading | A few pence per sheet |
 | Supplier allergens and prices | Pennies per invoice or product read; nothing for a supplier file |
 | Kitchen voice input | None |
+| Label scanning | About 1-2p per label; about 40p for a chemical including its data sheet and COSHH draft (mostly in the Live AI plan already) |
 
 Hosting stays on the one Render web service and database in Frankfurt for
 everything above.
