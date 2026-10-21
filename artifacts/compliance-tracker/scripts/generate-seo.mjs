@@ -73,11 +73,14 @@ ComplyTrack is a multi-tenant SaaS platform for UK businesses managing their own
 - [Home](${baseUrl}/): What ComplyTrack does, who it serves, and key features.
 - [Sign up](${baseUrl}/signup): Create an account and start tracking compliance.
 - [Log in](${baseUrl}/login): Access for existing customers.
+- [Modules](${baseUrl}/features): Every ComplyTrack module, what it records and the UK rules behind it.
+- [Pricing](${baseUrl}/pricing): Core £10 per site per month, £10 per module, capped at £50 per site per month.
+- [Free templates](${baseUrl}/templates): Printable fire, water, hot tub, kitchen and sprayer logs.
 
 ## Notes for AI crawlers
 - The home page is the canonical reference for what the product is and who it serves.
 - All other application routes (dashboard, sites, contractors, settings, etc.) sit behind authentication and are not part of the public, indexable surface.
-- For the most accurate, current information about features and pricing, use the home page.
+- For the most accurate, current information about features and pricing, use the modules and pricing pages.
 `;
 
 mkdirSync(publicDir, { recursive: true });

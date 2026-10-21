@@ -270,7 +270,7 @@ export default function ExternalChecksPage() {
             </td>
             <td className="px-6 py-4">
               <div className="flex flex-col gap-1.5 items-start">
-                <CheckStatusWithCertificate itemId={item.id} status={item.status}>
+                <CheckStatusWithCertificate item={item}>
                   <StatusBadge status={item.status} />
                 </CheckStatusWithCertificate>
                 <NeedsActionBadge item={item} />

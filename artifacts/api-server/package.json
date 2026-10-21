@@ -25,6 +25,7 @@
     "test:contractor-visits": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/contractor-visits.mjs",
     "test:certificate-follow-up": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/certificate-follow-up.mjs",
     "test:kitchen-hold-controls": "bash tests/run-fresh-schema.sh tests/kitchen-hold-controls.mjs",
+    "test:voice-log": "bash tests/run-fresh-schema.sh tests/voice-log.mjs",
     "test:kitchen-inspection-export": "bash tests/run-fresh-schema.sh tests/kitchen-inspection-export.mjs",
     "test:kitchen-status-site-scope": "bash tests/run-fresh-schema.sh tests/kitchen-status-site-scope.mjs",
     "test:dashboard-accuracy": "bash tests/run-fresh-schema.sh tests/dashboard-accuracy.mjs",

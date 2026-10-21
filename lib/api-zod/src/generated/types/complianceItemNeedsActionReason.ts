@@ -12,4 +12,5 @@ export type ComplianceItemNeedsActionReason = typeof ComplianceItemNeedsActionRe
 export const ComplianceItemNeedsActionReason = {
   unsatisfactory: 'unsatisfactory',
   open_defects: 'open_defects',
+  certificate_outstanding: 'certificate_outstanding',
 } as const;

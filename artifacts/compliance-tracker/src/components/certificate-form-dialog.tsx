@@ -175,8 +175,11 @@ export function CertificateFormDialog({
           await createCertificate.mutateAsync({ contractorId, data: payload });
         }
       }
-      // A certificate on a check clears it from "Certificates outstanding".
-      if (itemId) queryClient.invalidateQueries({ queryKey: ["certificates-outstanding"] });
+      // A certificate on a check clears "Certificate outstanding" (and its needs-action state).
+      if (itemId) {
+        queryClient.invalidateQueries({ queryKey: ["certificates-outstanding"] });
+        queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === "string" && q.queryKey[0].startsWith("/api/compliance-items") });
+      }
       toast({
         title: certificate ? "Certificate updated" : "Certificate uploaded",
         description: defectPayload.length

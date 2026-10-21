@@ -11,11 +11,12 @@
  *
  * FOLLOW_UP_AFTER_DAYS after the visit, then every FOLLOW_UP_EVERY_DAYS
  * while it is still missing:
- *   - the contractor gets a follow-up asking for the certificate, drafted
- *     into Contractor Approvals like the visit reminder (a manager sends it)
- *     with the people responsible copied in; a draft still waiting when the
- *     certificate arrives is withdrawn, and a new one is not added while the
- *     last is still waiting;
+ *   - the contractor is emailed asking for the certificate, with the people
+ *     responsible copied in. It goes automatically, with no approval step
+ *     (Steuart, 2026-10-21): the worst case is the contractor replying that
+ *     they already sent it. Each send is recorded in contractor_email_queue;
+ *     one that fails is left pending in Contractor Approvals for a manager,
+ *     and is withdrawn if the certificate arrives first;
  *   - the people responsible (lib/dueItems.ts responsibleForCertificate: the
  *     person assigned, the site's Maintenance managers and heads of
  *     department; with none, its Managers, else the Owners) see it under
@@ -29,6 +30,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { loadResponsibilityContext, responsibleForCertificate, type ResponsibilityContext } from "./dueItems";
 import { escapeHtml, parseEmailList } from "./email";
+import { dispatchStoredContractorEmail } from "./fixTrackNotifications";
 import { logger } from "./logger";
 
 export const FOLLOW_UP_AFTER_DAYS = 14;
@@ -165,8 +167,9 @@ async function clientSettings(clientId: number): Promise<Record<string, string>>
 }
 
 /**
- * Withdraw follow-up drafts still waiting for a manager once the certificate
- * is in (the visit day is the end of the draft's idempotency key).
+ * Withdraw follow-ups still waiting for a manager (a send that failed, or a
+ * draft from before chases went automatically) once the certificate is in
+ * (the visit day is the end of the draft's idempotency key).
  */
 async function withdrawAnsweredDrafts(): Promise<number> {
   const result = await db.execute(sql`
@@ -185,7 +188,9 @@ async function withdrawAnsweredDrafts(): Promise<number> {
   return rowsOf(result).length;
 }
 
-export interface CertificateFollowUpResult { visits: number; drafted: number; withdrawn: number; errors: number }
+export interface CertificateFollowUpResult { visits: number; sent: number; failed: number; withdrawn: number; errors: number }
+
+type SendContractorEmail = typeof dispatchStoredContractorEmail;
 
 /** The addresses a business's follow-up names: who the contractor sends the certificate to, then the rest copied in. */
 function certificateAddresses(ctx: ResponsibilityContext, visit: VisitAwaitingCertificate, maintenanceEmail: string | undefined): string[] {
@@ -196,43 +201,70 @@ function certificateAddresses(ctx: ResponsibilityContext, visit: VisitAwaitingCe
 }
 
 async function followUpBusiness(
-  clientId: number, visits: VisitAwaitingCertificate[], today: string, result: CertificateFollowUpResult,
+  clientId: number, visits: VisitAwaitingCertificate[], today: string, result: CertificateFollowUpResult, send: SendContractorEmail,
 ): Promise<void> {
   const [settings, ctx] = await Promise.all([clientSettings(clientId), loadResponsibilityContext(clientId)]);
   const companyName = settings["companyName"] ?? "ComplyTrack";
-  // Contractor follow-ups wait in Contractor Approvals, one per chase (the
-  // idempotency key ends in the visit day and chase number). A check holds
-  // one waiting draft at a time, so while the last follow-up (or a reminder)
-  // for the same check is still waiting, the next is added on a later run.
+  // One follow-up per chase (the idempotency key ends in the visit day and
+  // chase number), recorded as it is sent. A check holds one active queue
+  // row at a time, so while a reminder for the same check is waiting for
+  // approval the chase goes on a later run.
   for (const visit of visits) {
     if (!visit.contractorEmail) continue;
     const chase = chasesOwed(visit.visitDay, today);
+    const key = `certificate-followup-${clientId}-${visit.itemId}-${visit.visitDay}-${chase}`;
     const addresses = certificateAddresses(ctx, visit, settings["maintenanceEmail"]);
     const email = contractorFollowUpEmail(visit, companyName, addresses[0] ?? null);
     const cc = addresses.filter((address) => address !== visit.contractorEmail!.toLowerCase());
-    const queued = await db.execute(sql`
-      INSERT INTO contractor_email_queue
-        (client_id, entity_type, entity_id, department_id, contractor_id, email_type, mode,
-         to_email, subject, body_html, body_text, cc_json, email_preview_json, idempotency_key)
-      VALUES (${clientId}, 'compliance', ${visit.itemId}, ${visit.siteDepartmentId ?? visit.departmentId},
-        ${visit.contractorId}, ${CERTIFICATE_FOLLOW_UP_EMAIL_TYPE}, 'assign', ${visit.contractorEmail},
-        ${email.subject}, ${email.html}, ${email.text}, ${JSON.stringify(cc)}::jsonb,
-        ${JSON.stringify({ subject: email.subject, html: email.html, text: email.text })}::jsonb,
-        ${`certificate-followup-${clientId}-${visit.itemId}-${visit.visitDay}-${chase}`})
-      ON CONFLICT DO NOTHING
-      RETURNING id
-    `);
-    if (rowsOf(queued).length) result.drafted++;
+    const claimed = await db.transaction(async (tx) => {
+      // An earlier follow-up still waiting for approval is replaced by this one.
+      await tx.execute(sql`
+        UPDATE contractor_email_queue SET status = 'cancelled', last_error = 'Replaced by a later follow-up', updated_at = now()
+        WHERE client_id = ${clientId} AND entity_type = 'compliance' AND entity_id = ${visit.itemId}
+          AND email_type = ${CERTIFICATE_FOLLOW_UP_EMAIL_TYPE} AND status = 'pending' AND idempotency_key <> ${key}
+      `);
+      return rowsOf<{ id: number }>(await tx.execute(sql`
+        INSERT INTO contractor_email_queue
+          (client_id, entity_type, entity_id, department_id, contractor_id, email_type, mode, status, approved_at,
+           to_email, subject, body_html, body_text, cc_json, email_preview_json, idempotency_key)
+        VALUES (${clientId}, 'compliance', ${visit.itemId}, ${visit.siteDepartmentId ?? visit.departmentId},
+          ${visit.contractorId}, ${CERTIFICATE_FOLLOW_UP_EMAIL_TYPE}, 'assign', 'sending', now(), ${visit.contractorEmail},
+          ${email.subject}, ${email.html}, ${email.text}, ${JSON.stringify(cc)}::jsonb,
+          ${JSON.stringify({ subject: email.subject, html: email.html, text: email.text })}::jsonb, ${key})
+        ON CONFLICT DO NOTHING
+        RETURNING id
+      `))[0];
+    });
+    if (!claimed) continue;
+    try {
+      await send({
+        to: visit.contractorEmail, subject: email.subject, html: email.html, text: email.text,
+        cc: cc.length ? cc : undefined, clientId, idempotencyKey: key,
+      });
+      await db.execute(sql`UPDATE contractor_email_queue SET status = 'sent', sent_at = now(), updated_at = now()
+        WHERE id = ${claimed.id} AND status = 'sending'`);
+      result.sent++;
+    } catch (err) {
+      // Left for a manager to send from Contractor Approvals; the key is
+      // unchanged, so a retry cannot deliver twice.
+      await db.execute(sql`UPDATE contractor_email_queue SET status = 'pending', approved_at = NULL,
+        last_error = ${err instanceof Error ? err.message.slice(0, 500) : "Send failed"}, updated_at = now()
+        WHERE id = ${claimed.id} AND status = 'sending'`);
+      result.failed++;
+      logger.warn({ err, clientId, itemId: visit.itemId }, "Certificate follow-up could not be sent; left in Contractor Approvals");
+    }
   }
 }
 
 /**
- * Draft the contractor follow-ups due today and withdraw those answered. The
- * person responsible hears in their 08:00 personal reminder
- * (lib/personalReminders.ts), not from this job.
+ * Send the contractor follow-ups due today and withdraw any waiting ones that
+ * have been answered. The person responsible hears in their 08:00 personal
+ * reminder (lib/personalReminders.ts), not from this job.
  */
-export async function runCertificateFollowUpJob({ now = new Date() }: { now?: Date } = {}): Promise<CertificateFollowUpResult> {
-  const result: CertificateFollowUpResult = { visits: 0, drafted: 0, withdrawn: 0, errors: 0 };
+export async function runCertificateFollowUpJob(
+  { now = new Date(), send = dispatchStoredContractorEmail }: { now?: Date; send?: SendContractorEmail } = {},
+): Promise<CertificateFollowUpResult> {
+  const result: CertificateFollowUpResult = { visits: 0, sent: 0, failed: 0, withdrawn: 0, errors: 0 };
   result.withdrawn = await withdrawAnsweredDrafts();
   const today = now.toISOString().slice(0, 10);
   const visits = await getVisitsAwaitingCertificate(null, { today });
@@ -242,7 +274,7 @@ export async function runCertificateFollowUpJob({ now = new Date() }: { now?: Da
 
   for (const [clientId, clientVisits] of byClient) {
     try {
-      await followUpBusiness(clientId, clientVisits, today, result);
+      await followUpBusiness(clientId, clientVisits, today, result, send);
     } catch (err) {
       result.errors++;
       logger.error({ err, clientId }, "Certificate follow-up failed for a business");

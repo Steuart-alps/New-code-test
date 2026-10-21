@@ -22,6 +22,7 @@ import {
   useUpdateLegionellaConfig,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { SayItButton } from "@/components/say-it-button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -1349,7 +1350,8 @@ export default function LegionellaPage() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <SayItButton siteId={filterSite} />
             {canAdmin && <LegionellaConfigDialog siteId={filterSite} />}
             <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={value => { setRecordOpen(value); if (!value) setScanEquipment(undefined); }} defaultCheckType={quickCheckType} preset={scanEquipment} />
           </div>
