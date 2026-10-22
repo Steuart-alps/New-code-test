@@ -21,7 +21,11 @@
  *     two weeks on (lib/certificateFollowUp.ts), then every two weeks while
  *     it is still missing;
  *   - documents they still have to sign (by their staff roster email), added
- *     when an email is going anyway, and on Mondays.
+ *     when an email is going anyway, and on Mondays;
+ *   - Mondays, by staff roster email: their own outstanding training
+ *     (lib/trainingOutstanding.ts: expired or expiring, records to sign,
+ *     COSHH assessments to sign). Settings "Staff training expiring" sets the
+ *     lead time, and Off stops it.
  * Tasks assigned to a group ("Staff" or "Managers") go on that group's bell
  * only.
  * Anything marked urgent, and every new FixTrack issue, is emailed the same
@@ -32,7 +36,9 @@
  * set. Managers get one covering the sites their departments can see. It
  * lists the last week's completed work by track and by person, what is
  * overdue and who has it, what is due this week, anything nobody has been
- * given, expiries in the next 60 days, certificates outstanding two weeks or more
+ * given, expiries in the next 60 days, TrainTrack (each person's outstanding
+ * training, and who can't be reminded for want of a roster email),
+ * certificates outstanding two weeks or more
  * after a contractor visit, documents still to sign and contractor reminders waiting
  * in Contractor Approvals. On those days an
  * Owner's own due-tomorrow list is folded in, so they get one email.
@@ -56,6 +62,7 @@ import {
 } from "@workspace/api-zod/reminder-timings";
 import {
   CONTRACTORS_MODULE,
+  TRAINING_EXPIRY_LEAD_DAYS,
   collectDueItems,
   loadResponsibilityContext,
   responsibleFor,
@@ -77,6 +84,7 @@ import { sendPushToUsers } from "./pushNotifications";
 import { getOutstandingSafeTrackAcknowledgements, getOutstandingSafeTrackStaffReminders } from "./safeTrackAckReminders";
 import { getEntitledServices, isEntitled } from "./services";
 import { localHourIn } from "./trackReminders";
+import { collectOutstandingTraining, type StaffTraining } from "./trainingOutstanding";
 import { candidateCanSeeSite } from "./trackOwners";
 import { isClientBillingLocked } from "./trialLock";
 import { createUserNotifications, type NewUserNotification } from "./userNotifications";
@@ -219,14 +227,18 @@ interface PersonalSections {
   urgent: UrgentItem[];
   certificates: VisitAwaitingCertificate[];
   signOffs: SignOff[];
+  /** Mondays: their own outstanding training, as a staff roster member. */
+  training: StaffTraining | null;
 }
 
-const emptySections = (): PersonalSections => ({ upcoming: [], nextWeek: [], overdue: [], expiring: [], urgent: [], certificates: [], signOffs: [] });
+const emptySections = (): PersonalSections => ({
+  upcoming: [], nextWeek: [], overdue: [], expiring: [], urgent: [], certificates: [], signOffs: [], training: null,
+});
 
 /** Whether anything in the sections needs an email on its own (sign-offs ride along). */
 const hasReminders = (sections: PersonalSections) =>
   sections.upcoming.length + sections.nextWeek.length + sections.overdue.length + sections.expiring.length + sections.urgent.length
-    + sections.certificates.length > 0;
+    + sections.certificates.length > 0 || sections.training != null;
 
 interface ActivityRow { track: string; person: string; count: number }
 
@@ -238,6 +250,8 @@ interface OwnerUpdate {
   unassigned: DueItem[];
   expiring: DueItem[];
   certificates: VisitAwaitingCertificate[];
+  /** TrainTrack: people with outstanding training. */
+  training: StaffTraining[];
   unsigned: Array<{ title: string; docType: string; outstanding: number }>;
   contractorDrafts: number;
   /** Omitted for Managers (it covers the whole business). */
@@ -312,6 +326,26 @@ function personalHtml(sections: PersonalSections, today: string): string {
       list(sections.certificates.map(certificateRow)),
     );
   }
+  if (sections.training) {
+    const training = sections.training;
+    const rows = [
+      ...training.expired.map((row) => `<strong>${escapeHtml(row.title)}</strong> <span style="color:#b91c1c;">· expired ${escapeHtml(formatDay(row.expiryDate))}</span>`),
+      ...training.expiring.map((row) => `<strong>${escapeHtml(row.title)}</strong> <span style="color:#64748b;">· expires ${escapeHtml(formatDay(row.expiryDate))}</span>`),
+      ...training.coshh.map((title) => `<strong>${escapeHtml(title)}</strong> <span style="color:#64748b;">· COSHH assessment to read and sign</span>`),
+      ...(training.toSign.length
+        ? [`${plural(training.toSign.length, "training record")} waiting for your signature`]
+        : []),
+    ];
+    parts.push(
+      heading("Your training"),
+      list(rows),
+      `<p style="margin:0 0 20px;color:#64748b;">${training.expired.length + training.expiring.length
+        ? "Speak to your manager to book anything expired or expiring. "
+        : ""}${training.hasAccount
+        ? `Sign off records and COSHH assessments in ${link("/my-training", "My training")}.`
+        : "Your manager can record your sign-off."}</p>`,
+    );
+  }
   if (sections.signOffs.length) {
     parts.push(heading(`${plural(sections.signOffs.length, "document")} to read and sign`), list(sections.signOffs.map((doc) =>
       `${escapeHtml(doc.title)} <span style="color:#64748b;">· ${escapeHtml(doc.docType)}${doc.siteName ? ` · ${escapeHtml(doc.siteName)}` : ""}</span>`)));
@@ -366,6 +400,24 @@ function ownerUpdateHtml(update: OwnerUpdate, today: string): string {
         ? ` · <strong style="color:#b91c1c;">expired ${escapeHtml(formatDay(item.dueDate))}</strong>`
         : ` · ${escapeHtml(formatDay(item.dueDate))}`))));
   }
+  if (update.training.length) {
+    const summary = (person: StaffTraining) => [
+      person.expired.length ? `<span style="color:#b91c1c;">expired: ${escapeHtml(person.expired.map((row) => row.title).join(", "))}</span>` : "",
+      person.expiring.length ? `expiring: ${escapeHtml(person.expiring.map((row) => `${row.title} (${formatDay(row.expiryDate)})`).join(", "))}` : "",
+      person.toSign.length ? `${plural(person.toSign.length, "record")} to sign` : "",
+      person.coshh.length ? `${plural(person.coshh.length, "COSHH assessment")} to sign` : "",
+    ].filter(Boolean).join(" · ");
+    const noEmail = update.training.filter((person) => !person.email).length;
+    parts.push(
+      heading(`TrainTrack: training outstanding (${plural(update.training.length, "person", "people")})`),
+      `<p style="margin:0 0 8px;color:#64748b;">Each person is reminded on Mondays by their staff roster email.${noEmail
+        ? ` ${plural(noEmail, "person has", "people have")} no email on the roster, so can't be reminded.`
+        : ""} See ${link("/train-track", "TrainTrack")}.</p>`,
+      list(update.training.map((person) => `<strong>${escapeHtml(person.name)}</strong>`
+        + `<span style="color:#64748b;">${person.siteName ? ` · ${escapeHtml(person.siteName)}` : ""}${person.email ? "" : " · no email"}</span>`
+        + ` · ${summary(person)}`)),
+    );
+  }
   if (update.certificates.length) {
     // Past the chase window the contractor is no longer reminded: say so.
     parts.push(heading("Certificates outstanding"), list(update.certificates.map((visit) => certificateRow(visit)
@@ -388,7 +440,7 @@ function ownerUpdateHtml(update: OwnerUpdate, today: string): string {
 
 function ownerUpdateHasContent(update: OwnerUpdate): boolean {
   return update.urgent.length + update.overdue.length + update.dueSoon.length + update.unassigned.length
-    + update.expiring.length + update.certificates.length + update.unsigned.length + update.contractorDrafts > 0
+    + update.expiring.length + update.certificates.length + update.training.length + update.unsigned.length + update.contractorDrafts > 0
     || (update.activity?.length ?? 0) > 0;
 }
 
@@ -498,6 +550,18 @@ export async function runPersonalRemindersForClient(
   const updateDay = frequency === "daily" || isMonday(today);
   const storedTimings = validateReminderTimings(settings.get(REMINDER_TIMINGS_SETTING) ?? {});
   const timings: Record<string, ReminderTiming> = storedTimings.ok ? storedTimings.value : {};
+  // Outstanding training, for the staff on Mondays and the updates.
+  const trainingLead = timings.train?.daysBefore;
+  const training = updateDay || isMonday(today)
+    ? await collectOutstandingTraining(clientId, today, {
+        leadDays: typeof trainingLead === "number" ? trainingLead : TRAINING_EXPIRY_LEAD_DAYS,
+        trainTrack: isEntitled(services, "traintrack"),
+        coshhTrack: isEntitled(services, "coshhtrack"),
+      }).catch((err) => {
+        logger.warn({ err, clientId }, "Personal reminders: could not read outstanding training");
+        return [] as StaffTraining[];
+      })
+    : [];
 
   const recipients = new Map<string, Recipient>();
   const recipientFor = (email: string, user?: { id: number; name: string } | null) => {
@@ -541,6 +605,16 @@ export async function runPersonalRemindersForClient(
   for (const visit of certificates) {
     if (certificateChaseOn(visit.visitDay, today) == null) continue;
     for (const userId of responsibleForCertificate(ctx, visit)) userRecipient(userId)?.sections.certificates.push(visit);
+  }
+
+  // Each staff member's own outstanding training, weekly, by roster email.
+  if (isMonday(today) && trainingLead !== null) {
+    for (const person of training) {
+      if (!person.email) continue;
+      const recipient = recipientFor(person.email);
+      recipient.name ??= person.name;
+      recipient.sections.training = person;
+    }
   }
 
   // Documents to sign, by staff roster email.
@@ -590,8 +664,10 @@ export async function runPersonalRemindersForClient(
         dueSoon: mine.filter((item) => item.kind === "due" && item.dueDate >= today && item.dueDate <= horizon).map(held),
         unassigned: mine.filter((item) => item.kind === "due" && item.dueDate <= addCalendarDays(today, 13)
           && responsibility.get(item.id)?.unassigned),
-        expiring: mine.filter((item) => item.kind === "expiry"),
+        // Training is listed by person in the TrainTrack section instead.
+        expiring: mine.filter((item) => item.kind === "expiry" && item.module !== "train"),
         certificates: certificates.filter((visit) => visible(visit.siteId)),
+        training: training.filter((person) => visible(person.siteId)),
         unsigned: full ? unsigned : [],
         contractorDrafts: full ? drafts : 0,
         activity: full ? activity : null,
@@ -650,6 +726,8 @@ export async function runPersonalRemindersForClient(
       const certificateCount = recipient.sections.certificates.length;
       const onlyCertificates = certificateCount > 0 && !recipient.sections.nextWeek.length
         && !recipient.sections.overdue.length && !recipient.sections.expiring.length;
+      const onlyTraining = recipient.sections.training != null && !certificateCount && !recipient.sections.nextWeek.length
+        && !recipient.sections.overdue.length && !recipient.sections.expiring.length;
       subject = recipient.sections.urgent.length
         ? `Needs action now at ${businessName} — ComplyTrack`
         : upcoming.length
@@ -658,6 +736,8 @@ export async function runPersonalRemindersForClient(
             ? `Due next week: ${plural(recipient.sections.nextWeek.length, "item")} at ${businessName} — ComplyTrack`
           : onlyCertificates
             ? `${certificateCount === 1 ? "A certificate" : "Certificates"} outstanding at ${businessName} — ComplyTrack`
+          : onlyTraining
+            ? `Your training at ${businessName} — ComplyTrack`
           : `Your reminders for ${businessName} — ComplyTrack`;
       body = greeting
         + `<p style="margin:0 0 8px;">This is what needs doing at ${escapeHtml(businessName)}.</p>`
@@ -668,7 +748,9 @@ export async function runPersonalRemindersForClient(
       bodyHtml: `${body}<div style="margin-top:24px;">${emailButton(appUrl, "Open ComplyTrack")}</div>`,
       footerNote: update
         ? "Settings → Reminder Notifications sets whether this comes weekly or daily"
-        : "You get this because these are assigned to you",
+        : recipient.sections.training && !recipient.userId
+          ? "You get this because you are on the staff roster"
+          : "You get this because these are assigned to you",
     });
     try {
       if (await sendClaimed(clientId, today, recipient, subject, html, send)) {

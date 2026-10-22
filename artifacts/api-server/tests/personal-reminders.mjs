@@ -382,6 +382,77 @@ try {
     ok("urgent actions and new FixTrack issues are emailed the same day, once, to the right people");
   }
 
+  // ── Weekly training reminders ─────────────────────────────────────────────
+  {
+    const [tomRoster] = await q(`UPDATE staff_roster SET site_id = $2 WHERE client_id = $1 AND name = 'Tom Staff' RETURNING id`, [A, redLion.id]);
+    await q(`UPDATE users SET staff_roster_id = $1 WHERE id = $2`, [tomRoster.id, tom.userId]);
+    const sallyEmail = `personal-sally-${stamp}@test.local`;
+    await q(`INSERT INTO staff_roster (client_id, site_id, name, email, active) VALUES ($1, $2, 'Sally Server', $3, true),
+             ($1, $4, 'Nobody Noemail', NULL, true), ($1, $2, 'Gone Leaver', $5, false)`,
+      [A, blueBoar.id, sallyEmail, redLion.id, `personal-leaver-${stamp}@test.local`]);
+    const record = (name, rosterId, type, completed, expiry, recordType = "certificate", signature = "signed") => q(
+      `INSERT INTO train_track_records (client_id, site_id, record_type, staff_name, staff_roster_id, training_type, completed_date, expiry_date, signature)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [A, redLion.id, recordType, name, rosterId, type, completed, expiry, signature]);
+    await record("Tom Staff", tomRoster.id, "First Aid at Work", "2023-10-20", "2026-10-20");
+    await record("Tom Staff", tomRoster.id, "Food Hygiene", "2023-11-20", "2026-11-20");
+    await record("Tom Staff", tomRoster.id, "Fire Marshal", "2023-09-01", "2026-09-01");
+    await record("Tom Staff", tomRoster.id, "Fire Marshal", "2026-08-20", "2029-08-20");
+    await record("Tom Staff", tomRoster.id, "Cellar induction", "2026-10-28", null, "internal", null);
+    await record("Sally Server", null, "Manual Handling", "2023-10-01", "2026-10-01");
+    await record("Nobody Noemail", null, "Ladder Safety", "2023-10-01", "2026-10-01");
+    await record("Gone Leaver", null, "Asbestos Awareness", "2023-10-01", "2026-10-01");
+    // An expired annual document sign-off is asked for again as a document, not as training.
+    const [doc] = await q(`INSERT INTO doc_track_documents (client_id, title, requires_acknowledgement) VALUES ($1, 'Staff handbook', false) RETURNING id`, [A]);
+    const [docRecord] = await q(`INSERT INTO train_track_records (client_id, site_id, record_type, staff_name, staff_roster_id, document_title, completed_date, expiry_date, signature)
+      VALUES ($1, $2, 'signoff', 'Tom Staff', $3, 'Staff handbook', '2025-10-01', '2026-10-01', 'signed') RETURNING id`, [A, redLion.id, tomRoster.id]);
+    await q(`INSERT INTO doc_acknowledgements (document_id, client_id, staff_roster_id, staff_name, train_track_record_id) VALUES ($1, $2, $3, 'Tom Staff', $4)`,
+      [doc.id, A, tomRoster.id, docRecord.id]);
+
+    sent.length = 0;
+    // Monday 2 November 2026, 08:15 GMT.
+    const result = await run("2026-11-02T08:15:00Z");
+    assert.equal(result.errors, 0);
+    const [tomMail] = to(tom.email);
+    assert.ok(tomMail, "Tom gets his training reminder");
+    assert.match(tomMail.html, /Your training[\s\S]*First Aid at Work[\s\S]*expired/);
+    assert.match(tomMail.html, /Food Hygiene[\s\S]*expires/, "expiring within 30 days");
+    assert.doesNotMatch(tomMail.html, /Fire Marshal/, "a renewed certificate isn't outstanding");
+    assert.doesNotMatch(tomMail.html, /Staff handbook/, "document sign-offs aren't listed as expiring training");
+    assert.match(tomMail.html, /1 training record waiting for your signature/);
+    assert.match(tomMail.html, /My training/);
+    const [sallyMail, ...sallyExtra] = to(sallyEmail);
+    assert.ok(sallyMail, "staff on the roster without an account are reminded by their roster email");
+    assert.equal(sallyExtra.length, 0);
+    assert.match(sallyMail.subject, /^Your training at /);
+    assert.match(sallyMail.html, /Hello Sally/);
+    assert.match(sallyMail.html, /Manual Handling/, "matched to the roster by name");
+    assert.doesNotMatch(sallyMail.html, /First Aid|Ladder/, "only her own training");
+    assert.equal(to(`personal-leaver-${stamp}@test.local`).length, 0, "people who have left aren't reminded");
+
+    const [update] = to(owner.email);
+    assert.match(update.html, /TrainTrack: training outstanding \(3 people\)/);
+    assert.match(update.html, /1 person has no email on the roster/);
+    assert.match(update.html, /Nobody Noemail[\s\S]*no email[\s\S]*Ladder Safety/);
+    assert.doesNotMatch(update.html, /Expiring in the next 60 days[\s\S]*First Aid at Work \(Tom Staff\)/,
+      "training isn't listed twice");
+    const [miaUpdate] = to(mia.email);
+    assert.match(miaUpdate.html, /TrainTrack[\s\S]*Sally Server/, "Managers see their own sites' staff");
+    assert.doesNotMatch(miaUpdate.html, /Nobody Noemail|First Aid at Work/, "not other departments' staff");
+
+    sent.length = 0;
+    await run("2026-11-03T08:15:00Z");
+    assert.equal(to(sallyEmail).length, 0, "weekly: not on a Tuesday");
+
+    assert.equal((await asOwner("PUT", "/settings", { reminderTimings: JSON.stringify({ train: { daysBefore: null, overdueEvery: 7 } }) })).status, 200);
+    sent.length = 0;
+    await run("2026-11-09T08:15:00Z");
+    assert.equal(to(sallyEmail).length, 0, "switched off in Settings");
+    assert.match(to(owner.email)[0].html, /TrainTrack: training outstanding/, "still in the Owner update");
+    await asOwner("PUT", "/settings", { reminderTimings: null });
+    ok("staff get their own outstanding training on Mondays; the updates list it by person");
+  }
+
   console.log(`\n${passed} personal reminder checks passed`);
 } finally {
   if (server) await new Promise((resolve) => server.close(resolve));
