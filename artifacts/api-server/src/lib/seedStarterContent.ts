@@ -137,6 +137,14 @@ export const STARTER: StarterCategory[] = [
     ],
   },
   {
+    name: "Waste",
+    color: "#84cc16",
+    checks: [
+      { title: "Waste Transfer Note — Annual Renewal", description: "Get a waste transfer note from your waste contractor for every collection, or one annual note covering regular collections of the same waste for up to 12 months, and keep each note for at least 2 years (duty of care, Environmental Protection Act 1990, section 34, and the duty of care regulations for your nation). Upload the note here as its certificate and link the waste contractor. Hazardous (special in Scotland) waste uses consignment notes instead, kept for 3 years.", priority: "high", leadTimeDays: 21, frequencyMonths: 12 },
+      { title: "Waste Carrier Registration Check", description: "Check your waste contractor is registered to carry waste on the public register of your environment regulator (Environment Agency, Natural Resources Wales, SEPA or NIEA) and keep a copy of their registration. Recheck every year and whenever you change contractor (duty of care, Environmental Protection Act 1990, section 34).", priority: "high", leadTimeDays: 14, frequencyMonths: 12 },
+    ],
+  },
+  {
     name: "Premises",
     color: "#a855f7",
     checks: [
