@@ -1,6 +1,6 @@
 /**
  * COSHHTrack, mounted at /coshh-track behind the coshhtrack service:
- *  - COSHH assessments for a substance from the core COSHH register or for a
+ *  - COSHH assessments for a substance from the COSHH register (its Substances tab) or for a
  *    task: who is at risk, exposure routes, controls, PPE, risk level, what
  *    follow-up is needed, and a review date (12 months by default).
  *  - Checks that follow from them: LEV thorough examinations (14 months by

@@ -1,33 +1,24 @@
 import { Link } from "wouter";
 import { AlertTriangle, ArrowRight } from "lucide-react";
 import { useRegisterList } from "@/components/register-shared";
-import { useAuth } from "@/context/auth-context";
 
-interface CoshhRow { id: number; siteId: number | null; reviewOverdue: boolean }
 interface AsbestosRow { id: number; siteId: number | null; planReviewOverdue: boolean }
 
 /**
- * Dashboard tile for overdue COSHH assessment reviews and asbestos management
- * plan reviews (core registers). Uses the register lists, which already apply
- * the caller's department scope and compute the overdue flags. Renders
- * nothing when neither register has an overdue review.
+ * Dashboard tile for overdue asbestos management plan reviews (core
+ * register). Uses the register list, which already applies the caller's
+ * department scope and computes the overdue flag. Renders nothing when no
+ * review is overdue. (COSHH reviews belong to COSHHTrack assessments.)
  */
 export function RegisterReviewsDue({ siteId = null }: { siteId?: number | null }) {
-  const { services, hasService } = useAuth();
-  // With COSHHTrack, COSHH reviews belong to its assessments and show on its
-  // own dashboard status, so the register's review dates aren't counted here.
-  const coshhTrack = services != null && hasService("coshhtrack");
-  const { data: coshh = [] } = useRegisterList<CoshhRow>("/registers/coshh");
   const { data: asbestos = [] } = useRegisterList<AsbestosRow>("/registers/asbestos");
   const inSite = (row: { siteId: number | null }) => siteId === null || row.siteId === siteId;
-  const coshhOverdue = coshhTrack ? 0 : coshh.filter((row) => row.reviewOverdue && inSite(row)).length;
   const asbestosOverdue = asbestos.filter((row) => row.planReviewOverdue && inSite(row)).length;
-  if (coshhOverdue === 0 && asbestosOverdue === 0) return null;
+  if (asbestosOverdue === 0) return null;
 
   const rows = [
-    { count: coshhOverdue, href: "/coshh", label: `COSHH assessment review${coshhOverdue === 1 ? "" : "s"} overdue` },
     { count: asbestosOverdue, href: "/asbestos", label: `asbestos management plan review${asbestosOverdue === 1 ? "" : "s"} overdue` },
-  ].filter((row) => row.count > 0);
+  ];
 
   return (
     <section aria-label="Register reviews overdue" className="rounded-xl border border-red-200 bg-red-50/50 px-4 py-3">

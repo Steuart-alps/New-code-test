@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 type CalendarKind =
   | "compliance_due" | "contractor_visit" | "contractor_insurance" | "contractor_indemnity"
   | "contractor_dbs" | "contractor_accreditation" | "fix_visit" | "pest_visit" | "training_expiry"
-  | "coshh_review" | "coshh_track_due" | "asbestos_plan_review";
+  | "coshh_track_due" | "asbestos_plan_review";
 
 interface CalendarEntry {
   id: string;
@@ -45,7 +45,6 @@ const KIND_GROUP: Record<CalendarKind, keyof typeof GROUPS> = {
   contractor_dbs: "expiries",
   contractor_accreditation: "expiries",
   training_expiry: "training",
-  coshh_review: "registers",
   coshh_track_due: "registers",
   asbestos_plan_review: "registers",
 };

@@ -4,7 +4,7 @@
  *    regulated allergens and "may contain" traces, ticked by hand or worked
  *    out from recipe lines, menus, a PPDS flag and an append-only tick change
  *    log. Ingredients, menus and chart sign-offs are in allergen-recipes.ts.
- *  - COSHH register (core): hazardous substances per site with a safety data
+ *  - COSHH register (part of COSHHTrack): hazardous substances per site with a safety data
  *    sheet, assessment and review dates, controls/PPE and status.
  *  - Asbestos (core): one current record per site (build age, survey, report,
  *    management plan review) plus its register of asbestos-containing
@@ -505,7 +505,7 @@ router.delete("/allergens/:id", requireAuth, denyViewers, async (req, res) => {
   res.status(204).end();
 });
 
-// ── COSHH register (core) ─────────────────────────────────────────────────────
+// ── COSHH register (COSHHTrack only: its Substances tab) ─────────────────────
 
 const COSHH_STATUSES = ["in_use", "withdrawn"] as const;
 
@@ -539,7 +539,7 @@ async function findCoshh(req: Request, clientId: number, id: number) {
   return row ?? null;
 }
 
-router.get("/coshh", requireAuth, async (req, res) => {
+router.get("/coshh", requireAuth, requireService("coshhtrack"), async (req, res) => {
   const clientId = requireClient(req, res);
   if (!clientId) return;
   const site = siteFilter(req, coshhSubstancesTable.siteId);
@@ -555,7 +555,7 @@ router.get("/coshh", requireAuth, async (req, res) => {
   res.json(rows.map(withCoshhStatus));
 });
 
-router.post("/coshh", requireAuth, denyViewers, async (req, res) => {
+router.post("/coshh", requireAuth, requireService("coshhtrack"), denyViewers, async (req, res) => {
   const clientId = requireClient(req, res);
   if (!clientId) return;
   const parsed = CoshhBody.safeParse(req.body);
@@ -585,7 +585,7 @@ router.post("/coshh", requireAuth, denyViewers, async (req, res) => {
   res.status(201).json(withCoshhStatus(row));
 });
 
-router.put("/coshh/:id", requireAuth, denyViewers, async (req, res) => {
+router.put("/coshh/:id", requireAuth, requireService("coshhtrack"), denyViewers, async (req, res) => {
   const clientId = requireClient(req, res);
   if (!clientId) return;
   const id = parseId(req.params.id);
@@ -623,7 +623,7 @@ router.put("/coshh/:id", requireAuth, denyViewers, async (req, res) => {
   res.json(withCoshhStatus(row));
 });
 
-router.delete("/coshh/:id", requireAuth, denyViewers, async (req, res) => {
+router.delete("/coshh/:id", requireAuth, requireService("coshhtrack"), denyViewers, async (req, res) => {
   const clientId = requireClient(req, res);
   if (!clientId) return;
   const id = parseId(req.params.id);
@@ -634,7 +634,7 @@ router.delete("/coshh/:id", requireAuth, denyViewers, async (req, res) => {
   res.status(204).end();
 });
 
-router.get("/coshh/:id/sds-url", requireAuth, async (req, res) => {
+router.get("/coshh/:id/sds-url", requireAuth, requireService("coshhtrack"), async (req, res) => {
   const clientId = requireClient(req, res);
   if (!clientId) return;
   const id = parseId(req.params.id);
