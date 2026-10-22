@@ -181,6 +181,7 @@ import type {
   ListPremisesInspectionsParams,
   ListPublicLinkAccessParams,
   MyCoshhSignOffs,
+  MyDocumentSignOffs,
   OkResponse,
   OrderFireCallPointsRequest,
   OwnTrainingRecord,
@@ -828,6 +829,232 @@ export const useSignMyCoshhAssessment = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSignMyCoshhAssessmentMutationOptions(options));
+    }
+
+export const getListMyDocumentSignOffsUrl = () => {
+
+
+
+
+  return `/api/train-track/my-documents`
+}
+
+/**
+ * @summary DocTrack documents the signed-in Viewer must read and sign, and those they have a current sign-off for
+ */
+export const listMyDocumentSignOffs = async ( options?: RequestInit): Promise<MyDocumentSignOffs> => {
+
+  return customFetch<MyDocumentSignOffs>(getListMyDocumentSignOffsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMyDocumentSignOffsQueryKey = () => {
+    return [
+    `/api/train-track/my-documents`
+    ] as const;
+    }
+
+
+export const getListMyDocumentSignOffsQueryOptions = <TData = Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMyDocumentSignOffsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyDocumentSignOffs>>> = ({ signal }) => listMyDocumentSignOffs({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMyDocumentSignOffsQueryResult = NonNullable<Awaited<ReturnType<typeof listMyDocumentSignOffs>>>
+export type ListMyDocumentSignOffsQueryError = ErrorType<void>
+
+
+/**
+ * @summary DocTrack documents the signed-in Viewer must read and sign, and those they have a current sign-off for
+ */
+
+export function useListMyDocumentSignOffs<TData = Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMyDocumentSignOffsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMyDocumentDownloadUrlUrl = (id: number,) => {
+
+
+
+
+  return `/api/train-track/my-documents/${id}/download-url`
+}
+
+/**
+ * @summary A short-lived link to open one of the Viewer's documents to read and sign
+ */
+export const getMyDocumentDownloadUrl = async (id: number, options?: RequestInit): Promise<CoshhDocumentUrl> => {
+
+  return customFetch<CoshhDocumentUrl>(getGetMyDocumentDownloadUrlUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMyDocumentDownloadUrlQueryKey = (id: number,) => {
+    return [
+    `/api/train-track/my-documents/${id}/download-url`
+    ] as const;
+    }
+
+
+export const getGetMyDocumentDownloadUrlQueryOptions = <TData = Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError = ErrorType<void>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMyDocumentDownloadUrlQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>> = ({ signal }) => getMyDocumentDownloadUrl(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMyDocumentDownloadUrlQueryResult = NonNullable<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>>
+export type GetMyDocumentDownloadUrlQueryError = ErrorType<void>
+
+
+/**
+ * @summary A short-lived link to open one of the Viewer's documents to read and sign
+ */
+
+export function useGetMyDocumentDownloadUrl<TData = Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError = ErrorType<void>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMyDocumentDownloadUrlQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSignMyDocumentUrl = (id: number,) => {
+
+
+
+
+  return `/api/train-track/my-documents/${id}/sign`
+}
+
+/**
+ * @summary Sign that the signed-in Viewer has read a DocTrack document (writes a TrainTrack sign-off)
+ */
+export const signMyDocument = async (id: number,
+    signTrainingRecordRequest: SignTrainingRecordRequest, options?: RequestInit): Promise<MyDocumentSignOffs> => {
+
+  return customFetch<MyDocumentSignOffs>(getSignMyDocumentUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(signTrainingRecordRequest)
+  }
+);}
+
+
+
+
+
+export const getSignMyDocumentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyDocument>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signMyDocument>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext> => {
+
+const mutationKey = ['signMyDocument'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signMyDocument>>, {id: number;data: BodyType<SignTrainingRecordRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  signMyDocument(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignMyDocumentMutationResult = NonNullable<Awaited<ReturnType<typeof signMyDocument>>>
+    export type SignMyDocumentMutationBody = BodyType<SignTrainingRecordRequest>
+    export type SignMyDocumentMutationError = ErrorType<void>
+
+    /**
+ * @summary Sign that the signed-in Viewer has read a DocTrack document (writes a TrainTrack sign-off)
+ */
+export const useSignMyDocument = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyDocument>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signMyDocument>>,
+        TError,
+        {id: number;data: BodyType<SignTrainingRecordRequest>},
+        TContext
+      > => {
+      return useMutation(getSignMyDocumentMutationOptions(options));
     }
 
 export const getSetActiveDepartmentUrl = () => {

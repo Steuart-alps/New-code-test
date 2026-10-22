@@ -402,11 +402,16 @@ async function docTrackSignOffs(clientId: number): Promise<Array<{ email: string
     JOIN staff_roster staff
       ON staff.client_id = d.client_id AND staff.active = true
      AND (d.department IS NULL OR staff.department = d.department)
+     AND (d.site_id IS NULL OR staff.site_id = d.site_id)
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
       AND NULLIF(trim(staff.email), '') IS NOT NULL
+      -- Signed, and not since expired (annual documents) or removed from TrainTrack.
       AND NOT EXISTS (
         SELECT 1 FROM doc_acknowledgements ack
+        LEFT JOIN train_track_records tr ON tr.id = ack.train_track_record_id AND tr.client_id = ack.client_id
         WHERE ack.client_id = d.client_id AND ack.document_id = d.id AND ack.staff_roster_id = staff.id
+          AND (ack.train_track_record_id IS NULL OR tr.id IS NOT NULL)
+          AND (tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
       )
     ORDER BY d.title
   `));

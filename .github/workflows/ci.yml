@@ -233,6 +233,9 @@ jobs:
       - name: COSHHTrack tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:coshh-track
 
+      - name: Document read-and-sign tests (fresh schema)
+        run: pnpm --filter @workspace/api-server run test:doc-sign-offs
+
       # Older, populated databases (Replit-era table layouts) must keep every
       # record through the runtime migrations, readable through today's routes.
       - name: Upgrade-path fixture tests

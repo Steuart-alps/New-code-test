@@ -299,6 +299,91 @@ export const SignMyCoshhAssessmentResponse = zod.object({
 
 
 /**
+ * @summary DocTrack documents the signed-in Viewer must read and sign, and those they have a current sign-off for
+ */
+export const ListMyDocumentSignOffsResponse = zod.object({
+  "rosterLinked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+})),
+  "completed": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary A short-lived link to open one of the Viewer's documents to read and sign
+ */
+export const GetMyDocumentDownloadUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetMyDocumentDownloadUrlResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string().nullish()
+})
+
+
+/**
+ * @summary Sign that the signed-in Viewer has read a DocTrack document (writes a TrainTrack sign-off)
+ */
+export const SignMyDocumentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignMyDocumentBody = zod.object({
+  "signature": zod.string().describe('Signature image as a data URL')
+})
+
+export const SignMyDocumentResponse = zod.object({
+  "rosterLinked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+})),
+  "completed": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+}))
+})
+
+
+/**
  * @summary Choose which of their departments a Manager with several is working in (kept for the session)
  */
 export const SetActiveDepartmentBody = zod.object({
