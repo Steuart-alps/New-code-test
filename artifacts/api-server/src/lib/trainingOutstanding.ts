@@ -12,7 +12,9 @@
  *
  * Records are matched to the roster by their roster link, or by name when
  * exactly one active roster member has that name (as the training matrix
- * does). Inactive roster members are left out.
+ * does). Inactive roster members are left out. Document and COSHH sign-off
+ * records aren't listed as expiring: those documents are asked for again
+ * under "documents to read and sign" (lib/docSignOffs.ts).
  */
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -81,13 +83,15 @@ export async function collectOutstandingTraining(
   if (options.trainTrack) {
     const records = rowsOf<{
       id: number; staff_roster_id: number | null; staff_name: string; title: string; record_type: string;
-      completed_date: unknown; expiry_date: unknown; signed: boolean;
+      completed_date: unknown; expiry_date: unknown; signed: boolean; document_sign_off: boolean;
     }>(await db.execute(sql`
-      SELECT id, staff_roster_id, staff_name, COALESCE(training_type, document_title, 'Training') AS title, record_type,
-        completed_date, expiry_date, signature IS NOT NULL AS signed
-      FROM train_track_records
-      WHERE client_id = ${clientId}
-      ORDER BY completed_date DESC, id DESC
+      SELECT r.id, r.staff_roster_id, r.staff_name, COALESCE(r.training_type, r.document_title, 'Training') AS title, r.record_type,
+        r.completed_date, r.expiry_date, r.signature IS NOT NULL AS signed,
+        (EXISTS (SELECT 1 FROM doc_acknowledgements a WHERE a.client_id = r.client_id AND a.train_track_record_id = r.id)
+          OR EXISTS (SELECT 1 FROM coshh_acknowledgements a WHERE a.client_id = r.client_id AND a.train_track_record_id = r.id)) AS document_sign_off
+      FROM train_track_records r
+      WHERE r.client_id = ${clientId}
+      ORDER BY r.completed_date DESC, r.id DESC
     `));
     const horizon = addCalendarDays(today, Math.max(0, options.leadDays));
     // Newest first, so the first record of each training per person is the current one.
@@ -101,6 +105,7 @@ export async function collectOutstandingTraining(
         && (record.record_type === "signoff" || record.record_type === "internal")) {
         person.toSign.push(record.title);
       }
+      if (record.document_sign_off) continue;
       const key = `${rosterId}:${record.title.trim().toLowerCase()}`;
       if (seen.has(key)) continue;
       seen.add(key);

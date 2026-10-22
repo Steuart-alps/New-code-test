@@ -402,6 +402,12 @@ try {
     await record("Sally Server", null, "Manual Handling", "2023-10-01", "2026-10-01");
     await record("Nobody Noemail", null, "Ladder Safety", "2023-10-01", "2026-10-01");
     await record("Gone Leaver", null, "Asbestos Awareness", "2023-10-01", "2026-10-01");
+    // An expired annual document sign-off is asked for again as a document, not as training.
+    const [doc] = await q(`INSERT INTO doc_track_documents (client_id, title, requires_acknowledgement) VALUES ($1, 'Staff handbook', false) RETURNING id`, [A]);
+    const [docRecord] = await q(`INSERT INTO train_track_records (client_id, site_id, record_type, staff_name, staff_roster_id, document_title, completed_date, expiry_date, signature)
+      VALUES ($1, $2, 'signoff', 'Tom Staff', $3, 'Staff handbook', '2025-10-01', '2026-10-01', 'signed') RETURNING id`, [A, redLion.id, tomRoster.id]);
+    await q(`INSERT INTO doc_acknowledgements (document_id, client_id, staff_roster_id, staff_name, train_track_record_id) VALUES ($1, $2, $3, 'Tom Staff', $4)`,
+      [doc.id, A, tomRoster.id, docRecord.id]);
 
     sent.length = 0;
     // Monday 2 November 2026, 08:15 GMT.
@@ -412,6 +418,7 @@ try {
     assert.match(tomMail.html, /Your training[\s\S]*First Aid at Work[\s\S]*expired/);
     assert.match(tomMail.html, /Food Hygiene[\s\S]*expires/, "expiring within 30 days");
     assert.doesNotMatch(tomMail.html, /Fire Marshal/, "a renewed certificate isn't outstanding");
+    assert.doesNotMatch(tomMail.html, /Staff handbook/, "document sign-offs aren't listed as expiring training");
     assert.match(tomMail.html, /1 training record waiting for your signature/);
     assert.match(tomMail.html, /My training/);
     const [sallyMail, ...sallyExtra] = to(sallyEmail);
