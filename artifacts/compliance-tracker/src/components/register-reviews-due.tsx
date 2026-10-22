@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { AlertTriangle, ArrowRight } from "lucide-react";
 import { useRegisterList } from "@/components/register-shared";
+import { useAuth } from "@/context/auth-context";
 
 interface CoshhRow { id: number; siteId: number | null; reviewOverdue: boolean }
 interface AsbestosRow { id: number; siteId: number | null; planReviewOverdue: boolean }
@@ -12,10 +13,14 @@ interface AsbestosRow { id: number; siteId: number | null; planReviewOverdue: bo
  * nothing when neither register has an overdue review.
  */
 export function RegisterReviewsDue({ siteId = null }: { siteId?: number | null }) {
+  const { services, hasService } = useAuth();
+  // With COSHHTrack, COSHH reviews belong to its assessments and show on its
+  // own dashboard status, so the register's review dates aren't counted here.
+  const coshhTrack = services != null && hasService("coshhtrack");
   const { data: coshh = [] } = useRegisterList<CoshhRow>("/registers/coshh");
   const { data: asbestos = [] } = useRegisterList<AsbestosRow>("/registers/asbestos");
   const inSite = (row: { siteId: number | null }) => siteId === null || row.siteId === siteId;
-  const coshhOverdue = coshh.filter((row) => row.reviewOverdue && inSite(row)).length;
+  const coshhOverdue = coshhTrack ? 0 : coshh.filter((row) => row.reviewOverdue && inSite(row)).length;
   const asbestosOverdue = asbestos.filter((row) => row.planReviewOverdue && inSite(row)).length;
   if (coshhOverdue === 0 && asbestosOverdue === 0) return null;
 

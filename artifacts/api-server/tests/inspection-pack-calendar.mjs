@@ -249,7 +249,9 @@ try {
   expectEntry(`fix-${seededA.issueId}`, { date: '2026-09-22', kind: 'fix_visit', href: `/fix-track/${seededA.issueId}` });
   assert.ok(ownerCalendar.entries.some(entry => entry.kind === 'contractor_accreditation' && entry.title === 'SiteA Gas Safe card expires'));
   assert.ok(ownerCalendar.entries.some(entry => entry.kind === 'pest_visit' && entry.date === '2026-09-18' && entry.href === '/pest-track'));
-  expectEntry(`coshh-${seededA.coshhId}`, { date: '2026-09-12', kind: 'coshh_review', status: 'overdue', href: '/coshh', siteName: 'Harbour Hotel' });
+  // In trial the owner has every module; with COSHHTrack the register's own
+  // review date is replaced by COSHHTrack's assessment reviews.
+  assert.ok(!byId.has(`coshh-${seededA.coshhId}`), 'register review dates are not repeated when the business has COSHHTrack');
   expectEntry(`asbestos-${seededA.asbestosId}`, { date: '2026-09-25', kind: 'asbestos_plan_review', href: '/asbestos', siteName: 'Harbour Hotel' });
   assert.ok(!ownerCalendar.entries.some(entry => entry.title.includes('old descaler')), 'archived COSHH substances are not due');
   const training = ownerCalendar.entries.filter(entry => entry.kind === 'training_expiry').map(entry => entry.detail);
@@ -270,6 +272,17 @@ try {
   const siteCalendar = await calendar(owner, `${range}&siteId=${siteB}`, 'site calendar');
   assert.ok(siteCalendar.entries.every(entry => entry.siteName === null || entry.siteName === 'Lakeside Spa'));
   denied(await get(foreign, `/calendar?${range}&siteId=${siteA}`), 400, 'calendar, another business’s site');
+  // Without COSHHTrack (the foreign business is core-only since its trial
+  // ended above), the free register's review dates are on the calendar.
+  const foreignCoshh = await one(
+    `INSERT INTO coshh_substances (client_id, product_name, review_due, status)
+     VALUES ($1, 'Foreign oven cleaner', '2026-09-12', 'in_use') RETURNING id`, [foreign.clientId]);
+  const foreignCalendar = await calendar(foreign, range, 'core-only calendar');
+  const foreignReview = foreignCalendar.entries.find(entry => entry.id === `coshh-${foreignCoshh.id}`);
+  assert.ok(foreignReview, `core-only calendar shows the register review: ${JSON.stringify(foreignCalendar.entries.map(e => e.id))}`);
+  assert.equal(foreignReview.kind, 'coshh_review');
+  assert.equal(foreignReview.href, '/coshh');
+  assert.equal(foreignReview.status, 'overdue');
   denied(await get(foreign, `/calendar?${range}&clientId=${owner.clientId}`), 403, 'calendar, unlinked clientId');
   const consultantCalendar = await calendar(consultant, `${range}&clientId=${owner.clientId}`, 'consultant calendar');
   assert.equal(consultantCalendar.entries.length, ownerCalendar.entries.length);

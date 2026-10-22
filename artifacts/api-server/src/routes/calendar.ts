@@ -150,16 +150,17 @@ router.get("/calendar", requireAuth, async (req, res) => {
                  OR (newer.completed_date = r.completed_date AND newer.id > r.id))
         )
     `) : [],
-    // Core registers: reviews of substances still in use, and asbestos
-    // management plans (none when no asbestos is expected).
-    rowsOf(sql`
+    // Core registers: reviews of substances still in use (only without
+    // COSHHTrack, whose assessment reviews replace the register's review
+    // date), and asbestos management plans (none when no asbestos is expected).
+    !isEntitled(services, "coshhtrack") ? rowsOf(sql`
       SELECT cs.id, cs.product_name, cs.review_due::text AS date, s.name AS site_name
       FROM coshh_substances cs
       LEFT JOIN sites s ON s.id = cs.site_id AND s.client_id = cs.client_id
       WHERE cs.client_id = ${clientId} AND cs.deleted_at IS NULL AND cs.status = 'in_use'
         AND cs.review_due BETWEEN ${from} AND ${to}
         AND ${siteScopeSql(scope, sql`cs.site_id`)}
-    `),
+    `) : [],
     rowsOf(sql`
       SELECT a.id, a.plan_review_due::text AS date, s.name AS site_name
       FROM asbestos_records a
