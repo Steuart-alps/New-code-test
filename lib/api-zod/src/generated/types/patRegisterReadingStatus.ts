@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { AiStatus } from './aiStatus';
 import type { PatRegisterReadingStatusSitesItem } from './patRegisterReadingStatusSitesItem';
 
 export interface PatRegisterReadingStatus {
@@ -12,5 +13,6 @@ export interface PatRegisterReadingStatus {
   /** Readings a business may have each month; 0 means no limit */
   monthlyLimit: number;
   usedThisMonth: number;
+  ai: AiStatus;
   sites: PatRegisterReadingStatusSitesItem[];
 }

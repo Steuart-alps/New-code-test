@@ -22,6 +22,9 @@ import type {
 import type {
   ActiveDepartmentRequest,
   AddPrivacyRetentionVerificationParams,
+  AiAddonChange,
+  AiAddonStatus,
+  AiStatus,
   AllergenChart,
   AllergenChartSignoff,
   AllergenChartSignoffInput,
@@ -6440,6 +6443,155 @@ export const useImportFireCallPoints = <TError = ErrorType<void | FireCallPointI
         TContext
       > => {
       return useMutation(getImportFireCallPointsMutationOptions(options));
+    }
+
+export const getGetAiAddonUrl = () => {
+
+
+
+
+  return `/api/billing/ai`
+}
+
+/**
+ * @summary The AI features add-on, whether this business has it, and how much of its allowance is used
+ */
+export const getAiAddon = async ( options?: RequestInit): Promise<AiAddonStatus> => {
+
+  return customFetch<AiAddonStatus>(getGetAiAddonUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAiAddonQueryKey = () => {
+    return [
+    `/api/billing/ai`
+    ] as const;
+    }
+
+
+export const getGetAiAddonQueryOptions = <TData = Awaited<ReturnType<typeof getAiAddon>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiAddon>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAiAddonQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAiAddon>>> = ({ signal }) => getAiAddon({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAiAddon>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAiAddonQueryResult = NonNullable<Awaited<ReturnType<typeof getAiAddon>>>
+export type GetAiAddonQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary The AI features add-on, whether this business has it, and how much of its allowance is used
+ */
+
+export function useGetAiAddon<TData = Awaited<ReturnType<typeof getAiAddon>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiAddon>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAiAddonQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getChangeAiAddonUrl = () => {
+
+
+
+
+  return `/api/billing/ai`
+}
+
+/**
+ * On adds one £25 monthly item to the subscription and charges the first month at once (nothing is switched on if the charge fails). Off removes it at once with no refund.
+ * @summary Switch the AI features add-on on or off (owners and consultants)
+ */
+export const changeAiAddon = async (aiAddonChange: AiAddonChange, options?: RequestInit): Promise<AiStatus> => {
+
+  return customFetch<AiStatus>(getChangeAiAddonUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiAddonChange)
+  }
+);}
+
+
+
+
+
+export const getChangeAiAddonMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeAiAddon>>, TError,{data: BodyType<AiAddonChange>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof changeAiAddon>>, TError,{data: BodyType<AiAddonChange>}, TContext> => {
+
+const mutationKey = ['changeAiAddon'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changeAiAddon>>, {data: BodyType<AiAddonChange>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  changeAiAddon(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChangeAiAddonMutationResult = NonNullable<Awaited<ReturnType<typeof changeAiAddon>>>
+    export type ChangeAiAddonMutationBody = BodyType<AiAddonChange>
+    export type ChangeAiAddonMutationError = ErrorType<void>
+
+    /**
+ * @summary Switch the AI features add-on on or off (owners and consultants)
+ */
+export const useChangeAiAddon = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeAiAddon>>, TError,{data: BodyType<AiAddonChange>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof changeAiAddon>>,
+        TError,
+        {data: BodyType<AiAddonChange>},
+        TContext
+      > => {
+      return useMutation(getChangeAiAddonMutationOptions(options));
     }
 
 export const getGetPatRegisterReadingUrl = () => {
@@ -14919,7 +15071,7 @@ export const getReadInspectionReportUrl = (id: number,) => {
 }
 
 /**
- * Replaces the list being checked with suggestions. Nothing is created until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit.
+ * Replaces the list being checked with suggestions. Nothing is created until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit. 402 AI_ADDON_REQUIRED without the AI features add-on; 429 AI_ALLOWANCE_USED once this period's AI allowance is used.
  * @summary Have ComplyTrack read the report and suggest actions (needs ANTHROPIC_API_KEY)
  */
 export const readInspectionReport = async (id: number, options?: RequestInit): Promise<InspectionReportReading> => {

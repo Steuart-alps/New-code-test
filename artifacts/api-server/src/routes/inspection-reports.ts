@@ -27,6 +27,7 @@ import { createDownloadMeter } from "../lib/downloadUsage";
 import { hasTenantAttachmentReference } from "../lib/attachmentReferences";
 import { sendReportActionPlanEmails } from "../lib/reportActionEmails";
 import { resolveAssigneeChange } from "../lib/assignees";
+import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
 
 /**
  * Uploaded audit and inspection reports (ALPS audits, Care Inspectorate, EHO,
@@ -168,14 +169,15 @@ router.get("/inspection-reports/options", requireAuth, canManageReports, async (
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   const departmentId = getActiveDepartmentId(req);
   const today = await getAccountToday(clientId);
-  const [modules, sites, people, used] = await Promise.all([
+  const [modules, sites, people, used, ai] = await Promise.all([
     moduleChoices(clientId), visibleSites(clientId, departmentId), assignees(clientId), aiReadsThisMonth(clientId, today),
+    getAiStatus(clientId),
   ]);
   const limit = reportReadingMonthlyLimit();
   res.json({
     reportTypes: inspectionReportTypeEnum.map((key) => ({ key, label: REPORT_TYPE_LABELS[key] })),
     modules, sites, assignees: people,
-    reading: { available: reportReadingConfigured(), monthlyLimit: limit, usedThisMonth: used },
+    reading: { available: reportReadingConfigured(), monthlyLimit: limit, usedThisMonth: used, ai },
   });
 });
 
@@ -264,6 +266,9 @@ router.get("/inspection-reports/:id", requireAuth, canManageReports, async (req,
   });
 });
 
+/** Held against the AI allowance while a report is read; a long report costs about this. */
+const REPORT_READING_ESTIMATE_PENCE = 60;
+
 // Ask ComplyTrack to read the report and suggest actions. The suggestions
 // replace the list being checked; nothing is created until it is confirmed.
 router.post("/inspection-reports/:id/read", requireAuth, denyViewers, canManageReports, async (req, res) => {
@@ -282,6 +287,18 @@ router.post("/inspection-reports/:id/read", requireAuth, denyViewers, canManageR
   if (report.aiReadCount >= REPORT_READS_PER_REPORT) {
     return res.status(429).json({ error: `This report has already been read ${REPORT_READS_PER_REPORT} times. Edit the list or type the actions in.`, code: "REPORT_READING_LIMIT" });
   }
+  // The AI add-on and its allowance (lib/aiAllowance.ts) are checked last,
+  // so a reading turned away above costs nothing.
+  let aiUseId: number;
+  try {
+    aiUseId = await claimAiUse({
+      clientId, userId: req.currentUser?.id ?? null, feature: "report_reading",
+      estimatePence: REPORT_READING_ESTIMATE_PENCE, instead: "Type the actions in instead.",
+    });
+  } catch (err) {
+    if (err instanceof AiUnavailableError) return res.status(err.status).json({ error: err.message, code: err.code });
+    throw err;
+  }
   // A month's count restarts with this reading when the report was last read in an earlier month.
   const [claimed] = await db.update(inspectionReportsTable).set({
     aiRequestedAt: new Date(), aiStatus: "reading", aiError: null, updatedAt: new Date(),
@@ -290,7 +307,10 @@ router.post("/inspection-reports/:id/read", requireAuth, denyViewers, canManageR
     eq(inspectionReportsTable.id, id), eq(inspectionReportsTable.clientId, clientId),
     sql`(${inspectionReportsTable.aiStatus} <> 'reading' OR ${inspectionReportsTable.aiRequestedAt} < now() - interval '10 minutes')`,
   )).returning({ id: inspectionReportsTable.id });
-  if (!claimed) return res.status(409).json({ error: "This report is already being read. Wait a minute and refresh." });
+  if (!claimed) {
+    await settleAiUse(aiUseId, null, false);
+    return res.status(409).json({ error: "This report is already being read. Wait a minute and refresh." });
+  }
 
   try {
     const [bytes] = await (await storage.getObjectEntityFile(report.objectPath)).download();
@@ -307,9 +327,11 @@ router.post("/inspection-reports/:id/read", requireAuth, denyViewers, canManageR
       draftActions: draft, aiStatus: "done", aiSummary: result.summary || null, aiModel: result.model,
       aiInputTokens: result.inputTokens, aiOutputTokens: result.outputTokens, updatedAt: new Date(),
     }).where(and(eq(inspectionReportsTable.id, id), eq(inspectionReportsTable.clientId, clientId))).returning();
+    await settleAiUse(aiUseId, result.usage, true);
     req.log.info({ reportId: id, clientId, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens }, "Inspection report read");
     res.json({ aiSummary: row.aiSummary, draftActions: row.draftActions });
   } catch (err) {
+    await settleAiUse(aiUseId, err instanceof ReportReadingError ? err.usage ?? null : null, false);
     const message = err instanceof ReportReadingError ? err.message
       : "ComplyTrack could not read this report just now. Try again later, or type the actions in.";
     if (!(err instanceof UnreadableReportError)) req.log.error({ err, reportId: id }, "Inspection report reading failed");

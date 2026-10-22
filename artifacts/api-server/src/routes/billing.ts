@@ -62,6 +62,9 @@ import {
   stillPaidReducedGib,
 } from "../lib/storageCapacity";
 import { SUBSCRIPTION_ACCESS_ENDS_AT } from "../lib/offboarding";
+import { AI_ADDON_LABEL, AI_SERVICE_KEY, isAiSubscriptionItem } from "../lib/aiAddonItem";
+import { getAiAddonPrice } from "../lib/services";
+import { getAiStatus, invalidateAiPlan } from "../lib/aiAllowance";
 
 const router = Router();
 
@@ -159,8 +162,8 @@ router.get("/config", requireAuth, async (req, res) => {
             };
             perSiteRate = 0;
             for (const item of live.items.data) {
-              // Extra storage is per GiB, not a per-site service.
-              if (isStorageSubscriptionItem(item)) continue;
+              // Extra storage (per GiB) and AI (per business) are not per-site services.
+              if (isStorageSubscriptionItem(item) || isAiSubscriptionItem(item)) continue;
               const key = item.price?.metadata?.service_key;
               if (key === BUNDLE_KEY) hasBundle = true;
               if (key && key !== BUNDLE_KEY && key !== "core") activeAddons.push(key);
@@ -698,6 +701,99 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
     res.json({ ok: true, entitled });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/billing/ai — the AI features add-on: its price, whether this
+// business has it, and how much of this period's allowance is used.
+router.get("/ai", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "clientId required" });
+  try {
+    const [status, price] = await Promise.all([
+      getAiStatus(clientId),
+      getAiAddonPrice().catch(() => null),
+    ]);
+    res.json({
+      ...status,
+      price: price ? { unitAmount: price.unitAmount, currency: price.currency } : null,
+      // Buying needs Stripe ready and the price to exist.
+      purchasable: Boolean(price) && isBillingActivationAllowed(),
+    });
+  } catch (err: any) {
+    req.log.error({ err, clientId }, "AI add-on status lookup failed");
+    res.status(503).json({ error: "AI details are unavailable right now. Please try again later." });
+  }
+});
+
+// POST /api/billing/ai — switch the AI features add-on on or off. On: one
+// £25 monthly item per business, the first month charged at once (or nothing
+// is switched on). Off: removed at once, no refund, like other add-ons.
+router.post("/ai", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
+  const parsed = z.object({ action: z.enum(["add", "remove"]) }).strict().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Action must be 'add' or 'remove'" });
+  const { action } = parsed.data;
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "clientId required" });
+
+  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  if (!client?.stripeCustomerId) return res.status(400).json({ error: "Subscribe to ComplyTrack first, then add AI features." });
+  if (action === "add" && !isBillingActivationAllowed()) {
+    return res.status(503).json({ error: BILLING_UNVERIFIED_ERROR, billingState: getBillingReadiness().phase });
+  }
+
+  try {
+    const stripe = await getUncachableStripeClient();
+    const sub = await findLiveSubscription(client.stripeCustomerId);
+    if (!sub) return res.status(400).json({ error: "Subscribe to ComplyTrack first, then add AI features." });
+
+    if (action === "add") {
+      const activation = await activatePaidAddonService({
+        allowedServiceKeys: [AI_SERVICE_KEY],
+        service: AI_SERVICE_KEY,
+        serviceLabel: AI_ADDON_LABEL,
+        clientId,
+        customerId: client.stripeCustomerId,
+        subscription: sub,
+        stripe,
+        getServicePrice: () => getAiAddonPrice(),
+        countClientSites: async () => 1,
+        findLiveSubscription,
+        collectFirstMonthInvoice: collectAddonFirstMonthInvoice,
+        invalidateEntitlements: invalidateAiPlan,
+        getEntitledServices: async () => true,
+        perBusiness: { description: `${AI_ADDON_LABEL} — 1 month (no proration)` },
+        onRollbackFailure: (rollbackError) => {
+          req.log?.error?.({ rollbackError, clientId }, "AI add-on rollback failed — manual attention needed");
+        },
+        onChargeFailure: (err) => {
+          req.log?.error?.({ err, clientId }, "AI add-on immediate charge failed; item rolled back");
+        },
+      });
+      if (activation.status === "price_missing" || activation.status === "unknown_service") {
+        return res.status(503).json({ error: "The AI add-on price is not set up yet. Please try again later." });
+      }
+      if (activation.status === "already_active") return res.status(409).json({ error: "AI features are already switched on" });
+      if (activation.status === "payment_unknown") {
+        return res.status(502).json({
+          error: "We couldn't confirm the payment outcome. Access has been kept while we confirm it; please contact support before retrying.",
+        });
+      }
+      if (activation.status === "charge_failed") {
+        return res.status(502).json({ error: "We couldn't complete the charge, so AI features weren't switched on. Please try again." });
+      }
+    } else {
+      // Only the business's own item is needed to stop paying, never the price.
+      const item = sub.items.data.find(isAiSubscriptionItem);
+      if (!item) return res.status(409).json({ error: "AI features are not switched on" });
+      await stripe.subscriptionItems.del(item.id, { proration_behavior: "none" });
+    }
+
+    invalidateAiPlan(clientId);
+    res.json(await getAiStatus(clientId));
+  } catch (err: any) {
+    req.log.error({ err, clientId, action }, "AI add-on change failed");
+    res.status(500).json({ error: "The AI add-on could not be changed just now. Please try again." });
   }
 });
 

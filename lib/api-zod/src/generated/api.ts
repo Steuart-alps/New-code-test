@@ -3124,12 +3124,72 @@ export const ImportFireCallPointsResponse = zod.object({
 
 
 /**
+ * @summary The AI features add-on, whether this business has it, and how much of its allowance is used
+ */
+export const getAiAddonResponseOnePercentUsedMin = 0;
+export const getAiAddonResponseOnePercentUsedMax = 100;
+
+
+
+export const GetAiAddonResponse = zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'none']),
+  "percentUsed": zod.number().min(getAiAddonResponseOnePercentUsedMin).max(getAiAddonResponseOnePercentUsedMax).describe('Share of this period\'s allowance used'),
+  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
+  "usedUp": zod.boolean().describe('The allowance is used up for this period')
+}).describe('The AI features add-on for this business: £25 a month, which includes a monthly allowance of AI use. Without it, AI buttons are unavailable.').and(zod.object({
+  "price": zod.object({
+  "unitAmount": zod.number().describe('Monthly price in pence, before VAT'),
+  "currency": zod.string()
+}).nullable(),
+  "purchasable": zod.boolean().describe('The add-on can be bought now (Stripe ready and the price exists)')
+}))
+
+
+/**
+ * On adds one £25 monthly item to the subscription and charges the first month at once (nothing is switched on if the charge fails). Off removes it at once with no refund.
+ * @summary Switch the AI features add-on on or off (owners and consultants)
+ */
+export const ChangeAiAddonBody = zod.object({
+  "action": zod.enum(['add', 'remove'])
+})
+
+export const changeAiAddonResponsePercentUsedMin = 0;
+export const changeAiAddonResponsePercentUsedMax = 100;
+
+
+
+export const ChangeAiAddonResponse = zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'none']),
+  "percentUsed": zod.number().min(changeAiAddonResponsePercentUsedMin).max(changeAiAddonResponsePercentUsedMax).describe('Share of this period\'s allowance used'),
+  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
+  "usedUp": zod.boolean().describe('The allowance is used up for this period')
+}).describe('The AI features add-on for this business: £25 a month, which includes a monthly allowance of AI use. Without it, AI buttons are unavailable.')
+
+
+/**
  * @summary Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
  */
+export const getPatRegisterReadingResponseAiPercentUsedMin = 0;
+export const getPatRegisterReadingResponseAiPercentUsedMax = 100;
+
+
+
 export const GetPatRegisterReadingResponse = zod.object({
   "available": zod.boolean(),
   "monthlyLimit": zod.number().describe('Readings a business may have each month; 0 means no limit'),
   "usedThisMonth": zod.number(),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'none']),
+  "percentUsed": zod.number().min(getPatRegisterReadingResponseAiPercentUsedMin).max(getPatRegisterReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
+  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
+  "usedUp": zod.boolean().describe('The allowance is used up for this period')
+}).describe('The AI features add-on for this business: £25 a month, which includes a monthly allowance of AI use. Without it, AI buttons are unavailable.'),
   "sites": zod.array(zod.object({
   "id": zod.number(),
   "name": zod.string()
@@ -6267,6 +6327,11 @@ export const RecordCoshhSignOffsResponse = zod.object({
 /**
  * @summary Report types, tracks, sites and people for the report screens, and whether reports can be read
  */
+export const getInspectionReportOptionsResponseReadingAiPercentUsedMin = 0;
+export const getInspectionReportOptionsResponseReadingAiPercentUsedMax = 100;
+
+
+
 export const GetInspectionReportOptionsResponse = zod.object({
   "reportTypes": zod.array(zod.object({
   "key": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
@@ -6289,7 +6354,15 @@ export const GetInspectionReportOptionsResponse = zod.object({
   "reading": zod.object({
   "available": zod.boolean(),
   "monthlyLimit": zod.number(),
-  "usedThisMonth": zod.number()
+  "usedThisMonth": zod.number(),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'none']),
+  "percentUsed": zod.number().min(getInspectionReportOptionsResponseReadingAiPercentUsedMin).max(getInspectionReportOptionsResponseReadingAiPercentUsedMax).describe('Share of this period\'s allowance used'),
+  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
+  "usedUp": zod.boolean().describe('The allowance is used up for this period')
+}).describe('The AI features add-on for this business: £25 a month, which includes a monthly allowance of AI use. Without it, AI buttons are unavailable.')
 })
 })
 
@@ -6426,7 +6499,7 @@ export const DeleteInspectionReportResponse = zod.void()
 
 
 /**
- * Replaces the list being checked with suggestions. Nothing is created until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit.
+ * Replaces the list being checked with suggestions. Nothing is created until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit. 402 AI_ADDON_REQUIRED without the AI features add-on; 429 AI_ALLOWANCE_USED once this period's AI allowance is used.
  * @summary Have ComplyTrack read the report and suggest actions (needs ANTHROPIC_API_KEY)
  */
 export const ReadInspectionReportParams = zod.object({

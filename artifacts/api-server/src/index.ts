@@ -29,6 +29,7 @@ import { Sentry, isErrorReportingEnabled } from "./lib/sentry";
 import {
   ensureServicePrices,
   ensureStoragePrice,
+  ensureAiAddonPrice,
   getServicePricePreflight,
   getServicePriceReadinessBlocker,
   type ServicePricePreflight,
@@ -144,6 +145,14 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
     if (await ensureStoragePrice()) logger.info("Created the Stripe extra-storage price");
   } catch (err) {
     logger.error({ err }, "ensureStoragePrice failed — extra storage stays unavailable until the next start");
+  }
+
+  // The AI features add-on price (£25 a month) is made the same way; a failure
+  // only hides the AI add-on until the next start.
+  try {
+    if (await ensureAiAddonPrice()) logger.info("Created the Stripe AI features add-on price");
+  } catch (err) {
+    logger.error({ err }, "ensureAiAddonPrice failed — the AI add-on stays unavailable until the next start");
   }
 
   // Report Stripe Tax settings that would stop VAT being charged correctly.

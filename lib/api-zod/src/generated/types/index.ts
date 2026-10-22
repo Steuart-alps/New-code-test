@@ -8,6 +8,12 @@
 
 export * from './activeDepartmentRequest';
 export * from './addPrivacyRetentionVerificationParams';
+export * from './aiAddonChange';
+export * from './aiAddonChangeAction';
+export * from './aiAddonStatus';
+export * from './aiAddonStatusPrice';
+export * from './aiStatus';
+export * from './aiStatusPlan';
 export * from './allergenChart';
 export * from './allergenChartLastSignoff';
 export * from './allergenChartSignoff';

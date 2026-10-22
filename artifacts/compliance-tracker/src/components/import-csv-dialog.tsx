@@ -7,6 +7,8 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
 import { API_BASE, getApiErrorMessage } from "@/lib/api";
 import { downloadFile } from "@/lib/download";
+import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
+import type { AiStatus } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -83,7 +85,7 @@ async function readSpreadsheet(file: File): Promise<{ headers: string[]; rows: s
   return { headers: headers.map(value => String(value ?? "")), rows: rows.map(row => row.map(value => String(value ?? ""))) };
 }
 
-interface RegisterReading { available: boolean; monthlyLimit: number; usedThisMonth: number; sites: Array<{ id: number; name: string }> }
+interface RegisterReading { available: boolean; monthlyLimit: number; usedThisMonth: number; ai: AiStatus; sites: Array<{ id: number; name: string }> }
 
 /** File types ComplyTrack can read a PAT register list from (spreadsheets go the usual way). */
 const READABLE_LIST = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp,.pdf,.docx,.txt";
@@ -291,7 +293,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
                   <p className="flex items-center gap-1.5 text-sm font-medium"><Sparkles className="h-4 w-4 text-primary" /> Only have a paper list, photo or PDF?</p>
                   <p className="text-xs text-muted-foreground">
                     Take a photo of the list (one page at a time), or upload a scan, PDF or Word file. ComplyTrack reads it and fills in the rows below for you to check. Nothing is saved until you click Import. The file is sent to Anthropic, our AI provider, to read; it isn't used to train their AI or kept by ComplyTrack.
-                    {readsLeft !== null && ` ${readsLeft} of ${reading.monthlyLimit} readings left this month.`}
+                    {readsLeft !== null && reading.ai.active && ` ${readsLeft} of ${reading.monthlyLimit} readings left this month.`}
                   </p>
                   {reading.sites.length > 0 && (
                     <label className="block text-xs">
@@ -305,9 +307,10 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
                   )}
                   <input ref={listInput} type="file" accept={READABLE_LIST} className="hidden" data-testid="input-pat-register-list-file"
                     onChange={event => { const selected = event.target.files?.[0]; if (selected) void readList(selected); }} />
-                  <Button type="button" variant="outline" size="sm" disabled={readsLeft === 0} onClick={() => listInput.current?.click()} data-testid="button-read-pat-register-list">
+                  <Button type="button" variant="outline" size="sm" disabled={readsLeft === 0 || !aiAllowanceState(reading.ai).canUse} onClick={() => listInput.current?.click()} data-testid="button-read-pat-register-list">
                     <Camera className="mr-1 h-4 w-4" /> Choose a photo or document
                   </Button>
+                  <div><AiAllowanceNote ai={reading.ai} /></div>
                 </div>
               )}
             </>

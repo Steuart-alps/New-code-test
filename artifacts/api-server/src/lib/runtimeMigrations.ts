@@ -2317,6 +2317,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateFireCallPoints();
     await migrateEquipmentLabels();
     await migrateInspectionReports();
+    await migrateAiUsage();
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
@@ -6338,4 +6339,31 @@ async function migrateInspectionReports() {
     CREATE INDEX IF NOT EXISTS "IDX_track_actions_inspection_report"
     ON "track_actions" ("client_id", "source_record_id") WHERE "source_kind" LIKE 'inspection_report:%'
   `);
+}
+
+// What each request to Claude cost a business, for the AI add-on's monthly
+// allowance (lib/aiAllowance.ts). Rows older than two years are not needed.
+async function migrateAiUsage() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "ai_usage" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "user_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "feature" text NOT NULL,
+      "status" text NOT NULL DEFAULT 'pending',
+      "model" text,
+      "input_tokens" integer NOT NULL DEFAULT 0,
+      "output_tokens" integer NOT NULL DEFAULT 0,
+      "cache_read_tokens" integer NOT NULL DEFAULT 0,
+      "cache_write_tokens" integer NOT NULL DEFAULT 0,
+      "web_searches" integer NOT NULL DEFAULT 0,
+      "cost_usd_micros" bigint NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "settled_at" timestamptz,
+      CONSTRAINT "ck_ai_usage_status" CHECK ("status" IN ('pending', 'done', 'failed')),
+      CONSTRAINT "ck_ai_usage_cost_nonnegative" CHECK ("cost_usd_micros" >= 0)
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_ai_usage_client_created" ON "ai_usage" ("client_id", "created_at")`);
+  await db.execute(sql`DELETE FROM "ai_usage" WHERE "created_at" < now() - interval '25 months'`);
 }
