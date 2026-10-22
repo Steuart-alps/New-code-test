@@ -24,6 +24,11 @@ import { REQUIRE_TWO_FACTOR_SETTING } from "../lib/twoFactorPolicy";
 import { OWNER_UPDATE_FREQUENCIES, OWNER_UPDATE_FREQUENCY_SETTING } from "../lib/personalReminders";
 import { REMINDER_TIMINGS_SETTING, validateReminderTimings } from "@workspace/api-zod/reminder-timings";
 import { isAllowedTenantSender, sanitizeSenderName } from "../lib/email";
+import {
+  buildTrackSummaryPreview,
+  loadTrackSummaryRoutingContext,
+  parseTrackSummaryRouting,
+} from "../lib/trackActionReminders";
 import { STORAGE_AUTO_TOP_UP_SETTING } from "../lib/storageFull";
 import { TODAY_BY_DEPARTMENT_ROLES_SETTING, normalizeTodayByDepartmentRoles } from "../lib/todayByDepartment";
 
@@ -218,6 +223,39 @@ router.get("/settings", requireAuth, async (req, res) => {
     .where(eq(appSettingsTable.clientId, clientId));
 
   res.json(await settingsWithReminderStatus(clientId, rows, req.currentUser!.role));
+});
+
+/**
+ * Who each track's daily summary goes to, worked out by the same code the
+ * daily job sends with. `routing` (the card's unsaved choices, as JSON)
+ * replaces the saved choices for this preview only; every id in it is
+ * resolved against this client's own users and departments, so ids from
+ * another account match nobody.
+ */
+router.get("/settings/track-summary-recipients", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+  const draft = req.query.routing;
+  if (draft !== undefined && typeof draft !== "string") {
+    res.status(400).json({ error: "routing must be a JSON string" });
+    return;
+  }
+  if (draft !== undefined && draft.trim() !== "") {
+    try {
+      const parsed = JSON.parse(draft);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    } catch {
+      res.status(400).json({ error: "routing must be a JSON object" });
+      return;
+    }
+  }
+  const context = await loadTrackSummaryRoutingContext(clientId, {
+    routing: draft === undefined ? undefined : parseTrackSummaryRouting(draft),
+  });
+  res.json(buildTrackSummaryPreview(context));
 });
 
 router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {

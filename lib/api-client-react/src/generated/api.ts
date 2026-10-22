@@ -117,6 +117,7 @@ import type {
   GetPoolMonitoringPlanParams,
   GetPrivacyGovernanceParams,
   GetTodayByDepartmentParams,
+  GetTrackSummaryRecipientsParams,
   GreenTrackApplication,
   GreenTrackApplicationInput,
   GreenTrackApplicationSaved,
@@ -223,6 +224,7 @@ import type {
   TestEmailRequest,
   TestEmailResponse,
   TodayByDepartment,
+  TrackSummaryPreview,
   UpdateCategoryRequest,
   UpdateCertificateDefectRequest,
   UpdateComplianceItemRequest,
@@ -4135,6 +4137,91 @@ export const useUpdateSettings = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getUpdateSettingsMutationOptions(options));
     }
+
+export const getGetTrackSummaryRecipientsUrl = (params?: GetTrackSummaryRecipientsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/settings/track-summary-recipients?${stringifiedParams}` : `/api/settings/track-summary-recipients`
+}
+
+/**
+ * Resolved with the same routing code the daily summary job sends with. Pass the unsaved choices as `routing` to preview them; otherwise the saved choices are used. Account admins and consultants only.
+ * @summary Preview who receives each track's daily summary
+ */
+export const getTrackSummaryRecipients = async (params?: GetTrackSummaryRecipientsParams, options?: RequestInit): Promise<TrackSummaryPreview> => {
+
+  return customFetch<TrackSummaryPreview>(getGetTrackSummaryRecipientsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTrackSummaryRecipientsQueryKey = (params?: GetTrackSummaryRecipientsParams,) => {
+    return [
+    `/api/settings/track-summary-recipients`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTrackSummaryRecipientsQueryOptions = <TData = Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError = ErrorType<void>>(params?: GetTrackSummaryRecipientsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTrackSummaryRecipientsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTrackSummaryRecipients>>> = ({ signal }) => getTrackSummaryRecipients(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTrackSummaryRecipientsQueryResult = NonNullable<Awaited<ReturnType<typeof getTrackSummaryRecipients>>>
+export type GetTrackSummaryRecipientsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Preview who receives each track's daily summary
+ */
+
+export function useGetTrackSummaryRecipients<TData = Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError = ErrorType<void>>(
+ params?: GetTrackSummaryRecipientsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTrackSummaryRecipientsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetPrivacyGovernanceUrl = (params?: GetPrivacyGovernanceParams,) => {
   const normalizedParams = new URLSearchParams();

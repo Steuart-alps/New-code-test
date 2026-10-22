@@ -33,6 +33,7 @@ import {
 } from "@/lib/service-action-outcome";
 import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
 import { TrackOwnersCard } from "@/components/track-owners-card";
+import type { TrackSummaryPreview, TrackSummaryPreviewTrack } from "@workspace/api-client-react";
 import { ReminderTimingsField, parseReminderTimings, type ReminderTimings } from "@/components/reminder-timings-field";
 import { CHECKOUT_ADDONS, checkoutPerSiteTotal } from "@/lib/addon-catalog";
 interface DomainRecord {
@@ -1151,6 +1152,90 @@ const TRACK_SUMMARY_MODULES = [
   { key: "incident", label: "IncidentTrack" },
 ] as const;
 
+const TRACK_RECIPIENT_VIA_LABEL = {
+  senior: "Senior management",
+  named: "Named",
+  department: "Department manager",
+} as const;
+
+/** One line for a track's collapsed row, from the server's preview. */
+function trackRecipientSummary(track: TrackSummaryPreviewTrack): string {
+  if (!track.enabled) return "Not in your plan";
+  if (track.recipients.length === 0) return "Nobody receives this";
+  if (track.seniorOnly) return track.mode === "automatic" ? "Automatic: no match, senior management only" : "Senior management only";
+  const names = track.recipients
+    .filter((recipient) => recipient.via.some((via) => via !== "senior"))
+    .map((recipient) => recipient.name ?? recipient.email);
+  return `${track.mode === "automatic" ? "Automatic: " : ""}${names.join(", ")} + senior management`;
+}
+
+/** Who receives one track, and why, as the daily job would send it. */
+function TrackRecipientPreview({ track }: { track: TrackSummaryPreviewTrack }) {
+  if (!track.enabled) {
+    return (
+      <p className="sm:col-span-2 text-xs text-muted-foreground" data-testid={`track-recipients-${track.module}`}>
+        This track isn't in your plan, so no summary is sent for it.
+      </p>
+    );
+  }
+  const departmentsWithoutManager = track.departments.filter((department) => department.managers.length === 0);
+  return (
+    <div className="sm:col-span-2 space-y-2 rounded-md border border-sky-200 bg-sky-50/60 p-3" data-testid={`track-recipients-${track.module}`}>
+      <p className="text-xs font-semibold text-sky-900">
+        Who receives this track{track.mode === "automatic" ? " (automatic match)" : ""}
+      </p>
+      {track.mode === "automatic" && (
+        <p className="text-xs text-sky-900">
+          {track.departments.length > 0
+            ? `Matched departments: ${track.departments.map((department) => department.name).join(", ")}.`
+            : "No department name matches this track."}
+        </p>
+      )}
+      {track.recipients.length === 0 ? (
+        <p className="flex items-start gap-1.5 text-xs text-destructive">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Nobody receives this track. Set a notification email or add an Owner.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {track.recipients.map((recipient) => (
+            <li key={recipient.email} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <span className="font-medium text-foreground">{recipient.name ?? recipient.email}</span>
+              {recipient.name && <span className="text-muted-foreground">{recipient.email}</span>}
+              {recipient.departmentName && <span className="text-muted-foreground">· {recipient.departmentName}</span>}
+              {recipient.via.map((via) => (
+                <span key={via} className={cn(
+                  "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                  via === "senior" ? "bg-slate-200 text-slate-800"
+                    : via === "named" ? "bg-violet-100 text-violet-800"
+                      : "bg-emerald-100 text-emerald-800",
+                )}>
+                  {via === "department" && track.mode === "automatic" ? "Automatic match" : TRACK_RECIPIENT_VIA_LABEL[via]}
+                </span>
+              ))}
+            </li>
+          ))}
+        </ul>
+      )}
+      {departmentsWithoutManager.map((department) => (
+        <p key={department.id} className="flex items-start gap-1.5 text-xs text-amber-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {department.name} has no Manager, so nobody from it receives this track. Give a Manager this department on the Users page.
+        </p>
+      ))}
+      {track.seniorOnly && track.recipients.length > 0 && (
+        <p className="text-xs text-sky-900">No eligible manager is assigned, so this falls back to senior management only.</p>
+      )}
+      {track.unavailableNamedCount > 0 && (
+        <p className="flex items-start gap-1.5 text-xs text-amber-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {track.unavailableNamedCount} named recipient{track.unavailableNamedCount === 1 ? " is" : "s are"} no longer an active manager and will be skipped.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TrackSummaryRoutingCard() {
   const { toast } = useToast();
   const { activeClientId } = useAuth();
@@ -1158,9 +1243,12 @@ function TrackSummaryRoutingCard() {
   const [users, setUsers] = useState<DeptUser[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [routing, setRouting] = useState<Record<string, { managerIds: number[]; departmentIds: number[] }>>({});
+  const [savedRouting, setSavedRouting] = useState("{}");
   const [seniorEmail, setSeniorEmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState<TrackSummaryPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1181,6 +1269,7 @@ function TrackSummaryRoutingCard() {
           [key, Array.isArray(entry) ? { managerIds: entry, departmentIds: [] } : entry]
         )) as Record<string, { managerIds: number[]; departmentIds: number[] }>;
         setRouting(normalized);
+        setSavedRouting(JSON.stringify(normalized));
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -1189,6 +1278,24 @@ function TrackSummaryRoutingCard() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [activeClientId]);
+
+  // The server works out the recipients with the daily job's own routing
+  // code, including the unsaved choices, so what is shown is what is sent.
+  const routingJson = JSON.stringify(routing);
+  useEffect(() => {
+    if (loading || !canAdmin) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({ routing: routingJson });
+      if (activeClientId != null) params.set("clientId", String(activeClientId));
+      apiFetch<TrackSummaryPreview>(`/settings/track-summary-recipients?${params}`)
+        .then((result) => { if (!cancelled) { setPreview(result); setPreviewError(null); } })
+        .catch((err: Error) => { if (!cancelled) setPreviewError(err.message); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [loading, canAdmin, activeClientId, routingJson]);
+  const previewByModule = new Map((preview?.tracks ?? []).map((track) => [track.module, track]));
+  const unsaved = routingJson !== savedRouting;
 
   const managers = users.filter(
     (user) => user.active !== false && (user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff"),
@@ -1223,6 +1330,7 @@ function TrackSummaryRoutingCard() {
         const body = await response.json().catch(() => null);
         throw new Error(body?.error ?? `Request failed (${response.status})`);
       }
+      setSavedRouting(serialized);
       toast({ title: "Track summary routing saved" });
     } catch (err: any) {
       toast({ title: "Couldn't save routing", description: err.message, variant: "destructive" });
@@ -1248,13 +1356,23 @@ function TrackSummaryRoutingCard() {
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
           <p className="font-semibold">Senior management — all tracks</p>
           <p className="mt-1 text-xs text-sky-800">
-            {seniorEmail.trim()
-              ? seniorEmail
-              : seniorManagers.length > 0
-                ? seniorManagers.map((manager) => manager.email).join(", ")
-                : "No admin/owner notification recipient is currently configured."}
+            {preview
+              ? preview.senior.recipients.length > 0
+                ? `${preview.senior.recipients.map((person) => person.name ? `${person.name} (${person.email})` : person.email).join(", ")}${preview.senior.source === "notification_email" ? " · notification email" : " · account Owners"}`
+                : "No admin/owner notification recipient is currently configured."
+              : seniorEmail.trim()
+                ? seniorEmail
+                : seniorManagers.length > 0
+                  ? seniorManagers.map((manager) => manager.email).join(", ")
+                  : "No admin/owner notification recipient is currently configured."}
           </p>
         </div>
+        {previewError && (
+          <p className="text-xs text-destructive">Couldn't load the recipient preview: {previewError}</p>
+        )}
+        {unsaved && preview && (
+          <p className="text-xs font-medium text-amber-800">The recipients below include changes you haven't saved yet.</p>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-8">
@@ -1270,19 +1388,23 @@ function TrackSummaryRoutingCard() {
               const selectedIds = routing[track.key]?.managerIds ?? [];
               const selectedDepartments = routing[track.key]?.departmentIds ?? [];
               const selectedManagers = managers.filter((manager) => selectedIds.includes(manager.id));
+              const trackPreview = previewByModule.get(track.key);
               return (
                 <details key={track.key} className="group">
                   <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 hover:bg-muted/30">
                     <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
                     <span className="flex-1 text-sm font-medium">{track.label}</span>
-                    <span className="max-w-[55%] truncate text-xs text-muted-foreground">
-                      {!Object.hasOwn(routing, track.key)
-                        ? "Automatic department match"
-                        : [...departments.filter((department) => selectedDepartments.includes(department.id)).map((department) => departmentLabel(department)),
-                            ...selectedManagers.map((manager) => manager.name)].join(", ") || "Senior management only"}
+                    <span className="max-w-[55%] truncate text-xs text-muted-foreground" data-testid={`track-recipient-summary-${track.key}`}>
+                      {trackPreview
+                        ? trackRecipientSummary(trackPreview)
+                        : !Object.hasOwn(routing, track.key)
+                          ? "Automatic department match"
+                          : [...departments.filter((department) => selectedDepartments.includes(department.id)).map((department) => departmentLabel(department)),
+                              ...selectedManagers.map((manager) => manager.name)].join(", ") || "Senior management only"}
                     </span>
                   </summary>
                   <div className="grid gap-2 border-t border-border/60 bg-muted/10 px-10 py-3 sm:grid-cols-2">
+                    {trackPreview && <TrackRecipientPreview track={trackPreview} />}
                     <div className="sm:col-span-2 flex items-center justify-between gap-3">
                       <span className="text-xs font-semibold text-muted-foreground">Departments (designated managers only)</span>
                       {Object.hasOwn(routing, track.key) && <Button size="sm" variant="ghost" disabled={!canAdmin || saving}

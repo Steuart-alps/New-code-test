@@ -1527,6 +1527,60 @@ export const UpdateSettingsResponse = zod.object({
 
 
 /**
+ * Resolved with the same routing code the daily summary job sends with. Pass the unsaved choices as `routing` to preview them; otherwise the saved choices are used. Account admins and consultants only.
+ * @summary Preview who receives each track's daily summary
+ */
+export const GetTrackSummaryRecipientsQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional(),
+  "routing": zod.coerce.string().optional().describe('Track summary routing JSON, as saved in trackSummaryRouting.')
+})
+
+export const GetTrackSummaryRecipientsResponse = zod.object({
+  "senior": zod.object({
+  "source": zod.enum(['notification_email', 'users']),
+  "recipients": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+}))
+}),
+  "tracks": zod.array(zod.object({
+  "module": zod.string(),
+  "label": zod.string(),
+  "enabled": zod.boolean(),
+  "mode": zod.enum(['automatic', 'custom']),
+  "departments": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "managers": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+}))
+})),
+  "namedManagers": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+})),
+  "unavailableNamedCount": zod.number(),
+  "seniorOnly": zod.boolean(),
+  "recipients": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+}).and(zod.object({
+  "via": zod.array(zod.enum(['senior', 'named', 'department']))
+})))
+}))
+})
+
+
+/**
  * @summary Get the current client's privacy-governance records
  */
 export const GetPrivacyGovernanceQueryParams = zod.object({
