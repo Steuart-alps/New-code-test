@@ -77,7 +77,7 @@ async function registerTenant(runId) {
   const clientId = (me.data?.user ?? me.data)?.clientId;
   if (!Number.isInteger(clientId)) throw new Error("bystander has no client");
   const record = await req("POST", "/fire-safety", {
-    checkType: "alarm", checkDate: new Date().toISOString().slice(0, 10), result: "pass",
+    checkType: "alarm", callPoint: "CP1", checkDate: new Date().toISOString().slice(0, 10), result: "pass",
   });
   if (record.status !== 201) throw new Error(`bystander audited record failed (${record.status})`);
   return { clientId };

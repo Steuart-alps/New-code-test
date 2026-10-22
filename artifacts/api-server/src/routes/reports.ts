@@ -4,9 +4,10 @@ import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { z } from "zod";
 import { getUnscopedComplianceReport } from "../lib/unscopedComplianceReport";
-import { getDepartmentComplianceReport } from "../lib/departmentComplianceReport";
+import { departmentOwnsSiteSql, getDepartmentComplianceReport } from "../lib/departmentComplianceReport";
 import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
 import { submittedDailyChecklists } from "../lib/dailyChecklistCompletion";
+import { departmentSiteId, recordSiteVisibleSql } from "../lib/departmentSites";
 
 const router = Router();
 type RiskAcknowledgementStatus = "acknowledged" | "pending" | "expired" | "missing";
@@ -52,7 +53,8 @@ type ReportScope = {
  * Reports accept ids from the URL, so resolve them against the authenticated
  * tenant before using them in any query.  A department-scoped user's
  * department remains authoritative, and a selected site must belong to the
- * resulting department rather than merely be a valid site in the tenant.
+ * resulting department rather than merely be a valid site in the tenant
+ * (given to it, or the site the department sits under).
  */
 async function resolveReportScope(
   req: Request,
@@ -104,7 +106,11 @@ async function resolveReportScope(
       res.status(400).json({ error: "Site not found" });
       return null;
     }
-    if (departmentId !== undefined && Number(site.department_id) !== departmentId
+    const departmentSite = departmentId !== undefined ? await departmentSiteId(departmentId) : null;
+    const inDepartment = departmentSite === null
+      ? Number(site.department_id) === departmentId
+      : departmentSite === requestedSiteId && (site.department_id === null || Number(site.department_id) === departmentId);
+    if (departmentId !== undefined && !inDepartment
         && !(allowCrossDepartmentSite && activeDepartmentId === null)) {
       res.status(403).json({ error: "Site is outside the selected department scope" });
       return null;
@@ -136,6 +142,7 @@ router.get("/reports/risk-acknowledgements", requireAuth, async (req, res) => {
     AND sr.active = true
     ${siteId !== undefined ? sql`AND sr.site_id = ${siteId}` : sql``}
     ${departmentName !== null ? sql`AND sr.department = ${departmentName}` : sql``}
+    ${effectiveDepartmentId !== undefined ? sql`AND ${recordSiteVisibleSql(sql`sr.site_id`, effectiveDepartmentId)}` : sql``}
   `;
 
   const documentScope = sql`
@@ -151,7 +158,7 @@ router.get("/reports/risk-acknowledgements", requireAuth, async (req, res) => {
           SELECT 1 FROM sites scoped_site
           WHERE scoped_site.id = d.site_id
             AND scoped_site.client_id = ${clientId}
-            AND scoped_site.department_id = ${effectiveDepartmentId}
+            AND ${departmentOwnsSiteSql(sql`scoped_site.id`, sql`scoped_site.department_id`, effectiveDepartmentId)}
         )
       )
     ` : sql``}
@@ -403,6 +410,9 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
         SELECT 'TreeTrack',                site_id FROM tree_inspections
           WHERE client_id = ${clientId} AND check_date      BETWEEN ${from} AND ${to}
         UNION ALL
+        SELECT 'COSHHTrack',               site_id FROM coshh_checks
+          WHERE client_id = ${clientId} AND deleted_at IS NULL AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
         SELECT 'PremisesTrack',            site_id FROM premises_inspections
           WHERE client_id = ${clientId} AND inspection_date BETWEEN ${from} AND ${to}
         UNION ALL
@@ -497,15 +507,15 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
   const { siteId, departmentId } = scope;
 
   const siteFilter = siteId && departmentId
-    ? sql`AND dc.site_id = ${siteId} AND dc.site_id IN (SELECT id FROM sites WHERE department_id = ${departmentId})`
+    ? sql`AND dc.site_id = ${siteId} AND dc.site_id IN (SELECT owned.id FROM sites owned WHERE ${departmentOwnsSiteSql(sql`owned.id`, sql`owned.department_id`, departmentId)})`
     : siteId
       ? sql`AND dc.site_id = ${siteId}`
       : departmentId
-        ? sql`AND dc.site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND department_id = ${departmentId})`
+        ? sql`AND dc.site_id IN (SELECT owned.id FROM sites owned WHERE owned.client_id = ${clientId} AND ${departmentOwnsSiteSql(sql`owned.id`, sql`owned.department_id`, departmentId)})`
         : sql``;
 
   const sitesFilter = departmentId
-    ? sql`WHERE client_id = ${clientId} AND department_id = ${departmentId}`
+    ? sql`WHERE client_id = ${clientId} AND ${departmentOwnsSiteSql(sql`sites.id`, sql`sites.department_id`, departmentId)}`
     : sql`WHERE client_id = ${clientId}`;
 
   const [sitesRes, trendRes, moduleRes] = await Promise.all([
@@ -546,6 +556,9 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
         SELECT check_date, site_id FROM tree_inspections
           WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
         UNION ALL
+        SELECT check_date, site_id FROM coshh_checks
+          WHERE client_id = ${clientId} AND deleted_at IS NULL AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
         SELECT inspection_date, site_id FROM premises_inspections
           WHERE client_id = ${clientId} AND inspection_date BETWEEN ${from} AND ${to}
         UNION ALL
@@ -585,7 +598,7 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
       JOIN sites s ON s.id = activity.site_id AND s.client_id = ${clientId}
       WHERE true
         ${siteId !== undefined ? sql`AND s.id = ${siteId}` : sql``}
-        ${departmentId !== undefined ? sql`AND s.department_id = ${departmentId}` : sql``}
+        ${departmentId !== undefined ? sql`AND ${departmentOwnsSiteSql(sql`s.id`, sql`s.department_id`, departmentId)}` : sql``}
       GROUP BY month, s.id
     `),
   ]);

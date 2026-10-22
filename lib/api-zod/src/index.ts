@@ -10,6 +10,7 @@ export {
   AddPrivacyRetentionVerificationParams,
   GetFoodSafetyRecordByDateParams,
   GetStorageUsageResponse,
+  ImportExtinguisherPointsBody,
   ListFeedbackReportHistoryParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,

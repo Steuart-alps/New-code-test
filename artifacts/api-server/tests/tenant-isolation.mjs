@@ -5,13 +5,14 @@
 // via clientId spoofing in query strings and request bodies.
 //
 // Covers: core routes (sites, items, categories, contractors, certificates,
-// clients, users, settings, billing) and service module routes (fire-safety,
-// food-safety, legionella).
+// clients, users and their department assignments, settings, billing) and
+// service module routes (fire-safety, food-safety, legionella).
 //
 // Usage: node tests/tenant-isolation.mjs   (API must be running; default base
 // http://localhost:8080/api, override with API_BASE env var)
 // Exits 0 when every check passes, 1 otherwise.
 
+import { promoteToConsultant } from "./consultant-account.mjs";
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
 let passed = 0;
@@ -86,6 +87,9 @@ async function setupTenant(label) {
   expectOk(`${label}: verify email`, verified.status);
   const login = await req("POST", "/auth/login", { email, password: "password-123" });
   expectOk(`${label}: login after verification`, login.status);
+  // Both tenants are consultants, the role with the widest reach (business
+  // lists and ?clientId switching), so isolation is checked where it matters most.
+  promoteToConsultant(email);
 
   const me = await req("GET", "/auth/me");
   expectOk(`${label}: /auth/me`, me.status);
@@ -115,7 +119,7 @@ async function setupTenant(label) {
   // ── Fire-safety module ───────────────────────────────────────────────────────
   // Trial accounts have "all" entitlements so module routes are always open.
   const fireSafetyCheck = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: uniqueDate(),
     result: "pass",
   });
@@ -136,9 +140,26 @@ async function setupTenant(label) {
   });
   expectOk(`${label}: create food-safety record`, foodRecord.status, [201]);
 
+  // ── Departments and a department-scoped staff user ──────────────────────────
+  const department = await req("POST", "/departments", { name: `${label} Kitchen` });
+  expectOk(`${label}: create department`, department.status, [201]);
+  const staff = await req("POST", "/users", {
+    name: `${label} Staff`,
+    email: `iso-staff-${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`,
+    password: "password-123",
+    role: "client_staff",
+    clientId,
+    departmentId: department.data?.id,
+  });
+  expectOk(`${label}: create department staff`, staff.status, [201]);
+  check(`${label}: staff saved with own department`, staff.data?.departmentId === department.data?.id,
+    `departmentId=${staff.data?.departmentId}`);
+
   return {
     req,
     label,
+    departmentId: department.data?.id,
+    staffUserId: staff.data?.id,
     clientId,
     userId: user?.id,
     siteId: site.data?.id,
@@ -206,6 +227,37 @@ async function attack(attacker, victim) {
   expectBlocked(`${tag}: PUT /users/:id (victim owner)`, (await req("PUT", `/users/${victim.userId}`, { name: "hacked" })).status);
   expectBlocked(`${tag}: DELETE /users/:id (victim owner)`, (await req("DELETE", `/users/${victim.userId}`)).status);
 
+  // ── Department assignment: a user's department must belong to their client ─
+  // The department decides which records a user sees, so another business's
+  // department id must never be accepted, and must answer like a missing one.
+  const foreignDeptCreate = await req("POST", "/users", {
+    name: "sneaky",
+    email: `sneak-dept-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`,
+    password: "password-123",
+    role: "client_staff",
+    clientId: attacker.clientId,
+    departmentId: victim.departmentId,
+  });
+  expectBlocked(`${tag}: POST /users with victim departmentId`, foreignDeptCreate.status);
+  const foreignDeptStaff = await req("PUT", `/users/${attacker.staffUserId}`, { departmentId: victim.departmentId });
+  expectBlocked(`${tag}: PUT own staff with victim departmentId`, foreignDeptStaff.status);
+  const missingDeptStaff = await req("PUT", `/users/${attacker.staffUserId}`, { departmentId: 2147483000 });
+  check(`${tag}: foreign department answers like a missing one`,
+    foreignDeptStaff.status === missingDeptStaff.status
+      && JSON.stringify(foreignDeptStaff.data) === JSON.stringify(missingDeptStaff.data),
+    `foreign ${foreignDeptStaff.status} ${JSON.stringify(foreignDeptStaff.data)} vs missing ${missingDeptStaff.status} ${JSON.stringify(missingDeptStaff.data)}`);
+  expectBlocked(`${tag}: PUT own staff (with other edits) and victim departmentId`,
+    (await req("PUT", `/users/${attacker.staffUserId}`, { name: "renamed", role: "client_viewer", departmentId: victim.departmentId })).status);
+  expectBlocked(`${tag}: PUT self with victim departmentId`,
+    (await req("PUT", `/users/${attacker.userId}`, { departmentId: victim.departmentId })).status);
+  const afterDeptAttempts = await req("GET", "/users");
+  const staffAfter = (Array.isArray(afterDeptAttempts.data) ? afterDeptAttempts.data : []).find((u) => u.id === attacker.staffUserId);
+  const ownerAfter = (Array.isArray(afterDeptAttempts.data) ? afterDeptAttempts.data : []).find((u) => u.id === attacker.userId);
+  check(`${tag}: rejected department edits leave staff unchanged`,
+    staffAfter?.departmentId === attacker.departmentId && staffAfter?.role === "client_staff" && staffAfter?.name !== "renamed",
+    JSON.stringify(staffAfter));
+  check(`${tag}: rejected department edit leaves owner unscoped`, ownerAfter?.departmentId === null, JSON.stringify(ownerAfter));
+
   // ── clientId spoofing via query string: core ─────────────────────────────────
   for (const path of [
     `/sites?clientId=${victim.clientId}`,
@@ -264,7 +316,7 @@ async function attack(attacker, victim) {
   expectBlocked(
     `${tag}: POST /fire-safety body clientId`,
     (await req("POST", "/fire-safety", {
-      checkType: "alarm",
+      checkType: "alarm", callPoint: "CP1",
       checkDate: uniqueDate(2),
       result: "pass",
       clientId: victim.clientId,
@@ -401,6 +453,67 @@ async function attack(attacker, victim) {
   );
 }
 
+// A consultant can reach several businesses, so being able to see a department
+// is not enough: it must belong to the business of the user being saved.
+async function consultantDepartmentChecks(owner) {
+  const { req } = owner;
+  const tag = `${owner.label} consultant`;
+  const second = await req("POST", "/clients", {
+    name: `${owner.label} Second Business`,
+    slug: `iso-second-${owner.label.toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+  });
+  expectOk(`${tag}: create second business`, second.status, [201]);
+  const secondClientId = second.data?.id;
+  const secondDept = await req("POST", `/departments?clientId=${secondClientId}`, { name: "Second Kitchen" });
+  expectOk(`${tag}: create department in second business`, secondDept.status, [201]);
+  check(`${tag}: second department belongs to second business`, secondDept.data?.clientId === secondClientId,
+    JSON.stringify(secondDept.data));
+
+  expectBlocked(`${tag}: PUT first-business staff with second-business department`,
+    (await req("PUT", `/users/${owner.staffUserId}`, { departmentId: secondDept.data?.id })).status);
+  expectBlocked(`${tag}: POST first-business user with second-business department`,
+    (await req("POST", "/users", {
+      name: "Wrong scope", email: `wrong-scope-a-${Date.now()}@test.local`, password: "password-123",
+      role: "client_viewer", clientId: owner.clientId, departmentId: secondDept.data?.id,
+    })).status);
+  expectBlocked(`${tag}: POST second-business user with first-business department`,
+    (await req("POST", "/users", {
+      name: "Wrong scope", email: `wrong-scope-b-${Date.now()}@test.local`, password: "password-123",
+      role: "client_viewer", clientId: secondClientId, departmentId: owner.departmentId,
+    })).status);
+
+  const users = await req("GET", `/users?clientId=${owner.clientId}`);
+  const staff = (Array.isArray(users.data) ? users.data : []).find((u) => u.id === owner.staffUserId);
+  check(`${tag}: rejected edit keeps staff in their own department`, staff?.departmentId === owner.departmentId,
+    JSON.stringify(staff));
+  check(`${tag}: rejected create added no first-business user`,
+    !(Array.isArray(users.data) ? users.data : []).some((u) => u.name === "Wrong scope"), "a rejected user was created");
+
+  // Valid assignments still save: a second-business viewer in its own
+  // department, and moving the first-business staff to another own department.
+  const viewer = await req("POST", "/users", {
+    name: "Second viewer", email: `second-viewer-${Date.now()}@test.local`, password: "password-123",
+    role: "client_viewer", clientId: secondClientId, departmentId: secondDept.data?.id,
+  });
+  expectOk(`${tag}: POST second-business viewer with its own department`, viewer.status, [201]);
+  check(`${tag}: second-business viewer saved with its department`,
+    viewer.data?.clientId === secondClientId && viewer.data?.departmentId === secondDept.data?.id, JSON.stringify(viewer.data));
+  const viewerRename = await req("PUT", `/users/${viewer.data?.id}`, { name: "Second viewer renamed", departmentId: secondDept.data?.id });
+  expectOk(`${tag}: PUT second-business viewer keeps its department`, viewerRename.status);
+  check(`${tag}: viewer department stays saved after edit`, viewerRename.data?.departmentId === secondDept.data?.id,
+    JSON.stringify(viewerRename.data));
+
+  // Departments can sit under a site; one at the user's own site is valid.
+  const otherDept = await req("POST", "/departments", { name: `${owner.label} Bar`, siteId: owner.siteId });
+  expectOk(`${tag}: create another own department at a site`, otherDept.status, [201]);
+  const moved = await req("PUT", `/users/${owner.staffUserId}`, { departmentId: otherDept.data?.id });
+  expectOk(`${tag}: PUT staff to another own department`, moved.status);
+  check(`${tag}: staff moved to own department`, moved.data?.departmentId === otherDept.data?.id, JSON.stringify(moved.data));
+  const cleared = await req("PUT", `/users/${owner.staffUserId}`, { departmentId: null });
+  expectOk(`${tag}: PUT staff to no department`, cleared.status);
+  check(`${tag}: staff department cleared`, cleared.data?.departmentId === null, JSON.stringify(cleared.data));
+}
+
 async function main() {
   // Unauthenticated requests must be rejected outright.
   const anon = makeSession();
@@ -432,6 +545,8 @@ async function main() {
 
   await attack(b, a);
   await attack(a, b);
+
+  await consultantDepartmentChecks(a);
 
   // Cleanup: each tenant deletes its own site (also exercises the happy path).
   expectOk("A: delete own site", (await a.req("DELETE", `/sites/${a.siteId}`)).status, [204]);

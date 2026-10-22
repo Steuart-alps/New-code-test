@@ -8,7 +8,8 @@
 // the archived file instead of the private storage path. A record pointed at
 // another tenant's object and one pointed at a missing object are omitted and
 // named in the manifest. A second API process with a small
-// EXPORT_ATTACHMENT_MAX_BYTES must warn in the README and record cap omissions.
+// EXPORT_ATTACHMENT_MAX_BYTES splits the files into parts: part 1 holds what
+// fits, and the manifest and README name the later parts.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -253,14 +254,14 @@ async function main() {
     assert.equal([...full.entries].some((name) => !name.endsWith("/") && sha256(full.read(name)) === foreignSha), false,
       "no archive member carries the foreign tenant's file");
     const readme = full.text("README.txt");
-    assert.doesNotMatch(readme, /attachment\(s\) omitted because/, "no cap warning when everything fits");
+    assert.doesNotMatch(readme, /This is part/, "a single download when everything fits");
   } finally {
     await full.done();
   }
 
   // ── Small attachment cap ───────────────────────────────────────────────────
-  // DocTrack is listed first, so a cap of exactly its size includes it and
-  // omits every later attachment.
+  // DocTrack is listed first, so a part of exactly its size holds it and every
+  // later attachment moves to a later part.
   const capped = await startCappedApi(docBytes.length);
   try {
     const small = await downloadExport(capped.base, owner.request, "capped export");
@@ -271,16 +272,12 @@ async function main() {
       assert.equal(sha256(small.read(docRow.zipPath)), sha256(docBytes), "capped: included bytes match");
       for (const want of later) {
         const row = small.manifest.find((r) => r.module === want.module && r.recordId === want.recordId);
-        assert.deepEqual([row?.status, row?.reason, row?.zipPath], ["omitted", "attachment size cap", ""], `capped: ${want.label} omitted for the cap`);
-        assert.equal(small.entries.has(want.zipPath), false, `capped: ${want.label} not archived`);
+        assert.equal(row?.status, "part", `capped: ${want.label} is in a later part`);
+        assert.ok(Number(row.part) >= 2, `capped: ${want.label} names its part`);
+        assert.equal(small.entries.has(row.zipPath), false, `capped: ${want.label} not in part 1`);
       }
-      // A file referenced by two records (a portal upload is both an uploaded
-      // certificate and a register entry) has a manifest row for each.
-      const capRows = small.manifest.filter((r) => r.reason === "attachment size cap");
-      assert.ok(capRows.length >= later.length, "capped: every later attachment has a cap row");
       const readme = small.text("README.txt");
-      assert.match(readme, new RegExp(`WARNING: ${capRows.length} attachment\\(s\\) omitted because the ${docBytes.length}-byte cap was reached\\. ${docBytes.length} bytes included\\.`),
-        "capped: README warns about the cap");
+      assert.match(readme, /This is part 1 of \d+\./, "capped: README says the export has parts");
     } finally {
       await small.done();
     }
@@ -288,7 +285,7 @@ async function main() {
     await capped.stop();
   }
 
-  console.log(`${SUITE}: DocTrack, SafeTrack, contractor certificate, item certificate and photo exported with matching bytes; foreign, missing and capped files omitted with reasons`);
+  console.log(`${SUITE}: DocTrack, SafeTrack, contractor certificate, item certificate and photo exported with matching bytes; foreign and missing files omitted with reasons; a small part size splits the files into parts`);
 }
 
 let failure;

@@ -51,12 +51,12 @@ services:
         sync: false
       - key: STRIPE_PUBLISHABLE_KEY
         sync: false
-      # Monthly per-GiB Stripe price for extra storage (unset hides "Buy").
+      # Optional: a hand-made Stripe price for extra storage. Unset, the app
+      # creates its own (£1 per 10 GB a month).
       - key: STORAGE_ADDON_PRICE_ID
         sync: false
-      # Storage price check (see .env.example): the provider's USD rate per
-      # GiB-month (default 0.015) and USD -> GBP rate. Without the exchange
-      # rate a GBP storage price cannot be checked, so "Buy" stays hidden.
+      # Storage cost check (see .env.example): the provider's USD rate per
+      # GiB-month (default 0.026) and USD -> GBP rate (unset assumes 1).
       - key: STORAGE_PROVIDER_USD_PER_GIB_MONTH
         sync: false
       - key: STORAGE_USD_EXCHANGE_RATE
@@ -77,7 +77,9 @@ services:
       # businesses without a trial. Unset means nobody.
       - key: PLATFORM_ADMIN_EMAILS
         sync: false
-      # Error reporting (Sentry free tier is enough): job failures, crashes.
+      # Error reporting (Sentry free tier is enough): job failures, crashes,
+      # website errors. The website reads it at build time, so save it with
+      # "Save, rebuild, and deploy". Unset = no reports (/readyz notes it).
       - key: SENTRY_DSN
         sync: false
       # File storage (Google Cloud Storage)

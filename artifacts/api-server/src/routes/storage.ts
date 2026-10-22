@@ -4,8 +4,9 @@ import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   GetStorageUsageResponse,
+  GetStorageStatusResponse,
 } from "@workspace/api-zod";
-import { ObjectStorageService, ObjectNotFoundError, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, UploadTooLargeError, maxUploadBytes, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
 import {
   readStorageUsageSnapshot,
   reconcileStorageUsage,
@@ -14,6 +15,7 @@ import {
   storageUsageSnapshotIsStale,
 } from "../lib/storageUsageSnapshot";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity, isStorageAutoTopUpOn, readStorageCapacity, storageLimitState, STORAGE_NEARLY_FULL_RATIO } from "../lib/storageLimit";
 import { ObjectPermission } from "../lib/objectAcl";
 import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable } from "@workspace/db/schema";
@@ -31,6 +33,7 @@ import {
   renewingStorageGib,
   stillPaidReducedGib,
 } from "../lib/storageCapacity";
+import { storageWarningThresholdBytes } from "../lib/storageWarningEmails";
 import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
@@ -43,7 +46,6 @@ const objectStorageService = new ObjectStorageService();
 // Every ObjectStorageService instance reports tenant uploads and deletions to
 // the usage ledger once this router is loaded.
 setStorageUsageRecorder(storageUsageLedger);
-const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 
 storageDownloadRouter.get("/storage/download/:token", async (req: Request, res: Response) => {
   let resolved: Awaited<ReturnType<typeof resolveDownloadToken>> = null;
@@ -114,6 +116,38 @@ async function estimateStorageCost(clientId: number, usedBytes: number, monthlyD
   };
 }
 
+/**
+ * GET /storage/status — nearly full / full for the in-app banner, readable by
+ * everyone signed in to the business (staff need to know why uploads stopped).
+ * Only owners and consultants see the figures. Usage is the ledger total;
+ * capacity is cached for a few minutes (storageLimit.ts).
+ */
+router.get("/storage/status", requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
+  try {
+    const { usedBytes } = await readStorageUsageSnapshot(clientId);
+    const capacityBytes = await readStorageCapacity(clientId).then((capacity) => capacity?.capacityBytes ?? null, (err) => {
+      req.log.warn({ err, clientId }, "Storage capacity unavailable; banner hidden");
+      return null;
+    });
+    const canManage = ["consultant", "client_admin"].includes(req.currentUser?.role ?? "");
+    res.json(GetStorageStatusResponse.parse({
+      state: storageLimitState(usedBytes, capacityBytes),
+      canManage,
+      autoTopUp: await isStorageAutoTopUpOn(clientId),
+      usedBytes: canManage ? usedBytes : null,
+      capacityBytes: canManage ? capacityBytes : null,
+    }));
+  } catch (error) {
+    req.log.error({ err: error, clientId }, "Storage status unavailable");
+    res.status(503).json({ error: "Storage status is temporarily unavailable." });
+  }
+});
+
 router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Request, res: Response): Promise<void> => {
   const clientId = getClientId(req);
   if (!clientId) {
@@ -155,16 +189,22 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
     const month = utcMonth();
     const monthlyDownloadBytes = await getMonthlyDownloadBytes(clientId, month);
     const estimatedCost = await estimateStorageCost(clientId, usedBytes, monthlyDownloadBytes);
-    const configuredThreshold = Number(thresholdSetting?.value);
-    const warningThresholdBytes = Number.isSafeInteger(configuredThreshold) && configuredThreshold > 0
-      ? configuredThreshold
-      : DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES;
+    const capacityBytes = await readStorageCapacity(clientId).then((capacity) => capacity?.capacityBytes ?? null, (err) => {
+      req.log.warn({ err, clientId }, "Storage capacity unavailable; not showing the limit");
+      return null;
+    });
+    // The Settings level; the email goes at it or at 80% of the paid
+    // storage, whichever is lower (storageWarningEmails.ts).
+    const warningThresholdBytes = storageWarningThresholdBytes(thresholdSetting?.value);
+    const emailLevelBytes = capacityBytes === null
+      ? warningThresholdBytes
+      : Math.min(warningThresholdBytes, Math.floor(capacityBytes * STORAGE_NEARLY_FULL_RATIO));
 
     res.json(GetStorageUsageResponse.parse({
       usedBytes,
       objectCount,
       warningThresholdBytes,
-      warning: usedBytes >= warningThresholdBytes,
+      warning: usedBytes >= emailLevelBytes,
       monthlyDownloadBytes,
       monthlyDownloadTrackingAvailable: true,
       month,
@@ -172,6 +212,9 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
       usageCheckedAt: snapshot.reconciledAt,
       usageAgeSeconds: snapshot.ageSeconds,
       usageRefreshing: snapshot.refreshing,
+      capacityBytes,
+      limitState: storageLimitState(usedBytes, capacityBytes),
+      autoTopUp: await isStorageAutoTopUpOn(clientId),
     }));
   } catch (error) {
     req.log.error({ err: error, operation: "account storage usage" }, "Object storage usage unavailable");
@@ -203,7 +246,13 @@ router.post("/storage/uploads/request-url", requireAuth, denyViewers, async (req
       res.status(400).json({ error: "No client context" });
       return;
     }
+    // Refuse early; finalisation checks the stored size as well.
+    if (size > maxUploadBytes()) {
+      res.status(400).json({ error: new UploadTooLargeError().message });
+      return;
+    }
 
+    await ensureUploadCapacity(clientId, req.log);
     const uploadURL = await objectStorageService.getObjectEntityUploadURL(clientId);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 

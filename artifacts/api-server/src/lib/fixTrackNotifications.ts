@@ -99,6 +99,10 @@ export interface ContractorAssignmentOpts {
   baseUrl:          string;
   clientId:         number;
   siteDocuments?:   { name: string; url: string }[];
+  /** The issue's photos and videos, as signed links. */
+  issueMedia?:      { url: string; isVideo: boolean }[];
+  /** The date the business would like the job done by (YYYY-MM-DD). */
+  targetDate?:      string | null;
   icsAttachment?:   string;
   icsFilename?:     string;
   cc?:              string | string[];
@@ -110,7 +114,7 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
   const {
     contractorName, contractorEmail, issueTitle, issueType, issuePriority,
     issueLocation, issueDescription, siteName, companyName,
-    bookedToken, completedToken, baseUrl, clientId, siteDocuments,
+    bookedToken, completedToken, baseUrl, clientId, siteDocuments, issueMedia, targetDate,
     icsAttachment, icsFilename, cc, idempotencyKey, previewOnly,
   } = opts;
 
@@ -122,6 +126,9 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
   const safeDesc     = issueDescription ? escapeHtml(issueDescription) : null;
   const safeSite     = siteName ? escapeHtml(siteName) : null;
   const safeCompany  = escapeHtml(companyName);
+  const safeTarget   = targetDate && /^\d{4}-\d{2}-\d{2}$/.test(targetDate)
+    ? escapeHtml(new Date(`${targetDate}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }))
+    : null;
 
   const bookedUrl    = `${baseUrl}/api/fix-track/action/${bookedToken}`;
   const completedUrl = `${baseUrl}/api/fix-track/action/${completedToken}`;
@@ -141,11 +148,21 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
       <tr><td style="color:#64748b;padding:3px 0">Priority</td><td style="font-weight:600">${safePriority}</td></tr>
       <tr><td style="color:#64748b;padding:3px 0">Location</td><td>${safeLocation}</td></tr>
       ${safeSite ? `<tr><td style="color:#64748b;padding:3px 0">Site</td><td>${safeSite}</td></tr>` : ""}
+      ${safeTarget ? `<tr><td style="color:#64748b;padding:3px 0">Needed by</td><td style="font-weight:600">${safeTarget}</td></tr>` : ""}
     </table>
     ${safeDesc ? `<p style="margin:12px 0 0;color:#475569;font-size:13px;border-top:1px solid #e2e8f0;padding-top:10px">${safeDesc}</p>` : ""}
   </div>
 
-  <p style="font-size:14px;color:#475569;margin:0 0 16px">Please update the job status by clicking one of the buttons below:</p>
+  ${issueMedia?.length ? `
+  <div style="margin:0 0 20px">
+    <p style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px">📷 Photos and videos of the problem</p>
+    ${issueMedia.map((item, index) => item.isVideo
+      ? `<div style="margin-bottom:6px"><a href="${escapeHtml(item.url)}" style="font-size:13px;color:#2563eb;text-decoration:none">▶ Video ${index + 1}</a></div>`
+      : `<a href="${escapeHtml(item.url)}" style="display:inline-block;margin:0 6px 6px 0"><img src="${escapeHtml(item.url)}" alt="Photo ${index + 1}" width="160" style="width:160px;max-width:100%;border-radius:6px;border:1px solid #e2e8f0"></a>`).join("")}
+    <p style="font-size:11px;color:#94a3b8;margin:6px 0 0">Links expire in 30 days.</p>
+  </div>` : ""}
+
+  <p style="font-size:14px;color:#475569;margin:0 0 16px">Please pick the date you will visit, and tell us when the job is done:</p>
 
   <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px">
     <tr>
@@ -153,14 +170,14 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
         <a href="${bookedUrl}"
            style="display:block;background:#f59e0b;color:#fff;text-decoration:none;
                   padding:14px 0;border-radius:8px;font-weight:700;font-size:15px;text-align:center">
-          📅 Mark as Booked
+          📅 Pick a visit date
         </a>
       </td>
       <td style="padding:0 0 0 6px">
         <a href="${completedUrl}"
            style="display:block;background:#10b981;color:#fff;text-decoration:none;
                   padding:14px 0;border-radius:8px;font-weight:700;font-size:15px;text-align:center">
-          ✅ Mark as Completed
+          ✅ Job done
         </a>
       </td>
     </tr>
@@ -268,7 +285,7 @@ export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promi
   <p style="font-size:14px;color:#475569;margin:0 0 16px">
     Please submit your quotation, including cost, availability, and any assumptions.
   </p>
-  ${quoteUrl ? `<p><a href="${quoteUrl}" style="display:inline-block;background:#8b5cf6;color:#fff;text-decoration:none;padding:12px 20px;border-radius:7px;font-weight:700">Submit Quote Online</a></p>` : ""}
+  ${quoteUrl ? `<p><a href="${quoteUrl}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:7px;font-weight:700">Submit Quote Online</a></p>` : ""}
 
   ${siteDocuments?.length ? `
   <div style="margin:0 0 20px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">

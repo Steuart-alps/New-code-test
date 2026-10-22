@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { AssigneeField, assigneeFields } from "@/components/assignee-field";
+import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
@@ -25,6 +27,8 @@ import { getApiErrorMessage } from "@/lib/api";
 import { format } from "date-fns";
 import { elapsedBoardDays, FixTrackBoard, type FixTrackBoardIssue } from "@/components/fix-track-board";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -94,6 +98,7 @@ interface Issue extends FixTrackBoardIssue {
   reportedBy: string;
   reportedDate: string;
   assignedTo?: string | null;
+  assigneeUserId?: number | null;
   contractorId?: number | null;
   contractorEmail?: string | null;
   resolvedDate?: string | null;
@@ -102,6 +107,9 @@ interface Issue extends FixTrackBoardIssue {
   emailRequestMode?: string | null;
   emailRequestStatus?: string | null;
   emailRequestedAt?: string | null;
+  emailSentAt?: string | null;
+  contractorVisitDate?: string | null;
+  contractorCompletedAt?: string | null;
   quote?: {
     id: number;
     status: string;
@@ -219,6 +227,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
     const newPaths: string[] = [];
     for (const file of files) {
       try {
+        assertWithinUploadLimit(file);
         const res = await clientApiFetch(`/fix-track/issues/${issueId}/request-upload`, {
           method: "POST",
           body: JSON.stringify({ name: file.name, contentType: file.type }),
@@ -246,7 +255,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
   return (
     <div className="space-y-4">
       <F label="Title *">
-        <Input value={form.title ?? ""} onChange={e => setForm({ ...form, title: e.target.value })}
+        <Input dictation value={form.title ?? ""} onChange={e => setForm({ ...form, title: e.target.value })}
           placeholder="e.g. Leaking pipe in kitchen, Broken window latch" autoFocus />
       </F>
 
@@ -340,8 +349,12 @@ function IssueForm({ form, setForm, issueId, isNew }: {
 
       <div className="grid grid-cols-2 gap-4">
         <F label="Assigned To (internal)">
-          <Input value={form.assignedTo ?? ""} onChange={e => setForm({ ...form, assignedTo: e.target.value })}
-            placeholder="Internal person responsible" />
+          <AssigneeField
+            id="fix-track-assignee"
+            siteId={form.siteId ? Number(form.siteId) : null}
+            value={{ assigneeUserId: form.assigneeUserId ?? null, name: form.assignedTo ?? "" }}
+            onChange={value => setForm({ ...form, assigneeUserId: value.assigneeUserId, assignedTo: value.name })}
+          />
         </F>
         <F label="Target Date">
           <Input type="date" value={form.targetDate ?? ""} onChange={e => setForm({ ...form, targetDate: e.target.value })} />
@@ -618,6 +631,7 @@ export default function FixTrackPage() {
   const [saving, setSaving]         = useState(false);
   const [notifying, setNotifying]         = useState<Record<number, boolean>>({});
   const [renotifyIssue, setRenotifyIssue] = useState<Issue | null>(null);
+  const [assigningIssue, setAssigningIssue] = useState<Issue | null>(null);
   const [signingIssue, setSigningIssue]   = useState<Issue | null>(null);
   const [signingBusy, setSigningBusy]     = useState(false);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
@@ -685,7 +699,7 @@ export default function FixTrackPage() {
     }
   }
 
-  function openCreate() {
+  function openCreate(prefill: { title?: string; location?: string; siteId?: number } = {}) {
     const today = new Date().toISOString().slice(0, 10);
     setEditing(null);
     setForm({
@@ -695,9 +709,22 @@ export default function FixTrackPage() {
       reportedDate: today,
       reportedBy:   user?.name ?? "",
       mediaUrls:    [],
+      ...prefill,
     });
     setDialogOpen(true);
   }
+
+  // "Report a fault" on a scanned QR label: a new report naming the item.
+  useEffect(() => {
+    const link = takeLinkParams(["report", "title", "location", "siteId"] as const);
+    if (link?.report !== "1" || !hasFixtrack) return;
+    const siteId = Number(link.siteId);
+    openCreate({
+      title: link.title?.slice(0, 200),
+      location: link.location?.slice(0, 300),
+      ...(Number.isSafeInteger(siteId) && siteId > 0 ? { siteId } : {}),
+    });
+  }, []);
 
   function openEdit(issue: Issue) {
     setEditing(issue);
@@ -716,7 +743,7 @@ export default function FixTrackPage() {
         ...form,
         siteId:        form.siteId        || null,
         contractorId:  form.contractorId  ? Number(form.contractorId) : null,
-        assignedTo:    form.assignedTo    || null,
+        ...assigneeFields({ assigneeUserId: form.assigneeUserId ?? null, name: form.assignedTo ?? "" }, "assignedTo"),
         targetDate:    form.targetDate    || null,
         description:   form.description   || null,
         solutionNotes: form.solutionNotes || null,
@@ -958,7 +985,7 @@ export default function FixTrackPage() {
               labelFor={humanizeType}
             />
             {canEdit && (
-              <Button onClick={openCreate} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
+              <Button onClick={() => openCreate()} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
                 <Plus className="w-4 h-4" /> Report Issue
               </Button>
             )}
@@ -1144,6 +1171,8 @@ export default function FixTrackPage() {
                             </Badge>
                           )}
                           {issue.assignedTo && <span>Assigned: <span className="font-medium">{issue.assignedTo}</span></span>}
+                          {issue.contractorVisitDate && <span>Contractor visit: <span className="font-medium">{format(new Date(issue.contractorVisitDate), "dd/MM/yyyy")}</span></span>}
+                          {issue.contractorCompletedAt && <span className="text-emerald-700">Contractor marked done {format(new Date(issue.contractorCompletedAt), "dd/MM/yyyy")}</span>}
                           {issue.targetDate && <span>Target: {format(new Date(issue.targetDate), "dd/MM/yyyy")}</span>}
                           {issue.resolvedDate && <span>Resolved: {format(new Date(issue.resolvedDate), "dd/MM/yyyy")}</span>}
                         </div>
@@ -1248,20 +1277,25 @@ export default function FixTrackPage() {
                             </Button>
                         </>
                       )}
-                      {canEdit && issue.contractorId && canAdmin && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
+                      {/* A manager's own choice of contractor is the approval,
+                          so the job is emailed straight away. */}
+                      {canEdit && canAdmin && ["reported", "in_progress"].includes(issue.status) && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
                         <>
                           <Button variant="outline" size="sm"
-                            onClick={() => handleRequestSend(issue, "assign")}
+                            onClick={() => setAssigningIssue(issue)}
                             disabled={notifying[issue.id]}
-                            className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50">
-                            Request assign
+                            className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50 gap-1"
+                            data-testid={`button-assign-contractor-${issue.id}`}>
+                            <Send className="w-3 h-3" /> Assign contractor
                           </Button>
-                          <Button variant="outline" size="sm"
-                            onClick={() => handleRequestSend(issue, "quote")}
-                            disabled={notifying[issue.id]}
-                            className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50">
-                            Request quote
-                          </Button>
+                          {issue.contractorId && (
+                            <Button variant="outline" size="sm"
+                              onClick={() => handleRequestSend(issue, "quote")}
+                              disabled={notifying[issue.id]}
+                              className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50">
+                              Request quote
+                            </Button>
+                          )}
                         </>
                       )}
                       {issue.contractorId && canAdmin && issue.emailRequestStatus === "approved" && (
@@ -1323,6 +1357,13 @@ export default function FixTrackPage() {
       </div>
 
       {/* Re-notify confirmation dialog */}
+      <AssignContractorDialog
+        issue={assigningIssue}
+        open={!!assigningIssue}
+        onOpenChange={open => !open && setAssigningIssue(null)}
+        onAssigned={load}
+      />
+
       <Dialog open={!!renotifyIssue} onOpenChange={open => !open && setRenotifyIssue(null)}>
         <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>

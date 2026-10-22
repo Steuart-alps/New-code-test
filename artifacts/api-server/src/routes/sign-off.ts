@@ -74,6 +74,7 @@ async function resolvePublicDocument(
       WHERE d.client_id = ${clientId}
         AND d.requires_acknowledgement = true
         AND (COALESCE(dep.name, site_dep.name) IS NULL OR COALESCE(dep.name, site_dep.name) = staff.department)
+        AND (dep.site_id IS NULL OR dep.site_id IS NOT DISTINCT FROM staff.site_id)
 
       UNION ALL
 
@@ -87,6 +88,7 @@ async function resolvePublicDocument(
       WHERE d.client_id = ${clientId}
         AND d.requires_acknowledgement = true
         AND (COALESCE(dep.name, site_dep.name) IS NULL OR COALESCE(dep.name, site_dep.name) = staff.department)
+        AND (dep.site_id IS NULL OR dep.site_id IS NOT DISTINCT FROM staff.site_id)
 
       UNION ALL
 
@@ -202,6 +204,7 @@ router.get("/:token/documents", async (req, res) => {
         WHERE d.client_id = ${client.id}
           AND d.requires_acknowledgement = true
           AND (COALESCE(dep.name, site_dep.name) IS NULL OR COALESCE(dep.name, site_dep.name) = ${staff.department})
+          AND (dep.site_id IS NULL OR dep.site_id IS NOT DISTINCT FROM ${staff.site_id ?? null}::integer)
 
         UNION ALL
 
@@ -215,6 +218,7 @@ router.get("/:token/documents", async (req, res) => {
         WHERE d.client_id = ${client.id}
           AND d.requires_acknowledgement = true
           AND (COALESCE(dep.name, site_dep.name) IS NULL OR COALESCE(dep.name, site_dep.name) = ${staff.department})
+          AND (dep.site_id IS NULL OR dep.site_id IS NOT DISTINCT FROM ${staff.site_id ?? null}::integer)
 
         UNION ALL
 

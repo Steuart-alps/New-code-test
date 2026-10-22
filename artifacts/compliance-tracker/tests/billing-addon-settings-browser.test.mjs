@@ -194,12 +194,19 @@ async function routeApi(route, url) {
   if (pathname === "/api/billing/invoices" && method === "GET") {
     return jsonResponse(route, { invoices: [] });
   }
+  // The app-wide storage limit banner (#156).
+  if (pathname === "/api/storage/status" && method === "GET") {
+    return jsonResponse(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
+  }
   if (pathname === "/api/storage/usage" && method === "GET") {
     return jsonResponse(route, {
       usedBytes: 0,
       objectCount: 0,
       warningThresholdBytes: 5 * 1024 ** 3,
       warning: false,
+      capacityBytes: null,
+      limitState: "not_limited",
+      autoTopUp: false,
       monthlyDownloadBytes: 0,
       monthlyDownloadTrackingAvailable: true,
       month: "2026-09",

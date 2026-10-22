@@ -19,6 +19,9 @@ import { appendAuditEvent } from "../lib/audit";
 import { completionFields, completionDateFromDay } from "../lib/complianceCompletion";
 import { NO_ACTION, itemActionState, itemActionStates, type ItemActionState } from "../lib/certificateOutcomes";
 import { getAccountToday } from "../lib/accountClock";
+import { recordTrackCheckFromTask } from "../lib/trackTaskLink";
+import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
+import { listAssignees, resolveAssigneeChange } from "../lib/assignees";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -103,7 +106,7 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
       .from(sitesTable)
       .where(and(
         eq(sitesTable.clientId, clientId),
-        or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+        sitesTableVisibleTo(deptId),
       ));
     conditions.push(
       or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites)) as any,
@@ -233,6 +236,25 @@ router.post("/compliance-items", requireAuth, denyViewers, requireClientAdmin, a
     }
   }
 
+  // The person responsible: for "All Sites" they must be able to see every site.
+  if (body.assigneeUserId != null) {
+    if (applyToAllSites) {
+      const sites = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.clientId, clientId));
+      for (const site of sites) {
+        if (!(await listAssignees(clientId, site.id)).some((person) => person.id === body.assigneeUserId)) {
+          res.status(400).json({ error: "The person assigned can't access every site; choose someone who can, or assign each site's check separately" });
+          return;
+        }
+      }
+    }
+    const assignee = await resolveAssigneeChange(clientId, applyToAllSites ? null : body.siteId ?? null, { assigneeUserId: body.assigneeUserId });
+    if (!assignee.ok) {
+      res.status(400).json({ error: assignee.error });
+      return;
+    }
+    body.assignedTo = assignee.name ?? null;
+  }
+
   // A check created as already completed is a completion like any other.
   const createCompletion = body.status === "completed" ? completionFields(body.frequencyMonths, new Date()).fields : {};
 
@@ -291,11 +313,11 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null && joined.item.siteId != null) {
     const [itemSite] = await db
-      .select({ departmentId: sitesTable.departmentId })
+      .select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
       .from(sitesTable)
       .where(eq(sitesTable.id, joined.item.siteId))
       .limit(1);
-    if (itemSite && itemSite.departmentId !== null && itemSite.departmentId !== deptId) {
+    if (itemSite && !(await siteVisibleToDepartment(itemSite, deptId))) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
@@ -363,6 +385,21 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
   }
 
   const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
+  if ("assigneeUserId" in body || "assignedTo" in body || "siteId" in body) {
+    const assignee = await resolveAssigneeChange(existing[0].clientId,
+      "siteId" in body ? body.siteId ?? null : existing[0].siteId, {
+        assigneeUserId: body.assigneeUserId,
+        name: body.assignedTo,
+      }, { assigneeUserId: existing[0].assigneeUserId, name: existing[0].assignedTo, siteId: existing[0].siteId });
+    if (!assignee.ok) {
+      res.status(400).json({ error: assignee.error });
+      return;
+    }
+    delete updateData.assigneeUserId;
+    delete updateData.assignedTo;
+    if (assignee.assigneeUserId !== undefined) updateData.assigneeUserId = assignee.assigneeUserId;
+    if (assignee.name !== undefined) updateData.assignedTo = assignee.name;
+  }
   let recurrence: { completedAt: Date; nextDueDate: Date } | null = null;
   if (body.status === "completed") {
     // An explicit date done (YYYY-MM-DD, never in the future) wins. Otherwise
@@ -410,6 +447,11 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     action: "updated", before: existing[0], after: joined!.item,
     ...(recurrence ? { metadata: { recurringCompletion: recurrence } } : {}),
   });
+  // Completing a task a track also keeps (emergency lighting, fire alarm and
+  // extinguisher servicing, cleaning the water tanks) records it in that track.
+  if (recurrence || (body.status === "completed" && String(joined!.item.completedAt) !== String(existing[0].completedAt))) {
+    await recordTrackCheckFromTask(req, joined!.item, joined!.item.completedAt);
+  }
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
     await itemActionState(existing[0].clientId, id)));
 });
@@ -471,11 +513,11 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null && existing[0].siteId != null) {
     const [itemSite] = await db
-      .select({ departmentId: sitesTable.departmentId })
+      .select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
       .from(sitesTable)
       .where(eq(sitesTable.id, existing[0].siteId))
       .limit(1);
-    if (itemSite && itemSite.departmentId !== null && itemSite.departmentId !== deptId) {
+    if (itemSite && !(await siteVisibleToDepartment(itemSite, deptId))) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
@@ -520,6 +562,7 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
       ? { metadata: { recurringCompletion: { completedAt: completion.fields.completedAt, nextDueDate: completion.fields.dueDate } } }
       : {}),
   });
+  if (completion) await recordTrackCheckFromTask(req, joined!.item, completion.fields.completedAt);
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor,
     await itemActionState(existing[0].clientId, id)));
 });
@@ -547,7 +590,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
       .from(sitesTable)
       .where(and(
         eq(sitesTable.clientId, clientId),
-        or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+        sitesTableVisibleTo(deptId),
       ));
     itemConditions.push(
       or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites)) as any,
@@ -561,7 +604,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   // Also scope the site breakdown to the user's accessible sites
   const siteConditions: ReturnType<typeof eq>[] = [eq(sitesTable.clientId, clientId)];
   if (deptId !== null) {
-    siteConditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)) as any);
+    siteConditions.push(sitesTableVisibleTo(deptId) as any);
   }
 
   const [items, contractors, certificates, sites] = await Promise.all([

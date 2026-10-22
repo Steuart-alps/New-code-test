@@ -8,6 +8,7 @@ import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/s
 import {
   findRawStoredEntry, isUniqueViolation, respondToRawStoredEntry, stagedPhotoEntry,
 } from "../lib/clientEntryReplay";
+import { siteVisibleToDepartment, visibleSiteIdsSql } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -27,12 +28,12 @@ async function checkSiteAccess(
   if (siteId === null) return departmentId === null ? null : "required";
   if (!Number.isSafeInteger(siteId) || siteId <= 0) return "invalid";
 
-  const [site] = await db.select({ departmentId: sitesTable.departmentId })
+  const [site] = await db.select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
     .from(sitesTable)
     .where(sql`${sitesTable.id} = ${siteId} AND ${sitesTable.clientId} = ${clientId}`)
     .limit(1);
   if (!site) return "invalid";
-  if (departmentId !== null && site.departmentId !== null && site.departmentId !== departmentId) {
+  if (!(await siteVisibleToDepartment(site, departmentId))) {
     return "forbidden";
   }
   return null;
@@ -88,8 +89,7 @@ router.get("/sessions", async (req, res) => {
       WHERE s.client_id = ${clientId}
         ${hasSiteFilter ? sql`AND s.site_id = ${requestedSiteId}` : sql``}
         ${departmentId !== null ? sql`AND (s.site_id IS NULL OR s.site_id IN (
-          SELECT id FROM sites WHERE client_id = ${clientId}
-            AND (department_id IS NULL OR department_id = ${departmentId})
+          ${visibleSiteIdsSql(clientId, departmentId)}
         ))` : sql``}
       ORDER BY s.session_date DESC, s.open_time DESC NULLS LAST
       LIMIT ${parseInt(limit, 10)}

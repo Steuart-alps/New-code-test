@@ -30,9 +30,12 @@ import {
   Inbox,
   Wheat,
   FlaskConical,
+  Beaker,
   ShieldAlert,
   LayoutGrid,
-  CalendarDays
+  CalendarDays,
+  QrCode,
+  FileSearch
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -47,7 +50,27 @@ export function isNavItemAvailable(item: NavItem, hasService: (key: string) => b
   return !item.serviceKey || hasService(item.serviceKey);
 }
 
-export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean; canAdmin: boolean }): NavGroup[] {
+/** Each section's open/closed choice is saved per user and business. */
+export function navGroupStorageKey(scope: string, groupId: string): string {
+  return `complytrack:nav:${scope}:${groupId}`;
+}
+
+/**
+ * Whether a section starts open: always when it holds the current page,
+ * never when every link in it is locked, else the saved choice, else its
+ * default.
+ */
+export function isNavGroupInitiallyOpen(
+  group: NavGroup,
+  { location, hasService, saved }: { location: string; hasService: (key: string) => boolean; saved: string | null },
+): boolean {
+  if (group.items.some(item => isNavItemActive(item, location))) return true;
+  if (!group.items.some(item => isNavItemAvailable(item, hasService))) return false;
+  if (saved !== null) return saved === "true";
+  return group.defaultOpen;
+}
+
+export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin }: { isConsultant: boolean; canAdmin: boolean; canManageUsers?: boolean }): NavGroup[] {
   const groups: NavGroup[] = [
     {
       id: "core",
@@ -71,6 +94,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
         { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
         { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
         { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
+        { href: "/coshh-track",    label: "COSHHTrack",      icon: Beaker,          serviceKey: "coshhtrack" },
         { href: "/coshh",          label: "COSHH Register",  icon: FlaskConical },
         { href: "/asbestos",       label: "Asbestos Register", icon: ShieldAlert },
       ],
@@ -144,6 +168,18 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
     }
   }
 
+  if (canManageUsers) {
+    // Managers keep the equipment list and print its QR labels.
+    groups.find(g => g.id === "core")?.items.push({ href: "/equipment", label: "Equipment & QR labels", icon: QrCode });
+    // Audit and inspection reports become actions (Owners, Managers, ALPS).
+    groups.find(g => g.id === "core")?.items.push({ href: "/report-actions", label: "Report actions", icon: FileSearch });
+  }
+
+  if (canManageUsers && !canAdmin) {
+    // Managers look after the Staff and Viewers in their own department.
+    groups.find(g => g.id === "people-training")?.items.push({ href: "/users", label: "Users", icon: Users });
+  }
+
   if (isConsultant) {
     groups.find(g => g.id === "core")?.items.splice(1, 0, { href: "/portfolio", label: "Portfolio", icon: LayoutGrid });
     groups.find(g => g.id === "admin")?.items.push({ href: "/clients", label: "Clients", icon: Building2 });
@@ -158,4 +194,55 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
   }
 
   return groups.filter(g => g.items.length > 0);
+}
+
+/** Pins are a small shortcut list, not a second menu. */
+export const MAX_PINNED_NAV_ITEMS = 6;
+
+/** Browser-only, per user and business: pins never reach the server. */
+export function pinnedNavStorageKey(scope: string): string {
+  return `complytrack:nav-pins:${scope}`;
+}
+
+/** Only links the user can open right now can be pinned. */
+export function isNavItemPinnable(item: NavItem, hasService: (key: string) => boolean): boolean {
+  return item.comingSoon !== true && isNavItemAvailable(item, hasService);
+}
+
+/** Reads a stored pin list, ignoring anything malformed or duplicated. */
+export function parsePinnedHrefs(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const hrefs = parsed.filter((href): href is string => typeof href === "string" && href.startsWith("/"));
+    return [...new Set(hrefs)].slice(0, MAX_PINNED_NAV_ITEMS);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The pinned links the user may still open, in pin order. A pin goes stale
+ * when its module is no longer entitled or the user's role no longer shows
+ * the link; `hrefs` is the cleaned list to store back.
+ */
+export function resolvePinnedNavItems(
+  pinnedHrefs: string[],
+  groups: NavGroup[],
+  hasService: (key: string) => boolean,
+): { items: NavItem[]; hrefs: string[] } {
+  const byHref = new Map(groups.flatMap(g => g.items).map(item => [item.href, item]));
+  const items = pinnedHrefs
+    .map(href => byHref.get(href))
+    .filter((item): item is NavItem => item !== undefined && isNavItemPinnable(item, hasService))
+    .slice(0, MAX_PINNED_NAV_ITEMS);
+  return { items, hrefs: items.map(item => item.href) };
+}
+
+/** Pins or unpins `href`; a new pin goes last and is refused once the list is full. */
+export function togglePinnedHref(pinnedHrefs: string[], href: string): string[] {
+  if (pinnedHrefs.includes(href)) return pinnedHrefs.filter(h => h !== href);
+  if (pinnedHrefs.length >= MAX_PINNED_NAV_ITEMS) return pinnedHrefs;
+  return [...pinnedHrefs, href];
 }

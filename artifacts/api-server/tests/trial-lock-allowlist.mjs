@@ -2,6 +2,7 @@
 // enforceTrialLock runs with the lock decision stubbed to "locked":
 //  - a consultant's read-only GET /portfolio passes through, so the list of
 //    businesses they manage keeps working after their own trial has ended;
+//  - GET /export (the full data download) stays open for cancelled businesses;
 //  - every other data route, and any non-GET /portfolio request, still gets
 //    402 trial_expired; billing and auth stay open as before.
 // Usage: node tests/trial-lock-allowlist.mjs
@@ -61,12 +62,16 @@ try {
 
   const portfolio = await run("GET", "/portfolio");
   assert.equal(portfolio.passed, true, "GET /portfolio is allowed through the trial lock");
+  const exported = await run("GET", "/export");
+  assert.equal(exported.passed, true, "a cancelled business can still download its full export");
 
   for (const [method, reqPath] of [
     ["GET", "/dashboard/summary"],
     ["GET", "/sites"],
     ["POST", "/portfolio"],
     ["GET", "/portfolio/extra"],
+    ["POST", "/export"],
+    ["GET", "/export/kitchen-register"],
     ["GET", "/consultant-branding"],
     ["PUT", "/consultant-branding"],
   ]) {

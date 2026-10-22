@@ -60,6 +60,7 @@ interface RequiredDocument {
   site_id: number | null;
   site_name: string | null;
   department_id: number | null;
+  department_site_id: number | null;
   document_type: "ra" | "sop" | "handbook";
   doc_type: OutstandingDocSummary["docType"];
 }
@@ -94,7 +95,7 @@ export async function getOutstandingSafeTrackAcknowledgements(
 ): Promise<OutstandingDocSummary[]> {
   const docsResult = await db.execute(sql`
     SELECT d.id, d.title, d.site_id, s.name AS site_name, d.department_id,
-           d.document_type, d.doc_type
+           dept.site_id AS department_site_id, d.document_type, d.doc_type
     FROM (
       SELECT id, title, site_id, department_id, 'ra'::text AS document_type,
              'Risk Assessment'::text AS doc_type
@@ -111,6 +112,7 @@ export async function getOutstandingSafeTrackAcknowledgements(
       WHERE client_id = ${clientId} AND requires_acknowledgement = true
     ) d
     LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = ${clientId}
+    LEFT JOIN departments dept ON dept.id = d.department_id AND dept.client_id = ${clientId}
     ORDER BY d.title ASC
   `);
   const docs = (docsResult.rows ?? []) as unknown as RequiredDocument[];
@@ -146,10 +148,13 @@ export async function getOutstandingSafeTrackAcknowledgements(
       : staff.filter((member) => member.site_id === doc.site_id);
     // Department applicability is based on a staff member's assigned site's
     // authoritative department relationship, never their free-text roster
-    // department value (which is descriptive and often inconsistent).
+    // department value (which is descriptive and often inconsistent). A
+    // department under a site covers exactly the staff assigned to that site.
     const relevantStaff = doc.department_id === null
       ? siteStaff
-      : siteStaff.filter((member) => member.site_department_id === doc.department_id);
+      : siteStaff.filter((member) => doc.department_site_id === null
+        ? member.site_department_id === doc.department_id
+        : member.site_id === doc.department_site_id);
     if (!relevantStaff.length) return [];
     const outstanding = relevantStaff.filter(
       (member) => !acknowledged.has(`${doc.document_type}:${doc.id}:${member.id}`),
@@ -212,10 +217,14 @@ export async function getOutstandingSafeTrackStaffReminders(
     LEFT JOIN sites doc_site
       ON doc_site.id = d.site_id
      AND doc_site.client_id = ${clientId}
+    LEFT JOIN departments doc_dept
+      ON doc_dept.id = d.department_id
+     AND doc_dept.client_id = ${clientId}
     WHERE NULLIF(trim(staff.email), '') IS NOT NULL
       AND (
         d.department_id IS NULL
-        OR staff_site.department_id = d.department_id
+        OR (doc_dept.site_id IS NULL AND staff_site.department_id = d.department_id)
+        OR doc_dept.site_id = staff.site_id
       )
       AND NOT EXISTS (
         SELECT 1
@@ -300,7 +309,7 @@ function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
   const tableOpen = `
     <table style="width:100%;border-collapse:collapse;"><tbody>`;
   const tail = `</tbody></table>
-    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open the secure SafeTrack register</a></p>
+    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#2563eb;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open the secure SafeTrack register</a></p>
     <p style="font-size:12px;color:#64748b;">Sign in to review the complete acknowledgement details and follow up.</p>
   </body></html>`;
   const shellBytes = Buffer.byteLength(head + tableOpen + tail, "utf8");
@@ -345,7 +354,7 @@ function buildStaffEmailHtml(
     <h2 style="color:#0f172a;">Your SafeTrack sign-offs are outstanding</h2>
     <p>Hello ${esc(staffName)}, the following required records still need your acknowledgement.</p>
     <table style="width:100%;border-collapse:collapse;"><tbody>${rows}</tbody></table>
-    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open SafeTrack</a></p>
+    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#2563eb;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open SafeTrack</a></p>
     <p style="font-size:12px;color:#64748b;">Please sign in and complete the outstanding sign-offs.</p>
   </body></html>`;
 }

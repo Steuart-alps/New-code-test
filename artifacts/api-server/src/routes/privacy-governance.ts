@@ -13,6 +13,8 @@ import {
   privacyRightsRequestsTable,
 } from "@workspace/db/schema";
 import { getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
+import { digestBearerToken } from "../lib/bearerTokens";
+import { addCalendarMonth, intakeUrl, newIntakeToken, privacyAdministrators } from "../lib/privacyIntake";
 
 const router = Router();
 // Scoped to this router's own paths: a root-level guard here also caught
@@ -32,14 +34,10 @@ function dateValue(value: string | null | undefined): Date | null {
   return value ? new Date(value) : null;
 }
 
-function addCalendarMonth(value: Date): Date {
-  const result = new Date(value);
-  const originalDay = result.getUTCDate();
-  result.setUTCDate(1);
-  result.setUTCMonth(result.getUTCMonth() + 1);
-  const lastDay = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate();
-  result.setUTCDate(Math.min(originalDay, lastDay));
-  return result;
+/** The stored link digest never leaves the server; callers only learn whether the form is live. */
+function programView<T extends { intakeTokenHash?: string | null }>(row: T) {
+  const { intakeTokenHash, ...rest } = row;
+  return { ...rest, intakeEnabled: Boolean(intakeTokenHash) };
 }
 
 function sendValidationError(res: Response, error: z.ZodError) {
@@ -52,7 +50,7 @@ function sendValidationError(res: Response, error: z.ZodError) {
 async function writeAudit(
   tx: any,
   clientId: number,
-  actorId: number,
+  actorId: number | null,
   entityType: string,
   entityId: number,
   action: string,
@@ -246,9 +244,11 @@ router.get("/privacy-governance", requireClientAdmin, async (req, res) => {
     db.select().from(privacyProcessorsTable).where(eq(privacyProcessorsTable.clientId, clientId)).orderBy(desc(privacyProcessorsTable.updatedAt)).limit(500),
     db.select().from(privacyBreachesTable).where(eq(privacyBreachesTable.clientId, clientId)).orderBy(desc(privacyBreachesTable.discoveredAt)).limit(500),
   ]);
+  const administrators = await privacyAdministrators(clientId);
 
   res.json({
-    program: programRows[0] ?? null,
+    program: programRows[0] ? programView(programRows[0]) : null,
+    privacyAdministrators: administrators.map(({ id, name }) => ({ id, name })),
     activities: activities.map((row) => ({ ...row, kind: "activity" })),
     rightsRequests: rightsRequests.map((row) => ({ ...row, kind: "rights_request" })),
     retentionSchedules: retentionSchedules.map((row) => ({ ...row, kind: "retention" })),
@@ -288,7 +288,69 @@ router.put("/privacy-governance/program", requireClientAdmin, async (req, res) =
     await writeAudit(tx, clientId, actorId, "privacy_program", rows[0].id, "updated", { section: "responsibilities_and_notice" });
     return rows[0];
   });
-  res.json(saved);
+  res.json(programView(saved));
+});
+
+const IntakeAssigneeBody = z.object({ assigneeId: z.number().int().positive().nullable() });
+
+/**
+ * Publish the online request form, or replace its link. The new link is only
+ * returned here: the database keeps its digest, and the previous link stops
+ * working at once.
+ */
+router.post("/privacy-governance/intake-link", requireClientAdmin, async (req, res) => {
+  const { clientId, actorId } = actorContext(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const token = newIntakeToken();
+  const now = new Date();
+  const saved = await db.transaction(async (tx) => {
+    const existing = (await tx.select({ hash: privacyProgramsTable.intakeTokenHash }).from(privacyProgramsTable)
+      .where(eq(privacyProgramsTable.clientId, clientId)).limit(1))[0];
+    const values = { intakeTokenHash: digestBearerToken(token), intakePublishedAt: now, intakePublishedBy: actorId, updatedBy: actorId, updatedAt: now };
+    const [row] = await tx.insert(privacyProgramsTable)
+      .values({ clientId, ...values })
+      .onConflictDoUpdate({ target: privacyProgramsTable.clientId, set: values })
+      .returning();
+    await writeAudit(tx, clientId, actorId, "privacy_program", row.id, existing?.hash ? "intake_link_rotated" : "intake_link_published", { section: "intake_link" });
+    return row;
+  });
+  res.status(201).json({ url: intakeUrl(token), program: programView(saved) });
+});
+
+router.delete("/privacy-governance/intake-link", requireClientAdmin, async (req, res) => {
+  const { clientId, actorId } = actorContext(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const saved = await db.transaction(async (tx) => {
+    const [row] = await tx.update(privacyProgramsTable)
+      .set({ intakeTokenHash: null, updatedBy: actorId, updatedAt: new Date() })
+      .where(eq(privacyProgramsTable.clientId, clientId))
+      .returning();
+    if (row) await writeAudit(tx, clientId, actorId, "privacy_program", row.id, "intake_link_disabled", { section: "intake_link" });
+    return row;
+  });
+  if (!saved) return res.status(404).json({ error: "The online request form is not set up" });
+  res.json(programView(saved));
+});
+
+router.put("/privacy-governance/intake-assignee", requireClientAdmin, async (req, res) => {
+  const { clientId, actorId } = actorContext(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = IntakeAssigneeBody.safeParse(req.body);
+  if (!parsed.success) return sendValidationError(res, parsed.error);
+  const { assigneeId } = parsed.data;
+  if (assigneeId !== null && !(await privacyAdministrators(clientId)).some((admin) => admin.id === assigneeId)) {
+    return res.status(400).json({ error: "Choose an administrator of this business" });
+  }
+  const saved = await db.transaction(async (tx) => {
+    const values = { intakeAssigneeId: assigneeId, updatedBy: actorId, updatedAt: new Date() };
+    const [row] = await tx.insert(privacyProgramsTable)
+      .values({ clientId, ...values })
+      .onConflictDoUpdate({ target: privacyProgramsTable.clientId, set: values })
+      .returning();
+    await writeAudit(tx, clientId, actorId, "privacy_program", row.id, "updated", { section: "intake_assignee", assigneeId });
+    return row;
+  });
+  res.json(programView(saved));
 });
 
 router.post("/privacy-governance/records", requireClientAdmin, async (req, res) => {

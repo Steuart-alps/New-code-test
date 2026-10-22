@@ -101,14 +101,15 @@ async function main(base) {
   same("no Stripe customer: not subscribed", (await user("GET", "/billing/storage")).data, { subscribed: false });
 
   await query("UPDATE clients SET stripe_customer_id = $1 WHERE id = $2", [customer, clientId]);
-  t.setSubscription(customer, [{ serviceKey: "core", quantity: 1 }, { serviceKey: "storage", quantity: 5 }], periodEnd);
-  await setRetained(clientId, 3.5 * GIB);
+  t.setSubscription(customer, [{ serviceKey: "core", quantity: 1 }, { serviceKey: "storage", quantity: 50 }], periodEnd);
+  // Needs 22.5 GiB beyond the plan: 30 GiB in whole 10 GiB steps.
+  await setRetained(clientId, 23.5 * GIB);
 
   console.log("\n── what is paid and what the files need ──");
   const before = (await user("GET", "/billing/storage")).data;
   same("renewing, paid, plan and minimum GiB",
     [before?.renewingGib, before?.paidGibThisPeriod, before?.planIncludedGib, before?.minimumGib],
-    [5, 5, 1, 3]);
+    [50, 50, 1, 30]);
   same("period end comes from the storage item", before?.periodEndsAt, periodEndIso);
   same("unit price shown", [before?.unitAmount, before?.currency], [25, "gbp"]);
   same("can reduce", [before?.canReduce, before?.reduceUnavailableReason], [true, null]);
@@ -119,65 +120,66 @@ async function main(base) {
   const syncUpdates = stripeCalls("subscriptions.update");
   check("site sync ran", syncUpdates.length === 1, JSON.stringify(syncUpdates));
   same("site sync resized only the per-site item", syncUpdates[0]?.params.items.map((item) => item.id), [`si_${customer}_0`]);
-  same("storage quantity untouched by site sync", storageQuantity(customer), 5);
+  same("storage quantity untouched by site sync", storageQuantity(customer), 50);
   t.calls.length = 0;
 
   console.log("\n── refused reductions ──");
-  const belowFiles = await user("POST", "/billing/storage/reduce", { targetGib: 2, requestId: randomUUID() });
+  const belowFiles = await user("POST", "/billing/storage/reduce", { targetGib: 20, requestId: randomUUID() });
   same("below what the files need → 409", belowFiles.status, 409);
-  check("explains the minimum", /at least 3 GiB/.test(belowFiles.data?.error ?? ""), belowFiles.data?.error);
-  same("not lower than now → 409", (await user("POST", "/billing/storage/reduce", { targetGib: 5, requestId: randomUUID() })).status, 409);
+  check("explains the minimum", /at least 30 GB/.test(belowFiles.data?.error ?? ""), belowFiles.data?.error);
+  same("not lower than now → 409", (await user("POST", "/billing/storage/reduce", { targetGib: 50, requestId: randomUUID() })).status, 409);
   same("bad body → 400", (await user("POST", "/billing/storage/reduce", { targetGib: 1.5, requestId: randomUUID() })).status, 400);
-  const crossTenant = await other.user("POST", `/billing/storage/reduce?clientId=${clientId}`, { targetGib: 3, requestId: randomUUID() });
+  same("not a whole 10 GiB step → 400", (await user("POST", "/billing/storage/reduce", { targetGib: 35, requestId: randomUUID() })).status, 400);
+  const crossTenant = await other.user("POST", `/billing/storage/reduce?clientId=${clientId}`, { targetGib: 30, requestId: randomUUID() });
   check("another business cannot reduce it", [400, 403, 404].includes(crossTenant.status), String(crossTenant.status));
   same("refusals never reached Stripe", t.calls.length, 0);
 
-  console.log("\n── reduce 5 → 3 GiB ──");
+  console.log("\n── reduce 50 → 30 GiB ──");
   const requestId = randomUUID();
-  const reduced = await user("POST", "/billing/storage/reduce", { targetGib: 3, requestId });
+  const reduced = await user("POST", "/billing/storage/reduce", { targetGib: 30, requestId });
   same("reduction accepted", reduced.status, 201);
-  same("confirmation details", [reduced.data?.fromGib, reduced.data?.toGib, reduced.data?.effectiveAt, reduced.data?.paidGibThisPeriod], [5, 3, periodEndIso, 5]);
+  same("confirmation details", [reduced.data?.fromGib, reduced.data?.toGib, reduced.data?.effectiveAt, reduced.data?.paidGibThisPeriod], [50, 30, periodEndIso, 50]);
   const update = stripeCalls("subscriptions.update");
   same("one Stripe quantity change", update.length, 1);
-  same("no proration, storage item only", update[0]?.params, { items: [{ id: `si_${customer}_1`, quantity: 3 }], proration_behavior: "none" });
+  same("no proration, storage item only", update[0]?.params, { items: [{ id: `si_${customer}_1`, quantity: 30 }], proration_behavior: "none" });
   same("idempotency key is per request", update[0]?.idempotencyKey, `storage-reduce-sub_${customer}-${requestId}`);
-  same("Stripe renews with 3 GiB", storageQuantity(customer), 3);
+  same("Stripe renews with 30 GiB", storageQuantity(customer), 30);
   const rows = await reductionRows(clientId);
-  same("one recorded reduction", rows.map((row) => [row.from_gib, row.to_gib, row.minimum_gib, row.requested_by]), [[5, 3, 3, tenant.userId]]);
+  same("one recorded reduction", rows.map((row) => [row.from_gib, row.to_gib, row.minimum_gib, row.requested_by]), [[50, 30, 30, tenant.userId]]);
   same("effective at period end", new Date(rows[0]?.effective_at).toISOString(), periodEndIso);
 
-  const replay = await user("POST", "/billing/storage/reduce", { targetGib: 3, requestId });
-  same("replay answers the same reduction", [replay.status, replay.data?.fromGib, replay.data?.toGib, replay.data?.replayed], [200, 5, 3, true]);
+  const replay = await user("POST", "/billing/storage/reduce", { targetGib: 30, requestId });
+  same("replay answers the same reduction", [replay.status, replay.data?.fromGib, replay.data?.toGib, replay.data?.replayed], [200, 50, 30, true]);
   same("replay never reaches Stripe again", stripeCalls("subscriptions.update").length, 1);
-  const stolen = await other.user("POST", "/billing/storage/reduce", { targetGib: 3, requestId });
+  const stolen = await other.user("POST", "/billing/storage/reduce", { targetGib: 30, requestId });
   check("another business cannot replay the request id", stolen.status >= 400, String(stolen.status));
 
   const after = (await user("GET", "/billing/storage")).data;
-  same("paid GiB kept until period end", [after?.renewingGib, after?.paidGibThisPeriod], [3, 5]);
-  same("scheduled reduction listed", after?.scheduled?.map((row) => [row.fromGib, row.toGib, row.effectiveAt]), [[5, 3, periodEndIso]]);
+  same("paid GiB kept until period end", [after?.renewingGib, after?.paidGibThisPeriod], [30, 50]);
+  same("scheduled reduction listed", after?.scheduled?.map((row) => [row.fromGib, row.toGib, row.effectiveAt]), [[50, 30, periodEndIso]]);
   same("files need all that renews: no further reduction", [after?.canReduce, after?.reduceUnavailableReason], [false, "needed_by_files"]);
   const usage = (await user("GET", "/storage/usage")).data;
-  same("estimate still includes the paid 5 GiB this period", usage?.estimatedCost?.includedStorageBytes, (1 + 5) * GIB);
-  same("files untouched", [usage?.usedBytes, (await query("SELECT count(*)::int AS n FROM storage_usage_objects WHERE client_id = $1 AND present", [clientId]))[0].n], [3.5 * GIB, 1]);
+  same("estimate still includes the paid 50 GiB this period", usage?.estimatedCost?.includedStorageBytes, (1 + 50) * GIB);
+  same("files untouched", [usage?.usedBytes, (await query("SELECT count(*)::int AS n FROM storage_usage_objects WHERE client_id = $1 AND present", [clientId]))[0].n], [23.5 * GIB, 1]);
 
   console.log("\n── Stripe failures ──");
-  await setRetained(clientId, 1.2 * GIB); // needs 1 GiB extra
+  await setRetained(clientId, 10.5 * GIB); // needs 9.5 GiB extra: one 10 GiB step
   t.setFault("fail");
-  const failed = await user("POST", "/billing/storage/reduce", { targetGib: 2, requestId: randomUUID() });
+  const failed = await user("POST", "/billing/storage/reduce", { targetGib: 20, requestId: randomUUID() });
   same("Stripe failure → 502", failed.status, 502);
-  same("failure changed nothing", [storageQuantity(customer), (await reductionRows(clientId)).length], [3, 1]);
+  same("failure changed nothing", [storageQuantity(customer), (await reductionRows(clientId)).length], [30, 1]);
   t.setFault("lose-response");
-  const lost = await user("POST", "/billing/storage/reduce", { targetGib: 2, requestId: randomUUID() });
-  same("lost response that Stripe applied is recorded", [lost.status, lost.data?.fromGib, lost.data?.toGib], [201, 3, 2]);
-  same("additive paid capacity: 2 renewing + 2 + 1 still paid", (await user("GET", "/billing/storage")).data?.paidGibThisPeriod, 5);
+  const lost = await user("POST", "/billing/storage/reduce", { targetGib: 20, requestId: randomUUID() });
+  same("lost response that Stripe applied is recorded", [lost.status, lost.data?.fromGib, lost.data?.toGib], [201, 30, 20]);
+  same("additive paid capacity: 20 renewing + 20 + 10 still paid", (await user("GET", "/billing/storage")).data?.paidGibThisPeriod, 50);
 
   console.log("\n── concurrent requests are serialised ──");
   t.setUpdateDelay(150);
-  const racing = await Promise.all([1, 1].map(() => user("POST", "/billing/storage/reduce", { targetGib: 1, requestId: randomUUID() })));
+  const racing = await Promise.all([1, 1].map(() => user("POST", "/billing/storage/reduce", { targetGib: 10, requestId: randomUUID() })));
   t.setUpdateDelay(0);
   same("exactly one of two racing reductions applies", racing.map((r) => r.status).sort(), [201, 409]);
-  same("Stripe renews with 1 GiB", storageQuantity(customer), 1);
-  same("paid capacity still 5 GiB", (await user("GET", "/billing/storage")).data?.paidGibThisPeriod, 5);
+  same("Stripe renews with 10 GiB", storageQuantity(customer), 10);
+  same("paid capacity still 50 GiB", (await user("GET", "/billing/storage")).data?.paidGibThisPeriod, 50);
 
   console.log("\n── remove all extra storage ──");
   await setRetained(clientId, GIB / 2);
@@ -186,13 +188,13 @@ async function main(base) {
   same("storage item deleted with no proration", stripeCalls("subscriptionItems.del").map((call) => call.params), [{ proration_behavior: "none" }]);
   same("core plan item kept", t.getSubscription(customer).items.data.map((item) => item.price.metadata.service_key), ["core"]);
   const empty = (await user("GET", "/billing/storage")).data;
-  same("nothing renews, 5 GiB still paid", [empty?.renewingGib, empty?.paidGibThisPeriod, empty?.reduceUnavailableReason], [0, 5, "no_extra_storage"]);
+  same("nothing renews, 50 GiB still paid", [empty?.renewingGib, empty?.paidGibThisPeriod, empty?.reduceUnavailableReason], [0, 50, "no_extra_storage"]);
 
   console.log("\n── after the period ends ──");
   await query("UPDATE storage_capacity_reductions SET effective_at = now() - interval '1 second' WHERE client_id = $1", [clientId]);
   const renewed = (await user("GET", "/billing/storage")).data;
   same("paid capacity follows the renewal", [renewed?.paidGibThisPeriod, renewed?.scheduled?.length], [0, 0]);
-  same("history kept", (await reductionRows(clientId)).map((row) => [row.from_gib, row.to_gib]), [[5, 3], [3, 2], [2, 1], [1, 0]]);
+  same("history kept", (await reductionRows(clientId)).map((row) => [row.from_gib, row.to_gib]), [[50, 30], [30, 20], [20, 10], [10, 0]]);
 }
 
 // ─── run ────────────────────────────────────────────────────────────────────

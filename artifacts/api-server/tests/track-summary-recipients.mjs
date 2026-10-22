@@ -89,11 +89,14 @@ try {
     const email = `track-summary-${label}-${stamp}@test.local`;
     const [row] = await q(
       `INSERT INTO users (email, password_hash, name, role, client_id, department_id,
-         is_department_manager, is_maintenance_manager, active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+         is_department_manager, is_maintenance_manager, all_departments, active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
       [email, passwordHash, `Summary ${label}`, role, clientId, extra.departmentId ?? null,
-        extra.departmentManager ?? false, extra.maintenanceManager ?? false, extra.active ?? true],
+        extra.departmentManager ?? false, extra.maintenanceManager ?? false, extra.allDepartments ?? false, extra.active ?? true],
     );
+    for (const departmentId of extra.extraDepartmentIds ?? []) {
+      await q(`INSERT INTO user_departments (user_id, department_id) VALUES ($1, $2)`, [row.id, departmentId]);
+    }
     return { email, userId: row.id, name: `Summary ${label}` };
   }
   const department = async (clientId, name) =>
@@ -108,6 +111,8 @@ try {
   const kitchen = await department(A, "Kitchen");
   const housekeeping = await department(A, "Housekeeping");
   const maintenance = await department(A, "Maintenance");
+  const leisure = await department(A, "Leisure");
+  const grounds = await department(A, "Grounds");
   const kitchenB = await department(B, "Kitchen");
 
   const admin = await addUser("admin-a", "client_admin", A);
@@ -115,6 +120,8 @@ try {
   const cook = await addUser("cook-a", "client_staff", A, { departmentId: kitchen }); // not designated
   await addUser("housekeeper-a", "client_staff", A, { departmentId: housekeeping }); // not designated
   const fixer = await addUser("fixer-a", "client_staff", A, { departmentId: maintenance, maintenanceManager: true });
+  // A Manager (head of department) over two departments needs no flag.
+  const hod = await addUser("hod-a", "client_manager", A, { departmentId: leisure, extraDepartmentIds: [grounds] });
   await addUser("viewer-a", "client_viewer", A, { departmentId: kitchen, departmentManager: true });
   const leaver = await addUser("leaver-a", "client_staff", A, { departmentId: kitchen, departmentManager: true, active: false });
   const chefB = await addUser("chef-b", "client_staff", B, { departmentId: kitchenB, departmentManager: true });
@@ -136,8 +143,8 @@ try {
   const automatic = await preview();
   assert.equal(automatic.status, 200, automatic.text);
   assert.equal(automatic.data.senior.source, "users");
-  assert.deepEqual(emails(automatic.data.senior.recipients), [admin.email],
-    "senior management is the account's active admins");
+  assert.deepEqual(emails(automatic.data.senior.recipients), [admin.email, ownerA.email].sort(),
+    "senior management is the account's active Owners");
   {
     const kitchenTrack = track(automatic.data, "kitchen");
     assert.equal(kitchenTrack.enabled, true);
@@ -151,20 +158,28 @@ try {
     assert.equal(chefRow.name, chef.name);
     assert.equal(chefRow.departmentName, "Kitchen");
     assert.deepEqual(kitchenTrack.recipients.find((recipient) => recipient.email === admin.email).via, ["senior"]);
-    assert.deepEqual(emails(kitchenTrack.recipients), [admin.email, chef.email].sort());
+    assert.deepEqual(emails(kitchenTrack.recipients), [admin.email, ownerA.email, chef.email].sort());
     ok("an automatic track lists its matched department and designated manager beside senior management");
 
     const hotTub = track(automatic.data, "hot_tub");
     assert.deepEqual(hotTub.departments.map((item) => [item.name, emails(item.managers)]),
-      [["Housekeeping", []], ["Maintenance", [fixer.email]]]);
-    assert.deepEqual(emails(hotTub.recipients), [admin.email, fixer.email].sort());
+      [["Housekeeping", []], ["Maintenance", [fixer.email]], ["Leisure", [hod.email]]]);
+    assert.deepEqual(emails(hotTub.recipients), [admin.email, ownerA.email, fixer.email, hod.email].sort());
     ok("a matched department with no eligible manager is reported, and maintenance managers count");
+
+    const tree = track(automatic.data, "tree");
+    assert.deepEqual(tree.departments.map((item) => [item.name, emails(item.managers)]),
+      [["Maintenance", [fixer.email]], ["Grounds", [hod.email]]]);
+    const hodRow = tree.recipients.find((recipient) => recipient.email === hod.email);
+    assert.deepEqual(hodRow.via, ["department"]);
+    assert.equal(hodRow.departmentName, "Leisure, Grounds");
+    ok("a Manager receives the tracks of every department they manage, beyond their first");
 
     const train = track(automatic.data, "train");
     assert.equal(train.mode, "automatic");
     assert.deepEqual(train.departments, []);
     assert.equal(train.seniorOnly, true);
-    assert.deepEqual(emails(train.recipients), [admin.email]);
+    assert.deepEqual(emails(train.recipients), [admin.email, ownerA.email].sort());
     ok("a track with no department match falls back to senior management only");
 
     const everyone = JSON.stringify(automatic.data);
@@ -185,7 +200,7 @@ try {
     assert.equal(kitchenTrack.unavailableNamedCount, 2, "another business's user and a leaver are skipped");
     assert.deepEqual(kitchenTrack.departments, [], "another business's department matches nothing");
     assert.deepEqual(kitchenTrack.recipients.find((recipient) => recipient.email === cook.email).via, ["named"]);
-    assert.deepEqual(emails(kitchenTrack.recipients), [admin.email, cook.email].sort());
+    assert.deepEqual(emails(kitchenTrack.recipients), [admin.email, ownerA.email, cook.email].sort());
     assert.ok(!JSON.stringify(result.data).includes(chefB.email));
     assert.equal(track(result.data, "pest").mode, "automatic", "other tracks stay automatic");
     const [saved] = await q(`SELECT value FROM app_settings WHERE client_id = $1 AND key = 'trackSummaryRouting'`, [A]);
@@ -196,13 +211,28 @@ try {
     const custom = track(emptyCustom.data, "kitchen");
     assert.equal(custom.mode, "custom");
     assert.equal(custom.seniorOnly, true);
-    assert.deepEqual(emails(custom.recipients), [admin.email]);
+    assert.deepEqual(emails(custom.recipients), [admin.email, ownerA.email].sort());
     ok("a customised track with nobody chosen goes to senior management only");
 
     const both = await preview(asAdmin, { kitchen: { managerIds: [chef.userId], departmentIds: [kitchen] } });
     assert.deepEqual(track(both.data, "kitchen").recipients.find((recipient) => recipient.email === chef.email).via,
       ["named", "department"], "a manager both named and matched is listed once with both reasons");
     ok("a manager named and matched by department is one recipient");
+  }
+
+  // ── A Manager over every department ────────────────────────────────────
+  {
+    const everyDepartment = await addUser("all-depts-a", "client_manager", A, { allDepartments: true });
+    const result = await preview();
+    for (const module of ["kitchen", "hot_tub", "tree"]) {
+      const row = track(result.data, module).recipients.find((recipient) => recipient.email === everyDepartment.email);
+      assert.deepEqual(row?.via, ["department"], `${module} reaches a Manager over every department`);
+      assert.equal(row.departmentName, "All departments");
+    }
+    assert.ok(!track(result.data, "train").recipients.some((recipient) => recipient.email === everyDepartment.email),
+      "a track with no matched department still goes to senior management only");
+    await q(`UPDATE users SET active = false WHERE id = $1`, [everyDepartment.userId]);
+    ok("a Manager over every department receives every matched track");
   }
 
   // ── Who may see it ─────────────────────────────────────────────────────

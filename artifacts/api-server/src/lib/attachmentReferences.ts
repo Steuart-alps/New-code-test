@@ -15,8 +15,15 @@ export const TENANT_ATTACHMENT_REFERENCE_SOURCES = [
   "client_documents.object_path",
   "contractor_certificates.object_path",
   "certificates.file_url",
+  "coshh_substances.sds_object_path",
+  "coshh_assessments.document_object_path",
+  "coshh_checks.report_object_path",
+  "asbestos_records.report_object_path",
+  "asbestos_survey_history.report_object_path",
+  "inspection_reports.object_path",
   "check_photos.object_path",
   "incident_riddor_events.receipt_object_path",
+  "green_puwer_inspections.certificate_object_path",
   "staged_photo_upload_receipts.object_path",
   "fix_track_issues.media_urls",
   "fix_track_issues.completion_document_path",
@@ -47,8 +54,20 @@ export async function listTenantAttachmentObjectPaths(
         FROM certificates cert
         JOIN contractors contractor ON contractor.id = cert.contractor_id
         WHERE contractor.client_id = ${tenantId}
+      UNION ALL
+        SELECT cert.file_url AS object_path
+        FROM certificates cert
+        JOIN compliance_items item ON item.id = cert.item_id
+        WHERE item.client_id = ${tenantId}
+      UNION ALL SELECT sds_object_path AS object_path FROM coshh_substances WHERE client_id = ${tenantId}
+      UNION ALL SELECT document_object_path AS object_path FROM coshh_assessments WHERE client_id = ${tenantId}
+      UNION ALL SELECT report_object_path AS object_path FROM coshh_checks WHERE client_id = ${tenantId}
+      UNION ALL SELECT report_object_path AS object_path FROM asbestos_records WHERE client_id = ${tenantId}
+      UNION ALL SELECT report_object_path AS object_path FROM asbestos_survey_history WHERE client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM inspection_reports WHERE client_id = ${tenantId}
       UNION ALL SELECT object_path FROM check_photos WHERE client_id = ${tenantId}
       UNION ALL SELECT receipt_object_path AS object_path FROM incident_riddor_events WHERE client_id = ${tenantId}
+      UNION ALL SELECT certificate_object_path AS object_path FROM green_puwer_inspections WHERE client_id = ${tenantId}
       UNION ALL SELECT object_path FROM staged_photo_upload_receipts WHERE client_id = ${tenantId}
       UNION ALL
         SELECT media.object_path
@@ -92,8 +111,21 @@ export async function hasTenantAttachmentReference(
         JOIN contractors contractor ON contractor.id = cert.contractor_id
         WHERE contractor.client_id = ${tenantId} AND cert.file_url = ${objectPath}
       )
+      OR EXISTS (
+        SELECT 1
+        FROM certificates cert
+        JOIN compliance_items item ON item.id = cert.item_id
+        WHERE item.client_id = ${tenantId} AND cert.file_url = ${objectPath}
+      )
+      OR EXISTS (SELECT 1 FROM coshh_substances WHERE client_id = ${tenantId} AND sds_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM coshh_assessments WHERE client_id = ${tenantId} AND document_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM coshh_checks WHERE client_id = ${tenantId} AND report_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM asbestos_records WHERE client_id = ${tenantId} AND report_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM asbestos_survey_history WHERE client_id = ${tenantId} AND report_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM inspection_reports WHERE client_id = ${tenantId} AND object_path = ${objectPath})
       OR EXISTS (SELECT 1 FROM check_photos WHERE client_id = ${tenantId} AND object_path = ${objectPath})
       OR EXISTS (SELECT 1 FROM incident_riddor_events WHERE client_id = ${tenantId} AND receipt_object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM green_puwer_inspections WHERE client_id = ${tenantId} AND certificate_object_path = ${objectPath})
       OR EXISTS (SELECT 1 FROM staged_photo_upload_receipts WHERE client_id = ${tenantId} AND object_path = ${objectPath})
       OR EXISTS (
         SELECT 1

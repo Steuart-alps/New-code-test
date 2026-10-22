@@ -9,9 +9,10 @@ import { sql, type SQL } from "drizzle-orm";
 import { approvedFrequencies } from "./waterMonitoringPlan";
 import { getAccountTimezone, localDateIn, zonedDateTimeToUtc } from "./accountClock";
 import { logger } from "./logger";
+import { linkedTaskCompletions } from "./trackTaskLink";
 
 export interface CheckAlert {
-  module: "fire" | "legionella" | "pool" | "hot_tub";
+  module: "fire" | "legionella" | "pool" | "hot_tub" | "coshh";
   moduleLabel: string;
   modulePath: string;
   checkType: string;
@@ -19,7 +20,7 @@ export interface CheckAlert {
   status: "overdue" | "due_soon" | "never" | "action_required" | "plan_required";
   lastDate: string | null;
   dueDate: string | null;
-  /** Positive = overdue by N days. Zero = due today. Negative = N days remaining. */
+  /** Days from today to the due date: negative = overdue by that many days, zero = due today, positive = days remaining. */
   daysUntilDue: number | null;
   frequencyLabel: string;
   /** The site the alert belongs to (null for a business without sites). */
@@ -32,6 +33,7 @@ export interface CheckAlert {
 export const FIRE_CHECK_TYPES = [
   "alarm", "emergency_lights", "extinguishers",
   "fire_doors", "fire_drill", "fire_walk", "alarm_panel",
+  "emergency_lights_annual", "alarm_service", "extinguisher_service",
 ] as const;
 export type FireCheckType = (typeof FIRE_CHECK_TYPES)[number];
 
@@ -39,6 +41,7 @@ export type FireCheckType = (typeof FIRE_CHECK_TYPES)[number];
 export const FIRE_FREQUENCY_DAYS: Record<FireCheckType, number> = {
   alarm: 7, emergency_lights: 30, extinguishers: 7,
   fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7,
+  emergency_lights_annual: 365, alarm_service: 180, extinguisher_service: 365,
 };
 
 /**
@@ -63,12 +66,15 @@ export function effectiveFireFrequencies(raw: unknown, profile: unknown = null):
 
 const FIRE_LABELS: Record<string, string> = {
   alarm: "Alarm test",
-  emergency_lights: "Emergency lights test",
+  emergency_lights: "Emergency lighting flick test",
   extinguishers: "Fire extinguisher check",
   fire_doors: "Fire door inspection",
   fire_drill: "Fire drill",
   fire_walk: "Fire walk",
   alarm_panel: "Alarm panel check",
+  emergency_lights_annual: "Annual 3-hour emergency lighting discharge test",
+  alarm_service: "6-monthly fire alarm service",
+  extinguisher_service: "Annual fire extinguisher service",
 };
 
 function frequencyDaysLabel(days: number): string {
@@ -85,7 +91,7 @@ function frequencyDaysLabel(days: number): string {
 // ── Legionella ────────────────────────────────────────────────────────────────
 
 // HSG274 Part 2 Table 2.1
-const LEGIONELLA_CHECK_TYPES = [
+export const LEGIONELLA_CHECK_TYPES = [
   "calorifier_temp", "hot_sentinel_temp", "hot_nonsent_temp",
   "cold_tank_temp", "cold_sentinel_temp", "cold_nonsent_temp",
   "cold_tank_inspection", "cold_tank_clean",
@@ -119,7 +125,7 @@ const POOL_LABELS: Record<string, string> = {
   closing: "Pool closing check",
   weekly: "Full pool balance check",
 };
-const TUB_CHECK_TYPES = ["water_chemistry", "temperature", "filter_clean",
+export const TUB_CHECK_TYPES = ["water_chemistry", "temperature", "filter_clean",
   "cover_inspection", "drain_refill", "microbiological_test", "risk_assessment"] as const;
 const TUB_LABELS: Record<string, string> = {
   water_chemistry: "Water chemistry check", temperature: "Temperature check",
@@ -173,7 +179,7 @@ export async function unreadLegionellaOutletUnits(clientId: number, siteIds: num
   const result = await db.execute(sql`
     SELECT DISTINCT o.site_id,
       CASE o.type WHEN 'cold' THEN 'cold_sentinel_temp' WHEN 'calorifier' THEN 'calorifier_temp'
-        ELSE 'hot_sentinel_temp' END AS check_type
+        WHEN 'little_used' THEN 'outlet_flush' ELSE 'hot_sentinel_temp' END AS check_type
     FROM legionella_sentinel_outlets o
     WHERE o.client_id = ${clientId} AND o.active = true AND o.site_id IN (${idList(siteIds)})
       AND NOT EXISTS (
@@ -263,6 +269,16 @@ async function fireSiteStatusesFor(
   for (const row of (latestRows.rows ?? []) as (Latest & { site_id: number | null; check_type: string })[]) {
     latest.set(`${row.site_id == null ? "none" : Number(row.site_id)}:${row.check_type}`, row);
   }
+  // A completed ComplyTrack task that mirrors a FireTrack check (the annual
+  // emergency lighting discharge test, the fire alarm and extinguisher
+  // services) counts as a passed check on its date, so completions from
+  // before the two were linked still show.
+  for (const [key, completedOn] of await linkedTaskCompletions(clientId, "fire")) {
+    const recorded = latest.get(key);
+    if (!recorded || String(recorded.check_date).slice(0, 10) < completedOn) {
+      latest.set(key, { id: 0, check_date: completedOn, result: "pass" });
+    }
+  }
   const frequencySetting = ((settingRows.rows ?? [])[0] as { value?: unknown } | undefined)?.value;
   const profiles = new Map<number, unknown>(
     ((profileRows.rows ?? []) as { site_id: number; profile: unknown }[]).map(row => [Number(row.site_id), row.profile]),
@@ -336,10 +352,9 @@ export function worstFireStatusByType(statuses: FireSiteStatus[]) {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export async function getCheckAlerts(clientId: number, scope: CheckScope = {}): Promise<CheckAlert[]> {
+export async function getCheckAlerts(clientId: number, scope: CheckScope = {}, now = new Date()): Promise<CheckAlert[]> {
   const alerts: CheckAlert[] = [];
 
-  const now = new Date();
   const timeZone = await getAccountTimezone(clientId);
   const todayIso = localDateIn(timeZone, now);
   const todayDays = toUtcDays(todayIso);
@@ -413,8 +428,14 @@ export async function getCheckAlerts(clientId: number, scope: CheckScope = {}): 
       GROUP BY site_id, check_type
     `);
     const legByType = new Map<string, string>(
-      ((legRows as any).rows ?? []).map((r: any) => [`${r.site_id}:${r.check_type}`, r.last_date]),
+      ((legRows as any).rows ?? []).map((r: any) => [`${r.site_id}:${r.check_type}`, String(r.last_date).slice(0, 10)]),
     );
+    // A completed ComplyTrack task that mirrors a water check (cleaning the
+    // cold water tanks) counts as a check on its date.
+    for (const [key, completedOn] of await linkedTaskCompletions(clientId, "legionella")) {
+      const recorded = legByType.get(key);
+      if (!recorded || recorded < completedOn) legByType.set(key, completedOn);
+    }
     const unreadOutlets = await unreadLegionellaOutletUnits(clientId, waterSiteIds);
     for (const site of waterSites) {
       const frequencies = planFor(site.id, "legionella", LEGIONELLA_CHECK_TYPES, "frequencyDays");

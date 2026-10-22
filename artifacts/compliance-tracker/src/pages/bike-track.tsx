@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -394,11 +395,14 @@ function NewHireDialog({
   onClose,
   bikes,
   onCreated,
+  presetBikeId,
 }: {
   open: boolean;
   onClose: () => void;
   bikes: BikeRow[];
   onCreated: () => void;
+  /** A bike from a scanned QR label: chosen already, so the hire starts at the guest details. */
+  presetBikeId?: number;
 }) {
   const { toast } = useToast();
   const [step, setStep] = useState(1);
@@ -425,6 +429,10 @@ function NewHireDialog({
   const { data: config } = useGetBikeTrackConfig();
   const availableBikes = useMemo(() => bikes.filter(b => b.active && b.status === "available"), [bikes]);
   const selectedBike = useMemo(() => bikes.find(b => b.id === selectedBikeId), [bikes, selectedBikeId]);
+
+  useEffect(() => {
+    if (open && presetBikeId) { setSelectedBikeId(presetBikeId); setStep(2); }
+  }, [open, presetBikeId]);
 
   // Pre-fill from template on first open
   useEffect(() => {
@@ -865,10 +873,10 @@ function BikeFormDialog({
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Select value={siteId} onValueChange={setSiteId}>
+              <Select value={siteId || "none"} onValueChange={v => setSiteId(v === "none" ? "" : v)}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="No specific site" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No specific site</SelectItem>
+                  <SelectItem value="none">No specific site</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -1062,6 +1070,8 @@ export default function BikeTrackPage() {
   const [deleteBikeId, setDeleteBikeId] = useState<number | null>(null);
   const [logService, setLogService] = useState<ServiceRow | "new" | null>(null);
   const [deleteServiceId, setDeleteServiceId] = useState<number | null>(null);
+  const [scanBikeId, setScanBikeId] = useState<number | null>(null);
+  const [hireBikeId, setHireBikeId] = useState<number>();
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
@@ -1106,6 +1116,24 @@ export default function BikeTrackPage() {
     for (const s of latestServicesArr) m[s.bikeId] = s;
     return m;
   }, [latestServicesArr]);
+
+  // A scanned QR label: a hired bike opens its return, an available bike
+  // starts a hire, anything else shows the bike in the fleet.
+  useEffect(() => {
+    const link = takeLinkParams(["bike"] as const);
+    const id = Number(link?.bike);
+    if (Number.isSafeInteger(id) && id > 0) setScanBikeId(id);
+  }, []);
+  useEffect(() => {
+    if (scanBikeId === null || bikesLoading || hiresLoading) return;
+    const bike = bikes.find(b => b.id === scanBikeId);
+    setScanBikeId(null);
+    if (!bike) return;
+    const hire = hires.find(h => h.bikeId === bike.id && h.status === "active");
+    if (bike.status === "hired" && hire) { setActiveTab("hires"); setReturnHire(hire); }
+    else if (bike.active && bike.status === "available") { setHireBikeId(bike.id); setShowNewHire(true); }
+    else { setActiveTab("fleet"); setSearch(bike.ref); }
+  }, [scanBikeId, bikesLoading, hiresLoading]);
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["bikes"] });
@@ -1778,7 +1806,8 @@ export default function BikeTrackPage() {
       {/* ── Dialogs ───────────────────────────────────────────────────────────── */}
       <NewHireDialog
         open={showNewHire}
-        onClose={() => setShowNewHire(false)}
+        onClose={() => { setShowNewHire(false); setHireBikeId(undefined); }}
+        presetBikeId={hireBikeId}
         bikes={bikes}
         onCreated={invalidate}
       />

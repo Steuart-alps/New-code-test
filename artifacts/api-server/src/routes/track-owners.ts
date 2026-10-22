@@ -3,6 +3,8 @@
  *   GET    /api/track-owners       any signed-in user of the business
  *   PUT    /api/track-owners       set/replace { module, siteId?, userId } (admins/consultants)
  *   DELETE /api/track-owners/:id   remove (admins/consultants)
+ *   GET    /api/assignees          people who can be assigned an action, issue
+ *                                  or check (?siteId= narrows to that site)
  * The business is always getClientId(req); users and sites are checked
  * against it, never trusted from the body.
  */
@@ -14,6 +16,8 @@ import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireCl
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { TRACK_MODULES, TRACK_MODULE_KEYS } from "../lib/trackModules";
 import { candidateCanSeeSite, loadEligibleOwners } from "../lib/trackOwners";
+import { siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
+import { listAssignees } from "../lib/assignees";
 
 const router: IRouter = Router();
 
@@ -38,7 +42,12 @@ router.get("/track-owners", requireAuth, async (req, res) => {
   const [services, candidates, siteResult, ownerResult] = await Promise.all([
     getEntitledServices(clientId),
     loadEligibleOwners(clientId),
-    db.execute(sql`SELECT id, name, department_id FROM sites WHERE client_id = ${clientId} ORDER BY name, id`),
+    db.execute(sql`
+      SELECT s.id, s.name FROM sites s
+      WHERE s.client_id = ${clientId}
+        ${departmentId !== null ? sql`AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)}` : sql``}
+      ORDER BY s.name, s.id
+    `),
     db.execute(sql`
       SELECT o.id, o.module, o.site_id, o.user_id, u.name AS user_name
       FROM track_owners o
@@ -47,8 +56,7 @@ router.get("/track-owners", requireAuth, async (req, res) => {
       ORDER BY o.module, o.site_id NULLS FIRST
     `),
   ]);
-  const sites = rowsOf<{ id: number; name: string; department_id: number | null }>(siteResult)
-    .filter((site) => departmentId === null || site.department_id == null || site.department_id === departmentId)
+  const sites = rowsOf<{ id: number; name: string }>(siteResult)
     .map((site) => ({ id: Number(site.id), name: site.name }));
   const visibleSiteIds = new Set(sites.map((site) => site.id));
   const eligibleIds = new Set(candidates.map((candidate) => candidate.id));
@@ -105,7 +113,7 @@ router.put("/track-owners", requireAuth, denyViewers, requireClientAdmin, async 
   if (!candidate) {
     return res.status(400).json({ error: "Choose an active admin, staff member or consultant of this business" });
   }
-  if (siteId !== null && !candidateCanSeeSite(candidate, siteDepartmentId)) {
+  if (siteId !== null && !candidateCanSeeSite(candidate, siteDepartmentId, siteId)) {
     return res.status(400).json({ error: `${candidate.name} can't access that site's department` });
   }
 
@@ -139,6 +147,26 @@ router.delete("/track-owners/:id", requireAuth, denyViewers, requireClientAdmin,
   `);
   if (removed.rows.length === 0) return res.status(404).json({ error: "Track owner not found" });
   res.status(204).end();
+});
+
+// Names only: anyone who records work (not viewers) can pick who does it.
+router.get("/assignees", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = z.object({ siteId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid siteId" });
+  const siteId = parsed.data.siteId ?? null;
+  if (siteId !== null) {
+    const [site] = rowsOf<{ id: number; department_id: number | null }>(await db.execute(sql`
+      SELECT id, department_id FROM sites WHERE id = ${siteId} AND client_id = ${clientId}
+    `));
+    const departmentId = getActiveDepartmentId(req);
+    if (!site || !(await siteVisibleToDepartment({ id: Number(site.id), departmentId: site.department_id }, departmentId))) {
+      return res.status(404).json({ error: "Site not found" });
+    }
+  }
+  const people = await listAssignees(clientId, siteId);
+  res.json(people.map((person) => ({ id: person.id, name: person.name, role: person.role })));
 });
 
 export default router;

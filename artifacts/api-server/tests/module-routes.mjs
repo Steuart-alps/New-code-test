@@ -90,6 +90,8 @@ async function testFireSafety(req, siteId) {
   for (const checkType of TYPES) {
     const res = await req("POST", "/fire-safety", {
       checkType,
+      callPoint: "CP1 – Reception",
+      nightStaff: "included",
       checkDate: isoDate(-1), // yesterday → always "ok" or "due_soon", never "overdue" for daily checks
       result: "pass",
       notes: `Test record for ${checkType}`,
@@ -593,7 +595,7 @@ async function testSiteFiltering(req, siteId) {
 
   // Create one fire-safety check pinned to the site
   const siteCheck = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: isoDate(-2),
     result: "pass",
     siteId,
@@ -666,6 +668,37 @@ async function testSiteFiltering(req, siteId) {
   });
   check("site-filter: duplicate weekly site/date is rejected", duplicateWeekly.status === 409, `got ${duplicateWeekly.status}`);
 
+  // "No" is the good answer to some review questions; only answers that need
+  // attention fail a submitted week.
+  // Today's week, so the edit below stays inside the correction window.
+  const goodNoWeekly = await req("POST", "/kitchen-weekly/weekly", {
+    weekCommencing: isoDate(0),
+    siteId,
+    checks: {
+      temperatureControl: "yes", complaintsReceived: "no", cleaningScheduleNeedsUpdate: "no",
+      staffRefresherRequired: "no", additionalChecksRequired: "no", methodsOrEquipmentChanged: "no",
+    },
+    submittedAt: new Date().toISOString(),
+  });
+  expectOk("weekly result: create submitted review with good \"No\" answers", goodNoWeekly.status, [201]);
+  check("weekly result: \"No\" to complaints, schedule update and refresher training passes",
+    goodNoWeekly.data?.overall_result === "pass", `got ${goodNoWeekly.data?.overall_result}`);
+  const failingWeekly = await req("POST", "/kitchen-weekly/weekly", {
+    weekCommencing: isoDate(-28),
+    siteId,
+    checks: { temperatureControl: "no", complaintsReceived: "no" },
+    submittedAt: new Date().toISOString(),
+  });
+  expectOk("weekly result: create submitted review with a failed rule", failingWeekly.status, [201]);
+  check("weekly result: \"No\" to a house rule still fails", failingWeekly.data?.overall_result === "fail",
+    `got ${failingWeekly.data?.overall_result}`);
+  const refresherEdit = await req("PUT", `/kitchen-weekly/weekly/${goodNoWeekly.data?.id}`, {
+    checks: { ...goodNoWeekly.data?.checks, staffRefresherRequired: "yes" },
+  });
+  expectOk("weekly result: edit submitted review", refresherEdit.status);
+  check("weekly result: \"Yes\" to refresher training needed fails on edit", refresherEdit.data?.overall_result === "fail",
+    `got ${refresherEdit.data?.overall_result}`);
+
   const probeDate = isoDate(-13);
   const orgProbe = await req("POST", "/kitchen-weekly/probe", {
     checkDate: probeDate,
@@ -695,7 +728,7 @@ async function testSiteFiltering(req, siteId) {
 
   // Invalid siteId (belongs to nobody) → 400
   const wrongSite = await req("POST", "/fire-safety", {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     checkDate: isoDate(),
     result: "pass",
     siteId: 999999999,

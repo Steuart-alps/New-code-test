@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type ChangeEvent } from "react";
 import { useRoute, useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,10 +9,12 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import {
   ArrowLeft, CheckCircle2, AlertTriangle, Loader2, Clock,
-  MapPin, User, FileText, Send, Camera, Wrench, ImagePlus
+  MapPin, User, FileText, Send, Camera, Wrench, ImagePlus, Trash2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
 
@@ -47,6 +49,9 @@ interface Issue {
   emailRequestMode?: string | null;
   emailRequestStatus?: string | null;
   emailRequestedAt?: string | null;
+  emailSentAt?: string | null;
+  contractorVisitDate?: string | null;
+  contractorCompletedAt?: string | null;
   mediaUrls: string[];
   siteId?: number | null;
   siteName?: string | null;
@@ -65,13 +70,16 @@ type MediaUploadProgress = {
 };
 
 const API_BASE = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
+// HEIC/HEIF is left out on purpose: the server cannot decode iPhone HEIC
+// (HEVC) photos, and because the picker does not list HEIC, iPhones hand
+// over their photos as JPEG.
+const MEDIA_INPUT_ACCEPT = "image/jpeg,image/png,image/webp,image/avif,video/mp4,video/quicktime,video/webm";
+const HEIC_EXTENSION = /\.(heic|heif)$/i;
 const MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   png: "image/png",
   webp: "image/webp",
-  heic: "image/heic",
-  heif: "image/heif",
   avif: "image/avif",
   mp4: "video/mp4",
   mov: "video/quicktime",
@@ -220,11 +228,29 @@ function StatusTimeline({ issue }: { issue: Issue }) {
 
 // ── Media Viewer Component ────────────────────────────────────────────────────
 
-function MediaGallery({ urls, clientId }: { urls: string[]; clientId: number | null | undefined }) {
+function MediaGallery({ urls, clientId, onDelete }: {
+  urls: string[];
+  clientId: number | null | undefined;
+  /** Shown to owners and admins once the issue is resolved or closed. */
+  onDelete?: (url: string) => Promise<void>;
+}) {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [initialIndex, setInitialIndex] = useState(0);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   if (!urls || urls.length === 0) return null;
+
+  const confirmDelete = async (url: string, isVideo: boolean) => {
+    if (!onDelete) return;
+    const what = isVideo ? "video" : "photo";
+    if (!window.confirm(`Delete this ${what} for good to free up storage? The issue and its history stay, and the history will show that you deleted it.`)) return;
+    setDeleting(url);
+    try {
+      await onDelete(url);
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
     <>
@@ -234,13 +260,13 @@ function MediaGallery({ urls, clientId }: { urls: string[]; clientId: number | n
           const src = privateObjectUrl(url, clientId);
           
           return (
+            <div key={url} className="relative flex-shrink-0 snap-start">
             <button
-              key={url}
               type="button"
               onClick={() => { setInitialIndex(idx); setViewerOpen(true); }}
               aria-label={`Open issue media ${idx + 1}`}
               data-testid={`button-open-issue-media-${idx}`}
-              className="relative w-28 h-28 flex-shrink-0 rounded-xl overflow-hidden border border-border bg-muted/30 snap-start active:scale-95 transition-transform"
+              className="relative w-28 h-28 rounded-xl overflow-hidden border border-border bg-muted/30 active:scale-95 transition-transform"
             >
               {isVideo ? (
                 <div className="w-full h-full bg-black/10 flex items-center justify-center">
@@ -252,6 +278,19 @@ function MediaGallery({ urls, clientId }: { urls: string[]; clientId: number | n
                 <img src={src} alt="Issue media" className="w-full h-full object-cover" />
               )}
             </button>
+            {onDelete && (
+              <button
+                type="button"
+                onClick={() => { void confirmDelete(url, isVideo); }}
+                disabled={deleting !== null}
+                aria-label={`Delete issue media ${idx + 1}`}
+                data-testid={`button-delete-issue-media-${idx}`}
+                className="absolute top-1.5 right-1.5 w-8 h-8 rounded-full bg-background/90 border border-border flex items-center justify-center text-red-600 shadow-sm disabled:opacity-50"
+              >
+                {deleting === url ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              </button>
+            )}
+            </div>
           );
         })}
       </div>
@@ -289,6 +328,60 @@ function MediaGallery({ urls, clientId }: { urls: string[]; clientId: number | n
   );
 }
 
+// ── Contractor job ────────────────────────────────────────────────────────────
+
+/** Who has the job outside the business: the contractor, their visit date and whether they finished. */
+function ContractorJobCard({ issue, canAssign, onAssign }: { issue: Issue; canAssign: boolean; onAssign: () => void }) {
+  const day = (value: string) => format(new Date(value), "d MMM yyyy");
+  const jobSent = issue.emailRequestStatus === "sent" && issue.emailRequestMode !== "quote";
+  const waitingApproval = issue.emailRequestStatus === "pending" || issue.emailRequestStatus === "approved";
+  if (!jobSent && !waitingApproval && !canAssign) return null;
+
+  return (
+    <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-3" data-testid="card-contractor-job">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Wrench className="w-4 h-4 text-muted-foreground" /> Contractor
+        </h3>
+        {canAssign && !waitingApproval && issue.emailRequestStatus !== "sending" && (
+          <Button size="sm" variant={jobSent ? "outline" : "default"} onClick={onAssign} className="gap-1.5" data-testid="button-open-assign-contractor">
+            <Send className="w-3.5 h-3.5" /> {jobSent ? "Assign a different contractor" : "Assign a contractor"}
+          </Button>
+        )}
+      </div>
+      {jobSent ? (
+        <ul className="text-sm space-y-1.5">
+          <li>
+            Assigned to <span className="font-medium">{issue.contractorName ?? "a contractor"}</span>
+            {issue.emailSentAt && <span className="text-muted-foreground"> · emailed {day(issue.emailSentAt)}</span>}
+          </li>
+          <li className="flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+            {issue.contractorVisitDate
+              ? <>Visit date: <span className="font-medium">{day(issue.contractorVisitDate)}</span></>
+              : <span className="text-muted-foreground">Waiting for the contractor to pick a visit date</span>}
+          </li>
+          {issue.contractorCompletedAt && (
+            <li className="flex items-center gap-1.5 text-emerald-700">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Contractor marked it done on {day(issue.contractorCompletedAt)}
+            </li>
+          )}
+        </ul>
+      ) : waitingApproval ? (
+        <p className="text-sm text-muted-foreground">
+          The email to {issue.contractorName ?? "the contractor"} is waiting for a manager in Contractor Approvals.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {issue.contractorName
+            ? `${issue.contractorName} is chosen for this job but hasn't been sent it yet.`
+            : "No contractor has this job yet."} Assign one and they get it by email, with a link to pick their visit date.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page Component ───────────────────────────────────────────────────────
 
 export default function FixTrackDetailPage() {
@@ -297,6 +390,13 @@ export default function FixTrackDetailPage() {
   const clientApiFetch = useActiveClientApi();
   const hasFixtrack = hasService("fixtrack");
   const canEdit = user?.role !== "client_viewer";
+  // Owners and admins can delete photos and videos once an issue is finished.
+  const canDeleteMedia = user?.role === "consultant" || user?.role === "client_admin";
+  // Owners, Managers and Maintenance managers give jobs to contractors.
+  const isOwner = useCanAdmin();
+  const isMaintenance = useIsMaintenanceManager();
+  const canAssignContractor = (isOwner || isMaintenance) && canEdit;
+  const [assignOpen, setAssignOpen] = useState(false);
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
@@ -315,6 +415,26 @@ export default function FixTrackDetailPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
+
+  async function deleteMedia(objectPath: string) {
+    if (!issue) return;
+    const issueId = issue.id;
+    try {
+      const res = await clientApiFetch(`/fix-track/issues/${issueId}/media/delete`, {
+        method: "POST",
+        body: JSON.stringify({ objectPath }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? "The file could not be deleted.");
+      setIssue((current) => current?.id === issueId && Array.isArray(body?.mediaUrls)
+        ? { ...current, mediaUrls: body.mediaUrls }
+        : current);
+      toast({ title: "Deleted", description: "The file is gone and the issue history records it." });
+      void loadIssue();
+    } catch (err) {
+      toast({ title: "Couldn't delete the file", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
+    }
+  }
 
   async function loadIssue() {
     try {
@@ -343,15 +463,16 @@ export default function FixTrackDetailPage() {
       for (const [index, file] of files.entries()) {
         try {
           const contentType = mediaContentType(file);
+          if (/^image\/hei[cf]/.test(contentType) || HEIC_EXTENSION.test(file.name)) {
+            throw new Error("HEIC photos can't be read. Save the photo as JPEG and upload it again.");
+          }
           if (!Object.values(MEDIA_TYPE_BY_EXTENSION).includes(contentType)) {
             throw new Error("Use a JPEG, PNG, WebP, MP4, MOV, or WebM file.");
           }
           if (contentType.startsWith("image/") && file.size > 10 * 1024 * 1024) {
             throw new Error("Photos must be 10 MB or smaller.");
           }
-          if (contentType.startsWith("video/") && file.size > 250 * 1024 * 1024) {
-            throw new Error("Videos must be 250 MB or smaller.");
-          }
+          assertWithinUploadLimit(file);
 
           setMediaUploadProgress({
             fileName: file.name,
@@ -606,6 +727,13 @@ export default function FixTrackDetailPage() {
           </div>
         </div>
 
+        <ContractorJobCard
+          issue={issue}
+          canAssign={canAssignContractor && (issue.status === "reported" || issue.status === "in_progress")}
+          onAssign={() => setAssignOpen(true)}
+        />
+        <AssignContractorDialog issue={issue} open={assignOpen} onOpenChange={setAssignOpen} onAssigned={loadIssue} />
+
         {/* Description & Media */}
         <div className="space-y-6">
           {issue.description && (
@@ -624,13 +752,22 @@ export default function FixTrackDetailPage() {
               <h3 className="text-sm font-semibold flex items-center gap-2">
                 <Camera className="w-4 h-4 text-muted-foreground" /> Attachments
               </h3>
-              {issue.mediaUrls && issue.mediaUrls.length > 0 && <MediaGallery urls={issue.mediaUrls} clientId={activeClientId} />}
+              {issue.mediaUrls && issue.mediaUrls.length > 0 && (
+                <MediaGallery
+                  urls={issue.mediaUrls}
+                  clientId={activeClientId}
+                  onDelete={canDeleteMedia && (issue.status === "resolved" || issue.status === "closed") ? deleteMedia : undefined}
+                />
+              )}
+              {canDeleteMedia && issue.mediaUrls && issue.mediaUrls.length > 0 && issue.status !== "resolved" && issue.status !== "closed" && (
+                <p className="text-xs text-muted-foreground">Photos and videos can be deleted to free up storage once the issue is resolved.</p>
+              )}
               {canEdit && (
                 <div className="space-y-3">
                   <input
                     ref={cameraInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,video/mp4,video/quicktime,video/webm"
+                    accept={MEDIA_INPUT_ACCEPT}
                     capture="environment"
                     className="hidden"
                     onChange={handleMediaSelection}
@@ -639,7 +776,7 @@ export default function FixTrackDetailPage() {
                   <input
                     ref={mediaInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,video/mp4,video/quicktime,video/webm"
+                    accept={MEDIA_INPUT_ACCEPT}
                     multiple
                     className="hidden"
                     onChange={handleMediaSelection}

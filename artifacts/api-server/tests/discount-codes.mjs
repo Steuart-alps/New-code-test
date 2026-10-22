@@ -11,6 +11,8 @@
 // Usage: node tests/discount-codes.mjs
 // Exits 0 when all checks pass, 1 otherwise.
 
+import { promoteToConsultant } from "./consultant-account.mjs";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
 let passed = 0;
@@ -63,6 +65,8 @@ async function registerAccount(label, ts, fixedEmail) {
       process.exit(1);
     }
   }
+  // Code status is for consultants; sign-up makes an Owner, so promote.
+  promoteToConsultant(email);
   const me = await session("GET", "/auth/me");
   const user = me.data?.user ?? me.data;
   const clientId = user?.clientId;
@@ -184,7 +188,7 @@ async function main() {
     }
   }
 
-  // Self-signup owners hold the consultant role but are not platform operators.
+  // Consultants who aren't platform operators can't issue codes.
   const ownerIssue = await b.session("POST", "/billing/discount-code");
   check("non-operator owner: POST blocked", ownerIssue.status === 403, `got ${ownerIssue.status}`);
 

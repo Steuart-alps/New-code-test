@@ -143,7 +143,7 @@ try {
   assert.deepEqual([...byRecipient.keys()].sort(), [admin.email, fixer.email].sort());
   ok("one grouped email per eligible recipient; viewers, ordinary staff and leavers get none");
 
-  const enabledTracks = 20;
+  const enabledTracks = 22;
   const seniorMail = byRecipient.get(admin.email);
   assert.match(seniorMail.subject, new RegExp(`^Daily track summary: ${enabledTracks} tracks, ${openActions.length} actions$`));
   for (const title of openActions) assert.ok(seniorMail.text.includes(title), `senior sees ${title}`);
@@ -155,7 +155,7 @@ try {
   // Automatic matching: "Maintenance" is a default department for these
   // tracks, "Kitchen" for DailyTrack AM/PM and KitchenTrack.
   const maintenanceTracks = ["FireTrack", "LegionellaTrack", "AquaTrack", "PATtrack", "PestTrack", "FixTrack",
-    "PremisesTrack", "TubTrack", "TreeTrack", "BikeTrack", "GreenTrack", "RoomTrack"];
+    "PremisesTrack", "TubTrack", "TreeTrack", "BikeTrack", "GreenTrack", "RoomTrack", "COSHHTrack", "Report actions"];
   const fixerMail = byRecipient.get(fixer.email);
   assert.equal(fixerMail.subject, `Daily track summary: ${maintenanceTracks.length} tracks, 2 actions`);
   for (const label of maintenanceTracks) assert.ok(fixerMail.html.includes(`>${label}</a>`), `maintenance manager gets ${label}`);

@@ -1,7 +1,7 @@
-// Storage add-on price alignment: the Stripe per-GiB price must match the
-// provider rate plus ALPS margin (with explicit currency conversion, rounding
-// and Stripe's minimum charge), and drift must pause purchases rather than
-// charge a different amount. The real billing router runs against an
+// Storage add-on price: extra storage is sold at £1 per 10 GiB (a 10p per GiB
+// monthly GBP Stripe price, bought in 10 GiB steps). Any other price, or a
+// provider cost plus ALPS margin above it, must pause purchases rather than
+// charge a different amount or sell at a loss. The real billing router runs against an
 // in-memory DB stub and a fake Stripe client; nothing external is contacted.
 //   node tests/storage-price-check.mjs
 import assert from "node:assert/strict";
@@ -16,7 +16,7 @@ const outFile = path.join(outDir, "storage-price-check.mjs");
 
 for (const key of [
   "STORAGE_PROVIDER_USD_PER_GIB_MONTH", "STORAGE_ALPS_MARKUP_PERCENT", "STORAGE_USD_EXCHANGE_RATE",
-  "STORAGE_PRICE_TOLERANCE_PERCENT", "STORAGE_ADDON_PRICE_ID",
+  "STORAGE_ADDON_PRICE_ID",
 ]) delete process.env[key];
 
 const client = { id: 52, name: "Storage price fixture", stripeCustomerId: "cus_storage", stripeSubscriptionId: null, subscriptionStatus: "active" };
@@ -54,6 +54,7 @@ const stubs = {
         };
       },
       async execute() { return { rows: [] }; },
+      async transaction(fn) { return fn(this); },
     };
   `,
   stripe: `
@@ -101,7 +102,7 @@ function makeSubscription() {
 }
 
 function storagePrice(overrides = {}) {
-  return { id: "price_storage", active: true, type: "recurring", currency: "gbp", unit_amount: 2, recurring: { interval: "month" }, metadata: {}, ...overrides };
+  return { id: "price_storage", active: true, type: "recurring", currency: "gbp", unit_amount: 10, recurring: { interval: "month" }, metadata: {}, ...overrides };
 }
 
 function fakeStripe() {
@@ -156,67 +157,52 @@ try {
     }],
   });
   const lib = await import(pathToFileURL(outFile).href);
-  const { evaluateStorageAddonPrice: evaluate, minimumStoragePurchaseGib, checkStorageAddonPrice, resetStoragePriceCheckCache } = lib;
-  const GBP = { STORAGE_USD_EXCHANGE_RATE: "0.79" };
+  const { evaluateStorageAddonPrice: evaluate, isWholeStoragePacks, roundUpToStoragePacks, checkStorageAddonPrice, resetStoragePriceCheckCache } = lib;
+  const GBP = { STORAGE_USD_EXCHANGE_RATE: "0.76" };
 
   console.log("── price calculation ──");
-  check("default 0.015 USD + 20% at 0.79 GBP/USD is 1.422p, rounded up to 2p: in line", () => {
+  check("10p per GiB (£1 per 10 GiB) covers the default 0.026 USD + 20% at 0.76 GBP/USD (2.3712p, so 3p)", () => {
     const result = evaluate(storagePrice(), GBP);
     assert.equal(result.status, "ok", result.message);
-    assert.equal(result.exactUnitAmount, 1.422);
-    assert.equal(result.expectedUnitAmount, 2);
-    assert.deepEqual(result.allowedUnitAmount, { min: 2, max: 2 });
-    assert.equal(result.minimumPurchaseGib, 15, "15 GiB × 2p reaches Stripe's 30p minimum");
+    assert.equal(result.expectedUnitAmount, 10);
+    assert.equal(result.exactUnitAmount, 2.3712);
+    assert.equal(result.costUnitAmount, 3);
+    assert.equal(result.packGib, 10);
+    assert.equal(result.minimumPurchaseGib, 10, "one 10 GiB step is £1, above Stripe's 30p minimum");
   });
-  check("a GBP price without an exchange rate cannot be checked, so it is not trusted", () => {
+  check("without an exchange rate the check assumes 1 USD = £1, which overstates the cost", () => {
     const result = evaluate(storagePrice(), {});
-    assert.equal(result.status, "misconfigured");
-    assert.deepEqual(result.issues, ["exchange_rate_missing"]);
+    assert.equal(result.status, "ok", result.message);
+    assert.equal(result.usdExchangeRate, 1);
+    assert.equal(result.exchangeRateAssumed, true);
+    assert.equal(result.costUnitAmount, 4);
   });
   for (const fx of ["0", "-1", "abc"]) {
     check(`exchange rate "${fx}" is rejected`, () => assert.deepEqual(evaluate(storagePrice(), { STORAGE_USD_EXCHANGE_RATE: fx }).issues, ["exchange_rate_invalid"]));
   }
-  check("a USD price needs no exchange rate (1.8c rounds up to 2c; minimum 25 GiB for 50c)", () => {
-    const result = evaluate(storagePrice({ currency: "usd" }), {});
-    assert.equal(result.status, "ok", result.message);
-    assert.equal(result.usdExchangeRate, 1);
-    assert.equal(result.minimumPurchaseGib, 25);
-  });
-  check("provider rate rising to 0.023 USD makes the 2p price drift (expected 3p)", () => {
-    const result = evaluate(storagePrice(), { ...GBP, STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.023" });
+  check("costs rising above 10p pause sales (0.09 USD + 20% at 0.76 = 8.208p is fine, 0.11 USD = 10.032p is not)", () => {
+    assert.equal(evaluate(storagePrice(), { ...GBP, STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.09" }).status, "ok");
+    const result = evaluate(storagePrice(), { ...GBP, STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.11" });
     assert.equal(result.status, "drift");
-    assert.deepEqual(result.issues, ["price_below_expected"]);
-    assert.equal(result.expectedUnitAmount, 3);
-    assert.match(result.message, /expected 0\.03 GBP/);
+    assert.deepEqual(result.issues, ["price_below_cost"]);
+    assert.equal(result.costUnitAmount, 11);
+    assert.match(result.message, /no longer covers/);
   });
-  check("a price above the margin is drift too (customers would pay more than shown)", () => {
-    assert.deepEqual(evaluate(storagePrice({ unit_amount: 5 }), GBP).issues, ["price_above_expected"]);
-  });
-  check("tolerance is applied after rounding up (1.00 USD + 20% at 0.80 = 96p, 5% → 92p to 101p)", () => {
-    const env = { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "1", STORAGE_USD_EXCHANGE_RATE: "0.8" };
-    assert.deepEqual(evaluate(storagePrice(), env).allowedUnitAmount, { min: 92, max: 101 });
-    for (const [amount, status] of [[91, "drift"], [92, "ok"], [96, "ok"], [101, "ok"], [102, "drift"]]) {
-      assert.equal(evaluate(storagePrice({ unit_amount: amount }), env).status, status, `${amount}p`);
-    }
-    assert.deepEqual(evaluate(storagePrice({ unit_amount: 96 }), { ...env, STORAGE_PRICE_TOLERANCE_PERCENT: "0" }).allowedUnitAmount, { min: 96, max: 96 });
-  });
-  check("floating-point noise does not round a whole amount up (0.07 USD → 7c, not 8c)", () => {
-    const result = evaluate(storagePrice({ currency: "usd", unit_amount: 7 }), { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.07", STORAGE_ALPS_MARKUP_PERCENT: "0" });
-    assert.equal(result.expectedUnitAmount, 7);
+  check("floating-point noise does not round a whole amount up (exactly 10p is still ok)", () => {
+    const result = evaluate(storagePrice(), { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.1", STORAGE_ALPS_MARKUP_PERCENT: "0", STORAGE_USD_EXCHANGE_RATE: "1" });
+    assert.equal(result.costUnitAmount, 10);
     assert.equal(result.status, "ok");
-  });
-  check("a near-zero rate still expects at least 1 minor unit", () => {
-    assert.equal(evaluate(storagePrice({ unit_amount: 1 }), { ...GBP, STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0" }).expectedUnitAmount, 1);
   });
   const misconfigured = {
     "inactive price": [{ active: false }, {}, "price_inactive"],
     "yearly price": [{ recurring: { interval: "year" } }, {}, "price_not_monthly"],
     "one-off price": [{ type: "one_time", recurring: null }, {}, "price_not_monthly"],
-    "sub-penny decimal price": [{ unit_amount: null }, {}, "price_not_whole_minor_units"],
-    "unsupported currency": [{ currency: "jpy" }, {}, "currency_unsupported"],
+    "the old 2p per GiB price": [{ unit_amount: 2 }, {}, "price_not_storage_rate"],
+    "a dearer price than shown": [{ unit_amount: 12 }, {}, "price_not_storage_rate"],
+    "sub-penny decimal price": [{ unit_amount: null }, {}, "price_not_storage_rate"],
+    "a USD price": [{ currency: "usd" }, {}, "currency_unsupported"],
     "invalid provider rate": [{}, { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "abc" }, "rate_config_invalid"],
     "negative margin": [{}, { STORAGE_ALPS_MARKUP_PERCENT: "-5" }, "rate_config_invalid"],
-    "invalid tolerance": [{}, { STORAGE_PRICE_TOLERANCE_PERCENT: "100" }, "tolerance_invalid"],
   };
   for (const [name, [priceOverrides, env, issue]] of Object.entries(misconfigured)) {
     check(`${name} is misconfigured, not ok`, () => {
@@ -225,12 +211,15 @@ try {
       assert.ok(result.issues.includes(issue), JSON.stringify(result.issues));
     });
   }
-  check("Stripe minimum-charge quantities", () => {
-    assert.equal(minimumStoragePurchaseGib(2, "gbp"), 15);
-    assert.equal(minimumStoragePurchaseGib(30, "gbp"), 1);
-    assert.equal(minimumStoragePurchaseGib(31, "GBP"), 1);
-    assert.equal(minimumStoragePurchaseGib(7, "usd"), 8);
-    assert.equal(minimumStoragePurchaseGib(2, "jpy"), null);
+  check("10 GiB steps", () => {
+    assert.equal(isWholeStoragePacks(0), true);
+    assert.equal(isWholeStoragePacks(30), true);
+    assert.equal(isWholeStoragePacks(15), false);
+    assert.equal(isWholeStoragePacks(-10), false);
+    assert.equal(roundUpToStoragePacks(0), 0);
+    assert.equal(roundUpToStoragePacks(1), 10);
+    assert.equal(roundUpToStoragePacks(20), 20);
+    assert.equal(roundUpToStoragePacks(21), 30);
   });
 
   console.log("── cached check ──");
@@ -247,13 +236,15 @@ try {
     state.storagePrice = new Error("Stripe down");
     const unavailable = await checkStorageAddonPrice({ env, maxAgeMs: 0 });
     check("an unreadable Stripe price is 'unavailable', never 'ok'", () => assert.equal(unavailable.status, "unavailable"));
-    const notConfigured = await checkStorageAddonPrice({ env: GBP });
-    check("no price id means the add-on is simply not offered", () => assert.equal(notConfigured.status, "not_configured"));
+    const notConfigured = await checkStorageAddonPrice({ env: GBP, findPriceId: async () => null });
+    check("no storage price means the add-on is simply not offered", () => assert.equal(notConfigured.status, "not_configured"));
+    const lookupFailed = await checkStorageAddonPrice({ env: GBP, maxAgeMs: 0, findPriceId: async () => { throw new Error("db down"); } });
+    check("a failed price lookup is 'unavailable', never 'ok'", () => assert.equal(lookupFailed.status, "unavailable"));
   }
 
   console.log("── billing routes ──");
   process.env.STORAGE_ADDON_PRICE_ID = "price_storage";
-  process.env.STORAGE_USD_EXCHANGE_RATE = "0.79";
+  process.env.STORAGE_USD_EXCHANGE_RATE = "0.76";
   const express = (await import("express")).default;
   const app = express();
   app.use(express.json());
@@ -280,61 +271,82 @@ try {
 
   fresh(storagePrice());
   let config = await request("GET", "/config");
-  check("config offers the add-on with its real price and minimum quantity", () => {
+  check("config offers the add-on at £1 per 10 GiB, in 10 GiB steps", () => {
     assert.equal(config.status, 200);
     assert.equal(config.data.storageAddonAvailable, true);
-    assert.deepEqual(config.data.storageAddon, { unitAmount: 2, currency: "gbp", minimumGib: 15 });
+    assert.deepEqual(config.data.storageAddon, { unitAmount: 10, currency: "gbp", minimumGib: 10, packGib: 10 });
   });
 
-  fresh(storagePrice({ unit_amount: 1 }));
+  fresh(storagePrice({ unit_amount: 2 }));
   config = await request("GET", "/config");
-  check("config hides the add-on while the price has drifted", () => {
+  check("config hides the add-on while the Stripe price is not the storage price", () => {
     assert.equal(config.data.storageAddonAvailable, false);
     assert.equal(config.data.storageAddon, null);
   });
-  check("drift is logged as an operator error", () => assert.ok(state.logged.some((entry) => /price drift/.test(entry.msg))));
+  check("a wrong price is logged as an operator error", () => assert.ok(state.logged.some((entry) => /price drift/.test(entry.msg))));
 
   fresh(new Error("Stripe down"));
   config = await request("GET", "/config");
   check("config hides the add-on when the Stripe price cannot be read", () => assert.equal(config.data.storageAddonAvailable, false));
 
-  fresh(storagePrice({ unit_amount: 1 }));
+  fresh(storagePrice({ unit_amount: 2 }));
   let response = await buy(20);
-  check("a purchase at a drifted price is refused and nothing is changed or charged", () => {
+  check("a purchase at a wrong price is refused and nothing is changed or charged", () => {
     assert.equal(response.status, 503);
     assert.equal(response.data.code, "STORAGE_PRICE_UNDER_REVIEW");
     assert.match(response.data.error, /not been charged/);
     assert.deepEqual(state.stripe.calls.subscriptionUpdate, []);
     assert.deepEqual(state.stripe.calls.invoiceCreate, []);
-    assert.ok(state.logged.some((entry) => /refused/.test(entry.msg) && entry.obj.storagePriceCheck?.expectedUnitAmount === 2));
+    assert.ok(state.logged.some((entry) => /refused/.test(entry.msg) && entry.obj.storagePriceCheck?.expectedUnitAmount === 10));
   });
 
   fresh(storagePrice());
-  process.env.STORAGE_USD_EXCHANGE_RATE = "";
+  process.env.STORAGE_PROVIDER_USD_PER_GIB_MONTH = "0.2";
   response = await buy(20);
-  check("a purchase without an exchange rate for a GBP price is refused", () => {
+  check("a purchase is refused when costs exceed the price", () => {
     assert.equal(response.status, 503);
     assert.deepEqual(state.stripe.calls.subscriptionUpdate, []);
   });
-  process.env.STORAGE_USD_EXCHANGE_RATE = "0.79";
+  delete process.env.STORAGE_PROVIDER_USD_PER_GIB_MONTH;
+
+  for (const gib of [5, 15]) {
+    fresh(storagePrice());
+    response = await buy(gib);
+    check(`${gib} GiB is not a whole 10 GiB step, so it is refused`, () => {
+      assert.equal(response.status, 400);
+      assert.match(response.data.error, /multiple of 10/);
+      assert.deepEqual(state.stripe.calls.subscriptionUpdate, []);
+    });
+  }
 
   fresh(storagePrice());
-  response = await buy(5);
-  check("a purchase below Stripe's minimum charge is refused with the minimum", () => {
-    assert.equal(response.status, 400);
-    assert.equal(response.data.code, "STORAGE_PURCHASE_BELOW_MINIMUM");
-    assert.equal(response.data.minimumGib, 15);
-    assert.match(response.data.error, /15 GiB.*0\.30 GBP/);
-    assert.deepEqual(state.stripe.calls.subscriptionUpdate, []);
+  response = await buy(20);
+  check("buying 20 GiB adds 20 GiB and puts £2 for the first month on the next bill", () => {
+    assert.equal(response.status, 201, JSON.stringify(response.data));
+    assert.deepEqual(response.data, { gibAdded: 20, monthlyGib: 20, unitAmount: 10, currency: "gbp" });
+    assert.equal(state.stripe.calls.subscriptionUpdate[0].params.items[0].quantity, 20);
+    assert.equal(state.stripe.calls.subscriptionUpdate[0].params.proration_behavior, "none");
+    assert.equal(state.stripe.calls.invoiceItemCreate[0].amount, 200);
+    // Pending on the subscription's next invoice, not a separate card payment.
+    assert.equal(state.stripe.calls.invoiceItemCreate[0].subscription, "sub_storage");
+    assert.equal(state.stripe.calls.invoiceItemCreate[0].invoice, undefined);
+    assert.deepEqual(state.stripe.calls.invoiceCreate, []);
   });
 
   fresh(storagePrice());
-  response = await buy(15);
-  check("an in-line purchase charges exactly price × GiB and adds the GiB to the subscription", () => {
-    assert.equal(response.status, 201, JSON.stringify(response.data));
-    assert.deepEqual(response.data, { gibAdded: 15, monthlyGib: 15, unitAmount: 2, currency: "gbp" });
-    assert.equal(state.stripe.calls.subscriptionUpdate[0].params.items[0].quantity, 15);
-    assert.equal(state.stripe.calls.invoiceItemCreate[0].amount, 30);
+  state.stripe.invoiceItems.create = async () => { throw new Error("Stripe down"); };
+  state.stripe.invoiceItems.list = async () => ({ data: [] });
+  const deleted = [];
+  state.stripe.subscriptionItems.del = async (id) => { deleted.push(id); return {}; };
+  state.stripe.subscriptions.update = async () => {
+    state.subscription.items.data.push({ id: "si_storage", quantity: 20, price: { id: "price_storage", metadata: { service_key: "storage" } } });
+    return state.subscription;
+  };
+  response = await buy(20);
+  check("if the first month can't be added, the storage is taken off again and nothing is charged", () => {
+    assert.equal(response.status, 502);
+    assert.match(response.data.error, /not been charged/);
+    assert.deepEqual(deleted, ["si_storage"]);
   });
 
   console.log(`\n${passed} storage price checks passed`);

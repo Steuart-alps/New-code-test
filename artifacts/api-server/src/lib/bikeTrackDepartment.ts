@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { db } from "@workspace/db";
 import { sql, type SQL } from "drizzle-orm";
 import { getActiveDepartmentId, getClientId } from "../middleware/requireAuth";
+import { siteVisibleSql, visibleSiteIdsSql } from "./departmentSites";
 
 // BikeTrack department scoping. Department-scoped staff and viewers see and
 // change only bikes at their department's sites, plus site-neutral ones, as on
@@ -9,21 +10,17 @@ import { getActiveDepartmentId, getClientId } from "../middleware/requireAuth";
 // services follow their bike. Writes are checked by bikeDepartmentWrites, ahead
 // of every handler, so the web and phone routes share the rule.
 
-function departmentSites(clientId: number, departmentId: number) {
-  return sql`SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${departmentId})`;
-}
-
 /** SQL condition (with leading AND) limiting `siteColumn` to the caller's department, or nothing. */
 export function departmentScope(req: Request, clientId: number, siteColumn: SQL) {
   const departmentId = getActiveDepartmentId(req);
-  return departmentId === null ? sql`` : sql`AND (${siteColumn} IS NULL OR ${siteColumn} IN (${departmentSites(clientId, departmentId)}))`;
+  return departmentId === null ? sql`` : sql`AND (${siteColumn} IS NULL OR ${siteColumn} IN (${visibleSiteIdsSql(clientId, departmentId)}))`;
 }
 
 async function siteAllowed(siteId: unknown, clientId: number, departmentId: number) {
   // Null is a site-neutral record; non-numbers are rejected by the body schemas.
   if (typeof siteId !== "number") return true;
-  const result = await db.execute(sql`SELECT 1 FROM sites WHERE id = ${siteId} AND client_id = ${clientId}
-    AND (department_id IS NULL OR department_id = ${departmentId})`);
+  const result = await db.execute(sql`SELECT 1 FROM sites s WHERE s.id = ${siteId} AND s.client_id = ${clientId}
+    AND ${siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId)}`);
   return (result.rows ?? []).length > 0;
 }
 

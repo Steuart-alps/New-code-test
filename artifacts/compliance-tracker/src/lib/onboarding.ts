@@ -11,6 +11,7 @@ export const BUSINESS_TYPE_OPTIONS = [
   { value: "offices_commercial", label: "Offices / Commercial" },
   { value: "retail", label: "Retail" },
   { value: "pest_control", label: "Pest Control" },
+  { value: "golf_club", label: "Golf Club" },
   { value: "other", label: "Other" },
 ] as const;
 
@@ -41,6 +42,7 @@ export const MODULE_INFO: Record<string, { label: string; href: string; hint: st
   pesttrack: { label: "PestTrack", href: "/pest-track", hint: "Pest control visits and sightings" },
   premisestrack: { label: "PremisesTrack", href: "/premises-track", hint: "Premises inspections" },
   roomtrack: { label: "RoomTrack", href: "/room-track", hint: "Room checks" },
+  coshhtrack: { label: "COSHHTrack", href: "/coshh-track", hint: "COSHH assessments and extraction tests" },
   dailytrack_am: { label: "DailyTrack AM", href: "/daily-track-am", hint: "Opening checklist" },
   dailytrack_pm: { label: "DailyTrack PM", href: "/daily-track-pm", hint: "Closing checklist" },
 };
@@ -56,14 +58,33 @@ export const RECOMMENDED_MODULES: Record<string, string[]> = {
   offices_commercial: ["firetrack", "pattrack", "incidenttrack", "doctrack"],
   retail: ["firetrack", "pattrack", "premisestrack", "incidenttrack"],
   pest_control: ["pesttrack", "doctrack", "traintrack"],
+  golf_club: ["firetrack", "legionellatrack", "kitchentrack", "premisestrack", "treetrack", "incidenttrack", "greentrack"],
   other: ["firetrack", "incidenttrack", "doctrack"],
+};
+
+/**
+ * Department names pre-ticked in setup for each business type; the owner
+ * removes or adds names before saving. No type: the hospitality set.
+ */
+export const DEPARTMENT_SUGGESTIONS: Record<string, string[]> = {
+  hotel_accommodation: ["Front of house", "Housekeeping", "Kitchen", "Maintenance"],
+  holiday_park_campsite: ["Front of house", "Housekeeping", "Grounds", "Leisure", "Maintenance"],
+  leisure_sports_centre: ["Front of house", "Pool", "Gym", "Maintenance"],
+  restaurant_cafe_pub: ["Front of house", "Kitchen", "Bar", "Cellar"],
+  care_home_healthcare: ["Care", "Kitchen", "Housekeeping", "Maintenance"],
+  nursery_school: ["Teaching", "Kitchen", "Caretaking", "Office"],
+  offices_commercial: ["Office", "Facilities", "Front of house"],
+  retail: ["Shop floor", "Stockroom", "Office"],
+  pest_control: ["Field team", "Office"],
+  golf_club: ["Greenkeeping", "Clubhouse", "Kitchen", "Bar", "Pro shop", "Maintenance"],
+  other: ["Front of house", "Housekeeping", "Maintenance"],
 };
 
 /** Order for choosing the module whose record form to open first. */
 export const FIRST_RECORD_PRIORITY = [
   "dailytrack_am", "kitchentrack", "firetrack", "legionellatrack", "aquatrack", "hottubtrack", "premisestrack",
   "roomtrack", "pattrack", "pesttrack", "incidenttrack", "fixtrack", "traintrack", "doctrack",
-  "treetrack", "biketrack", "greentrack", "dailytrack_pm",
+  "treetrack", "biketrack", "greentrack", "coshhtrack", "dailytrack_pm",
 ];
 
 export function moduleLabel(key: string | null | undefined): string | null {

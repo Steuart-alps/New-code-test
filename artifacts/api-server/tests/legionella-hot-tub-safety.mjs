@@ -56,6 +56,23 @@ const run = async () => {
   check("ordinary hot outlet at 42°C still fails", plainHot.data?.result === "fail");
   const outletStatus = await request("GET", "/legionella/outlet-status");
   check("TMV outlet is logged as a hot check", (outletStatus.data ?? []).find(o => o.id === tmv.data?.id)?.checkTypeForOutlet === "hot_sentinel_temp");
+  // Little-used outlets are flushed weekly; their status covers the last 7 days.
+  const littleUsed = await request("POST", "/legionella/outlets", { name: "Outlet 3", type: "little_used", location: "Plant room hose", siteId, sortOrder: 3 });
+  check("little-used outlet type can be registered", littleUsed.status === 201 && littleUsed.data?.type === "little_used", littleUsed.status);
+  const littleStatus = () => request("GET", "/legionella/outlet-status").then(r => (r.data ?? []).find(o => o.id === littleUsed.data?.id));
+  const beforeFlush = await littleStatus();
+  check("little-used outlet is logged as a weekly flush", beforeFlush?.checkTypeForOutlet === "outlet_flush" && beforeFlush?.period === "week"
+    && beforeFlush?.testedThisMonth === false, JSON.stringify(beforeFlush));
+  const oldFlush = await request("POST", "/legionella", { checkType: "outlet_flush", checkDate: new Date(Date.now() - 9 * 86400000).toISOString().slice(0, 10), result: "pass", siteId, outletId: littleUsed.data?.id, performedBy: "Integration tester" });
+  check("a flush can be recorded against the outlet", oldFlush.status === 201, JSON.stringify(oldFlush.data));
+  check("a flush 9 days ago does not count for this week", (await littleStatus())?.testedThisMonth === false);
+  const flush = await request("POST", "/legionella", { checkType: "outlet_flush", checkDate: day, result: "pass", siteId, outletId: littleUsed.data?.id, performedBy: "Integration tester" });
+  check("today's flush is recorded", flush.status === 201, JSON.stringify(flush.data));
+  check("today's flush counts for this week", (await littleStatus())?.testedThisMonth === true);
+  const wrongType = await request("POST", "/legionella", { checkType: "hot_sentinel_temp", checkDate: day, result: "pass", temperature: 55, siteId, outletId: littleUsed.data?.id, performedBy: "Integration tester" });
+  check("a little-used outlet does not take a temperature check", wrongType.status === 400, wrongType.status);
+  const tmvStatus = (await request("GET", "/legionella/outlet-status")).data?.find(o => o.id === tmv.data?.id);
+  check("sentinel outlets stay monthly", tmvStatus?.period === "month", JSON.stringify(tmvStatus));
   const legionella = await request("POST", "/legionella", { checkType: "calorifier_temp", checkDate: day, result: "pass", temperature: 55, siteId, performedBy: "Integration tester" });
   check("unsafe Legionella POST fails", legionella.status === 201 && legionella.data?.result === "fail", legionella.status);
   const hotTub = await request("POST", "/hot-tub", { checkType: "water_chemistry", checkDate: day, result: "pass", phValue: 8.2, sanitiserLevel: 2, temperature: 41, siteId, performedBy: "Integration tester" });

@@ -37,7 +37,7 @@ const bundled = await build({
     name: 'native-test-io',
     setup(builder) {
       builder.onResolve({
-        filter: /^(react-native|react-native-safe-area-context|@expo\/vector-icons|expo-router|expo-haptics|@\/hooks\/useColors|@\/lib\/auth|@\/lib\/api|@\/components\/KeyboardAwareScrollViewCompat)$/,
+        filter: /^(react-native|react-native-safe-area-context|@expo\/vector-icons|expo-router|expo-haptics|expo-camera|@\/hooks\/useColors|@\/lib\/auth|@\/lib\/api|@\/components\/KeyboardAwareScrollViewCompat)$/,
       }, () => ({ path: nativePath }));
       // The production outbox core with in-memory storage, signed in as the fixture user.
       builder.onResolve({ filter: /^@\/lib\/checkOutbox$/ }, () => ({

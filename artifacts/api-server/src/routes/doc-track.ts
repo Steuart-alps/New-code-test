@@ -5,21 +5,23 @@ import { sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectContentError, ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import {
   createAcknowledgementRegisterPdf,
   createCombinedAcknowledgementRegisterPdf,
 } from "../lib/acknowledgementRegisterPdf";
 import { newBearerToken } from "../lib/bearerTokens";
+import { recordSiteVisibleSql, siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
 
 const router = Router();
 const storage = new ObjectStorageService();
 
 async function canAccessSite(clientId: number, siteId: number | null | undefined, departmentId: number | null) {
   if (siteId == null) return true;
-  const result = await db.execute(sql`SELECT department_id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1`);
+  const result = await db.execute(sql`SELECT id, department_id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1`);
   const site = (result.rows ?? [])[0] as any;
-  return !!site && (departmentId === null || site.department_id === null || site.department_id === departmentId);
+  return !!site && await siteVisibleToDepartment({ id: site.id, departmentId: site.department_id }, departmentId);
 }
 async function canAccessDocument(clientId: number, documentId: number, departmentId: number | null) {
   const result = await db.execute(sql`
@@ -30,7 +32,8 @@ async function canAccessDocument(clientId: number, documentId: number, departmen
   `);
   const doc = (result.rows ?? [])[0] as any;
   if (!doc) return false;
-  const siteAllowed = doc.site_id === null || departmentId === null || doc.department_id === null || doc.department_id === departmentId;
+  const siteAllowed = doc.site_id === null
+    || await siteVisibleToDepartment({ id: doc.site_id, departmentId: doc.department_id }, departmentId);
   const documentAllowed = departmentId === null || doc.department === null || doc.department === doc.caller_department;
   return siteAllowed && documentAllowed;
 }
@@ -117,7 +120,7 @@ router.get("/documents", requireAuth, async (req, res) => {
          AND (d.site_id IS NULL OR sr.site_id = d.site_id)
     ) ack_status ON d.requires_acknowledgement = true
     WHERE d.client_id = ${clientId}
-      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
+      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR ${siteVisibleSql(sql`d.site_id`, sql`s.department_id`, getActiveDepartmentId(req)!)})
         AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
     ORDER BY d.created_at DESC
   `);
@@ -164,6 +167,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
     if (!existingAcl?.owner && !objectPath.startsWith(tenantUploadPrefix)) {
       return res.status(403).json({ error: "Upload was not reserved for this account" });
     }
+    await storage.enforceUploadSizeLimit(objectPath, clientId);
     // The file's own bytes decide its type (an allow-list of document
     // formats), never the type the browser declared, so an uploaded HTML or
     // SVG file can't be served back as a page on the app's origin.
@@ -334,7 +338,8 @@ router.get("/documents/:id/acknowledgements/export", requireAuth, requireClientA
       AND sr.active = true
       AND (${document.department}::text IS NULL OR sr.department = ${document.department})
       AND (${document.site_id}::integer IS NULL OR sr.site_id = ${document.site_id})
-      ${getActiveDepartmentId(req) !== null ? sql`AND (sr.department IS NULL OR sr.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
+      ${getActiveDepartmentId(req) !== null ? sql`AND (sr.department IS NULL OR sr.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))
+        AND ${recordSiteVisibleSql(sql`sr.site_id`, getActiveDepartmentId(req)!)}` : sql``}
     ORDER BY sr.name ASC
   `);
   const acknowledgementResult = await db.execute(sql`
@@ -439,7 +444,7 @@ router.get("/acknowledgements/my", requireAuth, async (req, res) => {
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
       AND (d.department IS NULL OR d.department = ${roster.department})
       AND (d.site_id IS NULL OR d.site_id = ${roster.site_id})
-      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
+      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR ${siteVisibleSql(sql`d.site_id`, sql`s.department_id`, getActiveDepartmentId(req)!)})
         AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
     ORDER BY d.created_at DESC
   `);
@@ -461,7 +466,7 @@ async function getAcknowledgementOverview(clientId: number, departmentId: number
     FROM doc_track_documents d
     LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = d.client_id
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
-      ${departmentId !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${departmentId})
+      ${departmentId !== null ? sql`AND (d.site_id IS NULL OR ${siteVisibleSql(sql`d.site_id`, sql`s.department_id`, departmentId)})
         AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${departmentId}))` : sql``}
     ORDER BY d.title ASC
   `);
@@ -471,7 +476,8 @@ async function getAcknowledgementOverview(clientId: number, departmentId: number
   const staffResult = await db.execute(sql`
     SELECT id, name, department, site_id FROM staff_roster
     WHERE client_id = ${clientId} AND active = true
-      ${departmentId !== null ? sql`AND (department IS NULL OR department = (SELECT name FROM departments WHERE id = ${departmentId}))` : sql``}
+      ${departmentId !== null ? sql`AND (department IS NULL OR department = (SELECT name FROM departments WHERE id = ${departmentId}))
+        AND ${recordSiteVisibleSql(sql`staff_roster.site_id`, departmentId)}` : sql``}
     ORDER BY name ASC
   `);
   const staff = (staffResult.rows ?? []) as any[];
@@ -861,6 +867,7 @@ router.post("/documents/request-upload", requireAuth, denyViewers, async (req, r
   }).parse(req.body); // validate — name/contentType not used server-side
 
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });

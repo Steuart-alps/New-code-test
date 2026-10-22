@@ -21,12 +21,16 @@ import {
   getSafeTrackReminderLastSentAt,
 } from "../lib/safeTrackAckReminders";
 import { REQUIRE_TWO_FACTOR_SETTING } from "../lib/twoFactorPolicy";
+import { OWNER_UPDATE_FREQUENCIES, OWNER_UPDATE_FREQUENCY_SETTING } from "../lib/personalReminders";
+import { REMINDER_TIMINGS_SETTING, validateReminderTimings } from "@workspace/api-zod/reminder-timings";
 import { isAllowedTenantSender, sanitizeSenderName } from "../lib/email";
 import {
   buildTrackSummaryPreview,
   loadTrackSummaryRoutingContext,
   parseTrackSummaryRouting,
 } from "../lib/trackActionReminders";
+import { STORAGE_AUTO_TOP_UP_SETTING } from "../lib/storageFull";
+import { TODAY_BY_DEPARTMENT_ROLES_SETTING, normalizeTodayByDepartmentRoles } from "../lib/todayByDepartment";
 
 const router: IRouter = Router();
 
@@ -58,12 +62,25 @@ const SETTING_KEYS = [
   // JSON map of operational module keys to the active manager user IDs who
   // should receive that track's daily action summary.
   "trackSummaryRouting",
-  // Account-level warning only; reaching it never blocks or deletes uploads.
+  // Account-level warning level for the storage email; the hard stop is the
+  // paid capacity (lib/storageLimit.ts), whichever is lower warns first.
   "storageWarningThresholdBytes",
+  // "true" buys 10 GB of storage automatically when the paid capacity is full;
+  // otherwise new uploads stop there. Owners and consultants only.
+  STORAGE_AUTO_TOP_UP_SETTING,
   ACCOUNT_TIMEZONE_SETTING,
   // "false" lets login accounts in this business skip the authenticator app;
   // absent or "true" keeps two-factor authentication mandatory.
   REQUIRE_TWO_FACTOR_SETTING,
+  // JSON {managers, maintenance, staff}: who besides Owners sees the
+  // dashboard's "Today by department" card (lib/todayByDepartment.ts).
+  TODAY_BY_DEPARTMENT_ROLES_SETTING,
+  // "weekly" (default) or "daily": when Owners get their update email
+  // (lib/personalReminders.ts).
+  OWNER_UPDATE_FREQUENCY_SETTING,
+  // JSON: per type, how many days before and how often when overdue the
+  // personal reminder email lists it (@workspace/api-zod/reminder-timings).
+  REMINDER_TIMINGS_SETTING,
 ] as const;
 
 // Secrets are write-only: GET /settings reports only whether one is set.
@@ -175,7 +192,7 @@ async function validateTrackSummaryRouting(
       ));
     const eligibleIds = new Set(
       eligible
-        .filter((user) => user.role === "client_admin" || user.role === "client_staff")
+        .filter((user) => user.role === "client_admin" || user.role === "client_manager" || user.role === "client_staff")
         .map((user) => user.id),
     );
     if ([...requestedIds].some((id) => !eligibleIds.has(id))) {
@@ -270,6 +287,20 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     }
     rawBody.fixTrackStaleDays = String(parsed);
   }
+  if (rawBody[OWNER_UPDATE_FREQUENCY_SETTING] !== undefined && rawBody[OWNER_UPDATE_FREQUENCY_SETTING] !== null
+    && !(OWNER_UPDATE_FREQUENCIES as readonly string[]).includes(rawBody[OWNER_UPDATE_FREQUENCY_SETTING]!)) {
+    res.status(400).json({ error: "Owner update must be weekly or daily" });
+    return;
+  }
+  const rawTimings = rawBody[REMINDER_TIMINGS_SETTING];
+  if (rawTimings !== undefined && rawTimings !== null) {
+    const validated = validateReminderTimings(rawTimings);
+    if (!validated.ok) {
+      res.status(400).json({ error: validated.error });
+      return;
+    }
+    rawBody[REMINDER_TIMINGS_SETTING] = Object.keys(validated.value).length ? JSON.stringify(validated.value) : null;
+  }
   if (rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING] !== undefined) {
     const rawLeadDays = rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING];
     if (rawLeadDays === null || rawLeadDays.trim() === "") {
@@ -299,6 +330,13 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     rawBody.storageWarningThresholdBytes = String(threshold);
     }
   }
+  if (rawBody[STORAGE_AUTO_TOP_UP_SETTING] !== undefined) {
+    const rawTopUp = rawBody[STORAGE_AUTO_TOP_UP_SETTING];
+    if (rawTopUp !== null && rawTopUp !== "true" && rawTopUp !== "false") {
+      res.status(400).json({ error: "Automatic storage top-up must be true or false" });
+      return;
+    }
+  }
   if (rawBody[ACCOUNT_TIMEZONE_SETTING] !== undefined) {
     const rawTimezone = rawBody[ACCOUNT_TIMEZONE_SETTING];
     if (rawTimezone === null || rawTimezone.trim() === "") {
@@ -319,7 +357,7 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     }
     req.log.info(
-      { clientId, actorId: req.currentUser!.id, required: rawRequired !== "false" },
+      { clientId, actorId: req.currentUser!.id, required: rawRequired === "true" },
       "Two-factor requirement changed",
     );
   }
@@ -372,6 +410,17 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
         return;
       }
       rawBody.smtpFrom = rawFrom.trim();
+    }
+  }
+  if (rawBody[TODAY_BY_DEPARTMENT_ROLES_SETTING] !== undefined) {
+    const rawRoles = rawBody[TODAY_BY_DEPARTMENT_ROLES_SETTING];
+    if (rawRoles !== null) {
+      const normalized = normalizeTodayByDepartmentRoles(rawRoles);
+      if (normalized === null) {
+        res.status(400).json({ error: "Today by department roles must be managers, maintenance and staff set to true or false" });
+        return;
+      }
+      rawBody[TODAY_BY_DEPARTMENT_ROLES_SETTING] = normalized;
     }
   }
   if (rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] !== undefined) {

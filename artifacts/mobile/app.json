@@ -56,6 +56,14 @@
           "microphonePermission": false
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "ComplyTrack uses the camera to take photos as evidence for issue reports, check records and certificates, and to scan appliance asset tags.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
       "expo-secure-store"
     ],
     "experiments": {

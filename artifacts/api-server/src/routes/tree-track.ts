@@ -4,11 +4,12 @@ import { db } from "@workspace/db";
 import { treeInspectionsTable, sitesTable, TREE_CHECK_TYPES } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
 
 const router = Router();
 
 /** Recommended inspection frequencies (days) — based on BS 3998:2010 / NTSG guidance */
-const FREQUENCY_DAYS: Record<(typeof TREE_CHECK_TYPES)[number], number> = {
+export const TREE_FREQUENCY_DAYS: Record<(typeof TREE_CHECK_TYPES)[number], number> = {
   visual_assessment:  365,  // Annual visual tree assessment (minimum)
   detailed_assessment: 365, // Following a VTA where anomalies were found
   post_storm:           30, // After any severe weather event
@@ -62,7 +63,7 @@ async function checkSiteAccess(
   if (siteId == null) return null;
   const site = await fetchClientSite(siteId, clientId);
   if (!site) return "not_found";
-  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return "forbidden";
+  if (!(await siteVisibleToDepartment(site, deptId))) return "forbidden";
   return "ok";
 }
 
@@ -72,7 +73,7 @@ function allowedSitesSubquery(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
@@ -141,7 +142,7 @@ router.get("/status", requireAuth, async (req, res) => {
   const todayDays = toUtcDays(todayIso);
 
   const statuses = TREE_CHECK_TYPES.map((checkType) => {
-    const frequencyDays = FREQUENCY_DAYS[checkType];
+    const frequencyDays = TREE_FREQUENCY_DAYS[checkType];
     const lastDate = lastByType.get(checkType) ?? null;
     if (!lastDate) {
       return { checkType, frequencyDays, lastDate: null, dueDate: null, status: "never" as const };

@@ -105,3 +105,46 @@ export const storageCapacityReductionsTable = pgTable("storage_capacity_reductio
   index("idx_storage_capacity_reductions_tenant").on(table.clientId, table.subscriptionId, table.effectiveAt),
   check("storage_capacity_reductions_lower", sql`${table.toGib} >= 0 AND ${table.toGib} < ${table.fromGib} AND ${table.toGib} >= ${table.minimumGib}`),
 ]);
+
+/**
+ * Each time a business's retained files passed its storage warning level and
+ * its managers were emailed. At most one notice per business is open; it is
+ * closed (cleared_at) once usage drops back below the level, so the next
+ * crossing emails again. Rows are never deleted.
+ * Maintained by api-server src/lib/storageWarningEmails.ts.
+ */
+export const storageWarningNoticesTable = pgTable("storage_warning_notices", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  thresholdBytes: bigint("threshold_bytes", { mode: "number" }).notNull(),
+  usedBytes: bigint("used_bytes", { mode: "number" }).notNull(),
+  recipientCount: integer("recipient_count").notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  clearedAt: timestamp("cleared_at", { withTimezone: true }),
+}, (table) => [
+  uniqueIndex("uq_storage_warning_notices_open").on(table.clientId).where(sql`${table.clearedAt} IS NULL`),
+  index("idx_storage_warning_notices_tenant").on(table.clientId, table.sentAt),
+]);
+
+/**
+ * What happened when a business's files reached its paid storage: uploads
+ * stopped ("full", open until usage is back under capacity), 10 GB packs were
+ * added automatically ("topped_up"), or that top-up could not be charged
+ * ("top_up_failed"). Each row is emailed to the business's owners once.
+ * Maintained by api-server src/lib/storageLimit.ts.
+ */
+export const storageLimitEventsTable = pgTable("storage_limit_events", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  usedBytes: bigint("used_bytes", { mode: "number" }).notNull(),
+  capacityBytes: bigint("capacity_bytes", { mode: "number" }).notNull(),
+  gibAdded: integer("gib_added"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  clearedAt: timestamp("cleared_at", { withTimezone: true }),
+  emailedAt: timestamp("emailed_at", { withTimezone: true }),
+}, (table) => [
+  check("ck_storage_limit_events_kind", sql`${table.kind} IN ('full', 'topped_up', 'top_up_failed')`),
+  uniqueIndex("uq_storage_limit_events_open_full").on(table.clientId).where(sql`${table.kind} = 'full' AND ${table.clearedAt} IS NULL`),
+  index("idx_storage_limit_events_tenant").on(table.clientId, table.createdAt),
+]);

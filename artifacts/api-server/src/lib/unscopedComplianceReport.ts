@@ -25,6 +25,7 @@ export async function getUnscopedComplianceReport(clientId: number, from: string
         UNION ALL SELECT 'LegionellaTrack', site_id FROM legionella_checks WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'TubTrack', site_id FROM hot_tub_checks WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'TreeTrack', site_id FROM tree_inspections WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL SELECT 'COSHHTrack', site_id FROM coshh_checks WHERE client_id = ${clientId} AND deleted_at IS NULL AND check_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'PremisesTrack', site_id FROM premises_inspections WHERE client_id = ${clientId} AND inspection_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'PestTrack', site_id FROM pest_visits WHERE client_id = ${clientId} AND visit_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'IncidentTrack', site_id FROM incidents WHERE client_id = ${clientId} AND incident_date BETWEEN ${from} AND ${to} AND site_id IS NOT NULL

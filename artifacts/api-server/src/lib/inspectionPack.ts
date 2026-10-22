@@ -6,6 +6,7 @@ import { approvedFrequencies } from "./waterMonitoringPlan";
 import { riddorDeadline, ukToday, type RiddorDeadlineState } from "./riddor";
 import { addCalendarDays, addCalendarMonths, siteScopeSql, type SiteAccessScope } from "./siteAccessScope";
 import { actionStateLabel, itemActionStates } from "./certificateOutcomes";
+import { SOUND_LEVEL_MIN_DB, soundLevelLowText } from "./fireSoundLevel";
 
 /**
  * Data for the one-click inspection pack (GET /reports/inspection-pack): a
@@ -123,12 +124,15 @@ const any = (services: Entitlements, ...keys: ServiceKey[]) => keys.some(key => 
 
 const FIRE_TYPES: Record<string, { label: string; days: number }> = {
   alarm: { label: "Weekly fire alarm test", days: 7 },
-  emergency_lights: { label: "Monthly emergency lighting test", days: 30 },
+  emergency_lights: { label: "Monthly emergency lighting flick test", days: 30 },
   extinguishers: { label: "Weekly extinguisher visual check", days: 7 },
   fire_doors: { label: "Fire door check", days: 90 },
-  fire_drill: { label: "Fire drill / evacuation", days: 180 },
+  fire_drill: { label: "Fire drill (6-monthly, with night staff)", days: 180 },
   fire_walk: { label: "Fire walk — escape route sign-off", days: 7 },
   alarm_panel: { label: "Alarm panel check", days: 7 },
+  emergency_lights_annual: { label: "Annual 3-hour emergency lighting discharge test", days: 365 },
+  alarm_service: { label: "6-monthly fire alarm service", days: 180 },
+  extinguisher_service: { label: "Annual fire extinguisher service", days: 365 },
 };
 
 const LEGIONELLA_TYPES: Record<string, string> = {
@@ -290,11 +294,14 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
       GROUP BY check_type
     `),
     rowsOf(sql`
-      SELECT f.check_date::text AS check_date, f.check_type, f.location, f.notes, s.name AS site_name
+      SELECT f.check_date::text AS check_date, f.check_type, f.location, f.call_point, f.notes, s.name AS site_name,
+             f.sound_level_db, f.sound_level_method, f.sound_level_bedhead
       FROM fire_safety_checks f
       LEFT JOIN sites s ON s.id = f.site_id AND s.client_id = f.client_id
       WHERE f.client_id = ${scope.clientId} AND f.check_date BETWEEN ${from} AND ${to}
-        AND f.result = 'fail' AND ${siteScope}
+        AND (f.result = 'fail' OR f.sound_level_db < CASE WHEN f.sound_level_bedhead
+          THEN ${SOUND_LEVEL_MIN_DB.bedhead}::real ELSE ${SOUND_LEVEL_MIN_DB.general}::real END)
+        AND ${siteScope}
       ORDER BY f.check_date, f.id
     `),
     rowsOf(sql`
@@ -323,7 +330,12 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
   const exceptions = failures.map(row => ({
     date: row.check_date, siteName: text(row.site_name),
     check: FIRE_TYPES[row.check_type]?.label ?? row.check_type,
-    reading: null, location: text(row.location), notes: text(row.notes),
+    reading: soundLevelLowText({
+      soundLevelDb: row.sound_level_db == null ? null : Number(row.sound_level_db),
+      soundLevelBedhead: row.sound_level_bedhead == null ? null : Boolean(row.sound_level_bedhead),
+      soundLevelMethod: text(row.sound_level_method),
+    }),
+    location: text(row.call_point) ? `Call point: ${row.call_point}` : text(row.location), notes: text(row.notes),
   }));
   return {
     section: { types: result.types, exceptions: capped(exceptions) },
@@ -606,6 +618,7 @@ const OTHER_MODULES: Array<{ report: string; label: string; services: ServiceKey
   { report: "PATtrack", label: "PATtrack tests", services: ["pattrack"], action: "pat" },
   { report: "FixTrack", label: "FixTrack issues reported", services: ["fixtrack"], action: "fix" },
   { report: "TreeTrack", label: "TreeTrack inspections", services: ["treetrack"], action: "tree" },
+  { report: "COSHHTrack", label: "COSHHTrack checks", services: ["coshhtrack"], action: "coshh" },
 ];
 
 export async function buildInspectionPack(options: {

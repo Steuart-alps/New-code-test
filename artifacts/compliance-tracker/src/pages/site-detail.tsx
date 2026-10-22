@@ -8,10 +8,12 @@ import { useToast } from "@/hooks/use-toast";
 import { useCanAdmin } from "@/context/auth-context";
 import {
   ArrowLeft, MapPin, Phone, User, Building2, AlertTriangle, Clock,
-  CheckCircle2, Circle, Loader2, FileText, Upload, Trash2,
+  CheckCircle2, Circle, Loader2, FileText, Upload, Trash2, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
 
 const STATUS_META: Record<string, { label: string; icon: any; className: string }> = {
   overdue:     { label: "Overdue",     icon: AlertTriangle,  className: "bg-rose-50 text-rose-700 border-rose-200" },
@@ -84,6 +86,7 @@ export default function SiteDetailPage() {
     e.target.value = "";
     setUploading(true);
     try {
+      assertWithinUploadLimit(file);
       const { uploadUrl, objectPath } = await apiFetch(`/sites/${id}/documents/request-upload`, { method: "POST" });
       await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
       await apiFetch(`/sites/${id}/documents`, {
@@ -297,9 +300,9 @@ export default function SiteDetailPage() {
       <Card className="bg-card overflow-hidden">
         <div className="px-6 py-4 border-b border-border flex items-center justify-between">
           <h3 className="font-display font-bold text-lg">Compliance Checks</h3>
-          <Link href="/external">
-            <Button variant="outline" size="sm">All Checks</Button>
-          </Link>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/external?siteId=${site.id}`}>All Checks</Link>
+          </Button>
         </div>
         {siteItems.length === 0 ? (
           <div className="py-12 text-center text-muted-foreground">
@@ -312,9 +315,9 @@ export default function SiteDetailPage() {
               const meta = STATUS_META[item.status] ?? STATUS_META.pending;
               const Icon = meta.icon;
               return (
-                <div key={item.id} className="px-6 py-4 flex items-start sm:items-center justify-between gap-4 flex-col sm:flex-row hover:bg-muted/30 transition-colors">
+                <Link key={item.id} href={`/items/${item.id}`} className="group px-6 py-4 flex items-start sm:items-center justify-between gap-4 flex-col sm:flex-row hover:bg-muted/30 transition-colors">
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm">{item.title}</div>
+                    <div className="font-semibold text-sm group-hover:text-primary group-hover:underline">{item.title}</div>
                     {item.description && <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{item.description}</div>}
                     <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-muted-foreground">
                       <span>Due {formatDate(item.dueDate)}</span>
@@ -328,12 +331,15 @@ export default function SiteDetailPage() {
                         {item.priority}
                       </span>
                     )}
-                    <span className={cn("inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border", meta.className)}>
-                      <Icon className="w-3 h-3" />
-                      {meta.label}
-                    </span>
+                    <CheckStatusWithCertificate item={item}>
+                      <span className={cn("inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border", meta.className)}>
+                        <Icon className="w-3 h-3" />
+                        {meta.label}
+                      </span>
+                    </CheckStatusWithCertificate>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary" />
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>

@@ -468,15 +468,15 @@ async function main() {
   check("food config unaffected by record lock", JSON.stringify(configAfter.data) === JSON.stringify(configBefore.data), "config changed");
 
   // Representative check-based family (fire safety).
-  const fireOld = await admin("POST", "/fire-safety", { checkType: "alarm", checkDate: old, result: "pass", performedBy: "Admin" });
+  const fireOld = await admin("POST", "/fire-safety", { checkType: "alarm", callPoint: "CP1", checkDate: old, result: "pass", performedBy: "Admin" });
   expect("seed old fire record", fireOld, [201]);
   const fireId = fireOld.data?.id;
   check("fire old PUT is locked", (await staff("PUT", `/fire-safety/${fireId}`, { notes: "staff edit" })).status === 423);
   check("fire forged date remains locked", (await staff("PUT", `/fire-safety/${fireId}`, { checkDate: today, notes: "forged" })).status === 423);
   expect("fire admin correction works", await admin("PUT", `/fire-safety/${fireId}`, { notes: "admin correction" }), [200]);
-  const fireDeleteSeed = await admin("POST", "/fire-safety", { checkType: "alarm", checkDate: iso(-4), result: "pass" });
+  const fireDeleteSeed = await admin("POST", "/fire-safety", { checkType: "alarm", callPoint: "CP1", checkDate: iso(-4), result: "pass" });
   check("fire old DELETE is locked", (await staff("DELETE", `/fire-safety/${fireDeleteSeed.data?.id}`)).status === 423);
-  const fireDraft = await staff("POST", "/fire-safety", { checkType: "alarm", checkDate: today, result: "pass" });
+  const fireDraft = await staff("POST", "/fire-safety", { checkType: "alarm", callPoint: "CP1", checkDate: today, result: "pass" });
   expect("fire today draft create", fireDraft, [201]);
   expect("fire today draft update", await staff("PUT", `/fire-safety/${fireDraft.data?.id}`, { notes: "draft staff edit" }), [200]);
 
@@ -937,6 +937,27 @@ async function main() {
     return { oldId, currentId };
   };
 
+  // COSHHTrack checks (LEV, health checks, monitoring, briefings) are dated
+  // records; their assessments are reviewed documents and are not locked.
+  const coshhSite = await admin("POST", "/sites", { name: `Lock COSHH Site ${suffix}`, seedStarterChecks: false });
+  expect("COSHH checks: seed site", coshhSite, [200, 201]);
+  if ([200, 201].includes(coshhSite.status)) {
+    const coshhCheck = (checkDate, extra = {}) => ({
+      siteId: coshhSite.data.id, checkType: "lev_examination", checkDate, subject: `Lock booth ${suffix}`, result: "pass", ...extra,
+    });
+    await lockedSubroute({
+      label: "COSHH check", path: "/coshh-track/checks",
+      createOld: () => admin("POST", "/coshh-track/checks", coshhCheck(old)),
+      createCurrent: () => admin("POST", "/coshh-track/checks", coshhCheck(today)),
+      staffEdit: coshhCheck(old, { notes: bypassMarker }),
+      forgedEdit: coshhCheck(today, { notes: bypassMarker }),
+      adminEdit: coshhCheck(old, { notes: "admin correction" }),
+      currentEdit: coshhCheck(today, { notes: "staff edit" }),
+      backdateEdit: coshhCheck(old, { notes: "backdated" }),
+      staffCurrentPut: 200, staffCurrentDelete: 204, adminDelete: 204,
+    });
+  }
+
   // PAT: certificates, replacements and failures are retained evidence. Their
   // DELETE handlers refuse every role (405); staff hit the lock first on old rows.
   const patSite = await admin("POST", "/sites", { name: `Lock PAT Site ${suffix}`, seedStarterChecks: false });
@@ -1061,6 +1082,53 @@ async function main() {
       staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
     });
 
+    // Hour readings: staff record them, managers delete them. The old one is
+    // the higher reading so the "lower than an earlier reading" guard stays out
+    // of the way of the lock checks.
+    const reading = (readingDate, hours) => ({ machineId, readingDate, hours, meterReplaced: true });
+    await lockedSubroute({
+      label: "Green hour reading", path: "/green-track/hour-readings", listPath: `/green-track/hour-readings?machineId=${machineId}`,
+      createOld: () => admin("POST", "/green-track/hour-readings", reading(old, 100)),
+      createCurrent: () => admin("POST", "/green-track/hour-readings", reading(today, 120)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { readingDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { readingDate: old, notes: "backdated", meterReplaced: true },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
+    // Spraying book and stock records: staff record them, managers delete them.
+    const product = await admin("POST", "/green-track/products", { name: `Lock fungicide ${suffix}`, category: "pesticide", unit: "L" });
+    expect("Green product: seed", product, [201]);
+    const productId = product.data?.id;
+    const spraying = (applicationDate) => ({
+      applicationDate, areas: ["greens"], operatorName: "Lock Fixture", products: [{ productId, quantityUsed: 1 }],
+    });
+    await lockedSubroute({
+      label: "Green spraying record", path: "/green-track/applications",
+      createOld: () => admin("POST", "/green-track/applications", spraying(old)),
+      createCurrent: () => admin("POST", "/green-track/applications", spraying(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { applicationDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { applicationDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+    const delivery = (movementDate) => ({ productId, movementDate, kind: "delivery", quantity: 10 });
+    await lockedSubroute({
+      label: "Green stock record", path: "/green-track/stock-movements",
+      createOld: () => admin("POST", "/green-track/stock-movements", delivery(old)),
+      createCurrent: () => admin("POST", "/green-track/stock-movements", delivery(today)),
+      staffEdit: { notes: bypassMarker },
+      forgedEdit: { movementDate: today, notes: bypassMarker },
+      adminEdit: { notes: "admin correction" },
+      currentEdit: { notes: "staff edit" },
+      backdateEdit: { movementDate: old, notes: "backdated" },
+      staffCurrentPut: 200, staffCurrentDelete: 403, adminDelete: 200,
+    });
+
     const puwer = (inspectionDate, extra = {}) => ({
       machineId, inspectionDate, nextInspectionDate: iso(300), inspectorName: "Lock Fixture", ...extra,
     });
@@ -1157,7 +1225,7 @@ async function main() {
   const withSite = (fields) => (siteId) => ({ ...fields, siteId });
   await departmentDelete({
     label: "Dept Fire check", createPath: "/fire-safety", adminDelete: [200, 204],
-    body: withSite({ checkType: "alarm", checkDate: old, result: "pass", performedBy: "Lock Fixture" }),
+    body: withSite({ checkType: "alarm", callPoint: "CP1", checkDate: old, result: "pass", performedBy: "Lock Fixture" }),
   });
   await departmentDelete({
     label: "Dept Legionella check", createPath: "/legionella", adminDelete: [200, 204],
@@ -1320,7 +1388,7 @@ async function main() {
     const stored = rowsOf((await admin("GET", list)).data).find((row) => idOf(row) === id);
     check(`site move: ${label} keeps its site`, siteOf(stored) === alphaSite.data.id, JSON.stringify(stored));
   };
-  const fireMove = (siteId) => ({ checkType: "alarm", checkDate: today, result: "pass", performedBy: "Lock Fixture", siteId });
+  const fireMove = (siteId) => ({ checkType: "alarm", callPoint: "CP1", checkDate: today, result: "pass", performedBy: "Lock Fixture", siteId });
   await siteMove({ label: "Fire check", createPath: "/fire-safety", create: fireMove, move: fireMove });
   const treeMove = (siteId) => ({ checkType: "visual_assessment", checkDate: today, result: "pass", treeRef: "LOCK-MOVE", inspector: "Lock Fixture", siteId });
   await siteMove({ label: "Tree inspection", createPath: "/tree-track", create: treeMove, move: treeMove });
@@ -1372,6 +1440,10 @@ async function main() {
   await siteMove({ label: "COSHH register item", createPath: "/registers/coshh",
     create: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }),
     move: (siteId) => ({ siteId, productName: `Lock cleaner ${suffix}` }) });
+  const coshhAssessment = (siteId) => ({ siteId, task: `Lock cleaning ${suffix}`, riskLevel: "low", assessmentDate: today });
+  await siteMove({ label: "COSHH assessment", createPath: "/coshh-track/assessments", create: coshhAssessment, move: coshhAssessment });
+  const coshhCheck = (siteId) => ({ siteId, checkType: "lev_examination", checkDate: today, subject: `Lock booth ${suffix}`, result: "pass" });
+  await siteMove({ label: "COSHH check", createPath: "/coshh-track/checks", create: coshhCheck, move: coshhCheck });
   await siteMove({ label: "Asbestos register item", createPath: "/registers/asbestos",
     create: (siteId) => ({ siteId, builtBefore2000: "unknown" }),
     move: (siteId) => ({ siteId, builtBefore2000: "unknown" }) });

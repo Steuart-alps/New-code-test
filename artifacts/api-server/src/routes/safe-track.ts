@@ -21,6 +21,8 @@ import {
   isTenantReservedObjectPath,
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
 
 const router = Router();
 
@@ -30,7 +32,7 @@ function allowedSites(clientId: number, deptId: number) {
   return db
     .select({ id: sitesTable.id })
     .from(sitesTable)
-    .where(and(eq(sitesTable.clientId, clientId), or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId))));
+    .where(and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(deptId)));
 }
 
 async function verifySite(siteId: number | null | undefined, clientId: number) {
@@ -45,7 +47,7 @@ async function siteInDepartment(siteId: number | null | undefined, clientId: num
   if (siteId == null || deptId === null) return true;
   const [row] = await db.select({ id: sitesTable.id }).from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)))).limit(1);
+      sitesTableVisibleTo(deptId))).limit(1);
   return !!row;
 }
 
@@ -182,6 +184,7 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
     const storage = new ObjectStorageService();
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });

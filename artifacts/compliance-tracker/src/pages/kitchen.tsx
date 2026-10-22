@@ -1,7 +1,10 @@
 import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
-import { assessKitchenTemperatures, kitchenFailureValue, kitchenHoldRequirement, parseKitchenTemperatureRules, type KitchenTemperatureFailure } from "@workspace/api-client-react";
+import { SayItButton } from "@/components/say-it-button";
+import { FoodJurisdictionOptions, KitchenGuidanceNote } from "@/components/kitchen-temperature-guidance";
+import { assessKitchenTemperatures, isFoodJurisdiction, kitchenFailureValue, kitchenHoldRequirement, kitchenTemperatureGuidance, parseKitchenTemperatureRules, type FoodJurisdiction, type KitchenTemperatureFailure } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { takeLinkParams } from "@/lib/deep-link";
 import { ChecklistItemRow } from "@/components/checklist-item-row";
 import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
 import { AppLayout } from "@/components/layout";
@@ -160,13 +163,6 @@ function coolingMins(start: string, finish: string): number | null {
   if (m < 0) m += 24 * 60; // overnight wrap
   return m;
 }
-const REHEATING_LIMITS = {
-  scotland: "Above 82°C",
-  england_wales: "Above 75°C",
-  northern_ireland: "Above 75°C",
-} as const;
-
-type FoodJurisdiction = keyof typeof REHEATING_LIMITS;
 
 // ── ConfigDialog ───────────────────────────────────────────────────────────────
 function ConfigDialog() {
@@ -196,7 +192,7 @@ function ConfigDialog() {
   const [cookingLimit, setCookingLimit] = useState("75°C or above (core)");
   const [coolingLimit, setCoolingLimit] = useState("8°C within 90 minutes");
   const [foodJurisdiction, setFoodJurisdiction] = useState<FoodJurisdiction>("england_wales");
-  const [reheatingLimit, setReheatingLimit] = useState<string>(REHEATING_LIMITS.england_wales);
+  const [reheatingLimit, setReheatingLimit] = useState<string>("Above 75°C");
   const [hotHoldingLimit, setHotHoldingLimit] = useState("Above 63°C");
 
   // Sections tab
@@ -221,8 +217,8 @@ function ConfigDialog() {
     if (!config) return;
     setCookingLimit(config.food_cooking_limit || "75°C or above (core)");
     setCoolingLimit(config.food_cooling_limit || "8°C within 90 minutes");
-    setFoodJurisdiction((config.food_jurisdiction as FoodJurisdiction) || "england_wales");
-    setReheatingLimit(config.food_reheating_limit || REHEATING_LIMITS.england_wales);
+    setFoodJurisdiction(isFoodJurisdiction(config.food_jurisdiction) ? config.food_jurisdiction : "england_wales");
+    setReheatingLimit(config.food_reheating_limit || "Above 75°C");
     setHotHoldingLimit(config.food_hot_holding_limit || "Above 63°C");
     setShowDeliveries(config.food_show_deliveries !== "false");
     setShowColdFood(config.food_show_cold_food !== "false");
@@ -502,6 +498,29 @@ function ConfigDialog() {
               These limits are starting guidance only. Set and review critical limits in your food-business-specific HACCP system, with competent advice where needed.
             </p>
             <div className="space-y-1.5">
+              <Label htmlFor="kitchen-food-country">Country guidance</Label>
+              <select
+                id="kitchen-food-country"
+                value={foodJurisdiction}
+                onChange={e => {
+                  const next = e.target.value as FoodJurisdiction;
+                  const labels = kitchenTemperatureGuidance(next).labels;
+                  setFoodJurisdiction(next);
+                  setCookingLimit(labels.cooking);
+                  setCoolingLimit(labels.cooling);
+                  setReheatingLimit(labels.reheating);
+                  setHotHoldingLimit(labels.hotHolding);
+                }}
+                className="h-9 w-full rounded-sm border border-input bg-background px-2 text-sm"
+              >
+                <FoodJurisdictionOptions />
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Choosing a country fills in its recommended limits below for new diary records; you can change any of them. To use its numbers for pass/fail checks, choose the same country in Numeric temperature controls at the top of KitchenTrack.
+              </p>
+              <KitchenGuidanceNote jurisdiction={foodJurisdiction} />
+            </div>
+            <div className="space-y-1.5">
               <Label>Cooking temperature limit</Label>
               <Input value={cookingLimit} placeholder="75°C or above (core)"
                 onChange={e => setCookingLimit(e.target.value)} />
@@ -512,25 +531,6 @@ function ConfigDialog() {
               <Input value={coolingLimit} placeholder="8°C within 90 minutes"
                 onChange={e => setCoolingLimit(e.target.value)} />
               <p className="text-xs text-muted-foreground">Set a safe cooling limit and corrective action for your process in the HACCP system.</p>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Food-safety jurisdiction</Label>
-              <select
-                value={foodJurisdiction}
-                onChange={e => {
-                  const next = e.target.value as FoodJurisdiction;
-                  setFoodJurisdiction(next);
-                  setReheatingLimit(REHEATING_LIMITS[next]);
-                }}
-                className="h-9 w-full rounded-sm border border-input bg-background px-2 text-sm"
-              >
-                <option value="scotland">Scotland — above 82°C</option>
-                <option value="england_wales">England / Wales — above 75°C</option>
-                <option value="northern_ireland">Northern Ireland — above 75°C</option>
-              </select>
-              <p className="text-xs text-muted-foreground">
-                Selecting a jurisdiction sets the standard reheating target used for new diary records.
-              </p>
             </div>
             <div className="space-y-1.5">
               <Label>Reheating limit</Label>
@@ -655,7 +655,7 @@ function MarkClosedDaysDialog({ siteId, defaultDate, onSaved }: { siteId: number
         </div>
         <div className="space-y-1">
           <Label htmlFor="closed-reason">Reason</Label>
-          <Input id="closed-reason" value={reason} maxLength={200} placeholder="e.g. Closed for refurbishment" onChange={(e) => setReason(e.target.value)} />
+          <Input id="closed-reason" dictation value={reason} maxLength={200} placeholder="e.g. Closed for refurbishment" onChange={(e) => setReason(e.target.value)} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -1022,6 +1022,34 @@ export function DailyDiaryTab() {
     templateSvItems,
     user?.name,
   ]);
+
+  // A fridge or freezer's scanned QR label opens today's diary for its site
+  // and puts the cursor in that unit's reading (AM before noon, PM after).
+  const [scanColdUnit, setScanColdUnit] = useState<string | null>(null);
+  useEffect(() => {
+    const link = takeLinkParams(["siteId", "coldUnit"] as const);
+    if (!link?.coldUnit) return;
+    const site = Number(link.siteId);
+    applyScope({ date: format(new Date(), "yyyy-MM-dd"), siteId: Number.isSafeInteger(site) && site > 0 ? site : null });
+    setScanColdUnit(link.coldUnit.slice(0, 100));
+  }, []);
+  useEffect(() => {
+    if (!scanColdUnit || !formReady) return;
+    const name = scanColdUnit.trim().toLowerCase();
+    setScanColdUnit(null);
+    let index = coldFood.findIndex(row => row.unit.trim().toLowerCase() === name);
+    if (index < 0 && !isSubmitted) {
+      index = coldFood.length;
+      setColdFood([...coldFood, { unit: scanColdUnit.trim(), tempAm: "", tempPm: "", correctiveAction: "" }]);
+    }
+    if (index < 0) return;
+    const field = new Date().getHours() < 12 ? "am" : "pm";
+    window.setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>(`[data-cold-unit-row="${index}"][data-cold-unit-field="${field}"]`);
+      input?.scrollIntoView({ behavior: "smooth", block: "center" });
+      input?.focus({ preventScroll: true });
+    }, 200);
+  }, [scanColdUnit, formReady]);
 
   // Date and site changes replace the form, so unsaved edits need a
   // deliberate discard; "Keep editing" stays on the current day and site.
@@ -1473,10 +1501,12 @@ export function DailyDiaryTab() {
                         </td>
                         <td className="px-3 py-1.5">
                           <Input value={row.tempAm} disabled={isSubmitted} onChange={e => upd("tempAm", e.target.value)}
+                            data-cold-unit-row={i} data-cold-unit-field="am" inputMode="decimal"
                             className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 3" />
                         </td>
                         <td className="px-3 py-1.5">
                           <Input value={row.tempPm} disabled={isSubmitted} onChange={e => upd("tempPm", e.target.value)}
+                            data-cold-unit-row={i} data-cold-unit-field="pm" inputMode="decimal"
                             className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 4" />
                         </td>
                         <td className="px-3 py-1.5">
@@ -2345,6 +2375,7 @@ export default function KitchenPage() {
             <p className="text-sm text-muted-foreground">{activeTabMeta.description}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <SayItButton />
             <Link href="/food-safety" className="text-sm font-medium text-primary underline underline-offset-2">Inspection register &amp; diary calendar</Link>
             <Link href="/allergens">
               <Button variant="outline" size="sm" className="gap-1.5">Allergen records</Button>

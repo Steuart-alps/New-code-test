@@ -5,6 +5,7 @@ import { requireAuth, requireConsultant, requirePlatformOperator } from "../midd
 import { isPlatformAdmin } from "../lib/platformAdmin";
 import { getClientId, requireClientAdmin } from "../middleware/requireAuth";
 import { logger } from "../lib/logger";
+import { sendTestErrorReport } from "../lib/sentry";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { escapeHtml, sendSystemEmail } from "../lib/email";
@@ -22,11 +23,21 @@ type DeletionRequest = {
   status: string;
 };
 
-async function deletionEligibility(clientId: number, consultant: boolean): Promise<DeletionClient | null> {
+/**
+ * Only the business's own owner may ask for its deletion: an Owner
+ * (client_admin) or an older self-signup owner (consultant role) whose own
+ * business it is. A consultant who looks after the business through a link,
+ * including ALPS, cannot ask on its behalf; they review requests instead.
+ */
+function isBusinessOwner(user: { role: string; clientId: number | null }, clientId: number): boolean {
+  return (user.role === "client_admin" || user.role === "consultant") && user.clientId === clientId;
+}
+
+async function deletionEligibility(clientId: number, owner: boolean): Promise<DeletionClient | null> {
   const result = await db.execute(sql`
     SELECT c.id, c.name,
-      (c.data_deleted_at IS NULL AND (${consultant} OR (
-        (c.cancelled_at IS NOT NULL OR EXISTS (
+      (${owner} AND c.data_deleted_at IS NULL
+        AND (c.cancelled_at IS NOT NULL OR EXISTS (
           SELECT 1 FROM stripe.subscriptions s
           WHERE s.customer = c.stripe_customer_id AND s.status = 'canceled'
         ))
@@ -34,20 +45,21 @@ async function deletionEligibility(clientId: number, consultant: boolean): Promi
           SELECT 1 FROM stripe.subscriptions live
           WHERE live.customer = c.stripe_customer_id
             AND live.status IN ('active', 'trialing', 'past_due')
-        )
-      ))) AS eligible
+        )) AS eligible
     FROM clients c WHERE c.id = ${clientId} LIMIT 1
   `);
   return (result.rows[0] as DeletionClient | undefined) ?? null;
 }
 
-// Account-level erasure request: records are kept for at least 30 days and
-// remain untouched until an administrator has reviewed legal retention holds.
+// Account-level erasure request: only the business's owner may ask, after
+// cancelling. Records are kept for at least 30 days and remain untouched until
+// an administrator has reviewed legal retention holds.
 router.get("/data-deletion/request", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "Select a client first" });
   try {
-    const client = await deletionEligibility(clientId, req.currentUser!.role === "consultant");
+    const owner = isBusinessOwner(req.currentUser!, clientId);
+    const client = await deletionEligibility(clientId, owner);
     if (!client) return res.status(404).json({ error: "Client not found" });
     const result = await db.execute(sql`
       SELECT id, requested_at, earliest_deletion_at, notification_state, status
@@ -55,7 +67,7 @@ router.get("/data-deletion/request", requireAuth, requireClientAdmin, async (req
       WHERE client_id = ${clientId} AND status IN ('pending','approved')
       LIMIT 1
     `);
-    res.json({ eligible: client.eligible, request: result.rows[0] ?? null });
+    res.json({ eligible: client.eligible, owner, request: result.rows[0] ?? null });
   } catch (err) {
     logger.error({ err, clientId }, "Could not load data deletion request");
     res.status(503).json({ error: "Deletion request status unavailable" });
@@ -68,8 +80,10 @@ router.post("/data-deletion/request", requireAuth, requireClientAdmin, async (re
   const adminEmail = process.env.ADMIN_EMAIL?.trim();
   if (!adminEmail) return res.status(503).json({ error: "Deletion requests are temporarily unavailable. Contact support." });
   try {
-    const consultant = req.currentUser!.role === "consultant";
-    const client = await deletionEligibility(clientId, consultant);
+    if (!isBusinessOwner(req.currentUser!, clientId)) {
+      return res.status(403).json({ error: "Only the business's owner can request data deletion" });
+    }
+    const client = await deletionEligibility(clientId, true);
     if (!client) return res.status(404).json({ error: "Client not found" });
     if (!client.eligible) return res.status(403).json({ error: "Data deletion can be requested after cancellation" });
     // Unique pending request per client, even across concurrent POSTs. A
@@ -84,17 +98,15 @@ router.post("/data-deletion/request", requireAuth, requireClientAdmin, async (re
       SELECT c.id, ${req.currentUser!.id}, now() + interval '30 days'
       FROM clients c WHERE c.id = ${clientId}
         AND c.data_deleted_at IS NULL
-        AND (${consultant} OR (
-          (c.cancelled_at IS NOT NULL OR EXISTS (
-            SELECT 1 FROM stripe.subscriptions s
-            WHERE s.customer = c.stripe_customer_id AND s.status = 'canceled'
-          ))
-          AND NOT EXISTS (
-            SELECT 1 FROM stripe.subscriptions live
-            WHERE live.customer = c.stripe_customer_id
-              AND live.status IN ('active', 'trialing', 'past_due')
-          )
+        AND (c.cancelled_at IS NOT NULL OR EXISTS (
+          SELECT 1 FROM stripe.subscriptions s
+          WHERE s.customer = c.stripe_customer_id AND s.status = 'canceled'
         ))
+        AND NOT EXISTS (
+          SELECT 1 FROM stripe.subscriptions live
+          WHERE live.customer = c.stripe_customer_id
+            AND live.status IN ('active', 'trialing', 'past_due')
+        )
       ON CONFLICT (client_id) WHERE status IN ('pending','approved')
         DO UPDATE SET client_id = EXCLUDED.client_id
       RETURNING id, client_id, requested_at, earliest_deletion_at, notification_state, status
@@ -269,6 +281,17 @@ router.get("/admin/storage-price-check", requireAuth, requireConsultant, require
   const result = await checkStorageAddonPrice({ maxAgeMs: 0 });
   const status = result.status === "ok" ? 200 : result.status === "not_configured" ? 404 : 503;
   res.status(status).json(result);
+});
+
+// Sends one deliberate error report to Sentry and returns Sentry's answer
+// (accepted, rejected with a status code, failed, or not configured), so the
+// operator can confirm SENTRY_DSN and the environment tag without breaking
+// anything. Platform operators only (PLATFORM_ADMIN_EMAILS).
+// POST /api/admin/error-reports/test
+router.post("/admin/error-reports/test", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
+  const result = await sendTestErrorReport();
+  logger.info({ configured: result.configured, eventId: result.eventId, delivery: result.delivery }, "Test error report requested");
+  res.json(result);
 });
 
 // One-shot demo seed endpoint, gated by a secret token.

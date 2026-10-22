@@ -3,10 +3,11 @@ import { db } from "@workspace/db";
 import { appSettingsTable, consultantClientsTable, sitesTable, taskCompletionsTable, tasksTable, usersTable } from "@workspace/db/schema";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { denyViewers, getActiveDepartmentId, getClientId, requireAuth } from "../middleware/requireAuth";
+import { denyViewers, getActiveDepartmentId, getClientId, isDepartmentLead, managerDepartmentIds, requireAuth } from "../middleware/requireAuth";
 import { ACCOUNT_TIMEZONE_SETTING, normalizeAccountTimezone } from "../middleware/dailyEntryCutoff";
 import { addDays, isCalendarDay, occursOn, todayIn } from "../lib/taskSchedule";
 import { submittedDailyChecklists } from "../lib/dailyChecklistCompletion";
+import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 
 // Staff tasks: "My tasks today" for staff and task assignment for managers.
 // Managers (consultants, client admins, department managers for their own
@@ -28,7 +29,7 @@ const AUTO_COMPLETE_NOTE = { am: "Done automatically: AM checklist submitted", p
 export const TASK_MODULES = [
   "compliance", "firetrack", "kitchentrack", "legionellatrack", "doctrack", "fixtrack", "traintrack",
   "hottubtrack", "treetrack", "biketrack", "aquatrack", "greentrack", "incidenttrack", "pattrack",
-  "pesttrack", "premisestrack", "roomtrack", "dailytrack_am", "dailytrack_pm",
+  "pesttrack", "premisestrack", "roomtrack", "coshhtrack", "dailytrack_am", "dailytrack_pm",
 ] as const;
 
 const day = z.string().refine(isCalendarDay, "Use a YYYY-MM-DD date");
@@ -55,7 +56,8 @@ type Viewer = NonNullable<Request["currentUser"]>;
 /** Department managers manage tasks for their own department's sites only. */
 function managerScope(user: Viewer): "all" | number | null {
   if (user.role === "consultant" || user.role === "client_admin") return "all";
-  if (user.role === "client_staff" && user.isDepartmentManager && user.departmentId != null) return user.departmentId;
+  if (user.role === "client_manager" && user.allDepartments) return "all";
+  if (isDepartmentLead(user) && user.departmentId != null) return user.departmentId;
   return null;
 }
 
@@ -93,7 +95,7 @@ async function visibleTasks(clientId: number, req: Request) {
   const departmentId = getActiveDepartmentId(req);
   const siteCondition = departmentId == null
     ? undefined
-    : or(isNull(tasksTable.siteId), isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId));
+    : or(isNull(tasksTable.siteId), sitesTableVisibleTo(departmentId));
   return db.select({
     task: tasksTable,
     siteName: sitesTable.name,
@@ -108,11 +110,28 @@ async function visibleTasks(clientId: number, req: Request) {
 
 type VisibleRow = Awaited<ReturnType<typeof visibleTasks>>[number];
 
-function canManageRow(user: Viewer, row: { siteDepartmentId: number | null; task: { siteId: number | null } }): boolean {
+/** The site of a department manager's department, when it sits under one. */
+async function scopeSiteId(user: Viewer): Promise<number | null> {
+  const scope = managerScope(user);
+  return typeof scope === "number" ? departmentSiteId(scope) : null;
+}
+
+/**
+ * A department's site: given to the department, or the site the department
+ * sits under (when not another department's). A department under one site
+ * never has another.
+ */
+function isDepartmentSite(siteId: number, siteDepartmentId: number | null, departmentId: number, departmentSite: number | null): boolean {
+  return departmentSite == null
+    ? siteDepartmentId === departmentId
+    : departmentSite === siteId && (siteDepartmentId == null || siteDepartmentId === departmentId);
+}
+
+function canManageRow(user: Viewer, row: { siteDepartmentId: number | null; task: { siteId: number | null } }, departmentSite: number | null): boolean {
   const scope = managerScope(user);
   if (scope === "all") return true;
   if (scope === null) return false;
-  return row.task.siteId != null && row.siteDepartmentId === scope;
+  return row.task.siteId != null && isDepartmentSite(row.task.siteId, row.siteDepartmentId, scope, departmentSite);
 }
 
 function isAssignedTo(user: Viewer, task: { assigneeUserId: number | null; assigneeRole: string | null }): boolean {
@@ -130,9 +149,10 @@ async function validateScope(user: Viewer, clientId: number, value: { siteId: nu
     if (!site) return "Site not found";
     siteDepartmentId = site.departmentId;
   }
-  if (scope !== "all" && (value.siteId == null || siteDepartmentId !== scope)) return "Department managers can only set tasks for their department's sites";
+  if (scope !== "all" && (value.siteId == null || scope === null
+    || !isDepartmentSite(value.siteId, siteDepartmentId, scope, await scopeSiteId(user)))) return "Department managers can only set tasks for their department's sites";
   if (value.assigneeUserId != null) {
-    const [assignee] = await db.select({ id: usersTable.id, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active })
+    const [assignee] = await db.select({ id: usersTable.id, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, allDepartments: usersTable.allDepartments, active: usersTable.active })
       .from(usersTable).where(eq(usersTable.id, value.assigneeUserId));
     let member = assignee?.clientId === clientId;
     if (assignee && !member && assignee.role === "consultant") {
@@ -140,14 +160,23 @@ async function validateScope(user: Viewer, clientId: number, value: { siteId: nu
         .where(and(eq(consultantClientsTable.userId, assignee.id), eq(consultantClientsTable.clientId, clientId))))[0];
     }
     if (!assignee || !member || !assignee.active || assignee.role === "client_viewer") return "Assignee must be an active member of this business";
-    if (siteDepartmentId != null && (assignee.role === "client_staff") && assignee.departmentId !== siteDepartmentId) {
-      return "That person's department cannot see this site";
+    const departmentScoped = assignee.role === "client_staff" || (assignee.role === "client_manager" && !assignee.allDepartments);
+    // Each of the assignee's departments covers the site under the site rule
+    // (lib/departmentSites); without a department they see shared sites.
+    if (value.siteId != null && departmentScoped) {
+      const site = { id: value.siteId, departmentId: siteDepartmentId };
+      const departmentIds = assignee.role === "client_manager"
+        ? await managerDepartmentIds(assignee)
+        : assignee.departmentId != null ? [assignee.departmentId] : [];
+      const covered = (assignee.departmentId == null && siteDepartmentId == null)
+        || (await Promise.all(departmentIds.map((departmentId) => siteVisibleToDepartment(site, departmentId)))).some(Boolean);
+      if (!covered) return "That person's department cannot see this site";
     }
   }
   return null;
 }
 
-function present(row: VisibleRow, user: Viewer, date: string, completions: Map<string, ShownCompletion>, today: string, timeZone: string) {
+function present(row: VisibleRow, user: Viewer, date: string, completions: Map<string, ShownCompletion>, today: string, timeZone: string, departmentSite: number | null) {
   const { task } = row;
   // An open one-off task stays on the list after its due date until done.
   const occurrenceDate = task.recurrence === "once" ? task.startsOn : date;
@@ -172,7 +201,7 @@ function present(row: VisibleRow, user: Viewer, date: string, completions: Map<s
     completion: completion ? { completedByName: completion.completedByName, completedAt: completion.completedAt, note: completion.note, automatic: completion.automatic } : null,
     canUndo: canUndo(user, completion, today, timeZone),
     assignedToMe: isAssignedTo(user, task),
-    canManage: canManageRow(user, row),
+    canManage: canManageRow(user, row, departmentSite),
     canComplete: user.role !== "client_viewer" && task.active && (isAssignedTo(user, task) || managerScope(user) !== null),
   };
 }
@@ -241,7 +270,8 @@ router.get("/tasks", requireAuth, async (req, res) => {
       && (occursOn(row.task, date) || (row.task.recurrence === "once" && row.task.startsOn < date)));
   }
   const completions = await completionsFor(clientId, rows, date);
-  let tasks = rows.map((row) => present(row, user, date, completions, today, timeZone));
+  const departmentSite = await scopeSiteId(user);
+  let tasks = rows.map((row) => present(row, user, date, completions, today, timeZone, departmentSite));
   // Overdue one-off tasks that were done before the date drop off "mine".
   if (query.data.scope === "mine") tasks = tasks.filter((t) => t.dueOnDate || !t.completion);
   res.json({ date, today, canManage, tasks });
@@ -293,7 +323,7 @@ router.patch("/tasks/:id", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success || !Object.keys(parsed.data).length) return res.status(400).json({ error: parsed.success ? "No changes supplied" : parsed.error.flatten() });
   const row = (await visibleTasks(clientId, req)).find((r) => r.task.id === id);
   if (!row) return res.status(404).json({ error: "Task not found" });
-  if (!canManageRow(user, row)) return res.status(403).json({ error: "Only managers can edit this task" });
+  if (!canManageRow(user, row, await scopeSiteId(user))) return res.status(403).json({ error: "Only managers can edit this task" });
   const changes = parsed.data as Partial<z.infer<typeof createSchema>> & { active?: boolean };
   const next = {
     siteId: "siteId" in changes ? changes.siteId ?? null : row.task.siteId,

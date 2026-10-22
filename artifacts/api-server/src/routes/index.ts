@@ -7,6 +7,7 @@ import departmentsRouter from "./departments";
 import categoriesRouter from "./categories";
 import complianceItemsRouter from "./compliance-items";
 import contractorsRouter from "./contractors";
+import contractorVisitsRouter from "./contractor-visits";
 import certificatesRouter from "./certificates";
 import settingsRouter from "./settings";
 import notificationsRouter, { notificationsPublicRouter } from "./notifications";
@@ -24,9 +25,11 @@ import docTrackRouter from "./doc-track";
 import trainTrackRouter from "./train-track";
 import hotTubRouter from "./hot-tub";
 import treeTrackRouter from "./tree-track";
+import coshhTrackRouter from "./coshh-track";
 import bikeTrackRouter from "./bike-track";
 import poolTrackRouter from "./pool-track";
 import greenTrackRouter from "./green-track";
+import greenTrackSprayingRouter from "./green-track-spraying";
 import swimTrackRouter from "./swim-track";
 import photosRouter from "./photos";
 import staffRosterRouter from "./staff-roster";
@@ -35,6 +38,7 @@ import kitchenWeeklyRouter from "./kitchen-weekly";
 import kitchenCleaningRouter from "./kitchen-cleaning";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
+import dailyTrackStatusRouter from "./daily-track-status";
 import checklistTemplatesRouter from "./checklist-templates";
 import checkRemindersRouter from "./check-reminders";
 import w3wRouter from "./w3w";
@@ -52,9 +56,12 @@ import reportsRouter from "./reports";
 import inspectionPackRouter from "./inspection-pack";
 import calendarRouter from "./calendar";
 import privacyGovernanceRouter from "./privacy-governance";
+import privacyIntakePublicRouter from "./privacy-intake-public";
 import dashboardSummaryRouter from "./dashboard-summary";
+import dashboardTodayRouter from "./dashboard-today";
 import complianceHubRouter from "./compliance-hub";
 import trackActionsRouter from "./track-actions";
+import inspectionReportsRouter from "./inspection-reports";
 import trackEvidenceRouter from "./track-evidence";
 import auditEventsRouter from "./audit-events";
 import auditLogRouter from "./audit-log";
@@ -69,7 +76,9 @@ import consultantPortfolioRouter from "./consultant-portfolio";
 
 import setupRouter from "./setup";
 import tasksRouter from "./tasks";
+import equipmentRouter from "./equipment";
 import { requireAuth } from "../middleware/requireAuth";
+import { limitViewers } from "../middleware/viewerScope";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
 import { staffTrainingRouter } from "./staff-training";
@@ -83,6 +92,8 @@ router.use(healthRouter);
 router.use(authRouter);
 // First-party analytics ingest; does its own session check (before root-level auth routers).
 router.use(analyticsRouter);
+// Viewers reach only their own training records past this point.
+router.use(limitViewers);
 router.use("/billing", billingRouter);
 // Signed file download links (bearer tokens; opened without a session).
 router.use(storageDownloadRouter);
@@ -96,6 +107,8 @@ router.use("/fix-track/quotes/public", publicLinkRateLimits, fixTrackQuoteRouter
 router.use("/notifications/public/schedule", publicLinkRateLimits, notificationsPublicRouter);
 // Staff document sign-off link (token-protected).
 router.use("/sign-off", publicLinkRateLimits, signOffRouter);
+// Public privacy rights-request form (token-protected).
+router.use("/privacy-intake", publicLinkRateLimits, privacyIntakePublicRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
@@ -105,6 +118,7 @@ router.use(departmentsRouter);
 router.use(categoriesRouter);
 router.use(complianceItemsRouter);
 router.use(contractorsRouter);
+router.use(contractorVisitsRouter);
 router.use(certificatesRouter);
 router.use(settingsRouter);
 router.use(privacyGovernanceRouter);
@@ -133,6 +147,7 @@ router.use("/tree-track", requireAuth, requireService("treetrack"), treeTrackRou
 router.use("/bike-track", requireAuth, requireService("biketrack"), bikeTrackRouter);
 router.use("/pool-track",   requireAuth, requireAnyService("pooltrack", "aquatrack"),  poolTrackRouter);
 router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackRouter);
+router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackSprayingRouter);
 router.use("/swim-track",   requireAuth, requireAnyService("swimtrack", "aquatrack"),  swimTrackRouter);
 router.use("/photos", requireAuth, photosRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
@@ -143,6 +158,9 @@ router.use("/kitchen-cleaning", requireAuth, requireService("kitchentrack"), kit
 // service that matches the checklistType being read/written.
 router.use("/daily-track-am", requireAuth, requireAnyService("dailytrack_am", "kitchentrack", "premisestrack"), dailyTrackAmRouter);
 router.use("/daily-track-pm", requireAuth, requireAnyService("dailytrack_pm", "kitchentrack", "premisestrack"), dailyTrackPmRouter);
+// The status page covers both periods, so any AM or PM service opens it; the
+// route itself reports which checks those services make the client responsible for.
+router.use("/daily-track-status", requireAuth, requireAnyService("dailytrack_am", "dailytrack_pm", "kitchentrack", "premisestrack"), dailyTrackStatusRouter);
 router.use(checklistTemplatesRouter);
 router.use(checkRemindersRouter);
 router.use(w3wRouter);
@@ -153,13 +171,16 @@ router.use("/premises-track", requireAuth, requireService("premisestrack"), prem
 router.use("/room-track", requireAuth, requireService("roomtrack"), roomTrackRouter);
 // Allergen (KitchenTrack-gated inside), COSHH and asbestos registers.
 router.use("/registers", requireAuth, registersRouter);
+router.use("/coshh-track", requireAuth, requireService("coshhtrack"), coshhTrackRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
 router.use(exportRouter);
 router.use(reportsRouter);
 router.use(inspectionPackRouter);
 router.use(calendarRouter);
+router.use(equipmentRouter);
 router.use(dashboardSummaryRouter);
+router.use(dashboardTodayRouter);
 router.use(complianceHubRouter);
 router.use(feedbackRouter);
 router.use(csvImportsRouter);
@@ -168,6 +189,7 @@ router.use("/audit-events", auditEventsRouter);
 router.use("/audit-log", auditLogRouter);
 router.use("/public-link-access", publicLinkAccessRouter);
 router.use("/track-actions", trackActionsRouter);
+router.use(inspectionReportsRouter);
 router.use("/track-evidence", trackEvidenceRouter);
 router.use(setupRouter, tasksRouter);
 export default router;

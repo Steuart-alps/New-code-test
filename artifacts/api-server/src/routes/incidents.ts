@@ -12,11 +12,13 @@ import { appendAuditEvent } from "../lib/audit";
 import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { isReportableRiddorCategory, withRiddorDeadline } from "../lib/riddor";
 import { canReadHealthData, RIDDOR_RECEIPT_TYPES } from "../lib/riddorReceipts";
+import { siteVisibleToDepartment, sitesTableVisibleTo, visibleSiteIdsSql } from "../lib/departmentSites";
 import {
   ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError, ObjectContentError, ObjectGenerationError,
   type AllowedUploadType,
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -81,7 +83,7 @@ function allowedSites(clientId: number, deptId: number) {
     .from(sitesTable)
     .where(and(
       eq(sitesTable.clientId, clientId),
-      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      sitesTableVisibleTo(deptId),
     ));
 }
 
@@ -124,10 +126,10 @@ function redactHealthData<T extends { injuriesSustained?: string | null }>(req: 
 
 async function canAccessSite(clientId: number, siteId: number | null | undefined, deptId: number | null) {
   if (siteId == null) return true;
-  const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable)
+  const [site] = await db.select({ id: sitesTable.id, departmentId: sitesTable.departmentId }).from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
   if (!site) return false;
-  return deptId === null || site.departmentId === null || site.departmentId === deptId;
+  return siteVisibleToDepartment(site, deptId);
 }
 
 type SubmissionReceipt = z.infer<typeof submissionReceiptSchema>;
@@ -277,10 +279,7 @@ router.get("/summary", requireAuth, async (req, res) => {
 
   const deptId = getActiveDepartmentId(req);
   const deptClause = deptId !== null ? sql`
-    AND (site_id IS NULL OR site_id IN (
-      SELECT id FROM sites WHERE client_id = ${clientId}
-      AND (department_id IS NULL OR department_id = ${deptId})
-    ))` : sql``;
+    AND (site_id IS NULL OR site_id IN (${visibleSiteIdsSql(clientId, deptId)}))` : sql``;
   const result = await db.execute(sql`
     SELECT
       COUNT(*)::int                                                           AS total,
@@ -536,6 +535,7 @@ router.post("/riddor-receipts/request-upload", requireAuth, denyViewers, async (
     return res.status(400).json({ error: "Upload the HSE receipt as a PDF, JPEG or PNG" });
   }
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, contentType);
     res.json({ uploadUrl, objectPath: storage.normalizeObjectEntityPath(uploadUrl) });
   } catch (err) {

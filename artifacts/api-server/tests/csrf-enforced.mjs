@@ -56,7 +56,7 @@ async function send(method, path, { cookie, headers = {}, body } = {}) {
 
 function fireCheck(notes) {
   return {
-    checkType: "alarm",
+    checkType: "alarm", callPoint: "CP1",
     // Yesterday in the account's own day (Europe/London), not UTC.
     checkDate: new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(new Date(Date.now() - 86_400_000)),
     result: "pass",

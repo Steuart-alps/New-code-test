@@ -1,0 +1,87 @@
+name: Voice dictation checks
+
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/lib/dictation.ts"
+      - "artifacts/compliance-tracker/src/hooks/use-dictation.ts"
+      - "artifacts/compliance-tracker/src/components/dictation-button.tsx"
+      - "artifacts/compliance-tracker/src/components/coshh-speak-list-dialog.tsx"
+      - "artifacts/compliance-tracker/src/lib/walk-round.ts"
+      - "artifacts/compliance-tracker/src/components/walk-round-dialog.tsx"
+      - "artifacts/compliance-tracker/tests/walk-round-*"
+      - "artifacts/compliance-tracker/src/components/speak-to-pick-dialog.tsx"
+      - "artifacts/compliance-tracker/src/components/ui/textarea.tsx"
+      - "artifacts/compliance-tracker/src/components/ui/input.tsx"
+      - "artifacts/compliance-tracker/tests/dictation-*"
+      - "artifacts/compliance-tracker/src/lib/voice-log.ts"
+      - "artifacts/compliance-tracker/src/components/voice-log-dialog.tsx"
+      - "artifacts/compliance-tracker/src/components/say-it-button.tsx"
+      - "artifacts/compliance-tracker/tests/voice-log-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/dictation-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/lib/dictation.ts"
+      - "artifacts/compliance-tracker/src/hooks/use-dictation.ts"
+      - "artifacts/compliance-tracker/src/components/dictation-button.tsx"
+      - "artifacts/compliance-tracker/src/components/coshh-speak-list-dialog.tsx"
+      - "artifacts/compliance-tracker/src/lib/walk-round.ts"
+      - "artifacts/compliance-tracker/src/components/walk-round-dialog.tsx"
+      - "artifacts/compliance-tracker/tests/walk-round-*"
+      - "artifacts/compliance-tracker/src/components/speak-to-pick-dialog.tsx"
+      - "artifacts/compliance-tracker/src/components/ui/textarea.tsx"
+      - "artifacts/compliance-tracker/src/components/ui/input.tsx"
+      - "artifacts/compliance-tracker/tests/dictation-*"
+      - "artifacts/compliance-tracker/src/lib/voice-log.ts"
+      - "artifacts/compliance-tracker/src/components/voice-log-dialog.tsx"
+      - "artifacts/compliance-tracker/src/components/say-it-button.tsx"
+      - "artifacts/compliance-tracker/tests/voice-log-*"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/dictation-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  dictation:
+    name: Microphone buttons and spoken substance lists
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Dictation text rules
+        run: pnpm --filter @workspace/compliance-tracker run test:dictation-text
+
+      - name: Walk round and speak text rules
+        run: pnpm --filter @workspace/compliance-tracker run test:walk-round-text
+
+      - name: Dictation browser checks
+        run: pnpm --filter @workspace/compliance-tracker run test:dictation-browser
+
+      - name: Say it word reader
+        run: pnpm --filter @workspace/compliance-tracker run test:voice-log-reader
+
+      - name: Say it browser checks
+        run: pnpm --filter @workspace/compliance-tracker run test:voice-log-browser

@@ -151,6 +151,8 @@ async function routeApi(route) {
     // The header's notification bell (#92).
     case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
     case "/api/managed-by": return json(route, null);
+    // The app-wide storage limit banner (#156).
+    case "/api/storage/status": return json(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
     case "/api/sites": return json(route, SITES);
     case "/api/photos": return json(route, []);
     case "/api/photos/requirements": return json(route, []);

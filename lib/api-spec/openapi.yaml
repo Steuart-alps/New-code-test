@@ -15,6 +15,8 @@ tags:
     description: Privacy-safe history of public link use
   - name: compliance-items
     description: Compliance item operations
+  - name: assignees
+    description: People who can be assigned work
   - name: categories
     description: Category operations
   - name: sites
@@ -27,16 +29,26 @@ tags:
     description: App settings
   - name: notifications
     description: Notification operations
+  - name: fix-track
+    description: FixTrack issue operations
   - name: storage
     description: File storage operations
   - name: fire-safety
     description: Fire safety logbook operations
+  - name: equipment
+    description: Equipment list and QR labels
+  - name: inspection-reports
+    description: Uploaded audit and inspection reports turned into track actions
   - name: food-safety
     description: Kitchen / food safety diary operations
   - name: legionella
     description: Legionella water safety logbook operations (L8/HSG274)
+  - name: daily-track
+    description: DailyTrack daily checklist status (AM/PM checklists and manager sign-offs)
   - name: pat-track
     description: PAT testing register operations (appliance inventory and test results)
+  - name: coshh-track
+    description: COSHHTrack assessments, LEV examinations, health surveillance, monitoring and briefings
   - name: premises-track
     description: PremisesTrack premises safety inspection operations
   - name: privacy-governance
@@ -130,6 +142,126 @@ paths:
           description: Not an administrator or not authorised for this client
         "404":
           description: Report not found in the selected client
+  /train-track/my-records:
+    get:
+      operationId: listMyTrainingRecords
+      tags: [train-track]
+      summary: The signed-in Viewer's own training records (their linked staff roster entry)
+      responses:
+        "200":
+          description: Whether the account is linked to the roster, and that person's records, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [linked, records]
+                properties:
+                  linked: { type: boolean }
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-records/{id}/sign:
+    post:
+      operationId: signMyTrainingRecord
+      tags: [train-track]
+      summary: Add the signed-in Viewer's signature to one of their own unsigned training records
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The signed record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnTrainingRecord" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not one of this Viewer's records
+        "409":
+          description: Already signed
+  /train-track/my-coshh:
+    get:
+      operationId: listMyCoshhSignOffs
+      tags: [train-track]
+      summary: Current COSHH assessments the signed-in Viewer must read and sign, and those already signed
+      responses:
+        "200":
+          description: Assessments for the Viewer's site (and department, where the assessment names departments)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyCoshhSignOffs" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-coshh/{id}/sign:
+    post:
+      operationId: signMyCoshhAssessment
+      tags: [train-track]
+      summary: Sign that the signed-in Viewer has read a current COSHH assessment (writes a TrainTrack sign-off)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The Viewer's assessments after signing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyCoshhSignOffs" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not an assessment this Viewer must sign
+        "409":
+          description: Already signed this revision
+  /users/me/active-department:
+    put:
+      operationId: setActiveDepartment
+      tags: [users]
+      summary: Choose which of their departments a Manager with several is working in (kept for the session)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActiveDepartmentRequest" }
+      responses:
+        "200":
+          description: The chosen department and all of the Manager's departments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [departmentId, departmentIds]
+                properties:
+                  departmentId: { type: integer }
+                  departmentIds:
+                    type: array
+                    items: { type: integer }
+        "400":
+          description: No department given
+        "403":
+          description: Not a Manager
+        "404":
+          description: Not one of the Manager's departments
   /healthz:
     get:
       operationId: healthCheck
@@ -226,6 +358,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/PublicLinkAccessPage"
 
+  /assignees:
+    get:
+      operationId: listAssignees
+      tags: [assignees]
+      summary: People who can be assigned an action, FixTrack issue or compliance check
+      description: Active members of the business (not viewers) who can see the site. Names only; reminders for assigned work go to that person.
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: People who can be assigned
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Assignee"
+        "404":
+          description: The site is not in the business, or not in the caller's department
   /categories:
     get:
       operationId: listCategories
@@ -407,6 +562,58 @@ paths:
       responses:
         "204":
           description: Deleted
+
+  /contractor-visits:
+    get:
+      operationId: listContractorVisits
+      tags: [contractors]
+      summary: Contractor visits kept on the tracks, per site, with the contractor reminded
+      description: >
+        Each visit type the business's tracks cover, at each site the user can
+        see: when the track says it is next due, and the compliance check
+        (with its contractor) that drives the contractor reminder.
+      responses:
+        "200":
+          description: Visit types and per-site rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorVisitsResponse"
+    put:
+      operationId: setContractorVisit
+      tags: [contractors]
+      summary: Choose the contractor reminded about a visit at a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetContractorVisitRequest"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /certificates-outstanding:
+    get:
+      operationId: listCertificatesOutstanding
+      tags: [contractors]
+      summary: Contractor visits still waiting for their certificate
+      description: >
+        Compliance checks whose contractor visit happened at least
+        followUpAfterDays ago with no certificate uploaded since, however old,
+        at the sites the user can see. The contractor is chased every two
+        weeks until chaseStopsAfterDays after the visit (chasing false after).
+      responses:
+        "200":
+          description: Certificates outstanding, oldest visit first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificatesOutstandingResponse"
 
   /contractors:
     get:
@@ -947,6 +1154,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/DashboardStats"
 
+  /dashboard/today-by-department:
+    get:
+      operationId: getTodayByDepartment
+      tags: [compliance-items]
+      summary: Today's checks per site and department
+      description: >
+        For each site, one bar per department (and one for the whole site) with
+        today's checks done, not done yet and failed, and what is outstanding.
+        Owners see every department, Managers the departments they cover, others
+        their own. Owners choose which roles see it (setting todayByDepartmentRoles).
+      parameters:
+        - in: query
+          name: siteId
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Today's status by site and department
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TodayByDepartment"
+        "403":
+          description: The card is not shown for this person's role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /settings:
     get:
       operationId: getSettings
@@ -1051,6 +1288,116 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PrivacyProgram"
+
+  /privacy-governance/intake-link:
+    post:
+      operationId: publishPrivacyIntakeLink
+      tags: [privacy-governance]
+      summary: Publish the online privacy-request form, or replace its link
+      description: Returns the new link once. Only its digest is stored, and any previous link stops working.
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "201":
+          description: New form link and the updated privacy profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyIntakeLinkResult"
+    delete:
+      operationId: disablePrivacyIntakeLink
+      tags: [privacy-governance]
+      summary: Turn off the online privacy-request form
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Updated privacy profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyProgram"
+
+  /privacy-governance/intake-assignee:
+    put:
+      operationId: setPrivacyIntakeAssignee
+      tags: [privacy-governance]
+      summary: Choose the administrator assigned to online privacy requests
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyIntakeAssigneeInput"
+      responses:
+        "200":
+          description: Updated privacy profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyProgram"
+
+  /privacy-intake/{token}:
+    get:
+      operationId: getPrivacyIntakeForm
+      tags: [privacy-governance]
+      summary: Public - describe a business's online privacy-request form
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Organisation name and privacy notice for the form
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyIntakeForm"
+        "404":
+          description: The link is not active
+    post:
+      operationId: submitPrivacyIntakeRequest
+      tags: [privacy-governance]
+      summary: Public - submit a privacy rights request for staff review
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyIntakeSubmission"
+      responses:
+        "201":
+          description: Request received as unverified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyIntakeReceipt"
+        "404":
+          description: The link is not active
+        "429":
+          description: Too many submissions
 
   /privacy-governance/records:
     post:
@@ -1158,6 +1505,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/StorageUsage"
 
+  /storage/status:
+    get:
+      operationId: getStorageStatus
+      tags: [storage]
+      summary: Whether this business's storage is nearly full or full, for the in-app banner
+      responses:
+        "200":
+          description: Storage limit state for the signed-in user's business
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageStatus"
+
   /notifications/send-reminders:
     post:
       operationId: sendReminders
@@ -1227,6 +1587,119 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RequestUploadUrlResponse"
+        "409":
+          description: The business's paid storage is full (code STORAGE_FULL) and automatic top-up is off or failed. Every upload-link route answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /fix-track/issues/{id}/media/delete:
+    post:
+      operationId: deleteFixTrackIssueMedia
+      tags: [fix-track]
+      summary: Delete a photo or video from a resolved or closed issue (owners and admins)
+      description: >
+        Frees storage once an issue is finished. The issue, its notes and its
+        history stay; the history records who deleted which file and when.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FixTrackMediaDeleteRequest"
+      responses:
+        "200":
+          description: The issue's remaining photos and videos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FixTrackIssueMediaList"
+        "403":
+          description: Not an owner or admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue or file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The issue is not resolved or closed yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /fix-track/issues/{id}/assign-contractor:
+    post:
+      operationId: assignFixTrackContractor
+      tags: [fix-track]
+      summary: Give a job to a contractor and email it to them (managers)
+      description: >
+        A manager picks a contractor from the business's list, or adds a new
+        one, and the job email (details, photos, a link to pick a visit date
+        and a "job done" link) is sent straight away. The manager's choice is
+        the approval, so the email does not wait in Contractor Approvals. If
+        sending fails, the email stays in Contractor Approvals to retry.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FixTrackAssignContractorRequest"
+      responses:
+        "200":
+          description: The job was emailed to the contractor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FixTrackAssignContractorResult"
+        "400":
+          description: No contractor chosen, an unknown contractor, or one without an email address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a manager (staff ask for approval instead)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The issue is resolved, an email is being sent, or the job was already emailed and replace was not set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The email could not be sent; it waits in Contractor Approvals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /fire-safety:
     get:
@@ -1293,6 +1766,144 @@ paths:
           description: The site is not one of this client's sites
         "403":
           description: The site belongs to a department the caller cannot see
+
+  /fire-safety/call-points:
+    get:
+      operationId: listFireCallPoints
+      tags: [fire-safety]
+      summary: List manual call points with when each was last tested
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for call points not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+        - in: query
+          name: includeArchived
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Call points
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireCallPoint"
+    post:
+      operationId: createFireCallPoint
+      tags: [fire-safety]
+      summary: Add a manual call point (managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFireCallPointRequest"
+      responses:
+        "201":
+          description: Created call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
+        "409":
+          description: The site already has a call point with that name
+
+  /fire-safety/call-points/order:
+    put:
+      operationId: orderFireCallPoints
+      tags: [fire-safety]
+      summary: Set a site's call point rotation order (managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderFireCallPointsRequest"
+      responses:
+        "200":
+          description: The site's call points in use, in their new order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireCallPoint"
+        "409":
+          description: The list does not match the site's call points in use (it changed meanwhile)
+
+  /imports/fire-call-points/template:
+    get:
+      operationId: getFireCallPointImportTemplate
+      tags: [fire-safety]
+      summary: Download the CSV template for uploading a call point list (managers)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/fire-call-points:
+    post:
+      operationId: importFireCallPoints
+      tags: [fire-safety]
+      summary: Preview or import a spreadsheet of call points (managers)
+      description: >-
+        The browser sends the spreadsheet's header row and cell text. With
+        preview true (the default) nothing is written; otherwise every row is
+        written in one go, only when no row has an error. New call points join
+        the end of their site's rotation in file order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file is missing a required column or has no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
+  /fire-safety/call-points/{id}:
+    put:
+      operationId: updateFireCallPoint
+      tags: [fire-safety]
+      summary: Rename, move, archive or restore a call point (managers)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFireCallPointRequest"
+      responses:
+        "200":
+          description: Updated call point
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPoint"
 
   /fire-safety/{id}:
     put:
@@ -1659,6 +2270,499 @@ paths:
               schema:
                 $ref: "#/components/schemas/GreenTrackConfig"
 
+  /green-track/hours:
+    get:
+      operationId: getGreenTrackMachineHours
+      tags: [green-track]
+      summary: Each active machine's hour meter, hours used and service due by hours
+      description: >
+        Current hours are the latest reading (by date) from standalone hour
+        readings, pre-use checks, fuel logs and service records.
+      responses:
+        "200":
+          description: Machine hours
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackMachineHoursSummary"
+
+  /green-track/hour-readings:
+    get:
+      operationId: listGreenTrackHourReadings
+      tags: [green-track]
+      summary: List hour meter readings from every source, newest first
+      parameters:
+        - name: machineId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Hour readings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GreenTrackHourReading"
+    post:
+      operationId: createGreenTrackHourReading
+      tags: [green-track]
+      summary: Log an hour meter reading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackHourReadingInput"
+      responses:
+        "201":
+          description: Saved reading
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackHourReadingRow"
+        "409":
+          description: Lower than an earlier reading; resend with meterReplaced true
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/hour-readings/{id}:
+    put:
+      operationId: updateGreenTrackHourReading
+      tags: [green-track]
+      summary: Correct a standalone hour meter reading
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackHourReadingUpdate"
+      responses:
+        "200":
+          description: Updated reading
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackHourReadingRow"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteGreenTrackHourReading
+      tags: [green-track]
+      summary: Delete a standalone hour meter reading (managers)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /green-track/products:
+    get:
+      operationId: listGreenTrackProducts
+      tags: [green-track]
+      summary: List spraying and stock products with their stock on hand
+      responses:
+        "200":
+          description: Products, active first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GreenTrackProduct"
+    post:
+      operationId: createGreenTrackProduct
+      tags: [green-track]
+      summary: Add a product (pesticide, fertiliser, top dressing, seed...)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackProductInput"
+      responses:
+        "201":
+          description: Created product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackProduct"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/products/{id}:
+    put:
+      operationId: updateGreenTrackProduct
+      tags: [green-track]
+      summary: Update a product, or archive it with active false
+      description: The unit cannot change once the product has stock or spraying records (409).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackProductInput"
+      responses:
+        "200":
+          description: Updated product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackProduct"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Unit already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteGreenTrackProduct
+      tags: [green-track]
+      summary: Delete a product with no stock or spraying records (managers)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "409":
+          description: Product has records; archive it instead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/products/{id}/history:
+    get:
+      operationId: getGreenTrackProductHistory
+      tags: [green-track]
+      summary: A product's stock history, newest first, with the balance after each entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Product and its stock history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackProductHistory"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/stock-movements:
+    get:
+      operationId: listGreenTrackStockMovements
+      tags: [green-track]
+      summary: List deliveries, stock counts and write-offs
+      parameters:
+        - name: productId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Stock records, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GreenTrackStockMovement"
+    post:
+      operationId: createGreenTrackStockMovement
+      tags: [green-track]
+      summary: Log a delivery, stock count or write-off
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackStockMovementInput"
+      responses:
+        "201":
+          description: Saved stock record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackStockMovement"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/stock-movements/{id}:
+    put:
+      operationId: updateGreenTrackStockMovement
+      tags: [green-track]
+      summary: Correct a stock record (the product and kind stay as recorded)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackStockMovementUpdate"
+      responses:
+        "200":
+          description: Updated stock record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackStockMovement"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteGreenTrackStockMovement
+      tags: [green-track]
+      summary: Delete a stock record (managers)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /green-track/applications:
+    get:
+      operationId: listGreenTrackApplications
+      tags: [green-track]
+      summary: The spraying book (spraying, spreading and top dressing records)
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: productId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Records, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GreenTrackApplication"
+    post:
+      operationId: createGreenTrackApplication
+      tags: [green-track]
+      summary: Record a spraying, spreading or top dressing; the products used come off stock
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackApplicationInput"
+      responses:
+        "201":
+          description: Saved record, with any products now below zero stock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackApplicationSaved"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/applications/{id}:
+    put:
+      operationId: updateGreenTrackApplication
+      tags: [green-track]
+      summary: Correct a spraying record; sending products replaces the list
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackApplicationUpdate"
+      responses:
+        "200":
+          description: Updated record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackApplicationSaved"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteGreenTrackApplication
+      tags: [green-track]
+      summary: Delete a spraying record, putting its products back on stock (managers)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /green-track/puwer-inspections/{id}/certificate-url:
+    get:
+      operationId: getGreenTrackInspectionCertificateUrl
+      tags: [green-track]
+      summary: Get a short-lived download link for an inspection's uploaded certificate
+      description: >
+        Covers PUWER and LOLER examinations and NSTS sprayer tests. The link
+        expires after 15 minutes.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Download link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackCertificateDownload"
+        "404":
+          description: Inspection or certificate not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: File storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /incidents/config:
     get:
       operationId: getIncidentConfig
@@ -1950,6 +3054,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/OkResponse"
 
+  /daily-track-status/history:
+    get:
+      operationId: getDailyTrackHistory
+      tags: [daily-track]
+      summary: Daily checklist and sign-off history for the status page
+      description: >
+        The daily checks the client's services make each site responsible for,
+        with the AM/PM checklists and manager sign-offs dated in the range
+        (department-scoped users see their department's and shared sites).
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: to
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Requirements and history rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyTrackHistory"
+        "400":
+          description: from or to is missing or not YYYY-MM-DD
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: No daily checklist service is enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /premises-track:
     get:
       operationId: listPremisesInspections
@@ -2134,6 +3280,38 @@ paths:
       responses:
         "201":
           description: Created record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyRecord"
+
+  /food-safety/cold-reading:
+    post:
+      operationId: recordFoodSafetyColdReading
+      tags: [food-safety]
+      summary: Record one fridge or freezer reading in the day's diary
+      description: >-
+        Fills one unit's AM or PM reading in the day's diary, creating the
+        diary (with every fridge and freezer on the list) when needed. Used by
+        "Say it" voice logging. A reading already recorded is never
+        overwritten (409 READING_ALREADY_RECORDED), a submitted diary is not
+        changed (409 DIARY_SUBMITTED), and a reading outside the limits needs
+        the corrective action taken (400 KITCHEN_CORRECTIVE_ACTION_REQUIRED).
+      parameters:
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FoodSafetyColdReadingRequest"
+      responses:
+        "201":
+          description: The diary with the reading added
           content:
             application/json:
               schema:
@@ -2574,8 +3752,787 @@ paths:
         "204":
           description: Deleted
 
+  /equipment:
+    get:
+      operationId: listEquipment
+      tags: [equipment]
+      summary: List the equipment list (plant no track keeps a record of)
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for items not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+        - in: query
+          name: includeArchived
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Equipment items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EquipmentItem"
+    post:
+      operationId: createEquipment
+      tags: [equipment]
+      summary: Add an equipment item (Owners, consultants and Managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipmentItemRequest"
+      responses:
+        "201":
+          description: Created item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentItem"
+
+  /equipment/{id}:
+    put:
+      operationId: updateEquipment
+      tags: [equipment]
+      summary: Change, archive or restore an equipment item, and its linked Compliance Checks
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEquipmentItemRequest"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentItem"
+
+  /equipment/import-extinguishers:
+    post:
+      operationId: importExtinguisherPoints
+      tags: [equipment]
+      summary: Copy FireTrack's extinguisher list onto a site's equipment list
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: integer
+                  nullable: true
+      responses:
+        "200":
+          description: How many were added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added:
+                    type: integer
+                  alreadyListed:
+                    type: integer
+                required: [added, alreadyListed]
+
+  /equipment-labels:
+    get:
+      operationId: listEquipmentLabels
+      tags: [equipment]
+      summary: Everything that can carry a QR label, with its code once printed
+      parameters:
+        - in: query
+          name: siteId
+          description: A site id, or "none" for items not tied to a site. Omit for every visible site.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Labelable items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EquipmentLabelTarget"
+
+  /equipment-labels/sheet:
+    post:
+      operationId: printEquipmentLabelSheet
+      tags: [equipment]
+      summary: A PDF sheet of QR labels; items without a code get one
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipmentLabelSheetRequest"
+      responses:
+        "200":
+          description: PDF of labels
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /equipment-labels/replace:
+    post:
+      operationId: replaceEquipmentLabel
+      tags: [equipment]
+      summary: Replace a lost or damaged label; the old code stops working
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipmentLabelRef"
+      responses:
+        "200":
+          description: The item with its new code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentLabelTarget"
+
+  /equipment-labels/scan/{code}:
+    get:
+      operationId: scanEquipmentLabel
+      tags: [equipment]
+      summary: What a scanned QR label shows
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The item, whether it is in date, and what to do next
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquipmentScan"
+        "404":
+          description: The label is not available to this person (also for unknown codes)
+
+  /coshh-track/status:
+    get:
+      operationId: getCoshhTrackStatus
+      tags: [coshh-track]
+      summary: COSHHTrack assessment reviews and checks that are due, overdue or not yet recorded
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Due items, soonest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhTrackStatus"
+
+  /coshh-track/assessments:
+    get:
+      operationId: listCoshhAssessments
+      tags: [coshh-track]
+      summary: List COSHH assessments
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: COSHH assessments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CoshhAssessment"
+    post:
+      operationId: createCoshhAssessment
+      tags: [coshh-track]
+      summary: Record a COSHH assessment (owners, consultants and managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhAssessmentInput"
+      responses:
+        "201":
+          description: Created assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhAssessment"
+
+  /coshh-track/assessments/{id}:
+    put:
+      operationId: updateCoshhAssessment
+      tags: [coshh-track]
+      summary: Update a COSHH assessment (owners, consultants and managers)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhAssessmentInput"
+      responses:
+        "200":
+          description: Updated assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhAssessment"
+    delete:
+      operationId: deleteCoshhAssessment
+      tags: [coshh-track]
+      summary: Remove a COSHH assessment (kept in the audit trail and export)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+
+  /coshh-track/assessments/{id}/document-url:
+    get:
+      operationId: getCoshhAssessmentDocumentUrl
+      tags: [coshh-track]
+      summary: Short-lived download link for an assessment's attached document
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Download link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhDocumentUrl"
+
+  /coshh-track/checks:
+    get:
+      operationId: listCoshhChecks
+      tags: [coshh-track]
+      summary: List LEV examinations, health checks, exposure monitoring and staff briefings
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/CoshhCheckType"
+        - in: query
+          name: assessmentId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: COSHH checks, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CoshhCheck"
+    post:
+      operationId: createCoshhCheck
+      tags: [coshh-track]
+      summary: Record a COSHH check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhCheckInput"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhCheck"
+
+  /coshh-track/checks/{id}:
+    put:
+      operationId: updateCoshhCheck
+      tags: [coshh-track]
+      summary: Update a COSHH check
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CoshhCheckInput"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhCheck"
+    delete:
+      operationId: deleteCoshhCheck
+      tags: [coshh-track]
+      summary: Remove a COSHH check (kept in the audit trail and export)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+
+  /coshh-track/checks/{id}/report-url:
+    get:
+      operationId: getCoshhCheckReportUrl
+      tags: [coshh-track]
+      summary: Short-lived download link for a check's attached report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Download link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoshhDocumentUrl"
+  /coshh-track/sign-offs:
+    get:
+      operationId: listCoshhSignOffs
+      tags: [coshh-track]
+      summary: Current COSHH assessments with who has read and signed them and who still needs to (TrainTrack's COSHH section)
+      parameters:
+        - in: query
+          name: siteId
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Assessments the caller can see, with sign-off status for their current revision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assessments:
+                    type: array
+                    items: { $ref: "#/components/schemas/CoshhSignOffStatus" }
+                required: [assessments]
+  /coshh-track/assessments/{id}/sign-offs:
+    post:
+      operationId: recordCoshhSignOffs
+      tags: [coshh-track]
+      summary: Record staff signing that they have read a current COSHH assessment; each writes a TrainTrack sign-off
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CoshhSignOffRequest" }
+      responses:
+        "200":
+          description: How many were newly signed (people who need not sign, or already have, are skipped) and the assessment's status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signed: { type: integer }
+                  assessment:
+                    oneOf:
+                      - $ref: "#/components/schemas/CoshhSignOffStatus"
+                      - type: "null"
+                required: [signed, assessment]
+        "404":
+          description: Not a current assessment the caller can see
+
+  /inspection-reports/options:
+    get:
+      operationId: getInspectionReportOptions
+      tags: [inspection-reports]
+      summary: Report types, tracks, sites and people for the report screens, and whether reports can be read
+      responses:
+        "200":
+          description: Choices for the upload and checking screens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionReportOptions"
+
+  /inspection-reports:
+    get:
+      operationId: listInspectionReports
+      tags: [inspection-reports]
+      summary: Uploaded audit and inspection reports (Owners, Managers for their sites, consultants)
+      responses:
+        "200":
+          description: Reports, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InspectionReportSummary"
+    post:
+      operationId: createInspectionReport
+      tags: [inspection-reports]
+      summary: Register a report uploaded through /storage/uploads/request-url
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInspectionReportRequest"
+      responses:
+        "201":
+          description: Registered report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionReport"
+        "403":
+          description: Not this business's upload, or a site the caller cannot use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspection-reports/{id}:
+    get:
+      operationId: getInspectionReport
+      tags: [inspection-reports]
+      summary: A report, the list being checked, and the actions created from it
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionReportDetail"
+        "404":
+          description: Not found, or another department's report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteInspectionReport
+      tags: [inspection-reports]
+      summary: Remove a report uploaded by mistake (only while no actions come from it)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204":
+          description: Removed
+        "409":
+          description: Actions were created from it, so it is kept as their evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspection-reports/{id}/read:
+    post:
+      operationId: readInspectionReport
+      tags: [inspection-reports]
+      summary: Have ComplyTrack read the report and suggest actions (needs ANTHROPIC_API_KEY)
+      description: >
+        Replaces the list being checked with suggestions. Nothing is created
+        until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key
+        is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Suggested actions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionReportReading"
+        "429":
+          description: Reading limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Reading reports is not switched on
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inspection-reports/{id}/draft:
+    put:
+      operationId: saveInspectionReportDraft
+      tags: [inspection-reports]
+      summary: Save the list of actions being checked
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InspectionReportDraftRequest"
+      responses:
+        "200":
+          description: Saved list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draftActions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InspectionReportDraftAction"
+                required: [draftActions]
+
+  /inspection-reports/{id}/confirm:
+    post:
+      operationId: confirmInspectionReportActions
+      tags: [inspection-reports]
+      summary: Create the checked actions as open track actions linked to the report
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InspectionReportDraftRequest"
+      responses:
+        "201":
+          description: Created actions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  actions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InspectionReportAction"
+                  emailedTo:
+                    type: array
+                    description: Owners and Managers emailed the action plan
+                    items:
+                      type: string
+                required: [actions, emailedTo]
+
+  /inspection-reports/{id}/file:
+    get:
+      operationId: downloadInspectionReport
+      tags: [inspection-reports]
+      summary: Download the uploaded report
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The report file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
 components:
   schemas:
+    TodayByDepartment:
+      type: object
+      required: [date, groups]
+      properties:
+        date:
+          type: string
+          format: date
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayByDepartmentGroup"
+    TodayByDepartmentGroup:
+      type: object
+      required: [siteId, siteName, rows]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+          description: null for work not tied to one site ("All sites")
+        siteName:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayByDepartmentRow"
+    TodayByDepartmentRow:
+      type: object
+      required: [key, kind, departmentId, name, done, todo, failed, items, moreItems]
+      properties:
+        key:
+          type: string
+        kind:
+          type: string
+          enum: [whole_site, department]
+        departmentId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        done:
+          type: integer
+        todo:
+          type: integer
+        failed:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayByDepartmentItem"
+        moreItems:
+          type: integer
+    TodayByDepartmentItem:
+      type: object
+      required: [status, label, detail, path]
+      properties:
+        status:
+          type: string
+          enum: [todo, failed]
+        label:
+          type: string
+        detail:
+          type: string
+        path:
+          type: string
+    DailyTrackRequirement:
+      type: string
+      enum: [kitchen_opening, premises_opening, kitchen_closing, premises_closing, signoff]
+    DailyTrackHistoryChecklist:
+      type: object
+      required: [checkDate, siteId, checklistType, submittedAt]
+      properties:
+        checkDate:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        checklistType:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DailyTrackHistorySignoff:
+      type: object
+      required: [signoffDate, siteId, submittedAt]
+      properties:
+        signoffDate:
+          type: string
+          format: date
+        siteId:
+          type: integer
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DailyTrackHistory:
+      type: object
+      required: [requirements, checklists, signoffs]
+      properties:
+        requirements:
+          type: array
+          description: The checks each site is expected to complete per day, in display order
+          items:
+            $ref: "#/components/schemas/DailyTrackRequirement"
+        checklists:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyTrackHistoryChecklist"
+        signoffs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyTrackHistorySignoff"
+    SignTrainingRecordRequest:
+      type: object
+      required: [signature]
+      properties:
+        signature: { type: string, description: Signature image as a data URL }
+    ActiveDepartmentRequest:
+      type: object
+      required: [departmentId]
+      properties:
+        departmentId: { type: integer }
+    OwnTrainingRecord:
+      type: object
+      required: [id, record_type, staff_name, completed_date, signed]
+      properties:
+        id: { type: integer }
+        record_type: { type: string, enum: [certificate, signoff, internal] }
+        staff_name: { type: string }
+        training_type: { type: string, nullable: true }
+        document_title: { type: string, nullable: true }
+        document_type: { type: string, nullable: true }
+        provider: { type: string, nullable: true }
+        trainer: { type: string, nullable: true }
+        completed_date: { type: string }
+        expiry_date: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        signed: { type: boolean }
+        updated_at: { type: string }
+        site_name: { type: string, nullable: true }
     FeedbackReport:
       type: object
       required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, updatedByName, revision, submitterName]
@@ -2700,6 +4657,719 @@ components:
         before: {}
         after: {}
 
+    FixTrackMediaDeleteRequest:
+      type: object
+      required: [objectPath]
+      properties:
+        objectPath:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    FixTrackAssignContractorRequest:
+      type: object
+      description: Exactly one of contractorId and newContractor.
+      properties:
+        contractorId:
+          type: integer
+        newContractor:
+          $ref: "#/components/schemas/FixTrackNewContractor"
+        targetDate:
+          type: string
+          format: date
+          nullable: true
+          description: Left out keeps the issue's target date; null clears it.
+        replace:
+          type: boolean
+          description: Confirms replacing a job already emailed to a contractor.
+    FixTrackNewContractor:
+      type: object
+      required: [name, email]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        company:
+          type: string
+          nullable: true
+          maxLength: 200
+        email:
+          type: string
+          minLength: 3
+          maxLength: 320
+        phone:
+          type: string
+          nullable: true
+          maxLength: 50
+    FixTrackAssignContractorResult:
+      type: object
+      required: [ok, queueId, contractorId, contractorName, message]
+      properties:
+        ok:
+          type: boolean
+        queueId:
+          type: integer
+        mode:
+          type: string
+        subject:
+          type: string
+        bodyHtml:
+          type: string
+        contractorId:
+          type: integer
+        contractorName:
+          type: string
+        message:
+          type: string
+    FixTrackIssueMediaList:
+      type: object
+      required: [mediaUrls]
+      properties:
+        mediaUrls:
+          type: array
+          items:
+            type: string
+    GreenTrackMachineHours:
+      type: object
+      required: [machineId, machineName, machineType, currentHours, lastReadingDate, hoursLast7Days, hoursLast30Days, lastServiceDate, nextServiceHours, hoursToService, serviceHoursState]
+      properties:
+        machineId:
+          type: integer
+        machineName:
+          type: string
+        machineType:
+          type: string
+        siteId:
+          type: integer
+          nullable: true
+        currentHours:
+          type: number
+          nullable: true
+        lastReadingDate:
+          type: string
+          nullable: true
+        hoursLast7Days:
+          type: number
+          nullable: true
+        hoursLast30Days:
+          type: number
+          nullable: true
+        lastServiceDate:
+          type: string
+          nullable: true
+        nextServiceHours:
+          type: number
+          nullable: true
+        hoursToService:
+          type: number
+          nullable: true
+        serviceHoursState:
+          type: string
+          enum: [overdue, due_soon, ok, none]
+    GreenTrackMachineHoursSummary:
+      type: object
+      required: [dueSoonHours, machines]
+      properties:
+        dueSoonHours:
+          type: number
+        machines:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenTrackMachineHours"
+    GreenTrackHourReading:
+      type: object
+      required: [key, source, sourceLabel, sourceId, machineId, machineName, readingDate, hours]
+      properties:
+        id:
+          type: integer
+          nullable: true
+          description: Set only for standalone readings, which are edited on this route
+        key:
+          type: string
+        source:
+          type: string
+          enum: [reading, pre_use_check, fuel_log, service]
+        sourceLabel:
+          type: string
+        sourceId:
+          type: integer
+        machineId:
+          type: integer
+        machineName:
+          type: string
+        machineType:
+          type: string
+        readingDate:
+          type: string
+        hours:
+          type: number
+        recordedBy:
+          type: string
+          nullable: true
+        recordedByRosterId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    GreenTrackProduct:
+      type: object
+      required: [id, name, category, unit, active, stockOnHand, lowStock]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        category:
+          type: string
+          enum: [pesticide, fertiliser, top_dressing, seed, wetting_agent, other]
+        unit:
+          type: string
+          enum: [L, kg, t, bag, unit]
+        mappNumber:
+          type: string
+          nullable: true
+        activeIngredient:
+          type: string
+          nullable: true
+        supplier:
+          type: string
+          nullable: true
+        reorderLevel:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        stockOnHand:
+          type: number
+          description: Worked out from deliveries, counts, write-offs and records, in the product's unit
+        lowStock:
+          type: boolean
+        lastDeliveryDate:
+          type: string
+          format: date
+          nullable: true
+        lastCountDate:
+          type: string
+          format: date
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    GreenTrackProductInput:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+          enum: [pesticide, fertiliser, top_dressing, seed, wetting_agent, other]
+        unit:
+          type: string
+          enum: [L, kg, t, bag, unit]
+        mappNumber:
+          type: string
+          nullable: true
+        activeIngredient:
+          type: string
+          nullable: true
+        supplier:
+          type: string
+          nullable: true
+        reorderLevel:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+    GreenTrackStockLedgerEntry:
+      type: object
+      required: [key, kind, productId, date, change, balance]
+      properties:
+        key:
+          type: string
+        kind:
+          type: string
+          enum: [delivery, count, write_off, application]
+        productId:
+          type: integer
+        date:
+          type: string
+          format: date
+        change:
+          type: number
+        balance:
+          type: number
+        countedQuantity:
+          type: number
+          nullable: true
+        movementId:
+          type: integer
+          nullable: true
+        applicationId:
+          type: integer
+          nullable: true
+        detail:
+          type: string
+          nullable: true
+        recordedBy:
+          type: string
+          nullable: true
+    GreenTrackProductHistory:
+      type: object
+      required: [product, entries]
+      properties:
+        product:
+          $ref: "#/components/schemas/GreenTrackProduct"
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenTrackStockLedgerEntry"
+    GreenTrackStockMovement:
+      type: object
+      required: [id, productId, productName, unit, movementDate, kind, quantity]
+      properties:
+        id:
+          type: integer
+        productId:
+          type: integer
+        productName:
+          type: string
+        unit:
+          type: string
+        movementDate:
+          type: string
+          format: date
+        kind:
+          type: string
+          enum: [delivery, count, write_off]
+        quantity:
+          type: number
+          description: Signed change (a write-off is negative; a count is 0)
+        countedQuantity:
+          type: number
+          nullable: true
+        supplier:
+          type: string
+          nullable: true
+        batchNumber:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        recordedBy:
+          type: string
+          nullable: true
+        recordedByRosterId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    GreenTrackStockMovementInput:
+      type: object
+      required: [productId, movementDate, kind]
+      properties:
+        productId:
+          type: integer
+        movementDate:
+          type: string
+          format: date
+        kind:
+          type: string
+          enum: [delivery, count, write_off]
+        quantity:
+          type: number
+          description: Delivered or written-off quantity (above 0)
+        countedQuantity:
+          type: number
+          description: The quantity counted, for a stock count
+        supplier:
+          type: string
+          nullable: true
+        batchNumber:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        recordedBy:
+          type: string
+          nullable: true
+        recordedByRosterId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    GreenTrackStockMovementUpdate:
+      type: object
+      properties:
+        movementDate:
+          type: string
+          format: date
+        quantity:
+          type: number
+        countedQuantity:
+          type: number
+        supplier:
+          type: string
+          nullable: true
+        batchNumber:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        recordedBy:
+          type: string
+          nullable: true
+        recordedByRosterId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    GreenTrackApplicationProduct:
+      type: object
+      required: [productId, productName, category, unit, quantityUsed]
+      properties:
+        productId:
+          type: integer
+        productName:
+          type: string
+        category:
+          type: string
+        unit:
+          type: string
+        mappNumber:
+          type: string
+          nullable: true
+        ratePerHectare:
+          type: number
+          nullable: true
+        quantityUsed:
+          type: number
+    GreenTrackApplicationProductInput:
+      type: object
+      required: [productId, quantityUsed]
+      properties:
+        productId:
+          type: integer
+        ratePerHectare:
+          type: number
+          nullable: true
+        quantityUsed:
+          type: number
+          description: In the product's unit; this comes off stock
+    GreenTrackApplication:
+      type: object
+      required: [id, applicationDate, method, areas, products]
+      properties:
+        id:
+          type: integer
+        applicationDate:
+          type: string
+          format: date
+        startTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        endTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        method:
+          type: string
+          enum: [spray, granular, top_dressing, other]
+        machineId:
+          type: integer
+          nullable: true
+        areas:
+          type: array
+          items:
+            type: string
+            enum: [greens, tees, fairways, approaches, surrounds, bunkers, rough, practice, other]
+        areaDetails:
+          type: string
+          nullable: true
+        areaHectares:
+          type: number
+          nullable: true
+        waterVolumeLitres:
+          type: number
+          nullable: true
+        nozzle:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        operatorName:
+          type: string
+          nullable: true
+        operatorRosterId:
+          type: integer
+          nullable: true
+        operatorCertificate:
+          type: string
+          nullable: true
+        weather:
+          type: string
+          nullable: true
+        wind:
+          type: string
+          nullable: true
+        temperatureC:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        machineName:
+          type: string
+          nullable: true
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenTrackApplicationProduct"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    GreenTrackStockWarning:
+      type: object
+      required: [productId, productName, unit, stockOnHand]
+      properties:
+        productId:
+          type: integer
+        productName:
+          type: string
+        unit:
+          type: string
+        stockOnHand:
+          type: number
+    GreenTrackApplicationSaved:
+      allOf:
+        - $ref: "#/components/schemas/GreenTrackApplication"
+        - type: object
+          required: [stockWarnings]
+          properties:
+            stockWarnings:
+              type: array
+              items:
+                $ref: "#/components/schemas/GreenTrackStockWarning"
+    GreenTrackApplicationInput:
+      type: object
+      required: [applicationDate, products]
+      properties:
+        applicationDate:
+          type: string
+          format: date
+        startTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        endTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        method:
+          type: string
+          enum: [spray, granular, top_dressing, other]
+        machineId:
+          type: integer
+          nullable: true
+        areas:
+          type: array
+          items:
+            type: string
+            enum: [greens, tees, fairways, approaches, surrounds, bunkers, rough, practice, other]
+        areaDetails:
+          type: string
+          nullable: true
+        areaHectares:
+          type: number
+          nullable: true
+        waterVolumeLitres:
+          type: number
+          nullable: true
+        nozzle:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        operatorName:
+          type: string
+          nullable: true
+        operatorRosterId:
+          type: integer
+          nullable: true
+        operatorCertificate:
+          type: string
+          nullable: true
+        weather:
+          type: string
+          nullable: true
+        wind:
+          type: string
+          nullable: true
+        temperatureC:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        products:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/GreenTrackApplicationProductInput"
+    GreenTrackApplicationUpdate:
+      type: object
+      properties:
+        applicationDate:
+          type: string
+          format: date
+        startTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        endTime:
+          type: string
+          nullable: true
+          description: HH:MM
+        method:
+          type: string
+          enum: [spray, granular, top_dressing, other]
+        machineId:
+          type: integer
+          nullable: true
+        areas:
+          type: array
+          items:
+            type: string
+            enum: [greens, tees, fairways, approaches, surrounds, bunkers, rough, practice, other]
+        areaDetails:
+          type: string
+          nullable: true
+        areaHectares:
+          type: number
+          nullable: true
+        waterVolumeLitres:
+          type: number
+          nullable: true
+        nozzle:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        operatorName:
+          type: string
+          nullable: true
+        operatorRosterId:
+          type: integer
+          nullable: true
+        operatorCertificate:
+          type: string
+          nullable: true
+        weather:
+          type: string
+          nullable: true
+        wind:
+          type: string
+          nullable: true
+        temperatureC:
+          type: number
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        products:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/GreenTrackApplicationProductInput"
+    GreenTrackHourReadingInput:
+      type: object
+      required: [machineId, readingDate, hours]
+      properties:
+        machineId:
+          type: integer
+        readingDate:
+          type: string
+          format: date
+        hours:
+          type: number
+        recordedBy:
+          type: string
+          nullable: true
+        recordedByRosterId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        meterReplaced:
+          type: boolean
+          description: Confirms a reading lower than an earlier one (meter replaced or reset)
+    GreenTrackHourReadingUpdate:
+      type: object
+      properties:
+        readingDate:
+          type: string
+          format: date
+        hours:
+          type: number
+        recordedBy:
+          type: string
+          nullable: true
+        recordedByRosterId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        meterReplaced:
+          type: boolean
+    GreenTrackHourReadingRow:
+      type: object
+      description: The stored reading (database column names)
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        machine_id:
+          type: integer
+        reading_date:
+          type: string
+        hours:
+          type: number
+    GreenTrackCertificateDownload:
+      type: object
+      required: [downloadUrl]
+      properties:
+        downloadUrl:
+          type: string
+        fileName:
+          type: string
+          nullable: true
+
     ErrorResponse:
       type: object
       properties:
@@ -2816,6 +5486,77 @@ components:
           type: string
           nullable: true
 
+    ContractorVisitType:
+      type: object
+      required: [key, module, trackLabel, title, label, description, dueFrom]
+      properties:
+        key: { type: string }
+        module: { type: string }
+        trackLabel: { type: string }
+        title: { type: string, description: Title of the linked compliance check }
+        label: { type: string }
+        description: { type: string }
+        dueFrom: { type: string, enum: [track, later, check] }
+    ContractorVisit:
+      type: object
+      required: [visitKey, siteId, siteName, trackDueDate, checkId, checkSiteId, dueDate, status, contractorId, contractorName, reminderSentAt]
+      properties:
+        visitKey: { type: string }
+        siteId: { type: integer }
+        siteName: { type: string }
+        trackDueDate: { type: string, format: date, nullable: true }
+        checkId: { type: integer, nullable: true }
+        checkSiteId: { type: integer, nullable: true, description: Null for a business-wide check at a one-site business }
+        dueDate: { type: string, format: date, nullable: true }
+        status: { type: string, nullable: true }
+        contractorId: { type: integer, nullable: true }
+        contractorName: { type: string, nullable: true }
+        reminderSentAt: { type: string, format: date-time, nullable: true }
+    ContractorVisitsResponse:
+      type: object
+      required: [types, visits]
+      properties:
+        types:
+          type: array
+          items: { $ref: "#/components/schemas/ContractorVisitType" }
+        visits:
+          type: array
+          items: { $ref: "#/components/schemas/ContractorVisit" }
+    CertificateOutstanding:
+      type: object
+      required: [itemId, title, siteId, siteName, visitDate, daysSinceVisit, contractorName, chasing]
+      properties:
+        itemId: { type: integer }
+        title: { type: string }
+        siteId: { type: integer, nullable: true }
+        siteName: { type: string, nullable: true }
+        visitDate: { type: string, format: date }
+        daysSinceVisit: { type: integer }
+        contractorName: { type: string }
+        chasing:
+          type: boolean
+          description: False once the contractor is no longer reminded (chaseStopsAfterDays after the visit)
+    CertificatesOutstandingResponse:
+      type: object
+      required: [followUpAfterDays, chaseStopsAfterDays, certificates]
+      properties:
+        followUpAfterDays: { type: integer }
+        chaseStopsAfterDays: { type: integer }
+        certificates:
+          type: array
+          items: { $ref: "#/components/schemas/CertificateOutstanding" }
+    SetContractorVisitRequest:
+      type: object
+      required: [visitKey, siteId, contractorId]
+      properties:
+        visitKey: { type: string }
+        siteId: { type: integer }
+        contractorId: { type: integer, nullable: true }
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+          description: Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)
     Contractor:
       type: object
       properties:
@@ -3141,6 +5882,10 @@ components:
         assignedTo:
           type: string
           nullable: true
+        assigneeUserId:
+          type: integer
+          nullable: true
+          description: The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.
         dueDate:
           type: string
           format: date-time
@@ -3167,11 +5912,15 @@ components:
           nullable: true
         needsAction:
           type: boolean
-          description: The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date.
+          description: >
+            The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR
+            defects, or the contractor visit has happened with no certificate
+            uploaded since (certificate_outstanding), so the check needs action
+            and is not compliant whatever its due date.
         needsActionReason:
           type: string
           nullable: true
-          enum: [unsatisfactory, open_defects]
+          enum: [unsatisfactory, open_defects, certificate_outstanding]
         openDefectCount:
           type: integer
           description: Open C1/C2/FI/ID/AR defects on the newest certificate.
@@ -3188,6 +5937,17 @@ components:
         - priority
         - createdAt
         - updatedAt
+
+    Assignee:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        role:
+          type: string
+      required: [id, name, role]
 
     CreateComplianceItemRequest:
       type: object
@@ -3217,6 +5977,10 @@ components:
         assignedTo:
           type: string
           nullable: true
+        assigneeUserId:
+          type: integer
+          nullable: true
+          description: The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.
         dueDate:
           type: string
           format: date-time
@@ -3262,6 +6026,10 @@ components:
         assignedTo:
           type: string
           nullable: true
+        assigneeUserId:
+          type: integer
+          nullable: true
+          description: The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.
         dueDate:
           type: string
           format: date-time
@@ -3394,13 +6162,25 @@ components:
             updatedBy:
               type: integer
               nullable: true
+            intakeEnabled:
+              type: boolean
+            intakePublishedAt:
+              type: string
+              format: date-time
+              nullable: true
+            intakePublishedBy:
+              type: integer
+              nullable: true
+            intakeAssigneeId:
+              type: integer
+              nullable: true
             createdAt:
               type: string
               format: date-time
             updatedAt:
               type: string
               format: date-time
-          required: [id, clientId, updatedBy, createdAt, updatedAt]
+          required: [id, clientId, updatedBy, intakeEnabled, intakePublishedAt, intakePublishedBy, intakeAssigneeId, createdAt, updatedAt]
 
     PrivacyProcessingActivityInput:
       type: object
@@ -3572,6 +6352,19 @@ components:
             decidedBy:
               type: integer
               nullable: true
+            source:
+              type: string
+              enum: [staff, public_intake]
+            publicReference:
+              type: string
+              nullable: true
+            assignedTo:
+              type: integer
+              nullable: true
+            adminNotifiedAt:
+              type: string
+              format: date-time
+              nullable: true
             createdBy:
               type: integer
               nullable: true
@@ -3584,7 +6377,7 @@ components:
             updatedAt:
               type: string
               format: date-time
-          required: [id, clientId, dueAt, identityVerifiedAt, identityVerifiedBy, decidedAt, decidedBy, createdBy, updatedBy, createdAt, updatedAt]
+          required: [id, clientId, dueAt, identityVerifiedAt, identityVerifiedBy, decidedAt, decidedBy, source, publicReference, assignedTo, adminNotifiedAt, createdBy, updatedBy, createdAt, updatedAt]
 
     PrivacyRetentionScheduleInput:
       type: object
@@ -3928,7 +6721,87 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PrivacyBreach"
-      required: [program, activities, rightsRequests, retentionSchedules, retentionVerifications, processors, breaches]
+        privacyAdministrators:
+          type: array
+          description: People who can be assigned online privacy requests
+          items:
+            $ref: "#/components/schemas/PrivacyAdministrator"
+      required: [program, activities, rightsRequests, retentionSchedules, retentionVerifications, processors, breaches, privacyAdministrators]
+
+    PrivacyAdministrator:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+      required: [id, name]
+
+    PrivacyIntakeLinkResult:
+      type: object
+      properties:
+        url:
+          type: string
+          description: The form link. It is not stored and is shown only in this response.
+        program:
+          $ref: "#/components/schemas/PrivacyProgram"
+      required: [url, program]
+
+    PrivacyIntakeAssigneeInput:
+      type: object
+      properties:
+        assigneeId:
+          type: integer
+          nullable: true
+          description: An administrator of this business, or null to notify every administrator
+      required: [assigneeId]
+
+    PrivacyIntakeForm:
+      type: object
+      properties:
+        organisationName:
+          type: string
+        privacyNoticeUrl:
+          type: string
+          nullable: true
+        requestTypes:
+          type: array
+          items:
+            type: string
+            enum: [access, rectification, erasure, restriction, portability, objection, other]
+      required: [organisationName, privacyNoticeUrl, requestTypes]
+
+    PrivacyIntakeSubmission:
+      type: object
+      properties:
+        requestType:
+          type: string
+          enum: [access, rectification, erasure, restriction, portability, objection, other]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        email:
+          type: string
+          maxLength: 320
+        details:
+          type: string
+          minLength: 1
+          maxLength: 5000
+        website:
+          type: string
+          description: Leave empty (spam trap)
+      required: [requestType, name, email, details]
+
+    PrivacyIntakeReceipt:
+      type: object
+      properties:
+        reference:
+          type: string
+        receivedAt:
+          type: string
+          format: date-time
+      required: [reference, receivedAt]
 
     TrackSummaryPreviewPerson:
       type: object
@@ -4048,6 +6921,45 @@ components:
           type: string
           pattern: "^[0-9]+$"
           nullable: true
+        storageAutoTopUp:
+          type: string
+          enum: ["true", "false"]
+          nullable: true
+          description: '"true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'
+        ownerUpdateFrequency:
+          type: string
+          enum: ["weekly", "daily"]
+          nullable: true
+          description: How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
+        reminderTimings:
+          type: string
+          nullable: true
+          description: 'JSON object keyed by reminder type (track module, "tasks", "contractors", "train"), each {"daysBefore": number|"next_week"|null, "overdueEvery": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; "next_week" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.'
+
+    StorageLimitState:
+      type: string
+      enum: [ok, nearly_full, full, not_limited]
+      description: Usage against the storage the business pays for. nearly_full is 80% or more; full stops new uploads unless automatic top-up adds storage; not_limited means no paid limit applies (no live subscription, or it couldn't be read).
+
+    StorageStatus:
+      type: object
+      required: [state, canManage, autoTopUp, usedBytes, capacityBytes]
+      properties:
+        state:
+          $ref: "#/components/schemas/StorageLimitState"
+        canManage:
+          type: boolean
+          description: Whether this user can add storage or change automatic top-up.
+        autoTopUp:
+          type: boolean
+        usedBytes:
+          type: ["integer", "null"]
+          minimum: 0
+          description: Only for users who can manage storage.
+        capacityBytes:
+          type: ["integer", "null"]
+          minimum: 0
+          description: Only for users who can manage storage, and null when not limited.
 
     StorageUsage:
       type: object
@@ -4063,10 +6975,22 @@ components:
         - usageCheckedAt
         - usageAgeSeconds
         - usageRefreshing
+        - capacityBytes
+        - limitState
+        - autoTopUp
       properties:
         usedBytes:
           type: integer
           minimum: 0
+        capacityBytes:
+          type: ["integer", "null"]
+          minimum: 0
+          description: The storage the business pays for (plan allowance plus extra storage); null when uploads aren't limited.
+        limitState:
+          $ref: "#/components/schemas/StorageLimitState"
+        autoTopUp:
+          type: boolean
+          description: Whether automatic 10 GB top-up is switched on.
         usageCheckedAt:
           type: ["string", "null"]
           format: date-time
@@ -4210,7 +7134,7 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service]
 
     FireSafetyCheck:
       type: object
@@ -4238,6 +7162,32 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
+        soundLevelDb:
+          type: number
+          nullable: true
+          description: Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).
+        soundLevelMethod:
+          type: string
+          nullable: true
+          enum: [meter, phone]
+          description: How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+        soundLevelBedhead:
+          type: boolean
+          nullable: true
+          description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
         createdAt:
           type: string
           format: date-time
@@ -4275,6 +7225,32 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
+        soundLevelDb:
+          type: number
+          nullable: true
+          description: Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).
+        soundLevelMethod:
+          type: string
+          nullable: true
+          enum: [meter, phone]
+          description: How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+        soundLevelBedhead:
+          type: boolean
+          nullable: true
+          description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
       required:
         - checkType
         - checkDate
@@ -4300,6 +7276,198 @@ components:
         performedBy:
           type: string
           nullable: true
+        callPointId:
+          type: integer
+          nullable: true
+          description: Weekly alarm tests. A call point from the site's list.
+        callPoint:
+          type: string
+          nullable: true
+          description: Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).
+        nightStaff:
+          type: string
+          nullable: true
+          enum: [included, not_included, no_night_staff]
+          description: Fire drills. Whether night staff took part.
+        soundLevelDb:
+          type: number
+          nullable: true
+          description: Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).
+        soundLevelMethod:
+          type: string
+          nullable: true
+          enum: [meter, phone]
+          description: How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+        soundLevelBedhead:
+          type: boolean
+          nullable: true
+          description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
+
+    FireCallPoint:
+      type: object
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        location:
+          type: string
+          nullable: true
+          description: Where the call point is, e.g. "Kitchen fire exit, ground floor".
+        sortOrder:
+          type: integer
+          description: Place in the site's test rotation (1 = first).
+        sleepingArea:
+          type: boolean
+          description: Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastTestedDate:
+          type: string
+          nullable: true
+          description: Date of the latest alarm test that used this call point.
+        nextInTurn:
+          type: boolean
+          description: The call point to test next at its site (the one after the call point tested last, in rotation order).
+        notTestedThisRound:
+          type: boolean
+          description: In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).
+      required:
+        - id
+        - siteId
+        - name
+        - location
+        - sortOrder
+        - archivedAt
+        - lastTestedDate
+        - nextInTurn
+        - notTestedThisRound
+
+    CreateFireCallPointRequest:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        location:
+          type: string
+          nullable: true
+        sleepingArea:
+          type: boolean
+          description: Near bedrooms or other sleeping areas (75 dB at the bedhead).
+      required:
+        - siteId
+        - name
+
+    UpdateFireCallPointRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        location:
+          type: string
+          nullable: true
+        sleepingArea:
+          type: boolean
+          description: Near bedrooms or other sleeping areas (75 dB at the bedhead).
+        archived:
+          type: boolean
+
+    OrderFireCallPointsRequest:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        ids:
+          type: array
+          description: Every call point in use at the site, first to last.
+          items:
+            type: integer
+      required:
+        - siteId
+        - ids
+
+    FireCallPointImportRequest:
+      type: object
+      properties:
+        headers:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        preview:
+          type: boolean
+        siteId:
+          type: integer
+          nullable: true
+          description: The site for rows whose Site cell is blank.
+      required:
+        - headers
+        - rows
+
+    FireCallPointImportResult:
+      type: object
+      properties:
+        preview:
+          type: boolean
+        committed:
+          type: boolean
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            create:
+              type: integer
+            update:
+              type: integer
+            skip:
+              type: integer
+            error:
+              type: integer
+          required: [total, create, update, skip, error]
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              row:
+                type: integer
+              action:
+                type: string
+                enum: [create, update, skip, error]
+              label:
+                type: string
+              reasons:
+                type: array
+                items:
+                  type: string
+            required: [row, action, label, reasons]
+        ignoredHeaders:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+      required:
+        - preview
+        - committed
+        - summary
+        - rows
+        - ignoredHeaders
 
     FireSafetyStatus:
       type: object
@@ -4588,6 +7756,437 @@ components:
         incident_locations:
           type: string
 
+    CoshhCheckType:
+      type: string
+      enum: [lev_examination, health_surveillance, exposure_monitoring, staff_briefing]
+
+    CoshhExposureRoute:
+      type: string
+      enum: [inhalation, skin, eyes, ingestion, injection]
+
+    CoshhPpe:
+      type: string
+      enum: [gloves, eye_protection, face_shield, respirator, apron_overalls, footwear]
+
+    CoshhAssessmentInput:
+      type: object
+      properties:
+        siteId:
+          type: integer
+        substanceId:
+          type: ["integer", "null"]
+        task:
+          type: string
+        whoAtRisk:
+          type: ["string", "null"]
+        exposureRoutes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoshhExposureRoute"
+        howOften:
+          type: ["string", "null"]
+        hazardStatements:
+          type: ["string", "null"]
+        signalWord:
+          type: ["string", "null"]
+          enum: [danger, warning, none, null]
+        healthEffects:
+          type: ["string", "null"]
+        exposureLimits:
+          type: ["string", "null"]
+        controls:
+          type: ["string", "null"]
+        ppe:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoshhPpe"
+        ppeDetails:
+          type: ["string", "null"]
+        riskLevel:
+          type: string
+          enum: [low, medium, high]
+        healthSurveillanceRequired:
+          type: boolean
+        monitoringRequired:
+          type: boolean
+        levRequired:
+          type: boolean
+        storage:
+          type: ["string", "null"]
+        spillProcedure:
+          type: ["string", "null"]
+        firstAid:
+          type: ["string", "null"]
+        disposal:
+          type: ["string", "null"]
+        assessor:
+          type: ["string", "null"]
+        assessmentDate:
+          type: string
+        reviewDue:
+          type: ["string", "null"]
+          description: Omitted on create = 12 months after the assessment date.
+        status:
+          type: string
+          enum: [current, archived]
+        notes:
+          type: ["string", "null"]
+        draftSource:
+          type: ["string", "null"]
+          enum: [ai, null]
+          description: Set to ai when the form was pre-filled from a safety data sheet.
+        draftedAt:
+          type: ["string", "null"]
+          format: date-time
+        checkedAgainstSds:
+          type: boolean
+          description: Required (true) to save an AI draft; the saver is recorded as having checked it.
+        signOffDepartments:
+          type: array
+          items: { type: string }
+          description: Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site.
+        objectPath:
+          type: ["string", "null"]
+          description: A fresh upload from POST /registers/uploads/request-url, null to detach, omitted to keep.
+        fileName:
+          type: ["string", "null"]
+      required: [siteId, task, riskLevel, assessmentDate]
+
+    CoshhAssessment:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: ["integer", "null"]
+        substanceId:
+          type: ["integer", "null"]
+        task:
+          type: string
+        whoAtRisk:
+          type: ["string", "null"]
+        exposureRoutes:
+          type: array
+          items:
+            type: string
+        howOften:
+          type: ["string", "null"]
+        hazardStatements:
+          type: ["string", "null"]
+        signalWord:
+          type: ["string", "null"]
+        healthEffects:
+          type: ["string", "null"]
+        exposureLimits:
+          type: ["string", "null"]
+        controls:
+          type: ["string", "null"]
+        ppe:
+          type: array
+          items:
+            type: string
+        ppeDetails:
+          type: ["string", "null"]
+        riskLevel:
+          type: string
+        healthSurveillanceRequired:
+          type: boolean
+        monitoringRequired:
+          type: boolean
+        levRequired:
+          type: boolean
+        storage:
+          type: ["string", "null"]
+        spillProcedure:
+          type: ["string", "null"]
+        firstAid:
+          type: ["string", "null"]
+        disposal:
+          type: ["string", "null"]
+        assessor:
+          type: ["string", "null"]
+        assessmentDate:
+          type: string
+        reviewDue:
+          type: ["string", "null"]
+        status:
+          type: string
+        documentObjectPath:
+          type: ["string", "null"]
+        documentFileName:
+          type: ["string", "null"]
+        documentFileSize:
+          type: ["integer", "null"]
+        documentMimeType:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        draftSource:
+          type: ["string", "null"]
+        draftedAt:
+          type: ["string", "null"]
+        checkedBy:
+          type: ["integer", "null"]
+        checkedByName:
+          type: ["string", "null"]
+        checkedAt:
+          type: ["string", "null"]
+        revision:
+          type: integer
+          description: Goes up when a change alters what staff read, so they sign the assessment again.
+        signOffDepartments:
+          type: array
+          items: { type: string }
+        createdBy:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        deletedAt:
+          type: ["string", "null"]
+        reviewOverdue:
+          type: boolean
+      required: [id, clientId, task, exposureRoutes, ppe, riskLevel, healthSurveillanceRequired, monitoringRequired, levRequired, assessmentDate, status, reviewOverdue, revision, signOffDepartments]
+
+    CoshhSignOffSummary:
+      type: object
+      description: The parts of a current COSHH assessment a person reads before signing.
+      properties:
+        id: { type: integer }
+        siteId: { type: integer }
+        siteName: { type: ["string", "null"] }
+        task: { type: string }
+        productName: { type: ["string", "null"] }
+        substanceId: { type: ["integer", "null"] }
+        hasSafetyDataSheet: { type: boolean }
+        hasDocument: { type: boolean }
+        revision: { type: integer }
+        signOffDepartments:
+          type: array
+          items: { type: string }
+        assessmentDate: { type: ["string", "null"], format: date }
+        assessor: { type: ["string", "null"] }
+        riskLevel: { type: string }
+        hazardStatements: { type: ["string", "null"] }
+        signalWord: { type: ["string", "null"] }
+        healthEffects: { type: ["string", "null"] }
+        exposureRoutes:
+          type: array
+          items: { type: string }
+        controls: { type: ["string", "null"] }
+        ppe:
+          type: array
+          items: { type: string }
+        ppeDetails: { type: ["string", "null"] }
+        storage: { type: ["string", "null"] }
+        spillProcedure: { type: ["string", "null"] }
+        firstAid: { type: ["string", "null"] }
+        disposal: { type: ["string", "null"] }
+      required: [id, siteId, task, revision, signOffDepartments, riskLevel, exposureRoutes, ppe, hasSafetyDataSheet, hasDocument]
+
+    CoshhSignOffStatus:
+      allOf:
+        - $ref: "#/components/schemas/CoshhSignOffSummary"
+        - type: object
+          properties:
+            staffTotal: { type: integer }
+            signedCount: { type: integer }
+            signed:
+              type: array
+              items:
+                type: object
+                properties:
+                  staffRosterId: { type: integer }
+                  name: { type: string }
+                  department: { type: ["string", "null"] }
+                  signedAt: { type: string, format: date-time }
+                  hasSignature: { type: boolean }
+                  trainTrackRecordId: { type: ["integer", "null"] }
+                required: [staffRosterId, name, signedAt, hasSignature]
+            outstanding:
+              type: array
+              items:
+                type: object
+                properties:
+                  staffRosterId: { type: integer }
+                  name: { type: string }
+                  department: { type: ["string", "null"] }
+                  resign:
+                    type: boolean
+                    description: They signed an earlier revision, so this is a re-sign after a change.
+                required: [staffRosterId, name, resign]
+          required: [staffTotal, signedCount, signed, outstanding]
+
+    CoshhSignOffRequest:
+      type: object
+      properties:
+        signOffs:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              staffRosterId: { type: integer }
+              signature:
+                type: ["string", "null"]
+                description: The person's signature drawn on this device (base64 PNG).
+            required: [staffRosterId]
+      required: [signOffs]
+
+    MyCoshhSignOffs:
+      type: object
+      properties:
+        linked: { type: boolean }
+        pending:
+          type: array
+          items: { $ref: "#/components/schemas/CoshhSignOffSummary" }
+        signed:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/CoshhSignOffSummary"
+              - type: object
+                properties:
+                  signedAt: { type: string, format: date-time }
+                required: [signedAt]
+      required: [linked, pending, signed]
+
+    CoshhCheckInput:
+      type: object
+      properties:
+        siteId:
+          type: integer
+        assessmentId:
+          type: ["integer", "null"]
+        checkType:
+          $ref: "#/components/schemas/CoshhCheckType"
+        checkDate:
+          type: string
+        subject:
+          type: ["string", "null"]
+          description: The extraction system, the person checked or briefed, or the area monitored.
+        carriedOutBy:
+          type: ["string", "null"]
+        result:
+          type: string
+          enum: [pass, fail]
+        actionRequired:
+          type: ["string", "null"]
+          description: Required when the result is fail.
+        nextDueDate:
+          type: ["string", "null"]
+          description: Omitted on create = the suggested interval (LEV 14 months, others 12).
+        notes:
+          type: ["string", "null"]
+        objectPath:
+          type: ["string", "null"]
+        fileName:
+          type: ["string", "null"]
+      required: [siteId, checkType, checkDate]
+
+    CoshhCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: ["integer", "null"]
+        assessmentId:
+          type: ["integer", "null"]
+        checkType:
+          type: string
+        checkDate:
+          type: string
+        subject:
+          type: ["string", "null"]
+        carriedOutBy:
+          type: ["string", "null"]
+        result:
+          type: string
+        actionRequired:
+          type: ["string", "null"]
+        nextDueDate:
+          type: ["string", "null"]
+        reportObjectPath:
+          type: ["string", "null"]
+        reportFileName:
+          type: ["string", "null"]
+        reportFileSize:
+          type: ["integer", "null"]
+        reportMimeType:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdBy:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        deletedAt:
+          type: ["string", "null"]
+      required: [id, clientId, checkType, checkDate, result]
+
+    CoshhDueItem:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [assessment_review, lev_examination, health_surveillance, exposure_monitoring, staff_briefing]
+        recordId:
+          type: integer
+        assessmentId:
+          type: ["integer", "null"]
+        label:
+          type: string
+        siteId:
+          type: ["integer", "null"]
+        siteName:
+          type: ["string", "null"]
+        dueDate:
+          type: ["string", "null"]
+        daysUntilDue:
+          type: ["integer", "null"]
+          description: Negative = overdue by that many days; null for items not recorded yet.
+        status:
+          type: string
+          enum: [overdue, due_soon, ok, missing]
+      required: [kind, recordId, assessmentId, label, siteId, siteName, dueDate, daysUntilDue, status]
+
+    CoshhTrackStatus:
+      type: object
+      properties:
+        today:
+          type: string
+        dueSoonDays:
+          type: integer
+        overdue:
+          type: integer
+        dueSoon:
+          type: integer
+        missing:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoshhDueItem"
+      required: [today, dueSoonDays, overdue, dueSoon, missing, items]
+
+    CoshhDocumentUrl:
+      type: object
+      properties:
+        downloadUrl:
+          type: string
+        fileName:
+          type: ["string", "null"]
+      required: [downloadUrl]
+
     OkResponse:
       type: object
       properties:
@@ -4841,6 +8440,12 @@ components:
         updatedAt:
           type: string
           format: date-time
+        superseded:
+          type: boolean
+          description: >-
+            True when a later inspection of the same type and area at the same
+            site exists, so this one's next inspection date no longer applies.
+            Returned by the list.
       required:
         - id
         - clientId
@@ -4988,12 +8593,18 @@ components:
           type: string
           nullable: true
         food_jurisdiction:
-          description: Food-safety jurisdiction used to choose the standard reheating limit.
+          description: Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
           type: string
           enum:
             - scotland
             - england_wales
             - northern_ireland
+            - ireland
+            - australia
+            - new_zealand
+            - canada
+            - united_states
+            - other
           nullable: true
         food_cooking_limit:
           type: string
@@ -5236,6 +8847,30 @@ components:
         - createdAt
         - updatedAt
 
+    FoodSafetyColdReadingRequest:
+      type: object
+      required: [recordDate, unit, slot, temperature]
+      properties:
+        recordDate:
+          type: string
+          description: The diary's local calendar date (YYYY-MM-DD).
+        unit:
+          type: string
+          description: The fridge or freezer's name on the kitchen's list.
+        slot:
+          type: string
+          enum: [am, pm]
+        temperature:
+          type: number
+        correctiveAction:
+          type: string
+          description: Required when the reading is outside the unit's limits.
+        recordedAt:
+          type: string
+          format: date-time
+        spoken:
+          type: string
+          description: The words heard when the reading was spoken ("Say it"), kept as evidence.
     CreateFoodSafetyRecordRequest:
       type: object
       properties:
@@ -5404,6 +9039,10 @@ components:
         reheating:
           type: object
           additionalProperties: true
+        sousVide:
+          type: object
+          additionalProperties: true
+          description: One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).
         correctives:
           type: string
         expectedCorrectives:
@@ -5492,6 +9131,10 @@ components:
         performedBy:
           type: string
           nullable: true
+        equipmentId:
+          type: integer
+          nullable: true
+          description: A cold water tank or calorifier on the equipment list (its site must match siteId).
       required:
         - checkType
         - checkDate
@@ -5577,3 +9220,440 @@ components:
         approved:
           type: boolean
       required: [profile, approved]
+
+    EquipmentType:
+      type: string
+      enum: [cold_water_tank, calorifier, boiler, water_heater, lift, hoist, lifting_equipment, pressure_system, gas_appliance, air_conditioning, fire_extinguisher, ladder, other]
+
+    EquipmentLabelKind:
+      type: string
+      enum: [green_machine, pat_appliance, hot_tub, fire_call_point, water_outlet, bike, room, cold_unit, equipment]
+
+    EquipmentLinkedCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+      required: [id, title]
+
+    EquipmentItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/EquipmentType"
+        typeLabel:
+          type: string
+        location:
+          type: string
+          nullable: true
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serialNo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        complianceItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentLinkedCheck"
+        labelCode:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, siteId, siteName, name, type, typeLabel, location, make, model, serialNo, notes, active, complianceItems, labelCode, createdAt, updatedAt]
+
+    EquipmentItemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/EquipmentType"
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serialNo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        complianceItemIds:
+          type: array
+          items:
+            type: integer
+      required: [name, type]
+
+    UpdateEquipmentItemRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/EquipmentType"
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        make:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        serialNo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        complianceItemIds:
+          type: array
+          items:
+            type: integer
+
+    EquipmentLabelRef:
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/EquipmentLabelKind"
+        ref:
+          type: string
+          description: The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer.
+      required: [kind, ref]
+
+    EquipmentLabelSheetRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentLabelRef"
+        size:
+          type: string
+          enum: [standard, large]
+      required: [items]
+
+    EquipmentLabelTarget:
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/EquipmentLabelKind"
+        ref:
+          type: string
+        track:
+          type: string
+        name:
+          type: string
+        detail:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        code:
+          type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+      required: [kind, ref, track, name, detail, siteId, siteName, code, url]
+
+    EquipmentScanState:
+      type: string
+      enum: [ok, due_soon, overdue, never, problem, info]
+
+    EquipmentScanStatus:
+      type: object
+      properties:
+        label:
+          type: string
+        state:
+          $ref: "#/components/schemas/EquipmentScanState"
+        text:
+          type: string
+        note:
+          type: string
+      required: [label, state, text]
+
+    EquipmentScanAction:
+      type: object
+      properties:
+        label:
+          type: string
+        href:
+          type: string
+        primary:
+          type: boolean
+      required: [label, href]
+
+    EquipmentScanHistory:
+      type: object
+      properties:
+        date:
+          type: string
+        text:
+          type: string
+        state:
+          $ref: "#/components/schemas/EquipmentScanState"
+      required: [date, text, state]
+
+    EquipmentScan:
+      type: object
+      properties:
+        code:
+          type: string
+        clientId:
+          type: integer
+        kind:
+          $ref: "#/components/schemas/EquipmentLabelKind"
+        track:
+          type: string
+        name:
+          type: string
+        detail:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentScanStatus"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentScanAction"
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/EquipmentScanHistory"
+      required: [code, clientId, kind, track, name, detail, siteId, siteName, active, statuses, actions, history]
+
+    InspectionReportType:
+      type: string
+      enum: [alps_audit, care_inspectorate, eho, fire_officer, hse, insurer, other]
+
+    InspectionReportSeverity:
+      type: string
+      enum: [monitor, action_required, urgent]
+
+    InspectionReportOptions:
+      type: object
+      properties:
+        reportTypes:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { $ref: "#/components/schemas/InspectionReportType" }
+              label: { type: string }
+            required: [key, label]
+        modules:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              label: { type: string }
+            required: [key, label]
+        sites:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+            required: [id, name]
+        assignees:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+              role: { type: string }
+              isMaintenanceManager: { type: boolean }
+            required: [id, name, role, isMaintenanceManager]
+        reading:
+          type: object
+          properties:
+            available: { type: boolean }
+            monthlyLimit: { type: integer }
+            usedThisMonth: { type: integer }
+          required: [available, monthlyLimit, usedThisMonth]
+      required: [reportTypes, modules, sites, assignees, reading]
+
+    InspectionReportSummary:
+      type: object
+      properties:
+        id: { type: integer }
+        siteId: { type: integer, nullable: true }
+        reportType: { $ref: "#/components/schemas/InspectionReportType" }
+        title: { type: string }
+        reportDate: { type: string, format: date, nullable: true }
+        fileName: { type: string, nullable: true }
+        aiStatus: { type: string }
+        uploadedByName: { type: string }
+        createdAt: { type: string, format: date-time }
+        draftCount: { type: integer }
+        actionCount: { type: integer }
+        openCount: { type: integer }
+      required: [id, siteId, reportType, title, reportDate, fileName, aiStatus, uploadedByName, createdAt, draftCount, actionCount, openCount]
+
+    InspectionReportDraftAction:
+      type: object
+      properties:
+        title: { type: string }
+        instruction: { type: string, nullable: true }
+        module: { type: string }
+        severity: { $ref: "#/components/schemas/InspectionReportSeverity" }
+        siteId: { type: integer, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+        assignedUserId: { type: integer, nullable: true }
+        reportReference: { type: string, nullable: true }
+        draftSource: { type: string, enum: [ai, manual] }
+      required: [title, module, severity]
+
+    InspectionReportDraftRequest:
+      type: object
+      properties:
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InspectionReportDraftAction"
+      required: [actions]
+
+    InspectionReport:
+      type: object
+      properties:
+        id: { type: integer }
+        siteId: { type: integer, nullable: true }
+        reportType: { $ref: "#/components/schemas/InspectionReportType" }
+        title: { type: string }
+        reportDate: { type: string, format: date, nullable: true }
+        fileName: { type: string, nullable: true }
+        fileSize: { type: integer, nullable: true }
+        mimeType: { type: string, nullable: true }
+        readable: { type: boolean }
+        draftActions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InspectionReportDraftAction"
+        aiStatus: { type: string }
+        aiSummary: { type: string, nullable: true }
+        aiError: { type: string, nullable: true }
+        aiReadCount: { type: integer }
+        uploadedByName: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, siteId, reportType, title, reportDate, fileName, readable, draftActions, aiStatus, aiSummary, aiError, aiReadCount, uploadedByName, createdAt]
+
+    InspectionReportAction:
+      type: object
+      properties:
+        id: { type: integer }
+        siteId: { type: integer, nullable: true }
+        module: { type: string }
+        title: { type: string }
+        instruction: { type: string, nullable: true }
+        severity: { $ref: "#/components/schemas/InspectionReportSeverity" }
+        status: { type: string }
+        ownerName: { type: string, nullable: true }
+        assigneeUserId: { type: integer, nullable: true, description: The person assigned (gets the reminders) }
+        dueDate: { type: string, format: date, nullable: true }
+        draftSource: { type: string, nullable: true }
+        confirmedByName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        dueDateChanges:
+          type: array
+          description: Due date changes after the action was created (report detail only), oldest first
+          items:
+            type: object
+            properties:
+              changedAt: { type: string, format: date-time }
+              changedByName: { type: string, nullable: true }
+              from: { type: string, format: date, nullable: true }
+              to: { type: string, format: date, nullable: true }
+            required: [changedAt, changedByName, from, to]
+      required: [id, siteId, module, title, instruction, severity, status, ownerName, dueDate, draftSource, confirmedByName, createdAt]
+
+    InspectionReportDetail:
+      allOf:
+        - $ref: "#/components/schemas/InspectionReport"
+        - type: object
+          properties:
+            actions:
+              type: array
+              items:
+                $ref: "#/components/schemas/InspectionReportAction"
+          required: [actions]
+
+    InspectionReportReading:
+      type: object
+      properties:
+        aiSummary: { type: string, nullable: true }
+        draftActions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InspectionReportDraftAction"
+      required: [aiSummary, draftActions]
+
+    CreateInspectionReportRequest:
+      type: object
+      properties:
+        title: { type: string }
+        reportType: { $ref: "#/components/schemas/InspectionReportType" }
+        reportDate: { type: string, format: date, nullable: true }
+        siteId: { type: integer, nullable: true }
+        objectPath: { type: string }
+        fileName: { type: string }
+      required: [title, reportType, objectPath, fileName]

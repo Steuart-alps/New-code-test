@@ -5,6 +5,119 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export type TodayByDepartmentRowKind = typeof TodayByDepartmentRowKind[keyof typeof TodayByDepartmentRowKind];
+
+
+export const TodayByDepartmentRowKind = {
+  whole_site: 'whole_site',
+  department: 'department',
+} as const;
+
+export type TodayByDepartmentItemStatus = typeof TodayByDepartmentItemStatus[keyof typeof TodayByDepartmentItemStatus];
+
+
+export const TodayByDepartmentItemStatus = {
+  todo: 'todo',
+  failed: 'failed',
+} as const;
+
+export interface TodayByDepartmentItem {
+  status: TodayByDepartmentItemStatus;
+  label: string;
+  detail: string;
+  path: string;
+}
+
+export interface TodayByDepartmentRow {
+  key: string;
+  kind: TodayByDepartmentRowKind;
+  departmentId: number | null;
+  name: string;
+  done: number;
+  todo: number;
+  failed: number;
+  items: TodayByDepartmentItem[];
+  moreItems: number;
+}
+
+export interface TodayByDepartmentGroup {
+  /** null for work not tied to one site ("All sites") */
+  siteId: number | null;
+  siteName: string;
+  rows: TodayByDepartmentRow[];
+}
+
+export interface TodayByDepartment {
+  date: string;
+  groups: TodayByDepartmentGroup[];
+}
+
+export type DailyTrackRequirement = typeof DailyTrackRequirement[keyof typeof DailyTrackRequirement];
+
+
+export const DailyTrackRequirement = {
+  kitchen_opening: 'kitchen_opening',
+  premises_opening: 'premises_opening',
+  kitchen_closing: 'kitchen_closing',
+  premises_closing: 'premises_closing',
+  signoff: 'signoff',
+} as const;
+
+export interface DailyTrackHistoryChecklist {
+  checkDate: string;
+  siteId: number | null;
+  checklistType: string;
+  submittedAt: string | null;
+}
+
+export interface DailyTrackHistorySignoff {
+  signoffDate: string;
+  siteId: number | null;
+  submittedAt: string | null;
+}
+
+export interface DailyTrackHistory {
+  /** The checks each site is expected to complete per day, in display order */
+  requirements: DailyTrackRequirement[];
+  checklists: DailyTrackHistoryChecklist[];
+  signoffs: DailyTrackHistorySignoff[];
+}
+
+export interface SignTrainingRecordRequest {
+  /** Signature image as a data URL */
+  signature: string;
+}
+
+export interface ActiveDepartmentRequest {
+  departmentId: number;
+}
+
+export type OwnTrainingRecordRecordType = typeof OwnTrainingRecordRecordType[keyof typeof OwnTrainingRecordRecordType];
+
+
+export const OwnTrainingRecordRecordType = {
+  certificate: 'certificate',
+  signoff: 'signoff',
+  internal: 'internal',
+} as const;
+
+export interface OwnTrainingRecord {
+  id: number;
+  record_type: OwnTrainingRecordRecordType;
+  staff_name: string;
+  training_type?: string | null;
+  document_title?: string | null;
+  document_type?: string | null;
+  provider?: string | null;
+  trainer?: string | null;
+  completed_date: string;
+  expiry_date?: string | null;
+  notes?: string | null;
+  signed: boolean;
+  updated_at?: string;
+  site_name?: string | null;
+}
+
 export type FeedbackReportCategory = typeof FeedbackReportCategory[keyof typeof FeedbackReportCategory];
 
 
@@ -176,6 +289,509 @@ export interface AuditLogEntry {
   actorName: string | null;
 }
 
+export interface FixTrackMediaDeleteRequest {
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  objectPath: string;
+}
+
+export interface FixTrackNewContractor {
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /** @maxLength 200 */
+  company?: string | null;
+  /**
+     * @minLength 3
+     * @maxLength 320
+     */
+  email: string;
+  /** @maxLength 50 */
+  phone?: string | null;
+}
+
+/**
+ * Exactly one of contractorId and newContractor.
+ */
+export interface FixTrackAssignContractorRequest {
+  contractorId?: number;
+  newContractor?: FixTrackNewContractor;
+  /** Left out keeps the issue's target date; null clears it. */
+  targetDate?: string | null;
+  /** Confirms replacing a job already emailed to a contractor. */
+  replace?: boolean;
+}
+
+export interface FixTrackAssignContractorResult {
+  ok: boolean;
+  queueId: number;
+  mode?: string;
+  subject?: string;
+  bodyHtml?: string;
+  contractorId: number;
+  contractorName: string;
+  message: string;
+}
+
+export interface FixTrackIssueMediaList {
+  mediaUrls: string[];
+}
+
+export type GreenTrackMachineHoursServiceHoursState = typeof GreenTrackMachineHoursServiceHoursState[keyof typeof GreenTrackMachineHoursServiceHoursState];
+
+
+export const GreenTrackMachineHoursServiceHoursState = {
+  overdue: 'overdue',
+  due_soon: 'due_soon',
+  ok: 'ok',
+  none: 'none',
+} as const;
+
+export interface GreenTrackMachineHours {
+  machineId: number;
+  machineName: string;
+  machineType: string;
+  siteId?: number | null;
+  currentHours: number | null;
+  lastReadingDate: string | null;
+  hoursLast7Days: number | null;
+  hoursLast30Days: number | null;
+  lastServiceDate: string | null;
+  nextServiceHours: number | null;
+  hoursToService: number | null;
+  serviceHoursState: GreenTrackMachineHoursServiceHoursState;
+}
+
+export interface GreenTrackMachineHoursSummary {
+  dueSoonHours: number;
+  machines: GreenTrackMachineHours[];
+}
+
+export type GreenTrackHourReadingSource = typeof GreenTrackHourReadingSource[keyof typeof GreenTrackHourReadingSource];
+
+
+export const GreenTrackHourReadingSource = {
+  reading: 'reading',
+  pre_use_check: 'pre_use_check',
+  fuel_log: 'fuel_log',
+  service: 'service',
+} as const;
+
+export interface GreenTrackHourReading {
+  /** Set only for standalone readings, which are edited on this route */
+  id?: number | null;
+  key: string;
+  source: GreenTrackHourReadingSource;
+  sourceLabel: string;
+  sourceId: number;
+  machineId: number;
+  machineName: string;
+  machineType?: string;
+  readingDate: string;
+  hours: number;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+}
+
+export type GreenTrackProductCategory = typeof GreenTrackProductCategory[keyof typeof GreenTrackProductCategory];
+
+
+export const GreenTrackProductCategory = {
+  pesticide: 'pesticide',
+  fertiliser: 'fertiliser',
+  top_dressing: 'top_dressing',
+  seed: 'seed',
+  wetting_agent: 'wetting_agent',
+  other: 'other',
+} as const;
+
+export type GreenTrackProductUnit = typeof GreenTrackProductUnit[keyof typeof GreenTrackProductUnit];
+
+
+export const GreenTrackProductUnit = {
+  L: 'L',
+  kg: 'kg',
+  t: 't',
+  bag: 'bag',
+  unit: 'unit',
+} as const;
+
+export interface GreenTrackProduct {
+  id: number;
+  name: string;
+  category: GreenTrackProductCategory;
+  unit: GreenTrackProductUnit;
+  mappNumber?: string | null;
+  activeIngredient?: string | null;
+  supplier?: string | null;
+  reorderLevel?: number | null;
+  notes?: string | null;
+  active: boolean;
+  /** Worked out from deliveries, counts, write-offs and records, in the product's unit */
+  stockOnHand: number;
+  lowStock: boolean;
+  lastDeliveryDate?: string | null;
+  lastCountDate?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type GreenTrackProductInputCategory = typeof GreenTrackProductInputCategory[keyof typeof GreenTrackProductInputCategory];
+
+
+export const GreenTrackProductInputCategory = {
+  pesticide: 'pesticide',
+  fertiliser: 'fertiliser',
+  top_dressing: 'top_dressing',
+  seed: 'seed',
+  wetting_agent: 'wetting_agent',
+  other: 'other',
+} as const;
+
+export type GreenTrackProductInputUnit = typeof GreenTrackProductInputUnit[keyof typeof GreenTrackProductInputUnit];
+
+
+export const GreenTrackProductInputUnit = {
+  L: 'L',
+  kg: 'kg',
+  t: 't',
+  bag: 'bag',
+  unit: 'unit',
+} as const;
+
+export interface GreenTrackProductInput {
+  name?: string;
+  category?: GreenTrackProductInputCategory;
+  unit?: GreenTrackProductInputUnit;
+  mappNumber?: string | null;
+  activeIngredient?: string | null;
+  supplier?: string | null;
+  reorderLevel?: number | null;
+  notes?: string | null;
+  active?: boolean;
+}
+
+export type GreenTrackStockLedgerEntryKind = typeof GreenTrackStockLedgerEntryKind[keyof typeof GreenTrackStockLedgerEntryKind];
+
+
+export const GreenTrackStockLedgerEntryKind = {
+  delivery: 'delivery',
+  count: 'count',
+  write_off: 'write_off',
+  application: 'application',
+} as const;
+
+export interface GreenTrackStockLedgerEntry {
+  key: string;
+  kind: GreenTrackStockLedgerEntryKind;
+  productId: number;
+  date: string;
+  change: number;
+  balance: number;
+  countedQuantity?: number | null;
+  movementId?: number | null;
+  applicationId?: number | null;
+  detail?: string | null;
+  recordedBy?: string | null;
+}
+
+export interface GreenTrackProductHistory {
+  product: GreenTrackProduct;
+  entries: GreenTrackStockLedgerEntry[];
+}
+
+export type GreenTrackStockMovementKind = typeof GreenTrackStockMovementKind[keyof typeof GreenTrackStockMovementKind];
+
+
+export const GreenTrackStockMovementKind = {
+  delivery: 'delivery',
+  count: 'count',
+  write_off: 'write_off',
+} as const;
+
+export interface GreenTrackStockMovement {
+  id: number;
+  productId: number;
+  productName: string;
+  unit: string;
+  movementDate: string;
+  kind: GreenTrackStockMovementKind;
+  /** Signed change (a write-off is negative; a count is 0) */
+  quantity: number;
+  countedQuantity?: number | null;
+  supplier?: string | null;
+  batchNumber?: string | null;
+  reference?: string | null;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+}
+
+export type GreenTrackStockMovementInputKind = typeof GreenTrackStockMovementInputKind[keyof typeof GreenTrackStockMovementInputKind];
+
+
+export const GreenTrackStockMovementInputKind = {
+  delivery: 'delivery',
+  count: 'count',
+  write_off: 'write_off',
+} as const;
+
+export interface GreenTrackStockMovementInput {
+  productId: number;
+  movementDate: string;
+  kind: GreenTrackStockMovementInputKind;
+  /** Delivered or written-off quantity (above 0) */
+  quantity?: number;
+  /** The quantity counted, for a stock count */
+  countedQuantity?: number;
+  supplier?: string | null;
+  batchNumber?: string | null;
+  reference?: string | null;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+}
+
+export interface GreenTrackStockMovementUpdate {
+  movementDate?: string;
+  quantity?: number;
+  countedQuantity?: number;
+  supplier?: string | null;
+  batchNumber?: string | null;
+  reference?: string | null;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+}
+
+export interface GreenTrackApplicationProduct {
+  productId: number;
+  productName: string;
+  category: string;
+  unit: string;
+  mappNumber?: string | null;
+  ratePerHectare?: number | null;
+  quantityUsed: number;
+}
+
+export interface GreenTrackApplicationProductInput {
+  productId: number;
+  ratePerHectare?: number | null;
+  /** In the product's unit; this comes off stock */
+  quantityUsed: number;
+}
+
+export type GreenTrackApplicationMethod = typeof GreenTrackApplicationMethod[keyof typeof GreenTrackApplicationMethod];
+
+
+export const GreenTrackApplicationMethod = {
+  spray: 'spray',
+  granular: 'granular',
+  top_dressing: 'top_dressing',
+  other: 'other',
+} as const;
+
+export type GreenTrackApplicationAreasItem = typeof GreenTrackApplicationAreasItem[keyof typeof GreenTrackApplicationAreasItem];
+
+
+export const GreenTrackApplicationAreasItem = {
+  greens: 'greens',
+  tees: 'tees',
+  fairways: 'fairways',
+  approaches: 'approaches',
+  surrounds: 'surrounds',
+  bunkers: 'bunkers',
+  rough: 'rough',
+  practice: 'practice',
+  other: 'other',
+} as const;
+
+export interface GreenTrackApplication {
+  id: number;
+  applicationDate: string;
+  /** HH:MM */
+  startTime?: string | null;
+  /** HH:MM */
+  endTime?: string | null;
+  method: GreenTrackApplicationMethod;
+  machineId?: number | null;
+  areas: GreenTrackApplicationAreasItem[];
+  areaDetails?: string | null;
+  areaHectares?: number | null;
+  waterVolumeLitres?: number | null;
+  nozzle?: string | null;
+  reason?: string | null;
+  operatorName?: string | null;
+  operatorRosterId?: number | null;
+  operatorCertificate?: string | null;
+  weather?: string | null;
+  wind?: string | null;
+  temperatureC?: number | null;
+  notes?: string | null;
+  machineName?: string | null;
+  products: GreenTrackApplicationProduct[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface GreenTrackStockWarning {
+  productId: number;
+  productName: string;
+  unit: string;
+  stockOnHand: number;
+}
+
+export type GreenTrackApplicationSaved = GreenTrackApplication & {
+  stockWarnings: GreenTrackStockWarning[];
+};
+
+export type GreenTrackApplicationInputMethod = typeof GreenTrackApplicationInputMethod[keyof typeof GreenTrackApplicationInputMethod];
+
+
+export const GreenTrackApplicationInputMethod = {
+  spray: 'spray',
+  granular: 'granular',
+  top_dressing: 'top_dressing',
+  other: 'other',
+} as const;
+
+export type GreenTrackApplicationInputAreasItem = typeof GreenTrackApplicationInputAreasItem[keyof typeof GreenTrackApplicationInputAreasItem];
+
+
+export const GreenTrackApplicationInputAreasItem = {
+  greens: 'greens',
+  tees: 'tees',
+  fairways: 'fairways',
+  approaches: 'approaches',
+  surrounds: 'surrounds',
+  bunkers: 'bunkers',
+  rough: 'rough',
+  practice: 'practice',
+  other: 'other',
+} as const;
+
+export interface GreenTrackApplicationInput {
+  applicationDate: string;
+  /** HH:MM */
+  startTime?: string | null;
+  /** HH:MM */
+  endTime?: string | null;
+  method?: GreenTrackApplicationInputMethod;
+  machineId?: number | null;
+  areas?: GreenTrackApplicationInputAreasItem[];
+  areaDetails?: string | null;
+  areaHectares?: number | null;
+  waterVolumeLitres?: number | null;
+  nozzle?: string | null;
+  reason?: string | null;
+  operatorName?: string | null;
+  operatorRosterId?: number | null;
+  operatorCertificate?: string | null;
+  weather?: string | null;
+  wind?: string | null;
+  temperatureC?: number | null;
+  notes?: string | null;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  products: GreenTrackApplicationProductInput[];
+}
+
+export type GreenTrackApplicationUpdateMethod = typeof GreenTrackApplicationUpdateMethod[keyof typeof GreenTrackApplicationUpdateMethod];
+
+
+export const GreenTrackApplicationUpdateMethod = {
+  spray: 'spray',
+  granular: 'granular',
+  top_dressing: 'top_dressing',
+  other: 'other',
+} as const;
+
+export type GreenTrackApplicationUpdateAreasItem = typeof GreenTrackApplicationUpdateAreasItem[keyof typeof GreenTrackApplicationUpdateAreasItem];
+
+
+export const GreenTrackApplicationUpdateAreasItem = {
+  greens: 'greens',
+  tees: 'tees',
+  fairways: 'fairways',
+  approaches: 'approaches',
+  surrounds: 'surrounds',
+  bunkers: 'bunkers',
+  rough: 'rough',
+  practice: 'practice',
+  other: 'other',
+} as const;
+
+export interface GreenTrackApplicationUpdate {
+  applicationDate?: string;
+  /** HH:MM */
+  startTime?: string | null;
+  /** HH:MM */
+  endTime?: string | null;
+  method?: GreenTrackApplicationUpdateMethod;
+  machineId?: number | null;
+  areas?: GreenTrackApplicationUpdateAreasItem[];
+  areaDetails?: string | null;
+  areaHectares?: number | null;
+  waterVolumeLitres?: number | null;
+  nozzle?: string | null;
+  reason?: string | null;
+  operatorName?: string | null;
+  operatorRosterId?: number | null;
+  operatorCertificate?: string | null;
+  weather?: string | null;
+  wind?: string | null;
+  temperatureC?: number | null;
+  notes?: string | null;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  products?: GreenTrackApplicationProductInput[];
+}
+
+export interface GreenTrackHourReadingInput {
+  machineId: number;
+  readingDate: string;
+  hours: number;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+  /** Confirms a reading lower than an earlier one (meter replaced or reset) */
+  meterReplaced?: boolean;
+}
+
+export interface GreenTrackHourReadingUpdate {
+  readingDate?: string;
+  hours?: number;
+  recordedBy?: string | null;
+  recordedByRosterId?: number | null;
+  notes?: string | null;
+  meterReplaced?: boolean;
+}
+
+/**
+ * The stored reading (database column names)
+ */
+export interface GreenTrackHourReadingRow {
+  id?: number;
+  machine_id?: number;
+  reading_date?: string;
+  hours?: number;
+  [key: string]: unknown;
+ }
+
+export interface GreenTrackCertificateDownload {
+  downloadUrl: string;
+  fileName?: string | null;
+}
+
 export interface ErrorResponse {
   error: string;
 }
@@ -223,6 +839,72 @@ export interface UpdateSiteRequest {
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+}
+
+export type ContractorVisitTypeDueFrom = typeof ContractorVisitTypeDueFrom[keyof typeof ContractorVisitTypeDueFrom];
+
+
+export const ContractorVisitTypeDueFrom = {
+  track: 'track',
+  later: 'later',
+  check: 'check',
+} as const;
+
+export interface ContractorVisitType {
+  key: string;
+  module: string;
+  trackLabel: string;
+  /** Title of the linked compliance check */
+  title: string;
+  label: string;
+  description: string;
+  dueFrom: ContractorVisitTypeDueFrom;
+}
+
+export interface ContractorVisit {
+  visitKey: string;
+  siteId: number;
+  siteName: string;
+  trackDueDate: string | null;
+  checkId: number | null;
+  /** Null for a business-wide check at a one-site business */
+  checkSiteId: number | null;
+  dueDate: string | null;
+  status: string | null;
+  contractorId: number | null;
+  contractorName: string | null;
+  reminderSentAt: string | null;
+}
+
+export interface ContractorVisitsResponse {
+  types: ContractorVisitType[];
+  visits: ContractorVisit[];
+}
+
+export interface CertificateOutstanding {
+  itemId: number;
+  title: string;
+  siteId: number | null;
+  siteName: string | null;
+  visitDate: string;
+  daysSinceVisit: number;
+  contractorName: string;
+  /** False once the contractor is no longer reminded (chaseStopsAfterDays after the visit) */
+  chasing: boolean;
+}
+
+export interface CertificatesOutstandingResponse {
+  followUpAfterDays: number;
+  chaseStopsAfterDays: number;
+  certificates: CertificateOutstanding[];
+}
+
+export interface SetContractorVisitRequest {
+  visitKey: string;
+  siteId: number;
+  contractorId: number | null;
+  /** Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet) */
+  dueDate?: string | null;
 }
 
 export interface Contractor {
@@ -387,6 +1069,7 @@ export type ComplianceItemNeedsActionReason = typeof ComplianceItemNeedsActionRe
 export const ComplianceItemNeedsActionReason = {
   unsatisfactory: 'unsatisfactory',
   open_defects: 'open_defects',
+  certificate_outstanding: 'certificate_outstanding',
 } as const;
 
 export interface ComplianceItem {
@@ -404,6 +1087,8 @@ export interface ComplianceItem {
   contractorName?: string | null;
   contractorEmail?: string | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -415,13 +1100,19 @@ export interface ComplianceItem {
   notificationSentAt?: string | null;
   completedAt?: string | null;
   notes?: string | null;
-  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date. */
+  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
   needsAction?: boolean;
   needsActionReason?: ComplianceItemNeedsActionReason;
   /** Open C1/C2/FI/ID/AR defects on the newest certificate. */
   openDefectCount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Assignee {
+  id: number;
+  name: string;
+  role: string;
 }
 
 export type CreateComplianceItemRequestStatus = typeof CreateComplianceItemRequestStatus[keyof typeof CreateComplianceItemRequestStatus];
@@ -453,6 +1144,8 @@ export interface CreateComplianceItemRequest {
   categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -493,6 +1186,8 @@ export interface UpdateComplianceItemRequest {
   categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -576,6 +1271,10 @@ export type PrivacyProgram = PrivacyProgramInput & ({
   id: number;
   clientId: number;
   updatedBy: number | null;
+  intakeEnabled: boolean;
+  intakePublishedAt: string | null;
+  intakePublishedBy: number | null;
+  intakeAssigneeId: number | null;
   createdAt: string;
   updatedAt: string;
 });
@@ -736,6 +1435,14 @@ export const PrivacyRightsRequestKind = {
   rights_request: 'rights_request',
 } as const;
 
+export type PrivacyRightsRequestSource = typeof PrivacyRightsRequestSource[keyof typeof PrivacyRightsRequestSource];
+
+
+export const PrivacyRightsRequestSource = {
+  staff: 'staff',
+  public_intake: 'public_intake',
+} as const;
+
 export type PrivacyRightsRequest = PrivacyRightsRequestInput & ({
   kind: PrivacyRightsRequestKind;
   id: number;
@@ -745,6 +1452,10 @@ export type PrivacyRightsRequest = PrivacyRightsRequestInput & ({
   identityVerifiedBy: number | null;
   decidedAt: string | null;
   decidedBy: number | null;
+  source: PrivacyRightsRequestSource;
+  publicReference: string | null;
+  assignedTo: number | null;
+  adminNotifiedAt: string | null;
   createdBy: number | null;
   updatedBy: number | null;
   createdAt: string;
@@ -976,6 +1687,11 @@ export type PrivacyRetentionVerification = PrivacyRetentionVerificationInput & (
   verifiedAt: string;
 });
 
+export interface PrivacyAdministrator {
+  id: number;
+  name: string;
+}
+
 export interface PrivacyGovernanceResponse {
   program: PrivacyProgram | null;
   activities: PrivacyProcessingActivity[];
@@ -984,6 +1700,74 @@ export interface PrivacyGovernanceResponse {
   retentionVerifications: PrivacyRetentionVerification[];
   processors: PrivacyProcessor[];
   breaches: PrivacyBreach[];
+  /** People who can be assigned online privacy requests */
+  privacyAdministrators: PrivacyAdministrator[];
+}
+
+export interface PrivacyIntakeLinkResult {
+  /** The form link. It is not stored and is shown only in this response. */
+  url: string;
+  program: PrivacyProgram;
+}
+
+export interface PrivacyIntakeAssigneeInput {
+  /** An administrator of this business, or null to notify every administrator */
+  assigneeId: number | null;
+}
+
+export type PrivacyIntakeFormRequestTypesItem = typeof PrivacyIntakeFormRequestTypesItem[keyof typeof PrivacyIntakeFormRequestTypesItem];
+
+
+export const PrivacyIntakeFormRequestTypesItem = {
+  access: 'access',
+  rectification: 'rectification',
+  erasure: 'erasure',
+  restriction: 'restriction',
+  portability: 'portability',
+  objection: 'objection',
+  other: 'other',
+} as const;
+
+export interface PrivacyIntakeForm {
+  organisationName: string;
+  privacyNoticeUrl: string | null;
+  requestTypes: PrivacyIntakeFormRequestTypesItem[];
+}
+
+export type PrivacyIntakeSubmissionRequestType = typeof PrivacyIntakeSubmissionRequestType[keyof typeof PrivacyIntakeSubmissionRequestType];
+
+
+export const PrivacyIntakeSubmissionRequestType = {
+  access: 'access',
+  rectification: 'rectification',
+  erasure: 'erasure',
+  restriction: 'restriction',
+  portability: 'portability',
+  objection: 'objection',
+  other: 'other',
+} as const;
+
+export interface PrivacyIntakeSubmission {
+  requestType: PrivacyIntakeSubmissionRequestType;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /** @maxLength 320 */
+  email: string;
+  /**
+     * @minLength 1
+     * @maxLength 5000
+     */
+  details: string;
+  /** Leave empty (spam trap) */
+  website?: string;
+}
+
+export interface PrivacyIntakeReceipt {
+  reference: string;
+  receivedAt: string;
 }
 
 export interface TrackSummaryPreviewPerson {
@@ -1053,6 +1837,28 @@ export interface TrackSummaryPreview {
   tracks: TrackSummaryPreviewTrack[];
 }
 
+/**
+ * "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.
+ */
+export type AppSettingsStorageAutoTopUp = typeof AppSettingsStorageAutoTopUp[keyof typeof AppSettingsStorageAutoTopUp] | null;
+
+
+export const AppSettingsStorageAutoTopUp = {
+  true: 'true',
+  false: 'false',
+} as const;
+
+/**
+ * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
+ */
+export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequency[keyof typeof AppSettingsOwnerUpdateFrequency] | null;
+
+
+export const AppSettingsOwnerUpdateFrequency = {
+  weekly: 'weekly',
+  daily: 'daily',
+} as const;
+
 export interface AppSettings {
   smtpHost?: string | null;
   smtpPort?: string | null;
@@ -1066,6 +1872,44 @@ export interface AppSettings {
   accountTimezone?: string | null;
   /** @pattern ^[0-9]+$ */
   storageWarningThresholdBytes?: string | null;
+  /** "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there. */
+  storageAutoTopUp?: AppSettingsStorageAutoTopUp;
+  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays). */
+  ownerUpdateFrequency?: AppSettingsOwnerUpdateFrequency;
+  /** JSON object keyed by reminder type (track module, "tasks", "contractors", "train"), each {"daysBefore": number|"next_week"|null, "overdueEvery": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; "next_week" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue. */
+  reminderTimings?: string | null;
+}
+
+/**
+ * Usage against the storage the business pays for. nearly_full is 80% or more; full stops new uploads unless automatic top-up adds storage; not_limited means no paid limit applies (no live subscription, or it couldn't be read).
+ */
+export type StorageLimitState = typeof StorageLimitState[keyof typeof StorageLimitState];
+
+
+export const StorageLimitState = {
+  ok: 'ok',
+  nearly_full: 'nearly_full',
+  full: 'full',
+  not_limited: 'not_limited',
+} as const;
+
+export interface StorageStatus {
+  state: StorageLimitState;
+  /** Whether this user can add storage or change automatic top-up. */
+  canManage: boolean;
+  autoTopUp: boolean;
+  /**
+     * Only for users who can manage storage.
+     * @minimum 0
+     * @nullable
+     */
+  usedBytes: number | null;
+  /**
+     * Only for users who can manage storage, and null when not limited.
+     * @minimum 0
+     * @nullable
+     */
+  capacityBytes: number | null;
 }
 
 export type StorageUsageEstimatedCostCurrency = typeof StorageUsageEstimatedCostCurrency[keyof typeof StorageUsageEstimatedCostCurrency];
@@ -1098,6 +1942,15 @@ export type StorageUsageEstimatedCost = {
 export interface StorageUsage {
   /** @minimum 0 */
   usedBytes: number;
+  /**
+     * The storage the business pays for (plan allowance plus extra storage); null when uploads aren't limited.
+     * @minimum 0
+     * @nullable
+     */
+  capacityBytes: number | null;
+  limitState: StorageLimitState;
+  /** Whether automatic 10 GB top-up is switched on. */
+  autoTopUp: boolean;
   /**
      * When the totals were last reconciled with the storage provider; null before the first check.
      * @nullable
@@ -1182,6 +2035,9 @@ export const FireCheckType = {
   fire_drill: 'fire_drill',
   fire_walk: 'fire_walk',
   alarm_panel: 'alarm_panel',
+  emergency_lights_annual: 'emergency_lights_annual',
+  alarm_service: 'alarm_service',
+  extinguisher_service: 'extinguisher_service',
 } as const;
 
 export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof FireSafetyCheckResult];
@@ -1190,6 +2046,29 @@ export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof Fi
 export const FireSafetyCheckResult = {
   pass: 'pass',
   fail: 'fail',
+} as const;
+
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type FireSafetyCheckNightStaff = typeof FireSafetyCheckNightStaff[keyof typeof FireSafetyCheckNightStaff] | null;
+
+
+export const FireSafetyCheckNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type FireSafetyCheckSoundLevelMethod = typeof FireSafetyCheckSoundLevelMethod[keyof typeof FireSafetyCheckSoundLevelMethod] | null;
+
+
+export const FireSafetyCheckSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
 } as const;
 
 export interface FireSafetyCheck {
@@ -1202,6 +2081,18 @@ export interface FireSafetyCheck {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: FireSafetyCheckNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: FireSafetyCheckSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1214,6 +2105,29 @@ export const CreateFireSafetyCheckRequestResult = {
   fail: 'fail',
 } as const;
 
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type CreateFireSafetyCheckRequestNightStaff = typeof CreateFireSafetyCheckRequestNightStaff[keyof typeof CreateFireSafetyCheckRequestNightStaff] | null;
+
+
+export const CreateFireSafetyCheckRequestNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type CreateFireSafetyCheckRequestSoundLevelMethod = typeof CreateFireSafetyCheckRequestSoundLevelMethod[keyof typeof CreateFireSafetyCheckRequestSoundLevelMethod] | null;
+
+
+export const CreateFireSafetyCheckRequestSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface CreateFireSafetyCheckRequest {
   checkType: FireCheckType;
   checkDate: string;
@@ -1222,6 +2136,18 @@ export interface CreateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: CreateFireSafetyCheckRequestNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: CreateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
 }
 
 export type UpdateFireSafetyCheckRequestResult = typeof UpdateFireSafetyCheckRequestResult[keyof typeof UpdateFireSafetyCheckRequestResult];
@@ -1232,6 +2158,29 @@ export const UpdateFireSafetyCheckRequestResult = {
   fail: 'fail',
 } as const;
 
+/**
+ * Fire drills. Whether night staff took part.
+ */
+export type UpdateFireSafetyCheckRequestNightStaff = typeof UpdateFireSafetyCheckRequestNightStaff[keyof typeof UpdateFireSafetyCheckRequestNightStaff] | null;
+
+
+export const UpdateFireSafetyCheckRequestNightStaff = {
+  included: 'included',
+  not_included: 'not_included',
+  no_night_staff: 'no_night_staff',
+} as const;
+
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type UpdateFireSafetyCheckRequestSoundLevelMethod = typeof UpdateFireSafetyCheckRequestSoundLevelMethod[keyof typeof UpdateFireSafetyCheckRequestSoundLevelMethod] | null;
+
+
+export const UpdateFireSafetyCheckRequestSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface UpdateFireSafetyCheckRequest {
   checkDate?: string;
   result?: UpdateFireSafetyCheckRequestResult;
@@ -1239,6 +2188,101 @@ export interface UpdateFireSafetyCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** Weekly alarm tests. A call point from the site's list. */
+  callPointId?: number | null;
+  /** Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none). */
+  callPoint?: string | null;
+  /** Fire drills. Whether night staff took part. */
+  nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: UpdateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
+}
+
+export interface FireCallPoint {
+  id: number;
+  siteId: number | null;
+  name: string;
+  /** Where the call point is, e.g. "Kitchen fire exit, ground floor". */
+  location: string | null;
+  /** Place in the site's test rotation (1 = first). */
+  sortOrder: number;
+  /** Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB. */
+  sleepingArea?: boolean;
+  archivedAt: string | null;
+  /** Date of the latest alarm test that used this call point. */
+  lastTestedDate: string | null;
+  /** The call point to test next at its site (the one after the call point tested last, in rotation order). */
+  nextInTurn: boolean;
+  /** In use but never tested, or not tested within one full round (call points in use x the alarm test frequency). */
+  notTestedThisRound: boolean;
+}
+
+export interface CreateFireCallPointRequest {
+  siteId: number | null;
+  name: string;
+  location?: string | null;
+  /** Near bedrooms or other sleeping areas (75 dB at the bedhead). */
+  sleepingArea?: boolean;
+}
+
+export interface UpdateFireCallPointRequest {
+  name?: string;
+  location?: string | null;
+  /** Near bedrooms or other sleeping areas (75 dB at the bedhead). */
+  sleepingArea?: boolean;
+  archived?: boolean;
+}
+
+export interface OrderFireCallPointsRequest {
+  siteId: number | null;
+  /** Every call point in use at the site, first to last. */
+  ids: number[];
+}
+
+export interface FireCallPointImportRequest {
+  headers: string[];
+  rows: string[][];
+  preview?: boolean;
+  /** The site for rows whose Site cell is blank. */
+  siteId?: number | null;
+}
+
+export type FireCallPointImportResultSummary = {
+  total: number;
+  create: number;
+  update: number;
+  skip: number;
+  error: number;
+};
+
+export type FireCallPointImportResultRowsItemAction = typeof FireCallPointImportResultRowsItemAction[keyof typeof FireCallPointImportResultRowsItemAction];
+
+
+export const FireCallPointImportResultRowsItemAction = {
+  create: 'create',
+  update: 'update',
+  skip: 'skip',
+  error: 'error',
+} as const;
+
+export type FireCallPointImportResultRowsItem = {
+  row: number;
+  action: FireCallPointImportResultRowsItemAction;
+  label: string;
+  reasons: string[];
+};
+
+export interface FireCallPointImportResult {
+  preview: boolean;
+  committed: boolean;
+  summary: FireCallPointImportResultSummary;
+  rows: FireCallPointImportResultRowsItem[];
+  ignoredHeaders: string[];
+  error?: string;
 }
 
 export type FireSafetyStatusLastResult = typeof FireSafetyStatusLastResult[keyof typeof FireSafetyStatusLastResult] | null;
@@ -1564,6 +2608,451 @@ export interface IncidentConfig {
   incident_locations?: string;
 }
 
+export type CoshhCheckType = typeof CoshhCheckType[keyof typeof CoshhCheckType];
+
+
+export const CoshhCheckType = {
+  lev_examination: 'lev_examination',
+  health_surveillance: 'health_surveillance',
+  exposure_monitoring: 'exposure_monitoring',
+  staff_briefing: 'staff_briefing',
+} as const;
+
+export type CoshhExposureRoute = typeof CoshhExposureRoute[keyof typeof CoshhExposureRoute];
+
+
+export const CoshhExposureRoute = {
+  inhalation: 'inhalation',
+  skin: 'skin',
+  eyes: 'eyes',
+  ingestion: 'ingestion',
+  injection: 'injection',
+} as const;
+
+export type CoshhPpe = typeof CoshhPpe[keyof typeof CoshhPpe];
+
+
+export const CoshhPpe = {
+  gloves: 'gloves',
+  eye_protection: 'eye_protection',
+  face_shield: 'face_shield',
+  respirator: 'respirator',
+  apron_overalls: 'apron_overalls',
+  footwear: 'footwear',
+} as const;
+
+/**
+ * @nullable
+ */
+export type CoshhAssessmentInputSignalWord = typeof CoshhAssessmentInputSignalWord[keyof typeof CoshhAssessmentInputSignalWord] | null;
+
+
+export const CoshhAssessmentInputSignalWord = {
+  danger: 'danger',
+  warning: 'warning',
+  none: 'none',
+} as const;
+
+export type CoshhAssessmentInputRiskLevel = typeof CoshhAssessmentInputRiskLevel[keyof typeof CoshhAssessmentInputRiskLevel];
+
+
+export const CoshhAssessmentInputRiskLevel = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type CoshhAssessmentInputStatus = typeof CoshhAssessmentInputStatus[keyof typeof CoshhAssessmentInputStatus];
+
+
+export const CoshhAssessmentInputStatus = {
+  current: 'current',
+  archived: 'archived',
+} as const;
+
+/**
+ * Set to ai when the form was pre-filled from a safety data sheet.
+ * @nullable
+ */
+export type CoshhAssessmentInputDraftSource = typeof CoshhAssessmentInputDraftSource[keyof typeof CoshhAssessmentInputDraftSource] | null;
+
+
+export const CoshhAssessmentInputDraftSource = {
+  ai: 'ai',
+} as const;
+
+export interface CoshhAssessmentInput {
+  siteId: number;
+  /** @nullable */
+  substanceId?: number | null;
+  task: string;
+  /** @nullable */
+  whoAtRisk?: string | null;
+  exposureRoutes?: CoshhExposureRoute[];
+  /** @nullable */
+  howOften?: string | null;
+  /** @nullable */
+  hazardStatements?: string | null;
+  /** @nullable */
+  signalWord?: CoshhAssessmentInputSignalWord;
+  /** @nullable */
+  healthEffects?: string | null;
+  /** @nullable */
+  exposureLimits?: string | null;
+  /** @nullable */
+  controls?: string | null;
+  ppe?: CoshhPpe[];
+  /** @nullable */
+  ppeDetails?: string | null;
+  riskLevel: CoshhAssessmentInputRiskLevel;
+  healthSurveillanceRequired?: boolean;
+  monitoringRequired?: boolean;
+  levRequired?: boolean;
+  /** @nullable */
+  storage?: string | null;
+  /** @nullable */
+  spillProcedure?: string | null;
+  /** @nullable */
+  firstAid?: string | null;
+  /** @nullable */
+  disposal?: string | null;
+  /** @nullable */
+  assessor?: string | null;
+  assessmentDate: string;
+  /**
+     * Omitted on create = 12 months after the assessment date.
+     * @nullable
+     */
+  reviewDue?: string | null;
+  status?: CoshhAssessmentInputStatus;
+  /** @nullable */
+  notes?: string | null;
+  /**
+     * Set to ai when the form was pre-filled from a safety data sheet.
+     * @nullable
+     */
+  draftSource?: CoshhAssessmentInputDraftSource;
+  /** @nullable */
+  draftedAt?: string | null;
+  /** Required (true) to save an AI draft; the saver is recorded as having checked it. */
+  checkedAgainstSds?: boolean;
+  /** Departments (staff list names) whose staff must read and sign it in TrainTrack; empty means everyone at the site. */
+  signOffDepartments?: string[];
+  /**
+     * A fresh upload from POST /registers/uploads/request-url, null to detach, omitted to keep.
+     * @nullable
+     */
+  objectPath?: string | null;
+  /** @nullable */
+  fileName?: string | null;
+}
+
+export interface CoshhAssessment {
+  id: number;
+  clientId: number;
+  /** @nullable */
+  siteId?: number | null;
+  /** @nullable */
+  substanceId?: number | null;
+  task: string;
+  /** @nullable */
+  whoAtRisk?: string | null;
+  exposureRoutes: string[];
+  /** @nullable */
+  howOften?: string | null;
+  /** @nullable */
+  hazardStatements?: string | null;
+  /** @nullable */
+  signalWord?: string | null;
+  /** @nullable */
+  healthEffects?: string | null;
+  /** @nullable */
+  exposureLimits?: string | null;
+  /** @nullable */
+  controls?: string | null;
+  ppe: string[];
+  /** @nullable */
+  ppeDetails?: string | null;
+  riskLevel: string;
+  healthSurveillanceRequired: boolean;
+  monitoringRequired: boolean;
+  levRequired: boolean;
+  /** @nullable */
+  storage?: string | null;
+  /** @nullable */
+  spillProcedure?: string | null;
+  /** @nullable */
+  firstAid?: string | null;
+  /** @nullable */
+  disposal?: string | null;
+  /** @nullable */
+  assessor?: string | null;
+  assessmentDate: string;
+  /** @nullable */
+  reviewDue?: string | null;
+  status: string;
+  /** @nullable */
+  documentObjectPath?: string | null;
+  /** @nullable */
+  documentFileName?: string | null;
+  /** @nullable */
+  documentFileSize?: number | null;
+  /** @nullable */
+  documentMimeType?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  draftSource?: string | null;
+  /** @nullable */
+  draftedAt?: string | null;
+  /** @nullable */
+  checkedBy?: number | null;
+  /** @nullable */
+  checkedByName?: string | null;
+  /** @nullable */
+  checkedAt?: string | null;
+  /** Goes up when a change alters what staff read, so they sign the assessment again. */
+  revision: number;
+  signOffDepartments: string[];
+  /** @nullable */
+  createdBy?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+  /** @nullable */
+  deletedAt?: string | null;
+  reviewOverdue: boolean;
+}
+
+/**
+ * The parts of a current COSHH assessment a person reads before signing.
+ */
+export interface CoshhSignOffSummary {
+  id: number;
+  siteId: number;
+  /** @nullable */
+  siteName?: string | null;
+  task: string;
+  /** @nullable */
+  productName?: string | null;
+  /** @nullable */
+  substanceId?: number | null;
+  hasSafetyDataSheet: boolean;
+  hasDocument: boolean;
+  revision: number;
+  signOffDepartments: string[];
+  /** @nullable */
+  assessmentDate?: string | null;
+  /** @nullable */
+  assessor?: string | null;
+  riskLevel: string;
+  /** @nullable */
+  hazardStatements?: string | null;
+  /** @nullable */
+  signalWord?: string | null;
+  /** @nullable */
+  healthEffects?: string | null;
+  exposureRoutes: string[];
+  /** @nullable */
+  controls?: string | null;
+  ppe: string[];
+  /** @nullable */
+  ppeDetails?: string | null;
+  /** @nullable */
+  storage?: string | null;
+  /** @nullable */
+  spillProcedure?: string | null;
+  /** @nullable */
+  firstAid?: string | null;
+  /** @nullable */
+  disposal?: string | null;
+}
+
+export type CoshhSignOffStatusSignedItem = {
+  staffRosterId: number;
+  name: string;
+  /** @nullable */
+  department?: string | null;
+  signedAt: string;
+  hasSignature: boolean;
+  /** @nullable */
+  trainTrackRecordId?: number | null;
+};
+
+export type CoshhSignOffStatusOutstandingItem = {
+  staffRosterId: number;
+  name: string;
+  /** @nullable */
+  department?: string | null;
+  /** They signed an earlier revision, so this is a re-sign after a change. */
+  resign: boolean;
+};
+
+export type CoshhSignOffStatus = CoshhSignOffSummary & {
+  staffTotal: number;
+  signedCount: number;
+  signed: CoshhSignOffStatusSignedItem[];
+  outstanding: CoshhSignOffStatusOutstandingItem[];
+};
+
+export type CoshhSignOffRequestSignOffsItem = {
+  staffRosterId: number;
+  /**
+     * The person's signature drawn on this device (base64 PNG).
+     * @nullable
+     */
+  signature?: string | null;
+};
+
+export interface CoshhSignOffRequest {
+  /**
+     * @minItems 1
+     * @maxItems 200
+     */
+  signOffs: CoshhSignOffRequestSignOffsItem[];
+}
+
+export type MyCoshhSignOffsSignedItem = CoshhSignOffSummary & {
+  signedAt: string;
+};
+
+export interface MyCoshhSignOffs {
+  linked: boolean;
+  pending: CoshhSignOffSummary[];
+  signed: MyCoshhSignOffsSignedItem[];
+}
+
+export type CoshhCheckInputResult = typeof CoshhCheckInputResult[keyof typeof CoshhCheckInputResult];
+
+
+export const CoshhCheckInputResult = {
+  pass: 'pass',
+  fail: 'fail',
+} as const;
+
+export interface CoshhCheckInput {
+  siteId: number;
+  /** @nullable */
+  assessmentId?: number | null;
+  checkType: CoshhCheckType;
+  checkDate: string;
+  /**
+     * The extraction system, the person checked or briefed, or the area monitored.
+     * @nullable
+     */
+  subject?: string | null;
+  /** @nullable */
+  carriedOutBy?: string | null;
+  result?: CoshhCheckInputResult;
+  /**
+     * Required when the result is fail.
+     * @nullable
+     */
+  actionRequired?: string | null;
+  /**
+     * Omitted on create = the suggested interval (LEV 14 months, others 12).
+     * @nullable
+     */
+  nextDueDate?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  objectPath?: string | null;
+  /** @nullable */
+  fileName?: string | null;
+}
+
+export interface CoshhCheck {
+  id: number;
+  clientId: number;
+  /** @nullable */
+  siteId?: number | null;
+  /** @nullable */
+  assessmentId?: number | null;
+  checkType: string;
+  checkDate: string;
+  /** @nullable */
+  subject?: string | null;
+  /** @nullable */
+  carriedOutBy?: string | null;
+  result: string;
+  /** @nullable */
+  actionRequired?: string | null;
+  /** @nullable */
+  nextDueDate?: string | null;
+  /** @nullable */
+  reportObjectPath?: string | null;
+  /** @nullable */
+  reportFileName?: string | null;
+  /** @nullable */
+  reportFileSize?: number | null;
+  /** @nullable */
+  reportMimeType?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  createdBy?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+  /** @nullable */
+  deletedAt?: string | null;
+}
+
+export type CoshhDueItemKind = typeof CoshhDueItemKind[keyof typeof CoshhDueItemKind];
+
+
+export const CoshhDueItemKind = {
+  assessment_review: 'assessment_review',
+  lev_examination: 'lev_examination',
+  health_surveillance: 'health_surveillance',
+  exposure_monitoring: 'exposure_monitoring',
+  staff_briefing: 'staff_briefing',
+} as const;
+
+export type CoshhDueItemStatus = typeof CoshhDueItemStatus[keyof typeof CoshhDueItemStatus];
+
+
+export const CoshhDueItemStatus = {
+  overdue: 'overdue',
+  due_soon: 'due_soon',
+  ok: 'ok',
+  missing: 'missing',
+} as const;
+
+export interface CoshhDueItem {
+  kind: CoshhDueItemKind;
+  recordId: number;
+  /** @nullable */
+  assessmentId: number | null;
+  label: string;
+  /** @nullable */
+  siteId: number | null;
+  /** @nullable */
+  siteName: string | null;
+  /** @nullable */
+  dueDate: string | null;
+  /**
+     * Negative = overdue by that many days; null for items not recorded yet.
+     * @nullable
+     */
+  daysUntilDue: number | null;
+  status: CoshhDueItemStatus;
+}
+
+export interface CoshhTrackStatus {
+  today: string;
+  dueSoonDays: number;
+  overdue: number;
+  dueSoon: number;
+  missing: number;
+  items: CoshhDueItem[];
+}
+
+export interface CoshhDocumentUrl {
+  downloadUrl: string;
+  /** @nullable */
+  fileName?: string | null;
+}
+
 export interface OkResponse {
   ok: boolean;
 }
@@ -1702,6 +3191,8 @@ export interface PremisesInspection {
   createdBy?: number | null;
   createdAt?: string;
   updatedAt?: string;
+  /** True when a later inspection of the same type and area at the same site exists, so this one's next inspection date no longer applies. Returned by the list. */
+  superseded?: boolean;
 }
 
 export interface CreatePremisesInspectionRequest {
@@ -1748,7 +3239,7 @@ export interface PoolTrackConfig {
 }
 
 /**
- * Food-safety jurisdiction used to choose the standard reheating limit.
+ * Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels.
  */
 export type FoodSafetyConfigFoodJurisdiction = typeof FoodSafetyConfigFoodJurisdiction[keyof typeof FoodSafetyConfigFoodJurisdiction] | null;
 
@@ -1757,6 +3248,12 @@ export const FoodSafetyConfigFoodJurisdiction = {
   scotland: 'scotland',
   england_wales: 'england_wales',
   northern_ireland: 'northern_ireland',
+  ireland: 'ireland',
+  australia: 'australia',
+  new_zealand: 'new_zealand',
+  canada: 'canada',
+  united_states: 'united_states',
+  other: 'other',
 } as const;
 
 export interface FoodSafetyConfig {
@@ -1776,7 +3273,7 @@ export interface FoodSafetyConfig {
   food_show_sous_vide?: string | null;
   food_num_fridges?: string | null;
   food_num_freezers?: string | null;
-  /** Food-safety jurisdiction used to choose the standard reheating limit. */
+  /** Country (or UK nation) whose food-safety guidance gives the starting temperature limits and diary labels. */
   food_jurisdiction?: FoodSafetyConfigFoodJurisdiction;
   food_cooking_limit?: string | null;
   food_cooling_limit?: string | null;
@@ -1874,6 +3371,28 @@ export interface FoodSafetyRecord {
   updatedAt: string;
 }
 
+export type FoodSafetyColdReadingRequestSlot = typeof FoodSafetyColdReadingRequestSlot[keyof typeof FoodSafetyColdReadingRequestSlot];
+
+
+export const FoodSafetyColdReadingRequestSlot = {
+  am: 'am',
+  pm: 'pm',
+} as const;
+
+export interface FoodSafetyColdReadingRequest {
+  /** The diary's local calendar date (YYYY-MM-DD). */
+  recordDate: string;
+  /** The fridge or freezer's name on the kitchen's list. */
+  unit: string;
+  slot: FoodSafetyColdReadingRequestSlot;
+  temperature: number;
+  /** Required when the reading is outside the unit's limits. */
+  correctiveAction?: string;
+  recordedAt?: string;
+  /** The words heard when the reading was spoken ("Say it"), kept as evidence. */
+  spoken?: string;
+}
+
 export interface CreateFoodSafetyRecordRequest {
   /**
      * Stable device submission identifier retained across retries.
@@ -1926,6 +3445,11 @@ export type MobileTemperatureLogCooling = { [key: string]: unknown };
 
 export type MobileTemperatureLogReheating = { [key: string]: unknown };
 
+/**
+ * One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes).
+ */
+export type MobileTemperatureLogSousVide = { [key: string]: unknown };
+
 export interface MobileTemperatureLog {
   coldFood: unknown[];
   expectedColdFood: unknown[];
@@ -1934,6 +3458,8 @@ export interface MobileTemperatureLog {
   hotTemperature?: MobileTemperatureLogHotTemperature;
   cooling?: MobileTemperatureLogCooling;
   reheating?: MobileTemperatureLogReheating;
+  /** One sous vide reading (item, waterTemp, coreTemp, timeStarted, timeFinished, holdMinutes). */
+  sousVide?: MobileTemperatureLogSousVide;
   correctives?: string;
   expectedCorrectives: string | null;
 }
@@ -2033,6 +3559,8 @@ export type CreateLegionellaCheckRequest = unknown & ({
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
+  /** A cold water tank or calorifier on the equipment list (its site must match siteId). */
+  equipmentId?: number | null;
 });
 
 export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckRequestResult[keyof typeof UpdateLegionellaCheckRequestResult];
@@ -2112,6 +3640,327 @@ export interface WaterMonitoringPlanResult {
   approved: boolean;
 }
 
+export type EquipmentType = typeof EquipmentType[keyof typeof EquipmentType];
+
+
+export const EquipmentType = {
+  cold_water_tank: 'cold_water_tank',
+  calorifier: 'calorifier',
+  boiler: 'boiler',
+  water_heater: 'water_heater',
+  lift: 'lift',
+  hoist: 'hoist',
+  lifting_equipment: 'lifting_equipment',
+  pressure_system: 'pressure_system',
+  gas_appliance: 'gas_appliance',
+  air_conditioning: 'air_conditioning',
+  fire_extinguisher: 'fire_extinguisher',
+  ladder: 'ladder',
+  other: 'other',
+} as const;
+
+export type EquipmentLabelKind = typeof EquipmentLabelKind[keyof typeof EquipmentLabelKind];
+
+
+export const EquipmentLabelKind = {
+  green_machine: 'green_machine',
+  pat_appliance: 'pat_appliance',
+  hot_tub: 'hot_tub',
+  fire_call_point: 'fire_call_point',
+  water_outlet: 'water_outlet',
+  bike: 'bike',
+  room: 'room',
+  cold_unit: 'cold_unit',
+  equipment: 'equipment',
+} as const;
+
+export interface EquipmentLinkedCheck {
+  id: number;
+  title: string;
+}
+
+export interface EquipmentItem {
+  id: number;
+  siteId: number | null;
+  siteName: string | null;
+  name: string;
+  type: EquipmentType;
+  typeLabel: string;
+  location: string | null;
+  make: string | null;
+  model: string | null;
+  serialNo: string | null;
+  notes: string | null;
+  active: boolean;
+  complianceItems: EquipmentLinkedCheck[];
+  labelCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EquipmentItemRequest {
+  name: string;
+  type: EquipmentType;
+  siteId?: number | null;
+  location?: string | null;
+  make?: string | null;
+  model?: string | null;
+  serialNo?: string | null;
+  notes?: string | null;
+  active?: boolean;
+  complianceItemIds?: number[];
+}
+
+export interface UpdateEquipmentItemRequest {
+  name?: string;
+  type?: EquipmentType;
+  siteId?: number | null;
+  location?: string | null;
+  make?: string | null;
+  model?: string | null;
+  serialNo?: string | null;
+  notes?: string | null;
+  active?: boolean;
+  complianceItemIds?: number[];
+}
+
+export interface EquipmentLabelRef {
+  kind: EquipmentLabelKind;
+  /** The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer. */
+  ref: string;
+}
+
+export type EquipmentLabelSheetRequestSize = typeof EquipmentLabelSheetRequestSize[keyof typeof EquipmentLabelSheetRequestSize];
+
+
+export const EquipmentLabelSheetRequestSize = {
+  standard: 'standard',
+  large: 'large',
+} as const;
+
+export interface EquipmentLabelSheetRequest {
+  items: EquipmentLabelRef[];
+  size?: EquipmentLabelSheetRequestSize;
+}
+
+export interface EquipmentLabelTarget {
+  kind: EquipmentLabelKind;
+  ref: string;
+  track: string;
+  name: string;
+  detail: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  code: string | null;
+  url: string | null;
+}
+
+export type EquipmentScanState = typeof EquipmentScanState[keyof typeof EquipmentScanState];
+
+
+export const EquipmentScanState = {
+  ok: 'ok',
+  due_soon: 'due_soon',
+  overdue: 'overdue',
+  never: 'never',
+  problem: 'problem',
+  info: 'info',
+} as const;
+
+export interface EquipmentScanStatus {
+  label: string;
+  state: EquipmentScanState;
+  text: string;
+  note?: string;
+}
+
+export interface EquipmentScanAction {
+  label: string;
+  href: string;
+  primary?: boolean;
+}
+
+export interface EquipmentScanHistory {
+  date: string;
+  text: string;
+  state: EquipmentScanState;
+}
+
+export interface EquipmentScan {
+  code: string;
+  clientId: number;
+  kind: EquipmentLabelKind;
+  track: string;
+  name: string;
+  detail: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  active: boolean;
+  statuses: EquipmentScanStatus[];
+  actions: EquipmentScanAction[];
+  history: EquipmentScanHistory[];
+}
+
+export type InspectionReportType = typeof InspectionReportType[keyof typeof InspectionReportType];
+
+
+export const InspectionReportType = {
+  alps_audit: 'alps_audit',
+  care_inspectorate: 'care_inspectorate',
+  eho: 'eho',
+  fire_officer: 'fire_officer',
+  hse: 'hse',
+  insurer: 'insurer',
+  other: 'other',
+} as const;
+
+export type InspectionReportSeverity = typeof InspectionReportSeverity[keyof typeof InspectionReportSeverity];
+
+
+export const InspectionReportSeverity = {
+  monitor: 'monitor',
+  action_required: 'action_required',
+  urgent: 'urgent',
+} as const;
+
+export type InspectionReportOptionsReportTypesItem = {
+  key: InspectionReportType;
+  label: string;
+};
+
+export type InspectionReportOptionsModulesItem = {
+  key: string;
+  label: string;
+};
+
+export type InspectionReportOptionsSitesItem = {
+  id: number;
+  name: string;
+};
+
+export type InspectionReportOptionsAssigneesItem = {
+  id: number;
+  name: string;
+  role: string;
+  isMaintenanceManager: boolean;
+};
+
+export type InspectionReportOptionsReading = {
+  available: boolean;
+  monthlyLimit: number;
+  usedThisMonth: number;
+};
+
+export interface InspectionReportOptions {
+  reportTypes: InspectionReportOptionsReportTypesItem[];
+  modules: InspectionReportOptionsModulesItem[];
+  sites: InspectionReportOptionsSitesItem[];
+  assignees: InspectionReportOptionsAssigneesItem[];
+  reading: InspectionReportOptionsReading;
+}
+
+export interface InspectionReportSummary {
+  id: number;
+  siteId: number | null;
+  reportType: InspectionReportType;
+  title: string;
+  reportDate: string | null;
+  fileName: string | null;
+  aiStatus: string;
+  uploadedByName: string;
+  createdAt: string;
+  draftCount: number;
+  actionCount: number;
+  openCount: number;
+}
+
+export type InspectionReportDraftActionDraftSource = typeof InspectionReportDraftActionDraftSource[keyof typeof InspectionReportDraftActionDraftSource];
+
+
+export const InspectionReportDraftActionDraftSource = {
+  ai: 'ai',
+  manual: 'manual',
+} as const;
+
+export interface InspectionReportDraftAction {
+  title: string;
+  instruction?: string | null;
+  module: string;
+  severity: InspectionReportSeverity;
+  siteId?: number | null;
+  dueDate?: string | null;
+  assignedUserId?: number | null;
+  reportReference?: string | null;
+  draftSource?: InspectionReportDraftActionDraftSource;
+}
+
+export interface InspectionReportDraftRequest {
+  actions: InspectionReportDraftAction[];
+}
+
+export interface InspectionReport {
+  id: number;
+  siteId: number | null;
+  reportType: InspectionReportType;
+  title: string;
+  reportDate: string | null;
+  fileName: string | null;
+  fileSize?: number | null;
+  mimeType?: string | null;
+  readable: boolean;
+  draftActions: InspectionReportDraftAction[];
+  aiStatus: string;
+  aiSummary: string | null;
+  aiError: string | null;
+  aiReadCount: number;
+  uploadedByName: string;
+  createdAt: string;
+}
+
+export type InspectionReportActionDueDateChangesItem = {
+  changedAt: string;
+  changedByName: string | null;
+  from: string | null;
+  to: string | null;
+};
+
+export interface InspectionReportAction {
+  id: number;
+  siteId: number | null;
+  module: string;
+  title: string;
+  instruction: string | null;
+  severity: InspectionReportSeverity;
+  status: string;
+  ownerName: string | null;
+  /** The person assigned (gets the reminders) */
+  assigneeUserId?: number | null;
+  dueDate: string | null;
+  draftSource: string | null;
+  confirmedByName: string | null;
+  createdAt: string;
+  /** Due date changes after the action was created (report detail only), oldest first */
+  dueDateChanges?: InspectionReportActionDueDateChangesItem[];
+}
+
+export type InspectionReportDetail = InspectionReport & {
+  actions: InspectionReportAction[];
+};
+
+export interface InspectionReportReading {
+  aiSummary: string | null;
+  draftActions: InspectionReportDraftAction[];
+}
+
+export interface CreateInspectionReportRequest {
+  title: string;
+  reportType: InspectionReportType;
+  reportDate?: string | null;
+  siteId?: number | null;
+  objectPath: string;
+  fileName: string;
+}
+
 export type ListFeedbackReportsParams = {
 clientId?: number;
 category?: ListFeedbackReportsCategory;
@@ -2142,6 +3991,16 @@ clientId?: number;
 
 export type ListFeedbackReportHistoryParams = {
 clientId?: number;
+};
+
+export type ListMyTrainingRecords200 = {
+  linked: boolean;
+  records: OwnTrainingRecord[];
+};
+
+export type SetActiveDepartment200 = {
+  departmentId: number;
+  departmentIds: number[];
 };
 
 export type ListAuditLogParams = {
@@ -2205,6 +4064,10 @@ export const ListPublicLinkAccessActionType = {
   submit: 'submit',
 } as const;
 
+export type ListAssigneesParams = {
+siteId?: number;
+};
+
 export type ListComplianceItemsParams = {
 status?: ListComplianceItemsStatus;
 siteId?: number;
@@ -2232,6 +4095,10 @@ export const ListComplianceItemsPriority = {
   critical: 'critical',
 } as const;
 
+export type GetTodayByDepartmentParams = {
+siteId?: number;
+};
+
 export type GetTrackSummaryRecipientsParams = {
 clientId?: number;
 /**
@@ -2245,6 +4112,18 @@ clientId?: number;
 };
 
 export type SavePrivacyProgramParams = {
+clientId?: number;
+};
+
+export type PublishPrivacyIntakeLinkParams = {
+clientId?: number;
+};
+
+export type DisablePrivacyIntakeLinkParams = {
+clientId?: number;
+};
+
+export type SetPrivacyIntakeAssigneeParams = {
 clientId?: number;
 };
 
@@ -2271,6 +4150,22 @@ export type GetFireSafetyStatusParams = {
  */
 siteId?: number;
 };
+
+export type ListFireCallPointsParams = {
+/**
+ * A site id, or "none" for call points not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
+includeArchived?: ListFireCallPointsIncludeArchived;
+};
+
+export type ListFireCallPointsIncludeArchived = typeof ListFireCallPointsIncludeArchived[keyof typeof ListFireCallPointsIncludeArchived];
+
+
+export const ListFireCallPointsIncludeArchived = {
+  true: 'true',
+  false: 'false',
+} as const;
 
 export type GetFoodSafetyConfigParams = {
 /**
@@ -2344,6 +4239,31 @@ export type UpdateHotTubConfigParams = {
 siteId: number;
 };
 
+export type ListGreenTrackHourReadingsParams = {
+machineId?: number;
+limit?: number;
+};
+
+export type ListGreenTrackStockMovementsParams = {
+productId?: number;
+/**
+ * @minimum 1
+ * @maximum 1000
+ */
+limit?: number;
+};
+
+export type ListGreenTrackApplicationsParams = {
+from?: string;
+to?: string;
+productId?: number;
+/**
+ * @minimum 1
+ * @maximum 1000
+ */
+limit?: number;
+};
+
 export type ListPATTestsParams = {
 applianceId?: number;
 };
@@ -2352,6 +4272,11 @@ export type GetPATPresetTemplates200 = {[key: string]: PATPresetItem[]};
 
 export type SavePATPresetTemplateBody = {
   items: PATPresetItem[];
+};
+
+export type GetDailyTrackHistoryParams = {
+from: string;
+to: string;
 };
 
 export type ListPremisesInspectionsParams = {
@@ -2376,6 +4301,13 @@ date?: string;
 export type CreateFoodSafetyRecordParams = {
 /**
  * Scope the new record to a site. Omit for the whole-organisation diary.
+ */
+siteId?: number;
+};
+
+export type RecordFoodSafetyColdReadingParams = {
+/**
+ * Scope to a site's diary. Omit for the whole-organisation diary.
  */
 siteId?: number;
 };
@@ -2460,5 +4392,74 @@ siteId: number;
 
 export type UpdatePoolMonitoringPlanParams = {
 siteId: number;
+};
+
+export type ListEquipmentParams = {
+/**
+ * A site id, or "none" for items not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
+includeArchived?: ListEquipmentIncludeArchived;
+};
+
+export type ListEquipmentIncludeArchived = typeof ListEquipmentIncludeArchived[keyof typeof ListEquipmentIncludeArchived];
+
+
+export const ListEquipmentIncludeArchived = {
+  true: 'true',
+  false: 'false',
+} as const;
+
+export type ImportExtinguisherPointsBody = {
+  siteId?: number | null;
+};
+
+export type ImportExtinguisherPoints200 = {
+  added: number;
+  alreadyListed: number;
+};
+
+export type ListEquipmentLabelsParams = {
+/**
+ * A site id, or "none" for items not tied to a site. Omit for every visible site.
+ */
+siteId?: string;
+};
+
+export type GetCoshhTrackStatusParams = {
+siteId?: number;
+};
+
+export type ListCoshhAssessmentsParams = {
+siteId?: number;
+};
+
+export type ListCoshhChecksParams = {
+siteId?: number;
+checkType?: CoshhCheckType;
+assessmentId?: number;
+};
+
+export type ListCoshhSignOffsParams = {
+siteId?: number;
+};
+
+export type ListCoshhSignOffs200 = {
+  assessments: CoshhSignOffStatus[];
+};
+
+export type RecordCoshhSignOffs200 = {
+  signed: number;
+  assessment: CoshhSignOffStatus | null;
+};
+
+export type SaveInspectionReportDraft200 = {
+  draftActions: InspectionReportDraftAction[];
+};
+
+export type ConfirmInspectionReportActions201 = {
+  actions: InspectionReportAction[];
+  /** Owners and Managers emailed the action plan */
+  emailedTo: string[];
 };
 

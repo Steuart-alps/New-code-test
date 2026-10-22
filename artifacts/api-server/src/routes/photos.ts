@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin, getActiveDepartmentId } from "../middleware/requireAuth";
 import { patTestHistoryAccess } from "../lib/patLegacyHistoryScope";
+import { visibleSiteIdsSql } from "../lib/departmentSites";
 import { requireAnyService, requireService } from "../lib/services";
 import {
   AllowedUploadType,
@@ -16,6 +17,7 @@ import {
   isTenantReservedObjectPath,
 } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 import { hasTenantAttachmentReference } from "../lib/attachmentReferences";
 import {
   isStagedPhotoEntityType,
@@ -88,10 +90,7 @@ const SITE_DEPARTMENT_SCOPED_ENTITIES: ReadonlySet<PhotoEntityType> = new Set<Ph
 function departmentSiteCondition(alias: string, clientId: number, departmentId: number | null) {
   if (departmentId === null) return sql``;
   const column = sql.raw(`${alias}.site_id`);
-  return sql`AND (${column} IS NULL OR ${column} IN (
-    SELECT id FROM sites WHERE client_id = ${clientId}
-      AND (department_id IS NULL OR department_id = ${departmentId})
-  ))`;
+  return sql`AND (${column} IS NULL OR ${column} IN (${visibleSiteIdsSql(clientId, departmentId)}))`;
 }
 
 export function isSupportedPhotoEntityType(entityType: string): entityType is PhotoEntityType {
@@ -216,6 +215,7 @@ router.post(
     }
 
     try {
+      await ensureUploadCapacity(clientId, req.log);
       const uploadUrl = await storage.getObjectEntityUploadURL(clientId, body.contentType);
       const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
       if (!isTenantReservedObjectPath(objectPath, clientId)) {
@@ -323,6 +323,7 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
   if (await rejectUnownedPhotoEntity(res, body.entityType, body.entityId, clientId, getActiveDepartmentId(req))) return;
 
   try {
+    await ensureUploadCapacity(clientId, req.log);
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, body.contentType);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });

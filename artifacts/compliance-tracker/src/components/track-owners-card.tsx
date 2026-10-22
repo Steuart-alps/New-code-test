@@ -6,6 +6,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { roleLabel } from "@/lib/roles";
 
 interface TrackOwner {
   id: number;
@@ -25,16 +26,11 @@ interface TrackOwnersResponse {
 }
 
 const DEFAULT = "default";
-const ROLE_LABELS: Record<string, string> = {
-  client_admin: "Admin",
-  client_staff: "Staff",
-  consultant: "Owner / consultant",
-};
 
 /**
  * Settings card: who owns each track. The owner receives that track's in-app
  * reminders (bell pop-up and mobile push, never email); a site can have its
- * own owner. Unassigned tracks fall back to the business's admins.
+ * own owner. Unassigned tracks fall back to the business's Owners.
  */
 export function TrackOwnersCard() {
   const { toast } = useToast();
@@ -105,7 +101,7 @@ export function TrackOwnersCard() {
           )}
           {users.map((candidate) => (
             <SelectItem key={candidate.id} value={String(candidate.id)}>
-              {candidate.name} · {ROLE_LABELS[candidate.role] ?? candidate.role}
+              {candidate.name} · {roleLabel(candidate.role, user?.role === "consultant")}
             </SelectItem>
           ))}
         </SelectContent>

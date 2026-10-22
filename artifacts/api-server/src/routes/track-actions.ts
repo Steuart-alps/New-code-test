@@ -4,10 +4,15 @@ import { auditEventsTable, departmentsTable, fixTrackIssueActivityTable, fixTrac
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
-import { missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
+import { isInspectionReportSource, missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
+import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
+import { resolveAssigneeChange } from "../lib/assignees";
 
 const router = Router();
-const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room"] as const;
+// "audit" holds actions from uploaded audit and inspection reports
+// (routes/inspection-reports.ts) that belong to no other track.
+export const TRACK_ACTION_MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room", "audit"] as const;
+const MODULES = TRACK_ACTION_MODULES;
 const severity = z.enum(["monitor", "action_required", "urgent"]);
 const nullableText = z.string().trim().max(10_000).nullable().optional();
 const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
@@ -40,6 +45,7 @@ const oneOffFields = {
   instruction: nullableText,
   severity: severity.optional(),
   ownerName: nullableText,
+  assigneeUserId: z.number().int().positive().nullable().optional(),
   leadTimeDays: z.number().int().min(0).max(3650).optional(),
   dueDate: z.string().date().nullable().optional(),
   siteId: z.number().int().positive().nullable().optional(),
@@ -55,7 +61,8 @@ const createSchema = z.object({ templateId: z.number().int().positive().optional
 const patchSchema = z.object({
   title: z.string().trim().min(1).max(500).optional(), instruction: nullableText, severity: severity.optional(),
   status: z.enum(["open", "in_progress", "resolved"]).optional(), siteId: z.number().int().positive().nullable().optional(),
-  ownerName: nullableText, dueDate: z.string().date().nullable().optional(), remedialAction: nullableText,
+  ownerName: nullableText, assigneeUserId: z.number().int().positive().nullable().optional(),
+  dueDate: z.string().date().nullable().optional(), remedialAction: nullableText,
   evidenceReference: nullableText, resolutionNotes: nullableText,
   resolverSignature: drawnSignature.optional(),
 }).strict();
@@ -64,18 +71,30 @@ const fixTrackDecisionSchema = z.object({ create: z.boolean() }).strict();
 async function canAccessSite(siteId: number | null | undefined, clientId: number, departmentId: number | null) {
   if (siteId == null) return true;
   const conditions = [eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)];
-  if (departmentId != null) conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))!);
+  if (departmentId != null) conditions.push(sitesTableVisibleTo(departmentId));
   return !!(await db.select({ id: sitesTable.id }).from(sitesTable).where(and(...conditions)))[0];
 }
 async function canOwnScope(siteId: number | null | undefined, departmentId: number | null | undefined, clientId: number) {
   if (siteId != null && !await canAccessSite(siteId, clientId, null)) return false;
-  if (departmentId != null && !(await db.select({ id: departmentsTable.id }).from(departmentsTable).where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId))))[0]) return false;
-  if (siteId != null && departmentId != null && !(await db.select({ id: sitesTable.id }).from(sitesTable).where(and(eq(sitesTable.id, siteId), eq(sitesTable.departmentId, departmentId))))[0]) return false;
+  const [department] = departmentId == null ? [null] : await db.select({ siteId: departmentsTable.siteId }).from(departmentsTable).where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId)));
+  if (departmentId != null && !department) return false;
+  if (siteId != null && departmentId != null) {
+    const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable).where(eq(sitesTable.id, siteId));
+    if (!site || !departmentPairsWithSite(siteId, site.departmentId, departmentId, department!.siteId)) return false;
+  }
   return true;
+}
+// A site + department scope needs the site to be the department's: given to
+// it, or the site the department sits under. A department under one site never
+// pairs with another.
+function departmentPairsWithSite(siteId: number, siteDepartmentId: number | null, departmentId: number, departmentSite: number | null) {
+  return departmentSite == null
+    ? siteDepartmentId === departmentId
+    : departmentSite === siteId && (siteDepartmentId == null || siteDepartmentId === departmentId);
 }
 async function accessibleSiteIds(clientId: number, departmentId: number | null) {
   if (departmentId == null) return null;
-  return (await db.select({ id: sitesTable.id }).from(sitesTable).where(and(eq(sitesTable.clientId, clientId), or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))))).map(x => x.id);
+  return (await db.select({ id: sitesTable.id }).from(sitesTable).where(and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(departmentId)))).map(x => x.id);
 }
 async function scopeDepartmentId(clientId: number, siteId: number | undefined, activeDepartmentId: number | null) {
   if (activeDepartmentId != null || siteId == null) return activeDepartmentId;
@@ -120,10 +139,10 @@ router.post("/templates", requireAuth, requireClientAdmin, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" }); if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const result = await db.transaction(async (tx) => {
     const [site] = parsed.data.siteId == null ? [null] : await tx.select({ clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(eq(sitesTable.id, parsed.data.siteId)).for("update");
-    const [department] = parsed.data.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId }).from(departmentsTable).where(eq(departmentsTable.id, parsed.data.departmentId)).for("update");
+    const [department] = parsed.data.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId, siteId: departmentsTable.siteId }).from(departmentsTable).where(eq(departmentsTable.id, parsed.data.departmentId)).for("update");
     if ((parsed.data.siteId != null && site?.clientId !== clientId)
       || (parsed.data.departmentId != null && department?.clientId !== clientId)
-      || (site && parsed.data.departmentId != null && site.departmentId !== parsed.data.departmentId)) return null;
+      || (site && parsed.data.departmentId != null && !departmentPairsWithSite(parsed.data.siteId!, site.departmentId, parsed.data.departmentId, department!.siteId))) return null;
     const [row] = await tx.insert(trackActionTemplatesTable).values({ ...parsed.data, clientId, siteId: parsed.data.siteId ?? null, departmentId: parsed.data.departmentId ?? null, instruction: parsed.data.instruction, ownerDefault: parsed.data.ownerDefault ?? null }).returning();
     return row;
   });
@@ -138,10 +157,10 @@ router.patch("/templates/:id", requireAuth, requireClientAdmin, async (req, res)
     if (!current) return { status: 404 as const, error: "Template not found" };
     const next = { ...current, ...parsed.data };
     const [site] = next.siteId == null ? [null] : await tx.select({ clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(eq(sitesTable.id, next.siteId)).for("update");
-    const [department] = next.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId }).from(departmentsTable).where(eq(departmentsTable.id, next.departmentId)).for("update");
+    const [department] = next.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId, siteId: departmentsTable.siteId }).from(departmentsTable).where(eq(departmentsTable.id, next.departmentId)).for("update");
     if ((next.siteId != null && site?.clientId !== clientId)
       || (next.departmentId != null && department?.clientId !== clientId)
-      || (site && next.departmentId != null && site.departmentId !== next.departmentId)) {
+      || (site && next.departmentId != null && !departmentPairsWithSite(next.siteId!, site.departmentId, next.departmentId, department!.siteId))) {
       return { status: 400 as const, error: "Template scope must belong to this client" };
     }
     const [row] = await tx.update(trackActionTemplatesTable).set({ ...parsed.data, updatedAt: new Date() }).where(and(eq(trackActionTemplatesTable.id, id), eq(trackActionTemplatesTable.clientId, clientId))).returning();
@@ -181,6 +200,8 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); const parsed = createSchema.safeParse(req.body); if (!clientId) return res.status(400).json({ error: "No client context" }); if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const activeDepartmentId = getActiveDepartmentId(req);
+  const assignee = await resolveAssigneeChange(clientId, parsed.data.siteId ?? null, { assigneeUserId: parsed.data.assigneeUserId });
+  if (!assignee.ok) return res.status(400).json({ error: assignee.error });
   const createValues = (template?: typeof trackActionTemplatesTable.$inferSelect) => {
     const leadTimeDays = template ? template.leadTimeDays : parsed.data.leadTimeDays ?? null;
     const dueDate = template
@@ -193,7 +214,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       module: parsed.data.module, title: template?.title ?? parsed.data.title!,
       instruction: template?.instruction ?? parsed.data.instruction ?? null,
       severity: template?.severity ?? parsed.data.severity!,
-      ownerName: template?.ownerDefault ?? parsed.data.ownerName ?? null,
+      ownerName: assignee.name ?? template?.ownerDefault ?? parsed.data.ownerName ?? null,
+      assigneeUserId: assignee.assigneeUserId ?? null,
       leadTimeDays, dueDate, remedialAction: parsed.data.remedialAction ?? null,
       evidenceReference: parsed.data.evidenceReference ?? null, resolutionNotes: parsed.data.resolutionNotes ?? null,
     };
@@ -202,11 +224,12 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     let departmentId = activeDepartmentId;
     if (parsed.data.siteId != null) {
       const [site] = await tx.select({
+        id: sitesTable.id,
         clientId: sitesTable.clientId,
         departmentId: sitesTable.departmentId,
       }).from(sitesTable).where(eq(sitesTable.id, parsed.data.siteId)).for("update");
       if (!site || site.clientId !== clientId
-        || (activeDepartmentId != null && site.departmentId != null && site.departmentId !== activeDepartmentId)) {
+        || !(await siteVisibleToDepartment(site, activeDepartmentId))) {
         return { status: 403 as const, error: "Forbidden site" };
       }
       if (activeDepartmentId == null) departmentId = site.departmentId;
@@ -252,7 +275,7 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
       description: [action.instruction, `Originating module: ${action.module}`, `Module action: ${action.id}`].filter(Boolean).join("\n"),
       priority: action.severity === "urgent" ? "urgent" : action.severity === "action_required" ? "high" : "medium",
       status: "reported", reportedBy: req.currentUser!.name, reportedDate: new Date().toISOString().slice(0, 10),
-      targetDate: action.dueDate, assignedTo: action.ownerName, createdBy: req.currentUser!.id,
+      targetDate: action.dueDate, assignedTo: action.ownerName, assigneeUserId: action.assigneeUserId, createdBy: req.currentUser!.id,
     }).returning();
     await tx.insert(fixTrackIssueActivityTable).values({ clientId, issueId: issue.id, eventType: "status", status: "reported", createdBy: req.currentUser!.id });
     const [row] = await tx.update(trackActionsTable).set({ fixTrackIssueId: issue.id, fixTrackDisposition: keptInTrack ? "parallel" : "linked", updatedAt: new Date() }).where(and(eq(trackActionsTable.id, action.id), isNull(trackActionsTable.fixTrackIssueId))).returning();
@@ -271,18 +294,26 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     if (!current) return { status: 404 as const, error: "Action not found" };
     const siteIds = [...new Set([current.siteId, parsed.data.siteId].filter((value): value is number => value != null))].sort((a, b) => a - b);
     const sites = siteIds.length ? await tx.select({ id: sitesTable.id, clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(inArray(sitesTable.id, siteIds)).for("update") : [];
-    const canUse = (siteId: number | null | undefined) => siteId == null || sites.some(site => site.id === siteId && site.clientId === clientId && (departmentId == null || site.departmentId == null || site.departmentId === departmentId));
+    const departmentSite = await departmentSiteId(departmentId);
+    const canUse = (siteId: number | null | undefined) => siteId == null || sites.some(site => site.id === siteId && site.clientId === clientId && (departmentId == null || site.departmentId == null || site.departmentId === departmentId) && (departmentSite == null || site.id === departmentSite));
     // Another department's action answers exactly like a missing one; only a
     // move to a site the caller cannot use is reported as forbidden.
     if (!canUse(current.siteId)) return { status: 404 as const, error: "Action not found" };
     if ("siteId" in parsed.data && !canUse(parsed.data.siteId)) return { status: 403 as const, error: "Forbidden site" };
-    if (current.sourceKind && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
+    // A report's actions are typed from the report, so their site can be corrected.
+    if (current.sourceKind && !isInspectionReportSource(current.sourceKind) && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
       return { status: 409 as const, error: "The source record controls this action's site" };
     }
     const kitchenFailure = current.module === "kitchen" && current.sourceKind?.startsWith("kitchen_temperature_");
     if (kitchenFailure) {
       if (!["client_admin", "consultant"].includes(req.currentUser!.role)) return { status: 403 as const, error: "A manager must assign, resolve and verify failed-temperature actions" };
       if ("instruction" in parsed.data || "title" in parsed.data || "severity" in parsed.data) return { status: 409 as const, error: "The failed temperature and original control rule are immutable" };
+    }
+    // A report's due dates come from the inspector or auditor: only Owners, Managers and ALPS move them.
+    // Every change is kept in the audit log (who, when, from and to).
+    if (isInspectionReportSource(current.sourceKind) && "dueDate" in parsed.data && (parsed.data.dueDate ?? null) !== (current.dueDate ?? null)
+      && !["client_admin", "client_manager", "consultant"].includes(req.currentUser!.role)) {
+      return { status: 403 as const, error: "Only an Owner or Manager can change the due date of an action from a report" };
     }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
@@ -330,6 +361,17 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
       }
     }
     const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
+    if ("assigneeUserId" in parsed.data || "ownerName" in parsed.data || "siteId" in parsed.data) {
+      const assignee = await resolveAssigneeChange(clientId, "siteId" in parsed.data ? parsed.data.siteId ?? null : current.siteId, {
+        assigneeUserId: parsed.data.assigneeUserId,
+        name: parsed.data.ownerName,
+      }, { assigneeUserId: current.assigneeUserId, name: current.ownerName, siteId: current.siteId });
+      if (!assignee.ok) return { status: 400 as const, error: assignee.error };
+      delete updates.assigneeUserId;
+      delete updates.ownerName;
+      if (assignee.assigneeUserId !== undefined) updates.assigneeUserId = assignee.assigneeUserId;
+      if (assignee.name !== undefined) updates.ownerName = assignee.name;
+    }
     if (nextStatus === "resolved") {
       const resolverName = req.currentUser!.name?.trim();
       if (!resolverName) return { status: 400 as const, error: "Your account must have a name before resolving an action" };
