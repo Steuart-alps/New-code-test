@@ -212,6 +212,8 @@ async function main() {
     "green-track/hour-readings.csv", "green-track/fuel-logs.csv", "green-track/products.csv",
     "green-track/stock-records.csv", "green-track/spraying-records.csv", "green-track/spraying-record-products.csv",
     "incidents/riddor-events.csv",
+    "registers/allergen-ingredients.csv", "registers/allergen-ingredient-changes.csv", "registers/allergen-recipe-lines.csv",
+    "registers/allergen-menus.csv", "registers/allergen-menu-dishes.csv", "registers/allergen-chart-signoffs.csv",
   ];
   try {
     const ownerEntries = await exportZip(owner, ownerPath);

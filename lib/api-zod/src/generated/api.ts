@@ -6367,3 +6367,318 @@ export const DownloadInspectionReportParams = zod.object({
 export const DownloadInspectionReportResponse = zod.unknown()
 
 
+/**
+ * @summary List KitchenTrack ingredients with their allergens and the dishes that use them
+ */
+export const ListAllergenIngredientsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable().describe('null when every site can use it'),
+  "name": zod.string(),
+  "supplier": zod.string().nullish(),
+  "productCode": zod.string().nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "notes": zod.string().nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().nullish(),
+  "usedIn": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable()
+})).describe('Dishes using it, at sites the caller can see'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListAllergenIngredientsResponse = zod.array(ListAllergenIngredientsResponseItem)
+
+
+/**
+ * @summary Add an ingredient (for every site, or one site)
+ */
+export const createAllergenIngredientBodyNameMax = 200;
+
+export const createAllergenIngredientBodySupplierMax = 200;
+
+export const createAllergenIngredientBodyProductCodeMax = 100;
+
+export const createAllergenIngredientBodyContainsMax = 14;
+
+export const createAllergenIngredientBodyMayContainMax = 14;
+
+export const createAllergenIngredientBodyNotesMax = 2000;
+
+export const createAllergenIngredientBodyCheckedByMax = 200;
+
+export const createAllergenIngredientBodyChangeReasonMax = 1000;
+
+
+
+export const CreateAllergenIngredientBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "name": zod.string().max(createAllergenIngredientBodyNameMax),
+  "supplier": zod.string().max(createAllergenIngredientBodySupplierMax).nullish(),
+  "productCode": zod.string().max(createAllergenIngredientBodyProductCodeMax).nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(createAllergenIngredientBodyContainsMax),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(createAllergenIngredientBodyMayContainMax).optional(),
+  "notes": zod.string().max(createAllergenIngredientBodyNotesMax).nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().max(createAllergenIngredientBodyCheckedByMax).nullish(),
+  "changeReason": zod.string().max(createAllergenIngredientBodyChangeReasonMax).nullish().describe('Required when contains or may contain changes on an edit')
+})
+
+export const CreateAllergenIngredientResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable().describe('null when every site can use it'),
+  "name": zod.string(),
+  "supplier": zod.string().nullish(),
+  "productCode": zod.string().nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "notes": zod.string().nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().nullish(),
+  "usedIn": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable()
+})).describe('Dishes using it, at sites the caller can see'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Update an ingredient; changed allergens need a reason and update every dish that uses it
+ */
+export const UpdateAllergenIngredientParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateAllergenIngredientBodyNameMax = 200;
+
+export const updateAllergenIngredientBodySupplierMax = 200;
+
+export const updateAllergenIngredientBodyProductCodeMax = 100;
+
+export const updateAllergenIngredientBodyContainsMax = 14;
+
+export const updateAllergenIngredientBodyMayContainMax = 14;
+
+export const updateAllergenIngredientBodyNotesMax = 2000;
+
+export const updateAllergenIngredientBodyCheckedByMax = 200;
+
+export const updateAllergenIngredientBodyChangeReasonMax = 1000;
+
+
+
+export const UpdateAllergenIngredientBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "name": zod.string().max(updateAllergenIngredientBodyNameMax),
+  "supplier": zod.string().max(updateAllergenIngredientBodySupplierMax).nullish(),
+  "productCode": zod.string().max(updateAllergenIngredientBodyProductCodeMax).nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(updateAllergenIngredientBodyContainsMax),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(updateAllergenIngredientBodyMayContainMax).optional(),
+  "notes": zod.string().max(updateAllergenIngredientBodyNotesMax).nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().max(updateAllergenIngredientBodyCheckedByMax).nullish(),
+  "changeReason": zod.string().max(updateAllergenIngredientBodyChangeReasonMax).nullish().describe('Required when contains or may contain changes on an edit')
+})
+
+export const UpdateAllergenIngredientResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable().describe('null when every site can use it'),
+  "name": zod.string(),
+  "supplier": zod.string().nullish(),
+  "productCode": zod.string().nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "notes": zod.string().nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().nullish(),
+  "usedIn": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable()
+})).describe('Dishes using it, at sites the caller can see'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}).and(zod.object({
+  "dishesUpdated": zod.number().describe('Dishes whose allergens changed because of this edit')
+}))
+
+
+/**
+ * @summary Remove an ingredient no dish uses (kept for the record)
+ */
+export const DeleteAllergenIngredientParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteAllergenIngredientResponse = zod.void()
+
+
+/**
+ * @summary An ingredient's allergen change log, newest first
+ */
+export const ListAllergenIngredientChangesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListAllergenIngredientChangesResponseItem = zod.object({
+  "id": zod.number(),
+  "ingredientId": zod.number(),
+  "changeType": zod.enum(['created', 'allergens_changed', 'removed']),
+  "containsBefore": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "containsAfter": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "mayContainBefore": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "mayContainAfter": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "reason": zod.string().nullish(),
+  "dishesUpdated": zod.number(),
+  "changedByName": zod.string().nullish(),
+  "createdAt": zod.date()
+})
+export const ListAllergenIngredientChangesResponse = zod.array(ListAllergenIngredientChangesResponseItem)
+
+
+/**
+ * @summary List menus at the sites the caller can see
+ */
+export const ListAllergenMenusQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListAllergenMenusResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "contentsChangedAt": zod.date(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListAllergenMenusResponse = zod.array(ListAllergenMenusResponseItem)
+
+
+/**
+ * @summary Add a menu at a site
+ */
+export const createAllergenMenuBodyNameMax = 100;
+
+
+
+export const CreateAllergenMenuBody = zod.object({
+  "siteId": zod.number(),
+  "name": zod.string().max(createAllergenMenuBodyNameMax)
+})
+
+export const CreateAllergenMenuResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "contentsChangedAt": zod.date(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Rename a menu (it stays at its site)
+ */
+export const RenameAllergenMenuParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const renameAllergenMenuBodyNameMax = 100;
+
+
+
+export const RenameAllergenMenuBody = zod.object({
+  "name": zod.string().max(renameAllergenMenuBodyNameMax)
+})
+
+export const RenameAllergenMenuResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "contentsChangedAt": zod.date(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Remove a menu (its dishes stay; kept for the record)
+ */
+export const DeleteAllergenMenuParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteAllergenMenuResponse = zod.void()
+
+
+/**
+ * @summary Allergen charts (one per site and one per menu) with their latest sign-off
+ */
+export const ListAllergenChartsResponseItem = zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "menuId": zod.number().nullable().describe('null for the whole-site chart'),
+  "menuName": zod.string().nullable(),
+  "dishCount": zod.number(),
+  "lastSignoff": zod.union([zod.object({
+  "id": zod.number(),
+  "checkedByName": zod.string(),
+  "createdAt": zod.date(),
+  "note": zod.string().nullish(),
+  "dishCount": zod.number()
+}),zod.null()]),
+  "changedSinceCheck": zod.boolean().describe('A dish on the chart changed after the latest sign-off')
+})
+export const ListAllergenChartsResponse = zod.array(ListAllergenChartsResponseItem)
+
+
+/**
+ * @summary Sign-off history for a site's chart, or one menu's chart, newest first
+ */
+export const ListAllergenChartSignoffsQueryParams = zod.object({
+  "siteId": zod.coerce.number(),
+  "menuId": zod.coerce.number().optional()
+})
+
+export const ListAllergenChartSignoffsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "menuId": zod.number().nullable(),
+  "dishCount": zod.number(),
+  "note": zod.string().nullish(),
+  "checkedByName": zod.string(),
+  "createdAt": zod.date()
+})
+export const ListAllergenChartSignoffsResponse = zod.array(ListAllergenChartSignoffsResponseItem)
+
+
+/**
+ * @summary Sign off a chart as checked against current recipes and labels (signed-in person's name)
+ */
+export const signOffAllergenChartBodyNoteMax = 1000;
+
+
+
+export const SignOffAllergenChartBody = zod.object({
+  "siteId": zod.number(),
+  "menuId": zod.number().nullish(),
+  "confirmed": zod.boolean().describe('Must be true; the person confirms every dish was checked against current recipes and labels'),
+  "note": zod.string().max(signOffAllergenChartBodyNoteMax).nullish()
+})
+
+export const SignOffAllergenChartResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "menuId": zod.number().nullable(),
+  "dishCount": zod.number(),
+  "note": zod.string().nullish(),
+  "checkedByName": zod.string(),
+  "createdAt": zod.date()
+})
+
+
