@@ -33,6 +33,7 @@ Wednesday 28 October.
 | 14 | Label scanning (chemicals, food, GreenTrack products, equipment plates) | After launch | About 1-2p per label read; more when it also finds a data sheet and drafts COSHH | Anthropic key on Render |
 | 15 | FireTrack: sound level meter for fire alarm tests | After launch (with the iPhone app) | None | Phone app; your check of the dB limits |
 | 16 | Temperature probes and sensors: Bluetooth probes, Wi-Fi fridge, freezer and water tank monitoring | After launch (probes with the phone app) | Hardware bought by each business; possibly a bigger database later | Phone app; choice of sensor make |
+| 17 | Maintenance inventory: stock, cheapest supplier, low-stock reminder | After launch | None | Kitchen supplier price import for the cheapest supplier part |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -648,6 +649,34 @@ checks completely, or sit alongside them?
 
 ---
 
+## 17. Maintenance inventory
+
+**When:** after launch.
+
+A stock list for the maintenance team's parts and consumables: light bulbs and
+emergency light batteries, filters, fuses, fixings, paint, cleaning and
+water-treatment chemicals, PPE and so on.
+
+- **Stock control:** deliveries in, items used, stock counts and re-order
+  levels, using the same stock control as GreenTrack (#164) and the planned
+  kitchen stock (item 13), not a third system. Parts used on a FixTrack job or
+  a GreenTrack repair (item 1) can come off stock automatically.
+- **Cheapest supplier:** each item can have more than one supplier and price,
+  and the list shows the cheapest for each item or for the whole re-order. It
+  shares the supplier price import and comparison planned for kitchens
+  (item 13).
+- **Low-stock reminder:** when an item reaches its re-order level, the
+  maintenance manager (the person responsible) is told, not everyone. It goes
+  in their one daily "due" email and the Owner's weekly update (item 3),
+  rather than as a separate email for each item.
+
+**Cost:** none. No extra hosting.
+
+**Question for you:** should the inventory be per site, or one store shared
+across all of a business's sites?
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -694,6 +723,7 @@ work:
 | Recipe spec sheet reading | A few pence per sheet |
 | Supplier allergens and prices | Pennies per invoice or product read; nothing for a supplier file |
 | Kitchen voice input | None |
+| Maintenance inventory | None |
 | FireTrack sound level meter | None |
 | Temperature probes and sensors | Hardware paid by each business (plus a maker subscription for option 1); possibly a larger database plan later; text alerts a few pence each |
 | Label scanning | About 1-2p per label; about 40p for a chemical including its data sheet and COSHH draft (mostly in the Live AI plan already) |
