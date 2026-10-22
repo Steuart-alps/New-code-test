@@ -10,6 +10,7 @@ import { buildSignupPath } from "@/lib/signup-plan";
 import { SELECTED_MODULE_CARD, SELECTED_MODULE_CHECKBOX, SELECTED_MODULE_TICK } from "@/lib/addon-catalog";
 import alpsLogo from "@/assets/alps-logo.png";
 import { ConsultantPanel } from "@/pages/public-site";
+import { copyrightNotice } from "@/lib/copyright";
 
 // ─── Module definitions ────────────────────────────────────────────────────────
 
@@ -634,7 +635,7 @@ export default function LandingPage() {
               <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 opacity-70 brightness-0 invert" />
             </div>
           </div>
-          <p className="text-sm font-light">© {new Date().getFullYear()} ALPS Consulting Ltd. All rights reserved.</p>
+          <p className="text-sm font-light">{copyrightNotice()}</p>
           <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
             <Link href="/features" className="text-sm font-light hover:text-white transition-colors">Modules</Link>
             <Link href="/templates" className="text-sm font-light hover:text-white transition-colors">Free templates</Link>

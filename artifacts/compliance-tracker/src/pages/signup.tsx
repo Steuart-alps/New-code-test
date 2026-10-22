@@ -10,6 +10,7 @@ import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { parseSignupPlan, registrationPlanFields } from "@/lib/signup-plan";
 import alpsLogo from "@/assets/alps-logo.png";
+import { copyrightNotice } from "@/lib/copyright";
 
 const PESTTRACK_RECOMMENDED_BUSINESS_TYPES = new Set([
   "hotel_accommodation",
@@ -277,6 +278,7 @@ export default function SignupPage() {
                 Already have an account?{" "}
                 <button onClick={() => navigate("/login")} className="text-primary font-medium hover:underline">Sign in</button>
               </p>
+              <p className="text-center text-xs text-muted-foreground/60 font-light">{copyrightNotice()}</p>
             </div>
           </div>
         </motion.div>
