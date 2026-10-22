@@ -252,8 +252,9 @@ const MODULES = [
     bg: "bg-orange-50",
     border: "border-orange-200",
     required: false,
-    description: "COSHH logbook — assessments for each hazardous substance or task, built on your COSHH register and safety data sheets, with the checks that follow from them.",
+    description: "COSHH logbook — your COSHH register and safety data sheets, assessments for each hazardous substance or task, and the checks that follow from them.",
     features: [
+      "COSHH register: substances at each site with hazard symbols and safety data sheets",
       "COSHH assessments: who is at risk, exposure routes, controls and PPE",
       "Risk level and review dates with reminders",
       "LEV thorough examination records (at least every 14 months)",

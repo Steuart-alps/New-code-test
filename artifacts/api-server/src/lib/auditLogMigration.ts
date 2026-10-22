@@ -17,7 +17,8 @@ export const AUDITED_TABLES = [
  * key/value rows that the name-based redaction can't see.
  */
 export const EXTENDED_AUDITED_TABLES = [
-  "allergen_items", "asbestos_records", "asbestos_register_entries",
+  "allergen_chart_signoffs", "allergen_ingredients", "allergen_item_ingredients", "allergen_items",
+  "allergen_menu_items", "allergen_menus", "asbestos_records", "asbestos_register_entries",
   "bike_checks", "bike_hire_records", "bike_services", "bikes",
   "categories", "certificate_defects", "check_photos", "checklist_templates", "client_documents",
   "compliance_actions", "compliance_items", "contractor_certificates",

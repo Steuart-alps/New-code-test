@@ -33,6 +33,8 @@ export const LEGAL_CORE_STARTER_TITLES = new Set([
   "Legionella Risk Assessment",
   "Asbestos Management Survey & Register Review",
   "Employers' Liability Insurance Certificate",
+  "Waste Transfer Note — Annual Renewal",
+  "Waste Carrier Registration Check",
 ]);
 
 const ukDate = (value: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })

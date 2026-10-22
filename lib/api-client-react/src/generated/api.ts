@@ -22,6 +22,16 @@ import type {
 import type {
   ActiveDepartmentRequest,
   AddPrivacyRetentionVerificationParams,
+  AllergenChart,
+  AllergenChartSignoff,
+  AllergenChartSignoffInput,
+  AllergenIngredient,
+  AllergenIngredientChange,
+  AllergenIngredientInput,
+  AllergenIngredientSaved,
+  AllergenMenu,
+  AllergenMenuInput,
+  AllergenMenuRename,
   AppSettings,
   Assignee,
   AuditLogEntry,
@@ -107,6 +117,7 @@ import type {
   GetPoolMonitoringPlanParams,
   GetPrivacyGovernanceParams,
   GetTodayByDepartmentParams,
+  GetTrackSummaryRecipientsParams,
   GreenTrackApplication,
   GreenTrackApplicationInput,
   GreenTrackApplicationSaved,
@@ -143,6 +154,8 @@ import type {
   LegionellaCheck,
   LegionellaConfig,
   LegionellaStatus,
+  ListAllergenChartSignoffsParams,
+  ListAllergenMenusParams,
   ListAssigneesParams,
   ListAuditLogParams,
   ListComplianceItemsParams,
@@ -168,6 +181,7 @@ import type {
   ListPremisesInspectionsParams,
   ListPublicLinkAccessParams,
   MyCoshhSignOffs,
+  MyDocumentSignOffs,
   OkResponse,
   OrderFireCallPointsRequest,
   OwnTrainingRecord,
@@ -175,6 +189,9 @@ import type {
   PATTest,
   PATTrackConfig,
   PATTrackStatus,
+  PatRegisterReadRequest,
+  PatRegisterReadResult,
+  PatRegisterReadingStatus,
   PoolTrackConfig,
   PremisesInspection,
   PremisesTrackSummary,
@@ -211,6 +228,7 @@ import type {
   TestEmailRequest,
   TestEmailResponse,
   TodayByDepartment,
+  TrackSummaryPreview,
   UpdateCategoryRequest,
   UpdateCertificateDefectRequest,
   UpdateComplianceItemRequest,
@@ -814,6 +832,232 @@ export const useSignMyCoshhAssessment = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSignMyCoshhAssessmentMutationOptions(options));
+    }
+
+export const getListMyDocumentSignOffsUrl = () => {
+
+
+
+
+  return `/api/train-track/my-documents`
+}
+
+/**
+ * @summary DocTrack documents the signed-in Viewer must read and sign, and those they have a current sign-off for
+ */
+export const listMyDocumentSignOffs = async ( options?: RequestInit): Promise<MyDocumentSignOffs> => {
+
+  return customFetch<MyDocumentSignOffs>(getListMyDocumentSignOffsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMyDocumentSignOffsQueryKey = () => {
+    return [
+    `/api/train-track/my-documents`
+    ] as const;
+    }
+
+
+export const getListMyDocumentSignOffsQueryOptions = <TData = Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMyDocumentSignOffsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyDocumentSignOffs>>> = ({ signal }) => listMyDocumentSignOffs({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMyDocumentSignOffsQueryResult = NonNullable<Awaited<ReturnType<typeof listMyDocumentSignOffs>>>
+export type ListMyDocumentSignOffsQueryError = ErrorType<void>
+
+
+/**
+ * @summary DocTrack documents the signed-in Viewer must read and sign, and those they have a current sign-off for
+ */
+
+export function useListMyDocumentSignOffs<TData = Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyDocumentSignOffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMyDocumentSignOffsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMyDocumentDownloadUrlUrl = (id: number,) => {
+
+
+
+
+  return `/api/train-track/my-documents/${id}/download-url`
+}
+
+/**
+ * @summary A short-lived link to open one of the Viewer's documents to read and sign
+ */
+export const getMyDocumentDownloadUrl = async (id: number, options?: RequestInit): Promise<CoshhDocumentUrl> => {
+
+  return customFetch<CoshhDocumentUrl>(getGetMyDocumentDownloadUrlUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMyDocumentDownloadUrlQueryKey = (id: number,) => {
+    return [
+    `/api/train-track/my-documents/${id}/download-url`
+    ] as const;
+    }
+
+
+export const getGetMyDocumentDownloadUrlQueryOptions = <TData = Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError = ErrorType<void>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMyDocumentDownloadUrlQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>> = ({ signal }) => getMyDocumentDownloadUrl(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMyDocumentDownloadUrlQueryResult = NonNullable<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>>
+export type GetMyDocumentDownloadUrlQueryError = ErrorType<void>
+
+
+/**
+ * @summary A short-lived link to open one of the Viewer's documents to read and sign
+ */
+
+export function useGetMyDocumentDownloadUrl<TData = Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError = ErrorType<void>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyDocumentDownloadUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMyDocumentDownloadUrlQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSignMyDocumentUrl = (id: number,) => {
+
+
+
+
+  return `/api/train-track/my-documents/${id}/sign`
+}
+
+/**
+ * @summary Sign that the signed-in Viewer has read a DocTrack document (writes a TrainTrack sign-off)
+ */
+export const signMyDocument = async (id: number,
+    signTrainingRecordRequest: SignTrainingRecordRequest, options?: RequestInit): Promise<MyDocumentSignOffs> => {
+
+  return customFetch<MyDocumentSignOffs>(getSignMyDocumentUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(signTrainingRecordRequest)
+  }
+);}
+
+
+
+
+
+export const getSignMyDocumentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyDocument>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signMyDocument>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext> => {
+
+const mutationKey = ['signMyDocument'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signMyDocument>>, {id: number;data: BodyType<SignTrainingRecordRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  signMyDocument(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignMyDocumentMutationResult = NonNullable<Awaited<ReturnType<typeof signMyDocument>>>
+    export type SignMyDocumentMutationBody = BodyType<SignTrainingRecordRequest>
+    export type SignMyDocumentMutationError = ErrorType<void>
+
+    /**
+ * @summary Sign that the signed-in Viewer has read a DocTrack document (writes a TrainTrack sign-off)
+ */
+export const useSignMyDocument = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signMyDocument>>, TError,{id: number;data: BodyType<SignTrainingRecordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signMyDocument>>,
+        TError,
+        {id: number;data: BodyType<SignTrainingRecordRequest>},
+        TContext
+      > => {
+      return useMutation(getSignMyDocumentMutationOptions(options));
     }
 
 export const getSetActiveDepartmentUrl = () => {
@@ -4124,6 +4368,91 @@ export const useUpdateSettings = <TError = ErrorType<unknown>,
       return useMutation(getUpdateSettingsMutationOptions(options));
     }
 
+export const getGetTrackSummaryRecipientsUrl = (params?: GetTrackSummaryRecipientsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/settings/track-summary-recipients?${stringifiedParams}` : `/api/settings/track-summary-recipients`
+}
+
+/**
+ * Resolved with the same routing code the daily summary job sends with. Pass the unsaved choices as `routing` to preview them; otherwise the saved choices are used. Account admins and consultants only.
+ * @summary Preview who receives each track's daily summary
+ */
+export const getTrackSummaryRecipients = async (params?: GetTrackSummaryRecipientsParams, options?: RequestInit): Promise<TrackSummaryPreview> => {
+
+  return customFetch<TrackSummaryPreview>(getGetTrackSummaryRecipientsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTrackSummaryRecipientsQueryKey = (params?: GetTrackSummaryRecipientsParams,) => {
+    return [
+    `/api/settings/track-summary-recipients`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTrackSummaryRecipientsQueryOptions = <TData = Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError = ErrorType<void>>(params?: GetTrackSummaryRecipientsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTrackSummaryRecipientsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTrackSummaryRecipients>>> = ({ signal }) => getTrackSummaryRecipients(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTrackSummaryRecipientsQueryResult = NonNullable<Awaited<ReturnType<typeof getTrackSummaryRecipients>>>
+export type GetTrackSummaryRecipientsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Preview who receives each track's daily summary
+ */
+
+export function useGetTrackSummaryRecipients<TData = Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError = ErrorType<void>>(
+ params?: GetTrackSummaryRecipientsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTrackSummaryRecipients>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTrackSummaryRecipientsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetPrivacyGovernanceUrl = (params?: GetPrivacyGovernanceParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -6111,6 +6440,155 @@ export const useImportFireCallPoints = <TError = ErrorType<void | FireCallPointI
         TContext
       > => {
       return useMutation(getImportFireCallPointsMutationOptions(options));
+    }
+
+export const getGetPatRegisterReadingUrl = () => {
+
+
+
+
+  return `/api/imports/pat-appliances/reading`
+}
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
+ */
+export const getPatRegisterReading = async ( options?: RequestInit): Promise<PatRegisterReadingStatus> => {
+
+  return customFetch<PatRegisterReadingStatus>(getGetPatRegisterReadingUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPatRegisterReadingQueryKey = () => {
+    return [
+    `/api/imports/pat-appliances/reading`
+    ] as const;
+    }
+
+
+export const getGetPatRegisterReadingQueryOptions = <TData = Awaited<ReturnType<typeof getPatRegisterReading>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPatRegisterReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPatRegisterReadingQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPatRegisterReading>>> = ({ signal }) => getPatRegisterReading({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPatRegisterReading>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPatRegisterReadingQueryResult = NonNullable<Awaited<ReturnType<typeof getPatRegisterReading>>>
+export type GetPatRegisterReadingQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
+ */
+
+export function useGetPatRegisterReading<TData = Awaited<ReturnType<typeof getPatRegisterReading>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPatRegisterReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPatRegisterReadingQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReadPatRegisterListUrl = () => {
+
+
+
+
+  return `/api/imports/pat-appliances/read`
+}
+
+/**
+ * Claude reads the file and returns rows in the PAT appliance import's columns. Nothing is saved: the browser sends the rows to POST /imports/pat-appliances for the usual preview and import. The file is not stored. Off until the server has an Anthropic API key; each business has a monthly number of readings.
+ * @summary Read a photo, scan, PDF or Word list of appliances into register rows (managers)
+ */
+export const readPatRegisterList = async (patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<PatRegisterReadResult> => {
+
+  return customFetch<PatRegisterReadResult>(getReadPatRegisterListUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(patRegisterReadRequest)
+  }
+);}
+
+
+
+
+
+export const getReadPatRegisterListMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readPatRegisterList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readPatRegisterList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext> => {
+
+const mutationKey = ['readPatRegisterList'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readPatRegisterList>>, {data: BodyType<PatRegisterReadRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  readPatRegisterList(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReadPatRegisterListMutationResult = NonNullable<Awaited<ReturnType<typeof readPatRegisterList>>>
+    export type ReadPatRegisterListMutationBody = BodyType<PatRegisterReadRequest>
+    export type ReadPatRegisterListMutationError = ErrorType<void>
+
+    /**
+ * @summary Read a photo, scan, PDF or Word list of appliances into register rows (managers)
+ */
+export const useReadPatRegisterList = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readPatRegisterList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof readPatRegisterList>>,
+        TError,
+        {data: BodyType<PatRegisterReadRequest>},
+        TContext
+      > => {
+      return useMutation(getReadPatRegisterListMutationOptions(options));
     }
 
 export const getUpdateFireCallPointUrl = (id: number,) => {
@@ -14724,4 +15202,902 @@ export function useDownloadInspectionReport<TData = Awaited<ReturnType<typeof do
 
 
 
+
+export const getListAllergenIngredientsUrl = () => {
+
+
+
+
+  return `/api/registers/allergen-ingredients`
+}
+
+/**
+ * @summary List KitchenTrack ingredients with their allergens and the dishes that use them
+ */
+export const listAllergenIngredients = async ( options?: RequestInit): Promise<AllergenIngredient[]> => {
+
+  return customFetch<AllergenIngredient[]>(getListAllergenIngredientsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAllergenIngredientsQueryKey = () => {
+    return [
+    `/api/registers/allergen-ingredients`
+    ] as const;
+    }
+
+
+export const getListAllergenIngredientsQueryOptions = <TData = Awaited<ReturnType<typeof listAllergenIngredients>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenIngredients>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAllergenIngredientsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAllergenIngredients>>> = ({ signal }) => listAllergenIngredients({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAllergenIngredients>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAllergenIngredientsQueryResult = NonNullable<Awaited<ReturnType<typeof listAllergenIngredients>>>
+export type ListAllergenIngredientsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List KitchenTrack ingredients with their allergens and the dishes that use them
+ */
+
+export function useListAllergenIngredients<TData = Awaited<ReturnType<typeof listAllergenIngredients>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenIngredients>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAllergenIngredientsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateAllergenIngredientUrl = () => {
+
+
+
+
+  return `/api/registers/allergen-ingredients`
+}
+
+/**
+ * @summary Add an ingredient (for every site, or one site)
+ */
+export const createAllergenIngredient = async (allergenIngredientInput: AllergenIngredientInput, options?: RequestInit): Promise<AllergenIngredient> => {
+
+  return customFetch<AllergenIngredient>(getCreateAllergenIngredientUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(allergenIngredientInput)
+  }
+);}
+
+
+
+
+
+export const getCreateAllergenIngredientMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAllergenIngredient>>, TError,{data: BodyType<AllergenIngredientInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAllergenIngredient>>, TError,{data: BodyType<AllergenIngredientInput>}, TContext> => {
+
+const mutationKey = ['createAllergenIngredient'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAllergenIngredient>>, {data: BodyType<AllergenIngredientInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAllergenIngredient(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAllergenIngredientMutationResult = NonNullable<Awaited<ReturnType<typeof createAllergenIngredient>>>
+    export type CreateAllergenIngredientMutationBody = BodyType<AllergenIngredientInput>
+    export type CreateAllergenIngredientMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Add an ingredient (for every site, or one site)
+ */
+export const useCreateAllergenIngredient = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAllergenIngredient>>, TError,{data: BodyType<AllergenIngredientInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createAllergenIngredient>>,
+        TError,
+        {data: BodyType<AllergenIngredientInput>},
+        TContext
+      > => {
+      return useMutation(getCreateAllergenIngredientMutationOptions(options));
+    }
+
+export const getUpdateAllergenIngredientUrl = (id: number,) => {
+
+
+
+
+  return `/api/registers/allergen-ingredients/${id}`
+}
+
+/**
+ * @summary Update an ingredient; changed allergens need a reason and update every dish that uses it
+ */
+export const updateAllergenIngredient = async (id: number,
+    allergenIngredientInput: AllergenIngredientInput, options?: RequestInit): Promise<AllergenIngredientSaved> => {
+
+  return customFetch<AllergenIngredientSaved>(getUpdateAllergenIngredientUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(allergenIngredientInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateAllergenIngredientMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAllergenIngredient>>, TError,{id: number;data: BodyType<AllergenIngredientInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAllergenIngredient>>, TError,{id: number;data: BodyType<AllergenIngredientInput>}, TContext> => {
+
+const mutationKey = ['updateAllergenIngredient'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAllergenIngredient>>, {id: number;data: BodyType<AllergenIngredientInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateAllergenIngredient(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateAllergenIngredientMutationResult = NonNullable<Awaited<ReturnType<typeof updateAllergenIngredient>>>
+    export type UpdateAllergenIngredientMutationBody = BodyType<AllergenIngredientInput>
+    export type UpdateAllergenIngredientMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Update an ingredient; changed allergens need a reason and update every dish that uses it
+ */
+export const useUpdateAllergenIngredient = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAllergenIngredient>>, TError,{id: number;data: BodyType<AllergenIngredientInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateAllergenIngredient>>,
+        TError,
+        {id: number;data: BodyType<AllergenIngredientInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateAllergenIngredientMutationOptions(options));
+    }
+
+export const getDeleteAllergenIngredientUrl = (id: number,) => {
+
+
+
+
+  return `/api/registers/allergen-ingredients/${id}`
+}
+
+/**
+ * @summary Remove an ingredient no dish uses (kept for the record)
+ */
+export const deleteAllergenIngredient = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteAllergenIngredientUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteAllergenIngredientMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAllergenIngredient>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAllergenIngredient>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteAllergenIngredient'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAllergenIngredient>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteAllergenIngredient(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAllergenIngredientMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAllergenIngredient>>>
+
+    export type DeleteAllergenIngredientMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Remove an ingredient no dish uses (kept for the record)
+ */
+export const useDeleteAllergenIngredient = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAllergenIngredient>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAllergenIngredient>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteAllergenIngredientMutationOptions(options));
+    }
+
+export const getListAllergenIngredientChangesUrl = (id: number,) => {
+
+
+
+
+  return `/api/registers/allergen-ingredients/${id}/changes`
+}
+
+/**
+ * @summary An ingredient's allergen change log, newest first
+ */
+export const listAllergenIngredientChanges = async (id: number, options?: RequestInit): Promise<AllergenIngredientChange[]> => {
+
+  return customFetch<AllergenIngredientChange[]>(getListAllergenIngredientChangesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAllergenIngredientChangesQueryKey = (id: number,) => {
+    return [
+    `/api/registers/allergen-ingredients/${id}/changes`
+    ] as const;
+    }
+
+
+export const getListAllergenIngredientChangesQueryOptions = <TData = Awaited<ReturnType<typeof listAllergenIngredientChanges>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenIngredientChanges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAllergenIngredientChangesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAllergenIngredientChanges>>> = ({ signal }) => listAllergenIngredientChanges(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAllergenIngredientChanges>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAllergenIngredientChangesQueryResult = NonNullable<Awaited<ReturnType<typeof listAllergenIngredientChanges>>>
+export type ListAllergenIngredientChangesQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary An ingredient's allergen change log, newest first
+ */
+
+export function useListAllergenIngredientChanges<TData = Awaited<ReturnType<typeof listAllergenIngredientChanges>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenIngredientChanges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAllergenIngredientChangesQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListAllergenMenusUrl = (params?: ListAllergenMenusParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/registers/allergen-menus?${stringifiedParams}` : `/api/registers/allergen-menus`
+}
+
+/**
+ * @summary List menus at the sites the caller can see
+ */
+export const listAllergenMenus = async (params?: ListAllergenMenusParams, options?: RequestInit): Promise<AllergenMenu[]> => {
+
+  return customFetch<AllergenMenu[]>(getListAllergenMenusUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAllergenMenusQueryKey = (params?: ListAllergenMenusParams,) => {
+    return [
+    `/api/registers/allergen-menus`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAllergenMenusQueryOptions = <TData = Awaited<ReturnType<typeof listAllergenMenus>>, TError = ErrorType<ErrorResponse>>(params?: ListAllergenMenusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenMenus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAllergenMenusQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAllergenMenus>>> = ({ signal }) => listAllergenMenus(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAllergenMenus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAllergenMenusQueryResult = NonNullable<Awaited<ReturnType<typeof listAllergenMenus>>>
+export type ListAllergenMenusQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary List menus at the sites the caller can see
+ */
+
+export function useListAllergenMenus<TData = Awaited<ReturnType<typeof listAllergenMenus>>, TError = ErrorType<ErrorResponse>>(
+ params?: ListAllergenMenusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenMenus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAllergenMenusQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateAllergenMenuUrl = () => {
+
+
+
+
+  return `/api/registers/allergen-menus`
+}
+
+/**
+ * @summary Add a menu at a site
+ */
+export const createAllergenMenu = async (allergenMenuInput: AllergenMenuInput, options?: RequestInit): Promise<AllergenMenu> => {
+
+  return customFetch<AllergenMenu>(getCreateAllergenMenuUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(allergenMenuInput)
+  }
+);}
+
+
+
+
+
+export const getCreateAllergenMenuMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAllergenMenu>>, TError,{data: BodyType<AllergenMenuInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAllergenMenu>>, TError,{data: BodyType<AllergenMenuInput>}, TContext> => {
+
+const mutationKey = ['createAllergenMenu'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAllergenMenu>>, {data: BodyType<AllergenMenuInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAllergenMenu(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAllergenMenuMutationResult = NonNullable<Awaited<ReturnType<typeof createAllergenMenu>>>
+    export type CreateAllergenMenuMutationBody = BodyType<AllergenMenuInput>
+    export type CreateAllergenMenuMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Add a menu at a site
+ */
+export const useCreateAllergenMenu = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAllergenMenu>>, TError,{data: BodyType<AllergenMenuInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createAllergenMenu>>,
+        TError,
+        {data: BodyType<AllergenMenuInput>},
+        TContext
+      > => {
+      return useMutation(getCreateAllergenMenuMutationOptions(options));
+    }
+
+export const getRenameAllergenMenuUrl = (id: number,) => {
+
+
+
+
+  return `/api/registers/allergen-menus/${id}`
+}
+
+/**
+ * @summary Rename a menu (it stays at its site)
+ */
+export const renameAllergenMenu = async (id: number,
+    allergenMenuRename: AllergenMenuRename, options?: RequestInit): Promise<AllergenMenu> => {
+
+  return customFetch<AllergenMenu>(getRenameAllergenMenuUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(allergenMenuRename)
+  }
+);}
+
+
+
+
+
+export const getRenameAllergenMenuMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameAllergenMenu>>, TError,{id: number;data: BodyType<AllergenMenuRename>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameAllergenMenu>>, TError,{id: number;data: BodyType<AllergenMenuRename>}, TContext> => {
+
+const mutationKey = ['renameAllergenMenu'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameAllergenMenu>>, {id: number;data: BodyType<AllergenMenuRename>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  renameAllergenMenu(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenameAllergenMenuMutationResult = NonNullable<Awaited<ReturnType<typeof renameAllergenMenu>>>
+    export type RenameAllergenMenuMutationBody = BodyType<AllergenMenuRename>
+    export type RenameAllergenMenuMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Rename a menu (it stays at its site)
+ */
+export const useRenameAllergenMenu = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameAllergenMenu>>, TError,{id: number;data: BodyType<AllergenMenuRename>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof renameAllergenMenu>>,
+        TError,
+        {id: number;data: BodyType<AllergenMenuRename>},
+        TContext
+      > => {
+      return useMutation(getRenameAllergenMenuMutationOptions(options));
+    }
+
+export const getDeleteAllergenMenuUrl = (id: number,) => {
+
+
+
+
+  return `/api/registers/allergen-menus/${id}`
+}
+
+/**
+ * @summary Remove a menu (its dishes stay; kept for the record)
+ */
+export const deleteAllergenMenu = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteAllergenMenuUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteAllergenMenuMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAllergenMenu>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAllergenMenu>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteAllergenMenu'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAllergenMenu>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteAllergenMenu(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAllergenMenuMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAllergenMenu>>>
+
+    export type DeleteAllergenMenuMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Remove a menu (its dishes stay; kept for the record)
+ */
+export const useDeleteAllergenMenu = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAllergenMenu>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAllergenMenu>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteAllergenMenuMutationOptions(options));
+    }
+
+export const getListAllergenChartsUrl = () => {
+
+
+
+
+  return `/api/registers/allergen-charts`
+}
+
+/**
+ * @summary Allergen charts (one per site and one per menu) with their latest sign-off
+ */
+export const listAllergenCharts = async ( options?: RequestInit): Promise<AllergenChart[]> => {
+
+  return customFetch<AllergenChart[]>(getListAllergenChartsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAllergenChartsQueryKey = () => {
+    return [
+    `/api/registers/allergen-charts`
+    ] as const;
+    }
+
+
+export const getListAllergenChartsQueryOptions = <TData = Awaited<ReturnType<typeof listAllergenCharts>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenCharts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAllergenChartsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAllergenCharts>>> = ({ signal }) => listAllergenCharts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAllergenCharts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAllergenChartsQueryResult = NonNullable<Awaited<ReturnType<typeof listAllergenCharts>>>
+export type ListAllergenChartsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Allergen charts (one per site and one per menu) with their latest sign-off
+ */
+
+export function useListAllergenCharts<TData = Awaited<ReturnType<typeof listAllergenCharts>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenCharts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAllergenChartsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListAllergenChartSignoffsUrl = (params: ListAllergenChartSignoffsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/registers/allergen-charts/signoffs?${stringifiedParams}` : `/api/registers/allergen-charts/signoffs`
+}
+
+/**
+ * @summary Sign-off history for a site's chart, or one menu's chart, newest first
+ */
+export const listAllergenChartSignoffs = async (params: ListAllergenChartSignoffsParams, options?: RequestInit): Promise<AllergenChartSignoff[]> => {
+
+  return customFetch<AllergenChartSignoff[]>(getListAllergenChartSignoffsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAllergenChartSignoffsQueryKey = (params?: ListAllergenChartSignoffsParams,) => {
+    return [
+    `/api/registers/allergen-charts/signoffs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAllergenChartSignoffsQueryOptions = <TData = Awaited<ReturnType<typeof listAllergenChartSignoffs>>, TError = ErrorType<ErrorResponse>>(params: ListAllergenChartSignoffsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenChartSignoffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAllergenChartSignoffsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAllergenChartSignoffs>>> = ({ signal }) => listAllergenChartSignoffs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAllergenChartSignoffs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAllergenChartSignoffsQueryResult = NonNullable<Awaited<ReturnType<typeof listAllergenChartSignoffs>>>
+export type ListAllergenChartSignoffsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Sign-off history for a site's chart, or one menu's chart, newest first
+ */
+
+export function useListAllergenChartSignoffs<TData = Awaited<ReturnType<typeof listAllergenChartSignoffs>>, TError = ErrorType<ErrorResponse>>(
+ params: ListAllergenChartSignoffsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllergenChartSignoffs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAllergenChartSignoffsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSignOffAllergenChartUrl = () => {
+
+
+
+
+  return `/api/registers/allergen-charts/signoffs`
+}
+
+/**
+ * @summary Sign off a chart as checked against current recipes and labels (signed-in person's name)
+ */
+export const signOffAllergenChart = async (allergenChartSignoffInput: AllergenChartSignoffInput, options?: RequestInit): Promise<AllergenChartSignoff> => {
+
+  return customFetch<AllergenChartSignoff>(getSignOffAllergenChartUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(allergenChartSignoffInput)
+  }
+);}
+
+
+
+
+
+export const getSignOffAllergenChartMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signOffAllergenChart>>, TError,{data: BodyType<AllergenChartSignoffInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signOffAllergenChart>>, TError,{data: BodyType<AllergenChartSignoffInput>}, TContext> => {
+
+const mutationKey = ['signOffAllergenChart'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signOffAllergenChart>>, {data: BodyType<AllergenChartSignoffInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  signOffAllergenChart(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignOffAllergenChartMutationResult = NonNullable<Awaited<ReturnType<typeof signOffAllergenChart>>>
+    export type SignOffAllergenChartMutationBody = BodyType<AllergenChartSignoffInput>
+    export type SignOffAllergenChartMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Sign off a chart as checked against current recipes and labels (signed-in person's name)
+ */
+export const useSignOffAllergenChart = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signOffAllergenChart>>, TError,{data: BodyType<AllergenChartSignoffInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signOffAllergenChart>>,
+        TError,
+        {data: BodyType<AllergenChartSignoffInput>},
+        TContext
+      > => {
+      return useMutation(getSignOffAllergenChartMutationOptions(options));
+    }
 

@@ -26,7 +26,7 @@ const MAX_ENTRIES = 1000;
 export type CalendarKind =
   | "compliance_due" | "contractor_visit" | "contractor_insurance" | "contractor_indemnity"
   | "contractor_dbs" | "contractor_accreditation" | "fix_visit" | "pest_visit" | "training_expiry"
-  | "coshh_review" | "coshh_track_due" | "asbestos_plan_review";
+  | "coshh_track_due" | "asbestos_plan_review";
 
 export type CalendarEntry = {
   id: string;
@@ -68,7 +68,7 @@ router.get("/calendar", requireAuth, async (req, res) => {
   const state = (date: string, done: boolean): CalendarEntry["status"] =>
     done ? "done" : date < today ? "overdue" : "due";
 
-  const [items, visits, contractors, accreditations, fixIssues, pestVisits, training, coshh, asbestos] = await Promise.all([
+  const [items, visits, contractors, accreditations, fixIssues, pestVisits, training, asbestos] = await Promise.all([
     rowsOf(sql`
       SELECT ci.id, ci.title, ci.status, to_char(ci.due_date, 'YYYY-MM-DD') AS date,
              s.name AS site_name, c.name AS contractor_name, cat.name AS category
@@ -150,16 +150,8 @@ router.get("/calendar", requireAuth, async (req, res) => {
                  OR (newer.completed_date = r.completed_date AND newer.id > r.id))
         )
     `) : [],
-    // Core registers: reviews of substances still in use, and asbestos
-    // management plans (none when no asbestos is expected).
-    rowsOf(sql`
-      SELECT cs.id, cs.product_name, cs.review_due::text AS date, s.name AS site_name
-      FROM coshh_substances cs
-      LEFT JOIN sites s ON s.id = cs.site_id AND s.client_id = cs.client_id
-      WHERE cs.client_id = ${clientId} AND cs.deleted_at IS NULL AND cs.status = 'in_use'
-        AND cs.review_due BETWEEN ${from} AND ${to}
-        AND ${siteScopeSql(scope, sql`cs.site_id`)}
-    `),
+    // Core register: asbestos management plan reviews (none when no asbestos
+    // is expected). COSHH reviews come from COSHHTrack below.
     rowsOf(sql`
       SELECT a.id, a.plan_review_due::text AS date, s.name AS site_name
       FROM asbestos_records a
@@ -236,12 +228,6 @@ router.get("/calendar", requireAuth, async (req, res) => {
     });
   }
 
-  for (const row of coshh) {
-    entries.push({
-      id: `coshh-${row.id}`, date: row.date, kind: "coshh_review", title: `COSHH assessment review: ${row.product_name}`,
-      detail: null, siteName: row.site_name ?? null, href: "/coshh", status: state(row.date, false),
-    });
-  }
   // COSHHTrack: assessment reviews and the next LEV examination, health
   // check, monitoring or briefing in each series (lib/coshhTrack.ts).
   if (isEntitled(services, "coshhtrack")) {

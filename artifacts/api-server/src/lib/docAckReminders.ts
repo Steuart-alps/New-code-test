@@ -30,7 +30,7 @@ function esc(s: string | null | undefined): string {
 
 export async function getOutstandingAckSummary(clientId: number): Promise<OutstandingDocSummary[]> {
   const docsResult = await db.execute(sql`
-    SELECT id, title, department FROM doc_track_documents
+    SELECT id, title, department, site_id FROM doc_track_documents
     WHERE client_id = ${clientId} AND requires_acknowledgement = true
     ORDER BY title ASC
   `);
@@ -40,7 +40,7 @@ export async function getOutstandingAckSummary(clientId: number): Promise<Outsta
   const staffResult = await db.execute(sql`
     SELECT id,
       COALESCE(NULLIF(trim(name), ''), NULLIF(trim(concat_ws(' ', first_name, last_name)), '')) AS name,
-      department
+      department, site_id
     FROM staff_roster
     WHERE client_id = ${clientId} AND active = true
   `);
@@ -54,7 +54,8 @@ export async function getOutstandingAckSummary(clientId: number): Promise<Outsta
 
   return docs
     .map((d) => {
-      const relevant = d.department ? staff.filter((s) => s.department === d.department) : staff;
+      const relevant = staff.filter((s) =>
+        (!d.department || s.department === d.department) && (d.site_id == null || s.site_id === d.site_id));
       const outstanding = relevant.filter((s) => !acked.has(`${d.id}:${s.id}`));
       return {
         title: d.title as string,

@@ -67,6 +67,7 @@ import { getTrainingExpiry } from "@/lib/training-expiry";
 import { useLocalToday } from "@/hooks/use-local-today";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
 import { CoshhSignOffSection } from "@/components/coshh-sign-offs";
+import { DocumentSignOffSection } from "@/components/document-sign-offs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -255,12 +256,15 @@ export default function TrainTrackPage() {
   const canMutate = user?.role !== "client_viewer";
   // COSHH assessments to read and sign come from COSHHTrack.
   const showCoshh = hasService("coshhtrack");
+  // Documents to read and sign come from DocTrack.
+  const showDocuments = hasService("doctrack") || hasService("safetrack");
+  const canManageSignOffs = user?.role === "client_admin" || user?.role === "consultant";
   // Expiry states, counts and ordering roll over at local midnight while open.
   const today = useLocalToday();
   const qc = useQueryClient();
   const apiFetch = useTrainTrackApi();
 
-  const [tab, setTab]           = useState<RecordType | "audit" | "coshh">("certificate");
+  const [tab, setTab]           = useState<RecordType | "audit" | "coshh" | "documents">("certificate");
   const [siteFilter, setSite]   = useState("all");
   const [search, setSearch]     = useState("");
   const [certStatus, setCertStatus] = useState<"all" | CertStatus>("all");
@@ -729,7 +733,7 @@ ${rows.map(r => `<tr>
           >
             <Download className="w-4 h-4" /> Download Matrix
           </Button>
-          {canMutate && tab !== "coshh" && (
+          {canMutate && tab !== "coshh" && tab !== "documents" && (
             <Button onClick={openAdd} className="gap-2 rounded-sm">
               <Plus className="w-4 h-4" /> Add Record
             </Button>
@@ -772,6 +776,20 @@ ${rows.map(r => `<tr>
             COSHH
           </button>
         )}
+        {showDocuments && (
+          <button
+            type="button"
+            data-testid="tab-train-documents"
+            onClick={() => setTab("documents")}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors -mb-px",
+              tab === "documents" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <FileText className="w-4 h-4" />
+            Documents
+          </button>
+        )}
         {canAdmin && <button type="button" data-testid="tab-train-audit" onClick={() => setTab("audit")} className={cn("flex items-center px-5 py-3 text-sm font-medium border-b-2 -mb-px", tab === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
       </div>
       {canAdmin && tab === "audit" && <AuditLog module="train" />}
@@ -779,6 +797,12 @@ ${rows.map(r => `<tr>
         <>
           {SiteFilter && <div className="flex flex-wrap gap-3">{SiteFilter}</div>}
           <CoshhSignOffSection siteFilter={siteFilter} canSign={canMutate} />
+        </>
+      )}
+      {showDocuments && tab === "documents" && (
+        <>
+          {SiteFilter && <div className="flex flex-wrap gap-3">{SiteFilter}</div>}
+          <DocumentSignOffSection siteFilter={siteFilter} canManage={canManageSignOffs} />
         </>
       )}
 

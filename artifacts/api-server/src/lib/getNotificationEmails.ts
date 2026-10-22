@@ -24,6 +24,8 @@ export interface NotificationRecipients {
    * Empty when a client-level notificationEmail overrides the user lookup.
    */
   userIds: number[];
+  /** Where the addresses came from: the account's notification email or its user accounts. */
+  source: "notification_email" | "users";
 }
 
 export async function getNotificationEmails(
@@ -44,7 +46,7 @@ export async function getNotificationEmails(
 
   const notifEmail = notifRow?.value?.trim();
   if (notifEmail) {
-    return { emails: [notifEmail], userIds: [] };
+    return { emails: [notifEmail], userIds: [], source: "notification_email" };
   }
 
   // 2. Fall back to admin (and optionally maintenance manager) user accounts.
@@ -74,5 +76,5 @@ export async function getNotificationEmails(
   ];
   const userIds = [...new Set(admins.map((a) => a.id))];
 
-  return { emails, userIds };
+  return { emails, userIds, source: "users" };
 }

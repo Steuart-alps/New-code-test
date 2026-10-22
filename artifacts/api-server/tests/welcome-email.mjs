@@ -99,6 +99,15 @@ async function main() {
     check("email rejection is not returned to the user", !response.data?.error);
   }
 
+  // An unconfirmed address never blocks sign-in; the app shows a reminder.
+  const earlySession = makeSession();
+  const earlyLogin = await earlySession("POST", "/auth/login", { email, password: "welcome-password-123" });
+  check("the owner can sign in before confirming their email", earlyLogin.status === 200 && !earlyLogin.data?.requiresEmailVerification,
+    `got ${earlyLogin.status} ${JSON.stringify(earlyLogin.data)}`);
+  const earlyMe = await earlySession("GET", "/auth/me");
+  check("the signed-in owner is told their email is unconfirmed", earlyMe.status === 200 && earlyMe.data?.user?.emailVerified === false,
+    `got ${earlyMe.status} ${JSON.stringify(earlyMe.data?.user?.emailVerified)}`);
+
   // Recovery: a new verification link can be requested from the sign-in flow.
   // The answer is identical for unknown addresses, and a failed or slow send
   // never shows up in the response.
@@ -145,6 +154,31 @@ async function main() {
     check("the new verification link verifies the account", verified.status === 200, `got ${verified.status}`);
     const login = await makeSession()("POST", "/auth/login", { email, password: "welcome-password-123" });
     check("the verified owner can sign in", login.status === 200, `got ${login.status}`);
+    const verifiedMe = await earlySession("GET", "/auth/me");
+    check("the reminder clears once the email is confirmed", verifiedMe.data?.user?.emailVerified === true,
+      JSON.stringify(verifiedMe.data?.user?.emailVerified));
+
+    // A password reset link also arrives by email, so using one confirms the address.
+    const resetEmail = `welcome-reset-${ts}@test.local`;
+    const resetOwner = makeSession();
+    const resetRegistered = await resetOwner("POST", "/auth/register", { email: resetEmail, password: "welcome-password-123", name: "Reset Owner" });
+    check("second registration succeeds", resetRegistered.status === 200, `got ${resetRegistered.status}`);
+    await makeSession()("POST", "/auth/forgot-password", { email: resetEmail });
+    let resetMail;
+    for (let waitedMs = 0; waitedMs <= 5000 && !resetMail; waitedMs += 100) {
+      resetMail = capturedEmails().find((entry) => entry.to === resetEmail && entry.subject === "Reset your password");
+      if (!resetMail) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const resetToken = resetMail?.html?.match(/reset-password\?token=([0-9a-f]{64})/)?.[1] ?? "";
+    check("a password reset email is sent", !!resetToken);
+    const reset = await makeSession()("POST", "/auth/reset-password", { token: resetToken, password: "welcome-password-456" });
+    check("the reset link sets a new password", reset.status === 200, `got ${reset.status}`);
+    const afterReset = makeSession();
+    const afterResetLogin = await afterReset("POST", "/auth/login", { email: resetEmail, password: "welcome-password-456" });
+    const afterResetMe = await afterReset("GET", "/auth/me");
+    check("using a reset link confirms the email address",
+      afterResetLogin.status === 200 && afterResetMe.data?.user?.emailVerified === true,
+      `got ${afterResetLogin.status} ${JSON.stringify(afterResetMe.data?.user?.emailVerified)}`);
 
     // Three resends per address per hour, so one inbox can't be flooded.
     await session("POST", "/auth/resend-verification", { email });

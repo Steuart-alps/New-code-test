@@ -236,6 +236,9 @@ async function routeApi(route, url) {
   if (pathname === "/api/data-deletion/request" && method === "GET") {
     return jsonResponse(route, { eligible: false, request: null });
   }
+  if (pathname === "/api/settings/track-summary-recipients" && method === "GET") {
+    return jsonResponse(route, { senior: { source: "users", recipients: [] }, tracks: [] });
+  }
   if (pathname === "/api/departments" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/users" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/sites" && method === "GET") return jsonResponse(route, []);

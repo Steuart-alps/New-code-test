@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { useQueryClient } from "@tanstack/react-query";
 import {
-  Download, History, Info, Lock, Pencil, Plus, Printer, Search, Trash2, UtensilsCrossed, Wheat,
+  Download, History, Info, Lock, Pencil, Plus, Printer, Search, Trash2, UtensilsCrossed, Wheat, X,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -13,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
@@ -23,149 +24,42 @@ import {
   ConfirmDelete, SiteFilter, SiteSelect, downloadCsv, ensureOk, fmtDate, todayIso,
   useRegisterList, useRegisterSites,
 } from "@/components/register-shared";
+import { AllergenBadges, AllergenChangeLogDialog, AllergenTicks } from "@/components/allergen-parts";
+import { AllergenIngredientsTab } from "@/components/allergen-ingredients";
+import { AllergenChartsTab, chartDishes } from "@/components/allergen-charts";
+import {
+  ALLERGENS, CHARTS_PATH, DISHES_PATH, INGREDIENTS_PATH, MENUS_PATH,
+  chartTitle, combineIngredients, renderChartHtml, sameSet,
+  type AllergenChart, type AllergenIngredient, type AllergenItem, type AllergenMenu,
+} from "@/lib/allergens";
 
-// The 14 allergens in Schedule 1 of the Food Information Regulations 2014
-// (retained Regulation (EU) 1169/2011, Annex II). Keys match the API.
-export const ALLERGENS = [
-  { key: "celery", label: "Celery", short: "Celery" },
-  { key: "gluten", label: "Cereals containing gluten", short: "Gluten" },
-  { key: "crustaceans", label: "Crustaceans", short: "Crustaceans" },
-  { key: "eggs", label: "Eggs", short: "Eggs" },
-  { key: "fish", label: "Fish", short: "Fish" },
-  { key: "lupin", label: "Lupin", short: "Lupin" },
-  { key: "milk", label: "Milk", short: "Milk" },
-  { key: "molluscs", label: "Molluscs", short: "Molluscs" },
-  { key: "mustard", label: "Mustard", short: "Mustard" },
-  { key: "tree_nuts", label: "Tree nuts", short: "Tree nuts" },
-  { key: "peanuts", label: "Peanuts", short: "Peanuts" },
-  { key: "sesame", label: "Sesame", short: "Sesame" },
-  { key: "soya", label: "Soya", short: "Soya" },
-  { key: "sulphites", label: "Sulphur dioxide / sulphites (over 10 mg/kg or litre)", short: "Sulphites" },
-] as const;
-
-const LABEL: Record<string, string> = Object.fromEntries(ALLERGENS.map((a) => [a.key, a.label]));
-const SHORT: Record<string, string> = Object.fromEntries(ALLERGENS.map((a) => [a.key, a.short]));
-
-interface AllergenItem {
-  id: number;
-  siteId: number | null;
-  name: string;
-  description: string | null;
-  allergens: string[];
-  ppds: boolean;
-  lastReviewedAt: string | null;
-  reviewedBy: string | null;
-  updatedAt: string;
-}
-
-interface AllergenChange {
-  id: number;
-  changeType: "created" | "allergens_changed" | "removed";
-  allergensBefore: string[] | null;
-  allergensAfter: string[] | null;
-  reason: string | null;
-  changedByName: string | null;
-  createdAt: string;
+interface LineForm {
+  ingredientId: string;
+  quantity: string;
+  unit: string;
 }
 
 interface FormState {
   siteId: string;
   name: string;
   description: string;
+  mode: "recipe" | "hand";
+  lines: LineForm[];
   allergens: string[];
+  mayContain: string[];
+  menuIds: number[];
   ppds: boolean;
   lastReviewedAt: string;
   reviewedBy: string;
   changeReason: string;
 }
 
-const LIST_PATH = "/registers/allergens";
-
-function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
-}
-
-/** Printable front-of-house allergen matrix, one table per site. */
-function renderMatrixHtml(groups: { site: string; items: AllergenItem[] }[], businessName: string): string {
-  const head = ALLERGENS.map((a) => `<th class="allergen"><span>${escapeHtml(a.short)}</span></th>`).join("");
-  const sections = groups.map(({ site, items }) => {
-    const rows = items.map((item) => {
-      const cells = ALLERGENS.map((a) => item.allergens.includes(a.key)
-        ? `<td class="yes" aria-label="Contains ${escapeHtml(a.label)}">&#10004;</td>`
-        : `<td></td>`).join("");
-      const ppds = item.ppds ? `<div class="ppds">Prepacked for direct sale: see full ingredients label</div>` : "";
-      return `<tr><td class="dish"><strong>${escapeHtml(item.name)}</strong>${item.description ? `<div class="desc">${escapeHtml(item.description)}</div>` : ""}${ppds}</td>${cells}</tr>`;
-    }).join("");
-    return `<section><h2>${escapeHtml(site)}</h2><table><thead><tr><th class="dish">Dish / product</th>${head}</tr></thead><tbody>${rows}</tbody></table></section>`;
-  }).join("");
-  const reviewed = groups.flatMap((g) => g.items).map((i) => i.lastReviewedAt).filter(Boolean).sort().pop();
-  return `<!doctype html><html><head><title>Allergen information</title>
-    <style>
-      @page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:10pt}
-      h1{font-size:18pt;margin:0 0 2px}h2{font-size:12pt;margin:14px 0 6px}.sub{margin:0 0 8px;color:#52606d}
-      table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #7b8794;padding:4px;text-align:center;vertical-align:middle}
-      th.dish,td.dish{text-align:left;width:24%}th.allergen{height:96px;vertical-align:bottom;font-size:8.5pt;padding:2px}
-      th.allergen span{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap}
-      td.yes{font-weight:bold;font-size:12pt;background:#fde2e1;color:#8a1c1c}.desc{font-size:8pt;color:#52606d}
-      .ppds{font-size:8pt;color:#8a4b00;margin-top:2px}.notice{border:2px solid #172033;padding:8px;margin:10px 0;font-weight:bold}
-      .foot{margin-top:10px;font-size:8pt;color:#52606d}tr{break-inside:avoid}section{break-inside:auto}
-      @media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
-    </style></head><body>
-    <h1>Allergen information${businessName ? ` &ndash; ${escapeHtml(businessName)}` : ""}</h1>
-    <p class="sub">A tick means the dish or product contains that allergen as an ingredient.</p>
-    <div class="notice">If you have a food allergy or intolerance, please speak to a member of staff before you order.</div>
-    ${sections}
-    <p class="foot">Printed ${escapeHtml(format(new Date(), "d MMM yyyy"))}${reviewed ? ` &middot; last reviewed ${escapeHtml(fmtDate(reviewed))}` : ""}. Recipes and suppliers can change: check this sheet is current.</p>
-    </body></html>`;
-}
-
-function emptyForm(siteId: string, reviewer: string): FormState {
-  return { siteId, name: "", description: "", allergens: [], ppds: false, lastReviewedAt: todayIso(), reviewedBy: reviewer, changeReason: "" };
-}
-
-function ChangeHistoryDialog({ item, onClose }: { item: AllergenItem | null; onClose: () => void }) {
-  const api = useActiveClientApi();
-  const { activeClientId } = useAuth();
-  const { data: changes = [], isLoading, error } = useQuery<AllergenChange[]>({
-    queryKey: [`/api${LIST_PATH}/${item?.id}/changes`, activeClientId],
-    enabled: item !== null,
-    queryFn: async () => (await ensureOk(await api(`${LIST_PATH}/${item!.id}/changes`), "Could not load the change log")).json(),
-  });
-  const describe = (change: AllergenChange) => {
-    if (change.changeType === "created") return `Added with: ${(change.allergensAfter ?? []).map((k) => SHORT[k] ?? k).join(", ") || "no allergens"}`;
-    if (change.changeType === "removed") return "Removed from the register";
-    const before = change.allergensBefore ?? [];
-    const after = change.allergensAfter ?? [];
-    const added = after.filter((k) => !before.includes(k)).map((k) => SHORT[k] ?? k);
-    const removed = before.filter((k) => !after.includes(k)).map((k) => SHORT[k] ?? k);
-    return [added.length ? `Added: ${added.join(", ")}` : "", removed.length ? `Removed: ${removed.join(", ")}` : ""].filter(Boolean).join(" · ");
+function emptyForm(siteId: string, reviewer: string, hasIngredients: boolean): FormState {
+  return {
+    siteId, name: "", description: "", mode: hasIngredients ? "recipe" : "hand", lines: [],
+    allergens: [], mayContain: [], menuIds: [], ppds: false,
+    lastReviewedAt: todayIso(), reviewedBy: reviewer, changeReason: "",
   };
-  return (
-    <Dialog open={item !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Change log: {item?.name}</DialogTitle>
-          <DialogDescription>Each allergen change is kept with the recipe or supplier reason given.</DialogDescription>
-        </DialogHeader>
-        <div className="max-h-[60vh] overflow-y-auto space-y-2">
-          {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
-          {changes.map((change) => (
-            <div key={change.id} className="rounded-md border border-border p-3 text-sm space-y-1">
-              <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
-                <span>{format(new Date(change.createdAt), "d MMM yyyy, HH:mm")}</span>
-                <span>{change.changedByName ?? "Unknown user"}</span>
-              </div>
-              <p className="font-medium">{describe(change)}</p>
-              {change.reason && <p className="text-muted-foreground">Reason: {change.reason}</p>}
-            </div>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 export default function AllergensPage() {
@@ -176,8 +70,9 @@ export default function AllergensPage() {
   const api = useActiveClientApi();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { sites, siteName } = useRegisterSites();
+  const { siteName } = useRegisterSites();
 
+  const [tab, setTab] = useState("dishes");
   const [siteFilter, setSiteFilter] = useState("all");
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<AllergenItem | null>(null);
@@ -186,14 +81,36 @@ export default function AllergensPage() {
   const [deleteTarget, setDeleteTarget] = useState<AllergenItem | null>(null);
   const [historyItem, setHistoryItem] = useState<AllergenItem | null>(null);
 
-  const { data: items = [], isLoading, error } = useRegisterList<AllergenItem>(LIST_PATH, enabled);
+  const { data: items = [], isLoading, error } = useRegisterList<AllergenItem>(DISHES_PATH, enabled);
+  const ingredientsQuery = useRegisterList<AllergenIngredient>(INGREDIENTS_PATH, enabled);
+  const menusQuery = useRegisterList<AllergenMenu>(MENUS_PATH, enabled);
+  const chartsQuery = useRegisterList<AllergenChart>(CHARTS_PATH, enabled);
+  const ingredients = ingredientsQuery.data ?? [];
+  const menus = menusQuery.data ?? [];
+  const charts = chartsQuery.data ?? [];
+
   const visible = useMemo(() => items.filter((item) =>
     (siteFilter === "all" || String(item.siteId) === siteFilter)
-    && (!q || `${item.name} ${item.description ?? ""}`.toLowerCase().includes(q.toLowerCase())),
+    && (!q || `${item.name} ${item.description ?? ""} ${item.ingredients.map((i) => i.name).join(" ")}`.toLowerCase().includes(q.toLowerCase())),
   ), [items, siteFilter, q]);
 
-  const ticksChanged = editing !== null && form !== null
-    && (editing.allergens.length !== form.allergens.length || editing.allergens.some((k) => !form.allergens.includes(k)));
+  // Ingredients usable for the dish's site: every-site ones and that site's own.
+  const formIngredients = useMemo(() => form
+    ? ingredients.filter((i) => i.siteId === null || String(i.siteId) === form.siteId)
+    : [], [ingredients, form]);
+  const formMenus = useMemo(() => form ? menus.filter((m) => String(m.siteId) === form.siteId) : [], [menus, form]);
+
+  // What the dish will contain once saved.
+  const preview = useMemo(() => {
+    if (!form) return { contains: [] as string[], mayContain: [] as string[] };
+    if (form.mode === "hand") return { contains: form.allergens, mayContain: form.mayContain.filter((k) => !form.allergens.includes(k)) };
+    const chosen = form.lines.map((line) => ingredients.find((i) => String(i.id) === line.ingredientId)).filter((i): i is AllergenIngredient => !!i);
+    return combineIngredients(chosen);
+  }, [form, ingredients]);
+
+  const recipeEmpty = form?.mode === "recipe" && form.lines.filter((l) => l.ingredientId).length === 0;
+  const setsChanged = editing !== null && form !== null && !recipeEmpty
+    && (!sameSet(editing.allergens, preview.contains) || !sameSet(editing.mayContain ?? [], preview.mayContain));
 
   if (!enabled) {
     return (
@@ -211,7 +128,7 @@ export default function AllergensPage() {
 
   function openNew() {
     setEditing(null);
-    setForm(emptyForm(siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : "", user?.name ?? ""));
+    setForm(emptyForm(siteFilter !== "all" ? siteFilter : "", user?.name ?? "", ingredients.length > 0));
   }
 
   function openEdit(item: AllergenItem) {
@@ -220,7 +137,15 @@ export default function AllergensPage() {
       siteId: item.siteId == null ? "" : String(item.siteId),
       name: item.name,
       description: item.description ?? "",
+      mode: item.ingredients.length > 0 ? "recipe" : "hand",
+      lines: item.ingredients.map((line) => ({
+        ingredientId: String(line.ingredientId),
+        quantity: line.quantity == null ? "" : String(line.quantity),
+        unit: line.unit ?? "",
+      })),
       allergens: [...item.allergens],
+      mayContain: [...(item.mayContain ?? [])],
+      menuIds: [...item.menuIds],
       ppds: item.ppds,
       lastReviewedAt: item.lastReviewedAt ?? "",
       reviewedBy: item.reviewedBy ?? "",
@@ -228,19 +153,33 @@ export default function AllergensPage() {
     });
   }
 
-  function toggleAllergen(key: string, checked: boolean) {
-    setForm((prev) => prev && ({
-      ...prev,
-      allergens: checked ? [...prev.allergens.filter((k) => k !== key), key] : prev.allergens.filter((k) => k !== key),
-    }));
+  function updateLine(index: number, patch: Partial<LineForm>) {
+    setForm((prev) => prev && ({ ...prev, lines: prev.lines.map((line, i) => (i === index ? { ...line, ...patch } : line)) }));
+  }
+
+  async function refresh() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: [`/api${DISHES_PATH}`] }),
+      queryClient.invalidateQueries({ queryKey: [`/api${INGREDIENTS_PATH}`] }),
+      queryClient.invalidateQueries({ queryKey: [`/api${CHARTS_PATH}`] }),
+    ]);
   }
 
   async function save() {
     if (!form) return;
     if (!form.siteId) { toast({ title: "Choose a site", variant: "destructive" }); return; }
     if (!form.name.trim()) { toast({ title: "Enter the dish or product name", variant: "destructive" }); return; }
-    if (ticksChanged && !form.changeReason.trim()) {
-      toast({ title: "Say what changed", description: "Give the recipe or supplier change behind the new allergen ticks.", variant: "destructive" });
+    const lines = form.mode === "recipe" ? form.lines.filter((line) => line.ingredientId) : [];
+    if (form.mode === "recipe" && lines.length === 0) {
+      toast({ title: "Add the ingredients", description: "Or choose \"Tick allergens by hand\".", variant: "destructive" });
+      return;
+    }
+    if (new Set(lines.map((l) => l.ingredientId)).size !== lines.length) {
+      toast({ title: "Each ingredient once", description: "An ingredient is listed twice.", variant: "destructive" });
+      return;
+    }
+    if (setsChanged && !form.changeReason.trim()) {
+      toast({ title: "Say what changed", description: "Give the recipe or supplier change behind the new allergens.", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -249,20 +188,28 @@ export default function AllergensPage() {
         siteId: Number(form.siteId),
         name: form.name,
         description: form.description || null,
-        allergens: form.allergens,
+        allergens: form.mode === "hand" ? form.allergens : [],
+        mayContain: form.mode === "hand" ? form.mayContain : [],
+        ingredients: lines.map((line) => ({
+          ingredientId: Number(line.ingredientId),
+          quantity: line.quantity.trim() && Number(line.quantity) > 0 ? Number(line.quantity) : null,
+          unit: line.unit.trim() || null,
+        })),
+        // Only menus at the chosen site.
+        menuIds: form.menuIds.filter((id) => formMenus.some((m) => m.id === id)),
         ppds: form.ppds,
         lastReviewedAt: form.lastReviewedAt || null,
         reviewedBy: form.reviewedBy || null,
         changeReason: form.changeReason || null,
       };
-      await ensureOk(await api(editing ? `${LIST_PATH}/${editing.id}` : LIST_PATH, {
+      await ensureOk(await api(editing ? `${DISHES_PATH}/${editing.id}` : DISHES_PATH, {
         method: editing ? "PUT" : "POST",
         body: JSON.stringify(body),
       }), "Could not save");
       toast({ title: editing ? "Allergen record updated" : "Allergen record added" });
       setForm(null);
       setEditing(null);
-      await queryClient.invalidateQueries({ queryKey: [`/api${LIST_PATH}`] });
+      await refresh();
     } catch (err) {
       toast({ title: "Could not save", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
@@ -275,37 +222,35 @@ export default function AllergensPage() {
     setDeleteTarget(null);
     if (!target) return;
     try {
-      await ensureOk(await api(`${LIST_PATH}/${target.id}`, { method: "DELETE" }), "Could not remove");
+      await ensureOk(await api(`${DISHES_PATH}/${target.id}`, { method: "DELETE" }), "Could not remove");
       toast({ title: "Removed from the register", description: "The change log keeps a record of it." });
-      await queryClient.invalidateQueries({ queryKey: [`/api${LIST_PATH}`] });
+      await refresh();
     } catch (err) {
       toast({ title: "Could not remove", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     }
   }
 
-  function groupsForPrint() {
-    const bySite = new Map<string, AllergenItem[]>();
-    for (const item of visible) {
-      const name = siteName(item.siteId);
-      bySite.set(name, [...(bySite.get(name) ?? []), item]);
-    }
-    return [...bySite.entries()].map(([site, list]) => ({ site, items: list }));
-  }
-
-  function printMatrix() {
-    if (visible.length === 0) { toast({ title: "Nothing to print", description: "Add dishes or products first." }); return; }
-    printHtmlDocument(renderMatrixHtml(groupsForPrint(), client?.name ?? ""));
+  // Whole-site charts for the chosen site(s), with their sign-off status.
+  function printSiteCharts() {
+    const siteCharts = charts.filter((c) => c.menuId === null && (siteFilter === "all" || String(c.siteId) === siteFilter));
+    const printable = siteCharts
+      .map((chart) => ({ title: chartTitle(chart), items: chartDishes(chart, items), status: chart }))
+      .filter((chart) => chart.items.length > 0);
+    if (printable.length === 0) { toast({ title: "Nothing to print", description: "Add dishes or products first." }); return; }
+    printHtmlDocument(renderChartHtml(printable, client?.name ?? ""));
   }
 
   function exportCsv() {
     downloadCsv(`allergen-records-${todayIso()}.csv`,
-      ["Site", "Dish / product", "Description", ...ALLERGENS.map((a) => a.label), "Prepacked for direct sale", "Last reviewed", "Reviewed by"],
+      ["Site", "Dish / product", "Description", "Ingredients", ...ALLERGENS.map((a) => a.label), "Prepacked for direct sale", "Last reviewed", "Reviewed by"],
       visible.map((item) => [
-        siteName(item.siteId), item.name, item.description ?? "",
-        ...ALLERGENS.map((a) => (item.allergens.includes(a.key) ? "Yes" : "")),
+        siteName(item.siteId), item.name, item.description ?? "", item.ingredients.map((i) => i.name).join("; "),
+        ...ALLERGENS.map((a) => (item.allergens.includes(a.key) ? "Contains" : (item.mayContain ?? []).includes(a.key) ? "May contain" : "")),
         item.ppds ? "Yes" : "No", fmtDate(item.lastReviewedAt), item.reviewedBy ?? "",
       ]));
   }
+
+  const menuNames = (item: AllergenItem) => item.menuIds.map((id) => menus.find((m) => m.id === id)?.name).filter(Boolean).join(", ");
 
   const actions = (item: AllergenItem) => (
     <div className="flex items-center justify-end gap-1">
@@ -325,6 +270,8 @@ export default function AllergensPage() {
     </div>
   );
 
+  const needsCheck = charts.filter((c) => c.dishCount > 0 && (!c.lastSignoff || c.changedSinceCheck)).length;
+
   return (
     <AppLayout title="Allergen records">
       <div className="space-y-5">
@@ -335,7 +282,7 @@ export default function AllergensPage() {
             </div>
             <div>
               <h1 className="text-lg font-semibold leading-tight">Allergen records</h1>
-              <p className="text-xs text-muted-foreground">The 14 regulated allergens for each dish or product, by site</p>
+              <p className="text-xs text-muted-foreground">Ingredients, dishes and allergen charts for the 14 regulated allergens</p>
             </div>
           </div>
           <Link href="/kitchen">
@@ -348,116 +295,145 @@ export default function AllergensPage() {
         <div className="flex gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
           <Info className="w-4 h-4 shrink-0 mt-0.5" />
           <p>
-            These records support your allergen controls under the Food Information Regulations 2014. Food that is
-            prepacked for direct sale (PPDS) also needs a label with the name and full ingredients list, with the
-            14 allergens emphasised (Natasha's Law). Review the records whenever a recipe or supplier changes.
+            These records support your allergen controls under the Food Information Regulations 2014. Add your
+            ingredients from their labels, build dishes from them, and sign off each chart before it goes on display.
+            Food that is prepacked for direct sale (PPDS) also needs a label with the name and full ingredients list,
+            with the 14 allergens emphasised (Natasha's Law). Review the records whenever a recipe or supplier changes.
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
-          <div className="flex flex-col sm:flex-row gap-2">
-            <SiteFilter value={siteFilter} onChange={setSiteFilter} />
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <Input placeholder="Search dishes…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 h-8 text-xs rounded-sm w-full sm:w-48" />
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={printMatrix}>
-              <Printer className="w-3.5 h-3.5" /> Print matrix
-            </Button>
-            <Button variant="outline" size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={exportCsv} disabled={visible.length === 0}>
-              <Download className="w-3.5 h-3.5" /> Export CSV
-            </Button>
-            {canEdit && (
-              <Button size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={openNew}>
-                <Plus className="w-3.5 h-3.5" /> Add dish or product
-              </Button>
-            )}
-          </div>
-        </div>
+        <Tabs value={tab} onValueChange={setTab} className="space-y-4">
+          <TabsList className="h-auto flex-wrap justify-start">
+            <TabsTrigger value="dishes">Dishes ({items.length})</TabsTrigger>
+            <TabsTrigger value="ingredients">Ingredients ({ingredients.length})</TabsTrigger>
+            <TabsTrigger value="charts">
+              Charts{needsCheck > 0 && <Badge variant="outline" className="ml-1.5 h-5 px-1.5 text-[10px] border-amber-300 bg-amber-50 text-amber-800">{needsCheck} to check</Badge>}
+            </TabsTrigger>
+          </TabsList>
 
-        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-        {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
-        {!isLoading && !error && visible.length === 0 && (
-          <div className="rounded-xl border-2 border-dashed border-muted py-12 text-center text-sm text-muted-foreground">
-            {items.length === 0 ? "No dishes or products recorded yet." : "No records match this filter."}
-          </div>
-        )}
-
-        {visible.length > 0 && (
-          <>
-            {/* Matrix (tablet and desktop) */}
-            <div className="hidden md:block border border-border rounded-xl overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="text-left font-medium p-2 min-w-[180px]">Dish / product</th>
-                    {ALLERGENS.map((a) => (
-                      <th key={a.key} className="p-1 align-bottom font-medium text-[11px] w-9" title={a.label}>
-                        <span className="inline-block [writing-mode:vertical-rl] rotate-180 whitespace-nowrap">{a.short}</span>
-                      </th>
-                    ))}
-                    <th className="text-left font-medium p-2">Reviewed</th>
-                    <th className="p-2"><span className="sr-only">Actions</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((item) => (
-                    <tr key={item.id} className="border-t border-border">
-                      <td className="p-2 align-top">
-                        <p className="font-medium">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">{siteName(item.siteId)}</p>
-                        {item.ppds && <Badge variant="outline" className="mt-1 text-[10px] border-amber-300 bg-amber-50 text-amber-800">PPDS: full label needed</Badge>}
-                      </td>
-                      {ALLERGENS.map((a) => (
-                        <td key={a.key} className={cn("text-center", item.allergens.includes(a.key) && "bg-red-50 text-red-700 font-bold")}>
-                          {item.allergens.includes(a.key) ? <span aria-label={`Contains ${a.label}`}>✓</span> : ""}
-                        </td>
-                      ))}
-                      <td className="p-2 text-xs text-muted-foreground align-top whitespace-nowrap">
-                        {item.lastReviewedAt ? fmtDate(item.lastReviewedAt) : "Not recorded"}
-                        {item.reviewedBy && <div>{item.reviewedBy}</div>}
-                      </td>
-                      <td className="p-2 align-top">{actions(item)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Cards (phones) */}
-            <div className="md:hidden space-y-3">
-              {visible.map((item) => (
-                <div key={item.id} className="rounded-xl border border-border p-3 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium break-words">{item.name}</p>
-                      <p className="text-xs text-muted-foreground">{siteName(item.siteId)}</p>
-                    </div>
-                    {actions(item)}
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {item.allergens.length === 0
-                      ? <span className="text-xs text-muted-foreground">None of the 14 allergens</span>
-                      : item.allergens.map((k) => <Badge key={k} variant="outline" className="text-[11px] border-red-200 bg-red-50 text-red-700">{SHORT[k] ?? k}</Badge>)}
-                  </div>
-                  {item.ppds && <Badge variant="outline" className="text-[10px] border-amber-300 bg-amber-50 text-amber-800">PPDS: full label needed</Badge>}
-                  <p className="text-xs text-muted-foreground">
-                    Reviewed: {item.lastReviewedAt ? fmtDate(item.lastReviewedAt) : "not recorded"}{item.reviewedBy ? ` by ${item.reviewedBy}` : ""}
-                  </p>
+          <TabsContent value="dishes" className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <SiteFilter value={siteFilter} onChange={setSiteFilter} />
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <Input placeholder="Search dishes…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 h-8 text-xs rounded-sm w-full sm:w-48" />
                 </div>
-              ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={printSiteCharts}>
+                  <Printer className="w-3.5 h-3.5" /> Print chart
+                </Button>
+                <Button variant="outline" size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={exportCsv} disabled={visible.length === 0}>
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </Button>
+                {canEdit && (
+                  <Button size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={openNew}>
+                    <Plus className="w-3.5 h-3.5" /> Add dish or product
+                  </Button>
+                )}
+              </div>
             </div>
-          </>
-        )}
+
+            {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+            {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
+            {!isLoading && !error && visible.length === 0 && (
+              <div className="rounded-xl border-2 border-dashed border-muted py-12 text-center text-sm text-muted-foreground">
+                {items.length === 0 ? "No dishes or products recorded yet." : "No records match this filter."}
+              </div>
+            )}
+
+            {visible.length > 0 && (
+              <>
+                {/* Matrix (tablet and desktop) */}
+                <div className="hidden md:block border border-border rounded-xl overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left font-medium p-2 min-w-[180px]">Dish / product</th>
+                        {ALLERGENS.map((a) => (
+                          <th key={a.key} className="p-1 align-bottom font-medium text-[11px] w-9" title={a.label}>
+                            <span className="inline-block [writing-mode:vertical-rl] rotate-180 whitespace-nowrap">{a.short}</span>
+                          </th>
+                        ))}
+                        <th className="text-left font-medium p-2">Reviewed</th>
+                        <th className="p-2"><span className="sr-only">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visible.map((item) => (
+                        <tr key={item.id} className="border-t border-border">
+                          <td className="p-2 align-top">
+                            <p className="font-medium">{item.name}</p>
+                            <p className="text-xs text-muted-foreground">{siteName(item.siteId)}{menuNames(item) ? ` · ${menuNames(item)}` : ""}</p>
+                            {item.ingredients.length > 0 && (
+                              <p className="text-[11px] text-muted-foreground mt-0.5">From recipe: {item.ingredients.map((i) => i.name).join(", ")}</p>
+                            )}
+                            {item.ppds && <Badge variant="outline" className="mt-1 text-[10px] border-amber-300 bg-amber-50 text-amber-800">PPDS: full label needed</Badge>}
+                          </td>
+                          {ALLERGENS.map((a) => {
+                            const contains = item.allergens.includes(a.key);
+                            const may = !contains && (item.mayContain ?? []).includes(a.key);
+                            return (
+                              <td key={a.key} className={cn("text-center", contains && "bg-red-50 text-red-700 font-bold", may && "bg-amber-50 text-amber-800 font-semibold")}>
+                                {contains ? <span aria-label={`Contains ${a.label}`}>✓</span> : may ? <span aria-label={`May contain ${a.label}`}>M</span> : ""}
+                              </td>
+                            );
+                          })}
+                          <td className="p-2 text-xs text-muted-foreground align-top whitespace-nowrap">
+                            {item.lastReviewedAt ? fmtDate(item.lastReviewedAt) : "Not recorded"}
+                            {item.reviewedBy && <div>{item.reviewedBy}</div>}
+                          </td>
+                          <td className="p-2 align-top">{actions(item)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-[11px] text-muted-foreground p-2 border-t border-border">✓ contains · M may contain traces</p>
+                </div>
+
+                {/* Cards (phones) */}
+                <div className="md:hidden space-y-3">
+                  {visible.map((item) => (
+                    <div key={item.id} className="rounded-xl border border-border p-3 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-medium break-words">{item.name}</p>
+                          <p className="text-xs text-muted-foreground">{siteName(item.siteId)}{menuNames(item) ? ` · ${menuNames(item)}` : ""}</p>
+                        </div>
+                        {actions(item)}
+                      </div>
+                      <AllergenBadges contains={item.allergens} mayContain={item.mayContain ?? []} />
+                      {item.ingredients.length > 0 && (
+                        <p className="text-xs text-muted-foreground">Made with: {item.ingredients.map((i) => i.name).join(", ")}</p>
+                      )}
+                      {item.ppds && <Badge variant="outline" className="text-[10px] border-amber-300 bg-amber-50 text-amber-800">PPDS: full label needed</Badge>}
+                      <p className="text-xs text-muted-foreground">
+                        Reviewed: {item.lastReviewedAt ? fmtDate(item.lastReviewedAt) : "not recorded"}{item.reviewedBy ? ` by ${item.reviewedBy}` : ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </TabsContent>
+
+          <TabsContent value="ingredients">
+            <AllergenIngredientsTab ingredients={ingredients} isLoading={ingredientsQuery.isLoading} error={ingredientsQuery.error as Error | null} />
+          </TabsContent>
+
+          <TabsContent value="charts">
+            <AllergenChartsTab charts={charts} menus={menus} dishes={items}
+              isLoading={chartsQuery.isLoading} error={chartsQuery.error as Error | null} />
+          </TabsContent>
+        </Tabs>
       </div>
 
       <Dialog open={form !== null} onOpenChange={(open) => { if (!open) { setForm(null); setEditing(null); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit allergen record" : "Add dish or product"}</DialogTitle>
-            <DialogDescription>Tick every allergen the dish or product contains as an ingredient.</DialogDescription>
+            <DialogDescription>Build the dish from your ingredients, or tick its allergens by hand.</DialogDescription>
           </DialogHeader>
           {form && (
             <div className="space-y-4">
@@ -469,20 +445,89 @@ export default function AllergensPage() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="allergen-description">Description or recipe notes</Label>
+                <Label htmlFor="allergen-description">Description</Label>
                 <Textarea id="allergen-description" rows={2} value={form.description} maxLength={2000} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </div>
-              <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">Contains</legend>
+
+              <div className="space-y-2">
+                <Label>How are the allergens worked out?</Label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {ALLERGENS.map((a) => (
-                    <label key={a.key} className="flex items-start gap-2 rounded-md border border-border p-2 text-sm cursor-pointer hover:bg-muted/40">
-                      <Checkbox checked={form.allergens.includes(a.key)} onCheckedChange={(checked) => toggleAllergen(a.key, checked === true)} className="mt-0.5" />
-                      <span>{a.label}</span>
-                    </label>
+                  {([["recipe", "From the ingredients"], ["hand", "Tick allergens by hand"]] as const).map(([mode, label]) => (
+                    <Button key={mode} type="button" variant={form.mode === mode ? "default" : "outline"} size="sm"
+                      onClick={() => setForm({ ...form, mode })}>{label}</Button>
                   ))}
                 </div>
-              </fieldset>
+              </div>
+
+              {form.mode === "recipe" ? (
+                <div className="space-y-2">
+                  {formIngredients.length === 0 && (
+                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
+                      No ingredients for this site yet. Add them on the Ingredients tab first.
+                    </p>
+                  )}
+                  {form.lines.map((line, index) => (
+                    <div key={index} className="flex flex-wrap sm:flex-nowrap items-end gap-2">
+                      <div className="space-y-1 flex-1 min-w-[180px]">
+                        {index === 0 && <Label className="text-xs">Ingredient</Label>}
+                        <Select value={line.ingredientId} onValueChange={(ingredientId) => updateLine(index, { ingredientId })}>
+                          <SelectTrigger aria-label={`Ingredient ${index + 1}`}><SelectValue placeholder="Choose an ingredient" /></SelectTrigger>
+                          <SelectContent>
+                            {formIngredients.map((i) => (
+                              <SelectItem key={i.id} value={String(i.id)}>{i.name}{i.supplier ? ` (${i.supplier})` : ""}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1 w-20">
+                        {index === 0 && <Label className="text-xs">Amount</Label>}
+                        <Input inputMode="decimal" aria-label={`Amount ${index + 1}`} value={line.quantity} placeholder="Optional"
+                          onChange={(e) => updateLine(index, { quantity: e.target.value })} />
+                      </div>
+                      <div className="space-y-1 w-20">
+                        {index === 0 && <Label className="text-xs">Unit</Label>}
+                        <Input aria-label={`Unit ${index + 1}`} value={line.unit} maxLength={20} placeholder="g, ml…"
+                          onChange={(e) => updateLine(index, { unit: e.target.value })} />
+                      </div>
+                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9" aria-label={`Remove ingredient ${index + 1}`}
+                        onClick={() => setForm({ ...form, lines: form.lines.filter((_, i) => i !== index) })}>
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={formIngredients.length === 0}
+                    onClick={() => setForm({ ...form, lines: [...form.lines, { ingredientId: "", quantity: "", unit: "" }] })}>
+                    <Plus className="w-3.5 h-3.5" /> Add ingredient
+                  </Button>
+                  <div className="rounded-md border border-border bg-muted/30 p-2 space-y-1">
+                    <p className="text-xs font-medium">This dish will show</p>
+                    <AllergenBadges contains={preview.contains} mayContain={preview.mayContain}
+                      emptyText={recipeEmpty ? "Add ingredients to see the allergens" : "None of the 14 allergens"} />
+                  </div>
+                </div>
+              ) : (
+                <AllergenTicks idPrefix="dish" contains={form.allergens} mayContain={form.mayContain}
+                  onChange={(next) => setForm({ ...form, allergens: next.contains, mayContain: next.mayContain })} />
+              )}
+
+              {formMenus.length > 0 && (
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">On these menus</legend>
+                  <div className="flex flex-wrap gap-2">
+                    {formMenus.map((menu) => (
+                      <label key={menu.id} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-sm cursor-pointer">
+                        <Checkbox checked={form.menuIds.includes(menu.id)}
+                          onCheckedChange={(checked) => setForm({
+                            ...form,
+                            menuIds: checked === true ? [...form.menuIds.filter((id) => id !== menu.id), menu.id] : form.menuIds.filter((id) => id !== menu.id),
+                          })} />
+                        {menu.name}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+
               <div className="rounded-md border border-border p-3 space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <Label htmlFor="allergen-ppds">Prepacked for direct sale (PPDS)</Label>
@@ -491,7 +536,7 @@ export default function AllergensPage() {
                 {form.ppds && (
                   <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
                     PPDS food needs a label showing the name of the food and a full ingredients list with the allergens
-                    emphasised (for example in bold). Check the label matches these ticks.
+                    emphasised (for example in bold). Check the label matches these allergens.
                   </p>
                 )}
               </div>
@@ -505,7 +550,7 @@ export default function AllergensPage() {
                   <Input id="allergen-reviewer" value={form.reviewedBy} maxLength={200} onChange={(e) => setForm({ ...form, reviewedBy: e.target.value })} />
                 </div>
               </div>
-              {(ticksChanged || !editing) && (
+              {(setsChanged || !editing) && (
                 <div className="space-y-1.5">
                   <Label htmlFor="allergen-reason">
                     {editing ? "What changed? (recipe or supplier) *" : "Source or note for the change log"}
@@ -524,11 +569,27 @@ export default function AllergensPage() {
         </DialogContent>
       </Dialog>
 
-      <ChangeHistoryDialog item={historyItem} onClose={() => setHistoryItem(null)} />
+      <AllergenChangeLogDialog
+        title={historyItem?.name ?? null}
+        path={historyItem ? `${DISHES_PATH}/${historyItem.id}/changes` : null}
+        removedText="Removed from the register"
+        normalise={(row) => ({
+          id: row.id as number,
+          changeType: row.changeType as "created" | "allergens_changed" | "removed",
+          before: row.allergensBefore as string[] | null,
+          after: row.allergensAfter as string[] | null,
+          mayBefore: row.mayContainBefore as string[] | null,
+          mayAfter: row.mayContainAfter as string[] | null,
+          reason: row.reason as string | null,
+          changedByName: row.changedByName as string | null,
+          createdAt: row.createdAt as string,
+        })}
+        onClose={() => setHistoryItem(null)}
+      />
       <ConfirmDelete
         open={deleteTarget !== null}
         title="Remove this dish or product?"
-        description={`"${deleteTarget?.name ?? ""}" will be removed from the register and the printed matrix. The change log keeps a record of it.`}
+        description={`"${deleteTarget?.name ?? ""}" will be removed from the register and its allergen charts. The change log keeps a record of it.`}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={remove}
       />
