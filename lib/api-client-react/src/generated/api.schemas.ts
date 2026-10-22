@@ -2334,6 +2334,37 @@ export interface OrderFireCallPointsRequest {
   ids: number[];
 }
 
+export type PatRegisterReadingStatusSitesItem = {
+  id: number;
+  name: string;
+};
+
+export interface PatRegisterReadingStatus {
+  available: boolean;
+  /** Readings a business may have each month; 0 means no limit */
+  monthlyLimit: number;
+  usedThisMonth: number;
+  sites: PatRegisterReadingStatusSitesItem[];
+}
+
+export interface PatRegisterReadRequest {
+  /** @maxLength 255 */
+  fileName: string;
+  /** image/jpeg, image/png, image/webp, image/gif, application/pdf, .docx or text/plain */
+  mimeType: string;
+  /** The file as base64 (8 MB at most before encoding) */
+  data: string;
+  /** The site the list is for, if the person chose one */
+  siteId?: number | null;
+}
+
+export interface PatRegisterReadResult {
+  headers: string[];
+  rows: string[][];
+  /** Rows that were hard to read; their Notes start with "Check:" */
+  unclear: number;
+}
+
 export interface FireCallPointImportRequest {
   headers: string[];
   rows: string[][];

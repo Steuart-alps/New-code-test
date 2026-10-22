@@ -7,6 +7,9 @@ import { requireService } from "../lib/services";
 import { filterName } from "../lib/contentFilter";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { siteVisibleSql } from "../lib/departmentSites";
+import { getAccountToday } from "../lib/accountClock";
+import { ReportReadingError, reportReadingConfigured, UnreadableReportError } from "../lib/reportReading";
+import { readApplianceList, REGISTER_READING_MAX_BYTES, registerReadingMonthlyLimit } from "../lib/registerReading";
 import {
   CSV_IMPORT_MAX_CELL_LENGTH,
   CSV_IMPORT_MAX_COLUMNS,
@@ -400,6 +403,94 @@ function sendTemplate(type: CsvImportType, filename: string): RequestHandler {
 
 router.get("/imports/pat-appliances/template", requireAuth, requirePatImporter, requireService("pattrack"), sendTemplate("pat-appliances", "pattrack-appliances-template.csv"));
 router.post("/imports/pat-appliances", requireAuth, denyViewers, requirePatImporter, requireService("pattrack"), handleImport("pat-appliances"));
+
+// ── Reading a photo, scan, PDF or Word list into PAT register rows ─────────
+// Claude reads the file (lib/registerReading.ts) and the rows come back to the
+// browser, which sends them through the import preview above like a
+// spreadsheet. The file itself is not stored. Each business may have
+// REGISTER_READING_MONTHLY_LIMIT lists read a month, counted in app_settings
+// as "YYYY-MM:count" so a new month starts again at nought.
+const REGISTER_READS_SETTING = "patRegisterReads";
+class RegisterReadLimitError extends Error {}
+
+async function importableSites(clientId: number, departmentId: number | null) {
+  const visible = departmentId === null ? sql`TRUE` : siteVisibleSql(sql`s.id`, sql`s.department_id`, departmentId);
+  return rowsOf(await db.execute(sql`SELECT s.id, s.name FROM sites s WHERE s.client_id = ${clientId} AND ${visible} ORDER BY s.name, s.id`))
+    .map((row) => ({ id: Number(row.id), name: String(row.name) }));
+}
+
+async function registerReadsThisMonth(clientId: number, month: string) {
+  const [row] = rowsOf(await db.execute(sql`SELECT value FROM app_settings WHERE client_id = ${clientId} AND key = ${REGISTER_READS_SETTING}`));
+  const [storedMonth, count] = String(row?.value ?? "").split(":");
+  return storedMonth === month ? Number(count) || 0 : 0;
+}
+
+/** Count one reading for this month, unless the limit is reached. False when it is. */
+async function claimRegisterRead(clientId: number, month: string, limit: number) {
+  const underLimit = limit > 0
+    ? sql`WHERE split_part(app_settings.value, ':', 1) <> ${month} OR coalesce(nullif(split_part(app_settings.value, ':', 2), ''), '0')::int < ${limit}`
+    : sql``;
+  const claimed = rowsOf(await db.execute(sql`
+    INSERT INTO app_settings (client_id, key, value, updated_at) VALUES (${clientId}, ${REGISTER_READS_SETTING}, ${`${month}:1`}, now())
+    ON CONFLICT (client_id, key) DO UPDATE SET
+      value = CASE WHEN split_part(app_settings.value, ':', 1) = ${month}
+        THEN ${month} || ':' || (coalesce(nullif(split_part(app_settings.value, ':', 2), ''), '0')::int + 1)
+        ELSE ${`${month}:1`} END,
+      updated_at = now()
+    ${underLimit}
+    RETURNING value
+  `));
+  return claimed.length > 0;
+}
+
+const registerReadBody = z.object({
+  fileName: z.string().trim().min(1).max(255),
+  mimeType: z.string().trim().min(1).max(200),
+  // Base64 of the file; the browser shrinks photos before sending them.
+  data: z.string().min(1).max(Math.ceil(REGISTER_READING_MAX_BYTES / 3) * 4 + 4),
+  siteId: z.number().int().positive().nullable().optional(),
+}).strict();
+
+router.get("/imports/pat-appliances/reading", requireAuth, requirePatImporter, requireService("pattrack"), async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const month = (await getAccountToday(clientId)).slice(0, 7);
+  const [sites, used] = await Promise.all([importableSites(clientId, getActiveDepartmentId(req)), registerReadsThisMonth(clientId, month)]);
+  res.json({ available: reportReadingConfigured(), monthlyLimit: registerReadingMonthlyLimit(), usedThisMonth: used, sites });
+});
+
+router.post("/imports/pat-appliances/read", requireAuth, denyViewers, requirePatImporter, requireService("pattrack"), async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!reportReadingConfigured()) {
+    return res.status(503).json({ error: "Reading photos and documents is not switched on yet. Upload a spreadsheet instead.", code: "REGISTER_READING_UNAVAILABLE" });
+  }
+  const parsed = registerReadBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a photo, PDF or Word file of your list (8 MB at most)" });
+  const departmentId = getActiveDepartmentId(req);
+  const sites = await importableSites(clientId, departmentId);
+  const siteId = parsed.data.siteId ?? null;
+  if (siteId !== null && !sites.some((site) => site.id === siteId)) return res.status(400).json({ error: "Choose one of your sites" });
+
+  const bytes = Buffer.from(parsed.data.data, "base64");
+  const month = (await getAccountToday(clientId)).slice(0, 7);
+  const limit = registerReadingMonthlyLimit();
+  try {
+    // A file Claude cannot read is turned away before it counts towards the limit.
+    const result = await readApplianceList({ bytes, mimeType: parsed.data.mimeType, fileName: parsed.data.fileName, sites, siteId }, async () => {
+      if (!await claimRegisterRead(clientId, month, limit)) {
+        throw new RegisterReadLimitError(`This business has had ${limit} lists read this month, the most allowed. Upload a spreadsheet instead, or ask ALPS.`);
+      }
+    });
+    req.log.info({ clientId, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, rows: result.rows.length }, "PAT register list read");
+    res.json({ headers: result.headers, rows: result.rows, unclear: result.unclear });
+  } catch (err) {
+    if (err instanceof RegisterReadLimitError) return res.status(429).json({ error: err.message, code: "REGISTER_READING_LIMIT" });
+    if (err instanceof UnreadableReportError) return res.status(400).json({ error: err.message });
+    if (!(err instanceof ReportReadingError)) req.log.error({ err }, "PAT register list reading failed");
+    res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read this list just now. Try again later, or upload a spreadsheet." });
+  }
+});
 
 router.get("/imports/room-track-rooms/template", requireAuth, requireClientAdmin, requireService("roomtrack"), sendTemplate("room-track-rooms", "roomtrack-rooms-template.csv"));
 router.post("/imports/room-track-rooms", requireAuth, denyViewers, requireClientAdmin, requireService("roomtrack"), handleImport("room-track-rooms"));

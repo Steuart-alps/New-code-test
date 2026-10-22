@@ -2985,6 +2985,42 @@ export const ImportFireCallPointsResponse = zod.object({
 
 
 /**
+ * @summary Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
+ */
+export const GetPatRegisterReadingResponse = zod.object({
+  "available": zod.boolean(),
+  "monthlyLimit": zod.number().describe('Readings a business may have each month; 0 means no limit'),
+  "usedThisMonth": zod.number(),
+  "sites": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * Claude reads the file and returns rows in the PAT appliance import's columns. Nothing is saved: the browser sends the rows to POST /imports/pat-appliances for the usual preview and import. The file is not stored. Off until the server has an Anthropic API key; each business has a monthly number of readings.
+ * @summary Read a photo, scan, PDF or Word list of appliances into register rows (managers)
+ */
+export const readPatRegisterListBodyFileNameMax = 255;
+
+
+
+export const ReadPatRegisterListBody = zod.object({
+  "fileName": zod.string().max(readPatRegisterListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const ReadPatRegisterListResponse = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "unclear": zod.number().describe('Rows that were hard to read; their Notes start with \"Check:\"')
+})
+
+
+/**
  * @summary Rename, move, archive or restore a call point (managers)
  */
 export const UpdateFireCallPointParams = zod.object({

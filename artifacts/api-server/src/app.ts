@@ -227,7 +227,9 @@ app.post(
   }
 );
 
-// Register CSV imports send up to 1,000 rows; every other route keeps the default limit.
+// Register CSV imports send up to 1,000 rows, and a PAT register photo or PDF
+// is sent as base64 (8 MB file at most); every other route keeps the default limit.
+app.use("/api/imports/pat-appliances/read", express.json({ limit: "12mb" }));
 app.use("/api/imports", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

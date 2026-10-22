@@ -151,6 +151,22 @@ async function patImports(owner, manager, staff, viewer) {
   check("pat: ordinary staff are refused", (await staff("POST", "/imports/pat-appliances", pat([["Iron", "", "", "", "", ""]]))).status === 403);
   check("pat: viewer cannot import", (await viewer("POST", "/imports/pat-appliances", pat([["Iron", "", "", "", "", ""]], false))).status === 403);
   check("pat: viewer cannot download the template", (await viewer("GET", "/imports/pat-appliances/template")).status === 403);
+
+  // Reading a photo or document of a list: off without ANTHROPIC_API_KEY (as in
+  // CI); the stand-in API test (test:register-reading) covers the reading itself.
+  const reading = await owner("GET", "/imports/pat-appliances/reading");
+  const siteNames = (data) => (data?.sites ?? []).map((site) => site.name).sort().join(",");
+  check("pat reading: off until an Anthropic key is set, with this month's use and the owner's sites",
+    reading.status === 200 && reading.data?.available === false && reading.data?.usedThisMonth === 0 && siteNames(reading.data) === "Annexe,Main Building",
+    JSON.stringify(reading.data));
+  const managerReading = await manager("GET", "/imports/pat-appliances/reading");
+  check("pat reading: a department manager is offered only their department's sites",
+    managerReading.status === 200 && siteNames(managerReading.data) === "Main Building", JSON.stringify(managerReading.data));
+  const list = { fileName: "list.jpg", mimeType: "image/jpeg", data: Buffer.from("not really a photo").toString("base64") };
+  const off = await owner("POST", "/imports/pat-appliances/read", list);
+  check("pat reading: reading a list is refused while off", off.status === 503 && off.data?.code === "REGISTER_READING_UNAVAILABLE", JSON.stringify(off.data));
+  check("pat reading: ordinary staff are refused", (await staff("GET", "/imports/pat-appliances/reading")).status === 403);
+  check("pat reading: viewer cannot read a list", (await viewer("POST", "/imports/pat-appliances/read", list)).status === 403);
 }
 
 async function roomImports(owner, manager, viewer, otherClientId) {
