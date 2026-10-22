@@ -452,6 +452,13 @@ which breaks it. So the order of preference is:
 3. **Reading a supplier's public product page** only where its terms allow it,
    and always with a person confirming the result.
 
+### Compare suppliers for the kitchen order
+
+Put together the kitchen's order list and ComplyTrack shows which supplier is
+cheapest for the whole order, or for each item, using the prices from the
+supplier price import above. This is the KitchenTrack version of the consumer
+shopping comparison app (see "Future apps").
+
 ### Voice
 
 Speak things in rather than typing: a list of ingredients, a recipe, or a
@@ -646,11 +653,12 @@ checks completely, or sit alongside them?
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
 researched or built.
 
-### Shopping comparison app
+### Shopping comparison app (consumer)
 
-Enter a shopping list and the app says which shop is the best (cheapest
-overall) to go to for it. It could share the supplier price import planned
-for kitchens (item 13), since both need up-to-date product prices.
+A consumer app: enter a shopping list and it says which shop is the best
+(cheapest overall) to go to for it. The same idea is also planned inside
+KitchenTrack for comparing suppliers (item 13), and both can share the
+supplier price import, since both need up-to-date product prices.
 
 ---
 
