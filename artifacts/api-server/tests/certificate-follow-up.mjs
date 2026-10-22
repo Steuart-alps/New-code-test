@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { createTenant, createUser, pool, runCertificateFollowUpJob, runPersonalReminderJob } from './approval-workflow-fixtures.mjs';
 
-// A contractor visit that has happened with no certificate 3 days on: the
-// contractor gets one follow-up through Contractor Approvals, and the person
-// responsible (assigned person, else the site's Maintenance person, else a
-// Manager, else the Owner) sees it in their 08:00 personal reminder that day
-// and weekly after. Run:
+// A contractor visit that has happened with no certificate 2 weeks on, then
+// every 2 weeks: the contractor is emailed a follow-up automatically (a send
+// that fails waits in Contractor Approvals) with the people responsible copied in (the assigned person, the site's
+// Maintenance person and head of department; else a Manager, else the Owner),
+// who see it in their 08:00 personal reminder that day, and every Owner and
+// Manager update lists it. Run:
 //   FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/certificate-follow-up.mjs
 
 const ok = (response, status = 200) => {
@@ -26,7 +27,14 @@ const at = (offset) => new Date(`${day(offset)}T08:30:00Z`);
 
 const sent = [];
 const send = async (email) => { sent.push(email); };
-const followUp = () => runCertificateFollowUpJob({ now: at(0) });
+const contractorEmails = [];
+const followUp = (offset = 0, failFor = null) => runCertificateFollowUpJob({
+  now: at(offset),
+  send: async (email) => {
+    if (failFor && email.subject.includes(failFor)) throw new Error('Email provider unavailable');
+    contractorEmails.push(email);
+  },
+});
 const remind = async (clientIds, offset = 0) => {
   sent.length = 0;
   await pool.query(`DELETE FROM scheduled_email_claims WHERE job = 'personal-reminders'`);
@@ -46,6 +54,8 @@ try {
   const maintenanceAEmail = await emailOf(maintenanceA.userId);
   const staffA = await createUser(owner, { role: 'client_staff', departmentId: deptA.id });
   const staffAEmail = await emailOf(staffA.userId);
+  const headA = await createUser(owner, { role: 'client_staff', departmentId: deptA.id, isDepartmentManager: true });
+  const headAEmail = await emailOf(headA.userId);
   const manager = await createUser(owner, { role: 'client_manager' });
   const managerEmail = await emailOf(manager.userId);
   const ownerEmail = await ownerEmailOf(owner.clientId);
@@ -67,33 +77,42 @@ try {
   const certified = await check('Fire Alarm Maintenance', siteA.id);
   const old = await check('Boiler Service', siteA.id);
   const assigned = await check('Emergency Lighting Test', siteA.id, { assigneeUserId: staffA.userId });
-  await complete(gas.id, day(-3));
-  await complete(eicr.id, day(-3));
-  await complete(recent.id, day(-1));
-  await complete(certified.id, day(-6));
-  await complete(old.id, day(-45));
-  await complete(assigned.id, day(-3));
-  ok(await owner.request('POST', `/items/${certified.id}/certificates`, { name: 'Alarm certificate', issueDate: `${day(-6)}T00:00:00.000Z` }), 201);
+  await complete(gas.id, day(-14));
+  await complete(eicr.id, day(-14));
+  await complete(recent.id, day(-10));
+  await complete(certified.id, day(-20));
+  await complete(old.id, day(-120));
+  await complete(assigned.id, day(-14));
+  ok(await owner.request('POST', `/items/${certified.id}/certificates`, { name: 'Alarm certificate', issueDate: `${day(-20)}T00:00:00.000Z` }), 201);
 
   // ── Contractor follow-up ───────────────────────────────────────────────────
-  let result = await followUp();
+  let result = await followUp(0, 'EICR');
   const [gasDraft, ...moreGas] = await drafts(gas.id);
   assert.equal(moreGas.length, 0);
-  assert.equal(gasDraft.status, 'pending', 'the contractor follow-up waits in Contractor Approvals');
+  assert.equal(gasDraft.status, 'sent', 'the contractor follow-up is sent with no approval step');
+  const [gasEmail] = contractorEmails.filter((email) => email.subject.includes('Gas Safety Inspection'));
+  assert.equal(gasEmail.to, 'sam@gas.test');
+  assert.deepEqual([...gasEmail.cc].sort(), [maintenanceAEmail, headAEmail].sort());
   assert.equal(gasDraft.to_email, 'sam@gas.test');
   assert.match(gasDraft.subject, /Certificate needed: Gas Safety Inspection/);
   assert.match(gasDraft.body_text, new RegExp(`email it to ${maintenanceAEmail.replace(/[.+]/g, '\\$&')}`));
-  assert.deepEqual(gasDraft.cc_json, [maintenanceAEmail]);
-  assert.equal((await drafts(eicr.id)).length, 1);
+  assert.match(gasDraft.body_text, /invoice/);
+  assert.deepEqual([...gasDraft.cc_json].sort(), [maintenanceAEmail, headAEmail].sort(), 'Maintenance and the HoD are copied in');
+  const [eicrDraft] = await drafts(eicr.id);
+  assert.equal(eicrDraft.status, 'pending', 'a follow-up that could not be sent waits in Contractor Approvals');
+  assert.match(eicrDraft.last_error, /Email provider unavailable/);
+  assert.equal(result.sent, 2);
+  assert.equal(result.failed, 1);
   const [assignedDraft] = await drafts(assigned.id);
-  assert.deepEqual(assignedDraft.cc_json, [staffAEmail], 'a check given to someone asks for the certificate to go to them');
+  assert.equal(assignedDraft.cc_json[0], staffAEmail, 'a check given to someone asks for the certificate to go to them');
+  assert.deepEqual(assignedDraft.cc_json.slice(1).sort(), [maintenanceAEmail, headAEmail].sort());
   for (const item of [recent, certified, old]) {
     assert.equal((await drafts(item.id)).length, 0, `${item.title} is not followed up`);
   }
-  console.log('ok - a visit 3+ days ago with no certificate drafts one contractor follow-up');
+  console.log('ok - two weeks after a visit with no certificate, the contractor is emailed automatically, Maintenance and HoD copied in');
 
   result = await followUp();
-  assert.equal(result.drafted, 0);
+  assert.equal(result.sent, 0);
   assert.equal((await drafts(gas.id)).length, 1, 'each visit is followed up once');
   console.log('ok - each visit is followed up once');
 
@@ -105,55 +124,109 @@ try {
     return emails[0].html;
   };
   const maintenanceHtml = only(maintenanceAEmail);
-  assert.match(maintenanceHtml, /Certificates still to come/);
+  assert.match(maintenanceHtml, /Certificates outstanding/);
   assert.match(maintenanceHtml, /Gas Safety Inspection/);
+  assert.match(maintenanceHtml, /Emergency Lighting Test/, 'Maintenance is copied in on a check given to someone');
   assert.doesNotMatch(maintenanceHtml, /EICR/, "site B's visit is not theirs");
-  assert.doesNotMatch(maintenanceHtml, /Emergency Lighting Test/, 'a check given to someone goes to them');
-  assert.match(only(staffAEmail), /Emergency Lighting Test/);
+  assert.match(only(headAEmail), /Gas Safety Inspection/, 'the HoD hears too');
+  const staffHtml = only(staffAEmail);
+  assert.match(staffHtml, /Emergency Lighting Test/);
+  assert.doesNotMatch(staffHtml, /Gas Safety Inspection/, 'staff only hear about checks given to them');
   assert.match(only(managerEmail), /EICR/, 'site B has no Maintenance person, so its Manager hears');
   assert.equal(to(ownerEmail).length, 0, 'the Owner is not emailed');
   for (const email of sent) assert.doesNotMatch(email.html, /LOLER Examination|Fire Alarm Maintenance|Boiler Service/);
-  console.log('ok - the assigned person, else Maintenance for the site, else the Manager hears; never the Owner');
+  assert.equal((await drafts(old.id)).length, 0, 'no chase after 90 days');
+  console.log('ok - the assigned person, Maintenance and HoD for the site hear, else the Manager; never the Owner');
 
   await remind([owner.clientId], 1);
-  assert.equal(sent.filter((email) => /Certificates still to come/.test(email.html)).length, 0, 'not repeated the next day');
+  assert.equal(sent.filter((email) => /Certificates outstanding/.test(email.html)).length, 0, 'not repeated the next day');
   await remind([owner.clientId], 7);
-  assert.match(only(maintenanceAEmail), /Gas Safety Inspection/, 'still missing a week later: reminded again');
-  console.log('ok - repeated once a week while the certificate is missing, not daily');
+  assert.equal(sent.filter((email) => /Certificates outstanding/.test(email.html)).length, 0, 'not repeated a week later');
+  await remind([owner.clientId], 14);
+  assert.match(only(maintenanceAEmail), /Gas Safety Inspection/, 'still missing two weeks later: reminded again');
+  console.log('ok - repeated every two weeks while the certificate is missing');
 
-  // ── The Owner update lists every certificate still to come ─────────────────
+  // ── A manager can send one that failed; it isn't the due reminder ─────────
+  ok(await owner.request('POST', `/fix-track/contractor-email-queue/${(await pool.query(
+    `SELECT id FROM contractor_email_queue WHERE entity_id = $1 AND status = 'pending'`, [eicr.id])).rows[0].id}/approve-and-send`));
+  assert.equal((await drafts(eicr.id))[0].status, 'sent');
+  assert.equal(ok(await owner.request('GET', `/compliance-items/${eicr.id}`)).notificationSentAt, null,
+    'the next due reminder is still to come');
+  console.log("ok - a follow-up that failed can be sent from Contractor Approvals, and doesn't stop the next visit's reminder");
+
+  // ── The contractor is chased again every two weeks ─────────────────────────
+  await followUp(7);
+  assert.equal((await drafts(gas.id)).length, 1, 'not chased again before two weeks');
+  await followUp(14);
+  const gasChases = await drafts(gas.id);
+  assert.equal(gasChases.length, 2, 'chased again two weeks after the first');
+  assert.equal(gasChases[1].status, 'sent');
+  await followUp(14);
+  assert.equal((await drafts(gas.id)).length, 2, 'once per chase');
+  console.log('ok - the contractor is chased again every two weeks, once per chase');
+
+  // ── Owner and Manager updates list every certificate outstanding ───────────
   await pool.query(
     `INSERT INTO app_settings (client_id, key, value) VALUES ($1, 'ownerUpdateFrequency', 'daily')
      ON CONFLICT (client_id, key) DO UPDATE SET value = EXCLUDED.value`, [owner.clientId]);
   await remind([owner.clientId], 1);
   const update = only(ownerEmail);
-  assert.match(update, /Certificates still to come/);
+  assert.match(update, /Certificates outstanding/);
   assert.match(update, /Gas Safety Inspection/);
   assert.match(update, /EICR/);
+  const managerUpdate = only(managerEmail);
+  assert.match(managerUpdate, /Certificates outstanding/);
+  assert.match(managerUpdate, /EICR/, 'the Manager update lists them too');
+  assert.doesNotMatch(update, /LOLER Examination/, 'a visit under two weeks ago is not outstanding yet');
+  assert.match(update, /Boiler Service/, 'past the 90-day chase window, it stays on the updates');
+  assert.equal(update.match(/reminders to the contractor have stopped/g)?.length, 1, 'the update says chasing has stopped, for that one only');
+  assert.match(update, /Boiler Service[^]*?reminders to the contractor have stopped/);
   await pool.query(`DELETE FROM app_settings WHERE client_id = $1 AND key = 'ownerUpdateFrequency'`, [owner.clientId]);
-  console.log('ok - the Owner update lists them, with no separate Owner email');
+  console.log('ok - Owner and Manager updates list them, with no separate Owner email');
 
-  // ── A certificate withdraws the waiting draft ──────────────────────────────
+  // ── The app lists them too, by the sites each person can see ───────────────
+  const listed = ok(await owner.request('GET', '/certificates-outstanding'));
+  const titles = (list) => list.certificates.map((row) => row.title).sort();
+  assert.deepEqual(titles(listed), ['Boiler Service', 'EICR', 'Emergency Lighting Test', 'Gas Safety Inspection']);
+  assert.equal(listed.certificates.find((row) => row.title === 'Boiler Service').chasing, false, 'past 90 days the chase has stopped');
+  assert.equal(listed.certificates.find((row) => row.title === 'Gas Safety Inspection').chasing, true);
+  const siteAOnly = ok(await maintenanceA.request('GET', '/certificates-outstanding'));
+  assert.ok(!titles(siteAOnly).includes('EICR'), "site B's certificate is not shown to site A staff");
+  assert.ok(titles(siteAOnly).includes('Gas Safety Inspection'));
+  console.log('ok - the app lists certificates outstanding for the sites each person can see');
+
+  // ── Not compliant from the visit until the certificate is uploaded ─────────
+  const state = async (item) => ok(await owner.request('GET', `/compliance-items/${item.id}`));
+  for (const item of [gas, recent, old]) {
+    const got = await state(item);
+    assert.equal(got.needsAction, true, `${item.title} needs action`);
+    assert.equal(got.needsActionReason, 'certificate_outstanding');
+  }
+  assert.equal((await state(certified)).needsAction, false, 'a check with its certificate is compliant');
+  const today = ok(await owner.request('GET', '/dashboard/today-by-department'));
+  const redItems = today.groups.flatMap((group) => group.rows).flatMap((row) => row.items)
+    .filter((item) => item.detail === 'Certificate outstanding');
+  assert.ok(redItems.some((item) => item.label === 'Gas Safety Inspection'), 'the department bars show it red');
+  const failed = today.groups.flatMap((group) => group.rows).reduce((sum, row) => sum + row.failed, 0);
+  assert.ok(failed >= redItems.length);
+  console.log('ok - a check counts as not compliant from the visit until its certificate is uploaded');
+
+  // ── A certificate withdraws a follow-up still waiting ──────────────────────
+  await followUp(28, 'Gas Safety Inspection');
+  assert.equal((await drafts(gas.id)).at(-1).status, 'pending', 'the third chase failed to send');
   ok(await owner.request('POST', `/items/${gas.id}/certificates`, { name: 'Gas Safe certificate' }), 201);
   result = await followUp();
-  const [withdrawn] = await drafts(gas.id);
+  const withdrawn = (await drafts(gas.id)).at(-1);
   assert.equal(withdrawn.status, 'cancelled');
   assert.equal(withdrawn.last_error, 'Certificate received');
+  assert.equal((await state(gas)).needsAction, false, 'compliant again once the certificate is in');
   await remind([owner.clientId]);
   assert.doesNotMatch(to(maintenanceAEmail)[0]?.html ?? '', /Gas Safety Inspection/, 'no reminder once the certificate is in');
   console.log('ok - uploading the certificate withdraws the follow-up and stops the reminder');
 
-  // ── Sending the follow-up does not count as the due reminder ───────────────
-  const [eicrDraft] = (await pool.query(
-    `SELECT id FROM contractor_email_queue WHERE entity_id = $1 AND email_type = 'certificate_followup'`, [eicr.id])).rows;
-  ok(await owner.request('POST', `/fix-track/contractor-email-queue/${eicrDraft.id}/approve-and-send`));
-  const eicrAfter = ok(await owner.request('GET', `/compliance-items/${eicr.id}`));
-  assert.equal(eicrAfter.notificationSentAt, null, 'the next due reminder is still to come');
-  console.log("ok - a sent follow-up doesn't stop the next visit's reminder");
-
   // ── A booked visit date that has passed counts as a visit ──────────────────
   const booked = await check('Lift LOLER', siteA.id);
-  await pool.query(`UPDATE compliance_items SET visit_scheduled_at = $2 WHERE id = $1`, [booked.id, `${day(-3)}T10:00:00Z`]);
+  await pool.query(`UPDATE compliance_items SET visit_scheduled_at = $2 WHERE id = $1`, [booked.id, `${day(-14)}T10:00:00Z`]);
   await followUp();
   assert.equal((await drafts(booked.id)).length, 1);
   await remind([owner.clientId]);
@@ -167,7 +240,7 @@ try {
   const soloCheck = ok(await solo.request('POST', '/compliance-items', {
     title: 'PAT testing', priority: 'high', siteId: soloSite.id, contractorId: soloContractor.id,
   }), 201);
-  ok(await solo.request('PATCH', `/compliance-items/${soloCheck.id}/status`, { status: 'completed', completedAt: day(-3) }));
+  ok(await solo.request('PATCH', `/compliance-items/${soloCheck.id}/status`, { status: 'completed', completedAt: day(-14) }));
   await remind([solo.clientId]);
   assert.match(only(await ownerEmailOf(solo.clientId)), /PAT testing/, 'with no Maintenance person or Manager, the Owner hears');
   console.log('ok - a business with only an Owner still hears about it');

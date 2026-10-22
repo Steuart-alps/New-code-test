@@ -32,6 +32,7 @@ const MandatoryTwoFactorPage = lazy(() => import("@/pages/mandatory-two-factor")
 const TrialEndedPage = lazy(() => import("@/pages/trial-ended"));
 const TermsPage = lazy(() => import("@/pages/terms"));
 const PrivacyPage = lazy(() => import("@/pages/privacy"));
+const PublicSitePage = lazy(() => import("@/pages/public-site"));
 const PrivacyGovernancePage = lazy(() => import("@/pages/privacy-governance"));
 const VerifyEmailPage = lazy(() => import("@/pages/verify-email"));
 const SchedulePage = lazy(() => import("@/pages/schedule"));
@@ -39,7 +40,6 @@ const ItemDetailPage = lazy(() => import("@/pages/item-detail"));
 const FireSafetyPage = lazy(() => import("@/pages/fire-safety"));
 const KitchenPage = lazy(() => import("@/pages/kitchen"));
 const AllergensPage = lazy(() => import("@/pages/allergens"));
-const CoshhRegisterPage = lazy(() => import("@/pages/coshh-register"));
 const AsbestosRegisterPage = lazy(() => import("@/pages/asbestos-register"));
 const LegionellaPage = lazy(() => import("@/pages/legionella"));
 const FixTrackPage = lazy(() => import("@/pages/fix-track"));
@@ -154,6 +154,8 @@ function ProtectedRoutes() {
   if (location === "/signup") return <SignupPage />;
   if (location === "/terms") return <TermsPage />;
   if (location === "/privacy") return <PrivacyPage />;
+  // Modules, free templates and pricing (see pages/public-site.tsx).
+  if (/^\/(pricing|features|templates)(\/[^/]+)?\/?$/.test(location)) return <PublicSitePage location={location} />;
   if (location.startsWith("/verify-email")) return <VerifyEmailPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
@@ -237,7 +239,8 @@ function ProtectedRoutes() {
       <Route path="/fire-safety" component={FireSafetyPage} />
       <Route path="/kitchen" component={KitchenPage} />
       <Route path="/allergens" component={AllergensPage} />
-      <Route path="/coshh" component={CoshhRegisterPage} />
+      {/* The COSHH register is COSHHTrack's Substances tab. */}
+      <Route path="/coshh">{() => <Redirect to="/coshh-track?tab=substances" />}</Route>
       <Route path="/asbestos" component={AsbestosRegisterPage} />
       <Route path="/legionella" component={LegionellaPage} />
       <Route path="/safe-track">{() => <Redirect to="/doc-track" />}</Route>

@@ -5,6 +5,164 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+/**
+ * One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014
+ */
+export type AllergenKey = typeof AllergenKey[keyof typeof AllergenKey];
+
+
+export const AllergenKey = {
+  celery: 'celery',
+  gluten: 'gluten',
+  crustaceans: 'crustaceans',
+  eggs: 'eggs',
+  fish: 'fish',
+  lupin: 'lupin',
+  milk: 'milk',
+  molluscs: 'molluscs',
+  mustard: 'mustard',
+  tree_nuts: 'tree_nuts',
+  peanuts: 'peanuts',
+  sesame: 'sesame',
+  soya: 'soya',
+  sulphites: 'sulphites',
+} as const;
+
+export interface AllergenIngredientUse {
+  id: number;
+  name: string;
+  siteId: number | null;
+}
+
+export interface AllergenIngredient {
+  id: number;
+  /** null when every site can use it */
+  siteId: number | null;
+  name: string;
+  supplier?: string | null;
+  productCode?: string | null;
+  contains: AllergenKey[];
+  mayContain: AllergenKey[];
+  notes?: string | null;
+  lastCheckedAt?: string | null;
+  checkedBy?: string | null;
+  /** Dishes using it, at sites the caller can see */
+  usedIn: AllergenIngredientUse[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AllergenIngredientSaved = AllergenIngredient & {
+  /** Dishes whose allergens changed because of this edit */
+  dishesUpdated: number;
+};
+
+export interface AllergenIngredientInput {
+  siteId: number | null;
+  /** @maxLength 200 */
+  name: string;
+  /** @maxLength 200 */
+  supplier?: string | null;
+  /** @maxLength 100 */
+  productCode?: string | null;
+  /** @maxItems 14 */
+  contains: AllergenKey[];
+  /** @maxItems 14 */
+  mayContain?: AllergenKey[];
+  /** @maxLength 2000 */
+  notes?: string | null;
+  lastCheckedAt?: string | null;
+  /** @maxLength 200 */
+  checkedBy?: string | null;
+  /**
+     * Required when contains or may contain changes on an edit
+     * @maxLength 1000
+     */
+  changeReason?: string | null;
+}
+
+export type AllergenIngredientChangeChangeType = typeof AllergenIngredientChangeChangeType[keyof typeof AllergenIngredientChangeChangeType];
+
+
+export const AllergenIngredientChangeChangeType = {
+  created: 'created',
+  allergens_changed: 'allergens_changed',
+  removed: 'removed',
+} as const;
+
+export interface AllergenIngredientChange {
+  id: number;
+  ingredientId: number;
+  changeType: AllergenIngredientChangeChangeType;
+  containsBefore?: AllergenKey[] | null;
+  containsAfter?: AllergenKey[] | null;
+  mayContainBefore?: AllergenKey[] | null;
+  mayContainAfter?: AllergenKey[] | null;
+  reason?: string | null;
+  dishesUpdated: number;
+  changedByName?: string | null;
+  createdAt: string;
+}
+
+export interface AllergenMenu {
+  id: number;
+  siteId: number | null;
+  name: string;
+  contentsChangedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AllergenMenuInput {
+  siteId: number;
+  /** @maxLength 100 */
+  name: string;
+}
+
+export interface AllergenMenuRename {
+  /** @maxLength 100 */
+  name: string;
+}
+
+export interface AllergenChartLastSignoff {
+  id: number;
+  checkedByName: string;
+  createdAt: string;
+  note?: string | null;
+  dishCount: number;
+}
+
+export interface AllergenChart {
+  siteId: number;
+  siteName: string;
+  /** null for the whole-site chart */
+  menuId: number | null;
+  menuName: string | null;
+  dishCount: number;
+  lastSignoff: AllergenChartLastSignoff | null;
+  /** A dish on the chart changed after the latest sign-off */
+  changedSinceCheck: boolean;
+}
+
+export interface AllergenChartSignoff {
+  id: number;
+  siteId: number | null;
+  menuId: number | null;
+  dishCount: number;
+  note?: string | null;
+  checkedByName: string;
+  createdAt: string;
+}
+
+export interface AllergenChartSignoffInput {
+  siteId: number;
+  menuId?: number | null;
+  /** Must be true; the person confirms every dish was checked against current recipes and labels */
+  confirmed: boolean;
+  /** @maxLength 1000 */
+  note?: string | null;
+}
+
 export type TodayByDepartmentRowKind = typeof TodayByDepartmentRowKind[keyof typeof TodayByDepartmentRowKind];
 
 
@@ -881,6 +1039,24 @@ export interface ContractorVisitsResponse {
   visits: ContractorVisit[];
 }
 
+export interface CertificateOutstanding {
+  itemId: number;
+  title: string;
+  siteId: number | null;
+  siteName: string | null;
+  visitDate: string;
+  daysSinceVisit: number;
+  contractorName: string;
+  /** False once the contractor is no longer reminded (chaseStopsAfterDays after the visit) */
+  chasing: boolean;
+}
+
+export interface CertificatesOutstandingResponse {
+  followUpAfterDays: number;
+  chaseStopsAfterDays: number;
+  certificates: CertificateOutstanding[];
+}
+
 export interface SetContractorVisitRequest {
   visitKey: string;
   siteId: number;
@@ -1051,6 +1227,7 @@ export type ComplianceItemNeedsActionReason = typeof ComplianceItemNeedsActionRe
 export const ComplianceItemNeedsActionReason = {
   unsatisfactory: 'unsatisfactory',
   open_defects: 'open_defects',
+  certificate_outstanding: 'certificate_outstanding',
 } as const;
 
 export interface ComplianceItem {
@@ -1081,7 +1258,7 @@ export interface ComplianceItem {
   notificationSentAt?: string | null;
   completedAt?: string | null;
   notes?: string | null;
-  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date. */
+  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
   needsAction?: boolean;
   needsActionReason?: ComplianceItemNeedsActionReason;
   /** Open C1/C2/FI/ID/AR defects on the newest certificate. */
@@ -1751,6 +1928,73 @@ export interface PrivacyIntakeReceipt {
   receivedAt: string;
 }
 
+export interface TrackSummaryPreviewPerson {
+  /** @nullable */
+  userId: number | null;
+  /** @nullable */
+  name: string | null;
+  email: string;
+  /** @nullable */
+  departmentName: string | null;
+}
+
+export type TrackSummaryPreviewRecipientViaItem = typeof TrackSummaryPreviewRecipientViaItem[keyof typeof TrackSummaryPreviewRecipientViaItem];
+
+
+export const TrackSummaryPreviewRecipientViaItem = {
+  senior: 'senior',
+  named: 'named',
+  department: 'department',
+} as const;
+
+export type TrackSummaryPreviewRecipient = TrackSummaryPreviewPerson & {
+  via: TrackSummaryPreviewRecipientViaItem[];
+};
+
+export type TrackSummaryPreviewTrackMode = typeof TrackSummaryPreviewTrackMode[keyof typeof TrackSummaryPreviewTrackMode];
+
+
+export const TrackSummaryPreviewTrackMode = {
+  automatic: 'automatic',
+  custom: 'custom',
+} as const;
+
+export type TrackSummaryPreviewTrackDepartmentsItem = {
+  id: number;
+  name: string;
+  managers: TrackSummaryPreviewPerson[];
+};
+
+export interface TrackSummaryPreviewTrack {
+  module: string;
+  label: string;
+  enabled: boolean;
+  mode: TrackSummaryPreviewTrackMode;
+  departments: TrackSummaryPreviewTrackDepartmentsItem[];
+  namedManagers: TrackSummaryPreviewPerson[];
+  unavailableNamedCount: number;
+  seniorOnly: boolean;
+  recipients: TrackSummaryPreviewRecipient[];
+}
+
+export type TrackSummaryPreviewSeniorSource = typeof TrackSummaryPreviewSeniorSource[keyof typeof TrackSummaryPreviewSeniorSource];
+
+
+export const TrackSummaryPreviewSeniorSource = {
+  notification_email: 'notification_email',
+  users: 'users',
+} as const;
+
+export type TrackSummaryPreviewSenior = {
+  source: TrackSummaryPreviewSeniorSource;
+  recipients: TrackSummaryPreviewPerson[];
+};
+
+export interface TrackSummaryPreview {
+  senior: TrackSummaryPreviewSenior;
+  tracks: TrackSummaryPreviewTrack[];
+}
+
 /**
  * "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.
  */
@@ -1974,6 +2218,17 @@ export const FireSafetyCheckNightStaff = {
   no_night_staff: 'no_night_staff',
 } as const;
 
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type FireSafetyCheckSoundLevelMethod = typeof FireSafetyCheckSoundLevelMethod[keyof typeof FireSafetyCheckSoundLevelMethod] | null;
+
+
+export const FireSafetyCheckSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface FireSafetyCheck {
   id: number;
   clientId: number;
@@ -1990,6 +2245,12 @@ export interface FireSafetyCheck {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: FireSafetyCheckNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: FireSafetyCheckSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -2014,6 +2275,17 @@ export const CreateFireSafetyCheckRequestNightStaff = {
   no_night_staff: 'no_night_staff',
 } as const;
 
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type CreateFireSafetyCheckRequestSoundLevelMethod = typeof CreateFireSafetyCheckRequestSoundLevelMethod[keyof typeof CreateFireSafetyCheckRequestSoundLevelMethod] | null;
+
+
+export const CreateFireSafetyCheckRequestSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface CreateFireSafetyCheckRequest {
   checkType: FireCheckType;
   checkDate: string;
@@ -2028,6 +2300,12 @@ export interface CreateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: CreateFireSafetyCheckRequestNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: CreateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
 }
 
 export type UpdateFireSafetyCheckRequestResult = typeof UpdateFireSafetyCheckRequestResult[keyof typeof UpdateFireSafetyCheckRequestResult];
@@ -2050,6 +2328,17 @@ export const UpdateFireSafetyCheckRequestNightStaff = {
   no_night_staff: 'no_night_staff',
 } as const;
 
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type UpdateFireSafetyCheckRequestSoundLevelMethod = typeof UpdateFireSafetyCheckRequestSoundLevelMethod[keyof typeof UpdateFireSafetyCheckRequestSoundLevelMethod] | null;
+
+
+export const UpdateFireSafetyCheckRequestSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface UpdateFireSafetyCheckRequest {
   checkDate?: string;
   result?: UpdateFireSafetyCheckRequestResult;
@@ -2063,25 +2352,126 @@ export interface UpdateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: UpdateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
 }
 
 export interface FireCallPoint {
   id: number;
   siteId: number | null;
   name: string;
+  /** Where the call point is, e.g. "Kitchen fire exit, ground floor". */
+  location: string | null;
+  /** Place in the site's test rotation (1 = first). */
+  sortOrder: number;
+  /** Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB. */
+  sleepingArea?: boolean;
   archivedAt: string | null;
   /** Date of the latest alarm test that used this call point. */
   lastTestedDate: string | null;
+  /** The call point to test next at its site (the one after the call point tested last, in rotation order). */
+  nextInTurn: boolean;
+  /** In use but never tested, or not tested within one full round (call points in use x the alarm test frequency). */
+  notTestedThisRound: boolean;
 }
 
 export interface CreateFireCallPointRequest {
   siteId: number | null;
   name: string;
+  location?: string | null;
+  /** Near bedrooms or other sleeping areas (75 dB at the bedhead). */
+  sleepingArea?: boolean;
 }
 
 export interface UpdateFireCallPointRequest {
   name?: string;
+  location?: string | null;
+  /** Near bedrooms or other sleeping areas (75 dB at the bedhead). */
+  sleepingArea?: boolean;
   archived?: boolean;
+}
+
+export interface OrderFireCallPointsRequest {
+  siteId: number | null;
+  /** Every call point in use at the site, first to last. */
+  ids: number[];
+}
+
+export type PatRegisterReadingStatusSitesItem = {
+  id: number;
+  name: string;
+};
+
+export interface PatRegisterReadingStatus {
+  available: boolean;
+  /** Readings a business may have each month; 0 means no limit */
+  monthlyLimit: number;
+  usedThisMonth: number;
+  sites: PatRegisterReadingStatusSitesItem[];
+}
+
+export interface PatRegisterReadRequest {
+  /** @maxLength 255 */
+  fileName: string;
+  /** image/jpeg, image/png, image/webp, image/gif, application/pdf, .docx or text/plain */
+  mimeType: string;
+  /** The file as base64 (8 MB at most before encoding) */
+  data: string;
+  /** The site the list is for, if the person chose one */
+  siteId?: number | null;
+}
+
+export interface PatRegisterReadResult {
+  headers: string[];
+  rows: string[][];
+  /** Rows that were hard to read; their Notes start with "Check:" */
+  unclear: number;
+}
+
+export interface FireCallPointImportRequest {
+  headers: string[];
+  rows: string[][];
+  preview?: boolean;
+  /** The site for rows whose Site cell is blank. */
+  siteId?: number | null;
+}
+
+export type FireCallPointImportResultSummary = {
+  total: number;
+  create: number;
+  update: number;
+  skip: number;
+  error: number;
+};
+
+export type FireCallPointImportResultRowsItemAction = typeof FireCallPointImportResultRowsItemAction[keyof typeof FireCallPointImportResultRowsItemAction];
+
+
+export const FireCallPointImportResultRowsItemAction = {
+  create: 'create',
+  update: 'update',
+  skip: 'skip',
+  error: 'error',
+} as const;
+
+export type FireCallPointImportResultRowsItem = {
+  row: number;
+  action: FireCallPointImportResultRowsItemAction;
+  label: string;
+  reasons: string[];
+};
+
+export interface FireCallPointImportResult {
+  preview: boolean;
+  committed: boolean;
+  summary: FireCallPointImportResultSummary;
+  rows: FireCallPointImportResultRowsItem[];
+  ignoredHeaders: string[];
+  error?: string;
 }
 
 export type FireSafetyStatusLastResult = typeof FireSafetyStatusLastResult[keyof typeof FireSafetyStatusLastResult] | null;
@@ -2720,6 +3110,32 @@ export interface MyCoshhSignOffs {
   signed: MyCoshhSignOffsSignedItem[];
 }
 
+export interface MyDocumentSignOff {
+  id: number;
+  title: string;
+  category: string;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  file_name?: string | null;
+  /** @nullable */
+  mime_type?: string | null;
+  /** @nullable */
+  department?: string | null;
+  /** @nullable */
+  site_name?: string | null;
+  /** @nullable */
+  acknowledged_at?: string | null;
+  /** @nullable */
+  signature?: string | null;
+}
+
+export interface MyDocumentSignOffs {
+  rosterLinked: boolean;
+  pending: MyDocumentSignOff[];
+  completed: MyDocumentSignOff[];
+}
+
 export type CoshhCheckInputResult = typeof CoshhCheckInputResult[keyof typeof CoshhCheckInputResult];
 
 
@@ -3168,6 +3584,28 @@ export interface FoodSafetyRecord {
   submittedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type FoodSafetyColdReadingRequestSlot = typeof FoodSafetyColdReadingRequestSlot[keyof typeof FoodSafetyColdReadingRequestSlot];
+
+
+export const FoodSafetyColdReadingRequestSlot = {
+  am: 'am',
+  pm: 'pm',
+} as const;
+
+export interface FoodSafetyColdReadingRequest {
+  /** The diary's local calendar date (YYYY-MM-DD). */
+  recordDate: string;
+  /** The fridge or freezer's name on the kitchen's list. */
+  unit: string;
+  slot: FoodSafetyColdReadingRequestSlot;
+  temperature: number;
+  /** Required when the reading is outside the unit's limits. */
+  correctiveAction?: string;
+  recordedAt?: string;
+  /** The words heard when the reading was spoken ("Say it"), kept as evidence. */
+  spoken?: string;
 }
 
 export interface CreateFoodSafetyRecordRequest {
@@ -3876,6 +4314,14 @@ export type GetTodayByDepartmentParams = {
 siteId?: number;
 };
 
+export type GetTrackSummaryRecipientsParams = {
+clientId?: number;
+/**
+ * Track summary routing JSON, as saved in trackSummaryRouting.
+ */
+routing?: string;
+};
+
 export type GetPrivacyGovernanceParams = {
 clientId?: number;
 };
@@ -4074,6 +4520,13 @@ export type CreateFoodSafetyRecordParams = {
 siteId?: number;
 };
 
+export type RecordFoodSafetyColdReadingParams = {
+/**
+ * Scope to a site's diary. Omit for the whole-organisation diary.
+ */
+siteId?: number;
+};
+
 export type GetFoodSafetyRecordByDateParams = {
 /**
  * Scope to a site's diary. Omit for the whole-organisation diary.
@@ -4223,5 +4676,14 @@ export type ConfirmInspectionReportActions201 = {
   actions: InspectionReportAction[];
   /** Owners and Managers emailed the action plan */
   emailedTo: string[];
+};
+
+export type ListAllergenMenusParams = {
+siteId?: number;
+};
+
+export type ListAllergenChartSignoffsParams = {
+siteId: number;
+menuId?: number;
 };
 

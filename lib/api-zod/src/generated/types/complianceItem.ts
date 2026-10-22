@@ -37,7 +37,7 @@ export interface ComplianceItem {
   notificationSentAt?: Date | null;
   completedAt?: Date | null;
   notes?: string | null;
-  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date. */
+  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
   needsAction?: boolean;
   needsActionReason?: ComplianceItemNeedsActionReason;
   /** Open C1/C2/FI/ID/AR defects on the newest certificate. */

@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
 
 const STATUS_META: Record<string, { label: string; icon: any; className: string }> = {
   overdue:     { label: "Overdue",     icon: AlertTriangle,  className: "bg-rose-50 text-rose-700 border-rose-200" },
@@ -330,10 +331,12 @@ export default function SiteDetailPage() {
                         {item.priority}
                       </span>
                     )}
-                    <span className={cn("inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border", meta.className)}>
-                      <Icon className="w-3 h-3" />
-                      {meta.label}
-                    </span>
+                    <CheckStatusWithCertificate item={item}>
+                      <span className={cn("inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border", meta.className)}>
+                        <Icon className="w-3 h-3" />
+                        {meta.label}
+                      </span>
+                    </CheckStatusWithCertificate>
                     <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary" />
                   </div>
                 </Link>

@@ -298,8 +298,8 @@ function startScheduler() {
   schedule("0 8 * * *", "contractor-reminders", logged("Scheduled reminder job complete", runReminderJob), { daily: true });
   logger.info("Contractor reminder scheduler started (daily at 08:00)");
 
-  // Draft a follow-up for the contractor in Contractor Approvals when a visit
-  // has no certificate 3 days on (daily at 08:05; once per visit). The
+  // Email the contractor a follow-up (no approval step) when a visit has no
+  // certificate 2 weeks on, then every 2 weeks (daily at 08:05). The
   // person responsible hears in their 08:00 personal reminder.
   schedule("5 8 * * *", "certificate-follow-up", logged(
     "Certificate follow-up job complete", () => runCertificateFollowUpJob(),

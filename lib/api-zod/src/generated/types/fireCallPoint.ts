@@ -10,7 +10,17 @@ export interface FireCallPoint {
   id: number;
   siteId: number | null;
   name: string;
+  /** Where the call point is, e.g. "Kitchen fire exit, ground floor". */
+  location: string | null;
+  /** Place in the site's test rotation (1 = first). */
+  sortOrder: number;
+  /** Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB. */
+  sleepingArea?: boolean;
   archivedAt: Date | null;
   /** Date of the latest alarm test that used this call point. */
   lastTestedDate: string | null;
+  /** The call point to test next at its site (the one after the call point tested last, in rotation order). */
+  nextInTurn: boolean;
+  /** In use but never tested, or not tested within one full round (call points in use x the alarm test frequency). */
+  notTestedThisRound: boolean;
 }

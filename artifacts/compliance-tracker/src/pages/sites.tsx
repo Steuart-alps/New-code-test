@@ -272,7 +272,7 @@ export default function SitesPage() {
                 <span className="text-sm">
                   <span className="font-medium">Add starter compliance checks to this site</span>
                   <span className="block text-xs text-muted-foreground mt-0.5">
-                    Adds example gas, fire, electrical, lifting equipment (LOLER), legionella, asbestos, pressure system, air conditioning and insurance checks, without due dates. Starter checks your business already has that aren't assigned to a site are moved to this site instead of copied. Set each due date from your last service and remove any that don't apply.
+                    Adds example gas, fire, electrical, lifting equipment (LOLER), legionella, asbestos, pressure system, air conditioning, insurance and waste (waste transfer note, waste carrier) checks, without due dates. Starter checks your business already has that aren't assigned to a site are moved to this site instead of copied. Set each due date from your last service and remove any that don't apply.
                   </span>
                 </span>
               </label>

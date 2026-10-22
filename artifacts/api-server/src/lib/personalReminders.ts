@@ -17,9 +17,9 @@
  *     default);
  *   - expiries: the early reminder (by default 30 days for training, the
  *     contractor lead time for contractor documents) and 1 day before;
- *   - "Certificates still to come": a contractor visit with no certificate
- *     3 days on (lib/certificateFollowUp.ts), then once a week while it is
- *     still missing;
+ *   - "Certificates outstanding": a contractor visit with no certificate
+ *     two weeks on (lib/certificateFollowUp.ts), then every two weeks while
+ *     it is still missing;
  *   - documents they still have to sign (by their staff roster email), added
  *     when an email is going anyway, and on Mondays.
  * Tasks assigned to a group ("Staff" or "Managers") go on that group's bell
@@ -32,8 +32,8 @@
  * set. Managers get one covering the sites their departments can see. It
  * lists the last week's completed work by track and by person, what is
  * overdue and who has it, what is due this week, anything nobody has been
- * given, expiries in the next 60 days, certificates still to come after a
- * contractor visit, documents still to sign and contractor reminders waiting
+ * given, expiries in the next 60 days, certificates outstanding two weeks or more
+ * after a contractor visit, documents still to sign and contractor reminders waiting
  * in Contractor Approvals. On those days an
  * Owner's own due-tomorrow list is folded in, so they get one email.
  *
@@ -44,7 +44,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { addCalendarDays, getAccountTimezone, localDateIn } from "./accountClock";
-import { FOLLOW_UP_AFTER_DAYS, getVisitsAwaitingCertificate, type VisitAwaitingCertificate } from "./certificateFollowUp";
+import { LOOK_BACK_DAYS, certificateChaseOn, getVisitsAwaitingCertificate, type VisitAwaitingCertificate } from "./certificateFollowUp";
 import { getOutstandingAckSummary } from "./docAckReminders";
 import {
   DEFAULT_OVERDUE_EVERY,
@@ -307,8 +307,8 @@ function personalHtml(sections: PersonalSections, today: string): string {
   }
   if (sections.certificates.length) {
     parts.push(
-      heading("Certificates still to come"),
-      `<p style="margin:0 0 8px;color:#64748b;">The contractor has been and no certificate has been uploaded. A follow-up to the contractor is waiting in ${link("/contractor-approvals", "Contractor Approvals")}; when the certificate arrives, upload it on the check.</p>`,
+      heading("Certificates outstanding"),
+      `<p style="margin:0 0 8px;color:#64748b;">The contractor has been and no certificate has been uploaded. Certificates are often held until the invoice is paid. The contractor is emailed today asking for it, with you copied in. When the certificate arrives, upload it on the check.</p>`,
       list(sections.certificates.map(certificateRow)),
     );
   }
@@ -367,7 +367,11 @@ function ownerUpdateHtml(update: OwnerUpdate, today: string): string {
         : ` · ${escapeHtml(formatDay(item.dueDate))}`))));
   }
   if (update.certificates.length) {
-    parts.push(heading("Certificates still to come"), list(update.certificates.map(certificateRow)));
+    // Past the chase window the contractor is no longer reminded: say so.
+    parts.push(heading("Certificates outstanding"), list(update.certificates.map((visit) => certificateRow(visit)
+      + (daysBetween(visit.visitDay, today) >= LOOK_BACK_DAYS
+        ? ` <strong style="color:#b91c1c;">· reminders to the contractor have stopped after ${LOOK_BACK_DAYS} days; please chase them directly</strong>`
+        : ""))));
   }
   if (update.unsigned.length) {
     parts.push(heading("Documents still to be signed"), list(update.unsigned.map((doc) =>
@@ -398,11 +402,16 @@ async function docTrackSignOffs(clientId: number): Promise<Array<{ email: string
     JOIN staff_roster staff
       ON staff.client_id = d.client_id AND staff.active = true
      AND (d.department IS NULL OR staff.department = d.department)
+     AND (d.site_id IS NULL OR staff.site_id = d.site_id)
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
       AND NULLIF(trim(staff.email), '') IS NOT NULL
+      -- Signed, and not since expired (annual documents) or removed from TrainTrack.
       AND NOT EXISTS (
         SELECT 1 FROM doc_acknowledgements ack
+        LEFT JOIN train_track_records tr ON tr.id = ack.train_track_record_id AND tr.client_id = ack.client_id
         WHERE ack.client_id = d.client_id AND ack.document_id = d.id AND ack.staff_roster_id = staff.id
+          AND (ack.train_track_record_id IS NULL OR tr.id IS NOT NULL)
+          AND (tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
       )
     ORDER BY d.title
   `));
@@ -470,8 +479,9 @@ export async function runPersonalRemindersForClient(
   const today = localDateIn(timeZone, now);
   const [{ items, urgent }, certificates, ctx, services, settingRows, clientRows] = await Promise.all([
     collectDueItems(clientId, today, now),
-    getVisitsAwaitingCertificate(clientId, { today }).catch((err) => {
-      logger.warn({ err, clientId }, "Personal reminders: could not read certificates still to come");
+    // Every one outstanding, however old: chases stop after 90 days, the updates keep listing them.
+    getVisitsAwaitingCertificate(clientId, { today, lookBackDays: null }).catch((err) => {
+      logger.warn({ err, clientId }, "Personal reminders: could not read outstanding certificates");
       return [] as VisitAwaitingCertificate[];
     }),
     loadResponsibilityContext(clientId),
@@ -527,9 +537,9 @@ export async function runPersonalRemindersForClient(
     if (!section) continue;
     for (const userId of who.userIds) userRecipient(userId)?.sections[section].push(item);
   }
-  // A missing certificate: the day the contractor's follow-up is drafted, then weekly.
+  // A missing certificate: on each chase day (two weeks after the visit, then every two weeks).
   for (const visit of certificates) {
-    if ((daysBetween(visit.visitDay, today) - FOLLOW_UP_AFTER_DAYS) % 7 !== 0) continue;
+    if (certificateChaseOn(visit.visitDay, today) == null) continue;
     for (const userId of responsibleForCertificate(ctx, visit)) userRecipient(userId)?.sections.certificates.push(visit);
   }
 
@@ -647,7 +657,7 @@ export async function runPersonalRemindersForClient(
           : recipient.sections.nextWeek.length
             ? `Due next week: ${plural(recipient.sections.nextWeek.length, "item")} at ${businessName} — ComplyTrack`
           : onlyCertificates
-            ? `${certificateCount === 1 ? "A certificate" : "Certificates"} still to come at ${businessName} — ComplyTrack`
+            ? `${certificateCount === 1 ? "A certificate" : "Certificates"} outstanding at ${businessName} — ComplyTrack`
           : `Your reminders for ${businessName} — ComplyTrack`;
       body = greeting
         + `<p style="margin:0 0 8px;">This is what needs doing at ${escapeHtml(businessName)}.</p>`

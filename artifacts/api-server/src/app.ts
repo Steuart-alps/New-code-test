@@ -124,11 +124,18 @@ if (fs.existsSync(webIndexHtml)) {
   // compliance-tracker scripts/seo-pages.mjs). Every other client route gets
   // the home page's HTML, so it is marked noindex: otherwise search engines
   // would index app, token and unknown URLs as copies of the home page.
+  // Pages can be nested one level, such as /features/fire-safety-logbook.
   const publicPageFiles = new Map<string, string>();
-  for (const entry of fs.readdirSync(webDistDir, { withFileTypes: true })) {
-    const pageFile = path.join(webDistDir, entry.name, "index.html");
-    if (entry.isDirectory() && fs.existsSync(pageFile)) publicPageFiles.set(`/${entry.name}`, pageFile);
-  }
+  const addPublicPages = (dir: string, urlPrefix: string, depth: number) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === "assets") continue;
+      const pageDir = path.join(dir, entry.name);
+      const pageFile = path.join(pageDir, "index.html");
+      if (fs.existsSync(pageFile)) publicPageFiles.set(`${urlPrefix}/${entry.name}`, pageFile);
+      if (depth > 0) addPublicPages(pageDir, `${urlPrefix}/${entry.name}`, depth - 1);
+    }
+  };
+  addPublicPages(webDistDir, "", 1);
 
   const serveWebFiles = express.static(webDistDir, {
     index: false,
@@ -166,6 +173,13 @@ if (fs.existsSync(webIndexHtml)) {
   app.use((req, res, next) => {
     if ((req.method !== "GET" && req.method !== "HEAD") || isServerPath(req.path)) return next();
     res.setHeader("Cache-Control", "no-cache");
+    // A missing script or style file (usually one from before the latest
+    // release, asked for by a tab opened earlier) is a 404, never the app's
+    // HTML: browsers cannot run HTML as a script, and the web app reloads
+    // itself when a page file fails to load.
+    if (req.path.startsWith("/assets/")) {
+      return void res.status(404).type("text/plain").send("Not found");
+    }
     const pagePath = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
     const pageFile = publicPageFiles.get(pagePath);
     if (pageFile) return void res.sendFile(pageFile);
@@ -213,7 +227,9 @@ app.post(
   }
 );
 
-// Register CSV imports send up to 1,000 rows; every other route keeps the default limit.
+// Register CSV imports send up to 1,000 rows, and a PAT register photo or PDF
+// is sent as base64 (8 MB file at most); every other route keeps the default limit.
+app.use("/api/imports/pat-appliances/read", express.json({ limit: "12mb" }));
 app.use("/api/imports", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

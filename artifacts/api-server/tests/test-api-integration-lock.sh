@@ -77,7 +77,7 @@ const directLocked = new Set([
   "test:discounts", "test:compliance-hub", "test:guidance-register",
   "test:daily-checklist-entitlements", "test:export-attachment-acl",
   "test:photo-attachments",
-  "test:fix-track-overdue-alerts", "test:track-summary-delivery",
+  "test:fix-track-overdue-alerts", "test:track-summary-delivery", "test:track-summary-job",
   "test:contractor-upload-signatures", "test:contractor-compliance-reminders",
   "test:track-controls-mobile", "test:export-module-isolation",
   "test:water-dept-isolation",
@@ -118,7 +118,7 @@ const freshSchema = new Set([
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
   "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
   "test:owner-late-edit-reason",
-  "test:kitchen-cleaning-export", "test:pat-register-access", "test:green-nsts", "test:green-hours", "test:green-spraying", "test:safe-track-induction-browser", "test:equipment-qr-browser", "test:daily-track-month-history:pushed", "test:approved-account-deletion", "test:deletion-reminder", "test:export-parts", "test:cancelled-storage-class", "test:today-by-department", "test:equipment-labels",
+  "test:kitchen-cleaning-export", "test:pat-register-access", "test:green-nsts", "test:green-hours", "test:green-spraying", "test:allergen-recipes", "test:safe-track-induction-browser", "test:equipment-qr-browser", "test:daily-track-month-history:pushed", "test:approved-account-deletion", "test:deletion-reminder", "test:export-parts", "test:cancelled-storage-class", "test:today-by-department", "test:equipment-labels",
   "test:storage-metering", "test:storage-usage-snapshot", "test:storage-capacity-reduction", "test:storage-warning-emails",
   "test:content-filter",
   "test:feedback-triage", "test:contractor-token-security",
@@ -140,6 +140,8 @@ const freshSchema = new Set([
   "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
   "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster
+  "test:track-summary-job:pushed", // real daily job scoped to its own fixtures on the private cluster
+  "test:track-summary-recipients", "test:track-summary-recipients:pushed", // in-process app + daily summary job (capturing sender) on the private cluster
   "test:fire-call-points", "test:fire-discharge-task-link", "test:track-task-links", "test:track-due-dates", "test:contractor-visits", "test:certificate-follow-up",
   "test:hot-tub-registry:pushed", "test:kitchen-cleaning-legacy", "test:contractor-portal:pushed",
   "test:public-link-access", "test:public-link-rate-limit", // two API instances on the private cluster

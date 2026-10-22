@@ -121,6 +121,9 @@ jobs:
       - name: Sidebar sections and pins test
         run: pnpm --filter @workspace/compliance-tracker run test:nav-groups
 
+      - name: Reload after a new release test
+        run: pnpm --filter @workspace/compliance-tracker run test:new-release-reload
+
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
 
@@ -230,6 +233,9 @@ jobs:
       - name: COSHHTrack tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:coshh-track
 
+      - name: Document read-and-sign tests (fresh schema)
+        run: pnpm --filter @workspace/api-server run test:doc-sign-offs
+
       # Older, populated databases (Replit-era table layouts) must keep every
       # record through the runtime migrations, readable through today's routes.
       - name: Upgrade-path fixture tests
@@ -247,11 +253,17 @@ jobs:
       - name: GreenTrack spraying book and stock (production schema base)
         run: pnpm --filter @workspace/api-server run test:green-spraying
 
+      - name: KitchenTrack allergen recipes and charts (production schema base)
+        run: pnpm --filter @workspace/api-server run test:allergen-recipes
+
       - name: Report actions from uploaded reports (production schema base)
         run: pnpm --filter @workspace/api-server run test:inspection-reports
 
       - name: Reading reports with Claude (stand-in API, no key)
         run: pnpm --filter @workspace/api-server run test:report-reading
+
+      - name: Reading PAT register lists with Claude (stand-in API, no key)
+        run: pnpm --filter @workspace/api-server run test:register-reading
 
       - name: Checklist results and FixTrack job tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:checklist-results-fixtrack
@@ -267,6 +279,12 @@ jobs:
 
       - name: Hot tub registry search tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:hot-tub-registry:pushed
+
+      - name: Track summary recipient preview tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:track-summary-recipients:pushed
+
+      - name: Daily track summary job tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:track-summary-job:pushed
 
       - name: Account-level cleaning records test (production schema base)
         env:
@@ -344,10 +362,11 @@ jobs:
       # KitchenTrack numeric controls: the shared rule model and country
       # presets, then hold-time boundaries, retries and the corrective-action
       # follow-up, each on its own fresh database.
-      - name: KitchenTrack hold-time and temperature-action tests
+      - name: KitchenTrack hold-time, temperature-action and "Say it" tests
         run: |
           pnpm --filter @workspace/api-zod run test:kitchen-temperature
           pnpm --filter @workspace/api-zod run test:kitchen-temperature-guidance
           pnpm --filter @workspace/api-server run test:kitchen-hold-controls
           pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
           pnpm --filter @workspace/api-server run test:kitchen-mobile-replay
+          pnpm --filter @workspace/api-server run test:voice-log

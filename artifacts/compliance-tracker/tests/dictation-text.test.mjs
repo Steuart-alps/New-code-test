@@ -16,7 +16,7 @@ try {
     entryPoints: [path.join(root, "src/lib/dictation.ts")],
     bundle: true, platform: "node", format: "esm", outfile: bundle, logLevel: "silent",
   });
-  const { applySpokenPunctuation, insertDictatedText, splitSpokenList, dictationErrorMessage } =
+  const { applySpokenPunctuation, insertDictatedText, splitSpokenList, dictationErrorMessage, normaliseSpokenName, matchSpokenName } =
     await import(pathToFileURL(bundle).href);
 
   // Spoken punctuation.
@@ -57,6 +57,32 @@ try {
     ["Degreaser", "Glass cleaner", "Descaler", "Chlorine tablets"]);
   assert.deepEqual(splitSpokenList("erm WD-40; Diesel 2.5 litres."), ["WD-40", "Diesel 2.5 litres"]);
   assert.deepEqual(splitSpokenList("  ,, and  "), []);
+
+  // Saying a name from a list (a GreenTrack machine, a call point).
+  assert.equal(normaliseSpokenName("Fairway Mower one"), "fairway mower 1");
+  assert.equal(normaliseSpokenName("the number twenty one greens mower please"), "21 greens mower");
+  assert.equal(normaliseSpokenName("Pre-start check for mower1, 2nd"), "mower 1 2");
+  assert.equal(normaliseSpokenName("first floor"), "1 floor");
+  const machines = ["Fairway Mower 1", "Fairway Mower 2", "Greens Mower 1", "Greens Mower 2", "Tees Mower", "Utility Vehicle", "Toro Workman 3"]
+    .map((name, id) => ({ id, name }));
+  const picked = (spoken) => matchSpokenName(spoken, machines).match?.name ?? null;
+  const offered = (spoken) => matchSpokenName(spoken, machines).choices.map((m) => m.name);
+  assert.equal(picked("fairway mower one"), "Fairway Mower 1");
+  assert.equal(picked("Fairway mower 1."), "Fairway Mower 1");
+  assert.equal(picked("pre-start check for fairway mower number one"), "Fairway Mower 1");
+  assert.equal(picked("fairway mowers one"), "Fairway Mower 1", "plurals still match");
+  assert.equal(picked("the number two greens mower please"), "Greens Mower 2", "word order and filler don't matter");
+  assert.equal(picked("workman three"), "Toro Workman 3", "part of the name is enough when only one fits");
+  assert.equal(picked("utilty vehicle"), "Utility Vehicle", "a one-letter slip in a long word still matches");
+  assert.equal(picked("fairway mower"), null, "two fairway mowers: nothing picked");
+  assert.deepEqual(offered("fairway mower").slice(0, 2), ["Fairway Mower 1", "Fairway Mower 2"], "both offered to tap");
+  assert.equal(picked("greens mower 3"), null, "a number not in the name rules it out");
+  assert.deepEqual(offered("greens mower 3"), []);
+  assert.deepEqual(offered("nothing like it"), []);
+  assert.equal(matchSpokenName("mower 1", [{ id: 1, name: "Mower 1" }, { id: 2, name: "mower one" }]).match, null,
+    "two items with the same name: both offered");
+  assert.equal(matchSpokenName("ab12 cde", [{ id: 1, name: "Big tractor", aliases: ["AB12 CDE", null] }]).match?.id, 1,
+    "an alias such as a registration matches");
 
   assert.match(dictationErrorMessage("not-allowed"), /Allow the microphone/);
   assert.equal(dictationErrorMessage("no-speech"), null);

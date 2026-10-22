@@ -299,6 +299,91 @@ export const SignMyCoshhAssessmentResponse = zod.object({
 
 
 /**
+ * @summary DocTrack documents the signed-in Viewer must read and sign, and those they have a current sign-off for
+ */
+export const ListMyDocumentSignOffsResponse = zod.object({
+  "rosterLinked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+})),
+  "completed": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary A short-lived link to open one of the Viewer's documents to read and sign
+ */
+export const GetMyDocumentDownloadUrlParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetMyDocumentDownloadUrlResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string().nullish()
+})
+
+
+/**
+ * @summary Sign that the signed-in Viewer has read a DocTrack document (writes a TrainTrack sign-off)
+ */
+export const SignMyDocumentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignMyDocumentBody = zod.object({
+  "signature": zod.string().describe('Signature image as a data URL')
+})
+
+export const SignMyDocumentResponse = zod.object({
+  "rosterLinked": zod.boolean(),
+  "pending": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+})),
+  "completed": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "category": zod.string(),
+  "description": zod.string().nullish(),
+  "file_name": zod.string().nullish(),
+  "mime_type": zod.string().nullish(),
+  "department": zod.string().nullish(),
+  "site_name": zod.string().nullish(),
+  "acknowledged_at": zod.date().nullish(),
+  "signature": zod.string().nullish()
+}))
+})
+
+
+/**
  * @summary Choose which of their departments a Manager with several is working in (kept for the session)
  */
 export const SetActiveDepartmentBody = zod.object({
@@ -616,6 +701,26 @@ export const SetContractorVisitBody = zod.object({
 
 export const SetContractorVisitResponse = zod.object({
   "ok": zod.boolean()
+})
+
+
+/**
+ * Compliance checks whose contractor visit happened at least followUpAfterDays ago with no certificate uploaded since, however old, at the sites the user can see. The contractor is chased every two weeks until chaseStopsAfterDays after the visit (chasing false after).
+ * @summary Contractor visits still waiting for their certificate
+ */
+export const ListCertificatesOutstandingResponse = zod.object({
+  "followUpAfterDays": zod.number(),
+  "chaseStopsAfterDays": zod.number(),
+  "certificates": zod.array(zod.object({
+  "itemId": zod.number(),
+  "title": zod.string(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "visitDate": zod.date(),
+  "daysSinceVisit": zod.number(),
+  "contractorName": zod.string(),
+  "chasing": zod.boolean().describe('False once the contractor is no longer reminded (chaseStopsAfterDays after the visit)')
+}))
 })
 
 
@@ -1158,8 +1263,8 @@ export const ListComplianceItemsResponseItem = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1218,8 +1323,8 @@ export const CreateComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1259,8 +1364,8 @@ export const GetComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1320,8 +1425,8 @@ export const UpdateComplianceItemResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1379,8 +1484,8 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1503,6 +1608,60 @@ export const UpdateSettingsResponse = zod.object({
   "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
   "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
   "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
+})
+
+
+/**
+ * Resolved with the same routing code the daily summary job sends with. Pass the unsaved choices as `routing` to preview them; otherwise the saved choices are used. Account admins and consultants only.
+ * @summary Preview who receives each track's daily summary
+ */
+export const GetTrackSummaryRecipientsQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional(),
+  "routing": zod.coerce.string().optional().describe('Track summary routing JSON, as saved in trackSummaryRouting.')
+})
+
+export const GetTrackSummaryRecipientsResponse = zod.object({
+  "senior": zod.object({
+  "source": zod.enum(['notification_email', 'users']),
+  "recipients": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+}))
+}),
+  "tracks": zod.array(zod.object({
+  "module": zod.string(),
+  "label": zod.string(),
+  "enabled": zod.boolean(),
+  "mode": zod.enum(['automatic', 'custom']),
+  "departments": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "managers": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+}))
+})),
+  "namedManagers": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+})),
+  "unavailableNamedCount": zod.number(),
+  "seniorOnly": zod.boolean(),
+  "recipients": zod.array(zod.object({
+  "userId": zod.number().nullable(),
+  "name": zod.string().nullable(),
+  "email": zod.string(),
+  "departmentName": zod.string().nullable()
+}).and(zod.object({
+  "via": zod.array(zod.enum(['senior', 'named', 'department']))
+})))
+}))
 })
 
 
@@ -2785,6 +2944,9 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2804,7 +2966,10 @@ export const CreateFireSafetyCheckBody = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
 
 export const CreateFireSafetyCheckResponse = zod.object({
@@ -2820,6 +2985,9 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2859,8 +3027,13 @@ export const ListFireCallPointsResponseItem = zod.object({
   "id": zod.number(),
   "siteId": zod.number().nullable(),
   "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
-  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
 })
 export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseItem)
 
@@ -2870,20 +3043,124 @@ export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseIt
  */
 export const CreateFireCallPointBody = zod.object({
   "siteId": zod.number().nullable(),
-  "name": zod.string()
+  "name": zod.string(),
+  "location": zod.string().nullish(),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas (75 dB at the bedhead).')
 })
 
 export const CreateFireCallPointResponse = zod.object({
   "id": zod.number(),
   "siteId": zod.number().nullable(),
   "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
-  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
 })
 
 
 /**
- * @summary Rename, archive or restore a call point (managers)
+ * @summary Set a site's call point rotation order (managers)
+ */
+export const OrderFireCallPointsBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "ids": zod.array(zod.number()).describe('Every call point in use at the site, first to last.')
+})
+
+export const OrderFireCallPointsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+})
+export const OrderFireCallPointsResponse = zod.array(OrderFireCallPointsResponseItem)
+
+
+/**
+ * @summary Download the CSV template for uploading a call point list (managers)
+ */
+export const GetFireCallPointImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. New call points join the end of their site's rotation in file order.
+ * @summary Preview or import a spreadsheet of call points (managers)
+ */
+export const ImportFireCallPointsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportFireCallPointsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
+ */
+export const GetPatRegisterReadingResponse = zod.object({
+  "available": zod.boolean(),
+  "monthlyLimit": zod.number().describe('Readings a business may have each month; 0 means no limit'),
+  "usedThisMonth": zod.number(),
+  "sites": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * Claude reads the file and returns rows in the PAT appliance import's columns. Nothing is saved: the browser sends the rows to POST /imports/pat-appliances for the usual preview and import. The file is not stored. Off until the server has an Anthropic API key; each business has a monthly number of readings.
+ * @summary Read a photo, scan, PDF or Word list of appliances into register rows (managers)
+ */
+export const readPatRegisterListBodyFileNameMax = 255;
+
+
+
+export const ReadPatRegisterListBody = zod.object({
+  "fileName": zod.string().max(readPatRegisterListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const ReadPatRegisterListResponse = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "unclear": zod.number().describe('Rows that were hard to read; their Notes start with \"Check:\"')
+})
+
+
+/**
+ * @summary Rename, move, archive or restore a call point (managers)
  */
 export const UpdateFireCallPointParams = zod.object({
   "id": zod.coerce.number()
@@ -2891,6 +3168,8 @@ export const UpdateFireCallPointParams = zod.object({
 
 export const UpdateFireCallPointBody = zod.object({
   "name": zod.string().optional(),
+  "location": zod.string().nullish(),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas (75 dB at the bedhead).'),
   "archived": zod.boolean().optional()
 })
 
@@ -2898,8 +3177,13 @@ export const UpdateFireCallPointResponse = zod.object({
   "id": zod.number(),
   "siteId": zod.number().nullable(),
   "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
-  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
 })
 
 
@@ -2919,7 +3203,10 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
 
 export const UpdateFireSafetyCheckResponse = zod.object({
@@ -2935,6 +3222,9 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -4722,6 +5012,45 @@ export const CreateFoodSafetyRecordResponse = zod.object({
 
 
 /**
+ * Fills one unit's AM or PM reading in the day's diary, creating the diary (with every fridge and freezer on the list) when needed. Used by "Say it" voice logging. A reading already recorded is never overwritten (409 READING_ALREADY_RECORDED), a submitted diary is not changed (409 DIARY_SUBMITTED), and a reading outside the limits needs the corrective action taken (400 KITCHEN_CORRECTIVE_ACTION_REQUIRED).
+ * @summary Record one fridge or freezer reading in the day's diary
+ */
+export const RecordFoodSafetyColdReadingQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const RecordFoodSafetyColdReadingBody = zod.object({
+  "recordDate": zod.string().describe('The diary\'s local calendar date (YYYY-MM-DD).'),
+  "unit": zod.string().describe('The fridge or freezer\'s name on the kitchen\'s list.'),
+  "slot": zod.enum(['am', 'pm']),
+  "temperature": zod.number(),
+  "correctiveAction": zod.string().optional().describe('Required when the reading is outside the unit\'s limits.'),
+  "recordedAt": zod.date().optional(),
+  "spoken": zod.string().optional().describe('The words heard when the reading was spoken (\"Say it\"), kept as evidence.')
+})
+
+export const RecordFoodSafetyColdReadingResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "recordDate": zod.string(),
+  "deliveries": zod.array(zod.unknown()).optional(),
+  "coldFood": zod.array(zod.unknown()).optional(),
+  "hotTemperature": zod.array(zod.unknown()).optional(),
+  "hotHolding": zod.array(zod.unknown()).optional(),
+  "cookingLimit": zod.string().optional(),
+  "coolingLimit": zod.string().optional(),
+  "reheatingLimit": zod.string().optional(),
+  "hotHoldingLimit": zod.string().optional(),
+  "correctives": zod.string().nullish(),
+  "managerSignature": zod.string().nullish(),
+  "submittedAt": zod.date().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
  * @summary Get the food safety record for a specific date
  */
 export const GetFoodSafetyRecordByDateParams = zod.object({
@@ -6211,5 +6540,320 @@ export const DownloadInspectionReportParams = zod.object({
 })
 
 export const DownloadInspectionReportResponse = zod.unknown()
+
+
+/**
+ * @summary List KitchenTrack ingredients with their allergens and the dishes that use them
+ */
+export const ListAllergenIngredientsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable().describe('null when every site can use it'),
+  "name": zod.string(),
+  "supplier": zod.string().nullish(),
+  "productCode": zod.string().nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "notes": zod.string().nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().nullish(),
+  "usedIn": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable()
+})).describe('Dishes using it, at sites the caller can see'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListAllergenIngredientsResponse = zod.array(ListAllergenIngredientsResponseItem)
+
+
+/**
+ * @summary Add an ingredient (for every site, or one site)
+ */
+export const createAllergenIngredientBodyNameMax = 200;
+
+export const createAllergenIngredientBodySupplierMax = 200;
+
+export const createAllergenIngredientBodyProductCodeMax = 100;
+
+export const createAllergenIngredientBodyContainsMax = 14;
+
+export const createAllergenIngredientBodyMayContainMax = 14;
+
+export const createAllergenIngredientBodyNotesMax = 2000;
+
+export const createAllergenIngredientBodyCheckedByMax = 200;
+
+export const createAllergenIngredientBodyChangeReasonMax = 1000;
+
+
+
+export const CreateAllergenIngredientBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "name": zod.string().max(createAllergenIngredientBodyNameMax),
+  "supplier": zod.string().max(createAllergenIngredientBodySupplierMax).nullish(),
+  "productCode": zod.string().max(createAllergenIngredientBodyProductCodeMax).nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(createAllergenIngredientBodyContainsMax),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(createAllergenIngredientBodyMayContainMax).optional(),
+  "notes": zod.string().max(createAllergenIngredientBodyNotesMax).nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().max(createAllergenIngredientBodyCheckedByMax).nullish(),
+  "changeReason": zod.string().max(createAllergenIngredientBodyChangeReasonMax).nullish().describe('Required when contains or may contain changes on an edit')
+})
+
+export const CreateAllergenIngredientResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable().describe('null when every site can use it'),
+  "name": zod.string(),
+  "supplier": zod.string().nullish(),
+  "productCode": zod.string().nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "notes": zod.string().nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().nullish(),
+  "usedIn": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable()
+})).describe('Dishes using it, at sites the caller can see'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Update an ingredient; changed allergens need a reason and update every dish that uses it
+ */
+export const UpdateAllergenIngredientParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateAllergenIngredientBodyNameMax = 200;
+
+export const updateAllergenIngredientBodySupplierMax = 200;
+
+export const updateAllergenIngredientBodyProductCodeMax = 100;
+
+export const updateAllergenIngredientBodyContainsMax = 14;
+
+export const updateAllergenIngredientBodyMayContainMax = 14;
+
+export const updateAllergenIngredientBodyNotesMax = 2000;
+
+export const updateAllergenIngredientBodyCheckedByMax = 200;
+
+export const updateAllergenIngredientBodyChangeReasonMax = 1000;
+
+
+
+export const UpdateAllergenIngredientBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "name": zod.string().max(updateAllergenIngredientBodyNameMax),
+  "supplier": zod.string().max(updateAllergenIngredientBodySupplierMax).nullish(),
+  "productCode": zod.string().max(updateAllergenIngredientBodyProductCodeMax).nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(updateAllergenIngredientBodyContainsMax),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).max(updateAllergenIngredientBodyMayContainMax).optional(),
+  "notes": zod.string().max(updateAllergenIngredientBodyNotesMax).nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().max(updateAllergenIngredientBodyCheckedByMax).nullish(),
+  "changeReason": zod.string().max(updateAllergenIngredientBodyChangeReasonMax).nullish().describe('Required when contains or may contain changes on an edit')
+})
+
+export const UpdateAllergenIngredientResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable().describe('null when every site can use it'),
+  "name": zod.string(),
+  "supplier": zod.string().nullish(),
+  "productCode": zod.string().nullish(),
+  "contains": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "mayContain": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')),
+  "notes": zod.string().nullish(),
+  "lastCheckedAt": zod.date().nullish(),
+  "checkedBy": zod.string().nullish(),
+  "usedIn": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable()
+})).describe('Dishes using it, at sites the caller can see'),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}).and(zod.object({
+  "dishesUpdated": zod.number().describe('Dishes whose allergens changed because of this edit')
+}))
+
+
+/**
+ * @summary Remove an ingredient no dish uses (kept for the record)
+ */
+export const DeleteAllergenIngredientParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteAllergenIngredientResponse = zod.void()
+
+
+/**
+ * @summary An ingredient's allergen change log, newest first
+ */
+export const ListAllergenIngredientChangesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListAllergenIngredientChangesResponseItem = zod.object({
+  "id": zod.number(),
+  "ingredientId": zod.number(),
+  "changeType": zod.enum(['created', 'allergens_changed', 'removed']),
+  "containsBefore": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "containsAfter": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "mayContainBefore": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "mayContainAfter": zod.array(zod.enum(['celery', 'gluten', 'crustaceans', 'eggs', 'fish', 'lupin', 'milk', 'molluscs', 'mustard', 'tree_nuts', 'peanuts', 'sesame', 'soya', 'sulphites']).describe('One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014')).nullish(),
+  "reason": zod.string().nullish(),
+  "dishesUpdated": zod.number(),
+  "changedByName": zod.string().nullish(),
+  "createdAt": zod.date()
+})
+export const ListAllergenIngredientChangesResponse = zod.array(ListAllergenIngredientChangesResponseItem)
+
+
+/**
+ * @summary List menus at the sites the caller can see
+ */
+export const ListAllergenMenusQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListAllergenMenusResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "contentsChangedAt": zod.date(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListAllergenMenusResponse = zod.array(ListAllergenMenusResponseItem)
+
+
+/**
+ * @summary Add a menu at a site
+ */
+export const createAllergenMenuBodyNameMax = 100;
+
+
+
+export const CreateAllergenMenuBody = zod.object({
+  "siteId": zod.number(),
+  "name": zod.string().max(createAllergenMenuBodyNameMax)
+})
+
+export const CreateAllergenMenuResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "contentsChangedAt": zod.date(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Rename a menu (it stays at its site)
+ */
+export const RenameAllergenMenuParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const renameAllergenMenuBodyNameMax = 100;
+
+
+
+export const RenameAllergenMenuBody = zod.object({
+  "name": zod.string().max(renameAllergenMenuBodyNameMax)
+})
+
+export const RenameAllergenMenuResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "contentsChangedAt": zod.date(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Remove a menu (its dishes stay; kept for the record)
+ */
+export const DeleteAllergenMenuParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteAllergenMenuResponse = zod.void()
+
+
+/**
+ * @summary Allergen charts (one per site and one per menu) with their latest sign-off
+ */
+export const ListAllergenChartsResponseItem = zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "menuId": zod.number().nullable().describe('null for the whole-site chart'),
+  "menuName": zod.string().nullable(),
+  "dishCount": zod.number(),
+  "lastSignoff": zod.union([zod.object({
+  "id": zod.number(),
+  "checkedByName": zod.string(),
+  "createdAt": zod.date(),
+  "note": zod.string().nullish(),
+  "dishCount": zod.number()
+}),zod.null()]),
+  "changedSinceCheck": zod.boolean().describe('A dish on the chart changed after the latest sign-off')
+})
+export const ListAllergenChartsResponse = zod.array(ListAllergenChartsResponseItem)
+
+
+/**
+ * @summary Sign-off history for a site's chart, or one menu's chart, newest first
+ */
+export const ListAllergenChartSignoffsQueryParams = zod.object({
+  "siteId": zod.coerce.number(),
+  "menuId": zod.coerce.number().optional()
+})
+
+export const ListAllergenChartSignoffsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "menuId": zod.number().nullable(),
+  "dishCount": zod.number(),
+  "note": zod.string().nullish(),
+  "checkedByName": zod.string(),
+  "createdAt": zod.date()
+})
+export const ListAllergenChartSignoffsResponse = zod.array(ListAllergenChartSignoffsResponseItem)
+
+
+/**
+ * @summary Sign off a chart as checked against current recipes and labels (signed-in person's name)
+ */
+export const signOffAllergenChartBodyNoteMax = 1000;
+
+
+
+export const SignOffAllergenChartBody = zod.object({
+  "siteId": zod.number(),
+  "menuId": zod.number().nullish(),
+  "confirmed": zod.boolean().describe('Must be true; the person confirms every dish was checked against current recipes and labels'),
+  "note": zod.string().max(signOffAllergenChartBodyNoteMax).nullish()
+})
+
+export const SignOffAllergenChartResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "menuId": zod.number().nullable(),
+  "dishCount": zod.number(),
+  "note": zod.string().nullish(),
+  "checkedByName": zod.string(),
+  "createdAt": zod.date()
+})
 
 

@@ -1992,6 +1992,103 @@ async function runRuntimeMigrationsOnce() {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_item_changes_item_idx" ON "allergen_item_changes" ("client_id", "item_id")`);
+    // KitchenTrack ingredients, recipes, menus and chart sign-offs (Oct 2026).
+    // A dish with recipe lines takes its allergens from its ingredients
+    // (lib/allergenRecipes.ts); chart_changed_at against the latest sign-off
+    // shows a chart as "changed since last checked".
+    await db.execute(sql`ALTER TABLE "allergen_items" ADD COLUMN IF NOT EXISTS "may_contain" jsonb NOT NULL DEFAULT '[]'::jsonb`);
+    await db.execute(sql`ALTER TABLE "allergen_items" ADD COLUMN IF NOT EXISTS "chart_changed_at" timestamp NOT NULL DEFAULT now()`);
+    await db.execute(sql`ALTER TABLE "allergen_item_changes" ADD COLUMN IF NOT EXISTS "may_contain_before" jsonb`);
+    await db.execute(sql`ALTER TABLE "allergen_item_changes" ADD COLUMN IF NOT EXISTS "may_contain_after" jsonb`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_ingredients" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "name" text NOT NULL,
+        "supplier" text,
+        "product_code" text,
+        "contains" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "may_contain" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "notes" text,
+        "last_checked_at" date,
+        "checked_by" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_ingredients_client_site_idx" ON "allergen_ingredients" ("client_id", "site_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_ingredient_changes" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "ingredient_id" integer NOT NULL REFERENCES "allergen_ingredients"("id") ON DELETE CASCADE,
+        "change_type" text NOT NULL,
+        "contains_before" jsonb,
+        "contains_after" jsonb,
+        "may_contain_before" jsonb,
+        "may_contain_after" jsonb,
+        "reason" text,
+        "dishes_updated" integer NOT NULL DEFAULT 0,
+        "changed_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "changed_by_name" text,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_ingredient_changes_ingredient_idx" ON "allergen_ingredient_changes" ("client_id", "ingredient_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_item_ingredients" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "item_id" integer NOT NULL REFERENCES "allergen_items"("id") ON DELETE CASCADE,
+        "ingredient_id" integer NOT NULL REFERENCES "allergen_ingredients"("id") ON DELETE CASCADE,
+        "quantity" numeric(12, 3),
+        "unit" text,
+        "position" integer NOT NULL DEFAULT 0
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "allergen_item_ingredients_item_ingredient_idx" ON "allergen_item_ingredients" ("item_id", "ingredient_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_item_ingredients_ingredient_idx" ON "allergen_item_ingredients" ("client_id", "ingredient_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_menus" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "name" text NOT NULL,
+        "contents_changed_at" timestamp NOT NULL DEFAULT now(),
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_menus_client_site_idx" ON "allergen_menus" ("client_id", "site_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_menu_items" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "menu_id" integer NOT NULL REFERENCES "allergen_menus"("id") ON DELETE CASCADE,
+        "item_id" integer NOT NULL REFERENCES "allergen_items"("id") ON DELETE CASCADE
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "allergen_menu_items_menu_item_idx" ON "allergen_menu_items" ("menu_id", "item_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_menu_items_item_idx" ON "allergen_menu_items" ("client_id", "item_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_chart_signoffs" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "menu_id" integer REFERENCES "allergen_menus"("id") ON DELETE SET NULL,
+        "dish_count" integer NOT NULL DEFAULT 0,
+        "note" text,
+        "checked_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "checked_by_name" text NOT NULL,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_chart_signoffs_chart_idx" ON "allergen_chart_signoffs" ("client_id", "site_id", "menu_id", "created_at")`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "coshh_substances" (
         "id" serial PRIMARY KEY,
@@ -6108,6 +6205,26 @@ async function migrateFireCallPoints() {
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point_id" integer REFERENCES "fire_call_points"("id") ON DELETE SET NULL`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point" text`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "night_staff" text`);
+  // Oct 2026: each call point's location and its place in the site's test
+  // rotation. Sites whose call points have no order yet are numbered
+  // alphabetically, the order the list showed before.
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "location" text`);
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "sort_order" integer NOT NULL DEFAULT 0`);
+  await db.execute(sql`
+    UPDATE "fire_call_points" p SET "sort_order" = n.position
+    FROM (
+      SELECT id, row_number() OVER (PARTITION BY client_id, site_id ORDER BY name, id) AS position,
+             max(sort_order) OVER (PARTITION BY client_id, site_id) AS highest
+      FROM "fire_call_points"
+    ) n
+    WHERE n.id = p.id AND n.highest = 0
+  `);
+  // Oct 2026: the sound level heard on a weekly alarm test, and call points
+  // near sleeping areas (75 dB at the bedhead). Existing rows stay blank.
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "sleeping_area" boolean NOT NULL DEFAULT false`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_db" real`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_method" text`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_bedhead" boolean`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks

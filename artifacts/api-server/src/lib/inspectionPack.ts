@@ -6,6 +6,7 @@ import { approvedFrequencies } from "./waterMonitoringPlan";
 import { riddorDeadline, ukToday, type RiddorDeadlineState } from "./riddor";
 import { addCalendarDays, addCalendarMonths, siteScopeSql, type SiteAccessScope } from "./siteAccessScope";
 import { actionStateLabel, itemActionStates } from "./certificateOutcomes";
+import { SOUND_LEVEL_MIN_DB, soundLevelLowText } from "./fireSoundLevel";
 
 /**
  * Data for the one-click inspection pack (GET /reports/inspection-pack): a
@@ -293,11 +294,14 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
       GROUP BY check_type
     `),
     rowsOf(sql`
-      SELECT f.check_date::text AS check_date, f.check_type, f.location, f.call_point, f.notes, s.name AS site_name
+      SELECT f.check_date::text AS check_date, f.check_type, f.location, f.call_point, f.notes, s.name AS site_name,
+             f.sound_level_db, f.sound_level_method, f.sound_level_bedhead
       FROM fire_safety_checks f
       LEFT JOIN sites s ON s.id = f.site_id AND s.client_id = f.client_id
       WHERE f.client_id = ${scope.clientId} AND f.check_date BETWEEN ${from} AND ${to}
-        AND f.result = 'fail' AND ${siteScope}
+        AND (f.result = 'fail' OR f.sound_level_db < CASE WHEN f.sound_level_bedhead
+          THEN ${SOUND_LEVEL_MIN_DB.bedhead}::real ELSE ${SOUND_LEVEL_MIN_DB.general}::real END)
+        AND ${siteScope}
       ORDER BY f.check_date, f.id
     `),
     rowsOf(sql`
@@ -326,7 +330,12 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
   const exceptions = failures.map(row => ({
     date: row.check_date, siteName: text(row.site_name),
     check: FIRE_TYPES[row.check_type]?.label ?? row.check_type,
-    reading: null, location: text(row.call_point) ? `Call point: ${row.call_point}` : text(row.location), notes: text(row.notes),
+    reading: soundLevelLowText({
+      soundLevelDb: row.sound_level_db == null ? null : Number(row.sound_level_db),
+      soundLevelBedhead: row.sound_level_bedhead == null ? null : Boolean(row.sound_level_bedhead),
+      soundLevelMethod: text(row.sound_level_method),
+    }),
+    location: text(row.call_point) ? `Call point: ${row.call_point}` : text(row.location), notes: text(row.notes),
   }));
   return {
     section: { types: result.types, exceptions: capped(exceptions) },

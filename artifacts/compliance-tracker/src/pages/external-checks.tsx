@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAppMutations } from "@/hooks/use-app-data";
 import { toast } from "sonner";
 import { StatusBadge, PriorityBadge, NeedsActionBadge } from "@/components/badges";
+import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
 import { CompleteCheckDialog } from "@/components/complete-check-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { format } from "date-fns";
@@ -66,7 +67,7 @@ export default function ExternalChecksPage() {
   const canEdit = useCanEdit();
 
   const loadStarterPack = async () => {
-    if (!confirm("Load the starter pack? This adds the standard H&S categories and around 27 example compliance checks (Gas, Fire, Electrical, LOLER, Legionella, Pressure Systems, HVAC). Everything is fully editable.")) return;
+    if (!confirm("Load the starter pack? This adds the standard H&S categories and example compliance checks (Gas, Fire, Electrical, LOLER, Legionella, Pressure Systems, HVAC, Insurance, Waste). Everything is fully editable.")) return;
     setLoadingStarter(true);
     try {
       const res = await apiFetch("/starter-pack/load", { method: "POST" });
@@ -269,7 +270,9 @@ export default function ExternalChecksPage() {
             </td>
             <td className="px-6 py-4">
               <div className="flex flex-col gap-1.5 items-start">
-                <StatusBadge status={item.status} />
+                <CheckStatusWithCertificate item={item}>
+                  <StatusBadge status={item.status} />
+                </CheckStatusWithCertificate>
                 <NeedsActionBadge item={item} />
                 <PriorityBadge priority={item.priority} />
               </div>

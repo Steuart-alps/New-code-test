@@ -224,12 +224,13 @@ export function writeInspectionPackPdf(pack: InspectionPackData, output: Writabl
     ]));
     if (pack.fire.exceptions.total === 0) note(doc, "No failed fire safety checks in this period.");
     else {
-      note(doc, `Failed checks (${pack.fire.exceptions.total}):`, INK);
+      note(doc, `Failed checks and alarms too quiet (${pack.fire.exceptions.total}):`, INK);
       table(doc, [
-        { header: "Date", width: 70 }, { header: "Site", width: 110 }, { header: "Check", width: 190 },
-        { header: "Location", width: 120 }, { header: "Notes", width: 250 },
+        { header: "Date", width: 70 }, { header: "Site", width: 100 }, { header: "Check", width: 160 },
+        { header: "Sound level", width: 110 }, { header: "Location", width: 110 }, { header: "Notes", width: 190 },
       ], pack.fire.exceptions.rows.map(row => [
-        ukDate(row.date), row.siteName ?? "No site", row.check, row.location ?? "—", row.notes ?? "—",
+        ukDate(row.date), row.siteName ?? "No site", row.check,
+        row.reading ? { text: row.reading, alert: true } : "—", row.location ?? "—", row.notes ?? "—",
       ]));
       moreNote(doc, pack.fire.exceptions);
     }

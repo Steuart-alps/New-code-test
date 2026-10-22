@@ -53,6 +53,8 @@ tags:
     description: PremisesTrack premises safety inspection operations
   - name: privacy-governance
     description: Customer privacy-governance records and rights workflows
+  - name: kitchen-allergens
+    description: KitchenTrack ingredients, menus and allergen chart sign-offs
 paths:
   /feedback:
     get:
@@ -233,6 +235,70 @@ paths:
           description: Not an assessment this Viewer must sign
         "409":
           description: Already signed this revision
+  /train-track/my-documents:
+    get:
+      operationId: listMyDocumentSignOffs
+      tags: [train-track]
+      summary: DocTrack documents the signed-in Viewer must read and sign, and those they have a current sign-off for
+      responses:
+        "200":
+          description: Documents for the Viewer's department and site that staff must read and sign
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyDocumentSignOffs" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-documents/{id}/download-url:
+    get:
+      operationId: getMyDocumentDownloadUrl
+      tags: [train-track]
+      summary: A short-lived link to open one of the Viewer's documents to read and sign
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The download link
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CoshhDocumentUrl" }
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not a document this Viewer must sign
+        "503":
+          description: File storage is unavailable
+  /train-track/my-documents/{id}/sign:
+    post:
+      operationId: signMyDocument
+      tags: [train-track]
+      summary: Sign that the signed-in Viewer has read a DocTrack document (writes a TrainTrack sign-off)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The Viewer's documents after signing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyDocumentSignOffs" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not a document this Viewer must sign
+        "409":
+          description: Already signed
   /users/me/active-department:
     put:
       operationId: setActiveDepartment
@@ -596,6 +662,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OkResponse"
+
+  /certificates-outstanding:
+    get:
+      operationId: listCertificatesOutstanding
+      tags: [contractors]
+      summary: Contractor visits still waiting for their certificate
+      description: >
+        Compliance checks whose contractor visit happened at least
+        followUpAfterDays ago with no certificate uploaded since, however old,
+        at the sites the user can see. The contractor is chased every two
+        weeks until chaseStopsAfterDays after the visit (chasing false after).
+      responses:
+        "200":
+          description: Certificates outstanding, oldest visit first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificatesOutstandingResponse"
 
   /contractors:
     get:
@@ -1196,6 +1280,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppSettings"
 
+  /settings/track-summary-recipients:
+    get:
+      operationId: getTrackSummaryRecipients
+      tags: [settings]
+      summary: Preview who receives each track's daily summary
+      description: >
+        Resolved with the same routing code the daily summary job sends with.
+        Pass the unsaved choices as `routing` to preview them; otherwise the
+        saved choices are used. Account admins and consultants only.
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: routing
+          in: query
+          required: false
+          description: Track summary routing JSON, as saved in trackSummaryRouting.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Recipients for every track
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackSummaryPreview"
+        "400":
+          description: routing is not a JSON object
+
   /privacy-governance:
     get:
       operationId: getPrivacyGovernance
@@ -1763,11 +1878,125 @@ paths:
         "409":
           description: The site already has a call point with that name
 
+  /fire-safety/call-points/order:
+    put:
+      operationId: orderFireCallPoints
+      tags: [fire-safety]
+      summary: Set a site's call point rotation order (managers)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderFireCallPointsRequest"
+      responses:
+        "200":
+          description: The site's call points in use, in their new order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireCallPoint"
+        "409":
+          description: The list does not match the site's call points in use (it changed meanwhile)
+
+  /imports/fire-call-points/template:
+    get:
+      operationId: getFireCallPointImportTemplate
+      tags: [fire-safety]
+      summary: Download the CSV template for uploading a call point list (managers)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/fire-call-points:
+    post:
+      operationId: importFireCallPoints
+      tags: [fire-safety]
+      summary: Preview or import a spreadsheet of call points (managers)
+      description: >-
+        The browser sends the spreadsheet's header row and cell text. With
+        preview true (the default) nothing is written; otherwise every row is
+        written in one go, only when no row has an error. New call points join
+        the end of their site's rotation in file order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file is missing a required column or has no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
+  /imports/pat-appliances/reading:
+    get:
+      operationId: getPatRegisterReading
+      tags: [pat-track]
+      summary: Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
+      responses:
+        "200":
+          description: Reading status and the sites the caller can import into
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatRegisterReadingStatus"
+
+  /imports/pat-appliances/read:
+    post:
+      operationId: readPatRegisterList
+      tags: [pat-track]
+      summary: Read a photo, scan, PDF or Word list of appliances into register rows (managers)
+      description: >-
+        Claude reads the file and returns rows in the PAT appliance import's
+        columns. Nothing is saved: the browser sends the rows to
+        POST /imports/pat-appliances for the usual preview and import. The
+        file is not stored. Off until the server has an Anthropic API key;
+        each business has a monthly number of readings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatRegisterReadRequest"
+      responses:
+        "200":
+          description: The rows read from the file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatRegisterReadResult"
+        "400":
+          description: The file cannot be read here, or the site is not one of the caller's
+        "429":
+          description: This business has used its readings for the month
+        "502":
+          description: The file could not be read just now
+        "503":
+          description: Reading is not switched on (no Anthropic API key)
+
   /fire-safety/call-points/{id}:
     put:
       operationId: updateFireCallPoint
       tags: [fire-safety]
-      summary: Rename, archive or restore a call point (managers)
+      summary: Rename, move, archive or restore a call point (managers)
       parameters:
         - in: path
           name: id
@@ -3168,6 +3397,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/FoodSafetyRecord"
 
+  /food-safety/cold-reading:
+    post:
+      operationId: recordFoodSafetyColdReading
+      tags: [food-safety]
+      summary: Record one fridge or freezer reading in the day's diary
+      description: >-
+        Fills one unit's AM or PM reading in the day's diary, creating the
+        diary (with every fridge and freezer on the list) when needed. Used by
+        "Say it" voice logging. A reading already recorded is never
+        overwritten (409 READING_ALREADY_RECORDED), a submitted diary is not
+        changed (409 DIARY_SUBMITTED), and a reading outside the limits needs
+        the corrective action taken (400 KITCHEN_CORRECTIVE_ACTION_REQUIRED).
+      parameters:
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FoodSafetyColdReadingRequest"
+      responses:
+        "201":
+          description: The diary with the reading added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyRecord"
+
   /food-safety/by-date/{date}:
     get:
       operationId: getFoodSafetyRecordByDate
@@ -4240,8 +4501,583 @@ paths:
                 type: string
                 format: binary
 
+  /registers/allergen-ingredients:
+    get:
+      operationId: listAllergenIngredients
+      tags: [kitchen-allergens]
+      summary: List KitchenTrack ingredients with their allergens and the dishes that use them
+      responses:
+        "200":
+          description: Ingredients the caller can see, by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenIngredient"
+    post:
+      operationId: createAllergenIngredient
+      tags: [kitchen-allergens]
+      summary: Add an ingredient (for every site, or one site)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenIngredientInput"
+      responses:
+        "201":
+          description: Created ingredient
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenIngredient"
+        "400":
+          description: Invalid input or site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-ingredients/{id}:
+    put:
+      operationId: updateAllergenIngredient
+      tags: [kitchen-allergens]
+      summary: Update an ingredient; changed allergens need a reason and update every dish that uses it
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenIngredientInput"
+      responses:
+        "200":
+          description: Updated ingredient, with how many dishes' allergens changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenIngredientSaved"
+        "400":
+          description: Invalid input, missing reason, or dishes at other sites use it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAllergenIngredient
+      tags: [kitchen-allergens]
+      summary: Remove an ingredient no dish uses (kept for the record)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Still in a recipe
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-ingredients/{id}/changes:
+    get:
+      operationId: listAllergenIngredientChanges
+      tags: [kitchen-allergens]
+      summary: An ingredient's allergen change log, newest first
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Change log
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenIngredientChange"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-menus:
+    get:
+      operationId: listAllergenMenus
+      tags: [kitchen-allergens]
+      summary: List menus at the sites the caller can see
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Menus by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenMenu"
+        "400":
+          description: Invalid site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createAllergenMenu
+      tags: [kitchen-allergens]
+      summary: Add a menu at a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenMenuInput"
+      responses:
+        "201":
+          description: Created menu
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenMenu"
+        "400":
+          description: Invalid input or site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-menus/{id}:
+    put:
+      operationId: renameAllergenMenu
+      tags: [kitchen-allergens]
+      summary: Rename a menu (it stays at its site)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenMenuRename"
+      responses:
+        "200":
+          description: Renamed menu
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenMenu"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAllergenMenu
+      tags: [kitchen-allergens]
+      summary: Remove a menu (its dishes stay; kept for the record)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-charts:
+    get:
+      operationId: listAllergenCharts
+      tags: [kitchen-allergens]
+      summary: Allergen charts (one per site and one per menu) with their latest sign-off
+      responses:
+        "200":
+          description: Charts by site, the whole-site chart first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenChart"
+
+  /registers/allergen-charts/signoffs:
+    get:
+      operationId: listAllergenChartSignoffs
+      tags: [kitchen-allergens]
+      summary: Sign-off history for a site's chart, or one menu's chart, newest first
+      parameters:
+        - name: siteId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: menuId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sign-offs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenChartSignoff"
+        "400":
+          description: No site given
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: signOffAllergenChart
+      tags: [kitchen-allergens]
+      summary: Sign off a chart as checked against current recipes and labels (signed-in person's name)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenChartSignoffInput"
+      responses:
+        "201":
+          description: Sign-off recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenChartSignoff"
+        "400":
+          description: Not confirmed, unknown chart, or no dishes on it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
+    AllergenKey:
+      type: string
+      description: One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014
+      enum: [celery, gluten, crustaceans, eggs, fish, lupin, milk, molluscs, mustard, tree_nuts, peanuts, sesame, soya, sulphites]
+    AllergenIngredientUse:
+      type: object
+      required: [id, name, siteId]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        siteId:
+          type: integer
+          nullable: true
+    AllergenIngredient:
+      type: object
+      required: [id, siteId, name, contains, mayContain, usedIn, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+          description: null when every site can use it
+        name:
+          type: string
+        supplier:
+          type: string
+          nullable: true
+        productCode:
+          type: string
+          nullable: true
+        contains:
+          type: array
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        mayContain:
+          type: array
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        notes:
+          type: string
+          nullable: true
+        lastCheckedAt:
+          type: string
+          format: date
+          nullable: true
+        checkedBy:
+          type: string
+          nullable: true
+        usedIn:
+          type: array
+          description: Dishes using it, at sites the caller can see
+          items:
+            $ref: "#/components/schemas/AllergenIngredientUse"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AllergenIngredientSaved:
+      allOf:
+        - $ref: "#/components/schemas/AllergenIngredient"
+        - type: object
+          required: [dishesUpdated]
+          properties:
+            dishesUpdated:
+              type: integer
+              description: Dishes whose allergens changed because of this edit
+    AllergenIngredientInput:
+      type: object
+      required: [siteId, name, contains]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+          maxLength: 200
+        supplier:
+          type: string
+          nullable: true
+          maxLength: 200
+        productCode:
+          type: string
+          nullable: true
+          maxLength: 100
+        contains:
+          type: array
+          maxItems: 14
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        mayContain:
+          type: array
+          maxItems: 14
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+        lastCheckedAt:
+          type: string
+          format: date
+          nullable: true
+        checkedBy:
+          type: string
+          nullable: true
+          maxLength: 200
+        changeReason:
+          type: string
+          nullable: true
+          maxLength: 1000
+          description: Required when contains or may contain changes on an edit
+    AllergenIngredientChange:
+      type: object
+      required: [id, ingredientId, changeType, dishesUpdated, createdAt]
+      properties:
+        id:
+          type: integer
+        ingredientId:
+          type: integer
+        changeType:
+          type: string
+          enum: [created, allergens_changed, removed]
+        containsBefore:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        containsAfter:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        mayContainBefore:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        mayContainAfter:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        reason:
+          type: string
+          nullable: true
+        dishesUpdated:
+          type: integer
+        changedByName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    AllergenMenu:
+      type: object
+      required: [id, siteId, name, contentsChangedAt, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        contentsChangedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AllergenMenuInput:
+      type: object
+      required: [siteId, name]
+      properties:
+        siteId:
+          type: integer
+        name:
+          type: string
+          maxLength: 100
+    AllergenMenuRename:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+    AllergenChartLastSignoff:
+      type: object
+      required: [id, checkedByName, createdAt, dishCount]
+      properties:
+        id:
+          type: integer
+        checkedByName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        note:
+          type: string
+          nullable: true
+        dishCount:
+          type: integer
+    AllergenChart:
+      type: object
+      required: [siteId, siteName, menuId, menuName, dishCount, lastSignoff, changedSinceCheck]
+      properties:
+        siteId:
+          type: integer
+        siteName:
+          type: string
+        menuId:
+          type: integer
+          nullable: true
+          description: null for the whole-site chart
+        menuName:
+          type: string
+          nullable: true
+        dishCount:
+          type: integer
+        lastSignoff:
+          oneOf:
+            - $ref: "#/components/schemas/AllergenChartLastSignoff"
+            - type: "null"
+        changedSinceCheck:
+          type: boolean
+          description: A dish on the chart changed after the latest sign-off
+    AllergenChartSignoff:
+      type: object
+      required: [id, siteId, menuId, dishCount, checkedByName, createdAt]
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        menuId:
+          type: integer
+          nullable: true
+        dishCount:
+          type: integer
+        note:
+          type: string
+          nullable: true
+        checkedByName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AllergenChartSignoffInput:
+      type: object
+      required: [siteId, confirmed]
+      properties:
+        siteId:
+          type: integer
+        menuId:
+          type: integer
+          nullable: true
+        confirmed:
+          type: boolean
+          description: Must be true; the person confirms every dish was checked against current recipes and labels
+        note:
+          type: string
+          nullable: true
+          maxLength: 1000
     TodayByDepartment:
       type: object
       required: [date, groups]
@@ -5373,6 +6209,29 @@ components:
         visits:
           type: array
           items: { $ref: "#/components/schemas/ContractorVisit" }
+    CertificateOutstanding:
+      type: object
+      required: [itemId, title, siteId, siteName, visitDate, daysSinceVisit, contractorName, chasing]
+      properties:
+        itemId: { type: integer }
+        title: { type: string }
+        siteId: { type: integer, nullable: true }
+        siteName: { type: string, nullable: true }
+        visitDate: { type: string, format: date }
+        daysSinceVisit: { type: integer }
+        contractorName: { type: string }
+        chasing:
+          type: boolean
+          description: False once the contractor is no longer reminded (chaseStopsAfterDays after the visit)
+    CertificatesOutstandingResponse:
+      type: object
+      required: [followUpAfterDays, chaseStopsAfterDays, certificates]
+      properties:
+        followUpAfterDays: { type: integer }
+        chaseStopsAfterDays: { type: integer }
+        certificates:
+          type: array
+          items: { $ref: "#/components/schemas/CertificateOutstanding" }
     SetContractorVisitRequest:
       type: object
       required: [visitKey, siteId, contractorId]
@@ -5740,11 +6599,15 @@ components:
           nullable: true
         needsAction:
           type: boolean
-          description: The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date.
+          description: >
+            The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR
+            defects, or the contractor visit has happened with no certificate
+            uploaded since (certificate_outstanding), so the check needs action
+            and is not compliant whatever its due date.
         needsActionReason:
           type: string
           nullable: true
-          enum: [unsatisfactory, open_defects]
+          enum: [unsatisfactory, open_defects, certificate_outstanding]
         openDefectCount:
           type: integer
           description: Open C1/C2/FI/ID/AR defects on the newest certificate.
@@ -6627,6 +7490,87 @@ components:
           format: date-time
       required: [reference, receivedAt]
 
+    TrackSummaryPreviewPerson:
+      type: object
+      required: [userId, name, email, departmentName]
+      properties:
+        userId:
+          type: [integer, "null"]
+        name:
+          type: [string, "null"]
+        email:
+          type: string
+        departmentName:
+          type: [string, "null"]
+    TrackSummaryPreviewRecipient:
+      allOf:
+        - $ref: "#/components/schemas/TrackSummaryPreviewPerson"
+        - type: object
+          required: [via]
+          properties:
+            via:
+              type: array
+              items:
+                type: string
+                enum: [senior, named, department]
+    TrackSummaryPreviewTrack:
+      type: object
+      required: [module, label, enabled, mode, departments, namedManagers, unavailableNamedCount, seniorOnly, recipients]
+      properties:
+        module:
+          type: string
+        label:
+          type: string
+        enabled:
+          type: boolean
+        mode:
+          type: string
+          enum: [automatic, custom]
+        departments:
+          type: array
+          items:
+            type: object
+            required: [id, name, managers]
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              managers:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TrackSummaryPreviewPerson"
+        namedManagers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrackSummaryPreviewPerson"
+        unavailableNamedCount:
+          type: integer
+        seniorOnly:
+          type: boolean
+        recipients:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrackSummaryPreviewRecipient"
+    TrackSummaryPreview:
+      type: object
+      required: [senior, tracks]
+      properties:
+        senior:
+          type: object
+          required: [source, recipients]
+          properties:
+            source:
+              type: string
+              enum: [notification_email, users]
+            recipients:
+              type: array
+              items:
+                $ref: "#/components/schemas/TrackSummaryPreviewPerson"
+        tracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrackSummaryPreviewTrack"
     AppSettings:
       type: object
       properties:
@@ -6918,6 +7862,19 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        soundLevelDb:
+          type: number
+          nullable: true
+          description: Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).
+        soundLevelMethod:
+          type: string
+          nullable: true
+          enum: [meter, phone]
+          description: How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+        soundLevelBedhead:
+          type: boolean
+          nullable: true
+          description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
         createdAt:
           type: string
           format: date-time
@@ -6968,6 +7925,19 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        soundLevelDb:
+          type: number
+          nullable: true
+          description: Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).
+        soundLevelMethod:
+          type: string
+          nullable: true
+          enum: [meter, phone]
+          description: How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+        soundLevelBedhead:
+          type: boolean
+          nullable: true
+          description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
       required:
         - checkType
         - checkDate
@@ -7006,6 +7976,19 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        soundLevelDb:
+          type: number
+          nullable: true
+          description: Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).
+        soundLevelMethod:
+          type: string
+          nullable: true
+          enum: [meter, phone]
+          description: How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+        soundLevelBedhead:
+          type: boolean
+          nullable: true
+          description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
 
     FireCallPoint:
       type: object
@@ -7017,6 +8000,16 @@ components:
           nullable: true
         name:
           type: string
+        location:
+          type: string
+          nullable: true
+          description: Where the call point is, e.g. "Kitchen fire exit, ground floor".
+        sortOrder:
+          type: integer
+          description: Place in the site's test rotation (1 = first).
+        sleepingArea:
+          type: boolean
+          description: Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.
         archivedAt:
           type: string
           format: date-time
@@ -7025,12 +8018,22 @@ components:
           type: string
           nullable: true
           description: Date of the latest alarm test that used this call point.
+        nextInTurn:
+          type: boolean
+          description: The call point to test next at its site (the one after the call point tested last, in rotation order).
+        notTestedThisRound:
+          type: boolean
+          description: In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).
       required:
         - id
         - siteId
         - name
+        - location
+        - sortOrder
         - archivedAt
         - lastTestedDate
+        - nextInTurn
+        - notTestedThisRound
 
     CreateFireCallPointRequest:
       type: object
@@ -7040,6 +8043,12 @@ components:
           nullable: true
         name:
           type: string
+        location:
+          type: string
+          nullable: true
+        sleepingArea:
+          type: boolean
+          description: Near bedrooms or other sleeping areas (75 dB at the bedhead).
       required:
         - siteId
         - name
@@ -7049,8 +8058,143 @@ components:
       properties:
         name:
           type: string
+        location:
+          type: string
+          nullable: true
+        sleepingArea:
+          type: boolean
+          description: Near bedrooms or other sleeping areas (75 dB at the bedhead).
         archived:
           type: boolean
+
+    OrderFireCallPointsRequest:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        ids:
+          type: array
+          description: Every call point in use at the site, first to last.
+          items:
+            type: integer
+      required:
+        - siteId
+        - ids
+
+    PatRegisterReadingStatus:
+      type: object
+      properties:
+        available: { type: boolean }
+        monthlyLimit: { type: integer, description: "Readings a business may have each month; 0 means no limit" }
+        usedThisMonth: { type: integer }
+        sites:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+            required: [id, name]
+      required: [available, monthlyLimit, usedThisMonth, sites]
+
+    PatRegisterReadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        fileName: { type: string, maxLength: 255 }
+        mimeType: { type: string, description: "image/jpeg, image/png, image/webp, image/gif, application/pdf, .docx or text/plain" }
+        data: { type: string, description: "The file as base64 (8 MB at most before encoding)" }
+        siteId: { type: integer, nullable: true, description: "The site the list is for, if the person chose one" }
+      required: [fileName, mimeType, data]
+
+    PatRegisterReadResult:
+      type: object
+      properties:
+        headers:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          items:
+            type: array
+            items: { type: string }
+        unclear: { type: integer, description: "Rows that were hard to read; their Notes start with \"Check:\"" }
+      required: [headers, rows, unclear]
+
+    FireCallPointImportRequest:
+      type: object
+      properties:
+        headers:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        preview:
+          type: boolean
+        siteId:
+          type: integer
+          nullable: true
+          description: The site for rows whose Site cell is blank.
+      required:
+        - headers
+        - rows
+
+    FireCallPointImportResult:
+      type: object
+      properties:
+        preview:
+          type: boolean
+        committed:
+          type: boolean
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            create:
+              type: integer
+            update:
+              type: integer
+            skip:
+              type: integer
+            error:
+              type: integer
+          required: [total, create, update, skip, error]
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              row:
+                type: integer
+              action:
+                type: string
+                enum: [create, update, skip, error]
+              label:
+                type: string
+              reasons:
+                type: array
+                items:
+                  type: string
+            required: [row, action, label, reasons]
+        ignoredHeaders:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+      required:
+        - preview
+        - committed
+        - summary
+        - rows
+        - ignoredHeaders
 
     FireSafetyStatus:
       type: object
@@ -7637,6 +8781,33 @@ components:
                   signedAt: { type: string, format: date-time }
                 required: [signedAt]
       required: [linked, pending, signed]
+
+    MyDocumentSignOff:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        category: { type: string }
+        description: { type: ["string", "null"] }
+        file_name: { type: ["string", "null"] }
+        mime_type: { type: ["string", "null"] }
+        department: { type: ["string", "null"] }
+        site_name: { type: ["string", "null"] }
+        acknowledged_at: { type: ["string", "null"], format: date-time }
+        signature: { type: ["string", "null"] }
+      required: [id, title, category]
+
+    MyDocumentSignOffs:
+      type: object
+      properties:
+        rosterLinked: { type: boolean }
+        pending:
+          type: array
+          items: { $ref: "#/components/schemas/MyDocumentSignOff" }
+        completed:
+          type: array
+          items: { $ref: "#/components/schemas/MyDocumentSignOff" }
+      required: [rosterLinked, pending, completed]
 
     CoshhCheckInput:
       type: object
@@ -8430,6 +9601,30 @@ components:
         - createdAt
         - updatedAt
 
+    FoodSafetyColdReadingRequest:
+      type: object
+      required: [recordDate, unit, slot, temperature]
+      properties:
+        recordDate:
+          type: string
+          description: The diary's local calendar date (YYYY-MM-DD).
+        unit:
+          type: string
+          description: The fridge or freezer's name on the kitchen's list.
+        slot:
+          type: string
+          enum: [am, pm]
+        temperature:
+          type: number
+        correctiveAction:
+          type: string
+          description: Required when the reading is outside the unit's limits.
+        recordedAt:
+          type: string
+          format: date-time
+        spoken:
+          type: string
+          description: The words heard when the reading was spoken ("Say it"), kept as evidence.
     CreateFoodSafetyRecordRequest:
       type: object
       properties:
