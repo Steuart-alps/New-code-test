@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -8,6 +8,14 @@ import { siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites"
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { getAccountToday } from "../lib/accountClock";
 import { findSignOffAssessment, getMyCoshhSignOffs, recordCoshhSignOffs } from "../lib/coshhSignOffs";
+import {
+  findActiveRosterMember,
+  findEligibleRosterMember,
+  findSignOffDocument,
+  getMyDocuments,
+  recordDocAcknowledgements,
+  sendDocumentDownloadUrl,
+} from "../lib/docSignOffs";
 
 const router = Router();
 
@@ -273,6 +281,59 @@ router.post("/my-coshh/:id/sign", requireAuth, requireRole("client_viewer"), asy
     callerDepartmentId: null,
   });
   res.json({ linked: true, ...await getMyCoshhSignOffs(user.clientId, user.staffRosterId) });
+});
+
+// ── A Viewer's DocTrack documents to read and sign ────────────────────────────
+// Documents marked "staff must read and sign" for the Viewer's department and
+// site. Signing writes a TrainTrack sign-off for their roster entry; see
+// lib/docSignOffs.ts.
+
+async function myDocumentsContext(user: NonNullable<Request["currentUser"]>) {
+  if (user.clientId == null || user.staffRosterId == null) return null;
+  const services = await getEntitledServices(user.clientId);
+  if (!isEntitled(services, "doctrack") && !isEntitled(services, "safetrack")) return null;
+  const roster = await findActiveRosterMember(user.clientId, user.staffRosterId);
+  return roster ? { clientId: user.clientId, roster } : null;
+}
+
+router.get("/my-documents", requireAuth, requireRole("client_viewer"), async (req, res) => {
+  const user = req.currentUser!;
+  const context = await myDocumentsContext(user);
+  if (!context) return res.json({ rosterLinked: user.staffRosterId != null, pending: [], completed: [] });
+  res.json({ rosterLinked: true, ...await getMyDocuments(context.clientId, context.roster) });
+});
+
+router.get("/my-documents/:id/download-url", requireAuth, requireRole("client_viewer"), async (req, res) => {
+  const id = Number(req.params.id);
+  const context = Number.isSafeInteger(id) ? await myDocumentsContext(req.currentUser!) : null;
+  if (!context) return res.status(404).json({ error: "Not found" });
+  const mine = await getMyDocuments(context.clientId, context.roster);
+  if (![...mine.pending, ...mine.completed].some((doc) => doc.id === id)) return res.status(404).json({ error: "Not found" });
+  const result = await db.execute(sql`
+    SELECT object_path, file_name FROM doc_track_documents WHERE id = ${id} AND client_id = ${context.clientId} LIMIT 1
+  `);
+  const row = (result.rows ?? [])[0] as { object_path: string; file_name: string } | undefined;
+  if (!row) return res.status(404).json({ error: "Not found" });
+  return sendDocumentDownloadUrl(req, res, context.clientId, { id, ...row });
+});
+
+router.post("/my-documents/:id/sign", requireAuth, requireRole("client_viewer"), async (req, res) => {
+  const user = req.currentUser!;
+  const id = Number(req.params.id);
+  const parsed = z.object({ signature: z.string().min(1).max(500000) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A signature is required" });
+  const context = Number.isSafeInteger(id) ? await myDocumentsContext(user) : null;
+  if (!context) return res.status(404).json({ error: "Not found" });
+  const mine = await getMyDocuments(context.clientId, context.roster);
+  if (mine.completed.some((doc) => doc.id === id)) return res.status(409).json({ error: "You have already signed this document" });
+  if (!mine.pending.some((doc) => doc.id === id)) return res.status(404).json({ error: "Not found" });
+  const doc = await findSignOffDocument(context.clientId, id);
+  const member = doc && await findEligibleRosterMember(context.clientId, doc, context.roster.id);
+  if (!doc || !member) return res.status(404).json({ error: "Not found" });
+  await recordDocAcknowledgements(context.clientId, doc, [{
+    staffRosterId: member.id, staffName: member.name, signature: parsed.data.signature,
+  }], user.id);
+  res.json({ rosterLinked: true, ...await getMyDocuments(context.clientId, context.roster) });
 });
 
 // ── Create record ─────────────────────────────────────────────────────────────

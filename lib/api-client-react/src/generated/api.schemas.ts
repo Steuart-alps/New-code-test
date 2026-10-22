@@ -2854,6 +2854,32 @@ export interface MyCoshhSignOffs {
   signed: MyCoshhSignOffsSignedItem[];
 }
 
+export interface MyDocumentSignOff {
+  id: number;
+  title: string;
+  category: string;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  file_name?: string | null;
+  /** @nullable */
+  mime_type?: string | null;
+  /** @nullable */
+  department?: string | null;
+  /** @nullable */
+  site_name?: string | null;
+  /** @nullable */
+  acknowledged_at?: string | null;
+  /** @nullable */
+  signature?: string | null;
+}
+
+export interface MyDocumentSignOffs {
+  rosterLinked: boolean;
+  pending: MyDocumentSignOff[];
+  completed: MyDocumentSignOff[];
+}
+
 export type CoshhCheckInputResult = typeof CoshhCheckInputResult[keyof typeof CoshhCheckInputResult];
 
 

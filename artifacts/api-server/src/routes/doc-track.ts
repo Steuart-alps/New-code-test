@@ -3,8 +3,8 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
-import { ObjectContentError, ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
-import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ObjectContentError, ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { ensureUploadCapacity } from "../lib/storageLimit";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import {
@@ -13,6 +13,14 @@ import {
 } from "../lib/acknowledgementRegisterPdf";
 import { newBearerToken } from "../lib/bearerTokens";
 import { recordSiteVisibleSql, siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
+import {
+  findEligibleRosterMember,
+  findSignOffDocument,
+  getMyDocuments,
+  recordDocAcknowledgements,
+  sendDocumentDownloadUrl,
+  type ResolvedAck,
+} from "../lib/docSignOffs";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -427,33 +435,13 @@ router.get("/acknowledgements/my", requireAuth, async (req, res) => {
   const matches = await findMyRoster(clientId, req.currentUser!.email);
   if (matches.length > 1) return res.status(409).json({ error: "More than one active staff record uses your email. Ask an administrator to resolve this before signing." });
   if (matches.length === 0) return res.json({ rosterLinked: false, pending: [], completed: [] });
-  const roster = matches[0];
-  const result = await db.execute(sql`
-    SELECT d.id, d.title, d.category, d.description, d.file_name, d.mime_type,
-           d.department, s.name AS site_name, a.acknowledged_at, a.signature,
-           CASE WHEN a.id IS NOT NULL
-             AND (a.train_track_record_id IS NULL OR tr.id IS NOT NULL)
-             AND (tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
-             THEN true ELSE false END AS is_current
-    FROM doc_track_documents d
-    LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = d.client_id
-    LEFT JOIN doc_acknowledgements a ON a.document_id = d.id
-      AND a.client_id = d.client_id AND a.staff_roster_id = ${roster.id}
-    LEFT JOIN train_track_records tr ON tr.id = a.train_track_record_id
-      AND tr.client_id = d.client_id
-    WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
-      AND (d.department IS NULL OR d.department = ${roster.department})
-      AND (d.site_id IS NULL OR d.site_id = ${roster.site_id})
-      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR ${siteVisibleSql(sql`d.site_id`, sql`s.department_id`, getActiveDepartmentId(req)!)})
-        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
-    ORDER BY d.created_at DESC
-  `);
-  const rows = (result.rows ?? []) as Array<Record<string, unknown> & { is_current: boolean }>;
-  const toDocument = ({ is_current: _current, ...document }: typeof rows[number]) => document;
+  const departmentId = getActiveDepartmentId(req);
   res.json({
     rosterLinked: true,
-    pending: rows.filter(row => !row.is_current).map(toDocument),
-    completed: rows.filter(row => row.is_current).map(toDocument),
+    ...await getMyDocuments(clientId, matches[0], departmentId !== null
+      ? sql`AND (d.site_id IS NULL OR ${siteVisibleSql(sql`d.site_id`, sql`s.department_id`, departmentId)})
+        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${departmentId}))`
+      : sql``),
   });
 });
 
@@ -462,7 +450,7 @@ router.get("/acknowledgements/my", requireAuth, async (req, res) => {
 // have NOT yet acknowledged it.
 async function getAcknowledgementOverview(clientId: number, departmentId: number | null) {
   const docsResult = await db.execute(sql`
-    SELECT d.id, d.title, d.category, d.department, d.site_id, d.created_at
+    SELECT d.id, d.title, d.category, d.department, d.site_id, s.name AS site_name, d.created_at
     FROM doc_track_documents d
     LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = d.client_id
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
@@ -548,6 +536,8 @@ async function getAcknowledgementOverview(clientId: number, departmentId: number
       title: d.title,
       category: d.category,
       department: d.department,
+      siteId: d.site_id ?? null,
+      siteName: d.site_name ?? null,
       staffTotal: relevant.length,
       acknowledgedCount: relevant.length - outstanding.length,
       outstanding: outstanding.map((s) => ({ id: s.id, name: s.name, department: s.department })),
@@ -602,41 +592,6 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
 // server-side and any client-supplied roster id/name is ignored.
 const MANAGER_ROLES = new Set(["client_admin", "consultant"]);
 
-// A single acknowledgement to persist, always for an eligible roster entry.
-interface ResolvedAck {
-  staffRosterId: number;
-  staffName: string;
-  signature: string | null;
-}
-
-/**
- * The sole eligibility rule for acknowledgement evidence. A roster entry must
- * be active and assigned to every document scope that is set. Keep this
- * server-side: manager payloads and staff sessions are both untrusted.
- */
-async function findEligibleRosterMember(
-  clientId: number,
-  document: { site_id: number | null; department: string | null },
-  rosterId?: number,
-  email?: string | null,
-) {
-  if (rosterId == null && !email) return null;
-  const result = await db.execute(sql`
-    SELECT id, name
-    FROM staff_roster
-    WHERE client_id = ${clientId}
-      AND active = true
-      AND (${document.department}::text IS NULL OR department = ${document.department})
-      AND (${document.site_id}::integer IS NULL OR site_id = ${document.site_id})
-      AND (
-        ${rosterId ?? null}::integer IS NOT NULL AND id = ${rosterId ?? null}
-        OR ${email ?? null}::text IS NOT NULL AND email IS NOT NULL AND lower(email) = lower(${email ?? null})
-      )
-    LIMIT 1
-  `);
-  return (result.rows ?? [])[0] as { id: number; name: string } | undefined;
-}
-
 // Manager bulk-ack payload: they supply the roster entries to sign off.
 const ackBulkCreate = z.object({
   acknowledgements: z.array(z.object({
@@ -661,12 +616,7 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
   if (isNaN(docId)) return res.status(400).json({ error: "Invalid id" });
 
   // Verify document belongs to this client
-  const docResult = await db.execute(sql`
-    SELECT id, title, category, site_id, department, requires_acknowledgement, annual_acknowledgement FROM doc_track_documents
-    WHERE id = ${docId} AND client_id = ${clientId}
-    LIMIT 1
-  `);
-  const doc = (docResult.rows ?? [])[0] as any;
+  const doc = await findSignOffDocument(clientId, docId);
   if (!doc) return res.status(404).json({ error: "Not found" });
   if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
   if (!doc.requires_acknowledgement) return res.status(400).json({ error: "This document does not require acknowledgement" });
@@ -710,95 +660,7 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
     toCreate = [{ staffRosterId: roster.id, staffName: roster.name, signature }];
   }
 
-  const today = new Date().toISOString().split("T")[0];
-  // A payload may name the same person twice; the first entry wins.
-  const byRoster = new Map<number, ResolvedAck>();
-  for (const ack of toCreate) if (!byRoster.has(ack.staffRosterId)) byRoster.set(ack.staffRosterId, ack);
-  const rosterIds = [...byRoster.keys()].sort((a, b) => a - b);
-
-  // The TrainTrack sign-off and the acknowledgement that links to it commit
-  // together, so a failed acknowledgement write leaves no orphan sign-off.
-  // Locking each staff row (the public sign-off link takes the same lock)
-  // serializes concurrent manager, self and public submissions for that
-  // person, so a double tap or retry records one acknowledgement and one
-  // sign-off. Locks are taken in id order so overlapping bulk sign-offs
-  // cannot deadlock.
-  const created = await db.transaction(async (tx) => {
-    const rows: any[] = [];
-    for (const rosterId of rosterIds) {
-      await tx.execute(sql`
-        SELECT id FROM staff_roster WHERE id = ${rosterId} AND client_id = ${clientId} FOR UPDATE
-      `);
-    }
-    for (const rosterId of rosterIds) {
-      const ack = byRoster.get(rosterId)!;
-      // Current acknowledgements are idempotent. Expired annual sign-offs (or
-      // acknowledgements whose linked TrainTrack record was removed) are
-      // renewed below by replacing the stale link while retaining the
-      // acknowledgement row; the old TrainTrack record stays as history.
-      const existing = await tx.execute(sql`
-        SELECT a.id,
-               CASE
-                 WHEN a.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN false
-                 WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN false
-                 ELSE true
-               END AS is_current
-        FROM doc_acknowledgements a
-        LEFT JOIN train_track_records tr
-          ON tr.id = a.train_track_record_id AND tr.client_id = a.client_id
-        WHERE a.document_id = ${docId} AND a.client_id = ${clientId}
-          AND a.staff_roster_id = ${rosterId}
-        ORDER BY a.id
-        LIMIT 1
-      `);
-      const existingAck = (existing.rows ?? [])[0] as any;
-      if (existingAck?.is_current) continue;
-
-      // Create TrainTrack signoff record.
-      // When annual_acknowledgement is enabled the record gets a 1-year expiry so
-      // TrainTrack's expiry reminders automatically prompt re-acknowledgement.
-      const expiryDate = doc.annual_acknowledgement
-        ? sql`(${today}::date + interval '1 year')::date`
-        : sql`NULL::date`;
-      const trainResult = await tx.execute(sql`
-        INSERT INTO train_track_records
-          (client_id, site_id, record_type, staff_name, staff_roster_id, training_type, document_title,
-           document_type, completed_date, expiry_date, notes, signature)
-        VALUES
-          (${clientId}, ${doc.site_id ?? null}, 'signoff', ${ack.staffName}, ${rosterId},
-           ${doc.title},
-           ${doc.title}, ${doc.category}, ${today}::date,
-           ${expiryDate},
-           ${'Document acknowledgement via DocTrack'},
-           ${ack.signature ?? null})
-        RETURNING id
-      `);
-      const trainId = ((trainResult.rows ?? [])[0] as any)?.id ?? null;
-
-      const ackResult = existingAck
-        ? await tx.execute(sql`
-            UPDATE doc_acknowledgements
-            SET staff_name = ${ack.staffName},
-                signature = ${ack.signature ?? null},
-                acknowledged_by = ${userId},
-                train_track_record_id = ${trainId},
-                acknowledged_at = now()
-            WHERE id = ${existingAck.id} AND client_id = ${clientId}
-            RETURNING *
-          `)
-        : await tx.execute(sql`
-            INSERT INTO doc_acknowledgements
-              (document_id, client_id, staff_roster_id, staff_name, signature,
-               acknowledged_by, train_track_record_id)
-            VALUES
-              (${docId}, ${clientId}, ${rosterId}, ${ack.staffName},
-               ${ack.signature ?? null}, ${userId}, ${trainId})
-            RETURNING *
-          `);
-      if ((ackResult.rows ?? [])[0]) rows.push((ackResult.rows ?? [])[0]);
-    }
-    return rows;
-  });
+  const created = await recordDocAcknowledgements(clientId, doc, toCreate, userId);
 
   res.status(201).json({ created: created.length, records: created });
 });
@@ -894,39 +756,7 @@ router.get("/documents/:id/download-url", requireAuth, async (req, res) => {
   if (!row) return res.status(404).json({ error: "Not found" });
   if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
 
-  // Backfill ACL for legacy documents that were uploaded before the ACL check
-  // was enforced. A signed URL bypasses the application's storage route, so
-  // verify the final ACL here too; it must never be issued for another tenant.
-  try {
-    const file = await storage.getObjectEntityFile(row.object_path);
-    const existingAcl = await getObjectAclPolicy(file);
-    if (!existingAcl?.owner) {
-      // No ACL set — this is a legacy document; backfill it for this client.
-      await storage.trySetObjectEntityAclPolicy(row.object_path, {
-        owner: String(clientId),
-        visibility: "private",
-      });
-    } else if (existingAcl.owner !== String(clientId)) {
-      return res.status(403).json({ error: "Object does not belong to this account" });
-    }
-  } catch (err) {
-    if (err instanceof ObjectNotFoundError) {
-      return res.status(404).json({ error: "Document object not found" });
-    }
-    req.log.warn({ err, objectPath: row.object_path }, "Could not backfill ACL on DocTrack download");
-    // Non-fatal — attempt to generate the signed URL anyway.
-  }
-
-  try {
-    const downloadUrl = await storage.getSignedDownloadURL(row.object_path);
-    res.json({ downloadUrl, fileName: row.file_name });
-  } catch (err) {
-    if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "Document object not found" });
-    if (err instanceof ObjectOwnershipError) return res.status(403).json({ error: "Object does not belong to this account" });
-    return respondObjectStorageDownloadUnavailable(req, res, err, "DocTrack document download", {
-      documentId: id, clientId,
-    });
-  }
+  return sendDocumentDownloadUrl(req, res, clientId, { id, ...row });
 });
 
 export default router;

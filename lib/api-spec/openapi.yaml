@@ -233,6 +233,70 @@ paths:
           description: Not an assessment this Viewer must sign
         "409":
           description: Already signed this revision
+  /train-track/my-documents:
+    get:
+      operationId: listMyDocumentSignOffs
+      tags: [train-track]
+      summary: DocTrack documents the signed-in Viewer must read and sign, and those they have a current sign-off for
+      responses:
+        "200":
+          description: Documents for the Viewer's department and site that staff must read and sign
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyDocumentSignOffs" }
+        "403":
+          description: Not a Viewer
+  /train-track/my-documents/{id}/download-url:
+    get:
+      operationId: getMyDocumentDownloadUrl
+      tags: [train-track]
+      summary: A short-lived link to open one of the Viewer's documents to read and sign
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The download link
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CoshhDocumentUrl" }
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not a document this Viewer must sign
+        "503":
+          description: File storage is unavailable
+  /train-track/my-documents/{id}/sign:
+    post:
+      operationId: signMyDocument
+      tags: [train-track]
+      summary: Sign that the signed-in Viewer has read a DocTrack document (writes a TrainTrack sign-off)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignTrainingRecordRequest" }
+      responses:
+        "200":
+          description: The Viewer's documents after signing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyDocumentSignOffs" }
+        "400":
+          description: No signature given
+        "403":
+          description: Not a Viewer
+        "404":
+          description: Not a document this Viewer must sign
+        "409":
+          description: Already signed
   /users/me/active-department:
     put:
       operationId: setActiveDepartment
@@ -7942,6 +8006,33 @@ components:
                   signedAt: { type: string, format: date-time }
                 required: [signedAt]
       required: [linked, pending, signed]
+
+    MyDocumentSignOff:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        category: { type: string }
+        description: { type: ["string", "null"] }
+        file_name: { type: ["string", "null"] }
+        mime_type: { type: ["string", "null"] }
+        department: { type: ["string", "null"] }
+        site_name: { type: ["string", "null"] }
+        acknowledged_at: { type: ["string", "null"], format: date-time }
+        signature: { type: ["string", "null"] }
+      required: [id, title, category]
+
+    MyDocumentSignOffs:
+      type: object
+      properties:
+        rosterLinked: { type: boolean }
+        pending:
+          type: array
+          items: { $ref: "#/components/schemas/MyDocumentSignOff" }
+        completed:
+          type: array
+          items: { $ref: "#/components/schemas/MyDocumentSignOff" }
+      required: [rosterLinked, pending, completed]
 
     CoshhCheckInput:
       type: object

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SignaturePad } from "@/components/signature-pad";
 import { MyCoshhSignOffs } from "@/components/coshh-sign-offs";
+import { MyDocumentSignOffs } from "@/components/document-sign-offs";
 
 interface OwnRecord {
   id: number;
@@ -136,6 +137,7 @@ export default function MyTrainingPage() {
         ) : (
           <>
             <MyCoshhSignOffs />
+            <MyDocumentSignOffs />
             {records.length === 0 && <Card className="rounded-sm p-6 text-center text-sm text-muted-foreground">No training records yet.</Card>}
             {toSign > 0 && <p className="text-sm font-medium">{toSign === 1 ? "1 record is" : `${toSign} records are`} waiting for your signature.</p>}
             {records.map(record => <RecordCard key={record.id} record={record} />)}

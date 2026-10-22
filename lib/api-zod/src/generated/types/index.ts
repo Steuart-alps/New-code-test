@@ -294,6 +294,8 @@ export * from './mobileTemperatureLogReheating';
 export * from './mobileTemperatureLogSousVide';
 export * from './myCoshhSignOffs';
 export * from './myCoshhSignOffsSignedItem';
+export * from './myDocumentSignOff';
+export * from './myDocumentSignOffs';
 export * from './okResponse';
 export * from './orderFireCallPointsRequest';
 export * from './ownTrainingRecord';

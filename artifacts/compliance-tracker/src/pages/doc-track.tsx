@@ -17,16 +17,16 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useLiveAcknowledgements } from "@/hooks/use-live-acknowledgements";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Upload, FolderOpen, FileText, FileSpreadsheet, FileImage, FileVideo, File,
   Download, Trash2, Search, Plus, Loader2, Presentation, CheckSquare, Users,
-  CheckCircle2, Clock, Link2, Copy, Check, Printer, BookOpen,
+  CheckCircle2, Clock, Link2, Copy, Check, BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MyDocumentsView } from "@/components/my-documents-view";
+import { AcknowledgementsDialog, type StaffMember } from "@/components/acknowledgements-dialog";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -54,25 +54,6 @@ interface Doc {
   site_name: string | null;
   created_at: string;
   updated_at: string;
-}
-
-interface StaffMember {
-  id: number;
-  name: string;
-  job_title: string | null;
-  department: string | null;
-  site_id: number | null;
-  active: boolean;
-}
-
-interface Acknowledgement {
-  id: number;
-  staff_roster_id: number;
-  staff_name: string;
-  signature: string | null;
-  acknowledged_at: string;
-  expiry_date?: string | null;
-  acknowledgement_status?: "pending" | "acknowledged" | "expired";
 }
 
 interface Site {
@@ -141,262 +122,6 @@ function titleFromFileName(name: string): string {
 }
 
 // ─── Acknowledgements Dialog ──────────────────────────────────────────────────
-
-function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; open: boolean; onClose: () => void; canExport: boolean }) {
-  const { toast } = useToast();
-  const [staff, setStaff] = useState<StaffMember[]>([]);
-  const [acks, setAcks] = useState<Acknowledgement[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [checked, setChecked] = useState<Record<number, boolean>>({});
-  const [sigs, setSigs] = useState<Record<number, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [deptFilter, setDeptFilter] = useState("all");
-
-  async function handleExportRegister() {
-    setExporting(true);
-    try {
-      const response = await apiFetch(`/doc-track/documents/${doc.id}/acknowledgements/export`);
-      if (!response.ok) throw new Error("Export failed");
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${doc.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "document"}-acknowledgements.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      toast({ title: "PDF export failed", description: "Please try again.", variant: "destructive" });
-    } finally {
-      setExporting(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    setDeptFilter("all");
-    Promise.all([
-      apiFetch("/staff-roster").then(r => r.ok ? r.json() : []),
-      apiFetch(`/doc-track/documents/${doc.id}/acknowledgements`).then(r => r.ok ? r.json() : []),
-    ]).then(([s, a]) => {
-      // Only staff the API will accept for this document (same rule as
-      // findEligibleRosterMember: active, and in its department and site when set).
-      setStaff((s as StaffMember[]).filter(m =>
-        m.active
-        && (!doc.department || m.department === doc.department)
-        && (doc.site_id == null || m.site_id === doc.site_id),
-      ));
-      setAcks(a);
-      setChecked({});
-      setSigs({});
-    }).finally(() => setLoading(false));
-  }, [open, doc.id, doc.department, doc.site_id]);
-
-  // Pick up signatures staff record on their own devices while this is open.
-  useLiveAcknowledgements(open && !loading ? `/doc-track/documents/${doc.id}/acknowledgements` : null, acks, setAcks);
-
-  const ackedIds = new Set(acks.map((a: Acknowledgement) => a.staff_roster_id));
-  const ackedMap = Object.fromEntries(acks.map(a => [a.staff_roster_id, a]));
-
-  // Department filter
-  const departments = ["all", ...Array.from(new Set(staff.map(s => s.department).filter(Boolean) as string[])).sort()];
-  const visibleStaff = deptFilter === "all" ? staff : staff.filter(s => s.department === deptFilter);
-  const unacked = visibleStaff.filter(s => !ackedIds.has(s.id));
-  const acked   = visibleStaff.filter(s => ackedIds.has(s.id));
-
-  // Counts across ALL staff (for the footer summary)
-  const totalAcked = staff.filter(s => ackedIds.has(s.id)).length;
-
-  // Someone ticked here may have since signed on their own device.
-  const anyChecked = staff.some(s => checked[s.id] && !ackedIds.has(s.id));
-
-  async function handleSave() {
-    const toSave = staff.filter(s => checked[s.id] && !ackedIds.has(s.id));
-    if (!toSave.length) return;
-    setSaving(true);
-    try {
-      const res = await apiFetch(`/doc-track/documents/${doc.id}/acknowledge`, {
-        method: "POST",
-        body: JSON.stringify({
-          acknowledgements: toSave.map(s => ({
-            staffRosterId: s.id,
-            staffName: s.name,
-            signature: sigs[s.id]?.trim() || null,
-          })),
-        }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      toast({ title: `${data.created} acknowledgement${data.created === 1 ? "" : "s"} recorded`, description: "TrainTrack sign-off records created automatically." });
-      const fresh = await apiFetch(`/doc-track/documents/${doc.id}/acknowledgements`);
-      if (fresh.ok) setAcks(await fresh.json());
-      setChecked({});
-      setSigs({});
-    } catch {
-      toast({ title: "Save failed", variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function toggleAll() {
-    if (unacked.every(s => checked[s.id])) {
-      const cleared = { ...checked };
-      unacked.forEach(s => { delete cleared[s.id]; });
-      setChecked(cleared);
-    } else {
-      setChecked(prev => ({ ...prev, ...Object.fromEntries(unacked.map(s => [s.id, true])) }));
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <CheckSquare className="w-4 h-4" /> Acknowledgements — {doc.title}
-          </DialogTitle>
-        </DialogHeader>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
-        ) : staff.length === 0 ? (
-          <div className="py-8 text-center text-muted-foreground">
-            <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">No eligible staff in roster</p>
-            <p className="text-sm mt-1">Add active staff in this document's department and site in <strong>Staff Roster</strong> before recording acknowledgements.</p>
-          </div>
-        ) : (
-          <>
-            {/* Department filter */}
-            {departments.length > 2 && (
-              <div className="flex flex-wrap gap-1.5 pb-1">
-                {departments.map(d => (
-                  <button
-                    key={d}
-                    onClick={() => { setDeptFilter(d); setChecked({}); }}
-                    className={cn(
-                      "px-3 py-1 rounded-full text-xs font-medium transition-colors border",
-                      deptFilter === d
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-muted/40 text-muted-foreground border-border hover:bg-muted",
-                    )}
-                  >
-                    {d === "all" ? "All departments" : d}
-                    {d !== "all" && (
-                      <span className="ml-1.5 opacity-60">
-                        {staff.filter(s => s.department === d && ackedIds.has(s.id)).length}/
-                        {staff.filter(s => s.department === d).length}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-              {/* Pending */}
-              {unacked.length > 0 && (
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-medium text-muted-foreground">Pending ({unacked.length})</p>
-                    <button onClick={toggleAll} className="text-xs text-primary hover:underline">
-                      {unacked.every(s => checked[s.id]) ? "Deselect all" : "Select all"}
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {unacked.map(s => (
-                      <div key={s.id} className={cn("border rounded-lg p-3 transition-colors", checked[s.id] ? "bg-primary/5 border-primary/30" : "")}>
-                        <div className="flex items-center gap-3">
-                          <Checkbox
-                            checked={!!checked[s.id]}
-                            onCheckedChange={v => setChecked(prev => ({ ...prev, [s.id]: !!v }))}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm">{s.name}</p>
-                            {(s.job_title || s.department) && (
-                              <p className="text-xs text-muted-foreground">{[s.job_title, s.department].filter(Boolean).join(" · ")}</p>
-                            )}
-                          </div>
-                        </div>
-                        {checked[s.id] && (
-                          <div className="mt-2 ml-7">
-                            <Input
-                              placeholder="Signature (typed name) — optional"
-                              value={sigs[s.id] ?? ""}
-                              onChange={e => setSigs(prev => ({ ...prev, [s.id]: e.target.value }))}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Acknowledged */}
-              {acked.length > 0 && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground mb-2">Acknowledged ({acked.length})</p>
-                  <div className="space-y-1.5">
-                    {acked.map(s => {
-                      const a = ackedMap[s.id];
-                      return (
-                        <div key={s.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-green-50 border border-green-100">
-                          <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm">{s.name}</p>
-                            {(s.job_title || s.department) && (
-                              <p className="text-xs text-muted-foreground">{[s.job_title, s.department].filter(Boolean).join(" · ")}</p>
-                            )}
-                            {a?.signature && (a.signature.startsWith("data:image/")
-                              ? <img src={a.signature} alt={`Signature of ${s.name}`} className="h-8 mt-1 bg-white rounded border" />
-                              : <p className="text-xs text-muted-foreground">Signed: {a.signature}</p>)}
-                          </div>
-                          <span className="text-xs text-muted-foreground whitespace-nowrap flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {new Date(a.acknowledged_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {unacked.length === 0 && acked.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-6">No staff in this department.</p>
-              )}
-            </div>
-          </>
-        )}
-
-        <DialogFooter className="pt-3 border-t mt-2 gap-2 sm:gap-0">
-          <span className="text-xs text-muted-foreground mr-auto">
-            {totalAcked}/{staff.length} acknowledged overall · TrainTrack records created automatically
-          </span>
-          {canExport && !loading && staff.length > 0 && (
-            <Button variant="outline" size="sm" onClick={handleExportRegister} className="gap-1.5" disabled={saving || exporting}>
-              {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
-              Export PDF
-            </Button>
-          )}
-          <Button variant="outline" onClick={onClose} disabled={saving}>Close</Button>
-          {unacked.length > 0 && (
-            <Button onClick={handleSave} disabled={!anyChecked || saving}>
-              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
-              Record Acknowledgements
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ─── Document card ────────────────────────────────────────────────────────────
 
@@ -556,8 +281,12 @@ function UploadDialog({
   const [description, setDescription] = useState("");
   const [siteId, setSiteId] = useState<string>("none");
   const [department, setDepartment] = useState("");
-  const [requiresAcknowledgement, setRequiresAcknowledgement] = useState(false);
+  // Risk assessments (COSHH included), SOPs, policies and the like become a
+  // read-and-sign task for staff unless the uploader unticks it.
+  const [requiresAcknowledgement, setRequiresAcknowledgement] = useState(true);
+  const [ackChosen, setAckChosen] = useState(false);
   const [annualAcknowledgement, setAnnualAcknowledgement] = useState(false);
+  const [roster, setRoster] = useState<StaffMember[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<"idle" | "requesting" | "uploading" | "saving">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -569,11 +298,39 @@ function UploadDialog({
     setDescription("");
     setSiteId("none");
     setDepartment("");
-    setRequiresAcknowledgement(false);
+    setRequiresAcknowledgement(true);
+    setAckChosen(false);
     setAnnualAcknowledgement(false);
+    setRoster(null);
     setUploading(false);
     setProgress("idle");
   }
+
+  // The staff list, to suggest departments and say who will be asked to sign.
+  useEffect(() => {
+    if (!open || roster) return;
+    apiFetch("/staff-roster")
+      .then(r => (r.ok ? r.json() : []))
+      .then((rows: StaffMember[]) => setRoster(rows.filter(m => m.active)))
+      .catch(() => setRoster([]));
+  }, [open, roster]);
+
+  function changeCategory(next: Category) {
+    setCategory(next);
+    if (!ackChosen) {
+      setRequiresAcknowledgement(next !== "other");
+      if (next === "other") setAnnualAcknowledgement(false);
+    }
+  }
+
+  const departmentOptions = Array.from(new Set([
+    ...existingDepts,
+    ...(roster ?? []).map(m => m.department?.trim()).filter(Boolean) as string[],
+  ])).sort((a, b) => a.localeCompare(b));
+  // Same rule as the server: active staff in the department and at the site, when set.
+  const signers = (roster ?? []).filter(m =>
+    (!department.trim() || m.department === department.trim())
+    && (siteId === "none" || m.site_id === Number(siteId)));
 
   function handleFileChange(f: File) {
     setFile(f);
@@ -699,10 +456,10 @@ function UploadDialog({
           {/* Category */}
           <div className="space-y-1.5">
             <Label>Category</Label>
-            <Select value={category} onValueChange={v => setCategory(v as Category)}>
+            <Select value={category} onValueChange={v => changeCategory(v as Category)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="risk_assessment">Risk Assessment</SelectItem>
+                <SelectItem value="risk_assessment">Risk Assessment (including COSHH)</SelectItem>
                 <SelectItem value="sop">SOP (Standard Operating Procedure)</SelectItem>
                 <SelectItem value="handbook">Staff Handbook</SelectItem>
                 <SelectItem value="policy">Policy</SelectItem>
@@ -714,7 +471,7 @@ function UploadDialog({
 
           {/* Department */}
           <div className="space-y-1.5">
-            <Label>Department <span className="text-muted-foreground text-xs">(optional — leave blank for all staff)</span></Label>
+            <Label>Department <span className="text-muted-foreground text-xs">(optional, leave blank for all staff)</span></Label>
             <Input
               value={department}
               onChange={e => setDepartment(e.target.value)}
@@ -722,7 +479,7 @@ function UploadDialog({
               list="upload-dept-list"
             />
             <datalist id="upload-dept-list">
-              {existingDepts.map(d => <option key={d} value={d} />)}
+              {departmentOptions.map(d => <option key={d} value={d} />)}
             </datalist>
           </div>
 
@@ -756,12 +513,22 @@ function UploadDialog({
             <Checkbox
               id="requires-ack"
               checked={requiresAcknowledgement}
-              onCheckedChange={v => { setRequiresAcknowledgement(!!v); if (!v) setAnnualAcknowledgement(false); }}
+              onCheckedChange={v => { setAckChosen(true); setRequiresAcknowledgement(!!v); if (!v) setAnnualAcknowledgement(false); }}
               className="mt-0.5"
             />
             <div className="flex-1">
-              <Label htmlFor="requires-ack" className="cursor-pointer">Requires staff acknowledgement</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">Staff must sign off that they have read this document. Creates TrainTrack records automatically.</p>
+              <Label htmlFor="requires-ack" className="cursor-pointer">Staff must read and sign</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Adds a task in TrainTrack for every member of staff {department.trim() ? <>in <strong>{department.trim()}</strong></> : "in the business"}
+                {siteId !== "none" ? " at this site" : ""}. Each signature is saved in their training record, and anyone still to sign is listed in the Monday email.
+              </p>
+              {requiresAcknowledgement && roster && (
+                <p className={cn("text-xs mt-1", signers.length ? "text-foreground" : "text-amber-700")} data-testid="upload-signers">
+                  {signers.length
+                    ? `${signers.length} member${signers.length === 1 ? "" : "s"} of staff will be asked to sign.`
+                    : "No active staff on the Staff Roster match yet. Staff added to this department later will be asked to sign."}
+                </p>
+              )}
 
               {requiresAcknowledgement && (
                 <div className="flex items-start gap-2.5 mt-3 pl-0.5">
@@ -1300,7 +1067,7 @@ function OutstandingDialog({ open, onClose, canExport }: { open: boolean; onClos
             </div>
           ) : docs.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4">
-              No documents require acknowledgement yet. Mark a document as &ldquo;Acknowledgement required&rdquo; when uploading to track staff sign-off here.
+              No documents require acknowledgement yet. Tick &ldquo;Staff must read and sign&rdquo; when uploading to track staff sign-off here.
             </p>
           ) : view === "outstanding" ? (
             withOutstanding.length === 0 ? (

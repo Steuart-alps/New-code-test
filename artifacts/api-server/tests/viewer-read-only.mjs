@@ -297,8 +297,9 @@ async function main() {
   let notFound = 0;
   for (const route of routes) {
     // The writes a viewer makes: signing their own records, checked above, and
-    // signing a COSHH assessment for their site (tests/coshh-track.mjs).
-    if (route.path === "/train-track/my-records/:id/sign" || route.path === "/train-track/my-coshh/:id/sign") continue;
+    // signing a COSHH assessment for their site (tests/coshh-track.mjs) and a
+    // DocTrack document for their department (tests/doc-train-flows.mjs).
+    if (["/train-track/my-records/:id/sign", "/train-track/my-coshh/:id/sign", "/train-track/my-documents/:id/sign"].includes(route.path)) continue;
     let usedPlaceholder = false;
     const collection = route.path.replace(/\/:[^/]+.*$/, "");
     const path = route.path.replace(/:(\w+)(\([^)]*\))?\??/g, (_match, param) => {
