@@ -32,6 +32,7 @@ Wednesday 28 October.
 | 13 | Kitchens: stock, costings, GP, recipe spec sheets, supplier details, voice | After launch | None, except a few pence per spec sheet read | Allergen charts built, parked as draft #169 |
 | 14 | Label scanning (chemicals, food, GreenTrack products, equipment plates) | After launch | About 1-2p per label read; more when it also finds a data sheet and drafts COSHH | Anthropic key on Render |
 | 15 | FireTrack: sound level meter for fire alarm tests | After launch (with the iPhone app) | None | Phone app; your check of the dB limits |
+| 16 | Temperature probes and sensors: Bluetooth probes, Wi-Fi fridge, freezer and water tank monitoring | After launch (probes with the phone app) | Hardware bought by each business; possibly a bigger database later | Phone app; choice of sensor make |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -566,6 +567,80 @@ readings can be 5 to 10 dB out, so it belongs in the phone app.
 
 ---
 
+## 16. Temperature probes and sensors
+
+**When:** after launch. Bluetooth probes come with the phone app (item 4);
+Wi-Fi sensors can come at any time after launch. Nothing has been built yet.
+
+### Bluetooth probes
+
+Staff use a Bluetooth food probe (for example cooking, cooling, reheating or
+delivery checks) and the reading goes straight into the KitchenTrack record
+instead of being typed. The same works for LegionellaTrack outlet temperatures
+with a Bluetooth water thermometer. This removes typing mistakes and shows the
+record came from a probe.
+
+This needs the ComplyTrack phone app: a web page can't use Bluetooth on an
+iPhone (the same limit as the sound level meter, item 15). Each probe make
+talks in its own way, so we'd support one or two common makes first and
+check that their makers allow it.
+
+### Remote monitoring by Wi-Fi sensors
+
+A small sensor in each fridge, freezer or cold water tank sends its
+temperature every few minutes over the building's Wi-Fi. ComplyTrack:
+
+- fills in the twice-daily fridge and freezer readings automatically, so staff
+  don't have to;
+- shows a live temperature and a chart for each unit;
+- raises an alert when a unit stays out of range (for example a fridge above
+  8°C for more than 30 minutes, so opening the door doesn't set it off), and
+  records what was done about it;
+- for water tanks, records cold water below 20°C and hot water at the right
+  temperature for the legionella records.
+
+Each sensor is linked to the fridge, freezer or tank it sits in, using the
+fixed identities from the QR labels work (#159), so readings land on the right
+record.
+
+**Two ways to build it:**
+
+1. **Link to an existing sensor maker's service** that already sells Wi-Fi
+   sensors with its own app and a way for other software to read the data.
+   Quicker and more reliable, but each business pays that maker a monthly
+   subscription on top of the sensors.
+2. **Our own "send a reading" link** that standard, cheaper sensors send to
+   directly. No subscription for the business, but we'd have to test the
+   sensors ourselves and support the set-up.
+
+My suggestion is to start with option 1 for one maker, then add option 2 if
+clients want cheaper hardware.
+
+**Notifications.** Alerts follow your rule: they go to the person responsible
+for that kitchen or tank (with a text or phone alert for out-of-hours
+failures if wanted), not to everyone, and the Owner sees a summary in the
+weekly update (item 3).
+
+**Cost:**
+
+- **Hardware:** paid by each business. Bluetooth probes and Wi-Fi sensors
+  vary a lot in price, from tens of pounds to over a hundred each, and
+  option 1 adds the maker's monthly fee. These prices are rough and need
+  checking when a make is chosen.
+- **Hosting:** readings every few minutes add up (100 businesses with 10
+  sensors each is about 100,000 readings a day). To keep the database small
+  we'd keep every reading for a short time and then keep only hourly
+  highs and lows plus any alerts. Even so, a larger database plan on Render
+  may be needed once many businesses use sensors; I'll say so before it
+  happens.
+- Text message alerts, if wanted, cost a few pence each.
+
+**Questions for you:** do any of your clients already have sensors or
+Bluetooth probes, and which make? Should sensors replace the staff fridge
+checks completely, or sit alongside them?
+
+---
+
 ## Before launch (already in hand, listed for completeness)
 
 These are handled in the "Launch plan for 26 October" thread and are not new
@@ -599,6 +674,7 @@ work:
 | Supplier allergens and prices | Pennies per invoice or product read; nothing for a supplier file |
 | Kitchen voice input | None |
 | FireTrack sound level meter | None |
+| Temperature probes and sensors | Hardware paid by each business (plus a maker subscription for option 1); possibly a larger database plan later; text alerts a few pence each |
 | Label scanning | About 1-2p per label; about 40p for a chemical including its data sheet and COSHH draft (mostly in the Live AI plan already) |
 
 Hosting stays on the one Render web service and database in Frankfurt for
