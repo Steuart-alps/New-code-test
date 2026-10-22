@@ -641,6 +641,19 @@ checks completely, or sit alongside them?
 
 ---
 
+## Future apps (separate from ComplyTrack)
+
+Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
+researched or built.
+
+### Shopping comparison app
+
+Enter a shopping list and the app says which shop is the best (cheapest
+overall) to go to for it. It could share the supplier price import planned
+for kitchens (item 13), since both need up-to-date product prices.
+
+---
+
 ## Before launch (already in hand, listed for completeness)
 
 These are handled in the "Launch plan for 26 October" thread and are not new
