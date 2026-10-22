@@ -1946,6 +1946,52 @@ paths:
               schema:
                 $ref: "#/components/schemas/FireCallPointImportResult"
 
+  /imports/pat-appliances/reading:
+    get:
+      operationId: getPatRegisterReading
+      tags: [pat-track]
+      summary: Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
+      responses:
+        "200":
+          description: Reading status and the sites the caller can import into
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatRegisterReadingStatus"
+
+  /imports/pat-appliances/read:
+    post:
+      operationId: readPatRegisterList
+      tags: [pat-track]
+      summary: Read a photo, scan, PDF or Word list of appliances into register rows (managers)
+      description: >-
+        Claude reads the file and returns rows in the PAT appliance import's
+        columns. Nothing is saved: the browser sends the rows to
+        POST /imports/pat-appliances for the usual preview and import. The
+        file is not stored. Off until the server has an Anthropic API key;
+        each business has a monthly number of readings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatRegisterReadRequest"
+      responses:
+        "200":
+          description: The rows read from the file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatRegisterReadResult"
+        "400":
+          description: The file cannot be read here, or the site is not one of the caller's
+        "429":
+          description: This business has used its readings for the month
+        "502":
+          description: The file could not be read just now
+        "503":
+          description: Reading is not switched on (no Anthropic API key)
+
   /fire-safety/call-points/{id}:
     put:
       operationId: updateFireCallPoint
@@ -8035,6 +8081,46 @@ components:
       required:
         - siteId
         - ids
+
+    PatRegisterReadingStatus:
+      type: object
+      properties:
+        available: { type: boolean }
+        monthlyLimit: { type: integer, description: "Readings a business may have each month; 0 means no limit" }
+        usedThisMonth: { type: integer }
+        sites:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+            required: [id, name]
+      required: [available, monthlyLimit, usedThisMonth, sites]
+
+    PatRegisterReadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        fileName: { type: string, maxLength: 255 }
+        mimeType: { type: string, description: "image/jpeg, image/png, image/webp, image/gif, application/pdf, .docx or text/plain" }
+        data: { type: string, description: "The file as base64 (8 MB at most before encoding)" }
+        siteId: { type: integer, nullable: true, description: "The site the list is for, if the person chose one" }
+      required: [fileName, mimeType, data]
+
+    PatRegisterReadResult:
+      type: object
+      properties:
+        headers:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          items:
+            type: array
+            items: { type: string }
+        unclear: { type: integer, description: "Rows that were hard to read; their Notes start with \"Check:\"" }
+      required: [headers, rows, unclear]
 
     FireCallPointImportRequest:
       type: object

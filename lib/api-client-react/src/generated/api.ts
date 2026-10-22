@@ -189,6 +189,9 @@ import type {
   PATTest,
   PATTrackConfig,
   PATTrackStatus,
+  PatRegisterReadRequest,
+  PatRegisterReadResult,
+  PatRegisterReadingStatus,
   PoolTrackConfig,
   PremisesInspection,
   PremisesTrackSummary,
@@ -6437,6 +6440,155 @@ export const useImportFireCallPoints = <TError = ErrorType<void | FireCallPointI
         TContext
       > => {
       return useMutation(getImportFireCallPointsMutationOptions(options));
+    }
+
+export const getGetPatRegisterReadingUrl = () => {
+
+
+
+
+  return `/api/imports/pat-appliances/reading`
+}
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
+ */
+export const getPatRegisterReading = async ( options?: RequestInit): Promise<PatRegisterReadingStatus> => {
+
+  return customFetch<PatRegisterReadingStatus>(getGetPatRegisterReadingUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPatRegisterReadingQueryKey = () => {
+    return [
+    `/api/imports/pat-appliances/reading`
+    ] as const;
+    }
+
+
+export const getGetPatRegisterReadingQueryOptions = <TData = Awaited<ReturnType<typeof getPatRegisterReading>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPatRegisterReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPatRegisterReadingQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPatRegisterReading>>> = ({ signal }) => getPatRegisterReading({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPatRegisterReading>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPatRegisterReadingQueryResult = NonNullable<Awaited<ReturnType<typeof getPatRegisterReading>>>
+export type GetPatRegisterReadingQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document of an appliance list, and this month's use
+ */
+
+export function useGetPatRegisterReading<TData = Awaited<ReturnType<typeof getPatRegisterReading>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPatRegisterReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPatRegisterReadingQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReadPatRegisterListUrl = () => {
+
+
+
+
+  return `/api/imports/pat-appliances/read`
+}
+
+/**
+ * Claude reads the file and returns rows in the PAT appliance import's columns. Nothing is saved: the browser sends the rows to POST /imports/pat-appliances for the usual preview and import. The file is not stored. Off until the server has an Anthropic API key; each business has a monthly number of readings.
+ * @summary Read a photo, scan, PDF or Word list of appliances into register rows (managers)
+ */
+export const readPatRegisterList = async (patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<PatRegisterReadResult> => {
+
+  return customFetch<PatRegisterReadResult>(getReadPatRegisterListUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(patRegisterReadRequest)
+  }
+);}
+
+
+
+
+
+export const getReadPatRegisterListMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readPatRegisterList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readPatRegisterList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext> => {
+
+const mutationKey = ['readPatRegisterList'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readPatRegisterList>>, {data: BodyType<PatRegisterReadRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  readPatRegisterList(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReadPatRegisterListMutationResult = NonNullable<Awaited<ReturnType<typeof readPatRegisterList>>>
+    export type ReadPatRegisterListMutationBody = BodyType<PatRegisterReadRequest>
+    export type ReadPatRegisterListMutationError = ErrorType<void>
+
+    /**
+ * @summary Read a photo, scan, PDF or Word list of appliances into register rows (managers)
+ */
+export const useReadPatRegisterList = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readPatRegisterList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof readPatRegisterList>>,
+        TError,
+        {data: BodyType<PatRegisterReadRequest>},
+        TContext
+      > => {
+      return useMutation(getReadPatRegisterListMutationOptions(options));
     }
 
 export const getUpdateFireCallPointUrl = (id: number,) => {
