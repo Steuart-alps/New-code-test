@@ -12,7 +12,7 @@ Full detail for each step: the [launch plan](https://claude.ai/artifact/EamQtVRf
 - [ ] **2. Fix the VAT setting in Stripe** (5 min). Stripe → **Settings** → **Tax** → **Settings** → "Include tax in prices" = **No (Exclusive)**. At the moment £10 is charged as £8.33 + £1.67 VAT instead of £10 + £2 VAT. Type "tax set" in [Accounting and VAT][vat].
 - [ ] **3. Answer the Terms questions** (5 min), in [Launch plan for 26 October][launch]:
   - Is it right that an extra site is charged £10 straight away? (That's what the app does. The new Terms say so.)
-  - Is ALPS Consulting Ltd registered in Scotland (SC739043) or in England and Wales?
+  - Should the Terms be governed by Scots law and Scottish courts? The company is registered in Scotland. There's a card in the thread to tap.
   - What is the registered office address? The website must show it with the company number.
 - [ ] **4. Do the £12 billing test** (20 min, refunded; after step 2). Follow the [billing test steps](https://claude.ai/code/artifact/f6391a14-0a2a-4333-baf4-25a99e93f314). Type "billing test done" in [Billing test for Steuart][billing].
 - [ ] **5. Approve the public pages: type "merge 161"** (15 min to look) in [SEO and positioning][seo]. This adds 28 pages Google can find: modules, pricing and free printable logs.
