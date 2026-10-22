@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Beaker, CalendarClock, Download, FileText, Info, Pencil, Plus, Trash2 } from "lucide-react";
 import { AppLayout } from "@/components/layout";
+import { CoshhRegisterPanel, type CoshhSubstance } from "@/components/coshh-register-panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,7 +23,8 @@ import {
 } from "@/components/register-shared";
 
 // COSHHTrack (API: /api/coshh-track/*). Substances come from the core COSHH
-// register (/api/registers/coshh); assessments and checks link to them.
+// register (/api/registers/coshh), which COSHHTrack shows as its Substances
+// tab; assessments and checks link to them.
 
 const EXPOSURE_ROUTES = [
   { key: "inhalation", label: "Breathing in" },
@@ -54,7 +56,8 @@ const RISK_STYLE: Record<string, string> = {
   high: "border-red-300 bg-red-50 text-red-700",
 };
 
-interface Substance { id: number; siteId: number | null; productName: string; status: string; sdsObjectPath: string | null }
+type Substance = CoshhSubstance;
+const TABS = ["due", "substances", "assessments", "checks"];
 
 interface Assessment {
   id: number;
@@ -210,7 +213,11 @@ export default function CoshhTrackPage() {
   const { toast } = useToast();
   const { sites, siteName } = useRegisterSites();
 
-  const [tab, setTab] = useState("due");
+  const search = useSearch();
+  const [tab, setTab] = useState(() => {
+    const requested = new URLSearchParams(search).get("tab");
+    return requested && TABS.includes(requested) ? requested : "due";
+  });
   const [siteFilter, setSiteFilter] = useState("all");
   const [checkFilter, setCheckFilter] = useState<"all" | CheckType>("all");
   const [showArchived, setShowArchived] = useState(false);
@@ -270,7 +277,7 @@ export default function CoshhTrackPage() {
       siteId: substance?.siteId != null ? String(substance.siteId) : siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : "",
       substanceId: substance ? String(substance.id) : NONE,
       task: "", whoAtRisk: "", exposureRoutes: [], howOften: "", hazardStatements: "", signalWord: NONE,
-      healthEffects: "", exposureLimits: "", controls: "", ppe: [], ppeDetails: "", riskLevel: "medium",
+      healthEffects: "", exposureLimits: "", controls: substance?.controls ?? "", ppe: [], ppeDetails: "", riskLevel: "medium",
       healthSurveillanceRequired: false, monitoringRequired: false, levRequired: false,
       storage: "", spillProcedure: "", firstAid: "", disposal: "", assessor: user?.name ?? "",
       assessmentDate: today, reviewDue: addMonthsIso(today, 12), reviewDueTouched: false,
@@ -488,7 +495,8 @@ export default function CoshhTrackPage() {
             Under the COSHH Regulations 2002 you assess the risks from hazardous substances, put controls in place, keep
             them working (extraction systems are examined at least every 14 months), provide health checks where the
             assessment calls for them, and tell staff about the risks. List your products and safety data sheets in
-            the <Link href="/coshh" className="underline font-medium">COSHH Register</Link>, then assess each one here.
+            the <button type="button" className="underline font-medium" onClick={() => setTab("substances")}>Substances</button> tab
+            (your COSHH register), then assess each one.
           </p>
         </div>
 
@@ -531,6 +539,7 @@ export default function CoshhTrackPage() {
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             <TabsTrigger value="due">What's due</TabsTrigger>
+            <TabsTrigger value="substances">Substances</TabsTrigger>
             <TabsTrigger value="assessments">Assessments ({visibleAssessments.length})</TabsTrigger>
             <TabsTrigger value="checks">Checks ({visibleChecks.length})</TabsTrigger>
           </TabsList>
@@ -585,6 +594,21 @@ export default function CoshhTrackPage() {
                 </div>
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="substances" className="pt-3">
+            <CoshhRegisterPanel
+              track={{
+                assessments,
+                siteFilter,
+                onAssess: canAssess ? (substance) => newAssessment(substance) : undefined,
+                onOpenAssessment: (id) => {
+                  const assessment = assessments.find((a) => a.id === id);
+                  if (assessment && canAssess) editAssessment(assessment);
+                  else setTab("assessments");
+                },
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="assessments" className="space-y-3 pt-3">

@@ -10,6 +10,7 @@ import {
   pinnedNavStorageKey,
   resolvePinnedNavItems,
   togglePinnedHref,
+  withoutReplacedNavItems,
 } from "../src/lib/nav-groups.ts";
 
 function flattenGroups(groups) {
@@ -173,5 +174,15 @@ assert.deepEqual(togglePinnedHref(["/a", "/b"], "/a"), ["/b"], "Pinning again un
 const full = Array.from({ length: MAX_PINNED_NAV_ITEMS }, (_, i) => `/${i}`);
 assert.deepEqual(togglePinnedHref(full, "/extra"), full, "A full list refuses another pin");
 assert.deepEqual(togglePinnedHref(full, "/0"), full.slice(1), "A full list can still unpin");
+
+// COSHHTrack includes the COSHH register (its Substances tab), so the
+// separate register link only shows for businesses without COSHHTrack.
+const hrefsWith = (services) => withoutReplacedNavItems(userGroups, (key) => services.includes(key))
+  .flatMap(g => g.items.map(i => i.href));
+assert.ok(hrefsWith(["core"]).includes("/coshh"), "Without COSHHTrack the free COSHH register is in the menu");
+assert.ok(hrefsWith(["core"]).includes("/coshh-track"), "COSHHTrack still shows (locked) without the module");
+assert.ok(!hrefsWith(["core", "coshhtrack"]).includes("/coshh"), "With COSHHTrack the register link is not repeated");
+assert.ok(hrefsWith(["core", "coshhtrack"]).includes("/coshh-track"));
+assert.equal(withoutReplacedNavItems(userGroups, () => false).length, userGroups.length, "No section is dropped while modules load");
 
 console.log("Nav groups visibility regression tests passed.");

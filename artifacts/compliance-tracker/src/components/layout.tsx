@@ -67,6 +67,7 @@ import {
   getNavGroups,
   isNavItemActive,
   isNavItemAvailable,
+  withoutReplacedNavItems,
   isNavGroupInitiallyOpen,
   isNavItemPinnable,
   MAX_PINNED_NAV_ITEMS,
@@ -113,7 +114,11 @@ function useNavGroups(): NavGroup[] {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
   const canManageUsers = useCanManageUsers();
-  return getNavGroups({ isConsultant, canAdmin, canManageUsers });
+  const { services, hasService } = useAuth();
+  return withoutReplacedNavItems(
+    getNavGroups({ isConsultant, canAdmin, canManageUsers }),
+    (key) => services != null && hasService(key),
+  );
 }
 
 interface PinControls {

@@ -38,7 +38,11 @@ import {
   FileSearch
 } from "lucide-react";
 
-export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
+export interface NavItem {
+  href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean;
+  /** Hidden when the business has this module, because the module includes the page (e.g. COSHHTrack's Substances tab is the COSHH register). */
+  replacedByService?: string;
+}
 export interface NavGroup { id: string; title: string; defaultOpen: boolean; items: NavItem[] }
 
 export function isNavItemActive(item: NavItem, location: string): boolean {
@@ -48,6 +52,17 @@ export function isNavItemActive(item: NavItem, location: string): boolean {
 export function isNavItemAvailable(item: NavItem, hasService: (key: string) => boolean): boolean {
   if (item.serviceKeys) return item.serviceKeys.some(hasService);
   return !item.serviceKey || hasService(item.serviceKey);
+}
+
+/**
+ * Drops links whose page a module the business has already includes, and
+ * any section left empty. `hasService` must answer false while the
+ * business's modules are still loading, so the links don't flicker.
+ */
+export function withoutReplacedNavItems(groups: NavGroup[], hasService: (key: string) => boolean): NavGroup[] {
+  return groups
+    .map(group => ({ ...group, items: group.items.filter(item => !item.replacedByService || !hasService(item.replacedByService)) }))
+    .filter(group => group.items.length > 0);
 }
 
 /** Each section's open/closed choice is saved per user and business. */
@@ -95,7 +110,7 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
         { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
         { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
         { href: "/coshh-track",    label: "COSHHTrack",      icon: Beaker,          serviceKey: "coshhtrack" },
-        { href: "/coshh",          label: "COSHH Register",  icon: FlaskConical },
+        { href: "/coshh",          label: "COSHH Register",  icon: FlaskConical, replacedByService: "coshhtrack" },
         { href: "/asbestos",       label: "Asbestos Register", icon: ShieldAlert },
       ],
     },
