@@ -34,6 +34,8 @@ export interface AuthUser {
   staffRosterId?: number | null;
   /** Named in PLATFORM_ADMIN_EMAILS: may issue ALPS discount codes. */
   platformOperator?: boolean;
+  /** False only for a self-registered Owner who hasn't confirmed their address yet. */
+  emailVerified?: boolean;
 }
 
 export type PasskeyOptions = Record<string, unknown>;
@@ -53,7 +55,7 @@ interface AuthContextValue {
   client: AuthClient | null;
   billingLocked: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<{ requires2fa: boolean; requiresPasskey?: boolean; passkeyOptions?: PasskeyOptions; requires2faSetup?: boolean; requiresEmailVerification?: boolean }>;
+  login: (email: string, password: string) => Promise<{ requires2fa: boolean; requiresPasskey?: boolean; passkeyOptions?: PasskeyOptions; requires2faSetup?: boolean }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   activeClientId: number | null;
@@ -305,16 +307,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh().finally(() => setIsLoading(false));
   }, []);
 
-  async function login(email: string, password: string): Promise<{ requires2fa: boolean; requiresPasskey?: boolean; passkeyOptions?: PasskeyOptions; requires2faSetup?: boolean; requiresEmailVerification?: boolean }> {
+  async function login(email: string, password: string): Promise<{ requires2fa: boolean; requiresPasskey?: boolean; passkeyOptions?: PasskeyOptions; requires2faSetup?: boolean }> {
     const res = await apiFetch("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      const error = new Error(data.error ?? "Login failed") as Error & { requiresEmailVerification?: boolean };
-      error.requiresEmailVerification = data.requiresEmailVerification;
-      throw error;
+      throw new Error(data.error ?? "Login failed");
     }
     const data = await res.json();
     if (data.requires2fa || data.requiresPasskey) {
