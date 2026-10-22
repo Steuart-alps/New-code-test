@@ -160,17 +160,9 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  const verificationStatus = await db.execute(sql`
-    SELECT email_verified FROM users WHERE id = ${result.user.id} LIMIT 1
-  `);
-  const emailVerified = (verificationStatus.rows?.[0] as { email_verified?: boolean } | undefined)?.email_verified;
-  if (emailVerified === false) {
-    res.status(403).json({
-      error: "Please verify your email address before signing in.",
-      requiresEmailVerification: true,
-    });
-    return;
-  }
+  // An address that hasn't been confirmed yet never blocks sign-in: the
+  // account exists and the password is right. The web app reminds the user
+  // to confirm it (see emailVerified on /auth/me).
 
   // Never retain an earlier session while authenticating a new account.
   delete (req.session as any).userId;
@@ -375,6 +367,14 @@ function getPasskeySetupUserId(req: any): number | undefined {
 }
 
 // Body returned when password login completes without a second factor.
+// email_verified is a runtime-migration column, so it isn't on usersTable.
+async function isEmailVerified(userId: number): Promise<boolean> {
+  const result = await db.execute(sql`
+    SELECT email_verified FROM users WHERE id = ${userId} LIMIT 1
+  `);
+  return (result.rows?.[0] as { email_verified?: boolean } | undefined)?.email_verified !== false;
+}
+
 async function signedInResponse(
   user: typeof usersTable.$inferSelect,
   client: unknown,
@@ -388,7 +388,10 @@ async function signedInResponse(
       services = await getEntitledServices(user.clientId);
     } catch {}
   }
-  return { user: safeUser, client: client ?? null, billingLocked, services, twoFactorRequired: false };
+  return {
+    user: { ...safeUser, emailVerified: await isEmailVerified(user.id) },
+    client: client ?? null, billingLocked, services, twoFactorRequired: false,
+  };
 }
 
 router.post("/auth/passkeys/registration/options", async (req, res) => {
@@ -687,13 +690,16 @@ router.get("/auth/me", async (req, res) => {
     : stored;
   const passkeys = await getUserPasskeys(user.id);
   const twoFactorRequired = await isTwoFactorRequired(user);
+  // Only a self-registered Owner who hasn't opened the welcome link yet is
+  // false; the web app shows them a reminder with a "send again" button.
+  const emailVerified = await isEmailVerified(user.id);
   if (!user.totpEnabled) {
     if (twoFactorRequired) {
       res.json({ requires2faSetup: true, user: { ...safeUser, platformOperator: isPlatformOperator(user) } });
       return;
     }
     res.json({
-      user: { ...safeUser, recoveryCodesRemaining: 0, platformOperator: isPlatformOperator(user) },
+      user: { ...safeUser, recoveryCodesRemaining: 0, platformOperator: isPlatformOperator(user), emailVerified },
       client, billingLocked, services, passkeyCount: passkeys.length, twoFactorRequired,
     });
     return;
@@ -708,7 +714,7 @@ router.get("/auth/me", async (req, res) => {
     throw new Error("Could not determine remaining recovery codes");
   }
   res.json({
-    user: { ...safeUser, recoveryCodesRemaining, platformOperator: isPlatformOperator(user) },
+    user: { ...safeUser, recoveryCodesRemaining, platformOperator: isPlatformOperator(user), emailVerified },
     client, billingLocked, services, passkeyCount: passkeys.length, twoFactorRequired,
   });
 });
@@ -805,6 +811,14 @@ router.post("/auth/reset-password", resetPasswordRateLimit, async (req, res) => 
     await tx.update(usersTable)
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(usersTable.id, row.user_id));
+    // The link arrived by email, so the address is confirmed too.
+    await tx.execute(sql`
+      UPDATE users
+      SET email_verified = true,
+          email_verification_token = NULL,
+          email_verification_expires_at = NULL
+      WHERE id = ${row.user_id} AND email_verified = false
+    `);
     // Any other outstanding reset or set-up link stops working too.
     await tx.execute(sql`
       UPDATE password_reset_tokens SET used_at = now()
@@ -909,9 +923,9 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
     .values({ name, email, passwordHash, role: "client_admin", clientId, subscriptionStatus: "trial" })
     .returning();
 
-  // New self-registrations must confirm control of their email address before
-  // receiving an authenticated session. Existing accounts remain verified via
-  // the migration default, so this is backwards-compatible.
+  // New self-registrations are asked to confirm their email address. They can
+  // sign in meanwhile (the web app shows a reminder); existing and invited
+  // accounts are verified via the migration default.
   const verificationToken = randomBytes(32).toString("hex");
   const verificationHash = createHash("sha256").update(verificationToken).digest("hex");
   await db.execute(sql`
@@ -941,7 +955,7 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #1e293b;">Welcome to ComplyTrack</h2>
         <p>Hi ${safeName},</p>
-        <p>Your ComplyTrack account has been created. Please confirm your email address to activate it.</p>
+        <p>Your ComplyTrack account has been created. Please confirm your email address.</p>
         <p style="margin: 24px 0;">
           <a href="${verifyUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Verify email address</a>
         </p>
@@ -1059,7 +1073,7 @@ router.post("/auth/resend-verification", resendVerificationRateLimit, resendVeri
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #1e293b;">Verify your ComplyTrack email address</h2>
             <p>Hi ${escapeHtml(user.name)},</p>
-            <p>Here is a new link to confirm your email address and activate your ComplyTrack account.</p>
+            <p>Here is a new link to confirm your ComplyTrack email address.</p>
             <p style="margin: 24px 0;">
               <a href="${verifyUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Verify email address</a>
             </p>
@@ -1068,7 +1082,7 @@ router.post("/auth/resend-verification", resendVerificationRateLimit, resendVeri
             <p>Best regards,<br><strong>ComplyTrack</strong></p>
           </div>
         `,
-        text: `Hi ${user.name},\n\nHere is a new link to confirm your email address and activate your ComplyTrack account:\n${verifyUrl}\n\nOpen ComplyTrack: ${appUrl}\n\nThis link expires in 24 hours and replaces any earlier verification link. If you did not ask for it, you can ignore this email.\n\nBest regards,\nComplyTrack`,
+        text: `Hi ${user.name},\n\nHere is a new link to confirm your ComplyTrack email address:\n${verifyUrl}\n\nOpen ComplyTrack: ${appUrl}\n\nThis link expires in 24 hours and replaces any earlier verification link. If you did not ask for it, you can ignore this email.\n\nBest regards,\nComplyTrack`,
       }).catch((err) => {
         req.log.warn({ err }, "Failed to resend verification email");
       });
@@ -1154,17 +1168,9 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  const verificationStatus = await db.execute(sql`
-    SELECT email_verified FROM users WHERE id = ${result.user.id} LIMIT 1
-  `);
-  const emailVerified = (verificationStatus.rows?.[0] as { email_verified?: boolean } | undefined)?.email_verified;
-  if (emailVerified === false) {
-    res.status(403).json({
-      error: "Please verify your email address before signing in.",
-      requiresEmailVerification: true,
-    });
-    return;
-  }
+  // An address that hasn't been confirmed yet never blocks sign-in: the
+  // account exists and the password is right. The web app reminds the user
+  // to confirm it (see emailVerified on /auth/me).
 
   // Do not issue a bearer token until a second request proves possession of the
   // user's authenticator. Only a digest of the short-lived challenge is stored.

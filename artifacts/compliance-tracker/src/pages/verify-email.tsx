@@ -65,7 +65,7 @@ export default function VerifyEmailPage() {
     pending: {
       icon: <Mail className="w-10 h-10 text-primary" />,
       title: "Check your inbox",
-      text: "We sent a verification link to your email address. Open it to activate your ComplyTrack account.",
+      text: "We sent a link to confirm your email address. Your account is ready, so you can sign in now and open the link when it arrives.",
     },
     success: {
       icon: <CheckCircle2 className="w-10 h-10 text-green-600" />,
