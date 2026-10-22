@@ -2,6 +2,7 @@ import { ReactNode } from "react";
 import { useLocation } from "wouter";
 import { ShieldCheck, ArrowLeft } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
+import { copyrightNotice } from "@/lib/copyright";
 
 export function LegalLayout({ title, updated, children }: { title: string; updated: string; children: ReactNode }) {
   const [, navigate] = useLocation();
@@ -31,7 +32,7 @@ export function LegalLayout({ title, updated, children }: { title: string; updat
       </main>
       <footer className="border-t border-border py-8 px-6 mt-8">
         <p className="max-w-3xl mx-auto text-sm text-muted-foreground">
-          © {new Date().getFullYear()} ALPS Consulting Ltd. All rights reserved.
+          {copyrightNotice()}
         </p>
       </footer>
     </div>

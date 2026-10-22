@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import alpsLogo from "@/assets/alps-logo.png";
 import { API_BASE } from "@/lib/api";
+import { copyrightNotice } from "@/lib/copyright";
 
 type View = "login" | "totp" | "passkey" | "forgot" | "forgot-sent";
 
@@ -412,6 +413,7 @@ export default function LoginPage() {
           <p className="text-xs text-muted-foreground/60 font-light">
             Or ask your account owner to invite you if your business already uses ComplyTrack.
           </p>
+          <p className="text-xs text-muted-foreground/60 font-light pt-3">{copyrightNotice()}</p>
         </div>
       </motion.div>
     </div>
