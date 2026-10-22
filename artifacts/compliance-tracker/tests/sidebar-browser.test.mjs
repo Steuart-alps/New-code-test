@@ -89,7 +89,7 @@ try {
   });
 
   const desktop = page.locator("aside");
-  async function load(path = "/coshh") {
+  async function load(path = "/asbestos") {
     await page.goto(`${baseUrl}${path}`);
     // The desktop sidebar is hidden (not just closed) at phone width.
     await desktop.getByRole("button", { name: "Core Work", exact: true, includeHidden: true }).waitFor({ state: "attached" });
@@ -116,10 +116,10 @@ try {
   // ...and on in-app navigation (as a page link or a pinned link does) into a closed section.
   assert.equal(await isOpen(desktop, "Safety"), false);
   await page.evaluate(() => {
-    window.history.pushState(null, "", "/coshh");
+    window.history.pushState(null, "", "/asbestos");
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
-  await desktop.locator('a[href="/coshh"]').waitFor();
+  await desktop.locator('a[href="/asbestos"]').waitFor();
   assert.ok(await isOpen(desktop, "Safety"), "Navigating opens the new page's section");
 
   // A toggle is saved and survives a reload.
@@ -182,10 +182,10 @@ try {
   assert.equal(await desktop.locator('[data-testid="nav-pinned"]').count(), 0, "No pinned section until something is pinned");
   assert.equal(await desktop.getByRole("button", { name: "Pin LegionellaTrack" }).count(), 0,
     "A locked module has no pin button");
-  assert.equal(await desktop.getByRole("button", { name: "Pin COSHH Register" }).count(), 1,
+  assert.equal(await desktop.getByRole("button", { name: "Pin Asbestos Register" }).count(), 1,
     "Links without a service key can be pinned");
 
-  // Pin FireTrack (Safety, open because /coshh is in it) and Dashboard (Core).
+  // Pin FireTrack (Safety, open because /asbestos is in it) and Dashboard (Core).
   await desktop.locator('a[href="/fire-safety"]').hover();
   await desktop.getByRole("button", { name: "Pin FireTrack" }).click();
   await desktop.getByRole("button", { name: "Pin Dashboard" }).click();
@@ -203,7 +203,7 @@ try {
   drawer = page.getByRole("dialog");
   await drawer.locator('[data-testid="nav-pinned"]').waitFor();
   assert.deepEqual(await pinnedLabels(drawer), ["FireTrack", "Dashboard"], "The phone drawer shows the same pins");
-  const drawerPinOpacity = await drawer.getByRole("button", { name: "Pin COSHH Register" })
+  const drawerPinOpacity = await drawer.getByRole("button", { name: "Pin Asbestos Register" })
     .evaluate(el => Number(getComputedStyle(el).opacity));
   assert.ok(drawerPinOpacity > 0, "Pin buttons are visible in the drawer without hover");
   await drawer.locator('[data-testid="nav-pinned"] a[href="/fire-safety"]').click();
@@ -237,7 +237,7 @@ try {
     ["/dashboard", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors"])), [pinKey()]);
   await load();
   assert.equal((await pinnedLabels(desktop)).length, 6);
-  assert.ok(await desktop.getByRole("button", { name: "Pin COSHH Register" }).isDisabled(),
+  assert.ok(await desktop.getByRole("button", { name: "Pin Asbestos Register" }).isDisabled(),
     "A seventh pin is refused");
   assert.ok(await desktop.getByRole("button", { name: "Unpin Tasks" }).first().isEnabled());
 

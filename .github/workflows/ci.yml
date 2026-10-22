@@ -121,6 +121,9 @@ jobs:
       - name: Sidebar sections and pins test
         run: pnpm --filter @workspace/compliance-tracker run test:nav-groups
 
+      - name: Reload after a new release test
+        run: pnpm --filter @workspace/compliance-tracker run test:new-release-reload
+
       - name: Web client CSRF header test
         run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
 
@@ -249,6 +252,9 @@ jobs:
 
       - name: GreenTrack spraying book and stock (production schema base)
         run: pnpm --filter @workspace/api-server run test:green-spraying
+
+      - name: KitchenTrack allergen recipes and charts (production schema base)
+        run: pnpm --filter @workspace/api-server run test:allergen-recipes
 
       - name: Report actions from uploaded reports (production schema base)
         run: pnpm --filter @workspace/api-server run test:inspection-reports

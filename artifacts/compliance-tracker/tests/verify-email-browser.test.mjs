@@ -1,6 +1,6 @@
 // Verification-link page and signup email recovery, with the API stubbed:
 // the link's token is read from the query string, an expired link offers a
-// new one, sign-in carries the address over, and the resend copy never says
+// new one, sign-up carries the address over, and the resend copy never says
 // whether an account exists.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -72,9 +72,6 @@ try {
         ? json(route, { sent: true })
         : json(route, { error: "Too many attempts. Please try again later." }, resendStatus);
     }
-    if (url.pathname === "/api/auth/login") {
-      return json(route, { error: "Please verify your email address before signing in.", requiresEmailVerification: true }, 403);
-    }
     return json(route, {});
   });
 
@@ -92,12 +89,11 @@ try {
   await page.getByText("If that address has an account waiting to be verified").waitFor();
   assert.deepEqual(resendBodies.at(-1), { email: "owner@example.com" });
 
-  // Signing in before verifying lands on the page with the address filled in.
-  await page.goto(`${baseUrl}/login`);
-  await page.fill("#email", "new.owner@example.com");
-  await page.fill("input[type=password]", "password-123456");
-  await page.click("button[type=submit]");
+  // Straight after sign-up the page has the address filled in and says the
+  // account can be used before the link is opened.
+  await page.goto(`${baseUrl}/verify-email?email=${encodeURIComponent("new.owner@example.com")}`);
   await page.getByRole("heading", { name: "Check your inbox" }).waitFor();
+  await page.getByText("you can sign in now").waitFor();
   assert.equal(new URL(page.url()).searchParams.get("email"), "new.owner@example.com");
   assert.equal(await page.getByLabel("Email address").inputValue(), "new.owner@example.com");
   await page.getByText("Check your spam or junk folder.").waitFor();

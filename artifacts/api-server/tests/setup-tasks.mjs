@@ -83,6 +83,7 @@ const LEGAL_CORE = [
   "Fire Risk Assessment Review", "Fire Alarm Maintenance", "Emergency Light Maintenance", "Fire Extinguishers Maintenance",
   "Electrical Installation Condition Report (EICR)", "Legionella Risk Assessment",
   "Asbestos Management Survey & Register Review", "Employers' Liability Insurance Certificate",
+  "Waste Transfer Note — Annual Renewal", "Waste Carrier Registration Check",
 ];
 
 async function setupWizard(a, b, viewer) {

@@ -166,6 +166,7 @@
     "test:compliance-audit-history": "bash tests/run-compliance-audit-history.sh",
     "test:compliance-content": "bash tests/run-compliance-content.sh",
     "test:registers": "bash tests/run-fresh-schema.sh tests/registers.mjs",
+    "test:allergen-recipes": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/allergen-recipes.mjs",
     "test:coshh-track": "bash tests/run-fresh-schema.sh tests/coshh-track.mjs",
     "test:doc-sign-offs": "bash tests/run-fresh-schema.sh tests/doc-sign-offs.mjs",
 
