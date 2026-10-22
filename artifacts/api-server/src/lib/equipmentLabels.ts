@@ -219,7 +219,7 @@ async function tableTargets(kind: EquipmentLabelKind, clientId: number, departme
 }
 
 export const OUTLET_TYPE_LABELS: Record<string, string> = {
-  hot: "Hot outlet", cold: "Cold outlet", calorifier: "Calorifier", tmv: "TMV outlet",
+  hot: "Hot outlet", cold: "Cold outlet", calorifier: "Calorifier", tmv: "TMV outlet", little_used: "Little-used outlet",
 };
 
 /** Fridges and freezers, one per site that uses them ("0" for a business without sites). */
@@ -507,6 +507,7 @@ export async function buildScanSummary(code: string, clientId: number, target: L
     }
     case "water_outlet": {
       const checkType = OUTLET_CHECK_TYPES[String(target.extra?.outletType)] ?? "hot_sentinel_temp";
+      const flush = checkType === "outlet_flush";
       const readings = rowsOf(await db.execute(sql`
         SELECT check_date, result, temperature FROM legionella_checks
         WHERE client_id = ${clientId} AND outlet_id = ${id} ORDER BY check_date DESC, id DESC LIMIT 5`));
@@ -514,14 +515,16 @@ export async function buildScanSummary(code: string, clientId: number, target: L
       const last = readings[0];
       const lastDay = isoDay(last?.check_date);
       const status = last?.result === "fail" || last?.result === "action_required"
-        ? { label: "Temperature check", state: "problem" as const, text: `Out of range on ${formatDay(lastDay!)}` }
-        : dueStatus("Temperature check", lastDay && frequencies ? addDays(lastDay, frequencies[checkType]) : null, today, lastDay, 5);
+        ? { label: flush ? "Weekly flush" : "Temperature check", state: "problem" as const, text: `${flush ? "Failed" : "Out of range"} on ${formatDay(lastDay!)}` }
+        : dueStatus(flush ? "Weekly flush" : "Temperature check", lastDay && frequencies ? addDays(lastDay, frequencies[checkType]) : null, today, lastDay, 5);
       if (!frequencies) status.note = "Due dates show once the site's water plan is approved.";
       statuses.push(status);
       for (const r of readings) {
-        history.push({ date: isoDay(r.check_date)!, state: r.result === "pass" ? "ok" : "problem", text: `${r.temperature != null ? `${Number(r.temperature)}°C` : "Reading"}: ${r.result === "pass" ? "in range" : "out of range"}` });
+        history.push({ date: isoDay(r.check_date)!, state: r.result === "pass" ? "ok" : "problem", text: flush
+          ? `Flushed: ${r.result === "pass" ? "pass" : "fail"}`
+          : `${r.temperature != null ? `${Number(r.temperature)}°C` : "Reading"}: ${r.result === "pass" ? "in range" : "out of range"}` });
       }
-      if (record) actions.push({ label: "Record a temperature", href: `/legionella?${query({ outlet: id, open: "reading" })}`, primary: true });
+      if (record) actions.push({ label: flush ? "Record a flush" : "Record a temperature", href: `/legionella?${query({ outlet: id, open: "reading" })}`, primary: true });
       actions.push(...faultAction(target, viewer));
       break;
     }
@@ -668,4 +671,5 @@ export async function buildScanSummary(code: string, clientId: number, target: L
 
 const OUTLET_CHECK_TYPES: Record<string, string> = {
   hot: "hot_sentinel_temp", cold: "cold_sentinel_temp", calorifier: "calorifier_temp", tmv: "hot_sentinel_temp",
+  little_used: "outlet_flush",
 };

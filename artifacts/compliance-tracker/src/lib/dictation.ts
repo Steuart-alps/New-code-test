@@ -144,3 +144,116 @@ export function dictationErrorMessage(error: string): string | null {
       return null;
   }
 }
+
+// ─── Picking a named item by voice ───────────────────────────────────────────
+// "Fairway mower one", "the number 3 greens mower please": spoken names are
+// matched against a list (machines, call points, outlets) without any AI.
+
+const UNITS: Record<string, number> = {
+  zero: 0, oh: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10,
+};
+const TENS: Record<string, number> = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+const FILLER = new Set([
+  "the", "a", "an", "um", "umm", "uh", "er", "erm", "please", "number", "no", "open", "start", "starting",
+  "check", "checks", "pre", "prestart", "preuse", "use", "for", "on", "my", "this", "machine", "its", "it's",
+]);
+
+/**
+ * A spoken or written name reduced to comparable words: lower case, number
+ * words as digits ("twenty one" → "21", "first" → "1"), letters and digits
+ * split ("mower1" → "mower 1", "1st" → "1"), filler words and punctuation
+ * dropped.
+ */
+export function normaliseSpokenName(text: string): string {
+  const raw = text.toLowerCase()
+    .replace(/(\d+)(?:st|nd|rd|th)\b/g, "$1")
+    .replace(/([a-z])(\d)/g, "$1 $2")
+    .replace(/(\d)([a-z])/g, "$1 $2")
+    .split(/[^a-z0-9']+/)
+    .filter(Boolean);
+  const out: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const word = raw[i];
+    if (word in TENS) {
+      const next = raw[i + 1];
+      if (next && next in UNITS && UNITS[next] > 0 && UNITS[next] < 10) { out.push(String(TENS[word] + UNITS[next])); i++; }
+      else out.push(String(TENS[word]));
+    } else if (word in UNITS && !(word === "oh" && !/^\d/.test(out.at(-1) ?? ""))) {
+      out.push(String(UNITS[word]));
+    } else if (!FILLER.has(word)) {
+      out.push(word.replace(/'/g, ""));
+    }
+  }
+  return out.join(" ");
+}
+
+const isNumber = (word: string) => /^\d+$/.test(word);
+const singular = (word: string) => (word.length > 3 ? word.replace(/(?:es|s)$/, "") : word);
+
+function editDistanceAtMostOne(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else { i++; j++; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
+function sameWord(a: string, b: string): boolean {
+  if (a === b || singular(a) === singular(b)) return true;
+  return a.length >= 5 && b.length >= 5 && editDistanceAtMostOne(a, b);
+}
+
+/** How well `spoken` names `name`, from 0 (not at all) to 1 (the same). */
+export function spokenNameScore(spoken: string, name: string): number {
+  const said = normaliseSpokenName(spoken).split(" ").filter(Boolean);
+  const target = normaliseSpokenName(name).split(" ").filter(Boolean);
+  if (!said.length || !target.length) return 0;
+  if (said.join(" ") === target.join(" ")) return 1;
+  const saidNumbers = said.filter(isNumber), targetNumbers = target.filter(isNumber);
+  // A number names one machine of several: "mower 2" is never "mower 1".
+  if (saidNumbers.some(n => targetNumbers.length && !targetNumbers.includes(n))) return 0;
+  if (targetNumbers.some(n => saidNumbers.length && !saidNumbers.includes(n))) return 0;
+  let penalty = 0;
+  if (targetNumbers.length && !saidNumbers.length) penalty = 0.3;
+  else if (saidNumbers.length && !targetNumbers.length) penalty = 0.1;
+  const saidWords = said.filter(w => !isNumber(w)), targetWords = target.filter(w => !isNumber(w));
+  const covered = targetWords.filter(t => saidWords.some(s => sameWord(s, t))).length;
+  const relevant = saidWords.filter(s => targetWords.some(t => sameWord(s, t))).length;
+  const coverage = targetWords.length ? covered / targetWords.length : 1;
+  const precision = saidWords.length ? relevant / saidWords.length : 1;
+  if (!covered && targetWords.length) return 0;
+  return Math.max(0, Math.round((0.7 * coverage + 0.3 * precision - penalty) * 1000) / 1000);
+}
+
+export interface SpokenNameItem { id: number | string; name: string; aliases?: Array<string | null | undefined> }
+
+/**
+ * Picks the item a spoken phrase names. `match` is set when one item clearly
+ * fits; otherwise `choices` holds the likely items (best first, only those nearly as good as the best) to tap.
+ */
+export function matchSpokenName<T extends SpokenNameItem>(spoken: string, items: T[]): { match: T | null; choices: T[] } {
+  const scored = items
+    .map(item => ({
+      item,
+      score: Math.max(spokenNameScore(spoken, item.name), ...(item.aliases ?? []).filter((a): a is string => !!a).map(a => spokenNameScore(spoken, a))),
+    }))
+    .filter(s => s.score >= 0.5)
+    .sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name));
+  const [top, next] = scored;
+  if (!top) return { match: null, choices: [] };
+  const clear = (top.score === 1 && (!next || next.score < 1)
+    || top.score >= 0.75 && (!next || next.score <= top.score - 0.15)
+    || top.score >= 0.6 && !next);
+  // Only offer items nearly as good as the best: "fairway mower" offers both
+  // fairway mowers, not every mower.
+  const choices = scored.filter(s => s.score >= top.score - 0.15).slice(0, 6).map(s => s.item);
+  return { match: clear ? top.item : null, choices };
+}

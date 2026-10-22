@@ -34,7 +34,8 @@ import {
   ShieldAlert,
   LayoutGrid,
   CalendarDays,
-  QrCode
+  QrCode,
+  FileSearch
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -170,6 +171,8 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
   if (canManageUsers) {
     // Managers keep the equipment list and print its QR labels.
     groups.find(g => g.id === "core")?.items.push({ href: "/equipment", label: "Equipment & QR labels", icon: QrCode });
+    // Audit and inspection reports become actions (Owners, Managers, ALPS).
+    groups.find(g => g.id === "core")?.items.push({ href: "/report-actions", label: "Report actions", icon: FileSearch });
   }
 
   if (canManageUsers && !canAdmin) {

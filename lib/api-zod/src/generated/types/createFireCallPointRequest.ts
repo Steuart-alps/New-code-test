@@ -9,4 +9,7 @@
 export interface CreateFireCallPointRequest {
   siteId: number | null;
   name: string;
+  location?: string | null;
+  /** Near bedrooms or other sleeping areas (75 dB at the bedhead). */
+  sleepingArea?: boolean;
 }

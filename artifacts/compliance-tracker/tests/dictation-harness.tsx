@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { useForm } from "react-hook-form";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CoshhSpeakListDialog } from "../src/components/coshh-speak-list-dialog";
+import { SpeakToPickDialog } from "../src/components/speak-to-pick-dialog";
 import { Button } from "../src/components/ui/button";
 import { Input } from "../src/components/ui/input";
 import { Label } from "../src/components/ui/label";
@@ -11,9 +12,10 @@ import { Toaster } from "../src/components/ui/toaster";
 import "../src/index.css";
 
 declare global {
-  interface Window { __added: Array<{ siteId: number; names: string[] }> }
+  interface Window { __added: Array<{ siteId: number; names: string[] }>; __picked: string[] }
 }
 window.__added = [];
+window.__picked = [];
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
@@ -64,6 +66,26 @@ function ListDialog() {
   );
 }
 
+const MACHINES = ["Fairway Mower 1", "Fairway Mower 2", "Greens Mower 1", "Tees Mower"].map((name, id) => ({ id, name }));
+
+// "Say machine" on GreenTrack: say a name and the matching item is picked.
+function PickDialog() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>Say machine</Button>
+      <SpeakToPickDialog
+        open={open}
+        title="Say the machine"
+        noun="machine"
+        items={MACHINES}
+        onClose={() => setOpen(false)}
+        onPick={(machine) => { window.__picked.push(machine.name); setOpen(false); }}
+      />
+    </>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
     <div className="max-w-lg space-y-6 p-6">
@@ -82,6 +104,7 @@ createRoot(document.getElementById("root")!).render(
         <Textarea id="plain" dictation={false} />
       </div>
       <ListDialog />
+      <PickDialog />
     </div>
     <Toaster />
   </QueryClientProvider>,

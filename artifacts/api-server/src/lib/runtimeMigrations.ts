@@ -1644,7 +1644,7 @@ async function runRuntimeMigrationsOnce() {
       DROP CONSTRAINT IF EXISTS "contractor_email_queue_email_type_check"`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
       ADD CONSTRAINT "contractor_email_queue_email_type_check"
-      CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation'))`);
+      CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation','certificate_followup'))`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "quote_token" DROP NOT NULL`);
     await migrateComplianceScheduleTokens();
     // This credential-scrubbing migration assumes one application instance starts
@@ -2316,6 +2316,13 @@ async function runRuntimeMigrationsOnce() {
     await migrateCertificateOutcomes();
     await migrateFireCallPoints();
     await migrateEquipmentLabels();
+    await migrateInspectionReports();
+
+    // ---- The person responsible for an action, issue or check (Oct 2026) ----
+    await migrateAssignees();
+
+    // ---- FixTrack contractor visit date and completion (Oct 2026) ----
+    await migrateFixTrackContractorProgress();
 
     // ---- Department recorded with each submission (Oct 2026) ----
     // After every reported table exists; see submitterDepartmentMigration.ts.
@@ -6101,6 +6108,33 @@ export async function migrateComplianceScheduleTokens(): Promise<number> {
  * (header bell / mobile push). Mirrors lib/db/src/schema/track-notifications.ts
  * column for column, so pushed and runtime-only databases match.
  */
+/**
+ * The person an action, FixTrack issue or compliance check is assigned to, as
+ * a user of the business (lib/assignees.ts), so their reminders reach them.
+ * The existing text name stays: it is what screens show, and it holds a typed
+ * name for someone without an account.
+ */
+async function migrateAssignees() {
+  for (const table of ["track_actions", "fix_track_issues", "compliance_items"]) {
+    await db.execute(sql.raw(
+      `ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "assignee_user_id" integer REFERENCES "users"("id") ON DELETE SET NULL`,
+    ));
+    await db.execute(sql.raw(
+      `CREATE INDEX IF NOT EXISTS "IDX_${table}_assignee" ON "${table}" ("assignee_user_id") WHERE "assignee_user_id" IS NOT NULL`,
+    ));
+  }
+}
+
+/**
+ * A contractor emailed a FixTrack job picks their visit date from the email,
+ * and marks it done the same way; both are shown on the issue. Mirrors
+ * lib/db/src/schema/fix-track.ts.
+ */
+async function migrateFixTrackContractorProgress() {
+  await db.execute(sql`ALTER TABLE "fix_track_issues" ADD COLUMN IF NOT EXISTS "contractor_visit_date" date`);
+  await db.execute(sql`ALTER TABLE "fix_track_issues" ADD COLUMN IF NOT EXISTS "contractor_completed_at" timestamp`);
+}
+
 async function migrateTrackOwnersAndNotifications() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "track_owners" (
@@ -6171,6 +6205,26 @@ async function migrateFireCallPoints() {
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point_id" integer REFERENCES "fire_call_points"("id") ON DELETE SET NULL`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "call_point" text`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "night_staff" text`);
+  // Oct 2026: each call point's location and its place in the site's test
+  // rotation. Sites whose call points have no order yet are numbered
+  // alphabetically, the order the list showed before.
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "location" text`);
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "sort_order" integer NOT NULL DEFAULT 0`);
+  await db.execute(sql`
+    UPDATE "fire_call_points" p SET "sort_order" = n.position
+    FROM (
+      SELECT id, row_number() OVER (PARTITION BY client_id, site_id ORDER BY name, id) AS position,
+             max(sort_order) OVER (PARTITION BY client_id, site_id) AS highest
+      FROM "fire_call_points"
+    ) n
+    WHERE n.id = p.id AND n.highest = 0
+  `);
+  // Oct 2026: the sound level heard on a weekly alarm test, and call points
+  // near sleeping areas (75 dB at the bedhead). Existing rows stay blank.
+  await db.execute(sql`ALTER TABLE "fire_call_points" ADD COLUMN IF NOT EXISTS "sleeping_area" boolean NOT NULL DEFAULT false`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_db" real`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_method" text`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_bedhead" boolean`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks
@@ -6245,4 +6299,43 @@ async function migrateCertificateOutcomes() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_certificate" ON "certificate_defects" ("client_id", "certificate_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_fix_track_issue" ON "certificate_defects" ("fix_track_issue_id")`);
+}
+
+// Uploaded audit and inspection reports whose required actions become track
+// actions (source_kind 'inspection_report:...'), plus who drafted and confirmed them.
+async function migrateInspectionReports() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "inspection_reports" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "report_type" text NOT NULL,
+      "title" text NOT NULL,
+      "report_date" date,
+      "object_path" text NOT NULL,
+      "file_name" text,
+      "file_size" bigint,
+      "mime_type" text,
+      "draft_actions" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "ai_status" text NOT NULL DEFAULT 'not_requested',
+      "ai_summary" text,
+      "ai_model" text,
+      "ai_error" text,
+      "ai_requested_at" timestamp,
+      "ai_read_count" integer NOT NULL DEFAULT 0,
+      "ai_input_tokens" integer,
+      "ai_output_tokens" integer,
+      "uploaded_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "uploaded_by_name" text NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_inspection_reports_client" ON "inspection_reports" ("client_id", "created_at")`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "draft_source" text`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "confirmed_by_name" text`);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_track_actions_inspection_report"
+    ON "track_actions" ("client_id", "source_record_id") WHERE "source_kind" LIKE 'inspection_report:%'
+  `);
 }

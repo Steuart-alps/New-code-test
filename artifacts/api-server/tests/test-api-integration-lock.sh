@@ -140,7 +140,7 @@ const freshSchema = new Set([
   "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
   "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster
-  "test:fire-call-points", "test:fire-discharge-task-link", "test:track-task-links", "test:track-due-dates", "test:contractor-visits",
+  "test:fire-call-points", "test:fire-discharge-task-link", "test:track-task-links", "test:track-due-dates", "test:contractor-visits", "test:certificate-follow-up",
   "test:hot-tub-registry:pushed", "test:kitchen-cleaning-legacy", "test:contractor-portal:pushed",
   "test:public-link-access", "test:public-link-rate-limit", // two API instances on the private cluster
   "test:safe-track-ack-reminders:fresh", "test:storage-price-audit",

@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 for suite in \
   tests/fix-track-contractor-approval.mjs \
   tests/fix-track-quote-workflow.mjs \
+  tests/fix-track-assign-contractor.mjs \
   tests/compliance-reminder-approval.mjs \
   tests/contractor-portal-link-drafts.mjs; do
   bash tests/run-fresh-schema.sh "$suite"

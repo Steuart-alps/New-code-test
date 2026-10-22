@@ -9,6 +9,7 @@ import { motion } from "framer-motion";
 import { buildSignupPath } from "@/lib/signup-plan";
 import { SELECTED_MODULE_CARD, SELECTED_MODULE_CHECKBOX, SELECTED_MODULE_TICK } from "@/lib/addon-catalog";
 import alpsLogo from "@/assets/alps-logo.png";
+import { ConsultantPanel } from "@/pages/public-site";
 
 // ─── Module definitions ────────────────────────────────────────────────────────
 
@@ -467,6 +468,8 @@ export default function LandingPage() {
             </div>
           </div>
           <div className="flex items-center gap-4 sm:gap-6">
+            <Link href="/features" className="text-sm text-white/70 hover:text-white transition-colors hidden md:block">Modules</Link>
+            <Link href="/templates" className="text-sm text-white/70 hover:text-white transition-colors hidden md:block">Free templates</Link>
             <a href="#pricing" className="text-sm text-white/70 hover:text-white transition-colors hidden sm:block">Pricing</a>
             <button className="text-sm font-medium text-white/80 hover:text-white transition-colors" onClick={() => navigate("/login")}>Sign in</button>
             <Button className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-none rounded-[2px] hidden sm:inline-flex" onClick={() => navigate("/signup")}>Start free trial</Button>
@@ -601,6 +604,8 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <ConsultantPanel />
+
       {/* Final CTA */}
       <section className="py-32 px-6 bg-[#F7F2E4] text-center">
         <div className="max-w-2xl mx-auto">
@@ -629,7 +634,10 @@ export default function LandingPage() {
             </div>
           </div>
           <p className="text-sm font-light">© {new Date().getFullYear()} ALPS Consulting Ltd. All rights reserved.</p>
-          <div className="flex items-center gap-5">
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            <Link href="/features" className="text-sm font-light hover:text-white transition-colors">Modules</Link>
+            <Link href="/templates" className="text-sm font-light hover:text-white transition-colors">Free templates</Link>
+            <Link href="/pricing" className="text-sm font-light hover:text-white transition-colors">Pricing</Link>
             <Link href="/terms" className="text-sm font-light hover:text-white transition-colors">Terms</Link>
             <Link href="/privacy" className="text-sm font-light hover:text-white transition-colors">Privacy</Link>
             <Link href="/login" className="text-sm font-light hover:text-white transition-colors">Sign in</Link>

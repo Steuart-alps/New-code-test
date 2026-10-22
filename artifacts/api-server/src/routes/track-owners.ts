@@ -3,6 +3,8 @@
  *   GET    /api/track-owners       any signed-in user of the business
  *   PUT    /api/track-owners       set/replace { module, siteId?, userId } (admins/consultants)
  *   DELETE /api/track-owners/:id   remove (admins/consultants)
+ *   GET    /api/assignees          people who can be assigned an action, issue
+ *                                  or check (?siteId= narrows to that site)
  * The business is always getClientId(req); users and sites are checked
  * against it, never trusted from the body.
  */
@@ -14,7 +16,8 @@ import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireCl
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { TRACK_MODULES, TRACK_MODULE_KEYS } from "../lib/trackModules";
 import { candidateCanSeeSite, loadEligibleOwners } from "../lib/trackOwners";
-import { siteVisibleSql } from "../lib/departmentSites";
+import { siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
+import { listAssignees } from "../lib/assignees";
 
 const router: IRouter = Router();
 
@@ -144,6 +147,26 @@ router.delete("/track-owners/:id", requireAuth, denyViewers, requireClientAdmin,
   `);
   if (removed.rows.length === 0) return res.status(404).json({ error: "Track owner not found" });
   res.status(204).end();
+});
+
+// Names only: anyone who records work (not viewers) can pick who does it.
+router.get("/assignees", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = z.object({ siteId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid siteId" });
+  const siteId = parsed.data.siteId ?? null;
+  if (siteId !== null) {
+    const [site] = rowsOf<{ id: number; department_id: number | null }>(await db.execute(sql`
+      SELECT id, department_id FROM sites WHERE id = ${siteId} AND client_id = ${clientId}
+    `));
+    const departmentId = getActiveDepartmentId(req);
+    if (!site || !(await siteVisibleToDepartment({ id: Number(site.id), departmentId: site.department_id }, departmentId))) {
+      return res.status(404).json({ error: "Site not found" });
+    }
+  }
+  const people = await listAssignees(clientId, siteId);
+  res.json(people.map((person) => ({ id: person.id, name: person.name, role: person.role })));
 });
 
 export default router;

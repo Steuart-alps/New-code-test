@@ -387,6 +387,22 @@ export const ListPublicLinkAccessResponse = zod.object({
 
 
 /**
+ * Active members of the business (not viewers) who can see the site. Names only; reminders for assigned work go to that person.
+ * @summary People who can be assigned an action, FixTrack issue or compliance check
+ */
+export const ListAssigneesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListAssigneesResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "role": zod.string()
+})
+export const ListAssigneesResponse = zod.array(ListAssigneesResponseItem)
+
+
+/**
  * @summary List all categories
  */
 export const ListCategoriesResponseItem = zod.object({
@@ -600,6 +616,26 @@ export const SetContractorVisitBody = zod.object({
 
 export const SetContractorVisitResponse = zod.object({
   "ok": zod.boolean()
+})
+
+
+/**
+ * Compliance checks whose contractor visit happened at least followUpAfterDays ago with no certificate uploaded since, however old, at the sites the user can see. The contractor is chased every two weeks until chaseStopsAfterDays after the visit (chasing false after).
+ * @summary Contractor visits still waiting for their certificate
+ */
+export const ListCertificatesOutstandingResponse = zod.object({
+  "followUpAfterDays": zod.number(),
+  "chaseStopsAfterDays": zod.number(),
+  "certificates": zod.array(zod.object({
+  "itemId": zod.number(),
+  "title": zod.string(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "visitDate": zod.date(),
+  "daysSinceVisit": zod.number(),
+  "contractorName": zod.string(),
+  "chasing": zod.boolean().describe('False once the contractor is no longer reminded (chaseStopsAfterDays after the visit)')
+}))
 })
 
 
@@ -1135,14 +1171,15 @@ export const ListComplianceItemsResponseItem = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(listComplianceItemsResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1168,6 +1205,7 @@ export const CreateComplianceItemBody = zod.object({
   "categoryId": zod.number().nullish(),
   "contractorId": zod.number().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(createComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
@@ -1193,14 +1231,15 @@ export const CreateComplianceItemResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(createComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1233,14 +1272,15 @@ export const GetComplianceItemResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(getComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1267,6 +1307,7 @@ export const UpdateComplianceItemBody = zod.object({
   "categoryId": zod.number().nullish(),
   "contractorId": zod.number().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
@@ -1292,14 +1333,15 @@ export const UpdateComplianceItemResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1350,14 +1392,15 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "contractorName": zod.string().nullish(),
   "contractorEmail": zod.string().nullish(),
   "assignedTo": zod.string().nullish(),
+  "assigneeUserId": zod.number().nullish().describe('The person responsible, from GET \/assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it.'),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemStatusResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
-  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, so the check needs action whatever its due date.'),
-  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects']).nullish(),
+  "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
+  "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
   "openDefectCount": zod.number().optional().describe('Open C1\/C2\/FI\/ID\/AR defects on the newest certificate.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
@@ -1433,7 +1476,9 @@ export const GetSettingsResponse = zod.object({
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
-  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.')
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
+  "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
 
@@ -1455,7 +1500,9 @@ export const UpdateSettingsBody = zod.object({
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish(),
-  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.')
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
+  "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
 export const updateSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
@@ -1473,7 +1520,9 @@ export const UpdateSettingsResponse = zod.object({
   "companyName": zod.string().nullish(),
   "accountTimezone": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
-  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.')
+  "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
+  "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
 
@@ -2693,6 +2742,49 @@ export const DeleteFixTrackIssueMediaResponse = zod.object({
 
 
 /**
+ * A manager picks a contractor from the business's list, or adds a new one, and the job email (details, photos, a link to pick a visit date and a "job done" link) is sent straight away. The manager's choice is the approval, so the email does not wait in Contractor Approvals. If sending fails, the email stays in Contractor Approvals to retry.
+ * @summary Give a job to a contractor and email it to them (managers)
+ */
+export const AssignFixTrackContractorParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const assignFixTrackContractorBodyNewContractorNameMax = 200;
+
+export const assignFixTrackContractorBodyNewContractorCompanyMax = 200;
+
+export const assignFixTrackContractorBodyNewContractorEmailMin = 3;
+export const assignFixTrackContractorBodyNewContractorEmailMax = 320;
+
+export const assignFixTrackContractorBodyNewContractorPhoneMax = 50;
+
+
+
+export const AssignFixTrackContractorBody = zod.object({
+  "contractorId": zod.number().optional(),
+  "newContractor": zod.object({
+  "name": zod.string().min(1).max(assignFixTrackContractorBodyNewContractorNameMax),
+  "company": zod.string().max(assignFixTrackContractorBodyNewContractorCompanyMax).nullish(),
+  "email": zod.string().min(assignFixTrackContractorBodyNewContractorEmailMin).max(assignFixTrackContractorBodyNewContractorEmailMax),
+  "phone": zod.string().max(assignFixTrackContractorBodyNewContractorPhoneMax).nullish()
+}).optional(),
+  "targetDate": zod.date().nullish().describe('Left out keeps the issue\'s target date; null clears it.'),
+  "replace": zod.boolean().optional().describe('Confirms replacing a job already emailed to a contractor.')
+}).describe('Exactly one of contractorId and newContractor.')
+
+export const AssignFixTrackContractorResponse = zod.object({
+  "ok": zod.boolean(),
+  "queueId": zod.number(),
+  "mode": zod.string().optional(),
+  "subject": zod.string().optional(),
+  "bodyHtml": zod.string().optional(),
+  "contractorId": zod.number(),
+  "contractorName": zod.string(),
+  "message": zod.string()
+})
+
+
+/**
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
@@ -2713,6 +2805,9 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2732,7 +2827,10 @@ export const CreateFireSafetyCheckBody = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
 
 export const CreateFireSafetyCheckResponse = zod.object({
@@ -2748,6 +2846,9 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -2787,8 +2888,13 @@ export const ListFireCallPointsResponseItem = zod.object({
   "id": zod.number(),
   "siteId": zod.number().nullable(),
   "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
-  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
 })
 export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseItem)
 
@@ -2798,20 +2904,88 @@ export const ListFireCallPointsResponse = zod.array(ListFireCallPointsResponseIt
  */
 export const CreateFireCallPointBody = zod.object({
   "siteId": zod.number().nullable(),
-  "name": zod.string()
+  "name": zod.string(),
+  "location": zod.string().nullish(),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas (75 dB at the bedhead).')
 })
 
 export const CreateFireCallPointResponse = zod.object({
   "id": zod.number(),
   "siteId": zod.number().nullable(),
   "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
-  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
 })
 
 
 /**
- * @summary Rename, archive or restore a call point (managers)
+ * @summary Set a site's call point rotation order (managers)
+ */
+export const OrderFireCallPointsBody = zod.object({
+  "siteId": zod.number().nullable(),
+  "ids": zod.array(zod.number()).describe('Every call point in use at the site, first to last.')
+})
+
+export const OrderFireCallPointsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
+  "archivedAt": zod.date().nullable(),
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
+})
+export const OrderFireCallPointsResponse = zod.array(OrderFireCallPointsResponseItem)
+
+
+/**
+ * @summary Download the CSV template for uploading a call point list (managers)
+ */
+export const GetFireCallPointImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's header row and cell text. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. New call points join the end of their site's rotation in file order.
+ * @summary Preview or import a spreadsheet of call points (managers)
+ */
+export const ImportFireCallPointsBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportFireCallPointsResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
+ * @summary Rename, move, archive or restore a call point (managers)
  */
 export const UpdateFireCallPointParams = zod.object({
   "id": zod.coerce.number()
@@ -2819,6 +2993,8 @@ export const UpdateFireCallPointParams = zod.object({
 
 export const UpdateFireCallPointBody = zod.object({
   "name": zod.string().optional(),
+  "location": zod.string().nullish(),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas (75 dB at the bedhead).'),
   "archived": zod.boolean().optional()
 })
 
@@ -2826,8 +3002,13 @@ export const UpdateFireCallPointResponse = zod.object({
   "id": zod.number(),
   "siteId": zod.number().nullable(),
   "name": zod.string(),
+  "location": zod.string().nullable().describe('Where the call point is, e.g. \"Kitchen fire exit, ground floor\".'),
+  "sortOrder": zod.number().describe('Place in the site\'s test rotation (1 = first).'),
+  "sleepingArea": zod.boolean().optional().describe('Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB.'),
   "archivedAt": zod.date().nullable(),
-  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.')
+  "lastTestedDate": zod.string().nullable().describe('Date of the latest alarm test that used this call point.'),
+  "nextInTurn": zod.boolean().describe('The call point to test next at its site (the one after the call point tested last, in rotation order).'),
+  "notTestedThisRound": zod.boolean().describe('In use but never tested, or not tested within one full round (call points in use x the alarm test frequency).')
 })
 
 
@@ -2847,7 +3028,10 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "performedBy": zod.string().nullish(),
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
-  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.')
+  "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
 
 export const UpdateFireSafetyCheckResponse = zod.object({
@@ -2863,6 +3047,9 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
+  "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -4650,6 +4837,45 @@ export const CreateFoodSafetyRecordResponse = zod.object({
 
 
 /**
+ * Fills one unit's AM or PM reading in the day's diary, creating the diary (with every fridge and freezer on the list) when needed. Used by "Say it" voice logging. A reading already recorded is never overwritten (409 READING_ALREADY_RECORDED), a submitted diary is not changed (409 DIARY_SUBMITTED), and a reading outside the limits needs the corrective action taken (400 KITCHEN_CORRECTIVE_ACTION_REQUIRED).
+ * @summary Record one fridge or freezer reading in the day's diary
+ */
+export const RecordFoodSafetyColdReadingQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Scope to a site\'s diary. Omit for the whole-organisation diary.')
+})
+
+export const RecordFoodSafetyColdReadingBody = zod.object({
+  "recordDate": zod.string().describe('The diary\'s local calendar date (YYYY-MM-DD).'),
+  "unit": zod.string().describe('The fridge or freezer\'s name on the kitchen\'s list.'),
+  "slot": zod.enum(['am', 'pm']),
+  "temperature": zod.number(),
+  "correctiveAction": zod.string().optional().describe('Required when the reading is outside the unit\'s limits.'),
+  "recordedAt": zod.date().optional(),
+  "spoken": zod.string().optional().describe('The words heard when the reading was spoken (\"Say it\"), kept as evidence.')
+})
+
+export const RecordFoodSafetyColdReadingResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "recordDate": zod.string(),
+  "deliveries": zod.array(zod.unknown()).optional(),
+  "coldFood": zod.array(zod.unknown()).optional(),
+  "hotTemperature": zod.array(zod.unknown()).optional(),
+  "hotHolding": zod.array(zod.unknown()).optional(),
+  "cookingLimit": zod.string().optional(),
+  "coolingLimit": zod.string().optional(),
+  "reheatingLimit": zod.string().optional(),
+  "hotHoldingLimit": zod.string().optional(),
+  "correctives": zod.string().nullish(),
+  "managerSignature": zod.string().nullish(),
+  "submittedAt": zod.date().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
  * @summary Get the food safety record for a specific date
  */
 export const GetFoodSafetyRecordByDateParams = zod.object({
@@ -5861,6 +6087,284 @@ export const RecordCoshhSignOffsResponse = zod.object({
 }))
 })),zod.null()])
 })
+
+
+/**
+ * @summary Report types, tracks, sites and people for the report screens, and whether reports can be read
+ */
+export const GetInspectionReportOptionsResponse = zod.object({
+  "reportTypes": zod.array(zod.object({
+  "key": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "label": zod.string()
+})),
+  "modules": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string()
+})),
+  "sites": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+})),
+  "assignees": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "role": zod.string(),
+  "isMaintenanceManager": zod.boolean()
+})),
+  "reading": zod.object({
+  "available": zod.boolean(),
+  "monthlyLimit": zod.number(),
+  "usedThisMonth": zod.number()
+})
+})
+
+
+/**
+ * @summary Uploaded audit and inspection reports (Owners, Managers for their sites, consultants)
+ */
+export const ListInspectionReportsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "title": zod.string(),
+  "reportDate": zod.date().nullable(),
+  "fileName": zod.string().nullable(),
+  "aiStatus": zod.string(),
+  "uploadedByName": zod.string(),
+  "createdAt": zod.date(),
+  "draftCount": zod.number(),
+  "actionCount": zod.number(),
+  "openCount": zod.number()
+})
+export const ListInspectionReportsResponse = zod.array(ListInspectionReportsResponseItem)
+
+
+/**
+ * @summary Register a report uploaded through /storage/uploads/request-url
+ */
+export const CreateInspectionReportBody = zod.object({
+  "title": zod.string(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "reportDate": zod.date().nullish(),
+  "siteId": zod.number().nullish(),
+  "objectPath": zod.string(),
+  "fileName": zod.string()
+})
+
+export const CreateInspectionReportResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "title": zod.string(),
+  "reportDate": zod.date().nullable(),
+  "fileName": zod.string().nullable(),
+  "fileSize": zod.number().nullish(),
+  "mimeType": zod.string().nullish(),
+  "readable": zod.boolean(),
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+})),
+  "aiStatus": zod.string(),
+  "aiSummary": zod.string().nullable(),
+  "aiError": zod.string().nullable(),
+  "aiReadCount": zod.number(),
+  "uploadedByName": zod.string(),
+  "createdAt": zod.date()
+})
+
+
+/**
+ * @summary A report, the list being checked, and the actions created from it
+ */
+export const GetInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetInspectionReportResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "reportType": zod.enum(['alps_audit', 'care_inspectorate', 'eho', 'fire_officer', 'hse', 'insurer', 'other']),
+  "title": zod.string(),
+  "reportDate": zod.date().nullable(),
+  "fileName": zod.string().nullable(),
+  "fileSize": zod.number().nullish(),
+  "mimeType": zod.string().nullish(),
+  "readable": zod.boolean(),
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+})),
+  "aiStatus": zod.string(),
+  "aiSummary": zod.string().nullable(),
+  "aiError": zod.string().nullable(),
+  "aiReadCount": zod.number(),
+  "uploadedByName": zod.string(),
+  "createdAt": zod.date()
+}).and(zod.object({
+  "actions": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "module": zod.string(),
+  "title": zod.string(),
+  "instruction": zod.string().nullable(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "status": zod.string(),
+  "ownerName": zod.string().nullable(),
+  "assigneeUserId": zod.number().nullish().describe('The person assigned (gets the reminders)'),
+  "dueDate": zod.date().nullable(),
+  "draftSource": zod.string().nullable(),
+  "confirmedByName": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "dueDateChanges": zod.array(zod.object({
+  "changedAt": zod.date(),
+  "changedByName": zod.string().nullable(),
+  "from": zod.date().nullable(),
+  "to": zod.date().nullable()
+})).optional().describe('Due date changes after the action was created (report detail only), oldest first')
+}))
+}))
+
+
+/**
+ * @summary Remove a report uploaded by mistake (only while no actions come from it)
+ */
+export const DeleteInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteInspectionReportResponse = zod.void()
+
+
+/**
+ * Replaces the list being checked with suggestions. Nothing is created until the list is confirmed. 503 REPORT_READING_UNAVAILABLE when no key is set; 429 REPORT_READING_LIMIT past the monthly or per-report limit.
+ * @summary Have ComplyTrack read the report and suggest actions (needs ANTHROPIC_API_KEY)
+ */
+export const ReadInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ReadInspectionReportResponse = zod.object({
+  "aiSummary": zod.string().nullable(),
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+
+/**
+ * @summary Save the list of actions being checked
+ */
+export const SaveInspectionReportDraftParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SaveInspectionReportDraftBody = zod.object({
+  "actions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+export const SaveInspectionReportDraftResponse = zod.object({
+  "draftActions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+
+/**
+ * @summary Create the checked actions as open track actions linked to the report
+ */
+export const ConfirmInspectionReportActionsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ConfirmInspectionReportActionsBody = zod.object({
+  "actions": zod.array(zod.object({
+  "title": zod.string(),
+  "instruction": zod.string().nullish(),
+  "module": zod.string(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "siteId": zod.number().nullish(),
+  "dueDate": zod.date().nullish(),
+  "assignedUserId": zod.number().nullish(),
+  "reportReference": zod.string().nullish(),
+  "draftSource": zod.enum(['ai', 'manual']).optional()
+}))
+})
+
+export const ConfirmInspectionReportActionsResponse = zod.object({
+  "actions": zod.array(zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "module": zod.string(),
+  "title": zod.string(),
+  "instruction": zod.string().nullable(),
+  "severity": zod.enum(['monitor', 'action_required', 'urgent']),
+  "status": zod.string(),
+  "ownerName": zod.string().nullable(),
+  "assigneeUserId": zod.number().nullish().describe('The person assigned (gets the reminders)'),
+  "dueDate": zod.date().nullable(),
+  "draftSource": zod.string().nullable(),
+  "confirmedByName": zod.string().nullable(),
+  "createdAt": zod.date(),
+  "dueDateChanges": zod.array(zod.object({
+  "changedAt": zod.date(),
+  "changedByName": zod.string().nullable(),
+  "from": zod.date().nullable(),
+  "to": zod.date().nullable()
+})).optional().describe('Due date changes after the action was created (report detail only), oldest first')
+})),
+  "emailedTo": zod.array(zod.string()).describe('Owners and Managers emailed the action plan')
+})
+
+
+/**
+ * @summary Download the uploaded report
+ */
+export const DownloadInspectionReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DownloadInspectionReportResponse = zod.unknown()
 
 
 /**

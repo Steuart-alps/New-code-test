@@ -6,6 +6,7 @@ import { categoriesTable } from "./categories";
 import { contractorsTable } from "./contractors";
 import { clientsTable } from "./clients";
 import { departmentsTable } from "./departments";
+import { usersTable } from "./users";
 
 export const complianceStatusEnum = ["pending", "in_progress", "completed", "overdue"] as const;
 export const compliancePriorityEnum = ["low", "medium", "high", "critical"] as const;
@@ -24,6 +25,8 @@ export const complianceItemsTable = pgTable("compliance_items", {
   categoryId: integer("category_id").references(() => categoriesTable.id, { onDelete: "set null" }),
   contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "set null" }),
   assignedTo: text("assigned_to"),
+  /** The person responsible, when picked from the business's users (see track_actions). */
+  assigneeUserId: integer("assignee_user_id").references(() => usersTable.id, { onDelete: "set null" }),
   dueDate: timestamp("due_date"),
   leadTimeDays: integer("lead_time_days"),
   /** Optional repeat interval. Completing a check that has one records the

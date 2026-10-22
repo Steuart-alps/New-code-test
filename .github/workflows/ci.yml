@@ -250,6 +250,12 @@ jobs:
       - name: KitchenTrack allergen recipes and charts (production schema base)
         run: pnpm --filter @workspace/api-server run test:allergen-recipes
 
+      - name: Report actions from uploaded reports (production schema base)
+        run: pnpm --filter @workspace/api-server run test:inspection-reports
+
+      - name: Reading reports with Claude (stand-in API, no key)
+        run: pnpm --filter @workspace/api-server run test:report-reading
+
       - name: Checklist results and FixTrack job tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:checklist-results-fixtrack
 
@@ -332,16 +338,20 @@ jobs:
       - name: Contractor visits on every track reach the contractor reminder (production schema base)
         run: pnpm --filter @workspace/api-server run test:contractor-visits
 
+      - name: Certificate follow-up after a contractor visit (production schema base)
+        run: pnpm --filter @workspace/api-server run test:certificate-follow-up
+
       - name: Equipment list and QR label tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:equipment-labels
 
       # KitchenTrack numeric controls: the shared rule model and country
       # presets, then hold-time boundaries, retries and the corrective-action
       # follow-up, each on its own fresh database.
-      - name: KitchenTrack hold-time and temperature-action tests
+      - name: KitchenTrack hold-time, temperature-action and "Say it" tests
         run: |
           pnpm --filter @workspace/api-zod run test:kitchen-temperature
           pnpm --filter @workspace/api-zod run test:kitchen-temperature-guidance
           pnpm --filter @workspace/api-server run test:kitchen-hold-controls
           pnpm --filter @workspace/api-server run test:kitchen-temperature-actions
           pnpm --filter @workspace/api-server run test:kitchen-mobile-replay
+          pnpm --filter @workspace/api-server run test:voice-log

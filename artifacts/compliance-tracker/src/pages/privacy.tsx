@@ -42,6 +42,7 @@ export default function PrivacyPage() {
           <li><strong>Hosting and email providers</strong> — to run the application, store data, and deliver service emails.</li>
           <li><strong>Google Cloud Storage</strong> — to store photos and files attached to records.</li>
           <li><strong>Sentry</strong> — to tell us when something breaks. Error reports hold technical details such as the error, the page and the browser; we remove form contents, cookies, links that grant access and email addresses before they are sent.</li>
+          <li><strong>Anthropic</strong> — only when someone asks ComplyTrack to suggest actions from an uploaded audit or inspection report. The report is sent to Anthropic's AI to read; Anthropic doesn't use it to train its AI. A person checks every suggestion before anything is saved.</li>
           <li><strong>Expo, Apple and Google</strong> — to deliver push notifications to the mobile app. They receive the device token and the notification text, not your records.</li>
         </ul>
         <p>

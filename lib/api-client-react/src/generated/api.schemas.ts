@@ -455,6 +455,46 @@ export interface FixTrackMediaDeleteRequest {
   objectPath: string;
 }
 
+export interface FixTrackNewContractor {
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /** @maxLength 200 */
+  company?: string | null;
+  /**
+     * @minLength 3
+     * @maxLength 320
+     */
+  email: string;
+  /** @maxLength 50 */
+  phone?: string | null;
+}
+
+/**
+ * Exactly one of contractorId and newContractor.
+ */
+export interface FixTrackAssignContractorRequest {
+  contractorId?: number;
+  newContractor?: FixTrackNewContractor;
+  /** Left out keeps the issue's target date; null clears it. */
+  targetDate?: string | null;
+  /** Confirms replacing a job already emailed to a contractor. */
+  replace?: boolean;
+}
+
+export interface FixTrackAssignContractorResult {
+  ok: boolean;
+  queueId: number;
+  mode?: string;
+  subject?: string;
+  bodyHtml?: string;
+  contractorId: number;
+  contractorName: string;
+  message: string;
+}
+
 export interface FixTrackIssueMediaList {
   mediaUrls: string[];
 }
@@ -999,6 +1039,24 @@ export interface ContractorVisitsResponse {
   visits: ContractorVisit[];
 }
 
+export interface CertificateOutstanding {
+  itemId: number;
+  title: string;
+  siteId: number | null;
+  siteName: string | null;
+  visitDate: string;
+  daysSinceVisit: number;
+  contractorName: string;
+  /** False once the contractor is no longer reminded (chaseStopsAfterDays after the visit) */
+  chasing: boolean;
+}
+
+export interface CertificatesOutstandingResponse {
+  followUpAfterDays: number;
+  chaseStopsAfterDays: number;
+  certificates: CertificateOutstanding[];
+}
+
 export interface SetContractorVisitRequest {
   visitKey: string;
   siteId: number;
@@ -1169,6 +1227,7 @@ export type ComplianceItemNeedsActionReason = typeof ComplianceItemNeedsActionRe
 export const ComplianceItemNeedsActionReason = {
   unsatisfactory: 'unsatisfactory',
   open_defects: 'open_defects',
+  certificate_outstanding: 'certificate_outstanding',
 } as const;
 
 export interface ComplianceItem {
@@ -1186,6 +1245,8 @@ export interface ComplianceItem {
   contractorName?: string | null;
   contractorEmail?: string | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -1197,13 +1258,19 @@ export interface ComplianceItem {
   notificationSentAt?: string | null;
   completedAt?: string | null;
   notes?: string | null;
-  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, so the check needs action whatever its due date. */
+  /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
   needsAction?: boolean;
   needsActionReason?: ComplianceItemNeedsActionReason;
   /** Open C1/C2/FI/ID/AR defects on the newest certificate. */
   openDefectCount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Assignee {
+  id: number;
+  name: string;
+  role: string;
 }
 
 export type CreateComplianceItemRequestStatus = typeof CreateComplianceItemRequestStatus[keyof typeof CreateComplianceItemRequestStatus];
@@ -1235,6 +1302,8 @@ export interface CreateComplianceItemRequest {
   categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -1275,6 +1344,8 @@ export interface UpdateComplianceItemRequest {
   categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
+  /** The person responsible, from GET /assignees. Setting it also sets assignedTo to their name; a different typed assignedTo clears it. */
+  assigneeUserId?: number | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
   /**
@@ -1868,6 +1939,17 @@ export const AppSettingsStorageAutoTopUp = {
   false: 'false',
 } as const;
 
+/**
+ * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
+ */
+export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequency[keyof typeof AppSettingsOwnerUpdateFrequency] | null;
+
+
+export const AppSettingsOwnerUpdateFrequency = {
+  weekly: 'weekly',
+  daily: 'daily',
+} as const;
+
 export interface AppSettings {
   smtpHost?: string | null;
   smtpPort?: string | null;
@@ -1883,6 +1965,10 @@ export interface AppSettings {
   storageWarningThresholdBytes?: string | null;
   /** "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there. */
   storageAutoTopUp?: AppSettingsStorageAutoTopUp;
+  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays). */
+  ownerUpdateFrequency?: AppSettingsOwnerUpdateFrequency;
+  /** JSON object keyed by reminder type (track module, "tasks", "contractors", "train"), each {"daysBefore": number|"next_week"|null, "overdueEvery": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; "next_week" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue. */
+  reminderTimings?: string | null;
 }
 
 /**
@@ -2065,6 +2151,17 @@ export const FireSafetyCheckNightStaff = {
   no_night_staff: 'no_night_staff',
 } as const;
 
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type FireSafetyCheckSoundLevelMethod = typeof FireSafetyCheckSoundLevelMethod[keyof typeof FireSafetyCheckSoundLevelMethod] | null;
+
+
+export const FireSafetyCheckSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface FireSafetyCheck {
   id: number;
   clientId: number;
@@ -2081,6 +2178,12 @@ export interface FireSafetyCheck {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: FireSafetyCheckNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: FireSafetyCheckSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -2105,6 +2208,17 @@ export const CreateFireSafetyCheckRequestNightStaff = {
   no_night_staff: 'no_night_staff',
 } as const;
 
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type CreateFireSafetyCheckRequestSoundLevelMethod = typeof CreateFireSafetyCheckRequestSoundLevelMethod[keyof typeof CreateFireSafetyCheckRequestSoundLevelMethod] | null;
+
+
+export const CreateFireSafetyCheckRequestSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface CreateFireSafetyCheckRequest {
   checkType: FireCheckType;
   checkDate: string;
@@ -2119,6 +2233,12 @@ export interface CreateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: CreateFireSafetyCheckRequestNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: CreateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
 }
 
 export type UpdateFireSafetyCheckRequestResult = typeof UpdateFireSafetyCheckRequestResult[keyof typeof UpdateFireSafetyCheckRequestResult];
@@ -2141,6 +2261,17 @@ export const UpdateFireSafetyCheckRequestNightStaff = {
   no_night_staff: 'no_night_staff',
 } as const;
 
+/**
+ * How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given.
+ */
+export type UpdateFireSafetyCheckRequestSoundLevelMethod = typeof UpdateFireSafetyCheckRequestSoundLevelMethod[keyof typeof UpdateFireSafetyCheckRequestSoundLevelMethod] | null;
+
+
+export const UpdateFireSafetyCheckRequestSoundLevelMethod = {
+  meter: 'meter',
+  phone: 'phone',
+} as const;
+
 export interface UpdateFireSafetyCheckRequest {
   checkDate?: string;
   result?: UpdateFireSafetyCheckRequestResult;
@@ -2154,25 +2285,95 @@ export interface UpdateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
+  /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
+  soundLevelDb?: number | null;
+  /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
+  soundLevelMethod?: UpdateFireSafetyCheckRequestSoundLevelMethod;
+  /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
+  soundLevelBedhead?: boolean | null;
 }
 
 export interface FireCallPoint {
   id: number;
   siteId: number | null;
   name: string;
+  /** Where the call point is, e.g. "Kitchen fire exit, ground floor". */
+  location: string | null;
+  /** Place in the site's test rotation (1 = first). */
+  sortOrder: number;
+  /** Near bedrooms or other sleeping areas, where the alarm must reach 75 dB at the bedhead rather than 65 dB. */
+  sleepingArea?: boolean;
   archivedAt: string | null;
   /** Date of the latest alarm test that used this call point. */
   lastTestedDate: string | null;
+  /** The call point to test next at its site (the one after the call point tested last, in rotation order). */
+  nextInTurn: boolean;
+  /** In use but never tested, or not tested within one full round (call points in use x the alarm test frequency). */
+  notTestedThisRound: boolean;
 }
 
 export interface CreateFireCallPointRequest {
   siteId: number | null;
   name: string;
+  location?: string | null;
+  /** Near bedrooms or other sleeping areas (75 dB at the bedhead). */
+  sleepingArea?: boolean;
 }
 
 export interface UpdateFireCallPointRequest {
   name?: string;
+  location?: string | null;
+  /** Near bedrooms or other sleeping areas (75 dB at the bedhead). */
+  sleepingArea?: boolean;
   archived?: boolean;
+}
+
+export interface OrderFireCallPointsRequest {
+  siteId: number | null;
+  /** Every call point in use at the site, first to last. */
+  ids: number[];
+}
+
+export interface FireCallPointImportRequest {
+  headers: string[];
+  rows: string[][];
+  preview?: boolean;
+  /** The site for rows whose Site cell is blank. */
+  siteId?: number | null;
+}
+
+export type FireCallPointImportResultSummary = {
+  total: number;
+  create: number;
+  update: number;
+  skip: number;
+  error: number;
+};
+
+export type FireCallPointImportResultRowsItemAction = typeof FireCallPointImportResultRowsItemAction[keyof typeof FireCallPointImportResultRowsItemAction];
+
+
+export const FireCallPointImportResultRowsItemAction = {
+  create: 'create',
+  update: 'update',
+  skip: 'skip',
+  error: 'error',
+} as const;
+
+export type FireCallPointImportResultRowsItem = {
+  row: number;
+  action: FireCallPointImportResultRowsItemAction;
+  label: string;
+  reasons: string[];
+};
+
+export interface FireCallPointImportResult {
+  preview: boolean;
+  committed: boolean;
+  summary: FireCallPointImportResultSummary;
+  rows: FireCallPointImportResultRowsItem[];
+  ignoredHeaders: string[];
+  error?: string;
 }
 
 export type FireSafetyStatusLastResult = typeof FireSafetyStatusLastResult[keyof typeof FireSafetyStatusLastResult] | null;
@@ -3261,6 +3462,28 @@ export interface FoodSafetyRecord {
   updatedAt: string;
 }
 
+export type FoodSafetyColdReadingRequestSlot = typeof FoodSafetyColdReadingRequestSlot[keyof typeof FoodSafetyColdReadingRequestSlot];
+
+
+export const FoodSafetyColdReadingRequestSlot = {
+  am: 'am',
+  pm: 'pm',
+} as const;
+
+export interface FoodSafetyColdReadingRequest {
+  /** The diary's local calendar date (YYYY-MM-DD). */
+  recordDate: string;
+  /** The fridge or freezer's name on the kitchen's list. */
+  unit: string;
+  slot: FoodSafetyColdReadingRequestSlot;
+  temperature: number;
+  /** Required when the reading is outside the unit's limits. */
+  correctiveAction?: string;
+  recordedAt?: string;
+  /** The words heard when the reading was spoken ("Say it"), kept as evidence. */
+  spoken?: string;
+}
+
 export interface CreateFoodSafetyRecordRequest {
   /**
      * Stable device submission identifier retained across retries.
@@ -3669,6 +3892,166 @@ export interface EquipmentScan {
   history: EquipmentScanHistory[];
 }
 
+export type InspectionReportType = typeof InspectionReportType[keyof typeof InspectionReportType];
+
+
+export const InspectionReportType = {
+  alps_audit: 'alps_audit',
+  care_inspectorate: 'care_inspectorate',
+  eho: 'eho',
+  fire_officer: 'fire_officer',
+  hse: 'hse',
+  insurer: 'insurer',
+  other: 'other',
+} as const;
+
+export type InspectionReportSeverity = typeof InspectionReportSeverity[keyof typeof InspectionReportSeverity];
+
+
+export const InspectionReportSeverity = {
+  monitor: 'monitor',
+  action_required: 'action_required',
+  urgent: 'urgent',
+} as const;
+
+export type InspectionReportOptionsReportTypesItem = {
+  key: InspectionReportType;
+  label: string;
+};
+
+export type InspectionReportOptionsModulesItem = {
+  key: string;
+  label: string;
+};
+
+export type InspectionReportOptionsSitesItem = {
+  id: number;
+  name: string;
+};
+
+export type InspectionReportOptionsAssigneesItem = {
+  id: number;
+  name: string;
+  role: string;
+  isMaintenanceManager: boolean;
+};
+
+export type InspectionReportOptionsReading = {
+  available: boolean;
+  monthlyLimit: number;
+  usedThisMonth: number;
+};
+
+export interface InspectionReportOptions {
+  reportTypes: InspectionReportOptionsReportTypesItem[];
+  modules: InspectionReportOptionsModulesItem[];
+  sites: InspectionReportOptionsSitesItem[];
+  assignees: InspectionReportOptionsAssigneesItem[];
+  reading: InspectionReportOptionsReading;
+}
+
+export interface InspectionReportSummary {
+  id: number;
+  siteId: number | null;
+  reportType: InspectionReportType;
+  title: string;
+  reportDate: string | null;
+  fileName: string | null;
+  aiStatus: string;
+  uploadedByName: string;
+  createdAt: string;
+  draftCount: number;
+  actionCount: number;
+  openCount: number;
+}
+
+export type InspectionReportDraftActionDraftSource = typeof InspectionReportDraftActionDraftSource[keyof typeof InspectionReportDraftActionDraftSource];
+
+
+export const InspectionReportDraftActionDraftSource = {
+  ai: 'ai',
+  manual: 'manual',
+} as const;
+
+export interface InspectionReportDraftAction {
+  title: string;
+  instruction?: string | null;
+  module: string;
+  severity: InspectionReportSeverity;
+  siteId?: number | null;
+  dueDate?: string | null;
+  assignedUserId?: number | null;
+  reportReference?: string | null;
+  draftSource?: InspectionReportDraftActionDraftSource;
+}
+
+export interface InspectionReportDraftRequest {
+  actions: InspectionReportDraftAction[];
+}
+
+export interface InspectionReport {
+  id: number;
+  siteId: number | null;
+  reportType: InspectionReportType;
+  title: string;
+  reportDate: string | null;
+  fileName: string | null;
+  fileSize?: number | null;
+  mimeType?: string | null;
+  readable: boolean;
+  draftActions: InspectionReportDraftAction[];
+  aiStatus: string;
+  aiSummary: string | null;
+  aiError: string | null;
+  aiReadCount: number;
+  uploadedByName: string;
+  createdAt: string;
+}
+
+export type InspectionReportActionDueDateChangesItem = {
+  changedAt: string;
+  changedByName: string | null;
+  from: string | null;
+  to: string | null;
+};
+
+export interface InspectionReportAction {
+  id: number;
+  siteId: number | null;
+  module: string;
+  title: string;
+  instruction: string | null;
+  severity: InspectionReportSeverity;
+  status: string;
+  ownerName: string | null;
+  /** The person assigned (gets the reminders) */
+  assigneeUserId?: number | null;
+  dueDate: string | null;
+  draftSource: string | null;
+  confirmedByName: string | null;
+  createdAt: string;
+  /** Due date changes after the action was created (report detail only), oldest first */
+  dueDateChanges?: InspectionReportActionDueDateChangesItem[];
+}
+
+export type InspectionReportDetail = InspectionReport & {
+  actions: InspectionReportAction[];
+};
+
+export interface InspectionReportReading {
+  aiSummary: string | null;
+  draftActions: InspectionReportDraftAction[];
+}
+
+export interface CreateInspectionReportRequest {
+  title: string;
+  reportType: InspectionReportType;
+  reportDate?: string | null;
+  siteId?: number | null;
+  objectPath: string;
+  fileName: string;
+}
+
 export type ListFeedbackReportsParams = {
 clientId?: number;
 category?: ListFeedbackReportsCategory;
@@ -3771,6 +4154,10 @@ export const ListPublicLinkAccessActionType = {
   view: 'view',
   submit: 'submit',
 } as const;
+
+export type ListAssigneesParams = {
+siteId?: number;
+};
 
 export type ListComplianceItemsParams = {
 status?: ListComplianceItemsStatus;
@@ -4001,6 +4388,13 @@ export type CreateFoodSafetyRecordParams = {
 siteId?: number;
 };
 
+export type RecordFoodSafetyColdReadingParams = {
+/**
+ * Scope to a site's diary. Omit for the whole-organisation diary.
+ */
+siteId?: number;
+};
+
 export type GetFoodSafetyRecordByDateParams = {
 /**
  * Scope to a site's diary. Omit for the whole-organisation diary.
@@ -4140,6 +4534,16 @@ export type ListCoshhSignOffs200 = {
 export type RecordCoshhSignOffs200 = {
   signed: number;
   assessment: CoshhSignOffStatus | null;
+};
+
+export type SaveInspectionReportDraft200 = {
+  draftActions: InspectionReportDraftAction[];
+};
+
+export type ConfirmInspectionReportActions201 = {
+  actions: InspectionReportAction[];
+  /** Owners and Managers emailed the action plan */
+  emailedTo: string[];
 };
 
 export type ListAllergenMenusParams = {

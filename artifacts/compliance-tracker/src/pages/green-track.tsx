@@ -37,7 +37,7 @@ import {
   Tractor, Plus, AlertTriangle, CheckCircle2, Clock, Wrench,
   Pencil, Trash2, Lock, Search, Building2, Filter, ChevronDown, X,
   ShieldAlert, XCircle, CheckCheck, Gauge, Fuel, ClipboardCheck, Droplet, Settings,
-  Upload, Download, SprayCan, Package,
+  Upload, Download, SprayCan, Package, Mic,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -46,6 +46,8 @@ import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/compon
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
 import { GreenSprayingTab, GreenStockTab } from "@/components/green-track-spraying";
+import { SpeakToPickDialog } from "@/components/speak-to-pick-dialog";
+import { dictationSupported } from "@/components/dictation-button";
 import { getApiErrorMessage } from "@/lib/api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
@@ -752,7 +754,21 @@ function MachineImportDialog({
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
-    const parsed = parseMachineRosterCsv(await file.text(), sites);
+    let text: string;
+    if (/\.xlsx?$/i.test(file.name)) {
+      // An Excel file is read in the browser and its first sheet treated as CSV.
+      try {
+        const XLSX = await import("@e965/xlsx");
+        const book = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
+        text = XLSX.utils.sheet_to_csv(book.Sheets[book.SheetNames[0]], { blankrows: false });
+      } catch {
+        toast({ title: "Could not read file", description: "Make sure it is a valid .xlsx or .xls file.", variant: "destructive" });
+        return;
+      }
+    } else {
+      text = await file.text();
+    }
+    const parsed = parseMachineRosterCsv(text, sites);
     setFileName(file.name);
     setRows(parsed.rows);
     setErrors(parsed.errors);
@@ -795,8 +811,9 @@ function MachineImportDialog({
             </Button>
             <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm border border-border px-3 py-2 text-sm hover:bg-muted/40">
               <Upload className="w-3.5 h-3.5" />
-              Choose CSV
-              <input type="file" accept=".csv,text/csv" className="sr-only" onChange={e => void handleFile(e.target.files?.[0])} />
+              Choose CSV or Excel file
+              <input type="file" accept=".csv,text/csv,.xlsx,.xls" className="sr-only" data-testid="input-machine-roster-file"
+                onChange={e => { void handleFile(e.target.files?.[0]); e.target.value = ""; }} />
             </label>
             {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
           </div>
@@ -804,6 +821,7 @@ function MachineImportDialog({
             Required columns: <strong>name</strong> and <strong>type</strong>. Supported broad types include
             <strong> ride-on</strong>, <strong>pedestrian</strong>, tractor, utility, and other approved GreenTrack types.
             Optional columns include make, model, serial number, fleet number, year, site, notes, and active.
+            Use names staff would say, such as &quot;Fairway mower 1&quot;, so they can open a machine&apos;s pre-use check by saying its name.
           </p>
           {errors.length > 0 && (
             <div className="rounded-sm border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
@@ -2053,6 +2071,7 @@ export default function GreenTrackPage() {
   // A machine chosen by a scanned QR label, for the form the label opened.
   const [scanMachineId, setScanMachineId] = useState<string | undefined>();
   const [sprayingFromScan, setSprayingFromScan] = useState<{ machineId?: number } | null>(null);
+  const [sayMachineDialog, setSayMachineDialog] = useState(false);
 
   useEffect(() => {
     const link = takeLinkParams(["machine", "open"] as const);
@@ -2212,6 +2231,10 @@ export default function GreenTrackPage() {
   ];
 
   const activeMachines = machines.filter(m => m.active);
+  // A machine can also be said by its registration or its make and model.
+  const sayMachineItems = useMemo(() => activeMachines.map(m => ({
+    id: m.id, name: m.name, aliases: [m.regNo, [m.make, m.model].filter(Boolean).join(" ")],
+  })), [machines]);
 
   return (
     <AppLayout title="GreenTrack">
@@ -2352,6 +2375,12 @@ export default function GreenTrackPage() {
                   <Plus className="w-3.5 h-3.5" /> Add machine
                 </Button>
               </>
+            )}
+            {(activeTab === "pre-use" || activeTab === "fleet") && dictationSupported && activeMachines.length > 0 && (
+              <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8" data-testid="button-say-machine"
+                title="Say the machine's name to open its pre-use check" onClick={() => setSayMachineDialog(true)}>
+                <Mic className="w-3.5 h-3.5" /> Say machine
+              </Button>
             )}
             {activeTab === "pre-use" && (
               <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditPreUse(null); setPreUseDialog(true); }}>
@@ -2995,6 +3024,19 @@ export default function GreenTrackPage() {
 
       <MachineDialog open={machineDialog} onClose={() => { setMachineDialog(false); setEditMachine(null); }}
         machine={editMachine} sites={sites} onSaved={invalidate} />
+
+      <SpeakToPickDialog open={sayMachineDialog} onClose={() => setSayMachineDialog(false)}
+        title="Say the machine"
+        description={"Say the machine's name, for example \"fairway mower one\", and its pre-use check opens."}
+        noun="machine"
+        items={sayMachineItems}
+        onPick={(machine) => {
+          setSayMachineDialog(false);
+          setActiveTab("pre-use");
+          setEditPreUse(null);
+          setScanMachineId(String(machine.id));
+          setPreUseDialog(true);
+        }} />
 
       <PreUseDialog open={preUseDialog} onClose={() => { setPreUseDialog(false); setEditPreUse(null); setScanMachineId(undefined); }}
         presetMachineId={scanMachineId}

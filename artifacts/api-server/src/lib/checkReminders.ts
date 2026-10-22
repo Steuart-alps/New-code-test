@@ -179,7 +179,7 @@ export async function unreadLegionellaOutletUnits(clientId: number, siteIds: num
   const result = await db.execute(sql`
     SELECT DISTINCT o.site_id,
       CASE o.type WHEN 'cold' THEN 'cold_sentinel_temp' WHEN 'calorifier' THEN 'calorifier_temp'
-        ELSE 'hot_sentinel_temp' END AS check_type
+        WHEN 'little_used' THEN 'outlet_flush' ELSE 'hot_sentinel_temp' END AS check_type
     FROM legionella_sentinel_outlets o
     WHERE o.client_id = ${clientId} AND o.active = true AND o.site_id IN (${idList(siteIds)})
       AND NOT EXISTS (

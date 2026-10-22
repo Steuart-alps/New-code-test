@@ -30,7 +30,7 @@ export const EXTENDED_AUDITED_TABLES = [
   "green_application_products", "green_applications",
   "green_defects", "green_fuel_logs", "green_hour_readings", "green_machines", "green_pre_use_checks",
   "green_products", "green_puwer_inspections", "green_service_records", "green_stock_movements",
-  "hot_tub_checks", "hot_tubs",
+  "hot_tub_checks", "hot_tubs", "inspection_reports",
   "kitchen_cleaning_logs", "kitchen_cleaning_tasks", "kitchen_probe_checks", "kitchen_weekly_records",
   "legionella_sentinel_outlets",
   "pat_appliances", "pat_certificate_rooms", "pat_certificates",
