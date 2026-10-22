@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { PAT_APPLIANCE_TYPES } from "@workspace/db/schema";
 import { CSV_IMPORT_COLUMNS, CSV_IMPORT_MAX_ROWS } from "./csvImport";
+import { usageFromMessage, type AiCallUsage } from "./aiPricing";
 import { fileContentBlock, ReportReadingError, reportReadingModel, type UnreadableFileWording } from "./reportReading";
 
 /**
@@ -90,6 +91,7 @@ export interface RegisterReadingResult {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  usage: AiCallUsage;
 }
 
 const SYSTEM_PROMPT = `You help UK businesses move their existing list of portable electrical appliances into the PAT (portable appliance testing) register of ComplyTrack, a compliance app. The list may be a photo of a handwritten or printed sheet, a scan, a contractor's PAT test certificate or a typed document. A person will check every row you return against the original before anything is saved.
@@ -137,13 +139,14 @@ export async function readApplianceList(input: RegisterReadingInput, beforeSendi
     }],
   }).finalMessage();
 
-  if (message.stop_reason === "refusal") throw new ReportReadingError("ComplyTrack could not read this list. Type the appliances into a spreadsheet and upload that instead.");
-  if (message.stop_reason === "max_tokens") throw new ReportReadingError("This list is too long to read in one go. Upload it a few pages at a time.");
+  const usage = usageFromMessage(message, model);
+  if (message.stop_reason === "refusal") throw new ReportReadingError("ComplyTrack could not read this list. Type the appliances into a spreadsheet and upload that instead.", usage);
+  if (message.stop_reason === "max_tokens") throw new ReportReadingError("This list is too long to read in one go. Upload it a few pages at a time.", usage);
   const text = message.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("");
   let json: unknown = null;
   try { json = JSON.parse(text); } catch { /* reported below */ }
   const parsed = resultSchema.safeParse(json);
-  if (!parsed.success) throw new ReportReadingError("ComplyTrack could not understand its reading of this list. Try again, or upload a spreadsheet instead.");
+  if (!parsed.success) throw new ReportReadingError("ComplyTrack could not understand its reading of this list. Try again, or upload a spreadsheet instead.", usage);
 
   const siteName = new Map(input.sites.map((site) => [site.id, site.name]));
   const clean = (value: string | null, max: number) => (value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -152,7 +155,7 @@ export async function readApplianceList(input: RegisterReadingInput, beforeSendi
     .map((item) => ({ ...item, name: clean(item.name, 200) }))
     .filter((item) => item.name)
     .slice(0, CSV_IMPORT_MAX_ROWS);
-  if (!appliances.length) throw new ReportReadingError("No appliances were found in this file. Check it is the right file, or upload a clearer photo.");
+  if (!appliances.length) throw new ReportReadingError("No appliances were found in this file. Check it is the right file, or upload a clearer photo.", usage);
 
   // Same column order and headings as the import template.
   const headers = CSV_IMPORT_COLUMNS["pat-appliances"].map((column) => column.label);
@@ -177,5 +180,6 @@ export async function readApplianceList(input: RegisterReadingInput, beforeSendi
     model: message.model ?? model,
     inputTokens: message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0),
     outputTokens: message.usage.output_tokens,
+    usage,
   };
 }

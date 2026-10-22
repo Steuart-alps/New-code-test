@@ -2406,11 +2406,42 @@ export type PatRegisterReadingStatusSitesItem = {
   name: string;
 };
 
+export type AiStatusPlan = typeof AiStatusPlan[keyof typeof AiStatusPlan];
+
+
+export const AiStatusPlan = {
+  addon: 'addon',
+  trial: 'trial',
+  none: 'none',
+} as const;
+
+/**
+ * The AI features add-on for this business: £25 a month, which includes a monthly allowance of AI use. Without it, AI buttons are unavailable.
+ */
+export interface AiStatus {
+  /** The server has an Anthropic API key, so AI can be offered at all */
+  configured: boolean;
+  /** The business has the AI add-on (or a trial allowance) now */
+  active: boolean;
+  plan: AiStatusPlan;
+  /**
+     * Share of this period's allowance used
+     * @minimum 0
+     * @maximum 100
+     */
+  percentUsed: number;
+  /** When the allowance starts again */
+  resetsAt: string | null;
+  /** The allowance is used up for this period */
+  usedUp: boolean;
+}
+
 export interface PatRegisterReadingStatus {
   available: boolean;
   /** Readings a business may have each month; 0 means no limit */
   monthlyLimit: number;
   usedThisMonth: number;
+  ai: AiStatus;
   sites: PatRegisterReadingStatusSitesItem[];
 }
 
@@ -4064,6 +4095,7 @@ export type InspectionReportOptionsReading = {
   available: boolean;
   monthlyLimit: number;
   usedThisMonth: number;
+  ai: AiStatus;
 };
 
 export interface InspectionReportOptions {
@@ -4072,6 +4104,30 @@ export interface InspectionReportOptions {
   sites: InspectionReportOptionsSitesItem[];
   assignees: InspectionReportOptionsAssigneesItem[];
   reading: InspectionReportOptionsReading;
+}
+
+export type AiAddonStatusPrice = {
+  /** Monthly price in pence, before VAT */
+  unitAmount: number;
+  currency: string;
+} | null;
+
+export type AiAddonStatus = AiStatus & {
+  price: AiAddonStatusPrice;
+  /** The add-on can be bought now (Stripe ready and the price exists) */
+  purchasable: boolean;
+};
+
+export type AiAddonChangeAction = typeof AiAddonChangeAction[keyof typeof AiAddonChangeAction];
+
+
+export const AiAddonChangeAction = {
+  add: 'add',
+  remove: 'remove',
+} as const;
+
+export interface AiAddonChange {
+  action: AiAddonChangeAction;
 }
 
 export interface InspectionReportSummary {

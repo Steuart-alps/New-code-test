@@ -28,6 +28,8 @@ const stubs = {
       stripeSubscriptionId: "clients.stripeSubscriptionId", subscriptionStatus: "clients.subscriptionStatus" };
     export const sitesTable = { __table: "sites", clientId: "sites.clientId" };
     export const appSettingsTable = { __table: "app_settings", clientId: "app_settings.clientId", key: "app_settings.key", value: "app_settings.value" };
+    // Imported by lib/aiAllowance.ts (the AI add-on routes); never read here.
+    export const aiUsageTable = { __table: "ai_usage", id: "ai_usage.id" };
   `,
   drizzle: `
     export const eq = (left, right) => ({ left, right });

@@ -5,9 +5,11 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { AiStatus } from './aiStatus';
 
 export type InspectionReportOptionsReading = {
   available: boolean;
   monthlyLimit: number;
   usedThisMonth: number;
+  ai: AiStatus;
 };

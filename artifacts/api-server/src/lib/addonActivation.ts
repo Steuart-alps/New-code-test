@@ -56,6 +56,11 @@ export async function activatePaidAddonService(input: {
   onRollbackFailure?: (error: unknown) => void;
   onChargeFailure?: (error: unknown) => void;
   /**
+   * A flat add-on billed once per business (the AI add-on): quantity 1 and
+   * this invoice line, instead of one per site.
+   */
+  perBusiness?: { description: string };
+  /**
    * The per-site cap. When the client's per-site services plus this add-on
    * would reach it, the subscription is moved to the bundle instead, so the
    * advertised cap is never exceeded.
@@ -82,7 +87,7 @@ export async function activatePaidAddonService(input: {
     return { status: "already_active" };
   }
 
-  const quantity = Math.max(await input.countClientSites(input.clientId), 1);
+  const quantity = input.perBusiness ? 1 : Math.max(await input.countClientSites(input.clientId), 1);
   const periodStart =
     input.subscription.items.data[0]?.current_period_start ??
     input.subscription.created;
@@ -104,7 +109,8 @@ export async function activatePaidAddonService(input: {
   );
 
   const amount = price.unitAmount * quantity;
-  const description = `${input.serviceLabel} — 1 month access, ${quantity} site${quantity === 1 ? "" : "s"} (no proration)`;
+  const description = input.perBusiness?.description
+    ?? `${input.serviceLabel} — 1 month access, ${quantity} site${quantity === 1 ? "" : "s"} (no proration)`;
 
   try {
     const payment = await input.collectFirstMonthInvoice(input.stripe, {
@@ -168,10 +174,10 @@ async function switchToBundleAtCap(
   quantity: number,
   periodStart: number,
 ): Promise<AddonActivationResult | null> {
-  // Per-site service items (core, add-ons); storage is a separate product.
+  // Per-site service items (core, add-ons); storage and AI are separate products.
   const perSiteItems = input.subscription.items.data.filter((item) => {
     const key = item.price?.metadata?.service_key;
-    if (key) return key !== "storage";
+    if (key) return key !== "storage" && key !== "ai";
     return Boolean(bundle.corePriceId) && item.price?.id === bundle.corePriceId;
   });
   if (perSiteItems.some((item) => typeof item.price?.unit_amount !== "number" || !item.price?.id)) return null;

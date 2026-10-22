@@ -10,6 +10,7 @@ import { siteVisibleSql } from "../lib/departmentSites";
 import { getAccountToday } from "../lib/accountClock";
 import { ReportReadingError, reportReadingConfigured, UnreadableReportError } from "../lib/reportReading";
 import { readApplianceList, REGISTER_READING_MAX_BYTES, registerReadingMonthlyLimit } from "../lib/registerReading";
+import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
 import {
   CSV_IMPORT_MAX_CELL_LENGTH,
   CSV_IMPORT_MAX_COLUMNS,
@@ -411,6 +412,8 @@ router.post("/imports/pat-appliances", requireAuth, denyViewers, requirePatImpor
 // REGISTER_READING_MONTHLY_LIMIT lists read a month, counted in app_settings
 // as "YYYY-MM:count" so a new month starts again at nought.
 const REGISTER_READS_SETTING = "patRegisterReads";
+/** Held against the AI allowance while a list is read; a few photographed pages cost about this. */
+const REGISTER_READING_ESTIMATE_PENCE = 30;
 class RegisterReadLimitError extends Error {}
 
 async function importableSites(clientId: number, departmentId: number | null) {
@@ -455,8 +458,10 @@ router.get("/imports/pat-appliances/reading", requireAuth, requirePatImporter, r
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const month = (await getAccountToday(clientId)).slice(0, 7);
-  const [sites, used] = await Promise.all([importableSites(clientId, getActiveDepartmentId(req)), registerReadsThisMonth(clientId, month)]);
-  res.json({ available: reportReadingConfigured(), monthlyLimit: registerReadingMonthlyLimit(), usedThisMonth: used, sites });
+  const [sites, used, ai] = await Promise.all([
+    importableSites(clientId, getActiveDepartmentId(req)), registerReadsThisMonth(clientId, month), getAiStatus(clientId),
+  ]);
+  res.json({ available: reportReadingConfigured(), monthlyLimit: registerReadingMonthlyLimit(), usedThisMonth: used, ai, sites });
 });
 
 router.post("/imports/pat-appliances/read", requireAuth, denyViewers, requirePatImporter, requireService("pattrack"), async (req, res) => {
@@ -475,16 +480,25 @@ router.post("/imports/pat-appliances/read", requireAuth, denyViewers, requirePat
   const bytes = Buffer.from(parsed.data.data, "base64");
   const month = (await getAccountToday(clientId)).slice(0, 7);
   const limit = registerReadingMonthlyLimit();
+  let aiUseId: number | null = null;
   try {
-    // A file Claude cannot read is turned away before it counts towards the limit.
+    // A file Claude cannot read is turned away before it counts towards the
+    // limit or the AI allowance (lib/aiAllowance.ts).
     const result = await readApplianceList({ bytes, mimeType: parsed.data.mimeType, fileName: parsed.data.fileName, sites, siteId }, async () => {
+      aiUseId = await claimAiUse({
+        clientId, userId: req.currentUser?.id ?? null, feature: "register_reading",
+        estimatePence: REGISTER_READING_ESTIMATE_PENCE, instead: "Upload a spreadsheet instead.",
+      });
       if (!await claimRegisterRead(clientId, month, limit)) {
         throw new RegisterReadLimitError(`This business has had ${limit} lists read this month, the most allowed. Upload a spreadsheet instead, or ask ALPS.`);
       }
     });
+    if (aiUseId !== null) await settleAiUse(aiUseId, result.usage, true);
     req.log.info({ clientId, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, rows: result.rows.length }, "PAT register list read");
     res.json({ headers: result.headers, rows: result.rows, unclear: result.unclear });
   } catch (err) {
+    if (aiUseId !== null) await settleAiUse(aiUseId, err instanceof ReportReadingError ? err.usage ?? null : null, false);
+    if (err instanceof AiUnavailableError) return res.status(err.status).json({ error: err.message, code: err.code });
     if (err instanceof RegisterReadLimitError) return res.status(429).json({ error: err.message, code: "REGISTER_READING_LIMIT" });
     if (err instanceof UnreadableReportError) return res.status(400).json({ error: err.message });
     if (!(err instanceof ReportReadingError)) req.log.error({ err }, "PAT register list reading failed");

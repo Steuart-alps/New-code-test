@@ -94,6 +94,8 @@ const stubs = {
       __table: "app_settings", clientId: "app_settings.clientId",
       key: "app_settings.key", value: "app_settings.value",
     };
+    // Imported by lib/aiAllowance.ts (the AI add-on routes); never read here.
+    export const aiUsageTable = { __table: "ai_usage", id: "ai_usage.id" };
   `,
   drizzle: `
     export const eq = (left, right) => ({ left, right });
@@ -324,7 +326,7 @@ try {
 
   const { billingRouter, ADDON_KEYS, SERVICES, SERVICE_PRICE_CATALOGUE, getServicePrice } =
     await import(pathToFileURL(outFile).href);
-  assert.equal(fixtures.length, 21, "the independently pinned add-on fixture must contain all 21 billable services");
+  assert.equal(fixtures.length, 22, "the independently pinned add-on fixture must contain all 22 billable services");
   assert.deepEqual(
     Object.keys(SERVICES).filter((key) => key !== "core"),
     fixtures.map(({ key }) => key),
@@ -592,7 +594,7 @@ try {
     interval: "month",
   }, "legacy metadata-free core fallback remains available for GBP monthly prices");
 
-  console.log("Billing add-on catalogue regression tests passed for all 21 services.");
+  console.log("Billing add-on catalogue regression tests passed for all 22 services.");
 } finally {
   if (server) await new Promise((resolve) => server.close(resolve));
   delete globalThis.__billingAddonCatalogState;
