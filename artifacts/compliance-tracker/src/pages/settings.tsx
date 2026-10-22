@@ -2965,7 +2965,8 @@ export default function SettingsPage() {
                 Each person gets one email at 8am, only on days when something of theirs needs a reminder: by default the day
                 before it is due, then the day after if it goes overdue and once a week after that (change this per type below). Anything with no one assigned goes to the track's owner,
                 or to the Owners when no owner is set (Track Owners above). Urgent actions (including checks recorded as unsafe), critical
-                compliance checks and new FixTrack issues are emailed as soon as they are raised.
+                compliance checks and new FixTrack issues are emailed as soon as they are raised. On Mondays, everyone on the staff
+                roster with an email is also sent their own outstanding training (expired or expiring, and anything to sign).
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-5">
@@ -2973,7 +2974,7 @@ export default function SettingsPage() {
                 <Label htmlFor="ownerUpdateFrequency">Owner update</Label>
                 <p className="text-xs text-muted-foreground">
                   One email to the Owners listing what was done, what is overdue and who has it, what is due, anything with no one
-                  assigned, expiries in the next 60 days and documents still to sign. Managers get one for their own departments.
+                  assigned, expiries in the next 60 days, each person's outstanding training (TrainTrack) and documents still to sign. Managers get one for their own departments.
                   Sent at 8am in your account timezone.
                 </p>
                 <Select
