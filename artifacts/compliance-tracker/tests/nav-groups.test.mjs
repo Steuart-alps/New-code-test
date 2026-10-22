@@ -10,7 +10,6 @@ import {
   pinnedNavStorageKey,
   resolvePinnedNavItems,
   togglePinnedHref,
-  withoutReplacedNavItems,
 } from "../src/lib/nav-groups.ts";
 
 function flattenGroups(groups) {
@@ -39,7 +38,7 @@ assert.ok(!userItems.includes("Sites"), "User should not see Sites");
 assert.ok(!userItems.includes("Feedback inbox"), "Staff and viewers should not see internal feedback");
 assert.ok(!userItems.includes("Categories"), "Staff and viewers should not see the admin-only Categories page");
 assert.ok(userItems.includes("FireTrack"), "User should see FireTrack");
-assert.ok(userItems.includes("COSHH Register") && userItems.includes("Asbestos Register"), "Core registers are visible to every role");
+assert.ok(userItems.includes("Asbestos Register"), "The core asbestos register is visible to every role");
 const allergens = userGroups.flatMap(g => g.items).find(i => i.label === "Allergens");
 assert.equal(allergens?.serviceKey, "kitchentrack", "Allergen records sit under the KitchenTrack entitlement");
 
@@ -79,7 +78,7 @@ assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Ev
 const membership = groups => Object.fromEntries(groups.map(g => [g.id, g.items.map(i => i.href)]));
 assert.deepEqual(membership(adminGroups), {
   core: ["/dashboard", "/portfolio", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors", "/categories", "/equipment", "/report-actions"],
-  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/coshh", "/asbestos"],
+  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
   operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
   "people-training": ["/doc-track", "/train-track", "/users", "/staff-roster"],
@@ -88,7 +87,7 @@ assert.deepEqual(membership(adminGroups), {
 }, "Consultant admin sections");
 assert.deepEqual(membership(userGroups), {
   core: ["/dashboard", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors"],
-  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/coshh", "/asbestos"],
+  safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
   operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
   "people-training": ["/doc-track", "/train-track"],
@@ -175,14 +174,9 @@ const full = Array.from({ length: MAX_PINNED_NAV_ITEMS }, (_, i) => `/${i}`);
 assert.deepEqual(togglePinnedHref(full, "/extra"), full, "A full list refuses another pin");
 assert.deepEqual(togglePinnedHref(full, "/0"), full.slice(1), "A full list can still unpin");
 
-// COSHHTrack includes the COSHH register (its Substances tab), so the
-// separate register link only shows for businesses without COSHHTrack.
-const hrefsWith = (services) => withoutReplacedNavItems(userGroups, (key) => services.includes(key))
-  .flatMap(g => g.items.map(i => i.href));
-assert.ok(hrefsWith(["core"]).includes("/coshh"), "Without COSHHTrack the free COSHH register is in the menu");
-assert.ok(hrefsWith(["core"]).includes("/coshh-track"), "COSHHTrack still shows (locked) without the module");
-assert.ok(!hrefsWith(["core", "coshhtrack"]).includes("/coshh"), "With COSHHTrack the register link is not repeated");
-assert.ok(hrefsWith(["core", "coshhtrack"]).includes("/coshh-track"));
-assert.equal(withoutReplacedNavItems(userGroups, () => false).length, userGroups.length, "No section is dropped while modules load");
+// The COSHH register is COSHHTrack's Substances tab, not a menu link of its own.
+const allHrefs = userGroups.flatMap(g => g.items.map(i => i.href));
+assert.ok(!allHrefs.includes("/coshh"), "No separate COSHH register link");
+assert.ok(allHrefs.includes("/coshh-track"), "COSHHTrack is in the menu");
 
 console.log("Nav groups visibility regression tests passed.");

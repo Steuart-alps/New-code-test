@@ -131,6 +131,7 @@ await ok(staff.request("DELETE", `/registers/coshh/${overdue.id}`), 404, "staff 
 await ok(owner.request("DELETE", `/registers/coshh/${bleach.id}`), 204, "delete substance");
 assert.ok((await pool.query("SELECT deleted_at FROM coshh_substances WHERE id = $1", [bleach.id])).rows[0]?.deleted_at, "substance soft-deleted");
 
+
 // ── Asbestos ─────────────────────────────────────────────────────────────────
 await ok(owner.request("POST", "/registers/asbestos", { siteId: siteA.id, builtBefore2000: "yes", noAsbestosExpected: true }), 400, "no-asbestos option needs a post-2000 build");
 const surveyDate = isoDay(-10);
@@ -198,6 +199,26 @@ assert.ok((await pool.query("SELECT deleted_at FROM asbestos_records WHERE id = 
 assert.ok((await pool.query("SELECT deleted_at FROM asbestos_register_entries WHERE id = $1", [entry.id])).rows[0]?.deleted_at, "entry soft-deleted");
 // A soft-deleted record frees the site for a new current record.
 await ok(owner.request("POST", "/registers/asbestos", { siteId: siteA.id, builtBefore2000: "yes" }), 201, "new record after removal");
+
+// The register is part of COSHHTrack. A business without it (trial over, no
+// live subscription: core only) can't reach it; its saved substances stay
+// and come back if it adds COSHHTrack.
+const kept = await ok(foreign.request("POST", "/registers/coshh", { siteId: foreignSite.id, productName: "Kept cleaner" }), 201, "trial business adds substance");
+await pool.query("UPDATE clients SET trial_ends_at = now() - interval '1 day', stripe_customer_id = $2 WHERE id = $1",
+  [foreign.clientId, `cus_registers_${foreign.clientId}`]);
+for (const [method, path, body] of [
+  ["GET", "/registers/coshh"],
+  ["POST", "/registers/coshh", { siteId: foreignSite.id, productName: "New" }],
+  ["PUT", `/registers/coshh/${kept.id}`, { siteId: foreignSite.id, productName: "Changed" }],
+  ["DELETE", `/registers/coshh/${kept.id}`],
+  ["GET", `/registers/coshh/${kept.id}/sds-url`],
+]) {
+  const response = await foreign.request(method, path, body);
+  assert.equal(response.status, 403, `${method} ${path} without COSHHTrack`);
+  assert.equal(response.data?.code, "SERVICE_NOT_ENABLED", `${method} ${path} code`);
+}
+const keptRow = (await pool.query("SELECT product_name, deleted_at FROM coshh_substances WHERE id = $1", [kept.id])).rows[0];
+assert.deepEqual(keptRow, { product_name: "Kept cleaner", deleted_at: null }, "saved substances are kept without COSHHTrack");
 
 await pool.end();
 console.log("Registers: allergen, COSHH and asbestos routes passed.");

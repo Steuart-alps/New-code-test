@@ -4,14 +4,13 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { chromium } from "@playwright/test";
 
-// Browser regression for the COSHH register's two homes
-// (src/components/coshh-register-panel.tsx):
-//   - without COSHHTrack, the free COSHH Register page and menu link, with the
-//     register's own assessment date, review date and controls;
-//   - with COSHHTrack, no separate menu link, /coshh opens COSHHTrack's
-//     Substances tab, each substance shows its COSHHTrack assessments (or an
-//     "Assess" button that starts one with the register's controls), and
-//     editing a substance there leaves the register's hidden fields unchanged.
+// Browser regression for the COSHH register, which is COSHHTrack's Substances
+// tab (src/components/coshh-register-panel.tsx):
+//   - there is no separate menu link, and /coshh opens the Substances tab;
+//   - without COSHHTrack the register isn't served (the API refuses it);
+//   - each substance shows its COSHHTrack assessments (or an "Assess" button
+//     that starts one with the register's earlier controls), and editing a
+//     substance leaves the register's earlier assessment fields unchanged.
 // The API is mocked; anything not listed returns an empty list.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const freePort = async () => {
@@ -96,6 +95,9 @@ try {
       saves.push(JSON.parse(request.postData() ?? "{}"));
       return route.fulfill({ json: {} });
     }
+    if (path.includes("/api/registers/coshh") && !session.services.includes("coshhtrack")) {
+      return route.fulfill({ status: 403, json: { error: "COSHHTrack is not enabled for this account", code: "SERVICE_NOT_ENABLED", service: "coshhtrack" } });
+    }
     if (path.endsWith("/api/registers/coshh")) return route.fulfill({ json: substances });
     if (path.endsWith("/api/coshh-track/assessments")) return route.fulfill({ json: assessments });
     if (path.endsWith("/api/coshh-track/status")) {
@@ -106,24 +108,21 @@ try {
   });
   const sidebar = page.locator("aside");
 
-  // ─── Without COSHHTrack: the free register ────────────────────────────────
+  // ─── Without COSHHTrack: no register ──────────────────────────────────────
   await page.goto(`${baseUrl}/coshh`);
-  await page.getByRole("heading", { name: "COSHH register" }).first().waitFor();
-  await sidebar.locator('a[href="/coshh"]').waitFor(); // the free register is in the menu
-  await page.getByText("Oven cleaner").first().waitFor();
-  assert.ok(await page.getByText("Gloves and goggles").first().isVisible(), "The register shows its own controls");
-  await page.getByRole("button", { name: "Edit Oven cleaner" }).click();
-  assert.ok(await page.locator("#coshh-assessed").isVisible(), "The free register edits its own assessment date");
-  assert.ok(await page.locator("#coshh-controls").isVisible());
-  await page.keyboard.press("Escape");
+  await page.waitForURL(/\/coshh-track\?tab=substances$/);
+  await sidebar.locator('a[href="/coshh-track"]').waitFor();
+  assert.equal(await sidebar.locator('a[href="/coshh"]').count(), 0, "No separate register link");
+  await page.getByRole("tabpanel").getByText("COSHHTrack is not enabled for this account").first().waitFor();
+  assert.equal(await page.getByText("Oven cleaner").count(), 0, "No substances without COSHHTrack");
 
-  // ─── With COSHHTrack: one register, inside COSHHTrack ─────────────────────
+  // ─── With COSHHTrack: the register is its Substances tab ───────────────────
   session.services = ["core", "coshhtrack"];
   await page.goto(`${baseUrl}/coshh`);
   await page.waitForURL(/\/coshh-track\?tab=substances$/);
   await page.getByRole("tab", { name: "Substances", selected: true }).waitFor();
   await sidebar.locator('a[href="/coshh-track"]').waitFor();
-  assert.equal(await sidebar.locator('a[href="/coshh"]').count(), 0, "No separate register link with COSHHTrack");
+  assert.equal(await sidebar.locator('a[href="/coshh"]').count(), 0, "No separate register link with COSHHTrack either");
 
   const panel = page.getByRole("tabpanel");
   await panel.getByText("Oven cleaner").first().waitFor();
@@ -135,15 +134,15 @@ try {
   // Editing keeps the register's hidden assessment fields as they were.
   await panel.getByRole("button", { name: "Edit Oven cleaner" }).click();
   const dialog = page.getByRole("dialog");
-  assert.equal(await dialog.locator("#coshh-assessed").count(), 0, "No second assessment date inside COSHHTrack");
+  assert.equal(await dialog.locator("#coshh-assessed").count(), 0, "No second assessment date");
   await dialog.locator("#coshh-supplier").fill("Acme");
   await dialog.getByRole("button", { name: "Save" }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(saves.length, 1);
   assert.equal(saves[0].supplier, "Acme");
-  assert.equal(saves[0].assessmentDate, "2025-09-01", "Hidden assessment date is kept");
-  assert.equal(saves[0].reviewDue, "2026-09-01", "Hidden review date is kept");
-  assert.equal(saves[0].controls, "Gloves and goggles", "Hidden controls are kept");
+  assert.equal(saves[0].assessmentDate, "2025-09-01", "Earlier assessment date is kept");
+  assert.equal(saves[0].reviewDue, "2026-09-01", "Earlier review date is kept");
+  assert.equal(saves[0].controls, "Gloves and goggles", "Earlier controls are kept");
 
   // "Assess" starts a COSHHTrack assessment for that substance.
   await panel.getByRole("button", { name: "Assess", exact: true }).click();

@@ -22,7 +22,7 @@ import {
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
 
-// COSHHTrack (API: /api/coshh-track/*). Substances come from the core COSHH
+// COSHHTrack (API: /api/coshh-track/*). Substances come from the COSHH
 // register (/api/registers/coshh), which COSHHTrack shows as its Substances
 // tab; assessments and checks link to them.
 
@@ -767,7 +767,7 @@ export default function CoshhTrackPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <SiteSelect id="coshh-assessment-site" value={f.siteId} onChange={(siteId) => set({ siteId, substanceId: NONE })} />
                   <div className="space-y-1.5">
-                    <Label htmlFor="coshh-assessment-substance">Substance (from the COSHH Register)</Label>
+                    <Label htmlFor="coshh-assessment-substance">Substance (from the Substances tab)</Label>
                     <Select value={f.substanceId} onValueChange={(substanceId) => set({ substanceId })}>
                       <SelectTrigger id="coshh-assessment-substance"><SelectValue /></SelectTrigger>
                       <SelectContent>
