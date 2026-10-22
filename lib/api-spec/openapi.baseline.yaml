@@ -53,6 +53,8 @@ tags:
     description: PremisesTrack premises safety inspection operations
   - name: privacy-governance
     description: Customer privacy-governance records and rights workflows
+  - name: kitchen-allergens
+    description: KitchenTrack ingredients, menus and allergen chart sign-offs
 paths:
   /feedback:
     get:
@@ -4389,8 +4391,583 @@ paths:
                 type: string
                 format: binary
 
+  /registers/allergen-ingredients:
+    get:
+      operationId: listAllergenIngredients
+      tags: [kitchen-allergens]
+      summary: List KitchenTrack ingredients with their allergens and the dishes that use them
+      responses:
+        "200":
+          description: Ingredients the caller can see, by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenIngredient"
+    post:
+      operationId: createAllergenIngredient
+      tags: [kitchen-allergens]
+      summary: Add an ingredient (for every site, or one site)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenIngredientInput"
+      responses:
+        "201":
+          description: Created ingredient
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenIngredient"
+        "400":
+          description: Invalid input or site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-ingredients/{id}:
+    put:
+      operationId: updateAllergenIngredient
+      tags: [kitchen-allergens]
+      summary: Update an ingredient; changed allergens need a reason and update every dish that uses it
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenIngredientInput"
+      responses:
+        "200":
+          description: Updated ingredient, with how many dishes' allergens changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenIngredientSaved"
+        "400":
+          description: Invalid input, missing reason, or dishes at other sites use it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAllergenIngredient
+      tags: [kitchen-allergens]
+      summary: Remove an ingredient no dish uses (kept for the record)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Still in a recipe
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-ingredients/{id}/changes:
+    get:
+      operationId: listAllergenIngredientChanges
+      tags: [kitchen-allergens]
+      summary: An ingredient's allergen change log, newest first
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Change log
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenIngredientChange"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-menus:
+    get:
+      operationId: listAllergenMenus
+      tags: [kitchen-allergens]
+      summary: List menus at the sites the caller can see
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Menus by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenMenu"
+        "400":
+          description: Invalid site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createAllergenMenu
+      tags: [kitchen-allergens]
+      summary: Add a menu at a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenMenuInput"
+      responses:
+        "201":
+          description: Created menu
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenMenu"
+        "400":
+          description: Invalid input or site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-menus/{id}:
+    put:
+      operationId: renameAllergenMenu
+      tags: [kitchen-allergens]
+      summary: Rename a menu (it stays at its site)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenMenuRename"
+      responses:
+        "200":
+          description: Renamed menu
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenMenu"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAllergenMenu
+      tags: [kitchen-allergens]
+      summary: Remove a menu (its dishes stay; kept for the record)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /registers/allergen-charts:
+    get:
+      operationId: listAllergenCharts
+      tags: [kitchen-allergens]
+      summary: Allergen charts (one per site and one per menu) with their latest sign-off
+      responses:
+        "200":
+          description: Charts by site, the whole-site chart first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenChart"
+
+  /registers/allergen-charts/signoffs:
+    get:
+      operationId: listAllergenChartSignoffs
+      tags: [kitchen-allergens]
+      summary: Sign-off history for a site's chart, or one menu's chart, newest first
+      parameters:
+        - name: siteId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: menuId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sign-offs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AllergenChartSignoff"
+        "400":
+          description: No site given
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: signOffAllergenChart
+      tags: [kitchen-allergens]
+      summary: Sign off a chart as checked against current recipes and labels (signed-in person's name)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AllergenChartSignoffInput"
+      responses:
+        "201":
+          description: Sign-off recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllergenChartSignoff"
+        "400":
+          description: Not confirmed, unknown chart, or no dishes on it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
+    AllergenKey:
+      type: string
+      description: One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014
+      enum: [celery, gluten, crustaceans, eggs, fish, lupin, milk, molluscs, mustard, tree_nuts, peanuts, sesame, soya, sulphites]
+    AllergenIngredientUse:
+      type: object
+      required: [id, name, siteId]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        siteId:
+          type: integer
+          nullable: true
+    AllergenIngredient:
+      type: object
+      required: [id, siteId, name, contains, mayContain, usedIn, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+          description: null when every site can use it
+        name:
+          type: string
+        supplier:
+          type: string
+          nullable: true
+        productCode:
+          type: string
+          nullable: true
+        contains:
+          type: array
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        mayContain:
+          type: array
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        notes:
+          type: string
+          nullable: true
+        lastCheckedAt:
+          type: string
+          format: date
+          nullable: true
+        checkedBy:
+          type: string
+          nullable: true
+        usedIn:
+          type: array
+          description: Dishes using it, at sites the caller can see
+          items:
+            $ref: "#/components/schemas/AllergenIngredientUse"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AllergenIngredientSaved:
+      allOf:
+        - $ref: "#/components/schemas/AllergenIngredient"
+        - type: object
+          required: [dishesUpdated]
+          properties:
+            dishesUpdated:
+              type: integer
+              description: Dishes whose allergens changed because of this edit
+    AllergenIngredientInput:
+      type: object
+      required: [siteId, name, contains]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+          maxLength: 200
+        supplier:
+          type: string
+          nullable: true
+          maxLength: 200
+        productCode:
+          type: string
+          nullable: true
+          maxLength: 100
+        contains:
+          type: array
+          maxItems: 14
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        mayContain:
+          type: array
+          maxItems: 14
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+        lastCheckedAt:
+          type: string
+          format: date
+          nullable: true
+        checkedBy:
+          type: string
+          nullable: true
+          maxLength: 200
+        changeReason:
+          type: string
+          nullable: true
+          maxLength: 1000
+          description: Required when contains or may contain changes on an edit
+    AllergenIngredientChange:
+      type: object
+      required: [id, ingredientId, changeType, dishesUpdated, createdAt]
+      properties:
+        id:
+          type: integer
+        ingredientId:
+          type: integer
+        changeType:
+          type: string
+          enum: [created, allergens_changed, removed]
+        containsBefore:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        containsAfter:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        mayContainBefore:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        mayContainAfter:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/AllergenKey"
+        reason:
+          type: string
+          nullable: true
+        dishesUpdated:
+          type: integer
+        changedByName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    AllergenMenu:
+      type: object
+      required: [id, siteId, name, contentsChangedAt, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        contentsChangedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AllergenMenuInput:
+      type: object
+      required: [siteId, name]
+      properties:
+        siteId:
+          type: integer
+        name:
+          type: string
+          maxLength: 100
+    AllergenMenuRename:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+    AllergenChartLastSignoff:
+      type: object
+      required: [id, checkedByName, createdAt, dishCount]
+      properties:
+        id:
+          type: integer
+        checkedByName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        note:
+          type: string
+          nullable: true
+        dishCount:
+          type: integer
+    AllergenChart:
+      type: object
+      required: [siteId, siteName, menuId, menuName, dishCount, lastSignoff, changedSinceCheck]
+      properties:
+        siteId:
+          type: integer
+        siteName:
+          type: string
+        menuId:
+          type: integer
+          nullable: true
+          description: null for the whole-site chart
+        menuName:
+          type: string
+          nullable: true
+        dishCount:
+          type: integer
+        lastSignoff:
+          oneOf:
+            - $ref: "#/components/schemas/AllergenChartLastSignoff"
+            - type: "null"
+        changedSinceCheck:
+          type: boolean
+          description: A dish on the chart changed after the latest sign-off
+    AllergenChartSignoff:
+      type: object
+      required: [id, siteId, menuId, dishCount, checkedByName, createdAt]
+      properties:
+        id:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        menuId:
+          type: integer
+          nullable: true
+        dishCount:
+          type: integer
+        note:
+          type: string
+          nullable: true
+        checkedByName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AllergenChartSignoffInput:
+      type: object
+      required: [siteId, confirmed]
+      properties:
+        siteId:
+          type: integer
+        menuId:
+          type: integer
+          nullable: true
+        confirmed:
+          type: boolean
+          description: Must be true; the person confirms every dish was checked against current recipes and labels
+        note:
+          type: string
+          nullable: true
+          maxLength: 1000
     TodayByDepartment:
       type: object
       required: [date, groups]

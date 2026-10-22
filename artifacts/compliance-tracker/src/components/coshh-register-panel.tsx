@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { differenceInCalendarDays, parseISO } from "date-fns";
-import { Download, FileText, FlaskConical, Info, Mic, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { AppLayout } from "@/components/layout";
+import { ClipboardCheck, Download, FileText, Mic, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { CoshhSpeakListDialog } from "@/components/coshh-speak-list-dialog";
 import { dictationSupported } from "@/components/dictation-button";
 import { Button } from "@/components/ui/button";
@@ -18,9 +16,16 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
-  ConfirmDelete, DocumentField, SiteFilter, SiteSelect, addMonthsIso, downloadCsv, downloadRegisterDocument,
+  ConfirmDelete, DocumentField, SiteSelect, downloadCsv, downloadRegisterDocument,
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
+
+// COSHHTrack's Substances tab: the COSHH register (API: /registers/coshh),
+// hazardous substances at each site with their safety data sheets. Each
+// substance shows its COSHHTrack assessments. Register entries made before
+// the register moved into COSHHTrack may carry a simple assessment date,
+// review date and controls; they are no longer edited here but are kept
+// unchanged on save.
 
 // GHS hazard pictograms (GB CLP). Keys match the API.
 const PICTOGRAMS = [
@@ -36,7 +41,7 @@ const PICTOGRAMS = [
 ] as const;
 const PICTOGRAM_LABEL: Record<string, string> = Object.fromEntries(PICTOGRAMS.map((p) => [p.key, p.label]));
 
-interface Substance {
+export interface CoshhSubstance {
   id: number;
   siteId: number | null;
   productName: string;
@@ -59,80 +64,75 @@ interface FormState {
   hazardPictograms: string[];
   whereUsed: string;
   document: DocumentValue;
-  assessmentDate: string;
-  reviewDue: string;
-  reviewDueTouched: boolean;
-  controls: string;
+  // Earlier register fields, re-sent unchanged (the API clears omitted ones).
+  assessmentDate: string | null;
+  reviewDue: string | null;
+  controls: string | null;
   status: "in_use" | "withdrawn";
 }
 
 const LIST_PATH = "/registers/coshh";
 
-function reviewState(item: Substance): "overdue" | "soon" | "ok" | "none" | "withdrawn" {
-  if (item.status === "withdrawn") return "withdrawn";
-  if (!item.reviewDue) return "none";
-  if (item.reviewOverdue) return "overdue";
-  return differenceInCalendarDays(parseISO(item.reviewDue), new Date()) <= 30 ? "soon" : "ok";
+/** A COSHHTrack assessment, as the Substances tab shows it against its substance. */
+export interface TrackAssessmentLink {
+  id: number;
+  substanceId: number | null;
+  task: string;
+  status: "current" | "archived";
+  reviewDue: string | null;
+  reviewOverdue: boolean;
 }
 
-function ReviewBadge({ item }: { item: Substance }) {
-  const state = reviewState(item);
-  const styles = {
-    overdue: "border-red-300 bg-red-50 text-red-700",
-    soon: "border-amber-300 bg-amber-50 text-amber-800",
-    ok: "border-emerald-300 bg-emerald-50 text-emerald-700",
-    none: "border-slate-300 bg-slate-50 text-slate-600",
-    withdrawn: "border-slate-300 bg-slate-50 text-slate-600",
-  }[state];
-  const text = {
-    overdue: `Review overdue (${fmtDate(item.reviewDue)})`,
-    soon: `Review due ${fmtDate(item.reviewDue)}`,
-    ok: `Review ${fmtDate(item.reviewDue)}`,
-    none: "No review date",
-    withdrawn: "Withdrawn",
-  }[state];
-  return <Badge variant="outline" className={cn("text-[11px] whitespace-nowrap", styles)}>{text}</Badge>;
+export interface CoshhTrackLinks {
+  assessments: TrackAssessmentLink[];
+  /** Opens a new COSHHTrack assessment for the substance; absent when the caller can't write one. */
+  onAssess?: (substance: CoshhSubstance) => void;
+  /** Opens an existing assessment. */
+  onOpenAssessment?: (assessmentId: number) => void;
+  /** COSHHTrack's own site filter, which this tab follows instead of showing a second one. */
+  siteFilter: string;
 }
 
-export default function CoshhRegisterPage() {
+export function CoshhRegisterPanel({ track }: { track: CoshhTrackLinks }) {
   const canEdit = useCanEdit();
   const api = useActiveClientApi();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { sites, siteName } = useRegisterSites();
 
-  const [siteFilter, setSiteFilter] = useState("all");
+  const { siteFilter } = track;
   const [showWithdrawn, setShowWithdrawn] = useState(false);
   const [q, setQ] = useState("");
-  const [editing, setEditing] = useState<Substance | null>(null);
+  const [editing, setEditing] = useState<CoshhSubstance | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [saving, setSaving] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<Substance | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CoshhSubstance | null>(null);
   const [listOpen, setListOpen] = useState(false);
 
-  const { data: items = [], isLoading, error } = useRegisterList<Substance>(LIST_PATH);
+  const { data: items = [], isLoading, error } = useRegisterList<CoshhSubstance>(LIST_PATH);
   const visible = useMemo(() => items.filter((item) =>
     (siteFilter === "all" || String(item.siteId) === siteFilter)
     && (showWithdrawn || item.status === "in_use")
     && (!q || `${item.productName} ${item.supplier ?? ""} ${item.whereUsed ?? ""}`.toLowerCase().includes(q.toLowerCase())),
   ), [items, siteFilter, showWithdrawn, q]);
   const inUse = items.filter((item) => item.status === "in_use" && (siteFilter === "all" || String(item.siteId) === siteFilter));
-  const overdue = inUse.filter((item) => item.reviewOverdue).length;
+  const currentAssessments = (substanceId: number) =>
+    track.assessments.filter((a) => a.substanceId === substanceId && a.status === "current");
+  const overdue = inUse.filter((item) => currentAssessments(item.id).some((a) => a.reviewOverdue)).length;
+  const unassessed = inUse.filter((item) => currentAssessments(item.id).length === 0).length;
   const missingSds = inUse.filter((item) => !item.sdsObjectPath).length;
 
   function openNew() {
-    const today = todayIso();
     setEditing(null);
     setForm({
       siteId: siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : "",
       productName: "", supplier: "", hazardPictograms: [], whereUsed: "",
       document: { objectPath: null, fileName: null },
-      assessmentDate: today, reviewDue: addMonthsIso(today, 12), reviewDueTouched: false,
-      controls: "", status: "in_use",
+      assessmentDate: null, reviewDue: null, controls: null, status: "in_use",
     });
   }
 
-  function openEdit(item: Substance) {
+  function openEdit(item: CoshhSubstance) {
     setEditing(item);
     setForm({
       siteId: item.siteId == null ? "" : String(item.siteId),
@@ -141,10 +141,9 @@ export default function CoshhRegisterPage() {
       hazardPictograms: [...item.hazardPictograms],
       whereUsed: item.whereUsed ?? "",
       document: { objectPath: item.sdsObjectPath, fileName: item.sdsFileName },
-      assessmentDate: item.assessmentDate ?? "",
-      reviewDue: item.reviewDue ?? "",
-      reviewDueTouched: true,
-      controls: item.controls ?? "",
+      assessmentDate: item.assessmentDate,
+      reviewDue: item.reviewDue,
+      controls: item.controls,
       status: item.status,
     });
   }
@@ -165,9 +164,9 @@ export default function CoshhRegisterPage() {
           whereUsed: form.whereUsed || null,
           objectPath: form.document.objectPath,
           fileName: form.document.fileName,
-          assessmentDate: form.assessmentDate || null,
-          reviewDue: form.reviewDue || null,
-          controls: form.controls || null,
+          assessmentDate: form.assessmentDate,
+          reviewDue: form.reviewDue,
+          controls: form.controls,
           status: form.status,
         }),
       }), "Could not save");
@@ -196,7 +195,7 @@ export default function CoshhRegisterPage() {
     }
     await queryClient.invalidateQueries({ queryKey: [`/api${LIST_PATH}`] });
     const added = productNames.length - failed.length;
-    if (added > 0) toast({ title: added === 1 ? "1 substance added" : `${added} substances added`, description: "Attach each safety data sheet and record the assessment." });
+    if (added > 0) toast({ title: added === 1 ? "1 substance added" : `${added} substances added`, description: "Attach each safety data sheet, then assess each one." });
     if (failed.length > 0) toast({ title: `${failed.length} could not be added`, description: firstError, variant: "destructive" });
     return failed;
   }
@@ -214,7 +213,7 @@ export default function CoshhRegisterPage() {
     }
   }
 
-  async function downloadSds(item: Substance) {
+  async function downloadSds(item: CoshhSubstance) {
     try {
       await downloadRegisterDocument(api, `${LIST_PATH}/${item.id}/sds-url`, "safety-data-sheet");
     } catch (err) {
@@ -223,18 +222,18 @@ export default function CoshhRegisterPage() {
   }
 
   function exportCsv() {
-    downloadCsv(`coshh-register-${todayIso()}.csv`,
-      ["Site", "Product", "Supplier", "Hazard pictograms", "Where used", "Safety data sheet", "Assessment date", "Review due", "Review overdue", "Controls / PPE", "Status"],
+    downloadCsv(`coshh-substances-${todayIso()}.csv`,
+      ["Site", "Product", "Supplier", "Hazard pictograms", "Where used", "Safety data sheet", "COSHH assessments", "Status"],
       visible.map((item) => [
         siteName(item.siteId), item.productName, item.supplier ?? "",
         item.hazardPictograms.map((k) => PICTOGRAM_LABEL[k] ?? k).join("; "), item.whereUsed ?? "",
         item.sdsFileName ?? (item.sdsObjectPath ? "Attached" : "Missing"),
-        fmtDate(item.assessmentDate), fmtDate(item.reviewDue), item.reviewOverdue ? "Yes" : "No",
-        item.controls ?? "", item.status === "in_use" ? "In use" : "Withdrawn",
+        currentAssessments(item.id).map((a) => `${a.task}${a.reviewDue ? ` (review ${fmtDate(a.reviewDue)})` : ""}`).join("; ") || "None",
+        item.status === "in_use" ? "In use" : "Withdrawn",
       ]));
   }
 
-  const actions = (item: Substance) => (
+  const actions = (item: CoshhSubstance) => (
     <div className="flex items-center justify-end gap-1">
       {item.sdsObjectPath && (
         <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Download safety data sheet for ${item.productName}`} onClick={() => downloadSds(item)}>
@@ -254,34 +253,48 @@ export default function CoshhRegisterPage() {
     </div>
   );
 
-  const pictogramBadges = (item: Substance) => item.hazardPictograms.length === 0
+  // Substances tab: the substance's COSHHTrack assessments, or a prompt to assess it.
+  const trackAssessments = (item: CoshhSubstance) => {
+    const linked = currentAssessments(item.id);
+    if (linked.length === 0) {
+      if (item.status !== "in_use") return <span className="text-muted-foreground">Withdrawn</span>;
+      return (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant="outline" className="text-[11px] border-amber-300 bg-amber-50 text-amber-800">No COSHH assessment</Badge>
+          {item.assessmentDate && (
+            // A date recorded on the register before the business had COSHHTrack.
+            <span className="text-muted-foreground">Register says assessed {fmtDate(item.assessmentDate)}</span>
+          )}
+          {track.onAssess && (
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => track.onAssess!(item)}>
+              <ClipboardCheck className="w-3.5 h-3.5" /> Assess
+            </Button>
+          )}
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col items-start gap-1">
+        {linked.map((a) => (
+          <button key={a.id} type="button" className="text-left text-xs hover:underline" onClick={() => track.onOpenAssessment?.(a.id)}>
+            <span className="font-medium">{a.task}</span>{" "}
+            <Badge variant="outline" className={cn("text-[10px] whitespace-nowrap", a.reviewOverdue ? "border-red-300 bg-red-50 text-red-700" : "border-emerald-300 bg-emerald-50 text-emerald-700")}>
+              {a.reviewOverdue ? `Review overdue (${fmtDate(a.reviewDue)})` : a.reviewDue ? `Review ${fmtDate(a.reviewDue)}` : "Assessed"}
+            </Badge>
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const pictogramBadges = (item: CoshhSubstance) => item.hazardPictograms.length === 0
     ? <span className="text-xs text-muted-foreground">None recorded</span>
     : item.hazardPictograms.map((k) => <Badge key={k} variant="outline" className="text-[10px] border-orange-200 bg-orange-50 text-orange-800">{PICTOGRAM_LABEL[k] ?? k}</Badge>);
 
   return (
-    <AppLayout title="COSHH register">
+    <>
       <div className="space-y-5">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-sm bg-orange-50 border border-orange-200 flex items-center justify-center shrink-0">
-            <FlaskConical className="w-4 h-4 text-orange-700" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold leading-tight">COSHH register</h1>
-            <p className="text-xs text-muted-foreground">Hazardous substances used at each site, with safety data sheets and assessments</p>
-          </div>
-        </div>
-
-        <div className="flex gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
-          <Info className="w-4 h-4 shrink-0 mt-0.5" />
-          <p>
-            The Control of Substances Hazardous to Health Regulations 2002 expect you to assess the risks from
-            hazardous substances, put controls in place and review the assessment regularly and whenever something
-            changes. The suggested 12-month review is a common default, not a legal interval: set the date that fits
-            your assessment.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div className="border border-border rounded-sm p-3">
             <p className="text-xs text-muted-foreground">In use</p>
             <p className="text-xl font-bold">{inUse.length}</p>
@@ -289,6 +302,10 @@ export default function CoshhRegisterPage() {
           <div className={cn("border rounded-sm p-3", overdue > 0 ? "border-red-300 bg-red-50" : "border-border")}>
             <p className={cn("text-xs", overdue > 0 ? "text-red-700" : "text-muted-foreground")}>Reviews overdue</p>
             <p className={cn("text-xl font-bold", overdue > 0 && "text-red-700")}>{overdue}</p>
+          </div>
+          <div className={cn("border rounded-sm p-3", unassessed > 0 ? "border-amber-300 bg-amber-50" : "border-border")}>
+            <p className={cn("text-xs", unassessed > 0 ? "text-amber-800" : "text-muted-foreground")}>No COSHH assessment</p>
+            <p className={cn("text-xl font-bold", unassessed > 0 && "text-amber-800")}>{unassessed}</p>
           </div>
           <div className={cn("border rounded-sm p-3", missingSds > 0 ? "border-amber-300 bg-amber-50" : "border-border")}>
             <p className={cn("text-xs", missingSds > 0 ? "text-amber-800" : "text-muted-foreground")}>No data sheet</p>
@@ -298,7 +315,6 @@ export default function CoshhRegisterPage() {
 
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-            <SiteFilter value={siteFilter} onChange={setSiteFilter} />
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               <Input placeholder="Search substances…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 h-8 text-xs rounded-sm w-full sm:w-48" />
@@ -342,14 +358,14 @@ export default function CoshhRegisterPage() {
                   <tr>
                     <th className="p-2 font-medium">Product</th>
                     <th className="p-2 font-medium">Hazards</th>
-                    <th className="p-2 font-medium">Where used / controls</th>
-                    <th className="p-2 font-medium">Assessment</th>
+                    <th className="p-2 font-medium">Where used</th>
+                    <th className="p-2 font-medium">COSHH assessment</th>
                     <th className="p-2"><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
                   {visible.map((item) => (
-                    <tr key={item.id} className={cn("border-t border-border align-top", item.reviewOverdue && "bg-red-50/40")}>
+                    <tr key={item.id} className={"border-t border-border align-top"}>
                       <td className="p-2">
                         <p className="font-medium">{item.productName}</p>
                         <p className="text-xs text-muted-foreground">{[item.supplier, siteName(item.siteId)].filter(Boolean).join(" · ")}</p>
@@ -358,11 +374,9 @@ export default function CoshhRegisterPage() {
                       <td className="p-2"><div className="flex flex-wrap gap-1 max-w-[220px]">{pictogramBadges(item)}</div></td>
                       <td className="p-2 text-xs max-w-[280px]">
                         {item.whereUsed && <p>{item.whereUsed}</p>}
-                        {item.controls && <p className="text-muted-foreground mt-1 whitespace-pre-wrap">{item.controls}</p>}
                       </td>
                       <td className="p-2 text-xs space-y-1">
-                        <p className="text-muted-foreground">Assessed {item.assessmentDate ? fmtDate(item.assessmentDate) : "—"}</p>
-                        <ReviewBadge item={item} />
+                        {trackAssessments(item)}
                       </td>
                       <td className="p-2">{actions(item)}</td>
                     </tr>
@@ -372,7 +386,7 @@ export default function CoshhRegisterPage() {
             </div>
             <div className="lg:hidden space-y-3">
               {visible.map((item) => (
-                <div key={item.id} className={cn("rounded-xl border p-3 space-y-2", item.reviewOverdue ? "border-red-300" : "border-border")}>
+                <div key={item.id} className={"rounded-xl border border-border p-3 space-y-2"}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-medium break-words">{item.productName}</p>
@@ -382,9 +396,8 @@ export default function CoshhRegisterPage() {
                   </div>
                   <div className="flex flex-wrap gap-1">{pictogramBadges(item)}</div>
                   {item.whereUsed && <p className="text-xs">Used: {item.whereUsed}</p>}
-                  {item.controls && <p className="text-xs text-muted-foreground whitespace-pre-wrap">{item.controls}</p>}
                   <div className="flex flex-wrap items-center gap-2">
-                    <ReviewBadge item={item} />
+                    {trackAssessments(item)}
                     {!item.sdsObjectPath && item.status === "in_use" && <span className="text-xs text-amber-700">No safety data sheet</span>}
                   </div>
                 </div>
@@ -398,7 +411,7 @@ export default function CoshhRegisterPage() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit substance" : "Add substance"}</DialogTitle>
-            <DialogDescription>Take the hazard pictograms and controls from the supplier's safety data sheet.</DialogDescription>
+            <DialogDescription>Take the hazard pictograms from the supplier's safety data sheet.</DialogDescription>
           </DialogHeader>
           {form && (
             <div className="space-y-4">
@@ -448,30 +461,7 @@ export default function CoshhRegisterPage() {
                 <Textarea id="coshh-where" rows={2} value={form.whereUsed} maxLength={1000} onChange={(e) => setForm({ ...form, whereUsed: e.target.value })} />
               </div>
               <DocumentField label="Safety data sheet" value={form.document} onChange={(document) => setForm({ ...form, document })} />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="coshh-assessed">COSHH assessment date</Label>
-                  <Input id="coshh-assessed" type="date" value={form.assessmentDate} onChange={(e) => {
-                    const assessmentDate = e.target.value;
-                    setForm({
-                      ...form,
-                      assessmentDate,
-                      reviewDue: form.reviewDueTouched || !assessmentDate ? form.reviewDue : addMonthsIso(assessmentDate, 12),
-                    });
-                  }} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="coshh-review">Review due</Label>
-                  <Input id="coshh-review" type="date" value={form.reviewDue} onChange={(e) => setForm({ ...form, reviewDue: e.target.value, reviewDueTouched: true })} />
-                  <p className="text-[11px] text-muted-foreground">Suggested: 12 months after the assessment. Change it to suit.</p>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="coshh-controls">Controls and PPE</Label>
-                <Textarea id="coshh-controls" rows={3} value={form.controls} maxLength={4000}
-                  placeholder="For example: use in a ventilated area, nitrile gloves and eye protection, store locked away from food"
-                  onChange={(e) => setForm({ ...form, controls: e.target.value })} />
-              </div>
+              <p className="text-xs text-muted-foreground">Record the COSHH assessment for this substance on the Assessments tab.</p>
             </div>
           )}
           <DialogFooter className="gap-2">
@@ -496,6 +486,6 @@ export default function CoshhRegisterPage() {
         onCancel={() => setDeleteTarget(null)}
         onConfirm={remove}
       />
-    </AppLayout>
+    </>
   );
 }

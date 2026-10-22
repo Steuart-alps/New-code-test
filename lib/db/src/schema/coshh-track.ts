@@ -9,7 +9,7 @@ import { trainTrackRecordsTable } from "./train-track";
 // COSHHTrack: COSHH assessments per substance or task, and the dated checks
 // that follow from them (LEV thorough examinations, health surveillance,
 // exposure monitoring and staff briefings). The substance list itself is the
-// core COSHH register (coshh_substances). Rows are soft-deleted via
+// COSHH register (coshh_substances). Rows are soft-deleted via
 // deleted_at so a removed record and its file stay available for audit and
 // data export.
 
