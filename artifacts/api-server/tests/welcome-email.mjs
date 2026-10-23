@@ -56,10 +56,13 @@ async function main() {
   const name = `Welcome ${SCENARIO} User`;
   const session = makeSession();
   const startedAt = performance.now();
+  const orgName = `Welcome <${SCENARIO}> Golf Club`;
   const response = await session("POST", "/auth/register", {
     email,
     password: "welcome-password-123",
     name,
+    orgName,
+    services: ["firetrack", "kitchentrack"],
   });
   const elapsedMs = performance.now() - startedAt;
 
@@ -92,6 +95,22 @@ async function main() {
     check(
       "welcome email includes the verification link",
       invitation?.html?.includes(`/verify-email?token=${response.data?.verificationToken}`),
+    );
+
+    // ALPS (ADMIN_EMAIL) hears about each sign-up so it can welcome them.
+    let alert;
+    for (let waitedMs = 0; waitedMs <= 5000 && !alert; waitedMs += 100) {
+      alert = capturedEmails().find((entry) => entry.to === "alps-admin@test.local" && entry.html?.includes(email));
+      if (!alert) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    check("ALPS is told about the new sign-up", !!alert);
+    check("the sign-up alert names the business", alert?.subject === `New ComplyTrack sign-up: ${orgName}`, alert?.subject);
+    check("the sign-up alert escapes the business name", alert?.html?.includes(`Welcome &lt;${SCENARIO}&gt; Golf Club`) && !alert?.html?.includes(`<${SCENARIO}>`));
+    check("the sign-up alert lists the modules picked", alert?.html?.includes("FireTrack, KitchenTrack"));
+    check("the sign-up alert gives the trial end date", /Free trial ends/.test(alert?.html ?? "") && /\d{1,2} [A-Z][a-z]+ \d{4}/.test(alert?.text ?? ""));
+    check(
+      "only the welcome email goes to the new business",
+      capturedEmails().filter((entry) => entry.to === email).length === 1,
     );
   }
 
