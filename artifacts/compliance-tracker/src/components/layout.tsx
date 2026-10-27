@@ -113,7 +113,8 @@ function useNavGroups(): NavGroup[] {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
   const canManageUsers = useCanManageUsers();
-  return getNavGroups({ isConsultant, canAdmin, canManageUsers });
+  const isPlatformOperator = useAuth().user?.platformOperator === true;
+  return getNavGroups({ isConsultant, canAdmin, canManageUsers, isPlatformOperator });
 }
 
 interface PinControls {

@@ -216,6 +216,20 @@ try {
   // Once a week.
   assert.deepEqual(await alerts.runBillingDigest({ ...deps, now: digestNow }), { sent: false, reason: "already_sent" });
 
+  // The business dashboard: platform operators only, any dates.
+  assert.equal((await tenant.request("GET", "/admin/business-dashboard")).status, 403);
+  const month = await alerts.getBillingSummary({ from: new Date(Date.now() - 30 * 86_400_000), to: digestNow() });
+  assert.deepEqual(month.newSubscriptions.map((r) => r.businessName), ["Old Co", "Fairway <Golf> Club", "Fairway <Golf> Club"]);
+  assert.equal(month.gainedPence, 9999 + 3000 + 2000);
+  assert.equal(month.netBusinesses, 2);
+  assert.deepEqual(month.reasons, [{ reason: "payment_failed", label: "Payment failed", count: 1 }]);
+  assert.deepEqual(month.modules[0], { module: "FireTrack", changes: 3, businesses: 2 });
+  assert.ok(month.weeks.length >= 5, JSON.stringify(month.weeks));
+  assert.ok(month.weeks.every((w) => /^\d{4}-\d{2}-\d{2}$/.test(w.weekStart) && new Date(`${w.weekStart}T12:00:00Z`).getUTCDay() === 1));
+  assert.equal(month.weeks.reduce((n, w) => n + w.newCount, 0), 3);
+  assert.equal(month.weeks.reduce((n, w) => n + w.cancelledCount, 0), 1);
+  assert.equal(month.weeks.reduce((n, w) => n + w.netPence, 0), month.netPence);
+
   // As configured (digest only): changes are recorded with the details the
   // instant emails had, and nothing is sent.
   const configured = { ...deps, emailAtOnce: undefined };

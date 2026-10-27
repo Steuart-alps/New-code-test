@@ -588,6 +588,156 @@ function signedCount(n: number): string {
   return `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n)}`;
 }
 
+export interface BillingChange {
+  businessName: string;
+  summary: string;
+  monthlyPence: number;
+  reason: string | null;
+  at: string;
+}
+
+export interface BillingSummary {
+  from: string;
+  to: string;
+  newSubscriptions: BillingChange[];
+  cancellations: BillingChange[];
+  planChanges: BillingChange[];
+  trials: Array<{ businessName: string; at: string }>;
+  gainedPence: number;
+  lostPence: number;
+  planChangePence: number;
+  netPence: number;
+  netBusinesses: number;
+  reasons: Array<{ reason: string; label: string; count: number }>;
+  modules: Array<{ module: string; changes: number; businesses: number }>;
+  /** New and cancelled per week (weeks starting Monday, UK time), oldest first. */
+  weeks: Array<{ weekStart: string; newCount: number; cancelledCount: number; netPence: number }>;
+  totals: { paying: number; onTrial: number };
+}
+
+function isoString(value: Date | string): string {
+  return (value instanceof Date ? value : new Date(value)).toISOString();
+}
+
+/** The Monday (UK date) that starts the week containing `date`. */
+function ukWeekStart(date: Date): string {
+  const ukDay = date.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const day = new Date(`${ukDay}T12:00:00Z`);
+  day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
+  return day.toISOString().slice(0, 10);
+}
+
+/**
+ * Billing changes, new free trials and module activity between two moments,
+ * with the current paying and trial totals. Used by the Monday digest and the
+ * platform operators' business dashboard.
+ */
+export async function getBillingSummary(range: { from: Date; to: Date }, deps: Pick<BillingAlertDependencies, "execute"> = {}): Promise<BillingSummary> {
+  const execute = executor(deps);
+  const fromIso = range.from.toISOString();
+  const toIso = range.to.toISOString();
+
+  const changeRows = ((await execute(sql`
+    SELECT kind, business_name, summary, monthly_pence, reason, created_at
+    FROM billing_alerts
+    WHERE kind IN ('new_subscription', 'cancellation', 'plan_change')
+      AND created_at >= ${fromIso}::timestamptz AND created_at < ${toIso}::timestamptz
+    ORDER BY created_at
+  `)).rows ?? []) as Array<{ kind: string; business_name: string | null; summary: string | null; monthly_pence: number; reason: string | null; created_at: Date | string }>;
+  const ofKind = (kind: string): BillingChange[] => changeRows.filter((r) => r.kind === kind).map((r) => ({
+    businessName: r.business_name ?? "A deleted business",
+    summary: r.summary ?? "",
+    monthlyPence: Number(r.monthly_pence) || 0,
+    reason: r.reason,
+    at: isoString(r.created_at),
+  }));
+  const newSubscriptions = ofKind("new_subscription");
+  const cancellations = ofKind("cancellation");
+  const planChanges = ofKind("plan_change");
+  const sum = (rows: BillingChange[]) => rows.reduce((total, r) => total + r.monthlyPence, 0);
+  const gainedPence = sum(newSubscriptions);
+  const lostPence = sum(cancellations);
+  const planChangePence = sum(planChanges);
+
+  const reasonCounts = new Map<string, number>();
+  for (const row of cancellations) {
+    const key = row.reason && CANCELLATION_REASON_LABELS[row.reason] ? row.reason : "none";
+    reasonCounts.set(key, (reasonCounts.get(key) ?? 0) + 1);
+  }
+
+  const weeks = new Map<string, { newCount: number; cancelledCount: number; netPence: number }>();
+  for (let day = new Date(range.from); day < range.to; day = new Date(day.getTime() + 7 * 86_400_000)) {
+    weeks.set(ukWeekStart(day), { newCount: 0, cancelledCount: 0, netPence: 0 });
+  }
+  const week = (at: string) => {
+    const key = ukWeekStart(new Date(at));
+    const entry = weeks.get(key) ?? { newCount: 0, cancelledCount: 0, netPence: 0 };
+    weeks.set(key, entry);
+    return entry;
+  };
+  for (const row of newSubscriptions) { const w = week(row.at); w.newCount += 1; w.netPence += row.monthlyPence; }
+  for (const row of cancellations) { const w = week(row.at); w.cancelledCount += 1; w.netPence -= row.monthlyPence; }
+  for (const row of planChanges) week(row.at).netPence += row.monthlyPence;
+
+  const trials = ((await execute(sql`
+    SELECT name, created_at FROM clients
+    WHERE created_at >= ${fromIso}::timestamptz AND created_at < ${toIso}::timestamptz
+      AND trial_ends_at IS NOT NULL AND data_deleted_at IS NULL
+    ORDER BY created_at
+  `)).rows ?? []) as Array<{ name: string; created_at: Date | string }>;
+
+  const totals = ((await execute(sql`
+    SELECT
+      count(*) FILTER (WHERE subscription_status IN ('active', 'past_due'))::int AS paying,
+      count(*) FILTER (WHERE COALESCE(subscription_status, 'trial') NOT IN ('active', 'past_due')
+        AND trial_ends_at > now())::int AS on_trial
+    FROM clients
+    WHERE data_deleted_at IS NULL
+  `)).rows ?? [])[0] as { paying: number; on_trial: number } | undefined;
+
+  // Records saved or changed, by module, across every business. Compliance
+  // checks count when worked on, not when a new business's starter checks
+  // are created.
+  const activity = ((await execute(sql`
+    SELECT table_name, client_id, count(*)::int AS changes
+    FROM audit_log
+    WHERE changed_at >= ${fromIso}::timestamptz AND changed_at < ${toIso}::timestamptz
+      AND (action = 'update' OR (action = 'create' AND table_name NOT LIKE 'compliance\\_%'))
+    GROUP BY table_name, client_id
+  `)).rows ?? []) as Array<{ table_name: string; client_id: number; changes: number }>;
+  const byModule = new Map<string, { changes: number; clients: Set<number> }>();
+  for (const row of activity) {
+    const module = moduleForTable(row.table_name);
+    if (!module) continue;
+    const entry = byModule.get(module) ?? { changes: 0, clients: new Set<number>() };
+    entry.changes += Number(row.changes) || 0;
+    entry.clients.add(Number(row.client_id));
+    byModule.set(module, entry);
+  }
+
+  return {
+    from: fromIso,
+    to: toIso,
+    newSubscriptions,
+    cancellations,
+    planChanges,
+    trials: trials.map((t) => ({ businessName: t.name, at: isoString(t.created_at) })),
+    gainedPence,
+    lostPence,
+    planChangePence,
+    netPence: gainedPence - lostPence + planChangePence,
+    netBusinesses: newSubscriptions.length - cancellations.length,
+    reasons: [...reasonCounts.entries()]
+      .map(([reason, count]) => ({ reason, label: CANCELLATION_REASON_LABELS[reason]!, count }))
+      .sort((a, b) => b.count - a.count),
+    modules: [...byModule.entries()]
+      .map(([module, v]) => ({ module, changes: v.changes, businesses: v.clients.size }))
+      .sort((a, b) => b.changes - a.changes),
+    weeks: [...weeks.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([weekStart, v]) => ({ weekStart, ...v })),
+    totals: { paying: Number(totals?.paying ?? 0), onTrial: Number(totals?.on_trial ?? 0) },
+  };
+}
+
 export interface BillingDigestResult { sent: boolean; reason?: "no_admin_email" | "already_sent" }
 
 /**
@@ -605,74 +755,22 @@ export async function runBillingDigest(deps: BillingAlertDependencies = {}): Pro
   const from = new Date(now.getTime() - 7 * 86_400_000);
   const weekKey = now.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 
-  const changeRows = (await execute(sql`
-    SELECT kind, business_name, summary, monthly_pence, reason, created_at
-    FROM billing_alerts
-    WHERE kind IN ('new_subscription', 'cancellation', 'plan_change')
-      AND created_at >= ${from.toISOString()}::timestamptz AND created_at < ${now.toISOString()}::timestamptz
-    ORDER BY created_at
-  `)).rows as Array<{ kind: string; business_name: string | null; summary: string | null; monthly_pence: number; reason: string | null }>;
-  const ofKind = (kind: string) => changeRows.filter((r) => r.kind === kind);
-  const added = ofKind("new_subscription");
-  const cancelled = ofKind("cancellation");
-  const planChanges = ofKind("plan_change");
-  const sum = (rows: typeof changeRows) => rows.reduce((s, r) => s + (Number(r.monthly_pence) || 0), 0);
-  const gained = sum(added);
-  const lost = sum(cancelled);
-  const planDelta = sum(planChanges);
-  const net = gained - lost + planDelta;
-
-  const reasonCounts = new Map<string, number>();
-  for (const row of cancelled) {
-    const label = CANCELLATION_REASON_LABELS[row.reason ?? "none"] ?? CANCELLATION_REASON_LABELS.none!;
-    reasonCounts.set(label, (reasonCounts.get(label) ?? 0) + 1);
-  }
-
-  const trials = (await execute(sql`
-    SELECT name, created_at FROM clients
-    WHERE created_at >= ${from.toISOString()}::timestamptz AND created_at < ${now.toISOString()}::timestamptz
-      AND trial_ends_at IS NOT NULL AND data_deleted_at IS NULL
-    ORDER BY created_at
-  `)).rows as Array<{ name: string; created_at: Date | string }>;
-
-  const totals = ((await execute(sql`
-    SELECT
-      count(*) FILTER (WHERE subscription_status IN ('active', 'past_due'))::int AS paying,
-      count(*) FILTER (WHERE COALESCE(subscription_status, 'trial') NOT IN ('active', 'past_due')
-        AND trial_ends_at > now())::int AS on_trial
-    FROM clients
-    WHERE data_deleted_at IS NULL
-  `)).rows ?? [])[0] as { paying: number; on_trial: number } | undefined;
-
-  // Records saved or changed this week, by module, across every business.
-  // Compliance checks count when worked on, not when a new business's
-  // starter checks are created.
-  const activity = (await execute(sql`
-    SELECT table_name, client_id, count(*)::int AS changes
-    FROM audit_log
-    WHERE changed_at >= ${from.toISOString()}::timestamptz AND changed_at < ${now.toISOString()}::timestamptz
-      AND (action = 'update' OR (action = 'create' AND table_name NOT LIKE 'compliance\\_%'))
-    GROUP BY table_name, client_id
-  `)).rows as Array<{ table_name: string; client_id: number; changes: number }>;
-  const byModule = new Map<string, { changes: number; clients: Set<number> }>();
-  for (const row of activity) {
-    const module = moduleForTable(row.table_name);
-    if (!module) continue;
-    const entry = byModule.get(module) ?? { changes: 0, clients: new Set<number>() };
-    entry.changes += Number(row.changes) || 0;
-    entry.clients.add(Number(row.client_id));
-    byModule.set(module, entry);
-  }
-  const topModules = [...byModule.entries()]
-    .map(([label, v]) => [label, { changes: v.changes, businesses: v.clients.size }] as const)
-    .sort((a, b) => b[1].changes - a[1].changes)
-    .slice(0, 10);
+  const summary = await getBillingSummary({ from, to: now }, deps);
+  const added = summary.newSubscriptions;
+  const cancelled = summary.cancellations;
+  const planChanges = summary.planChanges;
+  const trials = summary.trials;
+  const gained = summary.gainedPence;
+  const lost = summary.lostPence;
+  const planDelta = summary.planChangePence;
+  const net = summary.netPence;
+  const topModules = summary.modules.slice(0, 10);
 
   if (!(await claim(execute, { kind: "weekly_digest", key: weekKey, clientId: null, businessName: null, summary: null, monthlyPence: net, reason: null }))) {
     return { sent: false, reason: "already_sent" };
   }
 
-  const netBusinesses = added.length - cancelled.length;
+  const netBusinesses = summary.netBusinesses;
   const fromLabel = formatUkDate(from)!;
   const toLabel = formatUkDate(new Date(now.getTime() - 1))!;
   const netColour = net > 0 ? "#16a34a" : net < 0 ? "#dc2626" : "#0f172a";
@@ -682,9 +780,9 @@ export async function runBillingDigest(deps: BillingAlertDependencies = {}): Pro
       <div style="font-size:24px;font-weight:800;color:${colour};">${escapeHtml(value)}</div>
       <div style="font-size:13px;color:#64748b;">${escapeHtml(note)}</div>
     </td>`;
-  const list = (title: string, rows: Array<{ business_name: string | null; summary: string | null }>) => rows.length === 0 ? "" : `
+  const list = (title: string, rows: BillingChange[]) => rows.length === 0 ? "" : `
       <h3 style="margin:24px 0 8px;font-size:17px;color:#0f172a;">${title}</h3>
-      <ul style="margin:0;padding-left:20px;">${rows.map((r) => `<li style="margin:0 0 6px;"><strong>${escapeHtml(r.business_name ?? "A deleted business")}</strong>: ${escapeHtml(r.summary ?? "")}</li>`).join("")}</ul>`;
+      <ul style="margin:0;padding-left:20px;">${rows.map((r) => `<li style="margin:0 0 6px;"><strong>${escapeHtml(r.businessName)}</strong>: ${escapeHtml(r.summary)}</li>`).join("")}</ul>`;
 
   const html = renderEmailLayout({
     subtitle: "Weekly billing digest",
@@ -704,27 +802,27 @@ export async function runBillingDigest(deps: BillingAlertDependencies = {}): Pro
         { label: "New free trials", value: trials.length, colour: "#2563eb" },
       ])}
       <h3 style="margin:0 0 8px;font-size:17px;color:#0f172a;">Why businesses cancelled</h3>
-      ${reasonCounts.size === 0
+      ${summary.reasons.length === 0
         ? `<p style="margin:0 0 24px;">No cancellations this week.</p>`
-        : barChart([...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value, colour: "#f59e0b" })))}
+        : barChart(summary.reasons.map((r) => ({ label: r.label, value: r.count, colour: "#f59e0b" })))}
       <h3 style="margin:0 0 8px;font-size:17px;color:#0f172a;">Most used modules</h3>
       <p style="margin:0 0 8px;font-size:14px;color:#64748b;">Records saved or updated this week, across all businesses.</p>
       ${topModules.length === 0
         ? `<p style="margin:0 0 24px;">No records were saved this week.</p>`
-        : barChart(topModules.map(([label, v]) => ({ label, value: v.changes, note: `in ${v.businesses} business${v.businesses === 1 ? "" : "es"}`, colour: "#2563eb" })))}
+        : barChart(topModules.map((m) => ({ label: m.module, value: m.changes, note: `in ${m.businesses} business${m.businesses === 1 ? "" : "es"}`, colour: "#2563eb" })))}
       ${list("New subscriptions", added)}
       ${list("Cancellations", cancelled)}
       ${list("Plan changes", planChanges)}
       ${trials.length ? `
       <h3 style="margin:24px 0 8px;font-size:17px;color:#0f172a;">New free trials</h3>
-      <ul style="margin:0;padding-left:20px;">${trials.map((t) => `<li style="margin:0 0 6px;"><strong>${escapeHtml(t.name)}</strong>, signed up ${escapeHtml(formatUkDate(t.created_at) ?? "")}</li>`).join("")}</ul>` : ""}
+      <ul style="margin:0;padding-left:20px;">${trials.map((t) => `<li style="margin:0 0 6px;"><strong>${escapeHtml(t.businessName)}</strong>, signed up ${escapeHtml(formatUkDate(t.at) ?? "")}</li>`).join("")}</ul>` : ""}
       <h3 style="margin:24px 0 8px;font-size:17px;color:#0f172a;">Now</h3>
-      <p style="margin:0 0 24px;"><strong>${totals?.paying ?? 0}</strong> paying business${totals?.paying === 1 ? "" : "es"} and <strong>${totals?.on_trial ?? 0}</strong> on a free trial.</p>
-      <p style="margin:0;">${emailButton(`${escapeHtml(appUrlOf(deps))}/clients`, "Open Clients")}</p>`,
+      <p style="margin:0 0 24px;"><strong>${summary.totals.paying}</strong> paying business${summary.totals.paying === 1 ? "" : "es"} and <strong>${summary.totals.onTrial}</strong> on a free trial.</p>
+      <p style="margin:0;">${emailButton(`${escapeHtml(appUrlOf(deps))}/business-dashboard`, "Open the business dashboard")}</p>`,
   });
 
-  const textList = (title: string, rows: Array<{ business_name: string | null; summary: string | null }>) =>
-    rows.length ? `\n${title}\n${rows.map((r) => `- ${r.business_name ?? "A deleted business"}: ${r.summary ?? ""}`).join("\n")}\n` : "";
+  const textList = (title: string, rows: BillingChange[]) =>
+    rows.length ? `\n${title}\n${rows.map((r) => `- ${r.businessName}: ${r.summary}`).join("\n")}\n` : "";
   const text = [
     `ComplyTrack weekly billing digest, ${fromLabel} to ${toLabel}`,
     "",
@@ -735,12 +833,13 @@ export async function runBillingDigest(deps: BillingAlertDependencies = {}): Pro
     `New free trials: ${trials.length}`,
     "",
     "Why businesses cancelled:",
-    ...(reasonCounts.size ? [...reasonCounts.entries()].map(([label, n]) => `- ${label}: ${n}`) : ["- No cancellations this week"]),
+    ...(summary.reasons.length ? summary.reasons.map((r) => `- ${r.label}: ${r.count}`) : ["- No cancellations this week"]),
     "",
     "Most used modules (records saved or updated):",
-    ...(topModules.length ? topModules.map(([label, v]) => `- ${label}: ${v.changes} (in ${v.businesses} business${v.businesses === 1 ? "" : "es"})`) : ["- None"]),
+    ...(topModules.length ? topModules.map((m) => `- ${m.module}: ${m.changes} (in ${m.businesses} business${m.businesses === 1 ? "" : "es"})`) : ["- None"]),
     textList("New subscriptions", added) + textList("Cancellations", cancelled) + textList("Plan changes", planChanges),
-    `Now: ${totals?.paying ?? 0} paying, ${totals?.on_trial ?? 0} on a free trial.`,
+    `Now: ${summary.totals.paying} paying, ${summary.totals.onTrial} on a free trial.`,
+    `Business dashboard: ${appUrlOf(deps)}/business-dashboard`,
   ].join("\n");
 
   try {

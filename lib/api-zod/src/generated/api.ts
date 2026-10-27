@@ -501,6 +501,71 @@ export const ListAuditLogResponse = zod.array(ListAuditLogResponseItem).max(50)
 
 
 /**
+ * The figures of ALPS's Monday billing digest for any dates (inclusive, UTC days). Without dates, the last 7 days. At most three years.
+ * @summary New subscriptions, cancellations, plan changes, trials and module activity between two dates (platform operators only)
+ */
+export const GetBusinessDashboardQueryParams = zod.object({
+  "from": zod.date().optional(),
+  "to": zod.date().optional()
+})
+
+export const GetBusinessDashboardResponse = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "newSubscriptions": zod.array(zod.object({
+  "businessName": zod.string(),
+  "summary": zod.string(),
+  "monthlyPence": zod.number().describe('Monthly amount before VAT gained, lost or changed'),
+  "reason": zod.string().nullable().describe('Cancellation reason key'),
+  "at": zod.date()
+})),
+  "cancellations": zod.array(zod.object({
+  "businessName": zod.string(),
+  "summary": zod.string(),
+  "monthlyPence": zod.number().describe('Monthly amount before VAT gained, lost or changed'),
+  "reason": zod.string().nullable().describe('Cancellation reason key'),
+  "at": zod.date()
+})),
+  "planChanges": zod.array(zod.object({
+  "businessName": zod.string(),
+  "summary": zod.string(),
+  "monthlyPence": zod.number().describe('Monthly amount before VAT gained, lost or changed'),
+  "reason": zod.string().nullable().describe('Cancellation reason key'),
+  "at": zod.date()
+})),
+  "trials": zod.array(zod.object({
+  "businessName": zod.string(),
+  "at": zod.date()
+})),
+  "gainedPence": zod.number(),
+  "lostPence": zod.number(),
+  "planChangePence": zod.number(),
+  "netPence": zod.number(),
+  "netBusinesses": zod.number(),
+  "reasons": zod.array(zod.object({
+  "reason": zod.string(),
+  "label": zod.string(),
+  "count": zod.number()
+})),
+  "modules": zod.array(zod.object({
+  "module": zod.string(),
+  "changes": zod.number(),
+  "businesses": zod.number()
+})),
+  "weeks": zod.array(zod.object({
+  "weekStart": zod.date(),
+  "newCount": zod.number(),
+  "cancelledCount": zod.number(),
+  "netPence": zod.number()
+})),
+  "totals": zod.object({
+  "paying": zod.number(),
+  "onTrial": zod.number()
+})
+})
+
+
+/**
  * Client admins and consultants only. Newest first, scoped to the active business. Entries never include link tokens; linkRef is a short prefix of the stored SHA-256 fingerprint so repeat use of one link can be matched without exposing the credential.
  * @summary List recent public-link access for the signed-in business
  */
