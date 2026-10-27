@@ -1,5 +1,6 @@
 // The 12-month retention clock: started for cancelled subscriptions and lapsed
-// trials, never started on a Stripe error, cleared on resubscription, and
+// trials, never started on a Stripe error or for a business that is free with
+// no trial end, cleared on resubscription, and
 // rechecked against Stripe before a retention deletion. Runs only inside the
 // disposable database:
 //   bash tests/run-fresh-schema.sh tests/retention-clock.mjs
@@ -43,25 +44,35 @@ try {
   const lapsedTrial = await createTenant("retention-lapsed-trial");
   const stripeDown = await createTenant("retention-stripe-down");
   const activeTrial = await createTenant("retention-active-trial");
+  // Created directly: the fixture's sign-ups are limited to five an hour.
+  const complimentary = { clientId: Number((await db.execute(sql`
+    INSERT INTO clients (name, slug) VALUES ('Retention complimentary', ${`retention-complimentary-${Date.now()}`})
+    RETURNING id`)).rows[0].id) };
   const setCustomer = (tenant, customer) =>
     db.execute(sql`UPDATE clients SET stripe_customer_id = ${customer} WHERE id = ${tenant.clientId}`);
   await setCustomer(cancelled, "cus_retention_cancelled");
   await setCustomer(resubscribed, "cus_retention_resubscribed");
   await setCustomer(stripeDown, "cus_retention_down");
+  // Free with no trial end, and once bought an extra it has since cancelled.
+  await setCustomer(complimentary, "cus_retention_complimentary");
+  await db.execute(sql`UPDATE clients SET trial_ends_at = NULL WHERE id = ${complimentary.clientId}`);
   await db.execute(sql`UPDATE clients SET cancelled_at = now() - interval '2 months',
     data_deletion_scheduled_at = now() + interval '10 months', offboarding_email_sent_at = now() - interval '2 months'
     WHERE id = ${resubscribed.clientId}`);
   await db.execute(sql`UPDATE clients SET trial_ends_at = now() - interval '3 days' WHERE id = ${lapsedTrial.clientId}`);
 
   const sent = [];
-  const scope = [cancelled, resubscribed, lapsedTrial, stripeDown, activeTrial].map((tenant) => tenant.clientId);
+  const scope = [cancelled, resubscribed, lapsedTrial, stripeDown, activeTrial, complimentary].map((tenant) => tenant.clientId);
   const result = await offboarding.runCancellationDetectionJob({
     clientIds: scope,
     findLiveSubscription: async (customer) => {
       if (customer === "cus_retention_down") throw new Error("Stripe unavailable");
       return customer === "cus_retention_resubscribed" ? { id: "sub_live", status: "active" } : null;
     },
-    getSubscriptionHistory: async (customer) => ({ any: true, canceled: customer === "cus_retention_cancelled" }),
+    getSubscriptionHistory: async (customer) => ({
+      any: true,
+      canceled: customer === "cus_retention_cancelled" || customer === "cus_retention_complimentary",
+    }),
     sendEmail: async (message) => { sent.push(message); },
   });
   assert.deepEqual(
@@ -81,6 +92,9 @@ try {
   assert.equal(monthsBetween(t.trial_ends_at, t.data_deletion_scheduled_at), 12);
   assert.equal((await row(stripeDown.clientId)).cancelled_at, null, "a Stripe error never starts the clock");
   assert.equal((await row(activeTrial.clientId)).cancelled_at, null, "a running trial is untouched");
+  const comp = await row(complimentary.clientId);
+  assert.equal(comp.cancelled_at, null, "a business free with no trial end never starts the clock");
+  assert.equal(comp.data_deletion_scheduled_at, null);
   assert.ok(sent.some((message) => /free trial has ended/i.test(message.html)), "the lapsed trial is warned");
   assert.ok(sent.some((message) => /subscription has ended/i.test(message.html)), "the cancelled subscriber is warned");
   assert.ok(sent.every((message) => message.idempotencyKey), "offboarding emails carry provider idempotency keys");

@@ -677,6 +677,10 @@ export async function runCancellationDetectionJob(deps: CancellationDetectionDep
         continue;
       }
       if (client.cancelledAt) continue; // already counting down
+      // A business with no trial end keeps every module free for good (set up
+      // by a platform operator, e.g. included in an ALPS contract), so ending
+      // a paid extra such as the AI add-on never starts its deletion clock.
+      if (client.trialEndsAt === null) continue;
 
       let reason: "cancelled" | "trial_ended";
       let endedAt: Date;
