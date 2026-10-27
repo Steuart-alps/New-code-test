@@ -42,6 +42,8 @@ import type {
   Category,
   Certificate,
   CertificateDefect,
+  CertificateInbox,
+  CertificateInboxItem,
   CertificateReadRequest,
   CertificateReading,
   CertificateReadingStatus,
@@ -92,6 +94,7 @@ import type {
   FeedbackReviewEvent,
   FeedbackScreenshotLink,
   FeedbackScreenshotUpload,
+  FileCertificateInboxItemRequest,
   FireCallPoint,
   FireCallPointImportRequest,
   FireCallPointImportResult,
@@ -3733,6 +3736,370 @@ export const useReadCertificate = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReadCertificateMutationOptions(options));
+    }
+
+export const getGetCertificateInboxUrl = () => {
+
+
+
+
+  return `/api/certificate-inbox`
+}
+
+/**
+ * Certificates emailed to the business's certificate address, or uploaded by a contractor through the "Upload certificate" link in their emails, waiting for someone to check and save them. The address is null until emailed certificates are switched on for the platform.
+ * @summary Certificates to confirm, and the business's certificate address (owners and ALPS)
+ */
+export const getCertificateInbox = async ( options?: RequestInit): Promise<CertificateInbox> => {
+
+  return customFetch<CertificateInbox>(getGetCertificateInboxUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCertificateInboxQueryKey = () => {
+    return [
+    `/api/certificate-inbox`
+    ] as const;
+    }
+
+
+export const getGetCertificateInboxQueryOptions = <TData = Awaited<ReturnType<typeof getCertificateInbox>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCertificateInbox>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCertificateInboxQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCertificateInbox>>> = ({ signal }) => getCertificateInbox({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCertificateInbox>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCertificateInboxQueryResult = NonNullable<Awaited<ReturnType<typeof getCertificateInbox>>>
+export type GetCertificateInboxQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Certificates to confirm, and the business's certificate address (owners and ALPS)
+ */
+
+export function useGetCertificateInbox<TData = Awaited<ReturnType<typeof getCertificateInbox>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCertificateInbox>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCertificateInboxQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getChangeCertificateInboxAddressUrl = () => {
+
+
+
+
+  return `/api/certificate-inbox/address`
+}
+
+/**
+ * @summary Give the business a new certificate address; the old one stops working
+ */
+export const changeCertificateInboxAddress = async ( options?: RequestInit): Promise<CertificateInbox> => {
+
+  return customFetch<CertificateInbox>(getChangeCertificateInboxAddressUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getChangeCertificateInboxAddressMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeCertificateInboxAddress>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof changeCertificateInboxAddress>>, TError,void, TContext> => {
+
+const mutationKey = ['changeCertificateInboxAddress'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changeCertificateInboxAddress>>, void> = () => {
+
+
+          return  changeCertificateInboxAddress(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChangeCertificateInboxAddressMutationResult = NonNullable<Awaited<ReturnType<typeof changeCertificateInboxAddress>>>
+
+    export type ChangeCertificateInboxAddressMutationError = ErrorType<void>
+
+    /**
+ * @summary Give the business a new certificate address; the old one stops working
+ */
+export const useChangeCertificateInboxAddress = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeCertificateInboxAddress>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof changeCertificateInboxAddress>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getChangeCertificateInboxAddressMutationOptions(options));
+    }
+
+export const getReadCertificateInboxItemUrl = (id: number,) => {
+
+
+
+
+  return `/api/certificate-inbox/${id}/read`
+}
+
+/**
+ * @summary Read a waiting certificate with AI (again), or accept one from an unknown sender
+ */
+export const readCertificateInboxItem = async (id: number, options?: RequestInit): Promise<CertificateInboxItem> => {
+
+  return customFetch<CertificateInboxItem>(getReadCertificateInboxItemUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getReadCertificateInboxItemMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readCertificateInboxItem>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readCertificateInboxItem>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['readCertificateInboxItem'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readCertificateInboxItem>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  readCertificateInboxItem(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReadCertificateInboxItemMutationResult = NonNullable<Awaited<ReturnType<typeof readCertificateInboxItem>>>
+
+    export type ReadCertificateInboxItemMutationError = ErrorType<void>
+
+    /**
+ * @summary Read a waiting certificate with AI (again), or accept one from an unknown sender
+ */
+export const useReadCertificateInboxItem = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readCertificateInboxItem>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof readCertificateInboxItem>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getReadCertificateInboxItemMutationOptions(options));
+    }
+
+export const getFileCertificateInboxItemUrl = (id: number,) => {
+
+
+
+
+  return `/api/certificate-inbox/${id}/file`
+}
+
+/**
+ * The same as POST /items/{itemId}/certificates, with the file already held; fileUrl in the certificate is ignored.
+ * @summary Save a waiting certificate to a compliance check
+ */
+export const fileCertificateInboxItem = async (id: number,
+    fileCertificateInboxItemRequest: FileCertificateInboxItemRequest, options?: RequestInit): Promise<Certificate> => {
+
+  return customFetch<Certificate>(getFileCertificateInboxItemUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fileCertificateInboxItemRequest)
+  }
+);}
+
+
+
+
+
+export const getFileCertificateInboxItemMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fileCertificateInboxItem>>, TError,{id: number;data: BodyType<FileCertificateInboxItemRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof fileCertificateInboxItem>>, TError,{id: number;data: BodyType<FileCertificateInboxItemRequest>}, TContext> => {
+
+const mutationKey = ['fileCertificateInboxItem'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof fileCertificateInboxItem>>, {id: number;data: BodyType<FileCertificateInboxItemRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  fileCertificateInboxItem(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FileCertificateInboxItemMutationResult = NonNullable<Awaited<ReturnType<typeof fileCertificateInboxItem>>>
+    export type FileCertificateInboxItemMutationBody = BodyType<FileCertificateInboxItemRequest>
+    export type FileCertificateInboxItemMutationError = ErrorType<void>
+
+    /**
+ * @summary Save a waiting certificate to a compliance check
+ */
+export const useFileCertificateInboxItem = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fileCertificateInboxItem>>, TError,{id: number;data: BodyType<FileCertificateInboxItemRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof fileCertificateInboxItem>>,
+        TError,
+        {id: number;data: BodyType<FileCertificateInboxItemRequest>},
+        TContext
+      > => {
+      return useMutation(getFileCertificateInboxItemMutationOptions(options));
+    }
+
+export const getDismissCertificateInboxItemUrl = (id: number,) => {
+
+
+
+
+  return `/api/certificate-inbox/${id}/dismiss`
+}
+
+/**
+ * @summary Remove a waiting certificate or message that is not needed
+ */
+export const dismissCertificateInboxItem = async (id: number, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getDismissCertificateInboxItemUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getDismissCertificateInboxItemMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissCertificateInboxItem>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof dismissCertificateInboxItem>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['dismissCertificateInboxItem'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dismissCertificateInboxItem>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  dismissCertificateInboxItem(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DismissCertificateInboxItemMutationResult = NonNullable<Awaited<ReturnType<typeof dismissCertificateInboxItem>>>
+
+    export type DismissCertificateInboxItemMutationError = ErrorType<void>
+
+    /**
+ * @summary Remove a waiting certificate or message that is not needed
+ */
+export const useDismissCertificateInboxItem = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissCertificateInboxItem>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof dismissCertificateInboxItem>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDismissCertificateInboxItemMutationOptions(options));
     }
 
 export const getUpdateItemCertificateUrl = (itemId: number,

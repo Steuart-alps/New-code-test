@@ -1292,6 +1292,239 @@ export const ReadCertificateResponse = zod.object({
 
 
 /**
+ * Certificates emailed to the business's certificate address, or uploaded by a contractor through the "Upload certificate" link in their emails, waiting for someone to check and save them. The address is null until emailed certificates are switched on for the platform.
+ * @summary Certificates to confirm, and the business's certificate address (owners and ALPS)
+ */
+export const GetCertificateInboxResponse = zod.object({
+  "address": zod.string().nullable().describe('Where to email certificates; null until emailed certificates are switched on.'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "source": zod.enum(['email', 'upload']),
+  "status": zod.enum(['reading', 'ready', 'held', 'message']).describe('reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached.'),
+  "senderEmail": zod.string().nullable(),
+  "senderName": zod.string().nullable(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "itemId": zod.number().nullable().describe('The check the link was for, or the one the AI matched'),
+  "itemTitle": zod.string().nullable(),
+  "subject": zod.string().nullable(),
+  "messageText": zod.string().nullable(),
+  "fileName": zod.string().nullable(),
+  "contentType": zod.string().nullable(),
+  "fileUrl": zod.string().nullable(),
+  "byteSize": zod.number().nullable(),
+  "reading": zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+}).nullable(),
+  "note": zod.string().nullable().describe('Why it was held, why the AI could not read it, or what was wrong with the attachment.'),
+  "receivedAt": zod.date()
+}))
+})
+
+
+/**
+ * @summary Give the business a new certificate address; the old one stops working
+ */
+export const ChangeCertificateInboxAddressResponse = zod.object({
+  "address": zod.string().nullable().describe('Where to email certificates; null until emailed certificates are switched on.'),
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "source": zod.enum(['email', 'upload']),
+  "status": zod.enum(['reading', 'ready', 'held', 'message']).describe('reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached.'),
+  "senderEmail": zod.string().nullable(),
+  "senderName": zod.string().nullable(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "itemId": zod.number().nullable().describe('The check the link was for, or the one the AI matched'),
+  "itemTitle": zod.string().nullable(),
+  "subject": zod.string().nullable(),
+  "messageText": zod.string().nullable(),
+  "fileName": zod.string().nullable(),
+  "contentType": zod.string().nullable(),
+  "fileUrl": zod.string().nullable(),
+  "byteSize": zod.number().nullable(),
+  "reading": zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+}).nullable(),
+  "note": zod.string().nullable().describe('Why it was held, why the AI could not read it, or what was wrong with the attachment.'),
+  "receivedAt": zod.date()
+}))
+})
+
+
+/**
+ * @summary Read a waiting certificate with AI (again), or accept one from an unknown sender
+ */
+export const ReadCertificateInboxItemParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ReadCertificateInboxItemResponse = zod.object({
+  "id": zod.number(),
+  "source": zod.enum(['email', 'upload']),
+  "status": zod.enum(['reading', 'ready', 'held', 'message']).describe('reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached.'),
+  "senderEmail": zod.string().nullable(),
+  "senderName": zod.string().nullable(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "itemId": zod.number().nullable().describe('The check the link was for, or the one the AI matched'),
+  "itemTitle": zod.string().nullable(),
+  "subject": zod.string().nullable(),
+  "messageText": zod.string().nullable(),
+  "fileName": zod.string().nullable(),
+  "contentType": zod.string().nullable(),
+  "fileUrl": zod.string().nullable(),
+  "byteSize": zod.number().nullable(),
+  "reading": zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+}).nullable(),
+  "note": zod.string().nullable().describe('Why it was held, why the AI could not read it, or what was wrong with the attachment.'),
+  "receivedAt": zod.date()
+})
+
+
+/**
+ * The same as POST /items/{itemId}/certificates, with the file already held; fileUrl in the certificate is ignored.
+ * @summary Save a waiting certificate to a compliance check
+ */
+export const FileCertificateInboxItemParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const fileCertificateInboxItemBodyCertificateDefectsItemDescriptionMax = 1000;
+
+export const fileCertificateInboxItemBodyCertificateDefectsItemLocationMax = 300;
+
+export const fileCertificateInboxItemBodyCertificateDefectsMax = 100;
+
+
+
+export const FileCertificateInboxItemBody = zod.object({
+  "itemId": zod.number().describe('The compliance check to save it to'),
+  "certificate": zod.object({
+  "name": zod.string(),
+  "fileUrl": zod.string().nullish(),
+  "issueDate": zod.date().nullish(),
+  "expiryDate": zod.date().nullish(),
+  "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string().min(1).max(fileCertificateInboxItemBodyCertificateDefectsItemDescriptionMax),
+  "location": zod.string().max(fileCertificateInboxItemBodyCertificateDefectsItemLocationMax).nullish(),
+  "needsWork": zod.boolean().optional().describe('With remedialJob, whether it goes into the remedial job. Left out, C1, C2, FI, ID and AR do.')
+})).max(fileCertificateInboxItemBodyCertificateDefectsMax).optional(),
+  "remedialJob": zod.boolean().optional().describe('The defects that need work share one FixTrack job (so one quote request covers them) and the others open no job. Without it each defect opens its own job.'),
+  "readByAi": zod.boolean().optional().describe('The details were read by ComplyTrack\'s AI and checked by the person saving them.')
+})
+})
+
+export const FileCertificateInboxItemResponse = zod.object({
+  "id": zod.number(),
+  "contractorId": zod.number().nullish(),
+  "itemId": zod.number().nullish(),
+  "name": zod.string(),
+  "fileUrl": zod.string().nullish(),
+  "issueDate": zod.date().nullish(),
+  "expiryDate": zod.date().nullish(),
+  "notes": zod.string().nullish(),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).optional().describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "defects": zod.array(zod.object({
+  "id": zod.number(),
+  "certificateId": zod.number(),
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "label": zod.string(),
+  "description": zod.string(),
+  "location": zod.string().nullish(),
+  "fixTrackIssueId": zod.number().nullish(),
+  "fixTrackStatus": zod.string().nullish(),
+  "fixTrackPriority": zod.string().nullish(),
+  "fixTrackTargetDate": zod.string().nullish(),
+  "resolvedAt": zod.date().nullish(),
+  "blocking": zod.boolean().describe('C1\/C2\/FI\/ID\/AR defects keep the check needing action while open.'),
+  "open": zod.boolean().describe('The FixTrack job is not resolved or closed (or, without a job, the defect is not marked remedied).'),
+  "createdAt": zod.date()
+})).optional().describe('Defects listed on an item certificate (absent for contractor certificates).'),
+  "createdAt": zod.date()
+})
+
+
+/**
+ * @summary Remove a waiting certificate or message that is not needed
+ */
+export const DismissCertificateInboxItemParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DismissCertificateInboxItemResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
  * @summary Update a compliance item's certificate
  */
 export const UpdateItemCertificateParams = zod.object({

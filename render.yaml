@@ -66,6 +66,13 @@ services:
         sync: false
       - key: RESEND_FROM_EMAIL
         sync: false
+      # Emailed certificates (see .env.example); unset = no certificate addresses
+      - key: CERTIFICATE_INBOX_DOMAIN
+        sync: false
+      - key: RESEND_INBOUND_WEBHOOK_SECRET
+        sync: false
+      - key: RESEND_INBOUND_API_KEY
+        sync: false
       - key: ADMIN_EMAIL
         sync: false
       # In-app "Submit feedback" reports are emailed here (unset = saved only

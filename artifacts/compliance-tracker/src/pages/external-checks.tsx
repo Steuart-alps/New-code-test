@@ -10,6 +10,7 @@ import { CheckStatusWithCertificate } from "@/components/certificates-outstandin
 import { CompleteCheckDialog } from "@/components/complete-check-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { CertificateReaderButton } from "@/components/certificate-reader-dialog";
+import { CertificateInboxCard } from "@/components/certificate-inbox-card";
 import { format } from "date-fns";
 import { Plus, Briefcase, Mail, Send, Calendar, X, Building2, Sparkles } from "lucide-react";
 import { apiFetch } from "@/lib/api";
@@ -216,6 +217,8 @@ export default function ExternalChecksPage() {
           )}
         </div>
       </div>
+
+      {canAdmin && <CertificateInboxCard />}
 
       {filterParam && (
         <div className="mb-4 flex items-center gap-2 px-4 py-2.5 bg-primary/5 border border-primary/20 rounded-lg">

@@ -37,6 +37,7 @@ const PublicSitePage = lazy(() => import("@/pages/public-site"));
 const PrivacyGovernancePage = lazy(() => import("@/pages/privacy-governance"));
 const VerifyEmailPage = lazy(() => import("@/pages/verify-email"));
 const SchedulePage = lazy(() => import("@/pages/schedule"));
+const CertificateUploadPage = lazy(() => import("@/pages/certificate-upload"));
 const ItemDetailPage = lazy(() => import("@/pages/item-detail"));
 const FireSafetyPage = lazy(() => import("@/pages/fire-safety"));
 const KitchenPage = lazy(() => import("@/pages/kitchen"));
@@ -160,6 +161,7 @@ function ProtectedRoutes() {
   if (/^\/(pricing|features|templates)(\/[^/]+)?\/?$/.test(location)) return <PublicSitePage location={location} />;
   if (location.startsWith("/verify-email")) return <VerifyEmailPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
+  if (location.startsWith("/certificate-upload/")) return <CertificateUploadPage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
   if (location.startsWith("/privacy-request/")) return <PrivacyRequestPage />;
   if (location.startsWith("/contractor-portal/")) return <Route path="/contractor-portal/:token" component={ContractorPortalPage} />;

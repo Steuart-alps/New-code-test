@@ -41,6 +41,7 @@ async function markComplianceNotified(q: any, clientId: number): Promise<void> {
 }
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
 import { CERTIFICATE_FOLLOW_UP_EMAIL_TYPE } from "../lib/certificateFollowUp";
+import { CERTIFICATE_UPLOAD_PLACEHOLDER, certificateReplyToFor } from "../lib/certificateInbox";
 import { resolveAssigneeChange } from "../lib/assignees";
 import { filterName } from "../lib/contentFilter";
 
@@ -56,11 +57,12 @@ function hydrateQueuedContent(q: any) {
   const fill = (text: string, placeholder: string, raw: string | undefined) =>
     raw === undefined ? text : text.split(placeholder).join(raw);
   const replace = (value: unknown): unknown => typeof value === "string"
-    ? fill(fill(fill(fill(value,
+    ? fill(fill(fill(fill(fill(value,
         "{{BOOKED_TOKEN}}", payload.booked),
         "{{COMPLETED_TOKEN}}", payload.completed),
         "{{QUOTE_TOKEN}}", payload.quote),
-        "{{PORTAL_URL}}", payload.portal)
+        "{{PORTAL_URL}}", payload.portal),
+        CERTIFICATE_UPLOAD_PLACEHOLDER, payload.certUpload)
     : Array.isArray(value) ? value.map(replace)
     : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, replace(v)]))
     : value;
@@ -105,7 +107,7 @@ function sendFailureResponse(res: any, err: unknown) {
   }
   return res.status(502).json({ error: "Contractor email could not be sent" });
 }
-const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/[a-z0-9-]{32,}/i;
+const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal|schedule|certificate-upload)\/[a-z0-9-]{32,}/i;
 const CALENDAR_CANCELLATION_NOTICE = "The attached calendar cancellation removes the previously sent assignment.";
 const CALENDAR_CANCELLATION_SUBJECT_PREFIX = "Calendar cancellation:";
 const FIXTRACK_UPLOAD_EXTENSIONS: Record<string, string> = {
@@ -2028,6 +2030,9 @@ async function sendClaimedDraft(q: any, clientId: number) {
       icsFilename: row.ics_filename ?? undefined,
       clientId,
       idempotencyKey: row.idempotency_key,
+      // A certificate chase is answered with the certificate, so the reply
+      // goes to the business's certificate address when it has one.
+      replyTo: row.email_type === CERTIFICATE_FOLLOW_UP_EMAIL_TYPE ? await certificateReplyToFor(clientId) ?? undefined : undefined,
     });
     return hydrated;
   };

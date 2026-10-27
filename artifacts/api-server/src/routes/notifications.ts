@@ -7,7 +7,8 @@ import { buildReminderEmail, buildCalendarInvite, buildVisitConfirmationEmail, g
 import { TestEmailBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
-import { digestBearerToken, encryptTokenPayload } from "../lib/bearerTokens";
+import { digestBearerToken, encryptTokenPayload, newBearerToken } from "../lib/bearerTokens";
+import { certificateReplyToFor, certificateUploadBlock, certificateUploadUrl, issueCertificateUploadLink } from "../lib/certificateInbox";
 import { lockReminderItem, reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
 import { logger } from "../lib/logger";
 import { syncContractorVisitChecks } from "../lib/contractorVisits";
@@ -81,6 +82,12 @@ async function sendReminderForItem(opts: {
   const scheduleLink = `${getPublicAppUrl()}/schedule/${scheduleToken}`;
 
   const ccDisplay = ccList.length > 0 ? ccList.join(", ") : null;
+  // After the visit the contractor can upload the certificate from the same
+  // email; the link's token rides in the encrypted payload like the booking one.
+  const uploadToken = newBearerToken();
+  const certificateRequest = certificateUploadBlock({
+    uploadUrl: certificateUploadUrl(), address: await certificateReplyToFor(item.clientId),
+  });
 
   const { html, text } = buildReminderEmail({
     contractorName: contractor.name,
@@ -91,6 +98,7 @@ async function sendReminderForItem(opts: {
     notes: item.notes,
     ccMaintenanceEmail: ccDisplay,
     scheduleLink,
+    certificateRequest,
   });
 
   // Reminders use the same approval queue as FixTrack contractor mail. The
@@ -104,7 +112,7 @@ async function sendReminderForItem(opts: {
   const safeText = text.split(scheduleToken).join("{{BOOKED_TOKEN}}");
   const subject = `Compliance Check Reminder: ${item.title}`;
   const preview = { subject, text: safeText, html: safeHtml };
-  const encryptedTokenPayload = encryptTokenPayload({ booked: scheduleToken });
+  const encryptedTokenPayload = encryptTokenPayload({ booked: scheduleToken, certUpload: uploadToken });
 
   // The idempotency claim and token issuance are one atomic operation. A retry
   // (or a concurrent runner) that loses the unique-key race leaves the first
@@ -145,6 +153,7 @@ async function sendReminderForItem(opts: {
     if (updatedItems.length !== 1) {
       throw new Error("Compliance item disappeared before its reminder token could be saved");
     }
+    await issueCertificateUploadLink(tx, { clientId: item.clientId, itemId: item.id, contractorId: contractor.id }, uploadToken);
     return true;
   });
 }
@@ -443,11 +452,15 @@ notificationsPublicRouter.post("/:token", async (req, res) => {
   });
 
   const safeTitle = item.title.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+  const uploadToken = newBearerToken();
   const { subject: confirmationSubject, html, text, dateStr } = buildVisitConfirmationEmail({
     contractorName: contractor.name,
     companyName,
     itemTitle: item.title,
     visitDate: proposed,
+    certificateRequest: certificateUploadBlock({
+      uploadUrl: certificateUploadUrl(), address: await certificateReplyToFor(item.clientId),
+    }),
   });
   // Consume the link and queue the confirmation atomically. The conditional
   // update on the digest is the one-time claim: of concurrent submissions
@@ -463,13 +476,18 @@ notificationsPublicRouter.post("/:token", async (req, res) => {
       ))
       .returning({ id: complianceItemsTable.id });
     if (consumed.length === 0) return false;
-    await tx.execute(sql`INSERT INTO contractor_email_queue
-    (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,body_text,cc_json,ics_content,ics_filename,email_preview_json,idempotency_key)
+    const queued = await tx.execute(sql`INSERT INTO contractor_email_queue
+    (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,body_text,cc_json,ics_content,ics_filename,email_preview_json,encrypted_token_payload,idempotency_key)
     VALUES (${item.clientId},'compliance',${item.id},${contractor.id},'reminder','assign',${contractor.email},
       ${confirmationSubject},${html},${text},${JSON.stringify(maintenanceEmail ? [maintenanceEmail] : [])}::jsonb,
       ${ics},${`${safeTitle}.ics`},${JSON.stringify({ subject: confirmationSubject, html, text })}::jsonb,
+      ${encryptTokenPayload({ certUpload: uploadToken })},
       ${`schedule-confirmation-${item.clientId}-${item.id}-${proposed.toISOString().slice(0,10)}`})
-    ON CONFLICT (idempotency_key) DO NOTHING`);
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING id`);
+    if (queued.rows.length) {
+      await issueCertificateUploadLink(tx, { clientId: item.clientId, itemId: item.id, contractorId: contractor.id }, uploadToken);
+    }
     return true;
   });
   if (!claimed) return void res.status(404).json({ error: "This scheduling link is no longer valid." });

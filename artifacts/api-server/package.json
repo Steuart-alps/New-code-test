@@ -28,6 +28,7 @@
     "test:track-due-dates": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-due-dates.mjs",
     "test:contractor-visits": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/contractor-visits.mjs",
     "test:certificate-follow-up": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/certificate-follow-up.mjs",
+    "test:certificate-inbox": "FRESH_SCHEMA_BASE=push FRESH_SCHEMA_CERTIFICATE_INBOX=1 bash tests/run-fresh-schema.sh tests/certificate-inbox.mjs",
     "test:kitchen-hold-controls": "bash tests/run-fresh-schema.sh tests/kitchen-hold-controls.mjs",
     "test:voice-log": "bash tests/run-fresh-schema.sh tests/voice-log.mjs",
     "test:kitchen-inspection-export": "bash tests/run-fresh-schema.sh tests/kitchen-inspection-export.mjs",

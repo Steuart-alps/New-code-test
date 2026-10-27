@@ -25,6 +25,7 @@ const fileStream = excluded("streams a stored file by a wildcard object path, no
 
 const EXCLUDED = {
   "POST /api/stripe/webhook": excluded("Stripe webhook; Stripe signs and sends it"),
+  "POST /api/inbound/certificate-email": excluded("Resend inbound email webhook; Resend signs and sends it"),
   "GET /api/internal/analytics/summary": excluded("operator report behind ANALYTICS_READ_TOKEN, not called by apps"),
   "POST /api/admin/seed-demo": excluded("one-off demo price seed behind DEMO_SEED_TOKEN"),
   "GET /api/storage/download/:token": excluded("signed download link opened by the browser"),
@@ -44,6 +45,8 @@ const EXCLUDED = {
   "POST /api/fix-track/quotes/public/:token": tokenLink,
   "GET /api/notifications/public/schedule/:token": tokenLink,
   "POST /api/notifications/public/schedule/:token": tokenLink,
+  "GET /api/certificate-upload/:token": tokenLink,
+  "POST /api/certificate-upload/:token": tokenLink,
   "GET /api/sign-off/:token/info": tokenLink,
   "GET /api/sign-off/:token/departments": tokenLink,
   "GET /api/sign-off/:token/staff": tokenLink,

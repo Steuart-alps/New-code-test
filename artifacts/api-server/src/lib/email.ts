@@ -7,7 +7,7 @@ import { appendFile } from "node:fs/promises";
 /** Upper bound for one email provider request (a hung connection fails the send). */
 const RESEND_REQUEST_TIMEOUT_MS = 15_000;
 
-function getResend(apiKeyOverride?: string | null) {
+export function getResend(apiKeyOverride?: string | null) {
   const apiKey = apiKeyOverride?.trim() || process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY is not configured.");
   const resend = new Resend(apiKey);
@@ -143,6 +143,8 @@ export async function sendEmail(opts: {
   clientId?: number | null;
   /** Stable key used by providers to make a retried dispatch non-duplicating. */
   idempotencyKey?: string;
+  /** Where a reply goes, e.g. the business's certificate address (lib/certificateInbox.ts). */
+  replyTo?: string;
 }) {
   const settings = await getEmailSettings(opts.clientId ?? null);
   const resend = getResend(settings["resendApiKey"]);
@@ -176,6 +178,7 @@ export async function sendEmail(opts: {
     html: applyEmailLayout(opts.html),
     text: opts.text,
     attachments,
+    ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
   };
   // Resend treats a repeated idempotency key as the same accepted email.
   // Keep this at the common transport boundary so callers cannot accidentally
@@ -503,6 +506,8 @@ export function buildVisitConfirmationEmail(opts: {
   companyName: string;
   itemTitle: string;
   visitDate: Date;
+  /** The "Upload certificate" block for after the visit (lib/certificateInbox.ts). */
+  certificateRequest?: { html: string; text: string } | null;
 }): { subject: string; html: string; text: string; dateStr: string } {
   const dateStr = opts.visitDate.toLocaleDateString("en-GB", {
     weekday: "long",
@@ -515,9 +520,10 @@ export function buildVisitConfirmationEmail(opts: {
       <h2 style="color: #1e293b;">Visit Confirmed</h2>
       <p>Thank you ${escapeHtml(opts.contractorName)}.</p>
       <p>Your visit for <strong>${escapeHtml(opts.itemTitle)}</strong> is scheduled for <strong>${escapeHtml(dateStr)}</strong>.</p>
+      ${opts.certificateRequest?.html ?? ""}
       <p>Best regards,<br><strong>${escapeHtml(opts.companyName)}</strong></p>
     </div>`;
-  const text = `Visit Confirmed\n\nThank you ${opts.contractorName}.\n\nYour visit for ${opts.itemTitle} is scheduled for ${dateStr}.\n\n${opts.companyName}`;
+  const text = `Visit Confirmed\n\nThank you ${opts.contractorName}.\n\nYour visit for ${opts.itemTitle} is scheduled for ${dateStr}.\n\n${opts.certificateRequest ? `${opts.certificateRequest.text}\n\n` : ""}${opts.companyName}`;
   const subject = `Visit Confirmed: ${opts.itemTitle} — ${dateStr}`;
   return { subject, html, text, dateStr };
 }
@@ -531,6 +537,8 @@ export function buildReminderEmail(opts: {
   notes?: string | null;
   ccMaintenanceEmail?: string | null;
   scheduleLink?: string | null;
+  /** The "Upload certificate" block for after the visit (lib/certificateInbox.ts). */
+  certificateRequest?: { html: string; text: string } | null;
 }) {
   const dueDateStr = opts.dueDate.toLocaleDateString("en-GB", {
     weekday: "long",
@@ -569,6 +577,7 @@ export function buildReminderEmail(opts: {
       <p>Please contact us to arrange your visit or inspection at your earliest convenience.</p>
       <p style="color: #475569;">A calendar appointment has been attached to this email — click it to add the due date directly to your calendar.</p>
       `}
+      ${opts.certificateRequest?.html ?? ""}
       <p>Best regards,<br><strong>${safeCompanyName}</strong></p>
       ${safeCcEmail ? `<p style="color: #94a3b8; font-size: 12px; margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 12px;">This email has been copied to ${safeCcEmail} for your records.</p>` : ""}
     </div>
@@ -585,7 +594,7 @@ ${opts.itemTitle}
 ${opts.notes ? opts.notes : ""}
 
 ${opts.scheduleLink ? `Pick a suitable visit date here:\n${opts.scheduleLink}\n\nOnce you confirm, a calendar invite will be sent to everyone.` : "A calendar appointment is attached — open it to add the due date to your calendar.\n\nPlease contact us to arrange your visit or inspection at your earliest convenience."}
-
+${opts.certificateRequest ? `\n${opts.certificateRequest.text}\n` : ""}
 Best regards,
 ${opts.companyName}
   `.trim();

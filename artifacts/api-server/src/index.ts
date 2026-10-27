@@ -43,6 +43,7 @@ import { runTwoFactorResetAlertRecovery } from "./lib/twoFactorResetAlerts";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
 import { runCertificateFollowUpJob } from "./lib/certificateFollowUp";
+import { runCertificateInboxRecovery } from "./lib/certificateInbox";
 import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob, runDeletionReminderJob } from "./lib/offboarding";
 import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
 import { runCancelledStorageClassJob } from "./lib/cancelledClientStorage";
@@ -315,6 +316,12 @@ function startScheduler() {
     "Certificate follow-up job complete", () => runCertificateFollowUpJob(),
   ), { daily: true });
   logger.info("Certificate follow-up scheduler started (daily at 08:05)");
+
+  // Emailed certificates the webhook could not finish, and any left mid-read.
+  schedule("*/5 * * * *", "certificate-inbox-recovery", logged(
+    "Certificate inbox recovery complete", () => runCertificateInboxRecovery(),
+    (result) => result.emails === 0 && result.reads === 0,
+  ));
 
   // Queue the contractors' own reminders (insurance, DBS/PVG, certificates)
   // for approval in Contractor Approvals. Run at 08:55 London time so 60/30-day

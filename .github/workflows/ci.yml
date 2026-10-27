@@ -373,6 +373,9 @@ jobs:
       - name: Certificate follow-up after a contractor visit (production schema base)
         run: pnpm --filter @workspace/api-server run test:certificate-follow-up
 
+      - name: Certificates emailed or uploaded by contractors wait to be confirmed (production schema base)
+        run: pnpm --filter @workspace/api-server run test:certificate-inbox
+
       - name: Equipment list and QR label tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:equipment-labels
 

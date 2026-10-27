@@ -66,6 +66,7 @@ const EXCEPTIONS = {
   "sign-off.ts POST /:token/acknowledge": linkToken("staff document sign-off", /\bresolveClient\(req\.params\.token\b/),
   "privacy-intake-public.ts POST /:token": linkToken("public privacy rights request", /\bresolveForm\(req\)/),
   "notifications.ts POST /:token [notificationsPublicRouter]": linkToken("contractor visit scheduling", /\bscheduleTokenDigest\(req\.params\.token\)/),
+  "certificate-inbox.ts POST /:token [certificateUploadPublicRouter]": linkToken("contractor certificate upload", /\bfindCertificateUploadLink\(req\.params\.token\)/),
   "staff-roster.ts POST /staff/:id/set-pin": kioskToken("PIN enrollment", /\benrollmentRateLimit\b/, /\breq\.body\?\.enrollment_token\b/, /\bdigestBearerToken\(parsedToken\.data\)/),
   "staff-roster.ts POST /staff/verify-pin": kioskToken("kiosk PIN check", /\bkioskClient\(req\.header\("x-kiosk-token"\)\)/),
   "staff-roster.ts POST /staff/kiosk-action": kioskToken("one kiosk action", /token_hash=\$\{digestBearerToken\(parsed\.data\.capability\)\}/),

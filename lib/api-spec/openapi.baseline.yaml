@@ -1082,6 +1082,113 @@ paths:
         "503":
           description: Reading is not switched on (no Anthropic API key)
 
+  /certificate-inbox:
+    get:
+      operationId: getCertificateInbox
+      tags: [certificates]
+      summary: Certificates to confirm, and the business's certificate address (owners and ALPS)
+      description: >-
+        Certificates emailed to the business's certificate address, or uploaded
+        by a contractor through the "Upload certificate" link in their emails,
+        waiting for someone to check and save them. The address is null until
+        emailed certificates are switched on for the platform.
+      responses:
+        "200":
+          description: The inbox
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateInbox"
+
+  /certificate-inbox/address:
+    post:
+      operationId: changeCertificateInboxAddress
+      tags: [certificates]
+      summary: Give the business a new certificate address; the old one stops working
+      responses:
+        "200":
+          description: The inbox with its new address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateInbox"
+        "503":
+          description: Emailed certificates are not switched on
+
+  /certificate-inbox/{id}/read:
+    post:
+      operationId: readCertificateInboxItem
+      tags: [certificates]
+      summary: Read a waiting certificate with AI (again), or accept one from an unknown sender
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The certificate with its reading (or why it could not be read, in note)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateInboxItem"
+        "404":
+          description: Not a waiting certificate of this business
+
+  /certificate-inbox/{id}/file:
+    post:
+      operationId: fileCertificateInboxItem
+      tags: [certificates]
+      summary: Save a waiting certificate to a compliance check
+      description: >-
+        The same as POST /items/{itemId}/certificates, with the file already
+        held; fileUrl in the certificate is ignored.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileCertificateInboxItemRequest"
+      responses:
+        "201":
+          description: Created certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certificate"
+        "404":
+          description: The check is not one of this business's
+        "409":
+          description: The certificate has already been saved or dismissed
+
+  /certificate-inbox/{id}/dismiss:
+    post:
+      operationId: dismissCertificateInboxItem
+      tags: [certificates]
+      summary: Remove a waiting certificate or message that is not needed
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Dismissed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: Not a waiting certificate of this business
+
   /items/{itemId}/certificates/{id}:
     put:
       operationId: updateItemCertificate
@@ -7078,6 +7185,64 @@ components:
           items: { type: string }
           description: Things that could not be read with confidence.
       required: [certificateType, name, itemId, checkReason, newCheck, contractorName, issueDate, nextInspectionDate, nextInspectionSource, outcome, summary, defects, unclear]
+
+    CertificateInbox:
+      type: object
+      properties:
+        address:
+          type: string
+          nullable: true
+          description: Where to email certificates; null until emailed certificates are switched on.
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CertificateInboxItem"
+      required: [address, items]
+
+    CertificateInboxItem:
+      type: object
+      properties:
+        id: { type: integer }
+        source: { type: string, enum: [email, upload] }
+        status:
+          type: string
+          enum: [reading, ready, held, message]
+          description: >-
+            reading = the AI is reading it; ready = waiting to be checked;
+            held = from a sender the business does not know (not read until
+            accepted); message = an email with no certificate attached.
+        senderEmail: { type: string, nullable: true }
+        senderName: { type: string, nullable: true }
+        contractorId: { type: integer, nullable: true }
+        contractorName: { type: string, nullable: true }
+        itemId: { type: integer, nullable: true, description: "The check the link was for, or the one the AI matched" }
+        itemTitle: { type: string, nullable: true }
+        subject: { type: string, nullable: true }
+        messageText: { type: string, nullable: true }
+        fileName: { type: string, nullable: true }
+        contentType: { type: string, nullable: true }
+        fileUrl: { type: string, nullable: true }
+        byteSize: { type: integer, nullable: true }
+        reading:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/CertificateReading"
+        note:
+          type: string
+          nullable: true
+          description: Why it was held, why the AI could not read it, or what was wrong with the attachment.
+        receivedAt: { type: string, format: date-time }
+      required: [id, source, status, senderEmail, senderName, contractorId, contractorName, itemId, itemTitle, subject, messageText, fileName, contentType, fileUrl, byteSize, reading, note, receivedAt]
+
+    FileCertificateInboxItemRequest:
+      type: object
+      properties:
+        itemId:
+          type: integer
+          description: The compliance check to save it to
+        certificate:
+          $ref: "#/components/schemas/CreateItemCertificateRequest"
+      required: [itemId, certificate]
 
     UpdateItemCertificateRequest:
       type: object

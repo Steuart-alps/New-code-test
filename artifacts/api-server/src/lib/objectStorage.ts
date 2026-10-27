@@ -757,6 +757,36 @@ export class ObjectStorageService {
   }
 
   /**
+   * Save bytes the server already holds and has checked (a certificate emailed
+   * to the business, lib/certificateInbox.ts) as a private object the tenant
+   * owns. The caller validates the content first.
+   */
+  async storeTenantFile(tenantId: number | string, bytes: Buffer, contentType: string, extension: string): Promise<string> {
+    if (!/^\.[a-z0-9]{1,10}$/.test(extension)) throw new Error("Invalid file extension");
+    const privateDir = this.getPrivateObjectDir().replace(/\/$/, "");
+    const { bucketName, objectName } = parseObjectPath(`${privateDir}/finalized/tenant-${tenantId}/${randomUUID()}${extension}`);
+    const destination = objectStorageClient.bucket(bucketName).file(objectName);
+    await destination.save(bytes, {
+      resumable: false,
+      contentType,
+      preconditionOpts: { ifGenerationMatch: 0 },
+      validation: "crc32c",
+    });
+    const objectPath = this.normalizeObjectEntityPath(`https://storage.googleapis.com/${bucketName}/${objectName}`);
+    return this.setTenantObjectAcl(objectPath, tenantId);
+  }
+
+  /** Read back a private object the tenant owns (at most maxBytes). */
+  async readTenantFile(objectPath: string, tenantId: number | string, maxBytes: number): Promise<Buffer> {
+    const file = await this.getObjectEntityFile(objectPath);
+    await this.assertTenantObjectOwnership(file, tenantId);
+    const [metadata] = await file.getMetadata();
+    if (Number(metadata.size) > maxBytes) throw new ObjectContentError("File is too large");
+    const [bytes] = await file.download({ validation: "crc32c" });
+    return bytes;
+  }
+
+  /**
    * Secure FixTrack media uploads. Images use the existing bounded decoder and
    * normalization path; videos are signature-checked and copied from one pinned
    * generation to a fresh immutable tenant key.
