@@ -36,6 +36,7 @@ Wednesday 28 October.
 | 17 | Maintenance inventory: stock, cheapest supplier, low-stock reminder | After launch | None | Kitchen supplier price import for the cheapest supplier part |
 | 18 | Reorder the side menu to each user's preference | After launch | None | Nothing |
 | 19 | Bar opening and closing checks, including beer tap tips | After launch | None | Your list of bar checks |
+| 20 | Send site safety information to contractors before their visit | After launch | None | Contractor sign-in work (in its own thread) |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -727,6 +728,39 @@ starting point.
 
 ---
 
+## 20. Site safety information sent to contractors before their visit
+
+**When:** after launch. Asked for on 27 October.
+
+When a contractor's visit is booked (the contractor reminder from #155 already
+lets them pick a date and sends a calendar invite), ComplyTrack also sends
+them the site information they need before they arrive:
+
+- the site's risk assessment (or the parts that apply to their work);
+- the fire evacuation procedure and assembly point;
+- the asbestos register for that site, so they know where not to drill or cut
+  before they start.
+
+**How it works:**
+
+- The details go as a secure link in the booking email and calendar invite,
+  not as attachments, so they always show the latest version and only work
+  for that visit.
+- The contractor ticks "I have read these" before the visit. The visit record
+  shows who read what and when, which is useful evidence if anything goes
+  wrong.
+- The manager chooses which documents go to which kind of contractor (for
+  example the asbestos register always goes to builders and electricians).
+
+**Links to other work.** This joins up with the contractor sign-in and
+one-track access being planned in the thread "Temporary contractor access to
+log tests": the contractor reads the site information, signs in on arrival,
+logs their test, and signs out.
+
+**Cost:** none. No extra hosting.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -776,6 +810,7 @@ work:
 | Maintenance inventory | None |
 | Reorder the side menu | None |
 | Bar opening and closing checks | None |
+| Site safety information to contractors | None |
 | FireTrack sound level meter | None |
 | Temperature probes and sensors | Hardware paid by each business (plus a maker subscription for option 1); possibly a larger database plan later; text alerts a few pence each |
 | Label scanning | About 1-2p per label; about 40p for a chemical including its data sheet and COSHH draft (mostly in the Live AI plan already) |
