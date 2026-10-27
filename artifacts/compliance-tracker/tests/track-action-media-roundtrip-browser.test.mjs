@@ -173,6 +173,23 @@ try {
   await staffPage.locator(zone).locator("xpath=ancestor::article").getByRole("button", { name: "Resolve action" }).scrollIntoViewIfNeeded();
   await shot(staffPage, "3-resolve-with-photos.png");
 
+  // ── 3b. Photos picked in "Add action" upload as soon as the action is created ──
+  await staffPage.getByRole("button", { name: "Add action" }).click();
+  await staffPage.locator("#action-title").fill("Replace the cracked fire exit sign");
+  await dropFiles(staffPage, '[data-testid="new-action-media"]', [photo]);
+  await staffPage.getByRole("img", { name: photo.name }).waitFor({ state: "visible" });
+  await staffPage.getByText("They upload when you save.").waitFor({ state: "visible" });
+  await staffPage.locator('[data-testid="new-action-media"]').scrollIntoViewIfNeeded();
+  await shot(staffPage, "4-new-action-with-photo.png");
+  assert.equal((await inspector.list(`uploads/tenant-${tenantA.clientId}/`)).length, 0, "nothing is uploaded before the action is created");
+  await staffPage.getByRole("button", { name: "Create action" }).click();
+  await staffPage.getByText("Photo or video added", { exact: true }).first().waitFor({ state: "visible", timeout: 60_000 });
+  const withNew = await api(staffPage, "GET", "/track-actions?module=audit");
+  const newAction = withNew.data.find(item => item.title === "Replace the cracked fire exit sign");
+  assert.ok(newAction, "the new action was created");
+  assert.equal(newAction.mediaUrls.length, 1, "its photo was attached straight after creation");
+  await staffPage.getByTestId(`button-open-action-media-${newAction.id}-0`).waitFor({ state: "visible" });
+
   // ── 4. Other tenants and viewers cannot add files ───────────────────────
   assert.equal((await api(tenantB.page, "POST", `/track-actions/${actionId}/request-upload`, { name: "x.jpg", contentType: "image/jpeg" })).status, 404,
     "another tenant cannot get an upload link for this action");

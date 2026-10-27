@@ -15,7 +15,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
 import { TrackEvidencePanel } from "@/components/track-evidence-panel";
-import { ActionMedia } from "@/components/action-media";
+import { ActionMedia, reportActionMediaResult, uploadActionMedia } from "@/components/action-media";
+import { PendingMediaPicker } from "@/components/pending-media-picker";
 import { cn } from "@/lib/utils";
 import { AssigneeField, assigneeFields, type AssigneeValue } from "@/components/assignee-field";
 
@@ -99,6 +100,9 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
+  // Photos and videos chosen in the "Add action" form, uploaded once it is created.
+  const [draftMedia, setDraftMedia] = useState<File[]>([]);
+  const [mediaStatus, setMediaStatus] = useState<string | null>(null);
   const [resolution, setResolution] = useState<Record<string, ResolutionValues>>({});
   const [pendingSignature, setPendingSignature] = useState<{ action: TrackAction; values: ResolutionValues } | null>(null);
 
@@ -197,9 +201,17 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(errorMessage(data, "Unable to create action"));
-      setDraft(emptyDraft);
-      setShowCreate(false);
       toast({ title: "Action created" });
+      if (draftMedia.length > 0 && data?.id != null) {
+        try {
+          reportActionMediaResult(toast, await uploadActionMedia(data.id, draftMedia, setMediaStatus));
+        } finally {
+          setMediaStatus(null);
+        }
+      }
+      setDraft(emptyDraft);
+      setDraftMedia([]);
+      setShowCreate(false);
       await loadActions();
     } catch (error) {
       toast({ title: "Couldn't create action", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -269,7 +281,8 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
                <div className="space-y-1.5"><Label htmlFor="action-site">Site <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "none"} onValueChange={value => setDraft({ ...draft, siteId: value === "none" ? "" : value, templateId: "" })}><SelectTrigger id="action-site"><SelectValue placeholder="No site" /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
                <div className="space-y-1.5"><Label htmlFor="action-owner">Assigned to <span className="text-muted-foreground">(optional)</span></Label><AssigneeField id="action-owner" siteId={draft.siteId ? Number(draft.siteId) : null} value={draft.owner} onChange={owner => setDraft({ ...draft, owner })} /></div>
                <div className="space-y-1.5"><Label htmlFor="action-due-date">Due date <span className="text-muted-foreground">(optional)</span></Label><Input id="action-due-date" disabled={!!draft.templateId} type="date" value={draft.dueDate} onChange={event => setDraft({ ...draft, dueDate: event.target.value })} /></div>
-              <div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={submitting}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create action</Button><Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button></div>
+               <div className="sm:col-span-2"><PendingMediaPicker files={draftMedia} onChange={setDraftMedia} disabled={submitting} testId="new-action-media" /></div>
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2"><Button type="submit" disabled={submitting}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create action</Button><Button type="button" variant="outline" disabled={submitting} onClick={() => { setShowCreate(false); setDraftMedia([]); }}>Cancel</Button>{mediaStatus && <span className="text-xs text-muted-foreground" role="status">{mediaStatus}</span>}</div>
             </form>
           )}
 

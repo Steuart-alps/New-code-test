@@ -10,6 +10,57 @@ import { MEDIA_INPUT_ACCEPT, mediaContentType, mediaFileProblem, putFileWithProg
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
 import { cn } from "@/lib/utils";
 
+export type ActionMediaResult = { added: number; failures: string[]; mediaUrls: string[] | null };
+
+/**
+ * Upload photos and videos to an action one by one: a signed upload link, a
+ * direct PUT to storage, then the API checks and attaches the file. Used by
+ * the action box and straight after "Create action".
+ */
+export async function uploadActionMedia(
+  actionId: number | string,
+  files: File[],
+  onProgress: (status: string) => void = () => {},
+): Promise<ActionMediaResult> {
+  const failures: string[] = [];
+  let added = 0;
+  let mediaUrls: string[] | null = null;
+  for (const [index, file] of files.entries()) {
+    const counter = files.length > 1 ? ` ${index + 1} of ${files.length}` : "";
+    try {
+      const problem = mediaFileProblem(file);
+      if (problem) throw new Error(problem);
+      assertWithinUploadLimit(file);
+      const contentType = mediaContentType(file);
+      onProgress(`Preparing${counter}`);
+      const presign = await apiFetch(`/track-actions/${actionId}/request-upload`, {
+        method: "POST",
+        body: JSON.stringify({ name: file.name.slice(0, 200), contentType }),
+      });
+      if (!presign.ok) throw new Error(await getApiErrorMessage(presign, "Couldn't prepare the upload."));
+      const { uploadUrl, objectPath } = await presign.json();
+      await putFileWithProgress(uploadUrl, file, contentType, (percent) => onProgress(`Uploading${counter}: ${percent}%`));
+      onProgress(`Saving${counter}`);
+      const attached = await apiFetch(`/track-actions/${actionId}/media`, {
+        method: "POST",
+        body: JSON.stringify({ objectPath }),
+      });
+      if (!attached.ok) throw new Error(await getApiErrorMessage(attached, "The file uploaded but couldn't be added to the action."));
+      const body = await attached.json();
+      if (Array.isArray(body?.mediaUrls)) mediaUrls = body.mediaUrls;
+      added += 1;
+    } catch (error) {
+      failures.push(`${file.name}: ${error instanceof Error ? error.message : "Upload failed."}`);
+    }
+  }
+  return { added, failures, mediaUrls };
+}
+
+export function reportActionMediaResult(toast: ReturnType<typeof useToast>["toast"], { added, failures }: ActionMediaResult) {
+  if (added > 0) toast({ title: added === 1 ? "Photo or video added" : `${added} photos and videos added` });
+  if (failures.length > 0) toast({ title: "Some files weren't added", description: failures.join("\n"), variant: "destructive" });
+}
+
 /**
  * Photos and videos kept as evidence on a track action (any track, Report
  * actions included). Files can be taken with the camera, picked, or dragged
@@ -31,42 +82,13 @@ export function ActionMedia({ actionId, mediaUrls, canAdd, onChange }: {
 
   async function upload(files: File[]) {
     if (!canAdd || uploading || files.length === 0) return;
-    const failures: string[] = [];
-    let added = 0;
     try {
-      for (const [index, file] of files.entries()) {
-        const counter = files.length > 1 ? ` ${index + 1} of ${files.length}` : "";
-        try {
-          const problem = mediaFileProblem(file);
-          if (problem) throw new Error(problem);
-          assertWithinUploadLimit(file);
-          const contentType = mediaContentType(file);
-          setProgress(`Preparing${counter}`);
-          const presign = await apiFetch(`/track-actions/${actionId}/request-upload`, {
-            method: "POST",
-            body: JSON.stringify({ name: file.name.slice(0, 200), contentType }),
-          });
-          if (!presign.ok) throw new Error(await getApiErrorMessage(presign, "Couldn't prepare the upload."));
-          const { uploadUrl, objectPath } = await presign.json();
-          await putFileWithProgress(uploadUrl, file, contentType, (percent) => setProgress(`Uploading${counter}: ${percent}%`));
-          setProgress(`Saving${counter}`);
-          const attached = await apiFetch(`/track-actions/${actionId}/media`, {
-            method: "POST",
-            body: JSON.stringify({ objectPath }),
-          });
-          if (!attached.ok) throw new Error(await getApiErrorMessage(attached, "The file uploaded but couldn't be added to the action."));
-          const body = await attached.json();
-          if (Array.isArray(body?.mediaUrls)) onChange(body.mediaUrls);
-          added += 1;
-        } catch (error) {
-          failures.push(`${file.name}: ${error instanceof Error ? error.message : "Upload failed."}`);
-        }
-      }
+      const result = await uploadActionMedia(actionId, files, setProgress);
+      if (result.mediaUrls) onChange(result.mediaUrls);
+      reportActionMediaResult(toast, result);
     } finally {
       setProgress(null);
     }
-    if (added > 0) toast({ title: added === 1 ? "Photo or video added" : `${added} photos and videos added` });
-    if (failures.length > 0) toast({ title: "Some files weren't added", description: failures.join("\n"), variant: "destructive" });
   }
 
   function picked(event: ChangeEvent<HTMLInputElement>) {

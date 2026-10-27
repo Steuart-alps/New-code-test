@@ -31,6 +31,7 @@ import { assertWithinUploadLimit } from "@/lib/upload-limits";
 import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
 import { MEDIA_INPUT_ACCEPT, VIDEO_PATH, mediaContentType, mediaFileProblem, privateObjectUrl } from "@/lib/media-upload";
 import { useFileDrop } from "@/hooks/use-file-drop";
+import { PendingMediaPicker } from "@/components/pending-media-picker";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -404,9 +405,10 @@ function IssueForm({ form, setForm, issueId, isNew }: {
         className={cn("space-y-2 rounded-lg transition-colors", mediaDrop.isDragging && "bg-primary/5 ring-2 ring-primary ring-offset-2")}
         data-testid="dropzone-issue-form-media"
       >
-        <Label>Photos / Videos</Label>
+        {issueId && <Label>Photos / Videos</Label>}
         {!issueId && (
-          <p className="text-xs text-muted-foreground">Create the issue first, then attach photos and videos here.</p>
+          <PendingMediaPicker files={form._pendingMedia ?? []} onChange={files => setForm({ ...form, _pendingMedia: files })}
+            label="Photos and videos" testId="new-issue-media" />
         )}
         {mediaUrls.length > 0 && (
           <div className="flex flex-wrap gap-2">
@@ -761,6 +763,33 @@ export default function FixTrackPage() {
     setLocation(`/fix-track/${issue.id}`);
   }
 
+  // Upload photos and videos picked before the issue was created, attaching
+  // each one straight away. Returns the issue's media list, or null if none was added.
+  async function attachNewIssueMedia(issueId: number, files: File[]): Promise<string[] | null> {
+    let mediaUrls: string[] | null = null;
+    const failures: string[] = [];
+    for (const file of files) {
+      try {
+        assertWithinUploadLimit(file);
+        const contentType = mediaContentType(file);
+        const reserved = await clientApiFetch(`/fix-track/issues/${issueId}/request-upload`, {
+          method: "POST", body: JSON.stringify({ name: file.name.slice(0, 200), contentType }),
+        });
+        if (!reserved.ok) throw new Error(await getApiErrorMessage(reserved, "Could not get upload URL"));
+        const { uploadUrl, objectPath } = await reserved.json();
+        const put = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": contentType } });
+        if (!put.ok) throw new Error("Upload failed");
+        const attached = await clientApiFetch(`/fix-track/issues/${issueId}/media`, { method: "POST", body: JSON.stringify({ objectPath }) });
+        if (!attached.ok) throw new Error(await getApiErrorMessage(attached, "The file uploaded but couldn't be added to the issue"));
+        mediaUrls = (await attached.json()).mediaUrls ?? mediaUrls;
+      } catch (err: any) {
+        failures.push(`${file.name}: ${err?.message ?? "Upload failed"}`);
+      }
+    }
+    if (failures.length > 0) toast({ title: "Some files weren't added", description: failures.join("\n"), variant: "destructive" });
+    return mediaUrls;
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -786,6 +815,9 @@ export default function FixTrackPage() {
       // and the edit dialog never changes the status.
       delete payload.resolvedByName;
       delete payload.resolverSignature;
+      // Chosen in the new-issue form; uploaded once the issue exists.
+      const pendingMedia: File[] = form._pendingMedia ?? [];
+      delete payload._pendingMedia;
 
       if (editing) {
         delete payload.status;
@@ -795,8 +827,9 @@ export default function FixTrackPage() {
         const res = await clientApiFetch("/fix-track/issues", { method: "POST", body: JSON.stringify(payload) });
         if (!res.ok) throw new Error((await res.json()).error ?? "Create failed");
         const created = await res.json();
+        const mediaUrls = pendingMedia.length > 0 ? await attachNewIssueMedia(created.id, pendingMedia) : null;
         setEditing(created);
-        setForm({ ...created });
+        setForm({ ...created, ...(mediaUrls ? { mediaUrls } : {}) });
         await load();
         setSaving(false);
         return; // keep dialog open so media can be attached
