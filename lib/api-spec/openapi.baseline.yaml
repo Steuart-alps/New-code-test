@@ -1030,6 +1030,58 @@ paths:
               schema:
                 $ref: "#/components/schemas/Certificate"
 
+  /certificates/reading:
+    get:
+      operationId: getCertificateReading
+      tags: [certificates]
+      summary: Whether ComplyTrack can read an uploaded certificate, and the AI allowance (owners and ALPS)
+      responses:
+        "200":
+          description: Reading status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateReadingStatus"
+
+  /certificates/read:
+    post:
+      operationId: readCertificate
+      tags: [certificates]
+      summary: Read a certificate with AI (owners and ALPS)
+      description: >-
+        Claude reads the certificate (an EICR, gas safety record, fire alarm
+        service certificate and so on) and says which compliance check it is
+        for, its issue and next inspection dates, its outcome and its defects.
+        Nothing is saved: the person checks the reading and saves it with
+        POST /items/{itemId}/certificates (remedialJob true). The file is not
+        stored here. Off until the server has an Anthropic API key; it uses the
+        AI features add-on's allowance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CertificateReadRequest"
+      responses:
+        "200":
+          description: What the certificate says
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateReading"
+        "400":
+          description: The file cannot be read here
+        "402":
+          description: The business does not have the AI features add-on (code AI_ADDON_REQUIRED)
+        "404":
+          description: The chosen check is not one of the caller's
+        "429":
+          description: The business has used its AI allowance (code AI_ALLOWANCE_USED)
+        "502":
+          description: The certificate could not be read just now
+        "503":
+          description: Reading is not switched on (no Anthropic API key)
+
   /items/{itemId}/certificates/{id}:
     put:
       operationId: updateItemCertificate
@@ -5769,6 +5821,10 @@ components:
         replace:
           type: boolean
           description: Confirms replacing a job already emailed to a contractor.
+        mode:
+          type: string
+          enum: [assign, quote]
+          description: '"quote" emails a quote request instead of giving the contractor the job. Left out means "assign".'
     FixTrackNewContractor:
       type: object
       required: [name, email]
@@ -6916,9 +6972,112 @@ components:
           type: array
           maxItems: 100
           items:
-            $ref: "#/components/schemas/CreateCertificateDefectRequest"
+            $ref: "#/components/schemas/CreateItemCertificateDefectRequest"
+        remedialJob:
+          type: boolean
+          description: >-
+            The defects that need work share one FixTrack job (so one quote
+            request covers them) and the others open no job. Without it each
+            defect opens its own job.
+        readByAi:
+          type: boolean
+          description: The details were read by ComplyTrack's AI and checked by the person saving them.
       required:
         - name
+
+    CreateItemCertificateDefectRequest:
+      type: object
+      properties:
+        code:
+          $ref: "#/components/schemas/CertificateDefectCode"
+        description:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        location:
+          type: string
+          nullable: true
+          maxLength: 300
+        needsWork:
+          type: boolean
+          description: With remedialJob, whether it goes into the remedial job. Left out, C1, C2, FI, ID and AR do.
+      required:
+        - code
+        - description
+
+    CertificateReadingStatus:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: False until the server has an Anthropic API key.
+        ai:
+          $ref: "#/components/schemas/AiStatus"
+        fixTrack:
+          type: boolean
+          description: Whether the business has FixTrack, where remedial work and quotes live.
+      required: [available, ai, fixTrack]
+
+    CertificateReadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        fileName: { type: string, maxLength: 255 }
+        mimeType: { type: string, description: "application/pdf, image/jpeg, image/png, image/webp, image/gif, .docx or text/plain" }
+        data: { type: string, description: "The file as base64 (15 MB at most before encoding)" }
+        itemId: { type: integer, nullable: true, description: "The check the certificate is for, when the person opened the reader from one" }
+      required: [fileName, mimeType, data]
+
+    CertificateReadingDefect:
+      type: object
+      properties:
+        code:
+          $ref: "#/components/schemas/CertificateDefectCode"
+        description: { type: string }
+        location: { type: string, nullable: true }
+        reference: { type: string, nullable: true, description: "The item or observation number on the certificate" }
+        needsWork: { type: boolean, description: "Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are." }
+      required: [code, description, location, reference, needsWork]
+
+    CertificateReadingNewCheck:
+      type: object
+      properties:
+        title: { type: string }
+        frequencyMonths: { type: integer, nullable: true }
+      required: [title, frequencyMonths]
+
+    CertificateReading:
+      type: object
+      properties:
+        certificateType: { type: string }
+        name: { type: string, description: "A name to file the certificate under" }
+        itemId: { type: integer, nullable: true, description: "The check it is for; null when none fits" }
+        checkReason: { type: string }
+        newCheck:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/CertificateReadingNewCheck"
+          description: When no check fits, the check to create for it.
+        contractorName: { type: string, nullable: true }
+        issueDate: { type: string, format: date, nullable: true }
+        nextInspectionDate: { type: string, format: date, nullable: true }
+        nextInspectionSource:
+          type: string
+          nullable: true
+          enum: [certificate, repeat, null]
+          description: '"certificate" when it states the date; "repeat" when worked out from the check''s repeat interval.'
+        outcome:
+          $ref: "#/components/schemas/CertificateOutcome"
+        summary: { type: string }
+        defects:
+          type: array
+          items:
+            $ref: "#/components/schemas/CertificateReadingDefect"
+        unclear:
+          type: array
+          items: { type: string }
+          description: Things that could not be read with confidence.
+      required: [certificateType, name, itemId, checkReason, newCheck, contractorName, issueDate, nextInspectionDate, nextInspectionSource, outcome, summary, defects, unclear]
 
     UpdateItemCertificateRequest:
       type: object

@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { FixTrackAssignContractorRequestMode } from './fixTrackAssignContractorRequestMode';
 import type { FixTrackNewContractor } from './fixTrackNewContractor';
 
 /**
@@ -17,4 +18,6 @@ export interface FixTrackAssignContractorRequest {
   targetDate?: Date | null;
   /** Confirms replacing a job already emailed to a contractor. */
   replace?: boolean;
+  /** "quote" emails a quote request instead of giving the contractor the job. Left out means "assign". */
+  mode?: FixTrackAssignContractorRequestMode;
 }

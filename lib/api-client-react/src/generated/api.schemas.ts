@@ -533,6 +533,17 @@ export interface FixTrackMediaDeleteRequest {
   objectPath: string;
 }
 
+/**
+ * "quote" emails a quote request instead of giving the contractor the job. Left out means "assign".
+ */
+export type FixTrackAssignContractorRequestMode = typeof FixTrackAssignContractorRequestMode[keyof typeof FixTrackAssignContractorRequestMode];
+
+
+export const FixTrackAssignContractorRequestMode = {
+  assign: 'assign',
+  quote: 'quote',
+} as const;
+
 export interface FixTrackNewContractor {
   /**
      * @minLength 1
@@ -560,6 +571,8 @@ export interface FixTrackAssignContractorRequest {
   targetDate?: string | null;
   /** Confirms replacing a job already emailed to a contractor. */
   replace?: boolean;
+  /** "quote" emails a quote request instead of giving the contractor the job. Left out means "assign". */
+  mode?: FixTrackAssignContractorRequestMode;
 }
 
 export interface FixTrackAssignContractorResult {
@@ -1278,6 +1291,19 @@ export interface UpdateCertificateDefectRequest {
   resolved: boolean;
 }
 
+export interface CreateItemCertificateDefectRequest {
+  code: CertificateDefectCode;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  description: string;
+  /** @maxLength 300 */
+  location?: string | null;
+  /** With remedialJob, whether it goes into the remedial job. Left out, C1, C2, FI, ID and AR do. */
+  needsWork?: boolean;
+}
+
 export interface CreateItemCertificateRequest {
   name: string;
   fileUrl?: string | null;
@@ -1286,7 +1312,108 @@ export interface CreateItemCertificateRequest {
   notes?: string | null;
   outcome?: CertificateOutcome;
   /** @maxItems 100 */
-  defects?: CreateCertificateDefectRequest[];
+  defects?: CreateItemCertificateDefectRequest[];
+  /** The defects that need work share one FixTrack job (so one quote request covers them) and the others open no job. Without it each defect opens its own job. */
+  remedialJob?: boolean;
+  /** The details were read by ComplyTrack's AI and checked by the person saving them. */
+  readByAi?: boolean;
+}
+
+export type AiStatusPlan = typeof AiStatusPlan[keyof typeof AiStatusPlan];
+
+
+export const AiStatusPlan = {
+  addon: 'addon',
+  trial: 'trial',
+  included: 'included',
+  none: 'none',
+} as const;
+
+/**
+ * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included ("included").
+ */
+export interface AiStatus {
+  /** The server has an Anthropic API key, so AI can be offered at all */
+  configured: boolean;
+  /** The business has the AI add-on (or a trial allowance) now */
+  active: boolean;
+  plan: AiStatusPlan;
+  /**
+     * Share of this period's allowance used
+     * @minimum 0
+     * @maximum 100
+     */
+  percentUsed: number;
+  /** When the allowance starts again */
+  resetsAt: string | null;
+  /** The allowance is used up for this period */
+  usedUp: boolean;
+}
+
+export interface CertificateReadingStatus {
+  /** False until the server has an Anthropic API key. */
+  available: boolean;
+  ai: AiStatus;
+  /** Whether the business has FixTrack, where remedial work and quotes live. */
+  fixTrack: boolean;
+}
+
+export interface CertificateReadRequest {
+  /** @maxLength 255 */
+  fileName: string;
+  /** application/pdf, image/jpeg, image/png, image/webp, image/gif, .docx or text/plain */
+  mimeType: string;
+  /** The file as base64 (15 MB at most before encoding) */
+  data: string;
+  /** The check the certificate is for, when the person opened the reader from one */
+  itemId?: number | null;
+}
+
+export interface CertificateReadingDefect {
+  code: CertificateDefectCode;
+  description: string;
+  location: string | null;
+  /** The item or observation number on the certificate */
+  reference: string | null;
+  /** Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are. */
+  needsWork: boolean;
+}
+
+export interface CertificateReadingNewCheck {
+  title: string;
+  frequencyMonths: number | null;
+}
+
+/**
+ * "certificate" when it states the date; "repeat" when worked out from the check's repeat interval.
+ */
+export type CertificateReadingNextInspectionSource = typeof CertificateReadingNextInspectionSource[keyof typeof CertificateReadingNextInspectionSource] | null;
+
+
+export const CertificateReadingNextInspectionSource = {
+  certificate: 'certificate',
+  repeat: 'repeat',
+} as const;
+
+export interface CertificateReading {
+  certificateType: string;
+  /** A name to file the certificate under */
+  name: string;
+  /** The check it is for; null when none fits */
+  itemId: number | null;
+  checkReason: string;
+  /** When no check fits, the check to create for it. */
+  newCheck: CertificateReadingNewCheck | null;
+  contractorName: string | null;
+  issueDate: string | null;
+  nextInspectionDate: string | null;
+  /** "certificate" when it states the date; "repeat" when worked out from the check's repeat interval. */
+  nextInspectionSource: CertificateReadingNextInspectionSource;
+  outcome: CertificateOutcome;
+  summary: string;
+  defects: CertificateReadingDefect[];
+  /** Things that could not be read with confidence. */
+  unclear: string[];
 }
 
 /**
@@ -2514,37 +2641,6 @@ export type PatRegisterReadingStatusSitesItem = {
   id: number;
   name: string;
 };
-
-export type AiStatusPlan = typeof AiStatusPlan[keyof typeof AiStatusPlan];
-
-
-export const AiStatusPlan = {
-  addon: 'addon',
-  trial: 'trial',
-  included: 'included',
-  none: 'none',
-} as const;
-
-/**
- * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included ("included").
- */
-export interface AiStatus {
-  /** The server has an Anthropic API key, so AI can be offered at all */
-  configured: boolean;
-  /** The business has the AI add-on (or a trial allowance) now */
-  active: boolean;
-  plan: AiStatusPlan;
-  /**
-     * Share of this period's allowance used
-     * @minimum 0
-     * @maximum 100
-     */
-  percentUsed: number;
-  /** When the allowance starts again */
-  resetsAt: string | null;
-  /** The allowance is used up for this period */
-  usedUp: boolean;
-}
 
 export interface PatRegisterReadingStatus {
   available: boolean;

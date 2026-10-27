@@ -1191,8 +1191,11 @@ export const CreateItemCertificateBody = zod.object({
   "defects": zod.array(zod.object({
   "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
   "description": zod.string().min(1).max(createItemCertificateBodyDefectsItemDescriptionMax),
-  "location": zod.string().max(createItemCertificateBodyDefectsItemLocationMax).nullish()
-})).max(createItemCertificateBodyDefectsMax).optional()
+  "location": zod.string().max(createItemCertificateBodyDefectsItemLocationMax).nullish(),
+  "needsWork": zod.boolean().optional().describe('With remedialJob, whether it goes into the remedial job. Left out, C1, C2, FI, ID and AR do.')
+})).max(createItemCertificateBodyDefectsMax).optional(),
+  "remedialJob": zod.boolean().optional().describe('The defects that need work share one FixTrack job (so one quote request covers them) and the others open no job. Without it each defect opens its own job.'),
+  "readByAi": zod.boolean().optional().describe('The details were read by ComplyTrack\'s AI and checked by the person saving them.')
 })
 
 export const CreateItemCertificateResponse = zod.object({
@@ -1222,6 +1225,69 @@ export const CreateItemCertificateResponse = zod.object({
   "createdAt": zod.date()
 })).optional().describe('Defects listed on an item certificate (absent for contractor certificates).'),
   "createdAt": zod.date()
+})
+
+
+/**
+ * @summary Whether ComplyTrack can read an uploaded certificate, and the AI allowance (owners and ALPS)
+ */
+export const getCertificateReadingResponseAiPercentUsedMin = 0;
+export const getCertificateReadingResponseAiPercentUsedMax = 100;
+
+
+
+export const GetCertificateReadingResponse = zod.object({
+  "available": zod.boolean().describe('False until the server has an Anthropic API key.'),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(getCertificateReadingResponseAiPercentUsedMin).max(getCertificateReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
+  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
+  "usedUp": zod.boolean().describe('The allowance is used up for this period')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
+  "fixTrack": zod.boolean().describe('Whether the business has FixTrack, where remedial work and quotes live.')
+})
+
+
+/**
+ * Claude reads the certificate (an EICR, gas safety record, fire alarm service certificate and so on) and says which compliance check it is for, its issue and next inspection dates, its outcome and its defects. Nothing is saved: the person checks the reading and saves it with POST /items/{itemId}/certificates (remedialJob true). The file is not stored here. Off until the server has an Anthropic API key; it uses the AI features add-on's allowance.
+ * @summary Read a certificate with AI (owners and ALPS)
+ */
+export const readCertificateBodyFileNameMax = 255;
+
+
+
+export const ReadCertificateBody = zod.object({
+  "fileName": zod.string().max(readCertificateBodyFileNameMax),
+  "mimeType": zod.string().describe('application\/pdf, image\/jpeg, image\/png, image\/webp, image\/gif, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (15 MB at most before encoding)'),
+  "itemId": zod.number().nullish().describe('The check the certificate is for, when the person opened the reader from one')
+})
+
+export const ReadCertificateResponse = zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
 })
 
 
@@ -3089,7 +3155,8 @@ export const AssignFixTrackContractorBody = zod.object({
   "phone": zod.string().max(assignFixTrackContractorBodyNewContractorPhoneMax).nullish()
 }).optional(),
   "targetDate": zod.date().nullish().describe('Left out keeps the issue\'s target date; null clears it.'),
-  "replace": zod.boolean().optional().describe('Confirms replacing a job already emailed to a contractor.')
+  "replace": zod.boolean().optional().describe('Confirms replacing a job already emailed to a contractor.'),
+  "mode": zod.enum(['assign', 'quote']).optional().describe('\"quote\" emails a quote request instead of giving the contractor the job. Left out means \"assign\".')
 }).describe('Exactly one of contractorId and newContractor.')
 
 export const AssignFixTrackContractorResponse = zod.object({
