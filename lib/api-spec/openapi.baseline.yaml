@@ -7962,7 +7962,7 @@ components:
           type: string
           enum: ["weekly", "daily", "monthly"]
           nullable: true
-          description: How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month.
+          description: How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly.
         reminderTimings:
           type: string
           nullable: true

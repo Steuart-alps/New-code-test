@@ -474,8 +474,10 @@ try {
     sent.length = 0;
     // Monday 16 November 2026: not the first Monday of the month.
     await run("2026-11-16T08:15:00Z");
-    assert.equal([...to(owner.email), ...to(mia.email)].filter((message) => /update for/i.test(message.subject)).length, 0,
-      "no update on other Mondays");
+    assert.equal(to(owner.email).filter((message) => /update for/i.test(message.subject)).length, 0,
+      "no Owner update on other Mondays");
+    assert.match(to(mia.email)[0]?.subject ?? "", /^Weekly update for /, "Managers still get theirs weekly");
+    assert.match(to(mia.email)[0].html, /Done in the last 7 days|Due this week|TrainTrack/);
 
     sent.length = 0;
     // Monday 7 December 2026: the first Monday of the month.
@@ -490,11 +492,11 @@ try {
       "lists what is due up to the next update (Mon 4 Jan)");
     assert.doesNotMatch(update.html, /Roof survey/, "that is in next month's update");
     assert.match(update.html, /daily, weekly or monthly/);
-    assert.match(to(mia.email)[0]?.subject ?? "", /^Monthly update for /, "Managers' updates follow the same setting");
+    assert.match(to(mia.email)[0]?.subject ?? "", /^Weekly update for /, "Managers stay on weekly");
 
     await q(`DELETE FROM track_actions WHERE title IN ('Annual gutter clean', 'Roof survey')`);
     await asOwner("PUT", "/settings", { ownerUpdateFrequency: null });
-    ok("Owners can switch the update to monthly, on the first Monday of each month");
+    ok("Owners can switch their update to monthly, on the first Monday of each month; Managers stay weekly");
   }
 
   console.log(`\n${passed} personal reminder checks passed`);

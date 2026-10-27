@@ -34,7 +34,8 @@
  * Owner update: Mondays by default; Settings "Owner update" can make it daily
  * or monthly (the first Monday of each month). It goes to the business's
  * Owners, or to its Notification email when one is set. Managers get one
- * covering the sites their departments can see. It lists the work completed
+ * covering the sites their departments can see, daily or weekly as the
+ * Owners' is (weekly when the Owners' is monthly). It lists the work completed
  * since the last update by track and by person, what is overdue and who has
  * it, what is due before the next update, anything nobody has been
  * given, expiries in the next 60 days, TrainTrack (each person's outstanding
@@ -222,16 +223,29 @@ export function firstMondayOfMonth(iso: string, months = 0): string {
   return first.toISOString().slice(0, 10);
 }
 
+interface UpdateSchedule {
+  period: "month" | "week" | "day";
+  /** Days back for the work done. */
+  since: number;
+  /** Days ahead for what is due. */
+  ahead: number;
+}
+
+/** Managers' updates follow the Owner's choice, except that monthly stays weekly for them. */
+export const managerUpdateFrequency = (frequency: OwnerUpdateFrequency): OwnerUpdateFrequency =>
+  frequency === "monthly" ? "weekly" : frequency;
+
 /**
  * Whether the Owner update goes today, and the days it covers: back to the
  * previous update for work done, and up to the day before the next one for
  * what is due.
  */
-export function ownerUpdateSchedule(frequency: OwnerUpdateFrequency, today: string): { since: number; ahead: number } | null {
-  if (frequency === "daily") return { since: 1, ahead: 1 };
-  if (frequency === "weekly") return isMonday(today) ? { since: 7, ahead: 6 } : null;
+export function ownerUpdateSchedule(frequency: OwnerUpdateFrequency, today: string): UpdateSchedule | null {
+  if (frequency === "daily") return { period: "day", since: 1, ahead: 1 };
+  if (frequency === "weekly") return isMonday(today) ? { period: "week", since: 7, ahead: 6 } : null;
   if (today !== firstMondayOfMonth(today)) return null;
   return {
+    period: "month",
     since: daysBetween(firstMondayOfMonth(today, -1), today),
     ahead: daysBetween(today, firstMondayOfMonth(today, 1)) - 1,
   };
@@ -267,7 +281,7 @@ const hasReminders = (sections: PersonalSections) =>
 interface ActivityRow { track: string; person: string; count: number }
 
 interface OwnerUpdate {
-  period: "month" | "week" | "day";
+  period: UpdateSchedule["period"];
   urgent: UrgentItem[];
   overdue: Array<{ item: DueItem; holder: string | null }>;
   dueSoon: Array<{ item: DueItem; holder: string | null }>;
@@ -574,7 +588,8 @@ export async function runPersonalRemindersForClient(
   const businessName = rowsOf<{ name: string }>(clientRows)[0]?.name ?? "your business";
   const frequency = parseOwnerUpdateFrequency(settings.get(OWNER_UPDATE_FREQUENCY_SETTING));
   const schedule = ownerUpdateSchedule(frequency, today);
-  const updateDay = schedule != null;
+  const managerSchedule = ownerUpdateSchedule(managerUpdateFrequency(frequency), today);
+  const updateDay = schedule != null || managerSchedule != null;
   const storedTimings = validateReminderTimings(settings.get(REMINDER_TIMINGS_SETTING) ?? {});
   const timings: Record<string, ReminderTiming> = storedTimings.ok ? storedTimings.value : {};
   // Outstanding training, for the staff on Mondays and the updates.
@@ -660,14 +675,15 @@ export async function runPersonalRemindersForClient(
   }
 
   // Owner and Manager updates.
-  if (schedule) {
-    const period = frequency === "daily" ? "day" : frequency === "monthly" ? "month" : "week";
-    const horizon = addCalendarDays(today, schedule.ahead);
-    const [activity, unsigned, drafts] = await Promise.all([
-      activitySince(clientId, new Date(now.getTime() - schedule.since * MS_DAY), now).catch((err) => {
+  if (updateDay) {
+    const readActivity = (since: number) =>
+      activitySince(clientId, new Date(now.getTime() - since * MS_DAY), now).catch((err) => {
         logger.warn({ err, clientId }, "Personal reminders: could not read activity since the last update");
         return [] as ActivityRow[];
-      }),
+      });
+    const [ownerActivity, managerActivity, unsigned, drafts] = await Promise.all([
+      schedule ? readActivity(schedule.since) : Promise.resolve([] as ActivityRow[]),
+      managerSchedule && managerSchedule.since !== schedule?.since ? readActivity(managerSchedule.since) : Promise.resolve(null),
       signs ? Promise.all([
         getOutstandingSafeTrackAcknowledgements(clientId),
         getOutstandingAckSummary(clientId),
@@ -681,15 +697,17 @@ export async function runPersonalRemindersForClient(
       db.execute(sql`SELECT count(*)::int AS count FROM contractor_email_queue WHERE client_id = ${clientId} AND status = 'pending'`)
         .then((rows) => Number(rowsOf<{ count: number }>(rows)[0]?.count ?? 0)).catch(() => 0),
     ]);
-    const build = (visible: (siteId: number | null) => boolean, full: boolean): OwnerUpdate => {
+    const build = (when: UpdateSchedule, visible: (siteId: number | null) => boolean, full: boolean): OwnerUpdate => {
       const mine = items.filter((item) => visible(item.siteId));
       const held = (item: DueItem) => ({ item, holder: responsibility.get(item.id)?.holder ?? null });
+      const horizon = addCalendarDays(today, when.ahead);
+      const activity = when === schedule ? ownerActivity : managerActivity ?? ownerActivity;
       return {
-        period,
+        period: when.period,
         urgent: urgent.filter((item) => visible(item.siteId)),
         overdue: mine.filter((item) => item.kind === "due" && item.dueDate < today).map(held),
         dueSoon: mine.filter((item) => item.kind === "due" && item.dueDate >= today && item.dueDate <= horizon).map(held),
-        unassigned: mine.filter((item) => item.kind === "due" && item.dueDate <= addCalendarDays(today, Math.max(13, schedule.ahead))
+        unassigned: mine.filter((item) => item.kind === "due" && item.dueDate <= addCalendarDays(today, Math.max(13, when.ahead))
           && responsibility.get(item.id)?.unassigned),
         // Training is listed by person in the TrainTrack section instead.
         expiring: mine.filter((item) => item.kind === "expiry" && item.module !== "train"),
@@ -702,20 +720,20 @@ export async function runPersonalRemindersForClient(
     };
     const everything = () => true;
     const notificationEmail = settings.get("notificationEmail")?.trim();
-    if (notificationEmail) {
-      recipientFor(notificationEmail).update = build(everything, true);
-    } else {
+    if (schedule && notificationEmail) {
+      recipientFor(notificationEmail).update = build(schedule, everything, true);
+    } else if (schedule) {
       for (const id of ctx.ownerIds) {
         const recipient = userRecipient(id);
-        if (recipient) recipient.update = build(everything, true);
+        if (recipient) recipient.update = build(schedule, everything, true);
       }
     }
     for (const user of ctx.eligible.values()) {
-      if (user.role !== "client_manager" || !user.email) continue;
+      if (!managerSchedule || user.role !== "client_manager" || !user.email) continue;
       const recipient = recipientFor(user.email, user);
       if (recipient.update) continue;
       const sees = (siteId: number | null) => siteId == null || candidateCanSeeSite(user, ctx.siteDepartments.get(siteId), siteId);
-      const update = build(sees, user.allDepartments === true);
+      const update = build(managerSchedule, sees, user.allDepartments === true);
       // Contractor documents go to whoever looks after contractors.
       if (!ctx.maintenanceManagerIds.includes(user.id)) update.expiring = update.expiring.filter((item) => item.module !== CONTRACTORS_MODULE);
       recipient.update = update;

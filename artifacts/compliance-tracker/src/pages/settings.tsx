@@ -3405,8 +3405,8 @@ export default function SettingsPage() {
                   <Label htmlFor="ownerUpdateFrequency">Owner update</Label>
                   <p className="text-xs text-muted-foreground">
                     One email to the Owners listing what was done, what is overdue and who has it, what is due, anything with no one
-                    assigned, expiries in the next 60 days, each person's outstanding training (TrainTrack) and documents still to sign. Managers get one for their own departments.
-                    Sent at 8am in your account timezone. Choosing monthly doesn't hold anything back: urgent items still come the same day,
+                    assigned, expiries in the next 60 days, each person's outstanding training (TrainTrack) and documents still to sign. Managers get one for their own departments, weekly
+                    when you choose monthly. Sent at 8am in your account timezone. Choosing monthly doesn't hold anything back: urgent items still come the same day,
                     and each person still gets their own reminders.
                   </p>
                   <Select
