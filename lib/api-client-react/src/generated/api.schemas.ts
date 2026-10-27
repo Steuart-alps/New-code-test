@@ -2424,11 +2424,42 @@ export type PatRegisterReadingStatusSitesItem = {
   name: string;
 };
 
+export type AiStatusPlan = typeof AiStatusPlan[keyof typeof AiStatusPlan];
+
+
+export const AiStatusPlan = {
+  addon: 'addon',
+  trial: 'trial',
+  none: 'none',
+} as const;
+
+/**
+ * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.
+ */
+export interface AiStatus {
+  /** The server has an Anthropic API key, so AI can be offered at all */
+  configured: boolean;
+  /** The business has the AI add-on (or a trial allowance) now */
+  active: boolean;
+  plan: AiStatusPlan;
+  /**
+     * Share of this period's allowance used
+     * @minimum 0
+     * @maximum 100
+     */
+  percentUsed: number;
+  /** When the allowance starts again */
+  resetsAt: string | null;
+  /** The allowance is used up for this period */
+  usedUp: boolean;
+}
+
 export interface PatRegisterReadingStatus {
   available: boolean;
   /** Readings a business may have each month; 0 means no limit */
   monthlyLimit: number;
   usedThisMonth: number;
+  ai: AiStatus;
   sites: PatRegisterReadingStatusSitesItem[];
 }
 
@@ -4082,6 +4113,7 @@ export type InspectionReportOptionsReading = {
   available: boolean;
   monthlyLimit: number;
   usedThisMonth: number;
+  ai: AiStatus;
 };
 
 export interface InspectionReportOptions {
@@ -4090,6 +4122,61 @@ export interface InspectionReportOptions {
   sites: InspectionReportOptionsSitesItem[];
   assignees: InspectionReportOptionsAssigneesItem[];
   reading: InspectionReportOptionsReading;
+}
+
+export type AiAddonStatusPrice = {
+  /** Monthly price in pence, before VAT */
+  unitAmount: number;
+  currency: string;
+} | null;
+
+/**
+ * The top-up an owner can buy now; null unless the add-on is on and billing is ready
+ */
+export type AiAddonStatusTopUp = {
+  /** Price in pence, before VAT, charged at once */
+  amount: number;
+  /** AI use it adds, in pence, until the add-on renews */
+  allowance: number;
+  currency: string;
+} | null;
+
+export type AiAddonStatus = AiStatus & {
+  price: AiAddonStatusPrice;
+  /** The add-on can be bought now (Stripe ready and the price exists) */
+  purchasable: boolean;
+  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready */
+  topUp: AiAddonStatusTopUp;
+  /**
+     * Top-ups paid for since the add-on last renewed
+     * @minimum 0
+     */
+  topUpsThisPeriod: number;
+  /** A top-up is bought automatically when the allowance runs out */
+  autoTopUp: boolean;
+  /**
+     * Most automatic top-ups in one period
+     * @minimum 0
+     */
+  autoTopUpLimit: number;
+};
+
+export type AiAddonChangeAction = typeof AiAddonChangeAction[keyof typeof AiAddonChangeAction];
+
+
+export const AiAddonChangeAction = {
+  add: 'add',
+  remove: 'remove',
+  top_up: 'top_up',
+  auto_top_up: 'auto_top_up',
+} as const;
+
+export interface AiAddonChange {
+  action: AiAddonChangeAction;
+  /** top_up only: a new UUID for each purchase, reused on retry */
+  requestId?: string;
+  /** auto_top_up only: switch automatic top-ups on or off */
+  enabled?: boolean;
 }
 
 export interface InspectionReportSummary {

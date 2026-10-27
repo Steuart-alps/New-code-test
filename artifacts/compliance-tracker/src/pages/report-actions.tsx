@@ -23,6 +23,7 @@ import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
 import { takeLinkParams } from "@/lib/deep-link";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
 import { Download, FileSearch, Loader2, Plus, Sparkles, Trash2, Upload } from "lucide-react";
 
 type Draft = InspectionReportDraftAction & { key: string };
@@ -451,12 +452,13 @@ function ReportDetail({ reportId, options, focusActionId, onRemoved }: {
           <div className="rounded-sm border border-violet-200 bg-violet-50/60 p-4 text-sm space-y-2">
             <p>ComplyTrack can read this report and suggest the actions it asks for. The report is sent to Anthropic, our AI provider, to read; it isn't used to train their AI. It takes up to two minutes. You check every action before anything is created.</p>
             <div className="flex flex-wrap items-center gap-3">
-              <Button size="sm" disabled={busy !== null || (reading.monthlyLimit > 0 && reading.usedThisMonth >= reading.monthlyLimit)} onClick={readReport}>
+              <Button size="sm" disabled={busy !== null || !aiAllowanceState(reading.ai).canUse || (reading.monthlyLimit > 0 && reading.usedThisMonth >= reading.monthlyLimit)} onClick={readReport}>
                 {busy === "read" ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1.5 h-4 w-4" />}
                 {busy === "read" ? "Reading the report…" : report.aiReadCount > 0 ? "Suggest actions again" : "Suggest actions from the report"}
               </Button>
-              {reading.monthlyLimit > 0 && <span className="text-xs text-muted-foreground">{reading.usedThisMonth} of {reading.monthlyLimit} reports read this month</span>}
+              {reading.ai.active && reading.monthlyLimit > 0 && <span className="text-xs text-muted-foreground">{reading.usedThisMonth} of {reading.monthlyLimit} reports read this month</span>}
             </div>
+            <AiAllowanceNote ai={reading.ai} />
             {report.aiStatus === "failed" && report.aiError && <p className="text-destructive">{report.aiError}</p>}
           </div>
         ) : reading.available ? (
@@ -559,7 +561,7 @@ export default function ReportActionsPage() {
                 <p className="font-medium text-[#162D42]">Turn an audit or inspection report into actions</p>
                 <p className="text-muted-foreground">
                   Upload an ALPS audit, Care Inspectorate, Environmental Health, fire officer or insurer report.
-                  {options?.reading.available ? " ComplyTrack suggests the actions it asks for." : " Type in the actions it asks for."}
+                  {options?.reading.available && options.reading.ai.active ? " ComplyTrack suggests the actions it asks for." : " Type in the actions it asks for."}
                   {" "}You check them, choose who does each one, and confirm. The report stays with its actions as evidence.
                 </p>
               </div>

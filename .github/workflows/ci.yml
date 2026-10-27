@@ -265,6 +265,12 @@ jobs:
       - name: Reading PAT register lists with Claude (stand-in API, no key)
         run: pnpm --filter @workspace/api-server run test:register-reading
 
+      - name: Pricing AI requests (pure)
+        run: pnpm --filter @workspace/api-server run test:ai-pricing
+
+      - name: AI features add-on and allowance (production schema base)
+        run: pnpm --filter @workspace/api-server run test:ai-addon
+
       - name: Checklist results and FixTrack job tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:checklist-results-fixtrack
 

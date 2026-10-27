@@ -7,6 +7,8 @@ import { getUncachableStripeClient, getStripeSync } from "./stripeClient";
 import { getClientId } from "../middleware/requireAuth";
 import { logger } from "./logger";
 import { findStoragePriceId, STORAGE_PRICE_CURRENCY, STORAGE_UNIT_AMOUNT_PENCE } from "./storagePricing";
+import { AI_ADDON_AMOUNT_PENCE, AI_ADDON_CURRENCY, AI_ADDON_LABEL, AI_SERVICE_KEY } from "./aiAddonItem";
+import type { PerSitePrice } from "./billing";
 
 /**
  * Per-site service catalog. `core` is ComplyTrack itself (always included in a
@@ -418,6 +420,71 @@ export async function ensureStoragePrice(): Promise<boolean> {
     await sync.syncBackfill({ object: "price" });
   } catch (err) {
     logger.error({ err }, "Stripe backfill after storage price creation failed; webhook will sync eventually");
+  }
+  return true;
+}
+
+/**
+ * The AI features add-on price: £15 a month (+VAT) per business, tagged
+ * service_key=ai, or the price AI_ADDON_PRICE_ID names. Null until it exists.
+ */
+export async function getAiAddonPrice(): Promise<PerSitePrice | null> {
+  const configured = process.env.AI_ADDON_PRICE_ID?.trim();
+  const rows = await db.execute(configured
+    ? sql`
+      SELECT pr.id AS price_id, pr.unit_amount, pr.currency
+        FROM stripe.prices pr
+       WHERE pr.id = ${configured} AND pr.active = true
+       LIMIT 1`
+    : sql`
+      SELECT pr.id AS price_id, pr.unit_amount, pr.currency
+        FROM stripe.prices pr
+        JOIN stripe.products p ON p.id = pr.product
+       WHERE p.active = true
+         AND pr.active = true
+         AND (pr.recurring->>'interval') = 'month'
+         AND COALESCE(pr.recurring->>'interval_count', '1') = '1'
+         AND pr.currency = ${AI_ADDON_CURRENCY}
+         AND pr.unit_amount = ${AI_ADDON_AMOUNT_PENCE}
+         AND pr.metadata->>'service_key' = ${AI_SERVICE_KEY}
+       ORDER BY pr.created DESC
+       LIMIT 1`);
+  const row = (rows.rows ?? [])[0] as { price_id?: string; unit_amount?: unknown; currency?: string } | undefined;
+  if (!row?.price_id) return null;
+  return { priceId: row.price_id, unitAmount: Number(row.unit_amount), currency: row.currency ?? AI_ADDON_CURRENCY, interval: "month" };
+}
+
+/**
+ * Ensure the AI features add-on price exists (£15 a month, GBP, VAT on top).
+ * Idempotent; skipped when AI_ADDON_PRICE_ID names a price by hand. Returns
+ * whether a price was created.
+ */
+export async function ensureAiAddonPrice(): Promise<boolean> {
+  if (process.env.AI_ADDON_PRICE_ID?.trim()) return false;
+  if (await getAiAddonPrice()) return false;
+  const stripe = await getUncachableStripeClient();
+  const product = await stripe.products.create(
+    { name: AI_ADDON_LABEL, metadata: { service_key: AI_SERVICE_KEY } },
+    { idempotencyKey: "ai-addon-product-v1" },
+  );
+  await stripe.prices.create(
+    {
+      product: product.id,
+      unit_amount: AI_ADDON_AMOUNT_PENCE,
+      currency: AI_ADDON_CURRENCY,
+      recurring: { interval: "month" },
+      tax_behavior: "exclusive",
+      metadata: { service_key: AI_SERVICE_KEY },
+    },
+    { idempotencyKey: `ai-addon-price-${AI_ADDON_CURRENCY}-${AI_ADDON_AMOUNT_PENCE}-v1` },
+  );
+  logger.info({ unitAmount: AI_ADDON_AMOUNT_PENCE }, "Created Stripe price for the AI features add-on");
+  try {
+    const sync = await getStripeSync();
+    await sync.syncBackfill({ object: "product" });
+    await sync.syncBackfill({ object: "price" });
+  } catch (err) {
+    logger.error({ err }, "Stripe backfill after AI add-on price creation failed; webhook will sync eventually");
   }
   return true;
 }
