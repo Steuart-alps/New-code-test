@@ -33,7 +33,7 @@ One after another, each against a freshly started test API:
 - FixTrack issue media: an iPhone-style JPEG (with a rotation tag) and an AVIF become upright JPEGs
   and show after a reload. A real HEIC photo, a cut-off JPEG, a GIF and text posing as MP4 are
   refused with a message and never attached. MP4, MOV and WebM clips are stored unchanged, served
-  in byte ranges, readable by a viewer but not by another business, and play and seek in Chromium
+  in byte ranges, readable by staff but not by a Viewer (Viewers see only their own training) or another business, and play and seek in Chromium
   after a reload. Viewers cannot upload or attach.
 - DocTrack sign-off status and registers.
 
