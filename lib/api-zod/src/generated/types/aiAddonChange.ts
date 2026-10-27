@@ -9,4 +9,8 @@ import type { AiAddonChangeAction } from './aiAddonChangeAction';
 
 export interface AiAddonChange {
   action: AiAddonChangeAction;
+  /** top_up only: a new UUID for each purchase, reused on retry */
+  requestId?: string;
+  /** auto_top_up only: switch automatic top-ups on or off */
+  enabled?: boolean;
 }

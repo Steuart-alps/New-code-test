@@ -12,4 +12,6 @@ export type AiAddonChangeAction = typeof AiAddonChangeAction[keyof typeof AiAddo
 export const AiAddonChangeAction = {
   add: 'add',
   remove: 'remove',
+  top_up: 'top_up',
+  auto_top_up: 'auto_top_up',
 } as const;

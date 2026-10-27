@@ -12,6 +12,7 @@ export * from './aiAddonChange';
 export * from './aiAddonChangeAction';
 export * from './aiAddonStatus';
 export * from './aiAddonStatusPrice';
+export * from './aiAddonStatusTopUp';
 export * from './aiStatus';
 export * from './aiStatusPlan';
 export * from './allergenChart';

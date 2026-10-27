@@ -8,7 +8,7 @@
 import type { AiStatusPlan } from './aiStatusPlan';
 
 /**
- * The AI features add-on for this business: £25 a month, which includes a monthly allowance of AI use. Without it, AI buttons are unavailable.
+ * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.
  */
 export interface AiStatus {
   /** The server has an Anthropic API key, so AI can be offered at all */

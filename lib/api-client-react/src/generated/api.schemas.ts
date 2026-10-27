@@ -2416,7 +2416,7 @@ export const AiStatusPlan = {
 } as const;
 
 /**
- * The AI features add-on for this business: £25 a month, which includes a monthly allowance of AI use. Without it, AI buttons are unavailable.
+ * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.
  */
 export interface AiStatus {
   /** The server has an Anthropic API key, so AI can be offered at all */
@@ -4112,10 +4112,35 @@ export type AiAddonStatusPrice = {
   currency: string;
 } | null;
 
+/**
+ * The top-up an owner can buy now; null unless the add-on is on and billing is ready
+ */
+export type AiAddonStatusTopUp = {
+  /** Price in pence, before VAT, charged at once */
+  amount: number;
+  /** AI use it adds, in pence, until the add-on renews */
+  allowance: number;
+  currency: string;
+} | null;
+
 export type AiAddonStatus = AiStatus & {
   price: AiAddonStatusPrice;
   /** The add-on can be bought now (Stripe ready and the price exists) */
   purchasable: boolean;
+  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready */
+  topUp: AiAddonStatusTopUp;
+  /**
+     * Top-ups paid for since the add-on last renewed
+     * @minimum 0
+     */
+  topUpsThisPeriod: number;
+  /** A top-up is bought automatically when the allowance runs out */
+  autoTopUp: boolean;
+  /**
+     * Most automatic top-ups in one period
+     * @minimum 0
+     */
+  autoTopUpLimit: number;
 };
 
 export type AiAddonChangeAction = typeof AiAddonChangeAction[keyof typeof AiAddonChangeAction];
@@ -4124,10 +4149,16 @@ export type AiAddonChangeAction = typeof AiAddonChangeAction[keyof typeof AiAddo
 export const AiAddonChangeAction = {
   add: 'add',
   remove: 'remove',
+  top_up: 'top_up',
+  auto_top_up: 'auto_top_up',
 } as const;
 
 export interface AiAddonChange {
   action: AiAddonChangeAction;
+  /** top_up only: a new UUID for each purchase, reused on retry */
+  requestId?: string;
+  /** auto_top_up only: switch automatic top-ups on or off */
+  enabled?: boolean;
 }
 
 export interface InspectionReportSummary {

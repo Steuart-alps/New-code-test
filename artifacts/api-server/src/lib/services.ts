@@ -425,7 +425,7 @@ export async function ensureStoragePrice(): Promise<boolean> {
 }
 
 /**
- * The AI features add-on price: £25 a month (+VAT) per business, tagged
+ * The AI features add-on price: £15 a month (+VAT) per business, tagged
  * service_key=ai, or the price AI_ADDON_PRICE_ID names. Null until it exists.
  */
 export async function getAiAddonPrice(): Promise<PerSitePrice | null> {
@@ -455,7 +455,7 @@ export async function getAiAddonPrice(): Promise<PerSitePrice | null> {
 }
 
 /**
- * Ensure the AI features add-on price exists (£25 a month, GBP, VAT on top).
+ * Ensure the AI features add-on price exists (£15 a month, GBP, VAT on top).
  * Idempotent; skipped when AI_ADDON_PRICE_ID names a price by hand. Returns
  * whether a price was created.
  */

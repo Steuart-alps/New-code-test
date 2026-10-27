@@ -187,7 +187,14 @@ try {
   // ── The app lists them too, by the sites each person can see ───────────────
   const listed = ok(await owner.request('GET', '/certificates-outstanding'));
   const titles = (list) => list.certificates.map((row) => row.title).sort();
-  assert.deepEqual(titles(listed), ['Boiler Service', 'EICR', 'Emergency Lighting Test', 'Gas Safety Inspection']);
+  // The app counts from the real today (the account's date), not from the
+  // Wednesday this suite's dates are pinned to, so from Sunday to Tuesday the
+  // "10 days ago" visit is already two weeks old and is listed as well.
+  const realToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+  const lolerDue = (Date.parse(`${realToday}T00:00:00Z`) - Date.parse(`${day(-10)}T00:00:00Z`)) / 86_400_000 >= 14;
+  assert.deepEqual(titles(listed), [
+    'Boiler Service', 'EICR', 'Emergency Lighting Test', 'Gas Safety Inspection', ...(lolerDue ? ['LOLER Examination'] : []),
+  ]);
   assert.equal(listed.certificates.find((row) => row.title === 'Boiler Service').chasing, false, 'past 90 days the chase has stopped');
   assert.equal(listed.certificates.find((row) => row.title === 'Gas Safety Inspection').chasing, true);
   const siteAOnly = ok(await maintenanceA.request('GET', '/certificates-outstanding'));

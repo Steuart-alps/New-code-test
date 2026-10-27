@@ -6,10 +6,25 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { AiAddonStatusPrice } from './aiAddonStatusPrice';
+import type { AiAddonStatusTopUp } from './aiAddonStatusTopUp';
 import type { AiStatus } from './aiStatus';
 
 export type AiAddonStatus = AiStatus & {
   price: AiAddonStatusPrice;
   /** The add-on can be bought now (Stripe ready and the price exists) */
   purchasable: boolean;
+  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready */
+  topUp: AiAddonStatusTopUp;
+  /**
+     * Top-ups paid for since the add-on last renewed
+     * @minimum 0
+     */
+  topUpsThisPeriod: number;
+  /** A top-up is bought automatically when the allowance runs out */
+  autoTopUp: boolean;
+  /**
+     * Most automatic top-ups in one period
+     * @minimum 0
+     */
+  autoTopUpLimit: number;
 };

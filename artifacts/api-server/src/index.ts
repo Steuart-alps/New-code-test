@@ -147,7 +147,7 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
     logger.error({ err }, "ensureStoragePrice failed — extra storage stays unavailable until the next start");
   }
 
-  // The AI features add-on price (£25 a month) is made the same way; a failure
+  // The AI features add-on price (£15 a month) is made the same way; a failure
   // only hides the AI add-on until the next start.
   try {
     if (await ensureAiAddonPrice()) logger.info("Created the Stripe AI features add-on price");

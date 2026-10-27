@@ -24,7 +24,6 @@ import type {
   AddPrivacyRetentionVerificationParams,
   AiAddonChange,
   AiAddonStatus,
-  AiStatus,
   AllergenChart,
   AllergenChartSignoff,
   AllergenChartSignoffInput,
@@ -6531,12 +6530,12 @@ export const getChangeAiAddonUrl = () => {
 }
 
 /**
- * On adds one £25 monthly item to the subscription and charges the first month at once (nothing is switched on if the charge fails). Off removes it at once with no refund.
- * @summary Switch the AI features add-on on or off (owners and consultants)
+ * add puts one £15 monthly item on the subscription and charges the first month at once (nothing is switched on if the charge fails). remove takes it off at once with no refund. top_up charges a one-off top-up at once and adds its AI use until the add-on renews; the same requestId never charges twice. auto_top_up switches automatic top-ups on or off.
+ * @summary Switch the AI features add-on on or off, buy a top-up, or set automatic top-ups (owners and consultants)
  */
-export const changeAiAddon = async (aiAddonChange: AiAddonChange, options?: RequestInit): Promise<AiStatus> => {
+export const changeAiAddon = async (aiAddonChange: AiAddonChange, options?: RequestInit): Promise<AiAddonStatus> => {
 
-  return customFetch<AiStatus>(getChangeAiAddonUrl(),
+  return customFetch<AiAddonStatus>(getChangeAiAddonUrl(),
   {
     ...options,
     method: 'POST',
@@ -6581,7 +6580,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ChangeAiAddonMutationError = ErrorType<void>
 
     /**
- * @summary Switch the AI features add-on on or off (owners and consultants)
+ * @summary Switch the AI features add-on on or off, buy a top-up, or set automatic top-ups (owners and consultants)
  */
 export const useChangeAiAddon = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeAiAddon>>, TError,{data: BodyType<AiAddonChange>}, TContext>, request?: SecondParameter<typeof customFetch>}

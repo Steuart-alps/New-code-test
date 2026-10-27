@@ -12,26 +12,26 @@ function formatResetDate(iso: string | null): string {
  */
 export function aiAllowanceState(ai: AiStatus): { canUse: boolean; note: string } {
   if (!ai.active) {
-    return { canUse: false, note: "This needs the AI features add-on (£25 a month + VAT for the whole business), which an owner can switch on in Settings." };
+    return { canUse: false, note: "This needs the AI features add-on (£15 a month + VAT for the whole business), which an owner can switch on in Settings." };
   }
   if (ai.usedUp) {
     return {
       canUse: false,
       note: ai.plan === "trial"
         ? "Your trial's AI allowance is used up. It comes with the AI features add-on once you subscribe."
-        : `This month's AI allowance is used up. It starts again ${formatResetDate(ai.resetsAt)}.`,
+        : `This month's AI allowance is used up. It starts again ${formatResetDate(ai.resetsAt)}, or an owner can buy a top-up in Settings.`,
     };
   }
   return { canUse: true, note: `${ai.percentUsed}% of ${ai.plan === "trial" ? "your trial's" : "this month's"} AI allowance used.` };
 }
 
-/** One line under an AI button, with a link to Settings when the add-on is off. */
+/** One line under an AI button, with a link to Settings when the add-on is off or used up. */
 export function AiAllowanceNote({ ai }: { ai: AiStatus }) {
   const { note } = aiAllowanceState(ai);
   return (
     <span className="text-xs text-muted-foreground" data-testid="ai-allowance-note">
       {note}
-      {!ai.active && <> <a href="/settings#ai" className="font-semibold underline underline-offset-2">Open Settings</a></>}
+      {(!ai.active || (ai.usedUp && ai.plan === "addon")) && <> <a href="/settings#ai" className="font-semibold underline underline-offset-2">Open Settings</a></>}
     </span>
   );
 }

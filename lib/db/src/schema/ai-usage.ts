@@ -1,4 +1,4 @@
-import { bigint, check, index, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, index, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { usersTable } from "./users";
@@ -33,4 +33,30 @@ export const aiUsageTable = pgTable("ai_usage", {
   index("idx_ai_usage_client_created").on(table.clientId, table.createdAt),
   check("ck_ai_usage_status", sql`${table.status} IN ('pending', 'done', 'failed')`),
   check("ck_ai_usage_cost_nonnegative", sql`${table.costUsdMicros} >= 0`),
+]);
+
+/**
+ * An AI top-up bought for a business once its monthly allowance runs low:
+ * charged at once as a one-off invoice, it adds allowance_pence of AI use
+ * until the add-on renews (api-server src/lib/aiTopUp.ts). request_id makes a
+ * repeated request (a double click, a retry) charge only once. Automatic
+ * top-ups use "auto-<period start>-<n>", so requests running together share one.
+ */
+export const aiTopUpsTable = pgTable("ai_top_ups", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => usersTable.id, { onDelete: "set null" }),
+  requestId: text("request_id").notNull(),
+  automatic: boolean("automatic").notNull().default(false),
+  amountPence: integer("amount_pence").notNull(),
+  allowancePence: integer("allowance_pence").notNull(),
+  currency: text("currency").notNull().default("gbp"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  settledAt: timestamp("settled_at", { withTimezone: true }),
+}, (table) => [
+  uniqueIndex("uq_ai_top_ups_client_request").on(table.clientId, table.requestId),
+  index("idx_ai_top_ups_client_created").on(table.clientId, table.createdAt),
+  check("ck_ai_top_ups_status", sql`${table.status} IN ('pending', 'paid', 'failed', 'unknown')`),
+  check("ck_ai_top_ups_amounts", sql`${table.amountPence} > 0 AND ${table.allowancePence} >= 0`),
 ]);

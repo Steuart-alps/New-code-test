@@ -1,4 +1,5 @@
-// The AI features add-on (£25 a month, £15 of AI use a period), through the
+// The AI features add-on (£15 a month, £10 of AI use a period, £6 top-ups for
+// £4 more), through the
 // real API.
 //
 // Runs only through tests/run-fresh-schema.sh (disposable database). The suite
@@ -8,7 +9,7 @@
 //
 // Rules protected here:
 //   - without the add-on (trials included) AI is refused before Claude is called;
-//   - switching it on adds one £25 item per business and charges the first
+//   - switching it on adds one £15 item per business and charges the first
 //     month at once; a failed charge switches nothing on;
 //   - the per-site quantity sync and the per-site price never include it;
 //   - each request is priced from the tokens Claude reports and counted
@@ -17,6 +18,11 @@
 //     requests running together cannot all slip past it;
 //   - a failed reading still counts what Claude charged; one turned away
 //     before sending counts nothing;
+//   - a top-up is charged at once and adds its use until renewal; a declined
+//     one adds nothing, and the same request id never charges twice;
+//   - automatic top-ups (the owner's choice) buy one when the allowance runs
+//     out, once for requests running together, up to the monthly limit, and
+//     not again for a day after a declined charge;
 //   - switching it off removes the item at once, with no proration.
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -68,7 +74,7 @@ process.env.LOG_LEVEL ||= "error";
 process.env.ANTHROPIC_API_KEY = "test-key-not-real";
 process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${claude.address().port}`;
 process.env.REGISTER_READING_MONTHLY_LIMIT = "0";
-for (const name of ["AI_ADDON_PRICE_ID", "AI_MONTHLY_ALLOWANCE_PENCE", "AI_TRIAL_ALLOWANCE_PENCE", "AI_USD_TO_GBP", "REPORT_READING_MODEL"]) delete process.env[name];
+for (const name of ["AI_ADDON_PRICE_ID", "AI_MONTHLY_ALLOWANCE_PENCE", "AI_TRIAL_ALLOWANCE_PENCE", "AI_USD_TO_GBP", "REPORT_READING_MODEL", "AI_TOP_UP_PRICE_PENCE", "AI_TOP_UP_ALLOWANCE_PENCE", "AI_AUTO_TOP_UP_LIMIT"]) delete process.env[name];
 
 function session(base) {
   let cookie = "";
@@ -115,8 +121,8 @@ async function stripeMirror() {
     recurring jsonb, metadata jsonb, created integer)`);
   await query("INSERT INTO stripe.products (id, active, name) VALUES ('prod_ai', true, 'AI features') ON CONFLICT DO NOTHING");
   await query(`INSERT INTO stripe.prices (id, product, active, currency, unit_amount, recurring, metadata, created)
-    VALUES ('price_ai', 'prod_ai', true, 'gbp', 2500, '{"interval":"month"}', '{"service_key":"ai"}', 1) ON CONFLICT DO NOTHING`);
-  t.definePrice("price_ai", 2500, "ai");
+    VALUES ('price_ai', 'prod_ai', true, 'gbp', 1500, '{"interval":"month"}', '{"service_key":"ai"}', 1) ON CONFLICT DO NOTHING`);
+  t.definePrice("price_ai", 1500, "ai");
   t.definePrice("price_core", 1000, "core");
   t.definePrice("price_pattrack", 1000, "pattrack");
 }
@@ -134,7 +140,7 @@ async function main(base) {
 
   console.log("\n── on a free trial, without the add-on ──");
   const trial = (await user("GET", "/billing/ai")).data;
-  same("offered but not on", [trial?.configured, trial?.active, trial?.plan, trial?.purchasable, trial?.price], [true, false, "none", true, { unitAmount: 2500, currency: "gbp" }]);
+  same("offered but not on", [trial?.configured, trial?.active, trial?.plan, trial?.purchasable, trial?.price], [true, false, "none", true, { unitAmount: 1500, currency: "gbp" }]);
   const status = (await user("GET", "/imports/pat-appliances/reading")).data;
   same("the PAT dialog sees the add-on is off", [status?.available, status?.ai?.active], [true, false]);
   const refused = await readList(user);
@@ -155,7 +161,7 @@ async function main(base) {
   const aiItems = t.getSubscription(customer).items.data.filter((item) => item.price.metadata.service_key === "ai");
   same("one item, quantity 1, whatever the sites", aiItems.map((item) => item.quantity), [1]);
   same("added with no proration", stripeCalls("subscriptions.update")[0]?.params?.proration_behavior, "none");
-  same("first month charged at once: £25", stripeCalls("invoiceItems.create").map((call) => [call.params.amount, call.params.currency]), [[2500, "gbp"]]);
+  same("first month charged at once: £15", stripeCalls("invoiceItems.create").map((call) => [call.params.amount, call.params.currency]), [[1500, "gbp"]]);
   same("switching on twice is refused", (await user("POST", "/billing/ai", { action: "add" })).status, 409);
   same("another business is unaffected", (await other.user("GET", "/billing/ai")).data?.plan, "none");
 
@@ -174,11 +180,11 @@ async function main(base) {
     await usageRows(clientId),
     [{ feature: "register_reading", status: "done", model: "claude-opus-5-5", input_tokens: 1800, output_tokens: 900, cost: READ_COST_MICROS }]);
   const afterOne = (await user("GET", "/billing/ai")).data;
-  same("a 2p reading is under 1% of £15", [afterOne?.percentUsed, afterOne?.usedUp, afterOne?.resetsAt], [0, false, new Date(periodEnd * 1000).toISOString()]);
+  same("a 2p reading is under 1% of £10", [afterOne?.percentUsed, afterOne?.usedUp, afterOne?.resetsAt], [0, false, new Date(periodEnd * 1000).toISOString()]);
 
   console.log("\n── the allowance runs out, and starts again with the period ──");
-  // £15 at 80p a dollar is $18.75 of use.
-  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 18750000)", [clientId]);
+  // £10 at 80p a dollar is $12.50 of use.
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 12500000)", [clientId]);
   const usedUp = (await user("GET", "/billing/ai")).data;
   same("shown as used up", [usedUp?.percentUsed, usedUp?.usedUp], [100, true]);
   const before = claudeRequests;
@@ -186,13 +192,58 @@ async function main(base) {
   same("refused once used up", [over.status, over.data?.code], [429, "AI_ALLOWANCE_USED"]);
   check("says when it starts again", /starts again on/.test(over.data?.error ?? ""), over.data?.error);
   same("Claude not called when refused", claudeRequests, before);
-  await query("UPDATE ai_usage SET created_at = to_timestamp($2) - interval '1 day' WHERE client_id = $1 AND cost_usd_micros = 18750000", [clientId, periodStart]);
-  same("use from an earlier period does not count", (await readList(user)).status, 200);
+  check("and says a top-up is possible", /buy a top-up/.test(over.data?.error ?? ""), over.data?.error);
+
+  console.log("\n── buying a top-up ──");
+  same("top-up offered at £6 for £4, none bought yet, automatic off",
+    [usedUp?.topUp, usedUp?.topUpsThisPeriod, usedUp?.autoTopUp, usedUp?.autoTopUpLimit],
+    [{ amount: 600, allowance: 400, currency: "gbp" }, 0, false, 3]);
+  same("a top-up needs a request id", (await user("POST", "/billing/ai", { action: "top_up" })).status, 400);
+  t.setInvoiceOutcome("open");
+  const declinedTopUp = await user("POST", "/billing/ai", { action: "top_up", requestId: crypto.randomUUID() });
+  same("a declined top-up adds nothing", [declinedTopUp.status, (await user("GET", "/billing/ai")).data?.usedUp], [502, true]);
+  t.setInvoiceOutcome("paid");
+  t.calls.length = 0;
+  const requestId = crypto.randomUUID();
+  const topped = await user("POST", "/billing/ai", { action: "top_up", requestId });
+  same("top-up bought", [topped.status, topped.data?.usedUp, topped.data?.topUpsThisPeriod, topped.data?.percentUsed], [200, false, 1, 72]);
+  same("charged £6 at once", stripeCalls("invoiceItems.create").map((call) => [call.params.amount, call.params.currency]), [[600, "gbp"]]);
+  same("the same request never charges twice", [(await user("POST", "/billing/ai", { action: "top_up", requestId })).status, stripeCalls("invoiceItems.create").length], [200, 1]);
+  same("reading works again", (await readList(user)).status, 200);
+  same("another business has no top-ups", (await other.user("GET", "/billing/ai")).data?.topUpsThisPeriod, 0);
+
+  console.log("\n── automatic top-ups ──");
+  // Use up the top-up too: £4 is $5.
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 5000000)", [clientId]);
+  same("used up again", (await readList(user)).status, 429);
+  const autoOn = await user("POST", "/billing/ai", { action: "auto_top_up", enabled: true });
+  same("owner switches automatic top-ups on", [autoOn.status, autoOn.data?.autoTopUp], [200, true]);
+  same("another business is unaffected", (await other.user("GET", "/billing/ai")).data?.autoTopUp, false);
+  const autoRows = async () => (await query("SELECT status FROM ai_top_ups WHERE client_id = $1 AND automatic ORDER BY id", [clientId])).map((row) => row.status);
+  same("an automatic top-up is bought and the reading goes ahead", [(await readList(user)).status, await autoRows()], [200, ["paid"]]);
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 5000000)", [clientId]);
+  claudeDelayMs = 300;
+  const autoTogether = await Promise.all([readList(user), readList(user), readList(user)]);
+  claudeDelayMs = 0;
+  same("requests running together buy only one", [autoTogether.map((result) => result.status), await autoRows()], [[200, 200, 200], ["paid", "paid"]]);
+  process.env.AI_AUTO_TOP_UP_LIMIT = "2";
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 5000000)", [clientId]);
+  same("no more than the monthly limit", [(await readList(user)).status, (await autoRows()).length], [429, 2]);
+  delete process.env.AI_AUTO_TOP_UP_LIMIT;
+  t.setInvoiceOutcome("open");
+  same("a declined automatic top-up adds nothing", [(await readList(user)).status, await autoRows()], [429, ["paid", "paid", "failed"]]);
+  t.setInvoiceOutcome("paid");
+  same("and is not tried again for a day", [(await readList(user)).status, (await autoRows()).length], [429, 3]);
+  same("switched off again", (await user("POST", "/billing/ai", { action: "auto_top_up", enabled: false })).data?.autoTopUp, false);
+
+  await query("UPDATE ai_usage SET created_at = to_timestamp($2) - interval '1 day' WHERE client_id = $1", [clientId, periodStart]);
+  await query("UPDATE ai_top_ups SET created_at = to_timestamp($2) - interval '1 day' WHERE client_id = $1", [clientId, periodStart]);
+  same("use and top-ups from an earlier period do not count", [(await readList(user)).status, (await user("GET", "/billing/ai")).data?.topUpsThisPeriod], [200, 0]);
 
   console.log("\n── requests running together cannot all slip past ──");
   // Leave about 1p of the allowance: the first request's 30p hold uses it.
   const spent = Number((await query("SELECT coalesce(sum(cost_usd_micros), 0)::bigint AS s FROM ai_usage WHERE client_id = $1 AND created_at >= to_timestamp($2)", [clientId, periodStart]))[0].s);
-  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', $2)", [clientId, 18750000 - 12500 - spent]);
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', $2)", [clientId, 12500000 - 12500 - spent]);
   claudeDelayMs = 300;
   const together = await Promise.all([readList(user), readList(user), readList(user)]);
   claudeDelayMs = 0;
@@ -216,6 +267,7 @@ async function main(base) {
   same("item removed at once, no proration", stripeCalls("subscriptionItems.del").map((call) => call.params?.proration_behavior), ["none"]);
   same("reading refused again", (await readList(user)).data?.code, "AI_ADDON_REQUIRED");
   same("switching off twice is refused", (await user("POST", "/billing/ai", { action: "remove" })).status, 409);
+  same("no top-ups without the add-on", [(await user("POST", "/billing/ai", { action: "top_up", requestId: crypto.randomUUID() })).status, (await user("GET", "/billing/ai")).data?.topUp], [409, null]);
   same("another business without a subscription cannot switch on", (await other.user("POST", "/billing/ai", { action: "add" })).status, 400);
 }
 

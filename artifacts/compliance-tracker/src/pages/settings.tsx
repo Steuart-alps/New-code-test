@@ -1911,16 +1911,19 @@ function SubscriptionDiscountForm({ billingPath, onApplied }: { billingPath: (pa
 }
 
 /**
- * The AI features add-on: £25 a month per business, which includes a monthly
- * allowance of AI use (reading reports and appliance lists). Hidden until the
- * server has an Anthropic API key. Shown as a share of the allowance, never in
- * pounds, so the allowance can change without confusing anyone.
+ * The AI features add-on: £15 a month per business, which includes a monthly
+ * allowance of AI use (reading reports and appliance lists), plus top-ups an
+ * owner buys by hand or automatically. Hidden until the server has an
+ * Anthropic API key. Shown as a share of the allowance, never in pounds, so
+ * the allowance can change without confusing anyone.
  */
 function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClientId: number | null; hasSubscription: boolean; canAdmin: boolean }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [confirming, setConfirming] = useState<"add" | "remove" | null>(null);
+  const [confirming, setConfirming] = useState<"add" | "remove" | "top_up" | null>(null);
   const [busy, setBusy] = useState(false);
+  // One id per top-up purchase, kept across retries so it is never charged twice.
+  const topUpRequestId = useRef<string | null>(null);
   const statusQuery = useQuery({
     queryKey: ["/api/billing/ai", activeClientId],
     queryFn: () => apiFetch<AiAddonStatus>(withBillingClient("/billing/ai", activeClientId)),
@@ -1935,21 +1938,36 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
   }, [status]);
 
   if (!status?.configured) return null;
-  const price = status.price ? `${formatMinorUnits(status.price.unitAmount, status.price.currency)} a month + VAT` : "£25 a month + VAT";
+  const price = status.price ? `${formatMinorUnits(status.price.unitAmount, status.price.currency)} a month + VAT` : "£15 a month + VAT";
   const isOn = status.plan === "addon";
+  const topUpPrice = status.topUp ? `${formatMinorUnits(status.topUp.amount, status.topUp.currency)} + VAT` : null;
+  const renewal = status.resetsAt ? formatUkDate(status.resetsAt) : null;
 
-  async function change(action: "add" | "remove") {
+  const titles = {
+    add: ["AI features switched on", "Couldn't switch on AI features"],
+    remove: ["AI features switched off", "Couldn't switch off AI features"],
+    top_up: ["Top-up added", "Couldn't buy a top-up"],
+    auto_top_up: ["Automatic top-ups updated", "Couldn't change automatic top-ups"],
+  } as const;
+
+  async function change(action: keyof typeof titles, extra: Record<string, unknown> = {}) {
     setBusy(true);
     try {
-      await apiFetch(withBillingClient("/billing/ai", activeClientId), { method: "POST", body: JSON.stringify({ action }) });
-      toast({ title: action === "add" ? "AI features switched on" : "AI features switched off" });
+      await apiFetch(withBillingClient("/billing/ai", activeClientId), { method: "POST", body: JSON.stringify({ action, ...extra }) });
+      toast({ title: titles[action][0] });
       setConfirming(null);
+      if (action === "top_up") topUpRequestId.current = null;
     } catch (err: any) {
-      toast({ title: action === "add" ? "Couldn't switch on AI features" : "Couldn't switch off AI features", description: err.message, variant: "destructive" });
+      toast({ title: titles[action][1], description: err.message, variant: "destructive" });
     } finally {
       setBusy(false);
       await queryClient.invalidateQueries({ queryKey: ["/api/billing/ai"] });
     }
+  }
+
+  function buyTopUp() {
+    topUpRequestId.current ??= crypto.randomUUID();
+    void change("top_up", { requestId: topUpRequestId.current });
   }
 
   return (
@@ -1976,11 +1994,19 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
             {status.usedUp ? (
               <p className="flex items-start gap-1.5 text-amber-800" role="status">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                <span>This month's AI allowance is used up. AI buttons stay off{status.resetsAt ? ` until ${formatUkDate(status.resetsAt)}` : " until the add-on renews"}; everything else works as normal.</span>
+                <span>
+                  This month's AI allowance is used up. AI buttons stay off{renewal ? ` until ${renewal}` : " until the add-on renews"}
+                  {isOn && status.topUp ? (canAdmin ? ", or until you buy a top-up below" : ", or until an owner buys a top-up") : ""}; everything else works as normal.
+                </span>
               </p>
-            ) : status.resetsAt ? (
-              <p className="text-xs text-muted-foreground">The allowance starts again on {formatUkDate(status.resetsAt)}.</p>
+            ) : renewal ? (
+              <p className="text-xs text-muted-foreground">The allowance starts again on {renewal}.</p>
             ) : null}
+            {isOn && status.topUpsThisPeriod > 0 && (
+              <p className="text-xs text-muted-foreground" data-testid="text-ai-top-ups">
+                {status.topUpsThisPeriod} top-up{status.topUpsThisPeriod === 1 ? "" : "s"} bought this month, included above.
+              </p>
+            )}
           </div>
         ) : (
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border text-xs font-semibold">Not switched on</span>
@@ -2005,10 +2031,41 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
         {canAdmin && hasSubscription && !isOn && !status.purchasable && (
           <p className="text-xs text-muted-foreground">AI features can't be added online right now. Nothing has been charged; please try again later.</p>
         )}
+        {canAdmin && isOn && status.topUp && topUpPrice && (
+          <div className="space-y-3 rounded-lg border p-4">
+            {confirming === "top_up" ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex-1">{topUpPrice} is charged now. It adds more AI use until {renewal ?? "the add-on renews"}.</span>
+                <Button size="sm" disabled={busy} onClick={buyTopUp} data-testid="button-confirm-ai-top-up">{busy ? "Charging…" : "Confirm and pay"}</Button>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setConfirming(null); topUpRequestId.current = null; }}>Cancel</Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-muted-foreground">Need more this month? A top-up costs {topUpPrice}.</span>
+                <Button size="sm" variant="outline" onClick={() => setConfirming("top_up")} data-testid="button-ai-top-up">Buy a top-up</Button>
+              </div>
+            )}
+            <div className="flex items-start justify-between gap-4 border-t border-border/50 pt-3">
+              <div className="space-y-1">
+                <Label htmlFor="ai-auto-top-up" className="font-medium">Top up automatically when the allowance runs out</Label>
+                <p className="text-xs text-muted-foreground">
+                  Off: AI buttons stop until the add-on renews or an owner buys a top-up. On: we charge {topUpPrice} and email the owners each time, at most {status.autoTopUpLimit} times a month.
+                </p>
+              </div>
+              <Switch
+                id="ai-auto-top-up"
+                checked={status.autoTopUp}
+                disabled={busy}
+                onCheckedChange={(checked) => { void change("auto_top_up", { enabled: checked }); }}
+                data-testid="switch-ai-auto-top-up"
+              />
+            </div>
+          </div>
+        )}
         {canAdmin && isOn && (
           confirming === "remove" ? (
             <div className="flex flex-wrap items-center gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-              <span className="flex-1">AI buttons stop at once. There's no refund for the rest of this month.</span>
+              <span className="flex-1">AI buttons stop at once. There's no refund for the rest of this month or for unused top-ups.</span>
               <Button size="sm" variant="destructive" disabled={busy} onClick={() => change("remove")}>{busy ? "Switching off…" : "Switch off"}</Button>
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(null)}>Cancel</Button>
             </div>

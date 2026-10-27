@@ -5,8 +5,8 @@
 
 export const AI_SERVICE_KEY = "ai";
 export const AI_ADDON_LABEL = "AI features";
-/** £25 a month (+VAT), whatever the number of sites. */
-export const AI_ADDON_AMOUNT_PENCE = 2500;
+/** £15 a month (+VAT), whatever the number of sites. */
+export const AI_ADDON_AMOUNT_PENCE = 1500;
 export const AI_ADDON_CURRENCY = "gbp";
 
 type SubscriptionItemLike = {

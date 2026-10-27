@@ -1963,11 +1963,13 @@ paths:
     post:
       operationId: changeAiAddon
       tags: [billing]
-      summary: Switch the AI features add-on on or off (owners and consultants)
+      summary: Switch the AI features add-on on or off, buy a top-up, or set automatic top-ups (owners and consultants)
       description: >-
-        On adds one £25 monthly item to the subscription and charges the first
-        month at once (nothing is switched on if the charge fails). Off removes
-        it at once with no refund.
+        add puts one £15 monthly item on the subscription and charges the first
+        month at once (nothing is switched on if the charge fails). remove takes
+        it off at once with no refund. top_up charges a one-off top-up at once
+        and adds its AI use until the add-on renews; the same requestId never
+        charges twice. auto_top_up switches automatic top-ups on or off.
       requestBody:
         required: true
         content:
@@ -1976,17 +1978,17 @@ paths:
               $ref: "#/components/schemas/AiAddonChange"
       responses:
         "200":
-          description: The AI status after the change
+          description: The AI add-on status after the change
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AiStatus"
+                $ref: "#/components/schemas/AiAddonStatus"
         "400":
-          description: No live subscription yet
+          description: No live subscription yet, or a missing requestId or enabled
         "409":
-          description: Already on, or already off
+          description: Already on, already off, the add-on is off (top-ups), or a top-up with this requestId is still being charged
         "502":
-          description: The first month's charge failed or could not be confirmed
+          description: The first month's or the top-up's charge failed or could not be confirmed
         "503":
           description: Billing or the add-on price is not ready
 
@@ -10346,8 +10348,8 @@ components:
     AiStatus:
       type: object
       description: >-
-        The AI features add-on for this business: £25 a month, which includes
-        a monthly allowance of AI use. Without it, AI buttons are unavailable.
+        The AI features add-on for this business: £15 a month, which includes
+        a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.
       properties:
         configured: { type: boolean, description: "The server has an Anthropic API key, so AI can be offered at all" }
         active: { type: boolean, description: "The business has the AI add-on (or a trial allowance) now" }
@@ -10370,13 +10372,27 @@ components:
                 currency: { type: string }
               required: [unitAmount, currency]
             purchasable: { type: boolean, description: "The add-on can be bought now (Stripe ready and the price exists)" }
-          required: [price, purchasable]
+            topUp:
+              type: object
+              nullable: true
+              description: The top-up an owner can buy now; null unless the add-on is on and billing is ready
+              properties:
+                amount: { type: integer, description: "Price in pence, before VAT, charged at once" }
+                allowance: { type: integer, description: "AI use it adds, in pence, until the add-on renews" }
+                currency: { type: string }
+              required: [amount, allowance, currency]
+            topUpsThisPeriod: { type: integer, minimum: 0, description: "Top-ups paid for since the add-on last renewed" }
+            autoTopUp: { type: boolean, description: "A top-up is bought automatically when the allowance runs out" }
+            autoTopUpLimit: { type: integer, minimum: 0, description: "Most automatic top-ups in one period" }
+          required: [price, purchasable, topUp, topUpsThisPeriod, autoTopUp, autoTopUpLimit]
 
     AiAddonChange:
       type: object
       additionalProperties: false
       properties:
-        action: { type: string, enum: [add, remove] }
+        action: { type: string, enum: [add, remove, top_up, auto_top_up] }
+        requestId: { type: string, description: "top_up only: a new UUID for each purchase, reused on retry" }
+        enabled: { type: boolean, description: "auto_top_up only: switch automatic top-ups on or off" }
       required: [action]
 
     InspectionReportSummary:
