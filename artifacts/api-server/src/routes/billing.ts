@@ -1115,6 +1115,9 @@ router.get("/invoices", requireAuth, requireRole("consultant", "client_admin"), 
 // because site count is managed by the app (which itself never prorates).
 const PORTAL_CONFIG_MARKER = "complytrack_no_refund_v1";
 let cachedPortalConfigId: string | null = null;
+// Stripe rejects a portal headline longer than 60 characters, which made
+// "Manage subscription" fail before any portal configuration was created.
+const PORTAL_HEADLINE = "ComplyTrack: cancellation takes effect at month end";
 
 async function findPortalConfigByMarker(stripe: any): Promise<string | null> {
   // Paginate the full list so an older config is never missed (which would
@@ -1165,9 +1168,7 @@ async function getNoRefundPortalConfigId(stripe: any): Promise<string> {
 async function createNoRefundPortalConfig(stripe: any): Promise<string> {
   const created = await stripe.billingPortal.configurations.create({
     metadata: { marker: PORTAL_CONFIG_MARKER },
-    business_profile: {
-      headline: "ComplyTrack billing — monthly billing, cancellations take effect at the end of the paid month.",
-    },
+    business_profile: { headline: PORTAL_HEADLINE },
     features: {
       invoice_history: { enabled: true },
       payment_method_update: { enabled: true },
