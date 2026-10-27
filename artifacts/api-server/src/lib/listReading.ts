@@ -184,9 +184,9 @@ export async function readList(input: ListReadingInput, beforeSending?: () => Pr
   const chosen = input.sites.find((site) => site.id === input.siteId) ?? null;
   const context = [
     `File name: ${promptLabel(input.fileName)}`,
-    hasSite ? (siteNames.length ? `Sites: ${siteNames.join("; ")}` : "Sites: none listed") : null,
-    hasSite ? (chosen ? `The person chose the site "${chosen.name}" for this list.` : "The person did not choose a site.") : null,
-    input.kind === "contractors" ? `Trade options: ${input.trades?.length ? input.trades.join("; ") : "none set"}` : null,
+    hasSite ? (siteNames.length ? `Sites: ${siteNames.map((name) => promptLabel(name)).join("; ")}` : "Sites: none listed") : null,
+    hasSite ? (chosen ? `The person chose the site ${promptLabel(chosen.name)} for this list.` : "The person did not choose a site.") : null,
+    input.kind === "contractors" ? `Trade options: ${input.trades?.length ? input.trades.map((trade) => promptLabel(trade)).join("; ") : "none set"}` : null,
   ].filter(Boolean).join("\n");
 
   const client = new Anthropic();

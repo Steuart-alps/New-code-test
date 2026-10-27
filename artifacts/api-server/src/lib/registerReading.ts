@@ -125,8 +125,8 @@ export async function readApplianceList(input: RegisterReadingInput, beforeSendi
   const context = [
     `File name: ${promptLabel(input.fileName)}`,
     `Appliance types: ${PAT_APPLIANCE_TYPES.join("; ")}`,
-    input.sites.length ? `Sites: ${input.sites.map((site) => `${site.id} = ${site.name}`).join("; ")}` : "Sites: none listed",
-    chosen ? `The person chose site ${chosen.id} (${chosen.name}) for this list.` : "The person did not choose a site.",
+    input.sites.length ? `Sites: ${input.sites.map((site) => `${site.id} = ${promptLabel(site.name)}`).join("; ")}` : "Sites: none listed",
+    chosen ? `The person chose site ${chosen.id} (${promptLabel(chosen.name)}) for this list.` : "The person did not choose a site.",
   ].join("\n");
 
   const client = new Anthropic();

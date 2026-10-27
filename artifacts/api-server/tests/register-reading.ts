@@ -76,7 +76,7 @@ try {
   const [image, context] = sent.body.messages[0].content;
   assert.equal(image.type, "image");
   assert.equal(image.source.media_type, "image/jpeg");
-  assert.match(context.text, /The person chose site 4 \(Clubhouse\)/);
+  assert.match(context.text, /The person chose site 4 \("Clubhouse"\)/);
   assert.match(sent.body.system, /Scope: you only read a list or register of electrical appliances/);
   assert.deepEqual(sent.body.output_config.format.schema.required, ["wrong_file", "appliances"]);
 
@@ -134,7 +134,7 @@ try {
   };
   const contractors = await readList({ ...listInput, kind: "contractors", trades: ["Electrical", "Gas"] });
   const contractorRequest = requests.at(-1)!;
-  assert.match(contractorRequest.body.messages[0].content[1].text, /Trade options: Electrical; Gas/);
+  assert.match(contractorRequest.body.messages[0].content[1].text, /Trade options: "Electrical"; "Gas"/);
   assert.doesNotMatch(contractorRequest.body.messages[0].content[1].text, /Sites:/, "contractors have no site column");
   assert.deepEqual(contractors.headers, ["Contact name", "Company", "Email", "Phone", "Address", "Trades", "Gas Safe number", "Public liability expiry", "Notes"]);
   assert.equal(contractors.rows.length, 2, "rows with nothing in them are dropped");

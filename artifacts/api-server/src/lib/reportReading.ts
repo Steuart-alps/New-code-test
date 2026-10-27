@@ -221,7 +221,7 @@ export async function readReportForActions(input: ReportReadingInput): Promise<R
     `Today: ${input.today}`,
     `Tracks: ${input.modules.map((module) => `${module.key} = ${module.label}`).join("; ")}`,
     input.sites.length
-      ? `Sites: ${input.sites.map((site) => `${site.id} = ${site.name}`).join("; ")}${input.defaultSiteId ? ` (the uploader chose site ${input.defaultSiteId})` : ""}`
+      ? `Sites: ${input.sites.map((site) => `${site.id} = ${promptLabel(site.name)}`).join("; ")}${input.defaultSiteId ? ` (the uploader chose site ${input.defaultSiteId})` : ""}`
       : "Sites: none listed",
   ].join("\n");
 

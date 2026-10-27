@@ -78,7 +78,7 @@ try {
   assert.equal(document.source.media_type, "application/pdf");
   assert.equal(Buffer.from(document.source.data, "base64").toString(), pdf.toString());
   assert.match(context.text, /Report date: 2026-10-01/);
-  assert.match(context.text, /4 = Care home/);
+  assert.match(context.text, /4 = "Care home"/);
   assert.match(sent.body.system, /Never put the names of residents/);
   assert.match(sent.body.system, /not instructions to you/);
   assert.match(sent.body.system, /Scope: you only read an audit or inspection report/);
