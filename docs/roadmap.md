@@ -37,6 +37,7 @@ Wednesday 28 October.
 | 18 | Reorder the side menu to each user's preference | After launch | None | Nothing |
 | 19 | Bar opening and closing checks, including beer tap tips | After launch | None | Your list of bar checks |
 | 20 | Send site safety information to contractors before their visit | After launch | None | Contractor sign-in work (in its own thread) |
+| 21 | White-labelling for resellers (for example insurance brokers) | After launch | Possibly small extra email and web address costs per partner | Your answers on billing and what partners see |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -761,6 +762,53 @@ logs their test, and signs out.
 
 ---
 
+## 21. White-labelling for resellers
+
+**When:** after launch. Asked for on 27 October.
+
+Partners such as insurance brokers resell ComplyTrack to their own clients
+under the partner's name and look.
+
+**What already exists.** Consultants can already set a practice name and logo
+that the businesses they manage see, and have a portfolio page covering all
+their linked businesses. White-labelling builds on that.
+
+**What it would add:**
+
+- **A partner account** (a new "Partner" role, separate from the ALPS-only
+  Consultant role) that sees only the businesses linked to it.
+- **The partner's branding everywhere a client looks:** logo, colours and name
+  in the app, on emails, and on PDFs and inspection packs, with an optional
+  small "Powered by ComplyTrack" line.
+- **Their own web address** (for example compliance.brokername.co.uk) and,
+  optionally, emails sent from the partner's own address.
+- **Sign-up through the partner:** a partner link or code, so new businesses
+  are linked to that partner and get its branding and price from day one.
+
+**Choices to make:**
+
+1. **Billing.** Either the partner pays ALPS one bill for all its clients and
+   charges them itself, or each client pays by card as now and the partner
+   earns a commission or discount. The no-proration rule and per-site charges
+   stay as they are either way.
+2. **What the partner sees.** Just a list of its clients and whether they are
+   active, or also each client's compliance status. An insurance broker may
+   want the status (it can help with premiums), but a client must agree to
+   share it, and the privacy terms need to say so.
+3. **Fully branded or co-branded.** Partner name only, or partner and ALPS
+   side by side.
+
+**Legal.** A reseller agreement and updated data-protection terms are needed
+before the first partner signs up. Worth taking to the solicitor review that
+is already planned.
+
+**Cost:** little or none for hosting. Each partner's own web address and
+email sending address may add a small cost (the email service and the host
+limit how many addresses are included), to be checked before the first
+partner. I'll flag it before it's added.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -811,6 +859,7 @@ work:
 | Reorder the side menu | None |
 | Bar opening and closing checks | None |
 | Site safety information to contractors | None |
+| White-labelling for resellers | Little or none for hosting; possibly a small cost per partner web address and email address |
 | FireTrack sound level meter | None |
 | Temperature probes and sensors | Hardware paid by each business (plus a maker subscription for option 1); possibly a larger database plan later; text alerts a few pence each |
 | Label scanning | About 1-2p per label; about 40p for a chemical including its data sheet and COSHH draft (mostly in the Live AI plan already) |
