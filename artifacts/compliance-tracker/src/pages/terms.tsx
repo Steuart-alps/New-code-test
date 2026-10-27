@@ -7,7 +7,7 @@ export default function TermsPage() {
         <h2>1. Who we are</h2>
         <p>
           ComplyTrack is a health &amp; safety compliance tracking service operated by ALPS Consulting Ltd, trading as ALPS Consultancy
-          (&ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;), a company registered in Scotland. By creating
+          (&ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;), a company registered in Scotland (company number SC739043). By creating
           an account or using ComplyTrack you agree to these Terms of Service.
         </p>
       </section>
@@ -105,7 +105,7 @@ export default function TermsPage() {
       <section>
         <h2>11. General</h2>
         <p>
-          These terms are governed by the laws of England and Wales, and the courts of England and Wales have exclusive
+          These terms are governed by the law of Scotland, and the Scottish courts have exclusive
           jurisdiction. If any provision is found unenforceable, the rest remain in effect. We may update these terms
           from time to time; material changes will be notified in the app or by email.
         </p>

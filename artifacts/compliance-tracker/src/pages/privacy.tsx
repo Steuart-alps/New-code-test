@@ -6,7 +6,7 @@ export default function PrivacyPage() {
       <section>
         <h2>1. Who we are</h2>
         <p>
-          ComplyTrack is operated by ALPS Consulting Ltd, trading as ALPS Consultancy, a company registered in Scotland. We are the data
+          ComplyTrack is operated by ALPS Consulting Ltd, trading as ALPS Consultancy, a company registered in Scotland (company number SC739043). We are the data
           controller for account information, and a data processor for the compliance records you and your team store
           in the service. This policy explains what we collect, why, and your rights.
         </p>
