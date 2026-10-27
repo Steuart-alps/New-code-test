@@ -20,6 +20,8 @@ export interface AiCreditBalance {
   balancePence: number;
   /** What is left of each lot still usable now, soonest to lapse first. */
   open: Array<AiCreditLot & { remainingPence: number }>;
+  /** Lots that lapsed by now with some left unused (what went back to ALPS), soonest first. */
+  lapsed: Array<AiCreditLot & { remainingPence: number }>;
 }
 
 /**
@@ -51,5 +53,7 @@ export function replayAiCredit(lots: AiCreditLot[], uses: AiCreditUse[], now: Da
   take(now);
   const open = ordered.filter((lot) => lot.startsAt <= now && lot.expiresAt > now && lot.remainingPence > 0);
   const left = open.reduce((sum, lot) => sum + lot.remainingPence, 0);
-  return { balancePence: owed > 0 ? -owed : left, open };
+  // A lapsed lot is never taken from again, so what it still holds is what lapsed.
+  const lapsed = ordered.filter((lot) => lot.expiresAt <= now && lot.remainingPence > 0);
+  return { balancePence: owed > 0 ? -owed : left, open, lapsed };
 }

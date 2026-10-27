@@ -37,6 +37,8 @@ const stillOpen = replayAiCredit(year, fiftyPounds, day("2027-10-31"));
 assert.equal(stillOpen.balancePence, 7000, "£70 unused at the end of the year, still usable");
 const afterLapse = replayAiCredit(year, fiftyPounds, day("2028-11-01"));
 assert.equal(afterLapse.balancePence, 0, "all lapsed 12 months after the last month ended");
+assert.equal(afterLapse.lapsed.reduce((sum, lot) => sum + lot.remainingPence, 0), 7000, "and the £70 is reported as lapsed");
+assert.equal(stillOpen.lapsed.length, 0, "nothing has lapsed before then");
 
 // A month's leftover lapses 12 months after that month ends, and not before.
 const november = [month("2026-11-01")];
