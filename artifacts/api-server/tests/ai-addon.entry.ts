@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import app, { markApplicationReady } from "../src/app";
 import { pool } from "@workspace/db";
 import { syncClientSubscriptionQuantity } from "../src/lib/billing";
-import { invalidateAiPlan } from "../src/lib/aiAllowance";
+import { invalidateAiPlan, warnIfAllowanceNearlyUsed } from "../src/lib/aiAllowance";
 import { calls, definePrice, getSubscription, setInvoiceOutcome, setSubscription } from "./ai-addon-stripe.stub";
 
 if (process.env.NODE_ENV !== "test" || process.env.FRESH_SCHEMA_TEST !== "1") {
@@ -27,4 +27,4 @@ export async function startServer(): Promise<{ base: string; close: () => Promis
   };
 }
 
-export { pool, syncClientSubscriptionQuantity, invalidateAiPlan, calls, definePrice, getSubscription, setInvoiceOutcome, setSubscription };
+export { pool, syncClientSubscriptionQuantity, invalidateAiPlan, warnIfAllowanceNearlyUsed, calls, definePrice, getSubscription, setInvoiceOutcome, setSubscription };

@@ -1943,6 +1943,8 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
   if (!status?.configured) return null;
   const price = status.price ? `${formatMinorUnits(status.price.unitAmount, status.price.currency)} a month + VAT` : "£15 a month + VAT";
   const isOn = status.plan === "addon";
+  // Free with no end date (set up by ALPS): a monthly allowance at no charge.
+  const included = status.plan === "included";
   const topUpPrice = status.topUp ? `${formatMinorUnits(status.topUp.amount, status.topUp.currency)} + VAT` : null;
   const renewal = status.resetsAt ? formatUkDate(status.resetsAt) : null;
 
@@ -1981,17 +1983,17 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
           <CardTitle className="font-display font-bold text-lg">AI features</CardTitle>
         </div>
         <CardDescription>
-          {price}, for the whole business. ComplyTrack's AI reads uploaded reports and suggests the actions they ask for, and turns a photo or PDF of an appliance list into PAT register rows. A fair monthly allowance of AI use is included.
+          {included ? "Included free for your business." : `${price}, for the whole business.`} ComplyTrack's AI reads uploaded reports and suggests the actions they ask for, and turns a photo or PDF of an appliance list into PAT register rows. A fair monthly allowance of AI use is included.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 p-6 text-sm">
-        {isOn || status.plan === "trial" ? (
+        {isOn || included || status.plan === "trial" ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
-                <CheckCircle2 className="w-3.5 h-3.5" /> {isOn ? "Active" : "Included in your trial"}
+                <CheckCircle2 className="w-3.5 h-3.5" /> {isOn ? "Active" : included ? "Included" : "Included in your trial"}
               </span>
-              <span className="text-xs text-muted-foreground">{status.percentUsed}% of {isOn ? "this month's" : "your trial"} allowance used</span>
+              <span className="text-xs text-muted-foreground">{status.percentUsed}% of {isOn || included ? "this month's" : "your trial"} allowance used</span>
             </div>
             <Progress value={status.percentUsed} aria-label="AI allowance used" />
             {status.usedUp ? (
@@ -1999,15 +2001,23 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>
                   This month's AI allowance is used up. AI buttons stay off{renewal ? ` until ${renewal}` : " until the add-on renews"}
-                  {isOn && status.topUp ? (canAdmin ? ", or until you buy a top-up below" : ", or until an owner buys a top-up") : ""}; everything else works as normal.
+                  {isOn && status.topUp ? (canAdmin ? ", or until you buy a top-up below" : ", or until an owner buys a top-up") : included ? (canAdmin ? ", or until you agree to a top-up below" : ", or until an owner agrees to a top-up") : ""}; everything else works as normal.
+                </span>
+              </p>
+            ) : status.percentUsed >= 75 ? (
+              <p className="flex items-start gap-1.5 text-amber-800" role="status" data-testid="text-ai-nearly-used">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  This month's AI allowance is nearly used up{renewal ? `. It starts again on ${renewal}` : ""}.
+                  {isOn && status.topUp ? " You can buy a top-up below if you need more." : included && canAdmin ? " You can agree to a top-up below if you need more." : ""}
                 </span>
               </p>
             ) : renewal ? (
               <p className="text-xs text-muted-foreground">The allowance starts again on {renewal}.</p>
             ) : null}
-            {isOn && status.topUpsThisPeriod > 0 && (
+            {(isOn || included) && status.topUpsThisPeriod > 0 && (
               <p className="text-xs text-muted-foreground" data-testid="text-ai-top-ups">
-                {status.topUpsThisPeriod} top-up{status.topUpsThisPeriod === 1 ? "" : "s"} bought this month, included above.
+                {status.topUpsThisPeriod} top-up{status.topUpsThisPeriod === 1 ? "" : "s"} {included ? "added" : "bought"} this month, included above.
               </p>
             )}
           </div>
@@ -2015,10 +2025,10 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border text-xs font-semibold">Not switched on</span>
         )}
 
-        {canAdmin && !hasSubscription && !isOn && (
+        {canAdmin && !hasSubscription && !isOn && !included && (
           <p className="text-xs text-muted-foreground">You can add AI features once you subscribe.</p>
         )}
-        {canAdmin && hasSubscription && !isOn && (
+        {canAdmin && hasSubscription && !isOn && !included && (
           confirming === "add" ? (
             <div className="flex flex-wrap items-center gap-3 rounded-md border border-primary/30 bg-primary/5 p-3">
               <span className="flex-1">The first month ({price}) is charged now, then monthly with your subscription.</span>
@@ -2031,8 +2041,26 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
             </Button>
           )
         )}
-        {canAdmin && hasSubscription && !isOn && !status.purchasable && (
+        {canAdmin && hasSubscription && !isOn && !included && !status.purchasable && (
           <p className="text-xs text-muted-foreground">AI features can't be added online right now. Nothing has been charged; please try again later.</p>
+        )}
+        {canAdmin && included && status.topUp && topUpPrice && (
+          <div className="rounded-lg border p-4">
+            {confirming === "top_up" ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex-1">
+                  {topUpPrice} is added to your next ALPS Consultancy invoice. It adds more AI use until {renewal ?? "the end of the month"}.
+                </span>
+                <Button size="sm" disabled={busy} onClick={buyTopUp} data-testid="button-confirm-ai-invoiced-top-up">{busy ? "Adding…" : "Agree"}</Button>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setConfirming(null); topUpRequestId.current = null; }}>Not now</Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-muted-foreground">Need more this month? A top-up is {topUpPrice}, added to your ALPS Consultancy invoice.</span>
+                <Button size="sm" variant="outline" onClick={() => setConfirming("top_up")} data-testid="button-ai-invoiced-top-up">Request a top-up</Button>
+              </div>
+            )}
+          </div>
         )}
         {canAdmin && isOn && status.topUp && topUpPrice && (
           <div className="space-y-3 rounded-lg border p-4">

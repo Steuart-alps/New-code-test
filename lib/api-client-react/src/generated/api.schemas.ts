@@ -2460,11 +2460,12 @@ export type AiStatusPlan = typeof AiStatusPlan[keyof typeof AiStatusPlan];
 export const AiStatusPlan = {
   addon: 'addon',
   trial: 'trial',
+  included: 'included',
   none: 'none',
 } as const;
 
 /**
- * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.
+ * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included ("included").
  */
 export interface AiStatus {
   /** The server has an Anthropic API key, so AI can be offered at all */
@@ -4170,10 +4171,10 @@ export type AiAddonStatusPrice = {
 } | null;
 
 /**
- * The top-up an owner can buy now; null unless the add-on is on and billing is ready
+ * The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan "included") the owner agrees to it and ALPS adds the price to their consultancy invoice.
  */
 export type AiAddonStatusTopUp = {
-  /** Price in pence, before VAT, charged at once */
+  /** Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance) */
   amount: number;
   /** AI use it adds, in pence, until the add-on renews */
   allowance: number;
@@ -4184,7 +4185,7 @@ export type AiAddonStatus = AiStatus & {
   price: AiAddonStatusPrice;
   /** The add-on can be bought now (Stripe ready and the price exists) */
   purchasable: boolean;
-  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready */
+  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan "included") the owner agrees to it and ALPS adds the price to their consultancy invoice. */
   topUp: AiAddonStatusTopUp;
   /**
      * Top-ups paid for since the add-on last renewed

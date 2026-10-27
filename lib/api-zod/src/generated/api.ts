@@ -3254,21 +3254,21 @@ export const getAiAddonResponseTwoAutoTopUpLimitMin = 0;
 export const GetAiAddonResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(getAiAddonResponseOnePercentUsedMin).max(getAiAddonResponseOnePercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.').and(zod.object({
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
   "price": zod.object({
   "unitAmount": zod.number().describe('Monthly price in pence, before VAT'),
   "currency": zod.string()
 }).nullable(),
   "purchasable": zod.boolean().describe('The add-on can be bought now (Stripe ready and the price exists)'),
   "topUp": zod.object({
-  "amount": zod.number().describe('Price in pence, before VAT, charged at once'),
+  "amount": zod.number().describe('Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance)'),
   "allowance": zod.number().describe('AI use it adds, in pence, until the add-on renews'),
   "currency": zod.string()
-}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready'),
+}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan \"included\") the owner agrees to it and ALPS adds the price to their consultancy invoice.'),
   "topUpsThisPeriod": zod.number().min(getAiAddonResponseTwoTopUpsThisPeriodMin).describe('Top-ups paid for since the add-on last renewed'),
   "autoTopUp": zod.boolean().describe('A top-up is bought automatically when the allowance runs out'),
   "autoTopUpLimit": zod.number().min(getAiAddonResponseTwoAutoTopUpLimitMin).describe('Most automatic top-ups in one period')
@@ -3297,21 +3297,21 @@ export const changeAiAddonResponseTwoAutoTopUpLimitMin = 0;
 export const ChangeAiAddonResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(changeAiAddonResponseOnePercentUsedMin).max(changeAiAddonResponseOnePercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.').and(zod.object({
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
   "price": zod.object({
   "unitAmount": zod.number().describe('Monthly price in pence, before VAT'),
   "currency": zod.string()
 }).nullable(),
   "purchasable": zod.boolean().describe('The add-on can be bought now (Stripe ready and the price exists)'),
   "topUp": zod.object({
-  "amount": zod.number().describe('Price in pence, before VAT, charged at once'),
+  "amount": zod.number().describe('Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance)'),
   "allowance": zod.number().describe('AI use it adds, in pence, until the add-on renews'),
   "currency": zod.string()
-}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready'),
+}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan \"included\") the owner agrees to it and ALPS adds the price to their consultancy invoice.'),
   "topUpsThisPeriod": zod.number().min(changeAiAddonResponseTwoTopUpsThisPeriodMin).describe('Top-ups paid for since the add-on last renewed'),
   "autoTopUp": zod.boolean().describe('A top-up is bought automatically when the allowance runs out'),
   "autoTopUpLimit": zod.number().min(changeAiAddonResponseTwoAutoTopUpLimitMin).describe('Most automatic top-ups in one period')
@@ -3333,11 +3333,11 @@ export const GetPatRegisterReadingResponse = zod.object({
   "ai": zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(getPatRegisterReadingResponseAiPercentUsedMin).max(getPatRegisterReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.'),
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
   "sites": zod.array(zod.object({
   "id": zod.number(),
   "name": zod.string()
@@ -3386,11 +3386,11 @@ export const GetImportListReadingResponse = zod.object({
   "ai": zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(getImportListReadingResponseAiPercentUsedMin).max(getImportListReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.'),
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
   "sites": zod.array(zod.object({
   "id": zod.number(),
   "name": zod.string()
@@ -6564,11 +6564,11 @@ export const GetInspectionReportOptionsResponse = zod.object({
   "ai": zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(getInspectionReportOptionsResponseReadingAiPercentUsedMin).max(getInspectionReportOptionsResponseReadingAiPercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").')
 })
 })
 
