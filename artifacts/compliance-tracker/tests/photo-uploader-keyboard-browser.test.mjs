@@ -180,10 +180,10 @@ async function main() {
         const { page } = await open(layout.query);
         const sequence = await tabSequence(page);
         const expected = layout.label === "full"
-          ? [layout.add, "View photo 1 of 2", "Remove photo 1 of 2", "View photo 2 of 2", "Remove photo 2 of 2"]
+          ? ["Take photo", layout.add, "View photo 1 of 2", "Remove photo 1 of 2", "View photo 2 of 2", "Remove photo 2 of 2"]
           : ["View photo 1 of 2", "Remove photo 1 of 2", "View photo 2 of 2", "Remove photo 2 of 2", layout.add];
         assert.deepEqual(sequence, expected);
-        assert.equal(await page.locator('input[type="file"]').evaluate((el) => el.tabIndex), -1, "the file input itself is not a Tab stop");
+        assert.deepEqual(await page.locator('input[type="file"]').evaluateAll((els) => els.map((el) => el.tabIndex)), [-1, -1], "the file inputs themselves are not Tab stops");
         await page.close();
       });
 
@@ -213,6 +213,23 @@ async function main() {
         assert.equal(requested.entityType, "fire_safety_check");
         assert.equal(requested.entityId, 41);
         assert.deepEqual(JSON.parse(writes[2].body), { entityType: "fire_safety_check", entityId: 41, objectPath: "/objects/uploads/900" });
+        await page.close();
+      });
+
+      await test(`${layout.label}: a photo dragged onto the uploader uploads to this record`, async () => {
+        const { page, state } = await open(layout.query);
+        await page.evaluate((bytes) => {
+          const transfer = new DataTransfer();
+          transfer.items.add(new File([new Uint8Array(bytes)], "dropped.png", { type: "image/png" }));
+          const zone = document.querySelector('input[type="file"]').parentElement.closest("div");
+          for (const type of ["dragenter", "dragover", "drop"]) {
+            zone.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
+          }
+        }, [...PNG]);
+        await page.getByRole("button", { name: "View photo 3 of 3" }).waitFor();
+        assert.deepEqual(mutations(state).map((r) => r.method + " " + (r.path ?? new URL(r.url).host)), [
+          "POST /api/photos/request-upload", "PUT storage.test", "POST /api/photos",
+        ]);
         await page.close();
       });
 

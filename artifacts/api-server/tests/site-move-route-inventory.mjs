@@ -118,6 +118,8 @@ const INVENTORY = {
   "track-actions.ts PATCH /:id": covered("scoped staff cannot PATCH track action site"),
   "track-actions.ts PATCH /templates/:id": adminOnly("action templates"),
   "track-actions.ts POST /:id/fix-track": notAMove("FixTrack decision on the action's stored site"),
+  "track-actions.ts POST /:id/media": notAMove("attaches a photo or video to the action on its stored site"),
+  "track-actions.ts POST /:id/request-upload": notAMove("upload link for the action on its stored site"),
   "track-evidence.ts POST /:id/review": notAMove("evidence review on the action's stored site"),
   "train-track.ts PATCH /records/:id": covered("scoped staff cannot PATCH TrainTrack site"),
   "tree-track.ts PUT /:id": siteMove("Tree inspection"),

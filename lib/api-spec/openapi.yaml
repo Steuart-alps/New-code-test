@@ -41,6 +41,8 @@ tags:
     description: Equipment list and QR labels
   - name: inspection-reports
     description: Uploaded audit and inspection reports turned into track actions
+  - name: track-actions
+    description: Actions on each track, and the photos and videos attached to them
   - name: food-safety
     description: Kitchen / food safety diary operations
   - name: legionella
@@ -1736,6 +1738,92 @@ paths:
                 $ref: "#/components/schemas/RequestUploadUrlResponse"
         "409":
           description: The business's paid storage is full (code STORAGE_FULL) and automatic top-up is off or failed. Every upload-link route answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /track-actions/{id}/request-upload:
+    post:
+      operationId: requestTrackActionMediaUpload
+      tags: [track-actions]
+      summary: Request a signed upload URL for a photo or video on an unresolved action
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrackActionMediaUploadRequest"
+      responses:
+        "200":
+          description: Signed upload URL and the object path to attach afterwards
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackActionMediaUploadResponse"
+        "400":
+          description: Not a JPEG, PNG, WebP, MP4, MOV or WebM file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Action not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The action is resolved, or the business's paid storage is full (code STORAGE_FULL)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /track-actions/{id}/media:
+    post:
+      operationId: attachTrackActionMedia
+      tags: [track-actions]
+      summary: Check an uploaded photo or video and attach it to an unresolved action
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrackActionMediaAttachRequest"
+      responses:
+        "200":
+          description: The action's photos and videos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackActionMediaList"
+        "400":
+          description: The file is not a valid photo or video
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Action or uploaded file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The action is resolved
           content:
             application/json:
               schema:
@@ -5558,6 +5646,44 @@ components:
           type: string
         message:
           type: string
+    TrackActionMediaUploadRequest:
+      type: object
+      required: [name, contentType]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        contentType:
+          type: string
+          minLength: 1
+          maxLength: 100
+    TrackActionMediaUploadResponse:
+      type: object
+      required: [uploadUrl, objectPath]
+      properties:
+        uploadUrl:
+          type: string
+        objectPath:
+          type: string
+    TrackActionMediaAttachRequest:
+      type: object
+      required: [objectPath]
+      additionalProperties: false
+      properties:
+        objectPath:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    TrackActionMediaList:
+      type: object
+      required: [mediaUrls]
+      properties:
+        mediaUrls:
+          type: array
+          items:
+            type: string
     FixTrackIssueMediaList:
       type: object
       required: [mediaUrls]

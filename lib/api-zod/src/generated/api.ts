@@ -2932,6 +2932,50 @@ export const RequestUploadUrlResponse = zod.object({
 
 
 /**
+ * @summary Request a signed upload URL for a photo or video on an unresolved action
+ */
+export const RequestTrackActionMediaUploadParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const requestTrackActionMediaUploadBodyNameMax = 200;
+
+export const requestTrackActionMediaUploadBodyContentTypeMax = 100;
+
+
+
+export const RequestTrackActionMediaUploadBody = zod.object({
+  "name": zod.string().min(1).max(requestTrackActionMediaUploadBodyNameMax),
+  "contentType": zod.string().min(1).max(requestTrackActionMediaUploadBodyContentTypeMax)
+})
+
+export const RequestTrackActionMediaUploadResponse = zod.object({
+  "uploadUrl": zod.string(),
+  "objectPath": zod.string()
+})
+
+
+/**
+ * @summary Check an uploaded photo or video and attach it to an unresolved action
+ */
+export const AttachTrackActionMediaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const attachTrackActionMediaBodyObjectPathMax = 1000;
+
+
+
+export const AttachTrackActionMediaBody = zod.object({
+  "objectPath": zod.string().min(1).max(attachTrackActionMediaBodyObjectPathMax)
+})
+
+export const AttachTrackActionMediaResponse = zod.object({
+  "mediaUrls": zod.array(zod.string())
+})
+
+
+/**
  * Frees storage once an issue is finished. The issue, its notes and its history stay; the history records who deleted which file and when.
  * @summary Delete a photo or video from a resolved or closed issue (owners and admins)
  */

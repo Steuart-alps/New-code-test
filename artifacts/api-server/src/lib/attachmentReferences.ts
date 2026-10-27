@@ -3,8 +3,8 @@ import { sql } from "drizzle-orm";
 /**
  * Every database location that can retain a private object reference. Keep this
  * registry aligned with the attachment sources in routes/export.ts. The two
- * specialised sources below cover the linked certificates table and FixTrack's
- * JSON media array.
+ * specialised sources below cover the linked certificates table and the JSON
+ * media arrays of FixTrack issues and track actions.
  */
 export const TENANT_ATTACHMENT_REFERENCE_SOURCES = [
   "doc_track_documents.object_path",
@@ -28,6 +28,7 @@ export const TENANT_ATTACHMENT_REFERENCE_SOURCES = [
   "fix_track_issues.media_urls",
   "fix_track_issues.completion_document_path",
   "fix_track_action_tokens.completion_object_path",
+  "track_actions.media_urls",
 ] as const;
 
 type SqlExecutor = {
@@ -76,6 +77,11 @@ export async function listTenantAttachmentObjectPaths(
         WHERE issue.client_id = ${tenantId}
       UNION ALL SELECT completion_document_path AS object_path FROM fix_track_issues WHERE client_id = ${tenantId}
       UNION ALL SELECT completion_object_path AS object_path FROM fix_track_action_tokens WHERE client_id = ${tenantId}
+      UNION ALL
+        SELECT media.object_path
+        FROM track_actions action
+        CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(action.media_urls, '[]'::jsonb)) media(object_path)
+        WHERE action.client_id = ${tenantId}
     ) attachments
     WHERE object_path LIKE '/objects/%'
   `);
@@ -140,6 +146,12 @@ export async function hasTenantAttachmentReference(
       OR EXISTS (
         SELECT 1 FROM fix_track_action_tokens
         WHERE client_id = ${tenantId} AND completion_object_path = ${objectPath}
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM track_actions action
+        CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(action.media_urls, '[]'::jsonb)) media(object_path)
+        WHERE action.client_id = ${tenantId} AND media.object_path = ${objectPath}
       )
     ) AS referenced
   `);

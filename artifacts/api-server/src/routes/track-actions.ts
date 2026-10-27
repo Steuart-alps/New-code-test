@@ -7,11 +7,17 @@ import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireCl
 import { isInspectionReportSource, missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
 import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
 import { resolveAssigneeChange } from "../lib/assignees";
+import {
+  ObjectContentError, ObjectGenerationError, ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService,
+} from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ensureUploadCapacity } from "../lib/storageLimit";
 
 const router = Router();
+const storage = new ObjectStorageService();
 // "audit" holds actions from uploaded audit and inspection reports
 // (routes/inspection-reports.ts) that belong to no other track.
-export const TRACK_ACTION_MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room", "audit"] as const;
+export const TRACK_ACTION_MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room", "coshh", "audit"] as const;
 const MODULES = TRACK_ACTION_MODULES;
 const severity = z.enum(["monitor", "action_required", "urgent"]);
 const nullableText = z.string().trim().max(10_000).nullable().optional();
@@ -67,6 +73,15 @@ const patchSchema = z.object({
   resolverSignature: drawnSignature.optional(),
 }).strict();
 const fixTrackDecisionSchema = z.object({ create: z.boolean() }).strict();
+// Evidence photos and videos: the types finalizeVerifiedIssueMediaUpload
+// checks and stores (as for FixTrack issues). HEIC is left out because the
+// server cannot decode iPhone HEIC; iPhones hand over JPEG instead.
+const ACTION_MEDIA_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/avif": ".avif",
+  "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
+};
+const actionMediaUploadSchema = z.object({ name: z.string().trim().min(1).max(200), contentType: z.string().trim().min(1).max(100) }).strict();
+const actionMediaSchema = z.object({ objectPath: z.string().min(1).max(1000) }).strict();
 
 async function canAccessSite(siteId: number | null | undefined, clientId: number, departmentId: number | null) {
   if (siteId == null) return true;
@@ -284,6 +299,78 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
   });
   if ("error" in result) return res.status(result.status).json({ error: result.error });
   res.status(result.status).json(result.row);
+});
+// Photos and videos as evidence on an action that is not yet resolved. The
+// browser uploads to the signed URL, then the file is checked and attached.
+async function openActionFor(clientId: number, id: number, departmentId: number | null) {
+  const [action] = await db.select({ id: trackActionsTable.id, siteId: trackActionsTable.siteId, status: trackActionsTable.status })
+    .from(trackActionsTable).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId)));
+  // Another department's action answers exactly like a missing one.
+  if (!action || !await canAccessSite(action.siteId, clientId, departmentId)) return { ok: false as const, status: 404, error: "Action not found" };
+  if (action.status === "resolved") return { ok: false as const, status: 409, error: "Photos and videos can't be added once an action is resolved" };
+  return { ok: true as const, action };
+}
+router.post("/:id/request-upload", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req); const id = Number(req.params.id); const parsed = actionMediaUploadSchema.safeParse(req.body);
+  if (!clientId || !Number.isInteger(id) || id <= 0 || !parsed.success) return res.status(400).json({ error: "Invalid request" });
+  const found = await openActionFor(clientId, id, getActiveDepartmentId(req));
+  if (!found.ok) return res.status(found.status).json({ error: found.error });
+  // The signed PUT binds this type, and storage serves it back from the app's
+  // origin, so only photo and video types may be reserved.
+  const contentType = parsed.data.contentType.toLowerCase();
+  const extension = ACTION_MEDIA_EXTENSIONS[contentType];
+  if (!extension) return res.status(400).json({ error: "Choose a JPEG, PNG, WebP, MP4, MOV or WebM file" });
+  try {
+    await ensureUploadCapacity(clientId, req.log);
+    const uploadUrl = await storage.getObjectEntityUploadURL(clientId, contentType, extension);
+    res.json({ uploadUrl, objectPath: storage.normalizeObjectEntityPath(uploadUrl) });
+  } catch (err) {
+    respondObjectStorageUnavailable(req, res, err, "track action media upload");
+  }
+});
+router.post("/:id/media", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req); const id = Number(req.params.id); const parsed = actionMediaSchema.safeParse(req.body);
+  if (!clientId || !Number.isInteger(id) || id <= 0 || !parsed.success) return res.status(400).json({ error: "Invalid request" });
+  const departmentId = getActiveDepartmentId(req);
+  const found = await openActionFor(clientId, id, departmentId);
+  if (!found.ok) return res.status(found.status).json({ error: found.error });
+  let finalizedPath: string;
+  try {
+    finalizedPath = (await storage.finalizeVerifiedIssueMediaUpload(parsed.data.objectPath, clientId)).objectPath;
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "Uploaded file not found" });
+    if (err instanceof ObjectContentError) {
+      // Rejected bytes are still unfinalised; a foreign path is refused by this call.
+      await storage.discardTenantUpload(parsed.data.objectPath, clientId).catch(() => {});
+      return res.status(400).json({ error: err.message });
+    }
+    if (err instanceof ObjectOwnershipError) return res.status(403).json({ error: err.message });
+    if (err instanceof ObjectGenerationError) return res.status(409).json({ error: err.message });
+    return respondObjectStorageUnavailable(req, res, err, "track action media finalization");
+  }
+  // Lock the row and append to the latest list so simultaneous uploads keep each other's files.
+  let result: { status: 200; mediaUrls: string[] } | { status: 404 | 409; error: string };
+  try {
+    result = await db.transaction(async (tx) => {
+      const [current] = await tx.select({ siteId: trackActionsTable.siteId, status: trackActionsTable.status, mediaUrls: trackActionsTable.mediaUrls })
+        .from(trackActionsTable).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId))).for("update");
+      if (!current || !await canAccessSite(current.siteId, clientId, departmentId)) return { status: 404 as const, error: "Action not found" };
+      if (current.status === "resolved") return { status: 409 as const, error: "Photos and videos can't be added once an action is resolved" };
+      const existing = current.mediaUrls ?? [];
+      const mediaUrls = existing.includes(finalizedPath) ? existing : [...existing, finalizedPath];
+      await tx.update(trackActionsTable).set({ mediaUrls, updatedAt: new Date() })
+        .where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId)));
+      return { status: 200 as const, mediaUrls };
+    });
+  } catch (error) {
+    await storage.deleteTenantObject(finalizedPath, clientId).catch(() => {});
+    throw error;
+  }
+  if (result.status !== 200) {
+    await storage.deleteTenantObject(finalizedPath, clientId).catch(() => {});
+    return res.status(result.status).json({ error: result.error });
+  }
+  res.json({ mediaUrls: result.mediaUrls });
 });
 router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); const id = Number(req.params.id); const parsed = patchSchema.safeParse(req.body); if (!clientId || !Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" }); if (!parsed.success || !Object.keys(parsed.data).length) return res.status(400).json({ error: parsed.success ? "No changes supplied" : parsed.error.flatten() });

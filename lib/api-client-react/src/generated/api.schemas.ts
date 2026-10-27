@@ -513,6 +513,36 @@ export interface FixTrackAssignContractorResult {
   message: string;
 }
 
+export interface TrackActionMediaUploadRequest {
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  contentType: string;
+}
+
+export interface TrackActionMediaUploadResponse {
+  uploadUrl: string;
+  objectPath: string;
+}
+
+export interface TrackActionMediaAttachRequest {
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  objectPath: string;
+}
+
+export interface TrackActionMediaList {
+  mediaUrls: string[];
+}
+
 export interface FixTrackIssueMediaList {
   mediaUrls: string[];
 }

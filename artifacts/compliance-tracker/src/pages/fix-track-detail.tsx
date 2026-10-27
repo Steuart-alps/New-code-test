@@ -15,6 +15,9 @@ import { cn } from "@/lib/utils";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
 import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
+import { MediaGallery } from "@/components/media-gallery";
+import { MEDIA_INPUT_ACCEPT, mediaContentType, mediaFileProblem, privateObjectUrl, putFileWithProgress } from "@/lib/media-upload";
+import { useFileDrop } from "@/hooks/use-file-drop";
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
 
@@ -68,61 +71,6 @@ type MediaUploadProgress = {
   percent: number;
   stage: "preparing" | "uploading" | "saving";
 };
-
-const API_BASE = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
-// HEIC/HEIF is left out on purpose: the server cannot decode iPhone HEIC
-// (HEVC) photos, and because the picker does not list HEIC, iPhones hand
-// over their photos as JPEG.
-const MEDIA_INPUT_ACCEPT = "image/jpeg,image/png,image/webp,image/avif,video/mp4,video/quicktime,video/webm";
-const HEIC_EXTENSION = /\.(heic|heif)$/i;
-const MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-  avif: "image/avif",
-  mp4: "video/mp4",
-  mov: "video/quicktime",
-  webm: "video/webm",
-};
-
-function mediaContentType(file: File): string {
-  if (file.type) return file.type.toLowerCase();
-  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  return MEDIA_TYPE_BY_EXTENSION[extension] ?? "";
-}
-
-// Media elements cannot send the active-client query that clientApiFetch adds,
-// so a consultant's tenant goes in the URL, as check-photo-uploader does.
-function privateObjectUrl(objectPath: string, clientId: number | null | undefined): string {
-  const normalizedPath = objectPath.startsWith("/objects/")
-    ? objectPath
-    : `/objects/${objectPath.replace(/^\/+/, "")}`;
-  return `${API_BASE}/storage${normalizedPath}${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`;
-}
-
-function putFileWithProgress(
-  uploadUrl: string,
-  file: File,
-  contentType: string,
-  onProgress: (percent: number) => void,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open("PUT", uploadUrl);
-    request.setRequestHeader("Content-Type", contentType);
-    request.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
-    });
-    request.addEventListener("load", () => {
-      if (request.status >= 200 && request.status < 300) resolve();
-      else reject(new Error(`Storage upload failed (${request.status}).`));
-    });
-    request.addEventListener("error", () => reject(new Error("Network error while uploading the file.")));
-    request.addEventListener("abort", () => reject(new Error("Upload was cancelled.")));
-    request.send(file);
-  });
-}
 
 const ISSUE_TYPES: Record<string, { label: string; color: string }> = {
   electrical:    { label: "Electrical",    color: "bg-yellow-100 text-yellow-800 border-yellow-200" },
@@ -228,106 +176,6 @@ function StatusTimeline({ issue }: { issue: Issue }) {
 
 // ── Media Viewer Component ────────────────────────────────────────────────────
 
-function MediaGallery({ urls, clientId, onDelete }: {
-  urls: string[];
-  clientId: number | null | undefined;
-  /** Shown to owners and admins once the issue is resolved or closed. */
-  onDelete?: (url: string) => Promise<void>;
-}) {
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [initialIndex, setInitialIndex] = useState(0);
-  const [deleting, setDeleting] = useState<string | null>(null);
-
-  if (!urls || urls.length === 0) return null;
-
-  const confirmDelete = async (url: string, isVideo: boolean) => {
-    if (!onDelete) return;
-    const what = isVideo ? "video" : "photo";
-    if (!window.confirm(`Delete this ${what} for good to free up storage? The issue and its history stay, and the history will show that you deleted it.`)) return;
-    setDeleting(url);
-    try {
-      await onDelete(url);
-    } finally {
-      setDeleting(null);
-    }
-  };
-
-  return (
-    <>
-      <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
-        {urls.map((url, idx) => {
-          const isVideo = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i.test(url);
-          const src = privateObjectUrl(url, clientId);
-          
-          return (
-            <div key={url} className="relative flex-shrink-0 snap-start">
-            <button
-              type="button"
-              onClick={() => { setInitialIndex(idx); setViewerOpen(true); }}
-              aria-label={`Open issue media ${idx + 1}`}
-              data-testid={`button-open-issue-media-${idx}`}
-              className="relative w-28 h-28 rounded-xl overflow-hidden border border-border bg-muted/30 active:scale-95 transition-transform"
-            >
-              {isVideo ? (
-                <div className="w-full h-full bg-black/10 flex items-center justify-center">
-                  <div className="w-8 h-8 rounded-full bg-background/80 flex items-center justify-center backdrop-blur-sm">
-                    <div className="w-0 h-0 border-t-4 border-t-transparent border-l-6 border-l-foreground border-b-4 border-b-transparent ml-1" />
-                  </div>
-                </div>
-              ) : (
-                <img src={src} alt="Issue media" className="w-full h-full object-cover" />
-              )}
-            </button>
-            {onDelete && (
-              <button
-                type="button"
-                onClick={() => { void confirmDelete(url, isVideo); }}
-                disabled={deleting !== null}
-                aria-label={`Delete issue media ${idx + 1}`}
-                data-testid={`button-delete-issue-media-${idx}`}
-                className="absolute top-1.5 right-1.5 w-8 h-8 rounded-full bg-background/90 border border-border flex items-center justify-center text-red-600 shadow-sm disabled:opacity-50"
-              >
-                {deleting === url ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-              </button>
-            )}
-            </div>
-          );
-        })}
-      </div>
-
-      {viewerOpen && (
-        <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col animate-in fade-in duration-200">
-          <div className="p-4 flex justify-between items-center bg-background/50 border-b absolute top-0 left-0 right-0 z-10">
-            <p className="font-medium text-sm">Media Viewer</p>
-            <Button variant="ghost" size="sm" onClick={() => setViewerOpen(false)}>Close</Button>
-          </div>
-          
-          <div className="flex-1 flex overflow-x-auto snap-x snap-mandatory pt-16">
-            {urls.map((url, idx) => {
-              const isVideo = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i.test(url);
-              const src = privateObjectUrl(url, clientId);
-              
-              return (
-                <div 
-                  key={url} 
-                  className="w-full flex-shrink-0 flex items-center justify-center p-4 snap-center"
-                  ref={el => { if (el && idx === initialIndex) el.scrollIntoView(); }}
-                >
-                  {isVideo ? (
-                    <video src={src} controls playsInline preload="metadata" className="max-w-full max-h-full rounded-lg" autoPlay={idx === initialIndex} />
-                  ) : (
-                    <img src={src} alt="Full view" className="max-w-full max-h-full object-contain rounded-lg shadow-xl" />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
 // ── Contractor job ────────────────────────────────────────────────────────────
 
 /** Who has the job outside the business: the contractor, their visit date and whether they finished. */
@@ -415,6 +263,7 @@ export default function FixTrackDetailPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
+  const mediaDrop = useFileDrop((files) => { void uploadIssueMedia(files); }, canEdit && !mediaUploading);
 
   async function deleteMedia(objectPath: string) {
     if (!issue) return;
@@ -463,15 +312,8 @@ export default function FixTrackDetailPage() {
       for (const [index, file] of files.entries()) {
         try {
           const contentType = mediaContentType(file);
-          if (/^image\/hei[cf]/.test(contentType) || HEIC_EXTENSION.test(file.name)) {
-            throw new Error("HEIC photos can't be read. Save the photo as JPEG and upload it again.");
-          }
-          if (!Object.values(MEDIA_TYPE_BY_EXTENSION).includes(contentType)) {
-            throw new Error("Use a JPEG, PNG, WebP, MP4, MOV, or WebM file.");
-          }
-          if (contentType.startsWith("image/") && file.size > 10 * 1024 * 1024) {
-            throw new Error("Photos must be 10 MB or smaller.");
-          }
+          const problem = mediaFileProblem(file);
+          if (problem) throw new Error(problem);
           assertWithinUploadLimit(file);
 
           setMediaUploadProgress({
@@ -763,7 +605,12 @@ export default function FixTrackDetailPage() {
                 <p className="text-xs text-muted-foreground">Photos and videos can be deleted to free up storage once the issue is resolved.</p>
               )}
               {canEdit && (
-                <div className="space-y-3">
+                <div
+                  {...mediaDrop.dropZoneProps}
+                  className={cn("space-y-3 rounded-lg border border-dashed p-3 transition-colors", mediaDrop.isDragging ? "border-primary bg-primary/5" : "border-border")}
+                  data-testid="dropzone-issue-media"
+                >
+                  <p className="hidden text-xs text-muted-foreground sm:block">Drag photos or videos here, or use the buttons.</p>
                   <input
                     ref={cameraInputRef}
                     type="file"

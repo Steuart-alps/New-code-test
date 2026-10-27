@@ -29,6 +29,8 @@ import { elapsedBoardDays, FixTrackBoard, type FixTrackBoardIssue } from "@/comp
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
 import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
+import { MEDIA_INPUT_ACCEPT, VIDEO_PATH, mediaContentType, mediaFileProblem, privateObjectUrl } from "@/lib/media-upload";
+import { useFileDrop } from "@/hooks/use-file-drop";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -128,21 +130,22 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1.5"><Label>{label}</Label>{children}</div>;
 }
 
-function MediaThumb({ path, clientId, onRemove }: { path: string; clientId: number | null; onRemove?: () => void }) {
-  const isVideo = /\.(mp4|mov|webm|avi)$/i.test(path);
+function MediaThumb({ path, clientId, previewSrc, onRemove }: { path: string; clientId: number | null; previewSrc?: string; onRemove?: () => void }) {
+  const isVideo = VIDEO_PATH.test(path);
   // Stored paths already start with /objects/; a consultant's tenant goes in
-  // the URL because media elements cannot send the active-client query.
-  const objectPath = path.startsWith("/objects/") ? path : `/objects/${path.replace(/^\/+/, "")}`;
-  const src = `/api/storage${objectPath}${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`;
+  // the URL because media elements cannot send the active-client query. A file
+  // uploaded in this form isn't attached until the issue is saved, and storage
+  // refuses unattached files, so it shows from the browser's copy until then.
+  const src = previewSrc ?? privateObjectUrl(path, clientId);
   return (
     <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-border bg-muted group flex-shrink-0">
       {isVideo
-        ? <video src={src} className="w-full h-full object-cover" />
+        ? <video src={src} className="w-full h-full object-cover" muted playsInline preload="metadata" />
         : <img src={src} alt="" className="w-full h-full object-cover"
             onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />}
       {onRemove && (
-        <button type="button" onClick={onRemove}
-          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <button type="button" onClick={onRemove} aria-label="Remove this photo or video"
+          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100 transition-opacity">
           <X className="w-3 h-3" />
         </button>
       )}
@@ -216,37 +219,54 @@ function IssueForm({ form, setForm, issueId, isNew }: {
     Array.isArray(c.trades) && c.trades.some(t => matchingTrades.includes(t)),
   );
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
+  // Browser copies of files uploaded in this form, shown until the issue is saved.
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const previewsRef = useRef(previews);
+  previewsRef.current = previews;
+  useEffect(() => () => { Object.values(previewsRef.current).forEach(url => URL.revokeObjectURL(url)); }, []);
+
+  async function uploadFiles(files: File[]) {
+    if (files.length === 0 || uploading) return;
     if (!issueId) {
       toast({ title: "Save the issue first to attach media", variant: "destructive" });
       return;
     }
     setUploading(true);
     const newPaths: string[] = [];
+    const newPreviews: Record<string, string> = {};
     for (const file of files) {
       try {
+        const problem = mediaFileProblem(file);
+        if (problem) throw new Error(problem);
         assertWithinUploadLimit(file);
+        const contentType = mediaContentType(file);
         const res = await clientApiFetch(`/fix-track/issues/${issueId}/request-upload`, {
           method: "POST",
-          body: JSON.stringify({ name: file.name, contentType: file.type }),
+          body: JSON.stringify({ name: file.name, contentType }),
         });
         if (!res.ok) {
           throw new Error(await getApiErrorMessage(res, "Could not get upload URL"));
         }
         const { uploadUrl, objectPath } = await res.json();
-        const up = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+        const up = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": contentType } });
         if (!up.ok) throw new Error("Upload failed");
         newPaths.push(objectPath);
+        newPreviews[objectPath] = URL.createObjectURL(file);
       } catch (err: any) {
-        toast({ title: "Upload failed", description: err?.message, variant: "destructive" });
+        toast({ title: `${file.name} wasn't uploaded`, description: err?.message, variant: "destructive" });
       }
     }
+    setPreviews(prev => ({ ...prev, ...newPreviews }));
     setForm((prev: any) => ({ ...prev, mediaUrls: [...(prev.mediaUrls ?? []), ...newPaths] }));
     setUploading(false);
-    if (fileRef.current) fileRef.current.value = "";
   }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    void uploadFiles(files);
+  }
+  const mediaDrop = useFileDrop(files => { void uploadFiles(files); }, !!issueId && !uploading);
 
   function removeMedia(path: string) {
     setForm({ ...form, mediaUrls: mediaUrls.filter(p => p !== path) });
@@ -379,21 +399,25 @@ function IssueForm({ form, setForm, issueId, isNew }: {
       </F>
 
       {/* Media attachments */}
-      <div className="space-y-2">
+      <div
+        {...mediaDrop.dropZoneProps}
+        className={cn("space-y-2 rounded-lg transition-colors", mediaDrop.isDragging && "bg-primary/5 ring-2 ring-primary ring-offset-2")}
+        data-testid="dropzone-issue-form-media"
+      >
         <Label>Photos / Videos</Label>
         {!issueId && (
-          <p className="text-xs text-muted-foreground">Create the issue first, then re-open it to attach photos and videos.</p>
+          <p className="text-xs text-muted-foreground">Create the issue first, then attach photos and videos here.</p>
         )}
         {mediaUrls.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {mediaUrls.map(path => (
-              <MediaThumb key={path} path={path} clientId={activeClientId} onRemove={() => removeMedia(path)} />
+              <MediaThumb key={path} path={path} clientId={activeClientId} previewSrc={previews[path]} onRemove={() => removeMedia(path)} />
             ))}
           </div>
         )}
         {issueId && (
-          <div>
-            <input ref={fileRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleFileChange} />
+          <div className="flex flex-wrap items-center gap-2">
+            <input ref={fileRef} type="file" accept={MEDIA_INPUT_ACCEPT} multiple className="hidden" onChange={handleFileChange} />
             <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}
               disabled={uploading} className="gap-1.5">
               {uploading
@@ -401,6 +425,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
                 : <ImagePlus className="w-3.5 h-3.5" />}
               {uploading ? "Uploading…" : "Attach Photo / Video"}
             </Button>
+            <span className="hidden text-xs text-muted-foreground sm:inline">or drag them here</span>
           </div>
         )}
       </div>

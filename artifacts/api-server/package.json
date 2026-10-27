@@ -139,6 +139,8 @@
     "test:photo-storage-roundtrip:fake": "bash tests/run-photo-storage-roundtrip.sh --in-process-fake",
     "test:fixtrack-video-roundtrip": "bash tests/run-photo-storage-roundtrip.sh --fixtrack-video",
     "test:fixtrack-video-roundtrip:fake": "bash tests/run-photo-storage-roundtrip.sh --in-process-fake --fixtrack-video",
+    "test:track-action-media-roundtrip": "bash tests/run-photo-storage-roundtrip.sh --track-action-media",
+    "test:track-action-media-roundtrip:fake": "bash tests/run-photo-storage-roundtrip.sh --in-process-fake --track-action-media",
     "test:staged-photo-creation": "node tests/staged-photo-creation.mjs",
     "test:staged-photo-cleanup": "bash tests/run-fresh-schema.sh tests/staged-photo-cleanup.mjs",
     "test:storage-outage-routes": "bash tests/run-storage-outage-routes.sh",

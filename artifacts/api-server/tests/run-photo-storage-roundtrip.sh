@@ -6,10 +6,14 @@
 #   bash tests/run-photo-storage-roundtrip.sh                    # dedicated GCS test bucket
 #   bash tests/run-photo-storage-roundtrip.sh --in-process-fake  # NOT the real round trip
 #   ... --fixtrack-video   # FixTrack MP4/MOV/WebM suite instead of incident photos
+#   ... --track-action-media  # photos and videos dragged onto a track action
 #
 # The default suite covers incident photos (attach, reload, delete). The
 # FixTrack video suite covers attach, gallery play and seek before and after a
-# reload, byte ranges, tenant boundaries and viewer refusal.
+# reload, byte ranges, tenant boundaries and viewer refusal. The track action
+# suite drags a photo and a video onto an action on the Report actions page.
+# PHOTO_ROUNDTRIP_SCREENSHOT_DIR, when set, is where browser suites may save
+# screenshots.
 #
 # Storage comes only from the PHOTO_ROUNDTRIP_* variables (see
 # photo-roundtrip-config.mjs). Without them the real mode skips with a message
@@ -29,7 +33,8 @@ for arg in "$@"; do
   case "$arg" in
     --in-process-fake) mode="in-process-fake" ;;
     --fixtrack-video) browser_test="fixtrack-video-roundtrip-browser.test.mjs" ;;
-    *) echo "Usage: $0 [--in-process-fake] [--fixtrack-video]" >&2; exit 2 ;;
+    --track-action-media) browser_test="track-action-media-roundtrip-browser.test.mjs" ;;
+    *) echo "Usage: $0 [--in-process-fake] [--fixtrack-video | --track-action-media]" >&2; exit 2 ;;
   esac
 done
 
@@ -161,5 +166,6 @@ done
 
 browser_env=(PATH="$PATH" HOME="$HOME" PHOTO_ROUNDTRIP_APP_URL="$origin" "${inspector_env[@]}")
 [ -n "${CHROMIUM_PATH:-}" ] && browser_env+=(CHROMIUM_PATH="$CHROMIUM_PATH")
+[ -n "${PHOTO_ROUNDTRIP_SCREENSHOT_DIR:-}" ] && browser_env+=(PHOTO_ROUNDTRIP_SCREENSHOT_DIR="$PHOTO_ROUNDTRIP_SCREENSHOT_DIR")
 [ "$mode" = "gcs" ] || browser_env+=(PHOTO_ROUNDTRIP_FAKE_UPLOAD_PORT="$upload_port")
 (cd "$web_dir" && env -i "${browser_env[@]}" node "tests/$browser_test")

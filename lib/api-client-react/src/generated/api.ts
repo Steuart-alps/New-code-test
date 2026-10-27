@@ -235,6 +235,10 @@ import type {
   TestEmailRequest,
   TestEmailResponse,
   TodayByDepartment,
+  TrackActionMediaAttachRequest,
+  TrackActionMediaList,
+  TrackActionMediaUploadRequest,
+  TrackActionMediaUploadResponse,
   TrackSummaryPreview,
   UpdateCategoryRequest,
   UpdateCertificateDefectRequest,
@@ -5932,6 +5936,150 @@ export const useRequestUploadUrl = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getRequestUploadUrlMutationOptions(options));
+    }
+
+export const getRequestTrackActionMediaUploadUrl = (id: number,) => {
+
+
+
+
+  return `/api/track-actions/${id}/request-upload`
+}
+
+/**
+ * @summary Request a signed upload URL for a photo or video on an unresolved action
+ */
+export const requestTrackActionMediaUpload = async (id: number,
+    trackActionMediaUploadRequest: TrackActionMediaUploadRequest, options?: RequestInit): Promise<TrackActionMediaUploadResponse> => {
+
+  return customFetch<TrackActionMediaUploadResponse>(getRequestTrackActionMediaUploadUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(trackActionMediaUploadRequest)
+  }
+);}
+
+
+
+
+
+export const getRequestTrackActionMediaUploadMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestTrackActionMediaUpload>>, TError,{id: number;data: BodyType<TrackActionMediaUploadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestTrackActionMediaUpload>>, TError,{id: number;data: BodyType<TrackActionMediaUploadRequest>}, TContext> => {
+
+const mutationKey = ['requestTrackActionMediaUpload'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestTrackActionMediaUpload>>, {id: number;data: BodyType<TrackActionMediaUploadRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  requestTrackActionMediaUpload(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestTrackActionMediaUploadMutationResult = NonNullable<Awaited<ReturnType<typeof requestTrackActionMediaUpload>>>
+    export type RequestTrackActionMediaUploadMutationBody = BodyType<TrackActionMediaUploadRequest>
+    export type RequestTrackActionMediaUploadMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Request a signed upload URL for a photo or video on an unresolved action
+ */
+export const useRequestTrackActionMediaUpload = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestTrackActionMediaUpload>>, TError,{id: number;data: BodyType<TrackActionMediaUploadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestTrackActionMediaUpload>>,
+        TError,
+        {id: number;data: BodyType<TrackActionMediaUploadRequest>},
+        TContext
+      > => {
+      return useMutation(getRequestTrackActionMediaUploadMutationOptions(options));
+    }
+
+export const getAttachTrackActionMediaUrl = (id: number,) => {
+
+
+
+
+  return `/api/track-actions/${id}/media`
+}
+
+/**
+ * @summary Check an uploaded photo or video and attach it to an unresolved action
+ */
+export const attachTrackActionMedia = async (id: number,
+    trackActionMediaAttachRequest: TrackActionMediaAttachRequest, options?: RequestInit): Promise<TrackActionMediaList> => {
+
+  return customFetch<TrackActionMediaList>(getAttachTrackActionMediaUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(trackActionMediaAttachRequest)
+  }
+);}
+
+
+
+
+
+export const getAttachTrackActionMediaMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachTrackActionMedia>>, TError,{id: number;data: BodyType<TrackActionMediaAttachRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof attachTrackActionMedia>>, TError,{id: number;data: BodyType<TrackActionMediaAttachRequest>}, TContext> => {
+
+const mutationKey = ['attachTrackActionMedia'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof attachTrackActionMedia>>, {id: number;data: BodyType<TrackActionMediaAttachRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  attachTrackActionMedia(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AttachTrackActionMediaMutationResult = NonNullable<Awaited<ReturnType<typeof attachTrackActionMedia>>>
+    export type AttachTrackActionMediaMutationBody = BodyType<TrackActionMediaAttachRequest>
+    export type AttachTrackActionMediaMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Check an uploaded photo or video and attach it to an unresolved action
+ */
+export const useAttachTrackActionMedia = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachTrackActionMedia>>, TError,{id: number;data: BodyType<TrackActionMediaAttachRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof attachTrackActionMedia>>,
+        TError,
+        {id: number;data: BodyType<TrackActionMediaAttachRequest>},
+        TContext
+      > => {
+      return useMutation(getAttachTrackActionMediaMutationOptions(options));
     }
 
 export const getDeleteFixTrackIssueMediaUrl = (id: number,) => {
