@@ -107,7 +107,7 @@ export default function ContractorsPage() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-24 bg-card rounded-2xl border border-dashed border-border/60">
           <Building className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-          <h3 className="text-lg font-semibold">No contractors found</h3>
+          <h3 className="text-lg font-bold">No contractors found</h3>
           <p className="text-muted-foreground mt-1 max-w-sm mx-auto">
             {showNonCompliantOnly ? "No contractors with missing or expired compliance fields match your search." : search ? "Try another search." : "Add your external contractors here to track their compliance and certificates."}
           </p>
@@ -127,7 +127,7 @@ export default function ContractorsPage() {
                       <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors transform group-hover:translate-x-1" />
                     </div>
                   </div>
-                  <h3 className="font-display font-semibold text-lg">{contractor.name}</h3>
+                  <h3 className="font-display font-bold text-lg">{contractor.name}</h3>
                   {contractor.company && <p className="text-sm text-muted-foreground mt-0.5">{contractor.company}</p>}
 
                   <div className="mt-auto pt-5 space-y-2">

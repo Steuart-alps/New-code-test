@@ -484,7 +484,7 @@ export default function CoshhTrackPage() {
             <Beaker className="w-4 h-4 text-orange-700" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold leading-tight">COSHHTrack</h1>
+            <h1 className="text-lg font-bold leading-tight">COSHHTrack</h1>
             <p className="text-xs text-muted-foreground">COSHH assessments, extraction (LEV) tests, health checks, air monitoring and staff briefings</p>
           </div>
         </div>

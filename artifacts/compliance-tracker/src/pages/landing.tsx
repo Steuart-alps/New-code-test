@@ -317,7 +317,7 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
   return (
     <div className="max-w-5xl mx-auto">
       <div className="text-center mb-14">
-        <h2 className="text-4xl sm:text-5xl font-display mb-5 text-[#162D42]">Build your compliance stack</h2>
+        <h2 className="text-4xl sm:text-5xl font-display font-bold mb-5 text-[#162D42]">Build your compliance stack</h2>
         <p className="text-muted-foreground text-xl font-light max-w-xl mx-auto">
           Start with the core and add the modules you need. Pay only for what you use — capped at £50/site/month for everything.
         </p>
@@ -360,7 +360,7 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
                   <Icon className={`w-5 h-5 ${mod.color}`} />
                 </div>
                 <div>
-                  <div className="font-display text-lg text-[#162D42]">{mod.label}</div>
+                  <div className="font-display font-bold text-lg text-[#162D42]">{mod.label}</div>
                   <div className="text-sm font-medium text-muted-foreground">
                     {mod.required ? "£10/site/mo" : "+ £10/site/mo"}
                   </div>
@@ -398,12 +398,12 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
             {bundleActive && <CheckCircle2 className="w-3 h-3 text-white" />}
           </div>
           <div>
-            <span className="font-display text-[#162D42] text-lg">ComplyTrack Complete</span>
+            <span className="font-display font-bold text-[#162D42] text-lg">ComplyTrack Complete</span>
             <span className="text-sm text-muted-foreground ml-3 font-light">All current and future modules — best value</span>
           </div>
         </div>
         <div className="text-right flex-shrink-0">
-          <div className="font-display text-2xl text-emerald-800">£50<span className="text-sm font-sans font-normal text-muted-foreground">/site/mo</span></div>
+          <div className="font-display font-bold text-2xl text-emerald-800">£50<span className="text-sm font-sans font-normal text-muted-foreground">/site/mo</span></div>
           <div className="text-xs text-emerald-700 font-medium">Save £{(MODULES.filter(m => !m.required).length * 10) - (50 - 10)}/mo vs. all add-ons</div>
         </div>
       </div>
@@ -413,7 +413,7 @@ function PricingBuilder({ onStart, selected, setSelected, bundleActive, setBundl
         <div>
           <div className="text-sm text-white/60 uppercase tracking-widest font-medium mb-1">Your plan · per site per month</div>
           <div className="flex items-baseline gap-2">
-            <span className="text-5xl font-display">£{total}</span>
+            <span className="text-5xl font-display font-bold">£{total}</span>
             <span className="text-white/60 text-sm">+ VAT</span>
           </div>
           <div className="text-sm text-white/60 mt-1 font-light">
@@ -462,7 +462,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-6 h-6 text-primary" />
-              <span className="font-medium text-xl font-display tracking-wide">ComplyTrack</span>
+              <span className="font-bold text-xl font-display tracking-wide">ComplyTrack</span>
             </div>
             <div className="hidden sm:flex items-center gap-3 pl-4 border-l border-white/20">
               <span className="text-sm text-white/60 font-display italic">by</span>
@@ -486,7 +486,7 @@ export default function LandingPage() {
             <div className="inline-flex items-center gap-2 border border-white/20 text-white/80 rounded-full px-4 py-1.5 text-sm font-medium mb-10 tracking-wide">
               <Star className="w-3.5 h-3.5 text-primary fill-primary" /> Built to support UK health & safety record keeping
             </div>
-            <h1 className="text-5xl sm:text-7xl font-display leading-[1.05] mb-8 tracking-tight text-white">
+            <h1 className="text-5xl sm:text-7xl font-display font-bold leading-[1.05] mb-8 tracking-tight text-white">
               Health & Safety<br />
               <span className="text-primary italic">Done Right.</span>
             </h1>
@@ -523,7 +523,7 @@ export default function LandingPage() {
       <section className="py-32 px-6 bg-[#F7F2E4]">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-4xl sm:text-5xl font-display mb-5 text-[#162D42]">One platform, every compliance discipline</h2>
+            <h2 className="text-4xl sm:text-5xl font-display font-bold mb-5 text-[#162D42]">One platform, every compliance discipline</h2>
             <p className="text-muted-foreground text-xl font-light max-w-2xl mx-auto">
               Each module supports records and controls for a specific UK health-and-safety area. Use them together or separately — your call.
             </p>
@@ -548,7 +548,7 @@ export default function LandingPage() {
                   <div className={`w-12 h-12 ${mod.bg} flex items-center justify-center mb-5 group-hover:scale-110 transition-transform duration-300`}>
                     <Icon className={`w-6 h-6 ${mod.color}`} />
                   </div>
-                  <div className="font-display text-xl text-[#162D42] mb-1">{mod.label}</div>
+                  <div className="font-display font-bold text-xl text-[#162D42] mb-1">{mod.label}</div>
                   <div className={`text-sm font-medium mb-4 ${mod.color}`}>
                     {mod.required ? "Core — £10/site/mo" : "Add-on — £10/site/mo"}
                   </div>
@@ -582,7 +582,7 @@ export default function LandingPage() {
       <section className="py-32 px-6 bg-[#F7F2E4]">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-20">
-            <h2 className="text-4xl sm:text-5xl font-display mb-6 text-[#162D42]">Everything that runs underneath</h2>
+            <h2 className="text-4xl sm:text-5xl font-display font-bold mb-6 text-[#162D42]">Everything that runs underneath</h2>
             <p className="text-muted-foreground text-xl font-light max-w-2xl mx-auto">Every module is built on a shared platform with these capabilities.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -598,7 +598,7 @@ export default function LandingPage() {
                 <div className="w-12 h-12 bg-[#F7F2E4] flex items-center justify-center mb-6 group-hover:bg-primary transition-colors duration-300">
                   <f.icon className="w-5 h-5 text-[#162D42] group-hover:text-white transition-colors duration-300" />
                 </div>
-                <h3 className="font-medium text-xl font-display text-[#162D42] mb-3">{f.title}</h3>
+                <h3 className="font-bold text-xl font-display text-[#162D42] mb-3">{f.title}</h3>
                 <p className="text-muted-foreground leading-relaxed font-light">{f.desc}</p>
               </motion.div>
             ))}
@@ -611,7 +611,7 @@ export default function LandingPage() {
       {/* Final CTA */}
       <section className="py-32 px-6 bg-[#F7F2E4] text-center">
         <div className="max-w-2xl mx-auto">
-          <h2 className="text-4xl sm:text-5xl font-display mb-6 text-[#162D42]">Ready to stay on top of your compliance?</h2>
+          <h2 className="text-4xl sm:text-5xl font-display font-bold mb-6 text-[#162D42]">Ready to stay on top of your compliance?</h2>
           <p className="text-muted-foreground text-xl font-light mb-12">
             Start your 14-day free trial. No credit card required. Add your team, invite your H&S consultant, and start logging on day one.
           </p>
@@ -627,7 +627,7 @@ export default function LandingPage() {
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-primary" />
-              <span className="font-medium font-display text-lg tracking-wide text-white">ComplyTrack</span>
+              <span className="font-bold font-display text-lg tracking-wide text-white">ComplyTrack</span>
             </div>
             <div className="hidden sm:block w-px h-6 bg-white/20" />
             <div className="flex items-center gap-3">

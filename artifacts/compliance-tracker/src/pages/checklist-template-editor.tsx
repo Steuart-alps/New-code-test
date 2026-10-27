@@ -150,7 +150,7 @@ export function ChecklistTemplateEditor({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-lg flex flex-col p-0">
         <SheetHeader className="px-6 pt-6 pb-4 border-b shrink-0">
-          <SheetTitle className="font-display">Customise checklist</SheetTitle>
+          <SheetTitle className="font-display font-bold">Customise checklist</SheetTitle>
           <SheetDescription>
             <span className="font-medium text-foreground">{typeLabel}</span>
             {siteName ? <> · {siteName}</> : <> · all sites</>}

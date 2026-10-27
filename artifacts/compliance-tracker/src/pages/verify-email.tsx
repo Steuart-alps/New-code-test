@@ -92,7 +92,7 @@ export default function VerifyEmailPage() {
       <div className="w-full max-w-md bg-white shadow-xl p-10 text-center">
         <ShieldCheck className="w-10 h-10 text-primary mx-auto mb-5" />
         <div className="flex justify-center mb-5">{content.icon}</div>
-        <h1 className="text-2xl font-display text-[#162D42] mb-3">{content.title}</h1>
+        <h1 className="text-2xl font-display font-bold text-[#162D42] mb-3">{content.title}</h1>
         <p className="text-sm text-muted-foreground leading-relaxed mb-8">{content.text}</p>
         {state === "success" ? (
           <Button className="w-full" onClick={() => navigate("/login")}>Go to sign in</Button>

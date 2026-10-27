@@ -311,7 +311,7 @@ export default function AsbestosRegisterPage() {
             <ShieldAlert className="w-4 h-4 text-slate-700" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold leading-tight">Asbestos register</h1>
+            <h1 className="text-lg font-bold leading-tight">Asbestos register</h1>
             <p className="text-xs text-muted-foreground">Surveys, known asbestos-containing materials and the management plan for each site</p>
           </div>
         </div>
@@ -371,7 +371,7 @@ export default function AsbestosRegisterPage() {
           <section key={record.id} className={cn("rounded-xl border p-4 space-y-3", record.planReviewOverdue ? "border-red-300" : "border-border")}>
             <div className="flex items-start justify-between gap-2 flex-wrap">
               <div className="min-w-0">
-                <h2 className="font-semibold break-words">{siteName(record.siteId)}</h2>
+                <h2 className="font-bold break-words">{siteName(record.siteId)}</h2>
                 <div className="flex flex-wrap gap-1.5 mt-1">
                   <Badge variant="outline" className="text-[11px]">Built before 2000: {BUILT_LABELS[record.builtBefore2000]}</Badge>
                   {record.noAsbestosExpected && <Badge variant="outline" className="text-[11px] border-emerald-300 bg-emerald-50 text-emerald-700">No asbestos expected (post-2000 build)</Badge>}
@@ -408,7 +408,7 @@ export default function AsbestosRegisterPage() {
             {record.notes && <p className="text-xs whitespace-pre-wrap">{record.notes}</p>}
             {(record.surveyHistory?.length ?? 0) > 0 && (
               <div className="space-y-1">
-                <h3 className="text-xs font-medium text-muted-foreground">Previous surveys</h3>
+                <h3 className="text-xs font-bold text-muted-foreground">Previous surveys</h3>
                 <ul className="space-y-1">
                   {record.surveyHistory!.map((survey) => (
                     <li key={survey.id} className="flex items-center justify-between gap-2 text-xs">
@@ -429,7 +429,7 @@ export default function AsbestosRegisterPage() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-medium">Asbestos-containing materials ({record.entries.length})</h3>
+                <h3 className="text-sm font-bold">Asbestos-containing materials ({record.entries.length})</h3>
                 {canEdit && (
                   <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => openNewEntry(record)}>
                     <Plus className="w-3 h-3" /> Add entry

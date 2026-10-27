@@ -656,7 +656,7 @@ export default function PestTrackPage() {
               <Bug className="w-4 h-4 text-emerald-700" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold leading-tight">PestTrack</h1>
+              <h1 className="text-lg font-bold leading-tight">PestTrack</h1>
               <p className="text-xs text-muted-foreground">Pest control visits and activity log</p>
             </div>
           </div>

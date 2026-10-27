@@ -215,7 +215,7 @@ export function CertificateFormDialog({
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl font-display">
+          <DialogTitle className="text-xl font-display font-bold">
             {certificate ? "Edit Certificate" : "Upload Certificate"}
           </DialogTitle>
         </DialogHeader>

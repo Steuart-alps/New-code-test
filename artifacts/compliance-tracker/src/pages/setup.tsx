@@ -250,7 +250,7 @@ export default function SetupPage() {
             {step === 0 && (
               <>
                 <div>
-                  <h2 className="text-lg font-semibold">What kind of business is this?</h2>
+                  <h2 className="text-lg font-bold">What kind of business is this?</h2>
                   <p className="text-sm text-muted-foreground">We use this to suggest modules and the starter compliance checks that usually apply.</p>
                 </div>
                 <div className="space-y-1.5">
@@ -275,7 +275,7 @@ export default function SetupPage() {
             {step === 1 && (
               <>
                 <div>
-                  <h2 className="text-lg font-semibold">Your sites</h2>
+                  <h2 className="text-lg font-bold">Your sites</h2>
                   <p className="text-sm text-muted-foreground">A site is a building or location where checks are recorded. Add each of your locations now; you will set up their departments next.</p>
                 </div>
                 {sites.length > 0 && (
@@ -314,7 +314,7 @@ export default function SetupPage() {
             {step === 2 && (
               <>
                 <div>
-                  <h2 className="text-lg font-semibold">Departments</h2>
+                  <h2 className="text-lg font-bold">Departments</h2>
                   <p className="text-sm text-muted-foreground">Departments split a site into areas such as Kitchen or Housekeeping, so staff see the records for their own area. Skip this if you don't need them.</p>
                 </div>
                 {sites.length > 1 && (
@@ -397,7 +397,7 @@ export default function SetupPage() {
             {step === 3 && (
               <>
                 <div>
-                  <h2 className="text-lg font-semibold">Which modules do you want to start with?</h2>
+                  <h2 className="text-lg font-bold">Which modules do you want to start with?</h2>
                   <p className="text-sm text-muted-foreground">We have ticked the ones that usually suit your business type. This only sets your starting point; it does not change your plan or billing.</p>
                 </div>
                 {(state.modules?.available.length ?? 0) === 0 ? (
@@ -423,7 +423,7 @@ export default function SetupPage() {
             {step === 4 && (
               <>
                 <div>
-                  <h2 className="text-lg font-semibold">Starter compliance checks</h2>
+                  <h2 className="text-lg font-bold">Starter compliance checks</h2>
                   <p className="text-sm text-muted-foreground">
                     Tick the checks that apply to your premises and enter when each was last done, so due dates are real.
                     We have ticked the core legal checks; untick anything that does not apply.
@@ -432,7 +432,7 @@ export default function SetupPage() {
                 <div className="space-y-4">
                   {grouped.map(([category, checks]) => (
                     <div key={category}>
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">{category}</h3>
+                      <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-1.5">{category}</h3>
                       <ul className="space-y-2">
                         {checks.map((c) => {
                           const choice = choices[c.title] ?? { ticked: false, date: "" };
@@ -490,7 +490,7 @@ export default function SetupPage() {
             {step === 5 && (
               <>
                 <div>
-                  <h2 className="text-lg font-semibold">Record your first check</h2>
+                  <h2 className="text-lg font-bold">Record your first check</h2>
                   <p className="text-sm text-muted-foreground">The quickest way to see how ComplyTrack works is to record something real today.</p>
                 </div>
                 <div className="rounded-lg border bg-muted/30 p-4 flex items-center justify-between gap-3 flex-wrap">

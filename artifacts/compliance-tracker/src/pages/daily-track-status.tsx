@@ -246,7 +246,7 @@ export function MonthOverview({ sites, onPickDay }: { sites: { id: number; name:
     <Card className="mt-8 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
-          <h3 className="font-semibold text-sm">Month overview</h3>
+          <h3 className="font-bold text-sm">Month overview</h3>
           <p className="text-xs text-muted-foreground">
             Spot patterns — days where checklists were incomplete or missing. Click a day to inspect it.
           </p>

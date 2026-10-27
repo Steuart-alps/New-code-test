@@ -198,7 +198,7 @@ export function AllergenChartsTab({ charts, menus, dishes, isLoading, error }: {
 
       {[...bySite.entries()].map(([siteId, siteCharts]) => (
         <section key={siteId} className="space-y-2">
-          <h3 className="text-sm font-semibold">{siteCharts[0].siteName}</h3>
+          <h3 className="text-sm font-bold">{siteCharts[0].siteName}</h3>
           {siteCharts.map((chart) => {
             const menu = chart.menuId === null ? null : menus.find((m) => m.id === chart.menuId) ?? null;
             return (

@@ -471,7 +471,7 @@ ${sorted.map(r => `<tr>
               <Building2 className="w-4 h-4 text-violet-700" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold leading-tight">PremisesTrack</h1>
+              <h1 className="text-lg font-bold leading-tight">PremisesTrack</h1>
               <p className="text-xs text-muted-foreground">Digital premises safety logbook</p>
             </div>
           </div>

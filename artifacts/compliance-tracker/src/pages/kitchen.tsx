@@ -354,7 +354,7 @@ function ConfigDialog() {
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader className="shrink-0">
-          <DialogTitle className="font-display">Diary Template</DialogTitle>
+          <DialogTitle className="font-display font-bold">Diary Template</DialogTitle>
           <p className="text-sm text-muted-foreground mt-1">
             Configure once — every new diary day will use these settings automatically.
           </p>
@@ -726,7 +726,7 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
       <CardContent className="pt-4 pb-4">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className="font-semibold text-sm">Monthly Completeness</h3>
+            <h3 className="font-bold text-sm">Monthly Completeness</h3>
             <p className="text-xs text-muted-foreground">Days where the food safety diary was not completed. Closed days are not counted as missing.</p>
           </div>
           <div className="flex items-center gap-2">
@@ -1300,7 +1300,7 @@ export function DailyDiaryTab() {
       <Card>
         <CardHeader className="border-b border-border/50 pb-4">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base font-display">Select Date</CardTitle>
+            <CardTitle className="text-base font-display font-bold">Select Date</CardTitle>
             {isFiled && (
               <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                 <CheckCircle2 className="w-3 h-3 mr-1" />
@@ -1367,7 +1367,7 @@ export function DailyDiaryTab() {
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Deliveries</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">Deliveries</CardTitle>
                   <CardDescription className="text-xs mt-1">
                     Chilled limit: ≤8°C · Frozen limit: ≤-15°C
                   </CardDescription>
@@ -1468,7 +1468,7 @@ export function DailyDiaryTab() {
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Cold Food Record</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">Cold Food Record</CardTitle>
                   <CardDescription className="text-xs mt-1">Fridge limit: ≤5°C · Freezer limit: ≤-18°C · Recommended twice daily (AM &amp; PM)</CardDescription>
                 </div>
                 {!isSubmitted && (
@@ -1534,7 +1534,7 @@ export function DailyDiaryTab() {
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Cooking Record</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">Cooking Record</CardTitle>
                   <CardDescription className="text-xs mt-1">Target: {entryCookingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
@@ -1582,7 +1582,7 @@ export function DailyDiaryTab() {
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Cooling Record</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">Cooling Record</CardTitle>
                   <CardDescription className="text-xs mt-1">Target: {entryCoolingLimit} · Rows exceeding 90 minutes are flagged red</CardDescription>
                 </div>
                 {!isSubmitted && (
@@ -1637,7 +1637,7 @@ export function DailyDiaryTab() {
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Reheating Record</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">Reheating Record</CardTitle>
                   <CardDescription className="text-xs mt-1">Target: {entryReheatingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
@@ -1683,7 +1683,7 @@ export function DailyDiaryTab() {
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Hot Holding / Off-Site Temperature Record</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">Hot Holding / Off-Site Temperature Record</CardTitle>
                   <CardDescription className="text-xs mt-1">Minimum: {entryHotHoldingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
@@ -1744,7 +1744,7 @@ export function DailyDiaryTab() {
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Sous Vide Record</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">Sous Vide Record</CardTitle>
                   <CardDescription className="text-xs mt-1">Log bath temperature, cooking duration and core probe temperature</CardDescription>
                 </div>
                 {!isSubmitted && (
@@ -1846,7 +1846,7 @@ export function DailyDiaryTab() {
           {/* Correctives */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Corrective Actions Taken</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Corrective Actions Taken</CardTitle>
               <CardDescription className="text-xs mt-1">
                 Note any issues found and what was done to fix them
               </CardDescription>
@@ -1866,7 +1866,7 @@ export function DailyDiaryTab() {
           {!isSubmitted && (
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Sign off &amp; File</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Sign off &amp; File</CardTitle>
               <CardDescription className="text-xs mt-1">Once filed, all entries are locked. Use "Save Draft" to save progress without locking.</CardDescription>
             </CardHeader>
             <CardContent className="p-4">
@@ -1903,7 +1903,7 @@ export function DailyDiaryTab() {
       {/* History */}
       <Card>
         <CardHeader className="border-b border-border/50 pb-4">
-          <CardTitle className="font-display">Recent Records</CardTitle>
+          <CardTitle className="font-display font-bold">Recent Records</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {!records || records.length === 0 ? (
@@ -2118,7 +2118,7 @@ function KitchenChecklistCard({
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Icon className="w-4 h-4 text-primary opacity-80" />
-            <h3 className="font-semibold font-display">{KCL_LABELS[type]}</h3>
+            <h3 className="font-bold font-display">{KCL_LABELS[type]}</h3>
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && !submitted && (
@@ -2334,7 +2334,7 @@ export default function KitchenPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">KitchenTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">KitchenTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Digital food safety diary — record deliveries, temperatures, and actions.
                 </p>

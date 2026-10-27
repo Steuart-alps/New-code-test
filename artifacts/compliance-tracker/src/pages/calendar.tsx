@@ -184,7 +184,7 @@ export default function CalendarPage() {
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon" aria-label="Previous month" onClick={() => shift(-1)}><ChevronLeft className="h-4 w-4" /></Button>
-          <h2 className="min-w-[10rem] text-center text-lg font-semibold" aria-live="polite">{monthLabel}</h2>
+          <h2 className="min-w-[10rem] text-center text-lg font-bold" aria-live="polite">{monthLabel}</h2>
           <Button variant="outline" size="icon" aria-label="Next month" onClick={() => shift(1)}><ChevronRight className="h-4 w-4" /></Button>
           <Button variant="ghost" size="sm" onClick={goToday}>Today</Button>
           {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Loading" />}
@@ -263,7 +263,7 @@ export default function CalendarPage() {
 
       {selected && (
         <section className="mt-4 hidden rounded-lg border p-4 md:block" aria-label={`Due on ${dayHeading(selected)}`}>
-          <h3 className="mb-2 font-medium">{dayHeading(selected)}</h3>
+          <h3 className="mb-2 font-bold">{dayHeading(selected)}</h3>
           {(byDate.get(selected) ?? []).length === 0
             ? <p className="text-sm text-muted-foreground">Nothing due on this day.</p>
             : <div className="grid gap-2 lg:grid-cols-2">{(byDate.get(selected) ?? []).map(entry => <EntryChip key={entry.id} entry={entry} />)}</div>}

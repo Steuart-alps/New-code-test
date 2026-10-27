@@ -44,7 +44,7 @@ export function MobileChecklistSubmissionCard({ submission }: { submission: Mobi
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Smartphone className="w-4 h-4 text-primary opacity-80" />
-          <h3 className="font-semibold font-display">{submission.type === "am" ? "AM" : "PM"} checklist (mobile app)</h3>
+          <h3 className="font-bold font-display">{submission.type === "am" ? "AM" : "PM"} checklist (mobile app)</h3>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{checked}/{submission.answers.length}</span>

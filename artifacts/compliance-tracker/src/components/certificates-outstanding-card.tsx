@@ -77,7 +77,7 @@ export function CertificatesOutstandingCard() {
 
   return (
     <Card className="p-5 mb-8 bg-card/60 border-border/50">
-      <h2 className="font-display font-semibold text-lg flex items-center gap-2">
+      <h2 className="font-display font-bold text-lg flex items-center gap-2">
         <FileWarning aria-hidden="true" className="w-5 h-5 text-amber-600" /> Certificates outstanding ({data.certificates.length})
       </h2>
       <p className="text-sm text-muted-foreground mt-1 mb-4 max-w-2xl">

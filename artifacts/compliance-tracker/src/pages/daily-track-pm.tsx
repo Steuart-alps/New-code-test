@@ -244,7 +244,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Icon className="w-4 h-4 text-primary opacity-80" />
-            <h3 className="font-semibold font-display">{CHECKLIST_LABELS[type]}</h3>
+            <h3 className="font-bold font-display">{CHECKLIST_LABELS[type]}</h3>
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && !submitted && (
@@ -362,7 +362,7 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <PenLine className="w-4 h-4 text-primary opacity-80" />
-          <h3 className="font-semibold font-display">Manager Daily Sign-off</h3>
+          <h3 className="font-bold font-display">Manager Daily Sign-off</h3>
         </div>
         {submitted
           ? <Badge className="bg-emerald-100 text-emerald-800 text-xs"><Lock className="w-3 h-3 mr-1" />Signed off</Badge>

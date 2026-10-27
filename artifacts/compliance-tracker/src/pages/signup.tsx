@@ -89,7 +89,7 @@ export default function SignupPage() {
         </button>
         <div className="flex items-center gap-3">
           <ShieldCheck className="w-6 h-6 text-primary" />
-          <span className="font-medium font-display text-xl text-[#162D42]">ComplyTrack</span>
+          <span className="font-bold font-display text-xl text-[#162D42]">ComplyTrack</span>
         </div>
         <button
           onClick={() => navigate("/login")}
@@ -111,7 +111,7 @@ export default function SignupPage() {
               <span className="text-xs font-display italic text-[#162D42]">by</span>
               <img src={alpsLogo} alt="ALPS Consultancy" className="h-4 grayscale mix-blend-multiply" />
             </div>
-            <h1 className="text-4xl font-display text-[#162D42] mb-3">Start your free trial</h1>
+            <h1 className="text-4xl font-display font-bold text-[#162D42] mb-3">Start your free trial</h1>
             <p className="text-muted-foreground text-sm font-light">
               14 days, full access. No credit card required.
             </p>

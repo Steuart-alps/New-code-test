@@ -365,7 +365,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             ) : (
               <ShieldCheck className="w-6 h-6 flex-shrink-0" style={{ color: primaryColor }} />
             )}
-            <span className="font-display font-medium text-lg tracking-wide break-words min-w-0 flex-1">
+            <span className="font-display font-bold text-lg tracking-wide break-words min-w-0 flex-1">
               {client ? client.name : "ComplyTrack"}
             </span>
           </Link>
@@ -536,7 +536,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                       ) : (
                         <ShieldCheck className="w-6 h-6 flex-shrink-0" style={{ color: primaryColor }} />
                       )}
-                      <span className="font-display font-medium text-lg tracking-wide break-words min-w-0 flex-1">
+                      <span className="font-display font-bold text-lg tracking-wide break-words min-w-0 flex-1">
                         {client ? client.name : "ComplyTrack"}
                       </span>
                     </Link>
@@ -600,7 +600,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
-            <h1 className="min-w-0 text-lg sm:text-2xl font-display font-medium text-[#162D42] truncate" title={title}>
+            <h1 className="min-w-0 text-lg sm:text-2xl font-display font-bold text-[#162D42] truncate" title={title}>
               {title}
             </h1>
           </div>

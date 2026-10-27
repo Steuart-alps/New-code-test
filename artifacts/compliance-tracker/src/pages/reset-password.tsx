@@ -60,7 +60,7 @@ export default function ResetPasswordPage() {
             <div className="flex justify-center mb-6 relative z-10">
               <ShieldCheck className="w-12 h-12 text-primary" />
             </div>
-            <h1 className="text-3xl font-display text-white mb-2 relative z-10">
+            <h1 className="text-3xl font-display font-bold text-white mb-2 relative z-10">
               ComplyTrack
             </h1>
             <div className="flex items-center justify-center gap-2 mt-4 relative z-10">
@@ -89,7 +89,7 @@ export default function ResetPasswordPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <h2 className="text-2xl font-display text-[#162D42] mb-3">Password updated</h2>
+                <h2 className="text-2xl font-display font-bold text-[#162D42] mb-3">Password updated</h2>
                 <p className="text-sm text-muted-foreground mb-8 font-light">
                   Your password has been reset successfully. You can now sign in with your new password.
                 </p>
@@ -107,7 +107,7 @@ export default function ResetPasswordPage() {
                   <ArrowLeft className="w-3.5 h-3.5" />
                   Back to sign in
                 </button>
-                <h2 className="text-2xl font-display text-[#162D42] mb-3">Set a new password</h2>
+                <h2 className="text-2xl font-display font-bold text-[#162D42] mb-3">Set a new password</h2>
                 <p className="text-sm text-muted-foreground mb-8 font-light">
                   Choose a new password for your account. It must be at least 8 characters.
                 </p>

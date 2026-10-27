@@ -286,7 +286,7 @@ export default function FeedbackInboxPage() {
             {!isLoading && !isError && data?.length === 0 && (
               <div className="p-10 text-center space-y-2" data-testid="empty-feedback">
                 <Inbox className="w-7 h-7 mx-auto text-muted-foreground" />
-                <p className="font-display text-lg text-[#162D42]">Nothing here</p>
+                <p className="font-display font-bold text-lg text-[#162D42]">Nothing here</p>
                 <p className="text-sm text-muted-foreground">
                   {category !== ALL || status !== ALL ? "No reports match these filters." : "No feedback has been submitted yet."}
                 </p>
@@ -322,7 +322,7 @@ export default function FeedbackInboxPage() {
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">{CATEGORY_LABELS[shown.category]}</p>
-                    <h2 className="font-display text-2xl break-words" data-testid="text-feedback-summary">{shown.summary}</h2>
+                    <h2 className="font-display font-bold text-2xl break-words" data-testid="text-feedback-summary">{shown.summary}</h2>
                   </div>
                   <Button variant="ghost" size="icon" onClick={close} disabled={save.isPending} aria-label="Close report" data-testid="button-close-feedback"><X className="w-4 h-4" /></Button>
                 </div>

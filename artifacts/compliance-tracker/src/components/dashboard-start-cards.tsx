@@ -107,7 +107,7 @@ function MyTasksTodayCard() {
   return (
     <section className="rounded-xl border bg-card p-4 shadow-sm space-y-3" aria-label="My tasks today">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="font-semibold flex items-center gap-2"><ListChecks className="w-5 h-5 text-primary" /> My tasks today</h2>
+        <h2 className="font-bold flex items-center gap-2"><ListChecks className="w-5 h-5 text-primary" /> My tasks today</h2>
         <Link href="/tasks" className="text-sm text-primary hover:underline">All my tasks</Link>
       </div>
       {isLoading ? <div className="h-12 rounded-md bg-muted animate-pulse" />

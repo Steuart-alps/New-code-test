@@ -57,7 +57,7 @@ export default function TwoFaRecoverPage() {
             <div className="flex justify-center mb-6 relative z-10">
                <KeyRound className="w-12 h-12 text-primary" />
             </div>
-            <h1 className="text-3xl font-display text-white mb-2 relative z-10">
+            <h1 className="text-3xl font-display font-bold text-white mb-2 relative z-10">
               Account Recovery
             </h1>
             <p className="text-white/60 text-sm relative z-10">
@@ -77,7 +77,7 @@ export default function TwoFaRecoverPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <h2 className="text-2xl font-display text-[#162D42] mb-3">Access restored</h2>
+                <h2 className="text-2xl font-display font-bold text-[#162D42] mb-3">Access restored</h2>
                 <p className="text-sm text-muted-foreground font-light">
                    You are signed in. That recovery code has been used, and your other recovery codes
                    and authenticator app remain active. Redirecting…
@@ -96,7 +96,7 @@ export default function TwoFaRecoverPage() {
                   <ArrowLeft className="w-3.5 h-3.5" /> Back to sign in
                 </button>
 
-                <h2 className="text-2xl font-display text-[#162D42] mb-3">Recover account access</h2>
+                <h2 className="text-2xl font-display font-bold text-[#162D42] mb-3">Recover account access</h2>
                 <p className="text-sm text-muted-foreground mb-8 font-light leading-relaxed">
                    Enter your email, password and one of the recovery codes you saved when you set up
                    two-factor authentication. The code can only be used once.

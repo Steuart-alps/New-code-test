@@ -465,7 +465,7 @@ export default function ContractorDetailPage() {
                       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`/items/${item.id}`); } }}
                     >
                       <div>
-                        <h4 className="font-semibold hover:text-primary transition-colors">{item.title}</h4>
+                        <h4 className="font-bold hover:text-primary transition-colors">{item.title}</h4>
                         <div className="flex items-center gap-3 mt-2 text-sm">
                           <StatusBadge status={item.status} />
                           <PriorityBadge priority={item.priority} />

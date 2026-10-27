@@ -203,13 +203,13 @@ function ManageTasksDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle className="font-display">Manage Cleaning Tasks</DialogTitle>
+          <DialogTitle className="font-display font-bold">Manage Cleaning Tasks</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-6 pr-1">
           {(["daily", "weekly", "monthly"] as Frequency[]).map(freq => (
             <div key={freq}>
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+              <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wide mb-2">
                 {freqLabel(freq)}
               </h3>
               {byFreq[freq].length === 0 ? (
@@ -317,7 +317,7 @@ function HistoryPanel({ history, title, onSelect }: {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base font-display">{title}</CardTitle>
+        <CardTitle className="text-base font-display font-bold">{title}</CardTitle>
         <CardDescription>Click a row to view that record</CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -877,7 +877,7 @@ export default function CleaningScheduleTab() {
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-display">Download cleaning record</DialogTitle>
+            <DialogTitle className="font-display font-bold">Download cleaning record</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">

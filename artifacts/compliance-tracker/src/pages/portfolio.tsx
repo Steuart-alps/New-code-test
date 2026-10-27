@@ -145,7 +145,7 @@ function BrandingCard() {
   return (
     <Card className="space-y-4 rounded-sm p-4 sm:p-5">
       <div>
-        <h2 className="font-semibold">Your practice branding</h2>
+        <h2 className="font-bold">Your practice branding</h2>
         <p className="text-sm text-muted-foreground">Businesses you manage see “Managed by” with your practice name and logo.</p>
       </div>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
