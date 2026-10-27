@@ -1,7 +1,7 @@
 // "Assigned to" people and the personal reminders: the assignee API and its
 // checks on track actions and compliance checks, the due-tomorrow email to
 // the person responsible (once a day, overdue on day 1 then weekly, group
-// tasks on the bell only), per-type reminder timings, the Owner update (Mondays, or daily by setting;
+// tasks on the bell only), per-type reminder timings, the Owner update (Mondays, or daily or monthly by setting;
 // Managers see only their departments' sites), and the same-day alerts for
 // urgent actions and new FixTrack issues.
 //
@@ -460,6 +460,41 @@ try {
     assert.match(to(owner.email)[0].html, /TrainTrack: training outstanding/, "still in the Owner update");
     await asOwner("PUT", "/settings", { reminderTimings: null });
     ok("staff get their own outstanding training on Mondays; the updates list it by person");
+  }
+
+  // ── Monthly Owner update ──────────────────────────────────────────────────
+  {
+    const saved = await asOwner("PUT", "/settings", { ownerUpdateFrequency: "monthly" });
+    assert.equal(saved.status, 200, saved.text);
+    assert.equal(saved.data.ownerUpdateFrequency, "monthly");
+    await q(`INSERT INTO track_actions (client_id, site_id, module, title, severity, status, due_date)
+             VALUES ($1, $2, 'fire', 'Annual gutter clean', 'action_required', 'open', '2026-12-30'),
+                    ($1, $2, 'fire', 'Roof survey', 'action_required', 'open', '2027-01-05')`, [A, redLion.id]);
+
+    sent.length = 0;
+    // Monday 16 November 2026: not the first Monday of the month.
+    await run("2026-11-16T08:15:00Z");
+    assert.equal([...to(owner.email), ...to(mia.email)].filter((message) => /update for/i.test(message.subject)).length, 0,
+      "no update on other Mondays");
+
+    sent.length = 0;
+    // Monday 7 December 2026: the first Monday of the month.
+    const result = await run("2026-12-07T08:15:00Z");
+    assert.equal(result.errors, 0);
+    const [update, ...extra] = to(owner.email);
+    assert.ok(update, "the Owner gets the monthly update");
+    assert.equal(extra.length, 0);
+    assert.match(update.subject, /^Monthly update for /);
+    assert.match(update.html, /Done since the last monthly update/);
+    assert.match(update.html, /Due before the next monthly update[\s\S]*Annual gutter clean/,
+      "lists what is due up to the next update (Mon 4 Jan)");
+    assert.doesNotMatch(update.html, /Roof survey/, "that is in next month's update");
+    assert.match(update.html, /daily, weekly or monthly/);
+    assert.match(to(mia.email)[0]?.subject ?? "", /^Monthly update for /, "Managers' updates follow the same setting");
+
+    await q(`DELETE FROM track_actions WHERE title IN ('Annual gutter clean', 'Roof survey')`);
+    await asOwner("PUT", "/settings", { ownerUpdateFrequency: null });
+    ok("Owners can switch the update to monthly, on the first Monday of each month");
   }
 
   console.log(`\n${passed} personal reminder checks passed`);

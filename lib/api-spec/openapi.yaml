@@ -7960,9 +7960,9 @@ components:
           description: '"true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'
         ownerUpdateFrequency:
           type: string
-          enum: ["weekly", "daily"]
+          enum: ["weekly", "daily", "monthly"]
           nullable: true
-          description: How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
+          description: How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month.
         reminderTimings:
           type: string
           nullable: true

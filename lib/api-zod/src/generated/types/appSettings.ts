@@ -23,7 +23,7 @@ export interface AppSettings {
   storageWarningThresholdBytes?: string | null;
   /** "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there. */
   storageAutoTopUp?: AppSettingsStorageAutoTopUp;
-  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays). */
+  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month. */
   ownerUpdateFrequency?: AppSettingsOwnerUpdateFrequency;
   /** JSON object keyed by reminder type (track module, "tasks", "contractors", "train"), each {"daysBefore": number|"next_week"|null, "overdueEvery": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; "next_week" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue. */
   reminderTimings?: string | null;

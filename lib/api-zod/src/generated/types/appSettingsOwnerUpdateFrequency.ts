@@ -7,7 +7,7 @@
  */
 
 /**
- * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
+ * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month.
  */
 export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequency[keyof typeof AppSettingsOwnerUpdateFrequency] | null;
 
@@ -15,4 +15,5 @@ export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequ
 export const AppSettingsOwnerUpdateFrequency = {
   weekly: 'weekly',
   daily: 'daily',
+  monthly: 'monthly',
 } as const;

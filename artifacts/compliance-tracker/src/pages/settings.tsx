@@ -3123,6 +3123,10 @@ function RequiredActionTemplatesCard() {
 // right one. Older links name a card on the former single page; they still
 // open the section that card now lives in.
 
+type OwnerUpdateFrequency = "daily" | "weekly" | "monthly";
+const parseOwnerUpdateFrequency = (value: unknown): OwnerUpdateFrequency =>
+  value === "daily" || value === "monthly" ? value : "weekly";
+
 type SettingsSectionId = "billing" | "business" | "departments" | "reminders" | "email" | "checks" | "storage" | "security";
 
 const SETTINGS_SECTIONS: { id: SettingsSectionId; label: string; description: string; Icon: typeof Settings2 }[] = [
@@ -3216,7 +3220,7 @@ export default function SettingsPage() {
     maintenanceEmail: "",
     additionalReminderEmails: "",
     notifyClientAdmins: "false",
-    ownerUpdateFrequency: "weekly" as "weekly" | "daily",
+    ownerUpdateFrequency: "weekly" as OwnerUpdateFrequency,
     smtpFrom: "",
     smtpFromName: "",
     resendApiKey: "",
@@ -3257,7 +3261,7 @@ export default function SettingsPage() {
         maintenanceEmail: (settings as any).maintenanceEmail || "",
         additionalReminderEmails: (settings as any).additionalReminderEmails || "",
         notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
-        ownerUpdateFrequency: settings.ownerUpdateFrequency === "daily" ? "daily" : "weekly",
+        ownerUpdateFrequency: parseOwnerUpdateFrequency(settings.ownerUpdateFrequency),
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
         resendApiKey: (settings as any).resendApiKey || "",
@@ -3402,20 +3406,22 @@ export default function SettingsPage() {
                   <p className="text-xs text-muted-foreground">
                     One email to the Owners listing what was done, what is overdue and who has it, what is due, anything with no one
                     assigned, expiries in the next 60 days, each person's outstanding training (TrainTrack) and documents still to sign. Managers get one for their own departments.
-                    Sent at 8am in your account timezone.
+                    Sent at 8am in your account timezone. Choosing monthly doesn't hold anything back: urgent items still come the same day,
+                    and each person still gets their own reminders.
                   </p>
                   <Select
                     value={formData.ownerUpdateFrequency}
                     onValueChange={(value) =>
-                      setFormData((prev) => ({ ...prev, ownerUpdateFrequency: value === "daily" ? "daily" : "weekly" }))
+                      setFormData((prev) => ({ ...prev, ownerUpdateFrequency: parseOwnerUpdateFrequency(value) }))
                     }
                   >
                     <SelectTrigger id="ownerUpdateFrequency" className="sm:w-64">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="weekly">Weekly, on Mondays</SelectItem>
                       <SelectItem value="daily">Every day</SelectItem>
+                      <SelectItem value="weekly">Weekly, on Mondays</SelectItem>
+                      <SelectItem value="monthly">Monthly, on the first Monday</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
