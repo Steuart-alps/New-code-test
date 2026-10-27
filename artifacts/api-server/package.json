@@ -154,6 +154,7 @@
     "test:doc-track-object-acl": "bash tests/run-doc-track-object-acl.sh",
     "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
     "test:billing-addon-catalog": "node tests/billing-addon-catalog.mjs",
+    "test:alps-discount-coupon": "node tests/alps-discount-coupon.mjs",
     "test:service-price-preflight": "node tests/service-price-preflight.mjs",
     "test:stripe-backfill-scope": "node tests/stripe-backfill-scope.mjs",
     "test:service-price-preflight-db": "bash tests/run-fresh-schema.sh tests/service-price-preflight-db.mjs",

@@ -15,6 +15,7 @@ import { format, startOfWeek } from "date-fns";
 import { Calendar, CheckCircle2, Save, Plus, Trash2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { kitchenWeeklyAttentionAnswer, kitchenWeeklyNeedsAttention } from "@workspace/api-client-react";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 // ── Data shape ────────────────────────────────────────────────────────────────
 
@@ -132,6 +133,7 @@ export default function WeeklyReviewTab() {
 
   const [checks, setChecks] = useState<Record<string, Answer>>({});
   const [deviations, setDeviations] = useState<{ rule?: string; action?: string }[]>([]);
+  const newRow = useFocusNewRow();
   const [additional, setAdditional] = useState<Record<string, any>>({});
   const [managerSig, setManagerSig] = useState("");
 
@@ -291,13 +293,13 @@ export default function WeeklyReviewTab() {
                   </CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => setDeviations([...deviations, {}])}>
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setDeviations([...deviations, {}]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-2">
+            <CardContent ref={newRow.ref} className="p-4 space-y-2">
               {attentionAnswers.length > 0 && deviations.length === 0 && !isSubmitted && (
                 <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2 mb-3">
                   <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />

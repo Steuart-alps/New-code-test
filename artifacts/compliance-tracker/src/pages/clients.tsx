@@ -258,7 +258,7 @@ const DISCOUNT_STATUS_COPY: Record<DiscountStatus["status"], { label: string; cl
   redeemed: {
     label: "Discount redeemed",
     className: "bg-green-100 text-green-700",
-    desc: "The 50% discount has been applied to this client's subscription. Each client can only redeem one discount.",
+    desc: "The 50% discount has been applied to this client's ComplyTrack and tracks (not the AI add-on or extra storage). Each client can only redeem one discount.",
   },
 };
 

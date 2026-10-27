@@ -43,6 +43,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -203,6 +204,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
 
   const [defaultPerformer, setDefaultPerformer] = useState("");
   const [nonSentinelOutlets, setNonSentinelOutlets] = useState<string[]>([]);
+  const newRow = useFocusNewRow();
   const [frequencyDays, setFrequencyDays] = useState<Record<string, string>>(
     Object.fromEntries(Object.entries(DEFAULT_LEGIONELLA_FREQUENCIES).map(([key, value]) => [key, String(value)])),
   );
@@ -308,7 +310,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
             <p className="text-xs text-muted-foreground">
               Non-sentinel (representative) outlets checked periodically. These appear as location suggestions on checks.
             </p>
-            <div className="space-y-2">
+            <div ref={newRow.ref} className="space-y-2">
               {nonSentinelOutlets.map((o, i) => (
                 <div key={i} className="flex gap-2 items-center">
                   <Input value={o} placeholder='e.g. "Ground floor toilet — cold tap"'
@@ -320,7 +322,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
                   </Button>
                 </div>
               ))}
-              <Button variant="outline" size="sm" onClick={() => setNonSentinelOutlets([...nonSentinelOutlets, ""])}>
+              <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setNonSentinelOutlets([...nonSentinelOutlets, ""]); }}>
                 <Plus className="w-3.5 h-3.5 mr-1.5" /> Add outlet
               </Button>
             </div>

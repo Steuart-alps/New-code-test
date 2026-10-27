@@ -2,8 +2,11 @@ import type Stripe from "stripe";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { AI_SERVICE_KEY } from "./aiAddonItem";
 
-const ALPS_COUPON_ID = "complytrack_alps50_forever";
+// The first coupon (50% off the whole subscription) is no longer handed out:
+// it also halved the AI add-on and extra storage. See getAlpsDiscountCouponId.
+const ALPS_COUPON_PREFIX = "complytrack_alps50_tracks_";
 const RESERVATION_TIMEOUT_MINUTES = 60;
 
 // ─── Manager-issued per-client discount codes ────────────────────────────────
@@ -331,12 +334,43 @@ export async function recordAlpsDiscountCheckoutEvent(event: {
   `);
 }
 
-export async function getAlpsDiscountCouponId(stripe: Stripe): Promise<string> {
+/**
+ * Stripe products the ALPS discount covers: ComplyTrack and its tracks (each
+ * service, and the Complete bundle, has its own product). Never the AI add-on
+ * or extra storage (Steuart, 2026-10-27: "discount is tracks only"; those stay
+ * full price). Read from the Stripe-synced price tables.
+ */
+export async function listAlpsDiscountProductIds(): Promise<string[]> {
+  const result = await db.execute(sql`
+    SELECT DISTINCT pr.product FROM stripe.prices pr
+     WHERE pr.metadata->>'service_key' IS NOT NULL
+       AND pr.metadata->>'service_key' NOT IN ('storage', ${AI_SERVICE_KEY})
+     ORDER BY pr.product
+  `);
+  return (result.rows as Array<{ product: string | null }>)
+    .map((row) => row.product)
+    .filter((id): id is string => Boolean(id));
+}
+
+/**
+ * The 50%-off-forever coupon, limited to the given track products. Coupons
+ * can't be changed once made, so its id comes from the product list: a new
+ * track product gets a new coupon for later redemptions. Refuses to make a
+ * coupon with no products, which Stripe would apply to everything.
+ */
+export async function getAlpsDiscountCouponId(
+  stripe: Stripe,
+  productIds?: string[],
+): Promise<string> {
+  const products = [...new Set(productIds ?? await listAlpsDiscountProductIds())].sort();
+  if (!products.length) throw new Error("No ComplyTrack track products found in Stripe for the ALPS discount.");
+  const couponId = `${ALPS_COUPON_PREFIX}${createHash("sha256").update(products.join(",")).digest("hex").slice(0, 16)}`;
   try {
-    const coupon = await stripe.coupons.retrieve(ALPS_COUPON_ID);
+    const coupon = await stripe.coupons.retrieve(couponId, { expand: ["applies_to"] });
     if (!("deleted" in coupon)) {
-      if (coupon.percent_off !== 50 || coupon.duration !== "forever") {
-        throw new Error("The ALPS discount coupon is not configured for 50% off forever.");
+      const covered = [...(coupon.applies_to?.products ?? [])].sort();
+      if (coupon.percent_off !== 50 || coupon.duration !== "forever" || covered.join(",") !== products.join(",")) {
+        throw new Error("The ALPS discount coupon is not configured for 50% off ComplyTrack tracks forever.");
       }
       return coupon.id;
     }
@@ -346,13 +380,14 @@ export async function getAlpsDiscountCouponId(stripe: Stripe): Promise<string> {
 
   const coupon = await stripe.coupons.create(
     {
-      id: ALPS_COUPON_ID,
+      id: couponId,
       percent_off: 50,
       duration: "forever",
-      name: "ALPS client 50% discount",
-      metadata: { complytrack_discount_code: "alps_client_50" },
+      name: "ALPS client 50% discount (tracks)",
+      applies_to: { products },
+      metadata: { complytrack_discount_code: "alps_client_50_tracks" },
     },
-    { idempotencyKey: `create-${ALPS_COUPON_ID}` },
+    { idempotencyKey: `create-${couponId}` },
   );
   return coupon.id;
 }

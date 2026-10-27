@@ -142,6 +142,9 @@ jobs:
       - name: Storage add-on price check test
         run: pnpm --filter @workspace/api-server run test:storage-price-check
 
+      - name: ALPS discount covers tracks only
+        run: pnpm --filter @workspace/api-server run test:alps-discount-coupon
+
       - name: Calendar invite fixture test
         run: pnpm --filter @workspace/api-server run test:calendar-invite-compatibility
 

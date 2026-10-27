@@ -185,6 +185,10 @@ async function routeApi(route) {
     body.ids.forEach((id, index) => { callPoints.find(p => p.id === id).sortOrder = index + 1; });
     return json(route, callPoints.filter(p => !p.archivedAt).sort(byOrder).map(withRotation));
   }
+  // The AI list reader (it needs the AI add-on) is not part of these checks.
+  if (method === "GET" && path === "/api/imports/list-reading/fire-call-points") {
+    return json(route, { available: false, monthlyLimit: 0, usedThisMonth: 0, ai: null, sites: [] });
+  }
   if (method === "POST" && path === "/api/imports/fire-call-points") {
     const body = JSON.parse(request.postData() ?? "{}");
     posts.push({ path, body });
