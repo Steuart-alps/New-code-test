@@ -77,24 +77,38 @@ assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Ev
 // Section membership: a nav edit that moves, drops or duplicates a link fails here.
 const membership = groups => Object.fromEntries(groups.map(g => [g.id, g.items.map(i => i.href)]));
 assert.deepEqual(membership(adminGroups), {
-  core: ["/dashboard", "/portfolio", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors", "/categories", "/equipment", "/report-actions"],
+  core: ["/dashboard", "/portfolio"],
+  setup: ["/settings", "/sites", "/users", "/staff-roster", "/equipment"],
+  compliance: ["/external", "/contractors", "/calendar", "/compliance-hub"],
   safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
   operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
-  "people-training": ["/doc-track", "/train-track", "/users", "/staff-roster"],
-  reporting: ["/reports"],
-  admin: ["/sites", "/clients", "/feedback", "/privacy-governance", "/settings"],
+  "people-training": ["/doc-track", "/train-track"],
+  reporting: ["/reports", "/report-actions"],
+  other: ["/tasks"],
+  admin: ["/categories", "/clients", "/feedback", "/privacy-governance"],
 }, "Consultant admin sections");
 assert.deepEqual(membership(userGroups), {
-  core: ["/dashboard", "/tasks", "/compliance-hub", "/calendar", "/external", "/contractors"],
+  core: ["/dashboard"],
+  compliance: ["/external", "/contractors", "/calendar", "/compliance-hub"],
   safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
   operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
   "people-training": ["/doc-track", "/train-track"],
   reporting: ["/reports"],
-}, "Staff and viewer sections (no empty Administration section)");
+  other: ["/tasks"],
+}, "Staff and viewer sections (no empty Set up or Administration section)");
 assert.deepEqual(membership(getNavGroups({ isConsultant: false, canAdmin: true })).admin,
-  ["/sites", "/feedback", "/privacy-governance", "/settings"], "Client admin Administration section");
+  ["/categories", "/feedback", "/privacy-governance"], "Client admin Administration section");
+assert.deepEqual(membership(getNavGroups({ isConsultant: false, canAdmin: false, canManageUsers: true })).setup,
+  ["/users", "/equipment"], "Managers set up their own team and equipment");
+
+// The menu follows the order a business sets up the service.
+assert.deepEqual(adminGroups.map(g => g.id),
+  ["core", "setup", "compliance", "safety", "food-water", "operations", "people-training", "reporting", "other", "admin"],
+  "Sections run in setup order, with Other and Administration last");
+const tasksItem = userGroups.flatMap(g => g.items).find(i => i.href === "/tasks");
+assert.equal(tasksItem?.label, "Other reminders", "Tasks is shown as Other reminders");
 
 for (const [label, groups] of [["consultant", adminGroups], ["staff", userGroups]]) {
   const all = hrefs(groups);
@@ -122,7 +136,9 @@ for (const item of adminGroups.flatMap(g => g.items)) {
 const groupById = id => userGroups.find(g => g.id === id);
 const kitchenOnly = key => key === "kitchentrack";
 const opensWith = (id, opts) => isNavGroupInitiallyOpen(groupById(id), { location: "/account-security", hasService: kitchenOnly, saved: null, ...opts });
-assert.equal(opensWith("core"), true, "Core Work starts open");
+assert.equal(opensWith("core"), true, "Home starts open");
+assert.equal(opensWith("compliance"), true, "Compliance starts open");
+assert.equal(opensWith("other"), false, "Other reminders starts tucked away");
 assert.equal(opensWith("safety"), false, "Other sections start closed");
 assert.equal(opensWith("core", { saved: "false" }), false, "A saved close is kept");
 assert.equal(opensWith("safety", { saved: "true" }), true, "A saved open is kept");

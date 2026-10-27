@@ -69,19 +69,38 @@ export function isNavGroupInitiallyOpen(
   return group.defaultOpen;
 }
 
+/**
+ * The menu follows the order a business sets up ComplyTrack (the setup
+ * wizard, then Getting started): settings, sites and the team first, then
+ * the compliance checks, then the tracks where records are kept, then
+ * reports. Sections a role can't use are dropped, so Staff and Viewers start
+ * at Compliance.
+ */
 export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin }: { isConsultant: boolean; canAdmin: boolean; canManageUsers?: boolean }): NavGroup[] {
   const groups: NavGroup[] = [
     {
       id: "core",
-      title: "Core Work",
+      title: "Home",
       defaultOpen: true,
       items: [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-        { href: "/tasks", label: "Tasks", icon: ClipboardList },
-        { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
-        { href: "/calendar", label: "Calendar", icon: CalendarDays },
+      ],
+    },
+    {
+      id: "setup",
+      title: "Set up",
+      defaultOpen: true,
+      items: [],
+    },
+    {
+      id: "compliance",
+      title: "Compliance",
+      defaultOpen: true,
+      items: [
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
         { href: "/contractors", label: "Contractors", icon: Building },
+        { href: "/calendar", label: "Calendar", icon: CalendarDays },
+        { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
       ],
     },
     {
@@ -143,51 +162,61 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
       ],
     },
     {
+      // Jobs that don't belong to any track; most work lives in the tracks.
+      id: "other",
+      title: "Other",
+      defaultOpen: false,
+      items: [
+        { href: "/tasks", label: "Other reminders", icon: ClipboardList },
+      ],
+    },
+    {
       id: "admin",
       title: "Administration",
       defaultOpen: false,
       items: []
     }
   ];
-
-  if (canAdmin) {
-    // The /categories routes are only registered for admins.
-    groups.find(g => g.id === "core")?.items.push({ href: "/categories", label: "Categories", icon: Tags });
-    const peopleGroup = groups.find(g => g.id === "people-training");
-    if (peopleGroup) {
-      peopleGroup.items.push(
-        { href: "/users", label: "Users", icon: Users },
-        { href: "/staff-roster", label: "Staff Roster", icon: ClipboardList }
-      );
-    }
-    const adminGroup = groups.find(g => g.id === "admin");
-    if (adminGroup) {
-      adminGroup.items.push({ href: "/sites", label: "Sites", icon: Building2 });
-    }
-  }
-
-  if (canManageUsers) {
-    // Managers keep the equipment list and print its QR labels.
-    groups.find(g => g.id === "core")?.items.push({ href: "/equipment", label: "Equipment & QR labels", icon: QrCode });
-    // Audit and inspection reports become actions (Owners, Managers, ALPS).
-    groups.find(g => g.id === "core")?.items.push({ href: "/report-actions", label: "Report actions", icon: FileSearch });
-  }
-
-  if (canManageUsers && !canAdmin) {
-    // Managers look after the Staff and Viewers in their own department.
-    groups.find(g => g.id === "people-training")?.items.push({ href: "/users", label: "Users", icon: Users });
-  }
+  const group = (id: string) => groups.find(g => g.id === id)!;
 
   if (isConsultant) {
-    groups.find(g => g.id === "core")?.items.splice(1, 0, { href: "/portfolio", label: "Portfolio", icon: LayoutGrid });
-    groups.find(g => g.id === "admin")?.items.push({ href: "/clients", label: "Clients", icon: Building2 });
+    group("core").items.push({ href: "/portfolio", label: "Portfolio", icon: LayoutGrid });
+  }
+
+  // Set up, in wizard order: business details, departments and modules
+  // (Settings), sites, then the team. The /settings, /sites, /staff-roster
+  // and /categories routes are only registered for admins.
+  const setup = group("setup").items;
+  if (canAdmin) {
+    setup.push(
+      { href: "/settings", label: "Settings", icon: Settings },
+      { href: "/sites", label: "Sites", icon: Building2 },
+    );
+  }
+  if (canManageUsers) {
+    // Managers look after the Staff and Viewers in their own department.
+    setup.push({ href: "/users", label: "Users", icon: Users });
+  }
+  if (canAdmin) {
+    setup.push({ href: "/staff-roster", label: "Staff Roster", icon: ClipboardList });
+  }
+  if (canManageUsers) {
+    // Managers keep the equipment list and print its QR labels.
+    setup.push({ href: "/equipment", label: "Equipment & QR labels", icon: QrCode });
+    // Audit and inspection reports become actions (Owners, Managers, ALPS).
+    group("reporting").items.push({ href: "/report-actions", label: "Report actions", icon: FileSearch });
   }
 
   if (canAdmin) {
-    groups.find(g => g.id === "admin")?.items.push(
+    group("admin").items.push({ href: "/categories", label: "Categories", icon: Tags });
+  }
+  if (isConsultant) {
+    group("admin").items.push({ href: "/clients", label: "Clients", icon: Building2 });
+  }
+  if (canAdmin) {
+    group("admin").items.push(
       { href: "/feedback", label: "Feedback inbox", icon: Inbox },
       { href: "/privacy-governance", label: "Privacy Centre", icon: ShieldCheck },
-      { href: "/settings", label: "Settings", icon: Settings }
     );
   }
 

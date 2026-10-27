@@ -126,12 +126,12 @@ export default function TasksPage() {
   const outstanding = myTasks.filter((t) => !t.completion).length;
 
   return (
-    <AppLayout title="Tasks">
+    <AppLayout title="Other reminders">
       <div className="max-w-3xl mx-auto py-6 px-4 space-y-6">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><ListChecks className="w-6 h-6 text-primary" /> Tasks</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Routine jobs for your team, one-off or repeating. {formatDay(today)}</p>
+            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><ListChecks className="w-6 h-6 text-primary" /> Other reminders</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Jobs for your team that don't belong to a track, one-off or repeating. {formatDay(today)}</p>
           </div>
           {isManager && tab === "all" && !draft && (
             <Button onClick={() => setDraft({ title: "", instruction: "", module: "", siteId: sites.data?.length === 1 ? String(sites.data[0].id) : "", assignee: "role:client_staff", recurrence: "daily", startsOn: today })}>
@@ -237,7 +237,7 @@ export default function TasksPage() {
             {all.error && <ErrorNote error={all.error} />}
             {!all.isLoading && allTasks.length === 0 && (
               <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                No tasks yet. {isManager ? "Create one, such as “Kitchen opening checklist” every day or “Weekly fire alarm test”." : ""}
+                No tasks yet. {isManager ? "Create one, such as “Kitchen opening checklist” every day or “Restock the first aid kits” every month." : ""}
               </p>
             )}
             <ul className="space-y-2">
