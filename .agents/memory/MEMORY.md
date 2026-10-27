@@ -97,3 +97,4 @@
 - [Recovery-code account binding](recovery-code-account-binding.md) — the user_id filter lives in consumeRecoveryCode and in the mobile verify-totp inline UPDATE; both are covered by cross-account tests.
 - [Training matrix identity](training-matrix-identity.md) — certificates link to roster by staff_roster_id; legacy name-only rows match only one unambiguous in-scope roster member, else reported as unmatched.
 - [Browser CSV formula safety](csv-formula-safety.md) — browser-built CSVs use compliance-tracker src/lib/csv.ts csvCell; it also neutralises leading tab/CR, which the api-server csvCell copies do not yet.
+- [AI kept to ComplyTrack work](ai-scope.md) — every Claude call does one fixed job: aiScopeRules + quoted labels + structured output with wrong_file; future chatbot must refuse off-topic questions.
