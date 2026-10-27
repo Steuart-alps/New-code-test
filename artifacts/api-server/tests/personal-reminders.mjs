@@ -42,7 +42,7 @@ try {
   });
   const entry = await import(pathToFileURL(outfile).href);
   pool = entry.pool;
-  const { app, runPersonalReminderJob, runUrgentAlertJob, hashPassword } = entry;
+  const { app, runPersonalReminderJob, runUrgentAlertJob, hashPassword, STARTER_CHECK_NOTE } = entry;
 
   server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
@@ -352,6 +352,12 @@ try {
     // Just created from an uploaded report: its action plan email has told the Owners and Managers.
     await q(`INSERT INTO track_actions (client_id, site_id, module, title, severity, status, source_kind, source_record_id, provenance)
       VALUES ($1, $2, 'audit', 'Inspector: repair the cellar door', 'urgent', 'open', 'inspection_report:fixture', 1, 'one_off')`, [A, redLion.id]);
+    // A Critical check the business set up, and a Critical starter check it
+    // was given as an example (no due date yet).
+    await q(`INSERT INTO compliance_items (client_id, site_id, title, status, priority, due_date)
+      VALUES ($1, $2, 'Gas safety certificate', 'pending', 'critical', '2026-10-15T10:00:00Z')`, [A, redLion.id]);
+    await q(`INSERT INTO compliance_items (client_id, title, status, priority, notes)
+      VALUES ($1, 'Starter fire risk assessment review', 'pending', 'critical', $2)`, [A, STARTER_CHECK_NOTE]);
     const result = await runUrgentAlertJob({ clientIds: [A, B], send, sendPush });
     assert.equal(result.errors, 0);
 
@@ -362,6 +368,8 @@ try {
     assert.doesNotMatch(ownerAlert.html, /Gas smell in the cellar/, "nobody is told about an issue they raised themselves");
     assert.doesNotMatch(ownerAlert.html, /Replace fire door closer/, "only urgent actions go straight away");
     assert.doesNotMatch(ownerAlert.html, /Inspector: repair the cellar door/, "a report's new actions were in its action plan email");
+    assert.match(ownerAlert.html, /Gas safety certificate/, "a Critical check goes to the Owners straight away");
+    assert.doesNotMatch(ownerAlert.html, /Starter fire risk assessment review/, "a new business's example checks are not alerted");
 
     const [tomAlert] = to(tom.email);
     assert.ok(tomAlert, "an urgent FixTrack issue goes to the person it is assigned to");
@@ -379,6 +387,7 @@ try {
     const count = sent.length;
     await runUrgentAlertJob({ clientIds: [A, B], send, sendPush });
     assert.equal(sent.length, count, "each item is alerted once");
+    await q(`DELETE FROM compliance_items WHERE title IN ('Gas safety certificate', 'Starter fire risk assessment review')`);
     ok("urgent actions and new FixTrack issues are emailed the same day, once, to the right people");
   }
 

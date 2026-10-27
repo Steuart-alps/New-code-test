@@ -213,7 +213,21 @@ export const EMAIL_BRAND = {
 
 /** Call-to-action link styled as the shared blue button. `href` must be safe for an attribute. */
 export function emailButton(href: string, label: string): string {
-  return `<a href="${href}" style="display:inline-block;background:${EMAIL_BRAND.button};color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">${label}</a>`;
+  return `<a href="${href}" style="display:inline-block;background:${EMAIL_BRAND.button};color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">${label}</a>`;
+}
+
+/** Smallest text size in an email body; the main text is 16px. */
+const MIN_BODY_FONT_PX = 13;
+
+/**
+ * Small print in a message body is raised a step (12px to 13px, 14px to
+ * 15px), so details, labels and badges stay easy to read on a phone.
+ */
+function readableFontSizes(html: string): string {
+  return html.replace(/font-size:(\s*)(\d+)px/gi, (match, space: string, px: string) => {
+    const size = Number(px);
+    return size < 15 ? `font-size:${space}${Math.max(size + 1, MIN_BODY_FONT_PX)}px` : match;
+  });
 }
 
 /**
@@ -230,14 +244,14 @@ export function renderEmailLayout(opts: { bodyHtml: string; subtitle?: string; f
 <body ${EMAIL_LAYOUT_MARKER} style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
   <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
     <div style="background:${EMAIL_BRAND.header};padding:32px 40px;">
-      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      ${opts.subtitle ? `<div style="font-size:14px;color:#94a3b8;margin-top:6px;">${opts.subtitle}</div>` : ""}
+      <div style="font-size:26px;font-weight:800;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
+      ${opts.subtitle ? `<div style="font-size:16px;font-weight:600;color:#cbd5e1;margin-top:6px;">${opts.subtitle}</div>` : ""}
     </div>
-    <div style="padding:32px 40px;color:#334155;font-size:15px;line-height:1.5;">
-${opts.bodyHtml}
+    <div style="padding:32px 40px;color:#1e293b;font-size:16px;line-height:1.6;">
+${readableFontSizes(opts.bodyHtml)}
     </div>
-    <div style="padding:24px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;">
-      <a href="${escapeHtml(appUrl)}" style="color:#94a3b8;text-decoration:none;"><img src="${escapeHtml(appUrl)}/email-assets/alps-logo.png" width="96" height="60" alt="ALPS Consultancy" style="display:block;margin:0 auto 12px;border:0;color:#94a3b8;font-size:12px;"/></a>
+    <div style="padding:24px 40px;border-top:1px solid #f1f5f9;font-size:13px;color:#64748b;text-align:center;line-height:1.6;">
+      <a href="${escapeHtml(appUrl)}" style="color:#64748b;text-decoration:none;"><img src="${escapeHtml(appUrl)}/email-assets/alps-logo.png" width="96" height="60" alt="ALPS Consultancy" style="display:block;margin:0 auto 12px;border:0;color:#64748b;font-size:13px;"/></a>
       ComplyTrack by ALPS Consultancy${opts.footerNote ? ` · ${opts.footerNote}` : ""}<br/>
       ALPS Consulting Ltd t/as ALPS Consultancy
     </div>
@@ -246,15 +260,19 @@ ${opts.bodyHtml}
 </html>`;
 }
 
+/** An older body's own Arial font, which would override the layout's typeface. */
+const BODY_FONT_OVERRIDE = /font-family:\s*Arial,\s*sans-serif;?\s*/gi;
+
 /**
  * Put an email body into the shared layout. Bodies built with
  * renderEmailLayout pass through unchanged; a full HTML document keeps only
- * what is inside its <body>.
+ * what is inside its <body>. A body's own Arial font is dropped so every
+ * email reads in the layout's typeface.
  */
 export function applyEmailLayout(html: string): string {
   if (html.includes(EMAIL_LAYOUT_MARKER)) return html;
   const body = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? html;
-  return renderEmailLayout({ bodyHtml: body });
+  return renderEmailLayout({ bodyHtml: body.replace(BODY_FONT_OVERRIDE, "") });
 }
 
 /** Extract a bare email address from a value that may include a display name,

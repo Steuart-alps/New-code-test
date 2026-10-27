@@ -36,6 +36,7 @@ import {
 } from "./emailDeliveryClaims";
 import { emailButton, escapeHtml, getPublicAppUrl, renderEmailLayout, sendEmail } from "./email";
 import { logger } from "./logger";
+import { STARTER_CHECK_NOTE } from "./seedStarterContent";
 import { sendPushToUsers } from "./pushNotifications";
 import { getEntitledServices, isEntitled, type Entitlements } from "./services";
 import { getTrackModule } from "./trackModules";
@@ -63,7 +64,7 @@ export interface UrgentAlertJobResult {
   errors: number;
 }
 
-interface Candidate {
+export interface Candidate {
   kind: "action" | "fix" | "compliance";
   id: number;
   module: string;
@@ -141,28 +142,48 @@ async function candidates(clientId: number, since: Date): Promise<Candidate[]> {
     FROM compliance_items c LEFT JOIN sites s ON s.id = c.site_id AND s.client_id = c.client_id
     WHERE c.client_id = ${clientId} AND c.priority = 'critical' AND c.status <> 'completed'
       AND GREATEST(c.created_at, c.updated_at) >= ${from}::timestamptz
+      -- A starter check a new business was given (lib/seedStarterContent.ts)
+      -- is an example until someone gives it a due date; a brand-new
+      -- business is not told its examples need action today.
+      AND NOT (c.notes IS NOT DISTINCT FROM ${STARTER_CHECK_NOTE} AND c.due_date IS NULL)
     ORDER BY 1, 2
   `));
 }
 
-function emailFor(businessName: string, items: Candidate[], name: string | null): { subject: string; html: string } {
+/** The coloured label beside each item, like the status badges in the check reminder email. */
+function badgeFor(item: Candidate): string {
+  const [text, background, colour] = item.kind === "compliance" ? ["Critical", "#fee2e2", "#b91c1c"]
+    : item.urgent ? ["Urgent", "#fee2e2", "#b91c1c"]
+    : ["New", "#dbeafe", "#1d4ed8"];
+  return `<span style="background:${background};color:${colour};padding:3px 10px;border-radius:12px;font-size:13px;font-weight:700;">${text}</span>`;
+}
+
+export function buildUrgentAlertEmail(businessName: string, items: Candidate[], name: string | null): { subject: string; html: string } {
   const appUrl = getPublicAppUrl();
   const anyUrgent = items.some((item) => item.urgent);
   const subject = items.length === 1
     ? `${describe(items[0]!).label}: ${items[0]!.title} — ComplyTrack`
     : `${items.length} ${anyUrgent ? "items need action today" : "new FixTrack issues"} at ${businessName} — ComplyTrack`;
+  const headline = items.length === 1
+    ? (anyUrgent ? "1 item needs action today" : "A new FixTrack issue has been reported")
+    : anyUrgent ? `${items.length} items need action today` : `${items.length} new FixTrack issues have been reported`;
   const rows = items.map((item) => {
     const { label, path } = describe(item);
-    const colour = item.urgent ? "#b91c1c" : "#334155";
-    return `<li style="margin:0 0 8px;"><strong><a href="${escapeHtml(`${appUrl}${path}`)}" style="color:${colour};text-decoration:none;">${escapeHtml(item.title)}</a></strong>`
-      + ` <span style="color:#64748b;">· ${escapeHtml(label)}${item.site_name ? ` · ${escapeHtml(item.site_name)}` : ""}</span></li>`;
+    return `<tr>
+          <td style="padding:12px 14px;border-bottom:1px solid #e2e8f0;">
+            <a href="${escapeHtml(`${appUrl}${path}`)}" style="font-weight:700;font-size:16px;color:#0f172a;text-decoration:none;">${escapeHtml(item.title)}</a>
+            <div style="font-size:14px;color:#64748b;margin-top:3px;">${escapeHtml(label)}${item.site_name ? ` · ${escapeHtml(item.site_name)}` : ""}</div>
+          </td>
+          <td style="padding:12px 14px;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap;vertical-align:top;">${badgeFor(item)}</td>
+        </tr>`;
   }).join("");
   const html = renderEmailLayout({
-    subtitle: escapeHtml(businessName),
+    subtitle: anyUrgent ? "Needs action today" : "New FixTrack issues",
     bodyHtml: `<p style="margin:0 0 16px;">Hello${name ? ` ${escapeHtml(name.split(" ")[0]!)}` : ""},</p>`
-      + `<p style="margin:0 0 12px;">${anyUrgent ? "This needs action today" : "A new issue has been reported"} at ${escapeHtml(businessName)}:</p>`
-      + `<ul style="margin:0 0 20px;padding-left:20px;">${rows}</ul>`
-      + emailButton(appUrl, "Open ComplyTrack"),
+      + `<p style="margin:0 0 6px;font-size:19px;font-weight:700;color:#0f172a;">${headline} at ${escapeHtml(businessName)}.</p>`
+      + `<p style="margin:0 0 20px;color:#475569;">Open ComplyTrack to deal with ${items.length === 1 ? "it" : "them"}.</p>`
+      + `<table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;margin:0 0 28px;">${rows}</table>`
+      + `<div style="text-align:center;">${emailButton(appUrl, "Open ComplyTrack →")}</div>`,
     footerNote: "Urgent items and new FixTrack issues are sent as they are raised",
   });
   return { subject, html };
@@ -202,7 +223,7 @@ export async function runUrgentAlertsForClient(
       if (claim) claims.push({ item, claim });
     }
     if (!claims.length) continue;
-    const { subject, html } = emailFor(businessName, claims.map((entry) => entry.item), user.name);
+    const { subject, html } = buildUrgentAlertEmail(businessName, claims.map((entry) => entry.item), user.name);
     try {
       await send({
         to: email, subject, html, clientId,

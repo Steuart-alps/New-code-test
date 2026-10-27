@@ -101,7 +101,7 @@ export function buildReportActionPlanEmail(input: PlanEmailInput): { subject: st
     ${input.summary ? `<div style="background:#f8fafc;border-radius:10px;padding:14px 16px;margin:0 0 16px;font-size:14px;"><div style="font-weight:600;margin-bottom:4px;">Summary of the report</div>${escapeHtml(input.summary)}</div>` : ""}
     <div style="font-size:13px;color:#64748b;margin:0 0 4px;">${escapeHtml(countLine)}</div>
     <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:14px;">${rows}</table>
-    <div style="margin:24px 0 0;"><a href="${escapeHtml(reportLink)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">Open the action plan</a></div>
+    <div style="margin:24px 0 0;"><a href="${escapeHtml(reportLink)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">Open the action plan</a></div>
     <p style="margin:16px 0 0;font-size:12px;color:#64748b;">You'll be asked to sign in. The report itself stays in ComplyTrack; it isn't attached to this email.</p>`;
   const html = renderEmailLayout({
     bodyHtml,
