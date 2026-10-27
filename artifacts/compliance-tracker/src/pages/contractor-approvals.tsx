@@ -598,7 +598,7 @@ export default function ContractorApprovalsPage() {
                     id="unsent-draft-heading"
                     ref={unsentDraftHeadingRef}
                     tabIndex={-1}
-                    className="text-sm font-medium text-amber-950 outline-none"
+                    className="text-sm font-bold text-amber-950 outline-none"
                   >
                     Your edits were not sent
                   </h2>
@@ -760,7 +760,7 @@ export default function ContractorApprovalsPage() {
                                       {format(new Date(item.createdAt), "dd MMM, HH:mm")}
                                     </span>
                                   </div>
-                                  <h3 className="font-medium">{item.jobTitle || "Untitled Job"}</h3>
+                                  <h3 className="font-bold">{item.jobTitle || "Untitled Job"}</h3>
                                   <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5">
                                     <Building className="w-3.5 h-3.5" />
                                     {item.contractorName || "Unknown Contractor"}

@@ -509,7 +509,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Status breakdown */}
         <div className="bg-card border rounded-xl p-5 space-y-3">
-          <h3 className="font-semibold text-sm">By status</h3>
+          <h3 className="font-bold text-sm">By status</h3>
           {byStatus.map(({ key, meta, count }) => {
             const Icon = meta.icon;
             return (
@@ -526,7 +526,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
 
         {/* Priority (open only) */}
         <div className="bg-card border rounded-xl p-5 space-y-3">
-          <h3 className="font-semibold text-sm">Open issues by priority</h3>
+          <h3 className="font-bold text-sm">Open issues by priority</h3>
           {byPriority.length === 0
             ? <p className="text-sm text-muted-foreground italic">No open issues</p>
             : byPriority.map(({ key, meta, count }) => (
@@ -544,7 +544,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
         {/* By type */}
         {byType.length > 0 && (
           <div className="bg-card border rounded-xl p-5 space-y-3">
-            <h3 className="font-semibold text-sm">Open issues by type</h3>
+            <h3 className="font-bold text-sm">Open issues by type</h3>
             {byType.map(({ key, meta, count }) => (
               <div key={key} className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground w-24 flex-shrink-0 truncate">{meta.label}</span>
@@ -558,7 +558,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
         {/* By site */}
         {bySite.length > 0 && (
           <div className="bg-card border rounded-xl p-5 space-y-3">
-            <h3 className="font-semibold text-sm">Open issues by site</h3>
+            <h3 className="font-bold text-sm">Open issues by site</h3>
             {bySite.map(([site, count]) => (
               <div key={site} className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground w-24 flex-shrink-0 truncate">{site}</span>
@@ -575,7 +575,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
         <div className="bg-card border rounded-xl overflow-hidden">
           <div className="px-5 py-4 border-b flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-500" />
-            <h3 className="font-semibold text-sm">Oldest unactioned — awaiting first response</h3>
+            <h3 className="font-bold text-sm">Oldest unactioned — awaiting first response</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -984,7 +984,7 @@ export default function FixTrackPage() {
               <Lock className="w-8 h-8 text-primary" />
             </div>
             <div>
-              <h2 className="text-2xl font-display font-medium mb-2">FixTrack</h2>
+              <h2 className="text-2xl font-display font-bold mb-2">FixTrack</h2>
               <p className="text-muted-foreground mb-1">Staff maintenance issue reporting — log faults, attach photos, track resolution.</p>
               <p className="font-medium text-primary">£10 per site per month</p>
             </div>
@@ -1449,7 +1449,7 @@ export default function FixTrackPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display">{editing ? "Edit Issue" : "Report Maintenance Issue"}</DialogTitle>
+            <DialogTitle className="font-display font-bold">{editing ? "Edit Issue" : "Report Maintenance Issue"}</DialogTitle>
             <DialogDescription>
               {editing ? "Update the maintenance issue details." : "Record a maintenance issue for manager review."}
             </DialogDescription>

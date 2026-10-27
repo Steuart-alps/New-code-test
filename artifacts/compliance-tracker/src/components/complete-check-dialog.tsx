@@ -59,7 +59,7 @@ export function CompleteCheckDialog({
     <Dialog open={!!item} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle className="font-display">Mark as done</DialogTitle>
+          <DialogTitle className="font-display font-bold">Mark as done</DialogTitle>
           <DialogDescription>{item?.title}</DialogDescription>
         </DialogHeader>
         <div className="space-y-2 py-2">

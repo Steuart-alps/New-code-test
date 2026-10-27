@@ -459,7 +459,7 @@ function StorageUsageCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <HardDrive className="w-5 h-5 text-sky-600" />
-          <CardTitle className="font-display">File Storage</CardTitle>
+          <CardTitle className="font-display font-bold">File Storage</CardTitle>
         </div>
         <CardDescription>
           Retained documents and evidence for this account. When files reach the storage you pay for, new uploads stop unless automatic top-up is on. Nothing is ever deleted. Owners and admins get one email at 80% (or your warning level, if lower) and one when storage is full.
@@ -772,7 +772,7 @@ function DepartmentsCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-violet-500" />
-          <CardTitle className="font-display">Departments</CardTitle>
+          <CardTitle className="font-display font-bold">Departments</CardTitle>
         </div>
         <CardDescription>
           Each department sits under one of your sites. Staff in a department see only that site
@@ -1347,7 +1347,7 @@ function TrackSummaryRoutingCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Route className="w-5 h-5 text-sky-600" />
-          <CardTitle className="font-display">Track Summary Recipients</CardTitle>
+          <CardTitle className="font-display font-bold">Track Summary Recipients</CardTitle>
         </div>
         <CardDescription>
           Senior management receives every enabled track. Choose departments or named staff for additional track-specific digests.
@@ -1550,7 +1550,7 @@ function SenderDomainCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Globe className="w-5 h-5 text-emerald-600" />
-          <CardTitle className="font-display">Sender Domain</CardTitle>
+          <CardTitle className="font-display font-bold">Sender Domain</CardTitle>
         </div>
         <CardDescription>
           Use your own business email address instead of the default sender. We’ll show you the small setup step needed for your domain.
@@ -1581,7 +1581,7 @@ function SenderDomainCard() {
           <div className="space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <div className="font-semibold font-display text-lg">{state.domainName}</div>
+                <div className="font-bold font-display text-lg">{state.domainName}</div>
                 <div className="mt-1"><StatusBadge status={state.status} /></div>
               </div>
               <div className="flex gap-2">
@@ -1745,7 +1745,7 @@ function EmailSetupGuide({
             <Mail className="w-5 h-5 text-indigo-600" />
           </div>
           <div>
-            <h3 className="font-display font-semibold text-base text-foreground leading-snug">
+            <h3 className="font-display font-bold text-base text-foreground leading-snug">
               Email sender setup
             </h3>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -1976,7 +1976,7 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display text-lg">AI features</CardTitle>
+          <CardTitle className="font-display font-bold text-lg">AI features</CardTitle>
         </div>
         <CardDescription>
           {price}, for the whole business. ComplyTrack's AI reads uploaded reports and suggests the actions they ask for, and turns a photo or PDF of an appliance list into PAT register rows. A fair monthly allowance of AI use is included.
@@ -2269,7 +2269,7 @@ function BillingCard() {
         <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
           <div className="flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-primary" />
-            <CardTitle className="font-display">Billing &amp; Subscription</CardTitle>
+            <CardTitle className="font-display font-bold">Billing &amp; Subscription</CardTitle>
           </div>
           <CardDescription>
             You're billed based on active services and sites. Your total scales automatically with the number of sites on your account.
@@ -2355,7 +2355,7 @@ function BillingCard() {
       {!loading && servicesConfig && (
         <Card className="shadow-lg border-border/50 bg-card mb-6">
           <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-            <CardTitle className="font-display text-lg">Services</CardTitle>
+            <CardTitle className="font-display font-bold text-lg">Services</CardTitle>
             <CardDescription>Add or remove services from your account.</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
@@ -2614,7 +2614,7 @@ function DataExportCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Download className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Data Export</CardTitle>
+          <CardTitle className="font-display font-bold">Data Export</CardTitle>
         </div>
         <CardDescription>
           Download all your compliance records as a ZIP file containing CSVs for every module — food safety, fire safety, documents, training, contractors and more. Useful before cancelling or for offline audit archives.
@@ -2672,7 +2672,7 @@ function InvoicesCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Invoices</CardTitle>
+          <CardTitle className="font-display font-bold">Invoices</CardTitle>
         </div>
         <CardDescription>
           Invoices are issued by Stripe each billing cycle and emailed to you automatically. Download past invoices here.
@@ -2911,7 +2911,7 @@ function PhotoRequirementsCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Camera className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Photo Requirements</CardTitle>
+          <CardTitle className="font-display font-bold">Photo Requirements</CardTitle>
         </div>
         <CardDescription>
           Choose which record types must include at least one photo. Staff will see a <strong>Required</strong> badge on those records.
@@ -3083,7 +3083,7 @@ function RequiredActionTemplatesCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <div className="flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-primary" /><CardTitle className="font-display">Required Action Templates</CardTitle></div>
+        <div className="flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-primary" /><CardTitle className="font-display font-bold">Required Action Templates</CardTitle></div>
         <CardDescription>Standardise actions for each module. Selecting a template creates an editable snapshot, so later template changes do not alter existing actions.</CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -3290,7 +3290,7 @@ export default function SettingsPage() {
         <SettingsMenu active={section} onSelect={openSection} />
         <div className="max-w-4xl min-w-0 space-y-6" data-testid={`settings-section-${section}`}>
           <div>
-            <h2 className="flex items-center gap-2 font-display text-xl font-semibold text-foreground">
+            <h2 className="flex items-center gap-2 font-display text-xl font-bold text-foreground">
               <sectionInfo.Icon className="h-5 w-5 text-primary" />
               {sectionInfo.label}
             </h2>
@@ -3311,7 +3311,7 @@ export default function SettingsPage() {
                 <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
                   <div className="flex items-center gap-2">
                     <Settings2 className="w-5 h-5 text-primary" />
-                    <CardTitle className="font-display">General Preferences</CardTitle>
+                    <CardTitle className="font-display font-bold">General Preferences</CardTitle>
                   </div>
                   <CardDescription>Global configuration for the compliance tracker.</CardDescription>
                 </CardHeader>
@@ -3373,7 +3373,7 @@ export default function SettingsPage() {
               <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
                 <div className="flex items-center gap-2">
                   <Bell className="w-5 h-5 text-amber-500" />
-                  <CardTitle className="font-display">Reminder Notifications</CardTitle>
+                  <CardTitle className="font-display font-bold">Reminder Notifications</CardTitle>
                 </div>
                 <CardDescription>
                   Each person gets one email at 8am, only on days when something of theirs needs a reminder: by default the day
@@ -3520,7 +3520,7 @@ export default function SettingsPage() {
               <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
                 <div className="flex items-center gap-2">
                   <Mail className="w-5 h-5 text-indigo-500" />
-                  <CardTitle className="font-display">Email Settings</CardTitle>
+                  <CardTitle className="font-display font-bold">Email Settings</CardTitle>
                 </div>
                 <CardDescription>
                   Choose the sender name and email address your recipients will see. We handle delivery for you.
@@ -3697,7 +3697,7 @@ function TodayByDepartmentRolesCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6" data-testid="card-today-by-department-roles">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <Users className="w-4 h-4" /> Today by department on the dashboard
         </CardTitle>
         <CardDescription>
@@ -3775,7 +3775,7 @@ function TwoFactorPolicyCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6" data-testid="card-two-factor-policy">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <ShieldCheck className="w-4 h-4" /> Two-factor requirement
         </CardTitle>
         <CardDescription>
@@ -3955,7 +3955,7 @@ export function TwoFactorCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <KeyRound className="w-4 h-4" /> Two-Factor Authentication
         </CardTitle>
         <CardDescription>
@@ -4186,7 +4186,7 @@ function PasskeyCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <KeyRound className="w-4 h-4" /> Passkeys
         </CardTitle>
         <CardDescription>
@@ -4274,7 +4274,7 @@ function ModulesCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Package className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Modules</CardTitle>
+          <CardTitle className="font-display font-bold">Modules</CardTitle>
         </div>
         <CardDescription>
           Activate or deactivate product modules for your account.

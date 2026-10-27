@@ -113,12 +113,12 @@ export function MyDocumentsView({ canAcknowledge }: { canAcknowledge: boolean })
 
   return <div className="space-y-8">
     <section aria-labelledby="my-pending-heading">
-      <h2 id="my-pending-heading" className="flex items-center gap-2 text-lg font-semibold"><BookOpen className="h-5 w-5" /> Documents to read ({data.pending.length})</h2>
+      <h2 id="my-pending-heading" className="flex items-center gap-2 text-lg font-bold"><BookOpen className="h-5 w-5" /> Documents to read ({data.pending.length})</h2>
       {data.pending.length === 0 && <p className="mt-3 rounded-lg border p-5 text-sm text-muted-foreground">You’re all caught up. No documents need your acknowledgement right now.</p>}
       <div className="mt-3 space-y-3">
         {data.pending.map(doc => <Card key={doc.id}><CardContent className="p-5 space-y-3">
           <div>
-            <h3 className="font-medium">{doc.title}</h3>
+            <h3 className="font-bold">{doc.title}</h3>
             <p className="text-xs text-muted-foreground">{[doc.category.replace(/_/g, " "), doc.site_name, doc.department].filter(Boolean).join(" · ")}</p>
             {doc.description && <p className="mt-2 text-sm text-muted-foreground">{doc.description}</p>}
           </div>
@@ -138,7 +138,7 @@ export function MyDocumentsView({ canAcknowledge }: { canAcknowledge: boolean })
       </div>
     </section>
     <section aria-labelledby="my-completed-heading">
-      <h2 id="my-completed-heading" className="flex items-center gap-2 text-lg font-semibold"><CheckCircle2 className="h-5 w-5" /> Completed ({data.completed.length})</h2>
+      <h2 id="my-completed-heading" className="flex items-center gap-2 text-lg font-bold"><CheckCircle2 className="h-5 w-5" /> Completed ({data.completed.length})</h2>
       {data.completed.length === 0 && <p className="mt-3 text-sm text-muted-foreground">No acknowledgements recorded yet.</p>}
       <div className="mt-3 space-y-2">
         {data.completed.map(doc => <div key={doc.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4">

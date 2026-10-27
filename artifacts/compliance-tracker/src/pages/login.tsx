@@ -137,7 +137,7 @@ export default function LoginPage() {
             <div className="flex justify-center mb-6 relative z-10">
               <ShieldCheck className="w-12 h-12 text-primary" />
             </div>
-            <h1 className="text-3xl font-display text-white mb-2 relative z-10">
+            <h1 className="text-3xl font-display font-bold text-white mb-2 relative z-10">
               ComplyTrack
             </h1>
             <div className="flex items-center justify-center gap-2 mt-4 relative z-10">
@@ -156,7 +156,7 @@ export default function LoginPage() {
                   exit={{ opacity: 0, x: 16 }}
                   transition={{ duration: 0.3 }}
                 >
-                  <h2 className="text-2xl font-display text-[#162D42] mb-8 text-center">Sign in to your account</h2>
+                  <h2 className="text-2xl font-display font-bold text-[#162D42] mb-8 text-center">Sign in to your account</h2>
                   <form onSubmit={handleLogin} className="space-y-5">
                     <div className="space-y-2">
                       <Label htmlFor="email" className="text-[#1A1A1A]">Email address</Label>
@@ -223,7 +223,7 @@ export default function LoginPage() {
                       <KeyRound className="w-7 h-7 text-primary" />
                     </div>
                   </div>
-                  <h2 className="text-2xl font-display text-[#162D42] mb-2 text-center">Two-factor authentication</h2>
+                  <h2 className="text-2xl font-display font-bold text-[#162D42] mb-2 text-center">Two-factor authentication</h2>
                   <p className="text-sm text-muted-foreground mb-8 text-center font-light">
                      {usingRecoveryCode
                        ? "Enter one of the recovery codes you saved when you enabled two-factor authentication."
@@ -309,7 +309,7 @@ export default function LoginPage() {
                       <KeyRound className="w-7 h-7 text-primary" />
                     </div>
                   </div>
-                  <h2 className="text-2xl font-display text-[#162D42] mb-2">Use your passkey</h2>
+                  <h2 className="text-2xl font-display font-bold text-[#162D42] mb-2">Use your passkey</h2>
                   <p className="text-sm text-muted-foreground mb-8">
                     Confirm your identity with the passkey saved on this device or security key.
                   </p>
@@ -339,7 +339,7 @@ export default function LoginPage() {
                     <ArrowLeft className="w-3.5 h-3.5" />
                     Back to sign in
                   </button>
-                  <h2 className="text-2xl font-display text-[#162D42] mb-3">Forgot your password?</h2>
+                  <h2 className="text-2xl font-display font-bold text-[#162D42] mb-3">Forgot your password?</h2>
                   <p className="text-sm text-muted-foreground mb-8 font-light">
                     Enter your email and we'll send you a link to reset your password.
                   </p>
@@ -386,7 +386,7 @@ export default function LoginPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
-                  <h2 className="text-2xl font-display text-[#162D42] mb-3">Check your email</h2>
+                  <h2 className="text-2xl font-display font-bold text-[#162D42] mb-3">Check your email</h2>
                   <p className="text-sm text-muted-foreground mb-8 font-light leading-relaxed">
                     If an account exists for <strong className="text-[#1A1A1A] font-medium">{forgotEmail}</strong>, you'll receive a password reset link shortly.
                   </p>

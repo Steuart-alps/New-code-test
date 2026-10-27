@@ -56,7 +56,7 @@ export function ErrorReportsCheck() {
 
   return (
     <section className="rounded-xl border bg-card p-5" aria-label="Error reports">
-      <h2 className="font-semibold">Error reports</h2>
+      <h2 className="font-bold">Error reports</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         {errorReportsEnabled()
           ? `This website build sends errors to Sentry (environment "${errorReportEnvironment}").`

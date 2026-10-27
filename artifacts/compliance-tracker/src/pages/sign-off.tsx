@@ -396,7 +396,7 @@ export default function SignOffPage() {
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
         <div className="text-center max-w-xs">
           <Shield className="w-12 h-12 mx-auto mb-4 text-slate-300" />
-          <h2 className="text-lg font-semibold text-slate-700">Invalid sign-off link</h2>
+          <h2 className="text-lg font-bold text-slate-700">Invalid sign-off link</h2>
           <p className="text-sm text-slate-500 mt-2">
             This link is no longer valid. Please ask your manager for the correct link.
           </p>
@@ -436,7 +436,7 @@ export default function SignOffPage() {
           <div className="space-y-4">
             <div className="text-center space-y-1">
               <Building2 className="w-8 h-8 mx-auto text-slate-400" />
-              <h1 className="text-xl font-semibold text-slate-800">Select your department</h1>
+              <h1 className="text-xl font-bold text-slate-800">Select your department</h1>
               <p className="text-sm text-slate-500">Tap your team to see your documents</p>
             </div>
 
@@ -476,7 +476,7 @@ export default function SignOffPage() {
 
             <div className="text-center space-y-1">
               <User className="w-8 h-8 mx-auto text-slate-400" />
-              <h1 className="text-xl font-semibold text-slate-800">Who are you?</h1>
+              <h1 className="text-xl font-bold text-slate-800">Who are you?</h1>
               <p className="text-sm text-slate-500">Select your name from the list</p>
             </div>
 
@@ -549,7 +549,7 @@ export default function SignOffPage() {
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
                   <CheckCircle2 className="w-9 h-9 text-green-500" />
                 </div>
-                <h2 className="text-xl font-semibold text-slate-800">All signed!</h2>
+                <h2 className="text-xl font-bold text-slate-800">All signed!</h2>
                 <p className="text-sm text-slate-500">
                   You have acknowledged all required documents. Thank you.
                 </p>
@@ -560,7 +560,7 @@ export default function SignOffPage() {
             ) : (
               <>
                 <div className="flex items-center justify-between">
-                  <h2 className="font-semibold text-slate-800">Your documents</h2>
+                  <h2 className="font-bold text-slate-800">Your documents</h2>
                   <span className="text-sm text-slate-500">
                     {docs.filter(d => d.signed).length}/{docs.length} signed
                   </span>

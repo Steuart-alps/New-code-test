@@ -561,7 +561,7 @@ export default function EquipmentPage() {
     <AppLayout title="Equipment & QR labels">
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-semibold">Equipment & QR labels</h1>
+          <h1 className="text-2xl font-bold">Equipment & QR labels</h1>
           <p className="text-sm text-muted-foreground">Put a QR label on every item. A phone scan shows whether it is in date and opens today's check, reading or fault report.</p>
         </div>
         <SetupGuide />

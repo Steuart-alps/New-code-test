@@ -90,7 +90,7 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
     <Card className="p-5 mb-8 bg-card/60 border-border/50">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="font-display font-semibold text-lg flex items-center gap-2">
+          <h2 className="font-display font-bold text-lg flex items-center gap-2">
             <CalendarClock aria-hidden="true" className="w-5 h-5 text-primary" /> Contractor visits
           </h2>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
@@ -117,7 +117,7 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
           if (!rows.length) return null;
           return (
             <section key={group} aria-label={group}>
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">{group}</h3>
+              <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wide mb-2">{group}</h3>
               <ul className="divide-y divide-border/60 rounded-sm border border-border/60">
                 {rows.map(visit => {
                   const type = typeByKey.get(visit.visitKey)!;

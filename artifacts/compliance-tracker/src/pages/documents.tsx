@@ -334,7 +334,7 @@ export default function DocumentsPage() {
         ) : filtered.length === 0 ? (
           <div className="text-center py-24 border border-dashed border-border rounded-xl">
             <FileText className="w-12 h-12 mx-auto mb-4 text-muted-foreground/40" />
-            <h3 className="font-semibold text-lg mb-1">
+            <h3 className="font-bold text-lg mb-1">
               {docs.length === 0 ? "No documents yet" : "No results"}
             </h3>
             <p className="text-sm text-muted-foreground max-w-xs mx-auto">

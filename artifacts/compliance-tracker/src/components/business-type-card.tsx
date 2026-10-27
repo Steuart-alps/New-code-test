@@ -42,7 +42,7 @@ export function BusinessTypeCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Building2 className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Business Type</CardTitle>
+          <CardTitle className="font-display font-bold">Business Type</CardTitle>
         </div>
         <CardDescription>Used to suggest modules and starter compliance checks, and for healthcare water temperature defaults.</CardDescription>
       </CardHeader>

@@ -90,7 +90,7 @@ export default function ScanPage() {
                 {scan.data.siteName && <span>{scan.data.siteName}</span>}
                 <span className="ml-auto font-mono tracking-widest">{scan.data.code}</span>
               </div>
-              <h1 className="text-xl font-semibold leading-tight">{scan.data.name}</h1>
+              <h1 className="text-xl font-bold leading-tight">{scan.data.name}</h1>
               {scan.data.detail && <p className="text-sm text-muted-foreground">{scan.data.detail}</p>}
               {!scan.data.active && (
                 <p className="pt-1 text-sm font-medium text-amber-700">This item is archived and no longer in use.</p>
@@ -131,7 +131,7 @@ export default function ScanPage() {
 
             {scan.data.history.length > 0 && (
               <Card className="p-4">
-                <h2 className="mb-2 text-sm font-semibold">Recent records</h2>
+                <h2 className="mb-2 text-sm font-bold">Recent records</h2>
                 <ul className="divide-y text-sm">
                   {scan.data.history.map((entry, index) => (
                     <li key={`${entry.date}-${index}`} className="flex items-start gap-3 py-2">

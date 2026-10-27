@@ -66,7 +66,7 @@ function PendingDeletionRequests() {
   };
   return (
     <section className="rounded-xl border border-amber-200 bg-card p-5" aria-label="Pending data deletion requests">
-      <h2 className="font-semibold">Pending data deletion requests</h2>
+      <h2 className="font-bold">Pending data deletion requests</h2>
       <p className="mt-1 text-xs text-muted-foreground">Review legal retention requirements before approval. Approval schedules deletion no earlier than 30 days after the request; legal holds still block it.</p>
       {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
       {!error && requests.length === 0 && <p className="mt-3 text-sm text-muted-foreground">No pending requests.</p>}
@@ -434,7 +434,7 @@ export default function ClientsPage() {
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-sm truncate">{c.name}</h3>
+                    <h3 className="font-bold text-sm truncate">{c.name}</h3>
                     <p className="text-xs text-muted-foreground">{c.slug}</p>
                   </div>
                   <div className="w-3 h-3 rounded-full flex-shrink-0 mt-1" style={{ backgroundColor: c.primaryColor }} />

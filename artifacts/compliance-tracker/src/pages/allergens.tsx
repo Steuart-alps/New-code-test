@@ -117,7 +117,7 @@ export default function AllergensPage() {
       <AppLayout title="Allergen records">
         <div className="max-w-xl mx-auto mt-12 rounded-xl border-2 border-primary/20 bg-primary/5 p-8 text-center space-y-4">
           <Lock className="w-8 h-8 text-primary mx-auto" />
-          <h2 className="text-xl font-medium">Allergen records are part of KitchenTrack</h2>
+          <h2 className="text-xl font-bold">Allergen records are part of KitchenTrack</h2>
           {canAdmin
             ? <Link href="/settings"><Button>Enable KitchenTrack</Button></Link>
             : <p className="text-sm text-muted-foreground">Ask your account admin to enable KitchenTrack.</p>}
@@ -281,7 +281,7 @@ export default function AllergensPage() {
               <Wheat className="w-4 h-4 text-amber-700" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold leading-tight">Allergen records</h1>
+              <h1 className="text-lg font-bold leading-tight">Allergen records</h1>
               <p className="text-xs text-muted-foreground">Ingredients, dishes and allergen charts for the 14 regulated allergens</p>
             </div>
           </div>

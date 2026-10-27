@@ -491,7 +491,7 @@ export default function HotTubPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">TubTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">TubTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Digital hot tub & spa pool maintenance logbook — daily water chemistry, temperature, filter and drain records based on HSG282 and PWTAG guidance.
                 </p>

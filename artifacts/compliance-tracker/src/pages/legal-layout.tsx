@@ -12,7 +12,7 @@ export function LegalLayout({ title, updated, children }: { title: string; updat
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <button onClick={() => navigate("/")} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <ShieldCheck className="w-5 h-5 text-primary" />
-            <span className="font-medium font-display text-lg tracking-wide">ComplyTrack</span>
+            <span className="font-bold font-display text-lg tracking-wide">ComplyTrack</span>
           </button>
           <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 opacity-70 brightness-0 invert" />
         </div>
@@ -24,9 +24,9 @@ export function LegalLayout({ title, updated, children }: { title: string; updat
         >
           <ArrowLeft className="w-4 h-4" /> Back to home
         </button>
-        <h1 className="font-display text-4xl text-foreground mb-2">{title}</h1>
+        <h1 className="font-display font-bold text-4xl text-foreground mb-2">{title}</h1>
         <p className="text-sm text-muted-foreground mb-10">Last updated: {updated}</p>
-        <div className="space-y-8 text-[15px] leading-relaxed text-foreground/90 [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-foreground [&_h2]:mb-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:space-y-1.5 [&_p+p]:mt-3">
+        <div className="space-y-8 text-base leading-relaxed text-foreground/90 [&_h2]:font-display [&_h2]:text-2xl [&_h2]:text-foreground [&_h2]:mb-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:space-y-1.5 [&_p+p]:mt-3">
           {children}
         </div>
       </main>

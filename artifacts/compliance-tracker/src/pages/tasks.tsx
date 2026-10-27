@@ -159,7 +159,7 @@ export default function TasksPage() {
 
         {draft && (
           <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4" aria-label={draft.id ? "Edit task" : "New task"}>
-            <h2 className="text-lg font-semibold">{draft.id ? "Edit task" : "New task"}</h2>
+            <h2 className="text-lg font-bold">{draft.id ? "Edit task" : "New task"}</h2>
             <div className="space-y-1.5">
               <Label htmlFor="task-title">Task</Label>
               <Input id="task-title" dictation value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="e.g. Kitchen opening checklist" />

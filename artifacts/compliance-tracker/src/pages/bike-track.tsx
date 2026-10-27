@@ -1241,7 +1241,7 @@ export default function BikeTrackPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">BikeTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">BikeTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Bike hire logbook — manage your fleet, record guest hires, and complete pre-hire and post-return safety checks.
                 </p>
@@ -1333,7 +1333,7 @@ export default function BikeTrackPage() {
       {/* ── Overview tab ─────────────────────────────────────────────────────── */}
       {activeTab === "overview" && (
         <div className="space-y-4">
-          <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Active Hires</h3>
+          <h3 className="font-bold text-sm text-muted-foreground uppercase tracking-wide">Active Hires</h3>
           {activeHires.length === 0 ? (
             <div className="text-center py-10 border border-dashed rounded-sm">
               <Bike className="w-8 h-8 mx-auto text-muted-foreground/30 mb-2" />

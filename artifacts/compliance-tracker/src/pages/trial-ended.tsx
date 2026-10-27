@@ -146,7 +146,7 @@ export default function TrialEndedPage() {
           <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center bg-[#162D42] text-white">
             <Lock className="h-6 w-6" />
           </div>
-          <h1 className="text-2xl font-display text-[#162D42] mb-3">Your free trial has ended</h1>
+          <h1 className="text-2xl font-display font-bold text-[#162D42] mb-3">Your free trial has ended</h1>
           <p className="text-base leading-relaxed font-light text-muted-foreground">
             {client?.name ? `The trial for ${client.name} has expired. ` : "Your trial has expired. "}
             {canPay
@@ -250,7 +250,7 @@ export default function TrialEndedPage() {
                 {hasAlpsDiscount && (
                   <span className="text-sm text-white/50 line-through">£{total}</span>
                 )}
-                <span className="text-xl font-display">£{hasAlpsDiscount ? total / 2 : total}</span>
+                <span className="text-xl font-display font-bold">£{hasAlpsDiscount ? total / 2 : total}</span>
                 <span className="text-xs text-white/50">+ VAT</span>
               </div>
             </div>

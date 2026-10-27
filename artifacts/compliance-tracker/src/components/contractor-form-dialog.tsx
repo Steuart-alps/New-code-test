@@ -190,7 +190,7 @@ export function ContractorFormDialog({
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl font-display">
+          <DialogTitle className="text-xl font-display font-bold">
             {contractor ? "Edit Contractor" : "Add Contractor"}
           </DialogTitle>
         </DialogHeader>

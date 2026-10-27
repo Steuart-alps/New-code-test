@@ -86,7 +86,7 @@
   --secondary-foreground: 208 50% 17%;
   
   --muted: 44 48% 93%;
-  --muted-foreground: 215 16% 47%;
+  --muted-foreground: 215 19% 35%;
   
   --accent: 44 48% 93%;
   --accent-foreground: 208 50% 17%;
@@ -107,14 +107,25 @@
   * {
     @apply border-border;
   }
+  /* A 16px base (the browser default, as in the emails) with medium-weight
+     body text reads as confident and welcoming; the display serif is thin,
+     so display text is bold. Phones use 15px so two-column cards and page
+     titles still fit. Sizes are in rem, so spacing and controls scale with
+     the base. */
   html {
-    font-size: 14px;
+    font-size: 15px;
+  }
+  @media (min-width: 640px) {
+    html {
+      font-size: 16px;
+    }
   }
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    font-weight: 500;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
-    @apply tracking-tight font-medium text-[#162D42];
+    @apply tracking-tight font-bold text-[#162D42];
   }
 }

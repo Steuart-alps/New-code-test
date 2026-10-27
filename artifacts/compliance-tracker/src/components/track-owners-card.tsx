@@ -114,7 +114,7 @@ export function TrackOwnersCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <BellRing className="w-5 h-5 text-amber-600" />
-          <CardTitle className="font-display">Track Owners</CardTitle>
+          <CardTitle className="font-display font-bold">Track Owners</CardTitle>
         </div>
         <CardDescription>
           The owner of a track gets its reminders in the app (a pop-up under the bell, and a phone notification in the

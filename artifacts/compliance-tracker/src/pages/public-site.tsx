@@ -33,7 +33,7 @@ export function ConsultantPanel() {
       <div className="max-w-4xl mx-auto grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
         <div>
           <p className="text-xs uppercase tracking-[0.18em] text-white/60 mb-2">Want a consultant too?</p>
-          <h2 className="font-display text-3xl mb-3 text-white">Real people on your site, backed up online</h2>
+          <h2 className="font-display font-bold text-3xl mb-3 text-white">Real people on your site, backed up online</h2>
           <p className="text-white/75 leading-relaxed max-w-2xl">
             ComplyTrack is built by ALPS Consultancy. Our consultants visit your site and work as part of your
             management team, then use ComplyTrack to keep your records right between visits. Consultancy is a
@@ -59,7 +59,7 @@ function PublicLayout({ children }: { children: ReactNode }) {
         <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <ShieldCheck className="w-5 h-5 text-primary" />
-            <span className="font-medium font-display text-lg tracking-wide">ComplyTrack</span>
+            <span className="font-bold font-display text-lg tracking-wide">ComplyTrack</span>
           </Link>
           <nav className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
             <Link href="/features" className="text-white/75 hover:text-white">Modules</Link>
@@ -101,7 +101,7 @@ function PageIntro({ eyebrow, heading, summary }: { eyebrow: string; heading: st
   return (
     <div className="mb-10">
       <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground mb-3">{eyebrow}</p>
-      <h1 className="font-display text-4xl sm:text-5xl text-[#162D42] dark:text-foreground mb-4 text-balance">{heading}</h1>
+      <h1 className="font-display font-bold text-4xl sm:text-5xl text-[#162D42] dark:text-foreground mb-4 text-balance">{heading}</h1>
       <p className="text-lg text-muted-foreground leading-relaxed max-w-3xl">{summary}</p>
     </div>
   );
@@ -141,7 +141,7 @@ function FeaturesIndex() {
               className="block border border-border bg-card p-5 hover:border-primary transition-colors"
             >
               <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">{m.name}</p>
-              <h2 className="font-display text-xl text-foreground mb-2">{m.heading}</h2>
+              <h2 className="font-display font-bold text-xl text-foreground mb-2">{m.heading}</h2>
               <p className="text-sm text-muted-foreground leading-relaxed">{m.summary}</p>
             </Link>
           ))}
@@ -164,7 +164,7 @@ function FeaturePage({ module }: { module: ModuleContent }) {
 
         <div className="grid gap-8 md:grid-cols-2">
           <section className="min-w-0">
-            <h2 className="font-display text-2xl text-foreground mb-4">What it records</h2>
+            <h2 className="font-display font-bold text-2xl text-foreground mb-4">What it records</h2>
             <ul className="grid gap-3">
               {module.records.map((r) => (
                 <li key={r} className="flex gap-3 text-foreground/90">
@@ -175,7 +175,7 @@ function FeaturePage({ module }: { module: ModuleContent }) {
             </ul>
           </section>
           <section className="min-w-0">
-            <h2 className="font-display text-2xl text-foreground mb-4">The rules behind it</h2>
+            <h2 className="font-display font-bold text-2xl text-foreground mb-4">The rules behind it</h2>
             <ul className="grid gap-3">
               {module.law.map((l) => (
                 <li key={l} className="flex gap-3 text-foreground/90">
@@ -193,7 +193,7 @@ function FeaturePage({ module }: { module: ModuleContent }) {
         </div>
 
         <section>
-          <h2 className="font-display text-2xl text-foreground mb-4">Good for</h2>
+          <h2 className="font-display font-bold text-2xl text-foreground mb-4">Good for</h2>
           <div className="flex flex-wrap gap-2">
             {module.goodFor.map((g) => (
               <span key={g} className="inline-flex items-center gap-1.5 border border-border px-3 py-1.5 text-sm text-foreground/90">
@@ -205,7 +205,7 @@ function FeaturePage({ module }: { module: ModuleContent }) {
 
         {templates.length > 0 && (
           <section>
-            <h2 className="font-display text-2xl text-foreground mb-2">Not ready to go digital?</h2>
+            <h2 className="font-display font-bold text-2xl text-foreground mb-2">Not ready to go digital?</h2>
             <p className="text-muted-foreground mb-4">Print a free paper version and start today.</p>
             <ul className="grid gap-2">
               {templates.map((t) => (
@@ -237,7 +237,7 @@ function TemplatesIndex() {
         <div className="grid gap-4 sm:grid-cols-2">
           {content.templates.map((t) => (
             <Link key={t.slug} href={`/templates/${t.slug}`} className="block border border-border bg-card p-5 hover:border-primary transition-colors">
-              <h2 className="font-display text-xl text-foreground mb-2">{t.name}</h2>
+              <h2 className="font-display font-bold text-xl text-foreground mb-2">{t.name}</h2>
               <p className="text-sm text-muted-foreground leading-relaxed">{t.summary}</p>
             </Link>
           ))}
@@ -267,7 +267,7 @@ function TemplatePage({ template }: { template: TemplateContent }) {
 
         <section className="bg-white text-black border border-border p-6 print:border-0 print:p-0" aria-label={`${template.name} to print`}>
           <div className="flex items-baseline justify-between gap-4 mb-4">
-            <h2 className="font-display text-2xl">{template.name}</h2>
+            <h2 className="font-display font-bold text-2xl">{template.name}</h2>
             <span className="text-xs text-neutral-500">complytrack.alpsconsultancy.co.uk</span>
           </div>
           <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 mb-5 text-sm">
@@ -300,7 +300,7 @@ function TemplatePage({ template }: { template: TemplateContent }) {
 
         {module && (
           <div className="mt-10 border border-border bg-card p-6 print:hidden">
-            <h2 className="font-display text-2xl text-foreground mb-2">Do this on your phone instead</h2>
+            <h2 className="font-display font-bold text-2xl text-foreground mb-2">Do this on your phone instead</h2>
             <p className="text-muted-foreground mb-5 max-w-3xl">
               {module.name} keeps these records on a phone, reminds staff when the next check is due, and keeps the full
               history ready for an inspector. £10 per site per month, monthly, with a 14-day free trial.
@@ -335,7 +335,7 @@ function PricingPage() {
         <div className="border border-border bg-card divide-y divide-border">
           {rows.map(([name, detail]) => (
             <div key={name} className="grid gap-1 sm:grid-cols-[14rem_1fr] p-5">
-              <h2 className="font-display text-xl text-foreground">{name}</h2>
+              <h2 className="font-display font-bold text-xl text-foreground">{name}</h2>
               <p className="text-muted-foreground">{detail}</p>
             </div>
           ))}

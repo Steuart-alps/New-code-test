@@ -269,7 +269,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
           <CardHeader className="border-b border-border/50 pb-4">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-base font-display">Probe Check Date</CardTitle>
+                <CardTitle className="text-base font-display font-bold">Probe Check Date</CardTitle>
                 <CardDescription className="text-xs mt-1">
                   Probes should be calibrated at least once every 4 weeks (monthly). Test using ice-point (0°C) and boiling-point (100°C) methods. Acceptable range: ±1°C.
                 </CardDescription>
@@ -292,7 +292,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
 
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="text-base font-display">Probe Check History</CardTitle>
+            <CardTitle className="text-base font-display font-bold">Probe Check History</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {history.length === 0 ? (
@@ -353,7 +353,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Probe Calibration Results</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">Probe Calibration Results</CardTitle>
                   <CardDescription className="text-xs mt-1">Record each probe's ice-point and boiling-point readings</CardDescription>
                 </div>
                 {!isSubmitted && (
@@ -384,7 +384,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
           {/* General notes */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">General Notes</CardTitle>
+              <CardTitle className="text-base font-display font-bold">General Notes</CardTitle>
             </CardHeader>
             <CardContent className="p-4">
               <Textarea
@@ -400,7 +400,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
           {/* Sign-off */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Sign-off</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Sign-off</CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

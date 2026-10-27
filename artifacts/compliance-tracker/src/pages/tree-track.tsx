@@ -366,7 +366,7 @@ export default function TreeTrackPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">TreeTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">TreeTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Digital tree inspection logbook — record visual assessments, detailed surveys, post-storm checks and remedial works in line with BS 3998:2010 and NTSG guidance.
                 </p>
