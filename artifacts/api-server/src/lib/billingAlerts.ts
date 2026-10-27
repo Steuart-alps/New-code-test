@@ -8,17 +8,20 @@ import { isStorageSubscriptionItem } from "./storageCapacity";
 import { logger } from "./logger";
 
 /**
- * Billing news for ALPS (ADMIN_EMAIL), from the Stripe webhook:
+ * Billing news for ALPS (ADMIN_EMAIL), from the Stripe webhook, recorded as
+ * billing_alerts rows:
  *
- * - a business starts a paid subscription (its first paid invoice): emailed at once;
- * - a business cancels (or Stripe cancels it after failed payments): emailed at once,
- *   with the reason they picked in the billing portal;
- * - modules, AI, extra storage or sites added or removed: recorded for the digest;
- * - every Monday, a digest of the week: net gain or loss, cancellation reasons
- *   and the most used modules as bar charts, and the current totals.
+ * - a business starts a paid subscription (its first paid invoice);
+ * - a business cancels (or Stripe cancels it after failed payments), with the
+ *   reason they picked in the billing portal;
+ * - modules, AI, extra storage or sites added or removed.
  *
- * Each change is claimed as a billing_alerts row before any email, so a webhook
- * Stripe delivers twice sends once; a failed send frees the claim. Nothing goes
+ * Every Monday a digest of the week goes to ALPS: net gain or loss, the
+ * changes, cancellation reasons and the most used modules as bar charts, and
+ * the current totals. Each change is also emailed on its own only when
+ * EMAIL_BILLING_CHANGES_AT_ONCE is set. One row per change, claimed by
+ * (kind, alert_key), so a webhook Stripe delivers twice counts once; a failed
+ * send frees the claim. Nothing goes
  * to the business. Without ADMIN_EMAIL nothing is recorded or sent.
  */
 
@@ -59,6 +62,8 @@ export interface BillingAlertDependencies {
   getAppUrl?: () => string;
   adminEmail?: string | null;
   now?: () => Date;
+  /** Overrides EMAIL_BILLING_CHANGES_AT_ONCE (tests). */
+  emailAtOnce?: boolean;
 }
 
 export type BillingAlertResult =
@@ -69,8 +74,12 @@ export type BillingAlertResult =
   | "unknown_business"
   | "already_sent";
 
-/** Plan changes go in the Monday digest only; set true to email each one as well. */
-export const EMAIL_PLAN_CHANGES_AT_ONCE = false;
+/**
+ * ALPS chose the Monday digest only (Oct 2026): every change is recorded
+ * for it and none is emailed on its own. Set true to email each new
+ * subscription, cancellation and plan change as it happens as well.
+ */
+export const EMAIL_BILLING_CHANGES_AT_ONCE = false;
 
 /** The reasons the billing portal offers, and why Stripe itself cancels. */
 export const CANCELLATION_REASON_LABELS: Record<string, string> = {
@@ -88,6 +97,10 @@ export const CANCELLATION_REASON_LABELS: Record<string, string> = {
 };
 
 // ---- Shared helpers -------------------------------------------------------
+
+function emailsAtOnce(deps: BillingAlertDependencies): boolean {
+  return deps.emailAtOnce ?? EMAIL_BILLING_CHANGES_AT_ONCE;
+}
 
 function adminAddress(deps: BillingAlertDependencies): string | null {
   const value = deps.adminEmail !== undefined ? deps.adminEmail : process.env.ADMIN_EMAIL;
@@ -296,11 +309,12 @@ export async function sendNewSubscriptionAlert(
     if (discountOff > 0) discount += `, ${formatMoney(discountOff, currency)} off this payment`;
   }
 
-  const summary = `${bought.join(", ") || "Subscription"}${fromItems.sites ? `, ${fromItems.sites} site${fromItems.sites === 1 ? "" : "s"}` : ""}, ${formatMoney(beforeVat, currency)} a month + VAT`;
+  const summary = `${bought.join(", ") || "Subscription"}${fromItems.sites ? `, ${fromItems.sites} site${fromItems.sites === 1 ? "" : "s"}` : ""}, ${formatMoney(beforeVat, currency)} a month + VAT${discount === "None" ? "" : `. Discount: ${discount}`}`;
   const claimKey = { kind: "new_subscription", key: subscriptionId };
   if (!(await claim(execute, { ...claimKey, clientId: client.id, businessName: client.name, summary, monthlyPence: beforeVat, reason: null }))) {
     return "already_sent";
   }
+  if (!emailsAtOnce(deps)) return "recorded";
 
   const rows: Array<[string, string]> = [
     ["Business", client.name],
@@ -390,13 +404,14 @@ export async function sendCancellationAlert(
   const comment = subscription.cancellation_details?.comment?.trim() || null;
   const accessEnds = formatUkDate(subscription.cancel_at ?? subscription.ended_at ?? subscription.canceled_at ?? null);
 
-  const summary = `${bought.join(", ") || "Subscription"}${sites ? `, ${sites} site${sites === 1 ? "" : "s"}` : ""}, ${formatMoney(monthly)} a month + VAT. Reason: ${reason}${comment ? ` ("${comment}")` : ""}`;
+  const ended = subscription.status === "canceled";
+  const summary = `${bought.join(", ") || "Subscription"}${sites ? `, ${sites} site${sites === 1 ? "" : "s"}` : ""}, ${formatMoney(monthly)} a month + VAT. ${ended ? "Access ended" : "Access ends"} ${accessEnds ?? "on a date not known"}. Reason: ${reason}${comment ? ` ("${comment}")` : ""}`;
   const claimKey = { kind: "cancellation", key: subscriptionId };
   if (!(await claim(execute, { ...claimKey, clientId: client.id, businessName: client.name, summary, monthlyPence: monthly, reason: reasonKey }))) {
     return "already_sent";
   }
+  if (!emailsAtOnce(deps)) return "recorded";
 
-  const ended = subscription.status === "canceled";
   const rows: Array<[string, string]> = [
     ["Business", client.name],
     ["Had", bought.join(", ") || "Not known"],
@@ -450,11 +465,11 @@ export async function withdrawCancellation(payload: AlertSubscription, deps: Bil
 /**
  * customer.subscription.updated with changed items: modules, AI, storage or
  * sites added or removed. Recorded for the Monday digest (one row per Stripe
- * event), and emailed at once only when EMAIL_PLAN_CHANGES_AT_ONCE is set.
+ * event), and emailed at once only when EMAIL_BILLING_CHANGES_AT_ONCE is set.
  */
 export async function recordPlanChange(
   event: { id?: string; data?: { object?: AlertSubscription; previous_attributes?: Record<string, any> } },
-  deps: BillingAlertDependencies & { emailAtOnce?: boolean } = {},
+  deps: BillingAlertDependencies = {},
 ): Promise<BillingAlertResult> {
   const subscription = event.data?.object;
   const previousItems = event.data?.previous_attributes?.items?.data as AlertItem[] | undefined;
@@ -491,7 +506,7 @@ export async function recordPlanChange(
   if (!(await claim(execute, { ...claimKey, clientId: client.id, businessName: client.name, summary, monthlyPence: delta, reason: null }))) {
     return "already_sent";
   }
-  if (!(deps.emailAtOnce ?? EMAIL_PLAN_CHANGES_AT_ONCE)) return "recorded";
+  if (!emailsAtOnce(deps)) return "recorded";
 
   const html = renderEmailLayout({
     subtitle: "Plan change",

@@ -222,7 +222,7 @@ app.post(
 
     // Best-effort follow-up once the synced tables are updated: local plan
     // status, retention-clock reset on resubscription, cancellation and
-    // failed-payment emails, and the new-subscription alert to ALPS. Never
+    // failed-payment emails, and billing changes for ALPS's digest. Never
     // throws — the 200 has already been sent.
     WebhookHandlers.afterSync(event).catch((err) => logger.warn({ err }, "Stripe webhook follow-up failed"));
   }

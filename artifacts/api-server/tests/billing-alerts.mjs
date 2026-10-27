@@ -50,7 +50,10 @@ try {
 
   const sent = [];
   const retrieved = [];
+  // Instant emails are off in production (Monday digest only); most checks
+  // below switch them on to inspect each email.
   const deps = {
+    emailAtOnce: true,
     adminEmail: "alerts@alps.example.test",
     getAppUrl: () => "https://app.example.test",
     sendEmail: async (message) => { sent.push(message); },
@@ -167,7 +170,7 @@ try {
   const upgrade = planEvent("evt_plan_1",
     [{ quantity: 2, price: price("core") }],
     [{ quantity: 3, price: price("core") }, { quantity: 3, price: price("kitchentrack") }, { quantity: 1, price: price("ai", 1500) }]);
-  assert.equal(await alerts.recordPlanChange(upgrade, deps), "recorded");
+  assert.equal(await alerts.recordPlanChange(upgrade, { ...deps, emailAtOnce: false }), "recorded");
   assert.equal(await alerts.recordPlanChange(upgrade, deps), "already_sent");
   // A status-only update is not a plan change.
   assert.equal(await alerts.recordPlanChange({ id: "evt_status", data: { object: upgrade.data.object, previous_attributes: { status: "incomplete" } } }, deps), "not_applicable");
@@ -212,6 +215,21 @@ try {
   assert.match(digestMail.html, /Fairway &lt;Golf&gt; Club/);
   // Once a week.
   assert.deepEqual(await alerts.runBillingDigest({ ...deps, now: digestNow }), { sent: false, reason: "already_sent" });
+
+  // As configured (digest only): changes are recorded with the details the
+  // instant emails had, and nothing is sent.
+  const configured = { ...deps, emailAtOnce: undefined };
+  const sentBeforeQuiet = sent.length;
+  const quietInvoice = invoice({ parent: { subscription_details: { subscription: "sub_quiet" } } });
+  assert.equal(await alerts.sendNewSubscriptionAlert(quietInvoice, configured), "recorded");
+  current = { ...cancelling, id: "sub_quiet" };
+  assert.equal(await alerts.sendCancellationAlert(current, { ...configured, retrieveSubscription: async () => current }), "recorded");
+  assert.equal(sent.length, sentBeforeQuiet);
+  const quiet = (await db.execute(sql`SELECT kind, summary FROM billing_alerts WHERE alert_key = 'sub_quiet' ORDER BY kind`)).rows;
+  assert.equal(quiet[0].kind, "cancellation");
+  assert.match(quiet[0].summary, /Access ends 27 November 2026\. Reason: Too expensive \("Budget <cut>"\)/);
+  assert.equal(quiet[1].kind, "new_subscription");
+  assert.match(quiet[1].summary, /Discount: ALPS client 50% discount \(ALPS code ending K7Q2\), £30\.00 off this payment/);
 
   console.log("Billing alert test passed");
 } finally {

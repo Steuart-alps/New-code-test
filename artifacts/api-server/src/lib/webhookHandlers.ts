@@ -51,10 +51,10 @@ export class WebhookHandlers {
           .catch((err) => logger.warn({ err }, "Cancellation warning email failed"));
       }
 
-      // ALPS: an email for a cancellation; modules, AI, storage or sites
-      // added or removed go in the Monday digest.
+      // For ALPS's Monday digest: cancellations, and modules, AI, storage or
+      // sites added or removed.
       await sendCancellationAlert(object)
-        .catch((err) => logger.warn({ err }, "Cancellation alert to ALPS could not be sent"));
+        .catch((err) => logger.warn({ err }, "Cancellation could not be recorded for ALPS"));
       if (event.type === "customer.subscription.updated") {
         if (event.data?.previous_attributes?.cancel_at_period_end === true) {
           await withdrawCancellation(object)
@@ -66,11 +66,11 @@ export class WebhookHandlers {
       return;
     }
 
-    // The first paid invoice of a subscription: tell ALPS a business has
-    // started paying (sent once per subscription).
+    // The first paid invoice of a subscription: a business has started
+    // paying (recorded once per subscription for ALPS's Monday digest).
     if (event.type === "invoice.paid") {
       await sendNewSubscriptionAlert(object)
-        .catch((err) => logger.warn({ err }, "New subscription alert could not be sent"));
+        .catch((err) => logger.warn({ err }, "New subscription could not be recorded for ALPS"));
       return;
     }
 
