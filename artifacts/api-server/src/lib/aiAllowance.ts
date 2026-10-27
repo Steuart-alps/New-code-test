@@ -23,7 +23,9 @@ export { aiCostUsdMicros, usageFromMessage, type AiCallUsage } from "./aiPricing
  *
  * Without ANTHROPIC_API_KEY nothing is offered at all. Without the add-on on
  * the business's live subscription, AI is unavailable (trials included,
- * unless AI_TRIAL_ALLOWANCE_PENCE gives them a small amount to try).
+ * unless AI_TRIAL_ALLOWANCE_PENCE gives them a small amount to try). A
+ * business with no trial end (every module free, set up by ALPS) gets the
+ * same monthly allowance free, counted per calendar month, with no top-ups.
  */
 
 function envPence(name: string, fallback: number): number {
@@ -81,6 +83,7 @@ export function aiConfigured(): boolean {
 export type AiPlan =
   | { kind: "addon"; periodStart: Date; periodEnd: Date | null; allowancePence: number }
   | { kind: "trial"; periodStart: Date; periodEnd: Date | null; allowancePence: number }
+  | { kind: "included"; periodStart: Date; periodEnd: Date; allowancePence: number }
   | { kind: "none" };
 
 const PLAN_TTL_MS = 5 * 60_000;
@@ -132,6 +135,16 @@ export async function getAiPlan(clientId: number): Promise<AiPlan> {
       return cached?.plan ?? { kind: "none" };
     }
   }
+  if (plan.kind === "none" && client.trialEndsAt === null) {
+    // Free with no end date: ALPS pays for the AI use, a month at a time.
+    const now = new Date();
+    plan = {
+      kind: "included",
+      periodStart: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+      periodEnd: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
+      allowancePence: aiMonthlyAllowancePence(),
+    };
+  }
   const trialRunning = !client.trialEndsAt || client.trialEndsAt.getTime() > Date.now();
   if (plan.kind === "none" && trialRunning && aiTrialAllowancePence() > 0) {
     plan = { kind: "trial", periodStart: client.createdAt, periodEnd: client.trialEndsAt, allowancePence: aiTrialAllowancePence() };
@@ -165,9 +178,9 @@ async function spentUsdMicros(executor: Pick<typeof db, "execute">, clientId: nu
 export interface AiStatus {
   /** ANTHROPIC_API_KEY is set, so AI can be offered at all. */
   configured: boolean;
-  /** The business has the add-on (or a trial allowance) right now. */
+  /** The business has the add-on (or a trial or included allowance) right now. */
   active: boolean;
-  plan: "addon" | "trial" | "none";
+  plan: "addon" | "trial" | "included" | "none";
   /** Share of this period's allowance used, 0-100. */
   percentUsed: number;
   /** When the allowance starts again (the add-on's renewal), if known. */
@@ -193,7 +206,7 @@ export async function getAiStatus(clientId: number): Promise<AiStatus> {
     active: true,
     plan: plan.kind,
     percentUsed,
-    resetsAt: plan.kind === "addon" ? plan.periodEnd?.toISOString() ?? null : null,
+    resetsAt: plan.kind === "addon" || plan.kind === "included" ? plan.periodEnd?.toISOString() ?? null : null,
     usedUp: usedPence >= allowancePence,
   };
 }
@@ -265,6 +278,8 @@ async function claimWithinAllowance(input: AiClaim, plan: Exclude<AiPlan, { kind
         "AI_ALLOWANCE_USED",
         plan.kind === "trial"
           ? `The AI allowance for your free trial is used up. It comes with the AI features add-on once you subscribe. ${input.instead}`
+          : plan.kind === "included"
+          ? `This business has used its AI allowance for this month. It starts again ${formatResetDate(plan.periodEnd)}. ${input.instead}`
           : `This business has used its AI allowance for this month. It starts again ${formatResetDate(plan.periodEnd)}, or an owner can buy a top-up in Settings, Billing. ${input.instead}`,
         429,
       );

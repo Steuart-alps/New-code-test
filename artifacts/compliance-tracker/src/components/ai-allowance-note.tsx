@@ -19,6 +19,8 @@ export function aiAllowanceState(ai: AiStatus): { canUse: boolean; note: string 
       canUse: false,
       note: ai.plan === "trial"
         ? "Your trial's AI allowance is used up. It comes with the AI features add-on once you subscribe."
+        : ai.plan === "included"
+        ? `This month's AI allowance is used up. It starts again ${formatResetDate(ai.resetsAt)}.`
         : `This month's AI allowance is used up. It starts again ${formatResetDate(ai.resetsAt)}, or an owner can buy a top-up in Settings.`,
     };
   }

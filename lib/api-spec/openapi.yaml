@@ -10657,10 +10657,11 @@ components:
       description: >-
         The AI features add-on for this business: £15 a month, which includes
         a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.
+        A business with no trial end (every module free, set up by ALPS) has the monthly allowance included ("included").
       properties:
         configured: { type: boolean, description: "The server has an Anthropic API key, so AI can be offered at all" }
         active: { type: boolean, description: "The business has the AI add-on (or a trial allowance) now" }
-        plan: { type: string, enum: [addon, trial, none] }
+        plan: { type: string, enum: [addon, trial, included, none] }
         percentUsed: { type: integer, minimum: 0, maximum: 100, description: "Share of this period's allowance used" }
         resetsAt: { type: string, format: date-time, nullable: true, description: "When the allowance starts again" }
         usedUp: { type: boolean, description: "The allowance is used up for this period" }

@@ -23,7 +23,9 @@
 //   - automatic top-ups (the owner's choice) buy one when the allowance runs
 //     out, once for requests running together, up to the monthly limit, and
 //     not again for a day after a declined charge;
-//   - switching it off removes the item at once, with no proration.
+//   - switching it off removes the item at once, with no proration;
+//   - a business with no trial end (every module free, set up by ALPS) gets
+//     the monthly allowance free each calendar month, with no top-ups.
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
@@ -269,6 +271,26 @@ async function main(base) {
   same("switching off twice is refused", (await user("POST", "/billing/ai", { action: "remove" })).status, 409);
   same("no top-ups without the add-on", [(await user("POST", "/billing/ai", { action: "top_up", requestId: crypto.randomUUID() })).status, (await user("GET", "/billing/ai")).data?.topUp], [409, null]);
   same("another business without a subscription cannot switch on", (await other.user("POST", "/billing/ai", { action: "add" })).status, 400);
+
+  console.log("\n── a business free with no end date has it included ──");
+  const free = await registerTenant(base, "free", stamp);
+  await query("UPDATE clients SET trial_ends_at = NULL WHERE id = $1", [free.clientId]);
+  const monthEnd = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)).toISOString();
+  const included = (await free.user("GET", "/billing/ai")).data;
+  same("included, renewing at the start of next month, no top-ups",
+    [included?.active, included?.plan, included?.percentUsed, included?.resetsAt, included?.topUp],
+    [true, "included", 0, monthEnd, null]);
+  const freeRead = await readList(free.user);
+  same("reading works with no subscription", [freeRead.status, (await usageRows(free.clientId)).length], [200, 1]);
+  // Last month's use does not count against this month.
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros, created_at) VALUES ($1, 'report_reading', 'done', 12500000, date_trunc('month', now()) - interval '1 day')", [free.clientId]);
+  same("last month's use is not counted", (await free.user("GET", "/billing/ai")).data?.usedUp, false);
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 12500000)", [free.clientId]);
+  const freeOver = await readList(free.user);
+  same("refused once this month's allowance is used", [freeOver.status, freeOver.data?.code], [429, "AI_ALLOWANCE_USED"]);
+  check("says when it starts again, with no top-up offered",
+    /starts again on/.test(freeOver.data?.error ?? "") && !/top-up/.test(freeOver.data?.error ?? ""), freeOver.data?.error);
+  same("no top-up for an included allowance (no subscription to charge)", (await free.user("POST", "/billing/ai", { action: "top_up", requestId: crypto.randomUUID() })).status, 400);
 }
 
 // ─── run ────────────────────────────────────────────────────────────────────
