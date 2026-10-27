@@ -36,6 +36,23 @@ const emptyProfile: Profile = {
   nextReviewDate: "", haccpSystemReviewed: false,
   waterWrittenSchemeReference: "",
 };
+// Stand-in text the server stores when Business setup creates the profile
+// (the columns can't be blank). Show it as an empty box with a grey hint so
+// people can type straight in, and send it back if the box is left empty.
+const setupStandIns = {
+  operationType: "Not yet described",
+  responsiblePersonRole: "Business owner or manager",
+} as const;
+type StandInField = keyof typeof setupStandIns;
+const standInFields = Object.keys(setupStandIns) as StandInField[];
+
+function withoutStandIns(profile: Profile): { profile: Profile; standIns: Set<StandInField> } {
+  const standIns = new Set(standInFields.filter(field => profile[field].trim() === setupStandIns[field]));
+  const cleared = { ...profile };
+  for (const field of standIns) cleared[field] = "";
+  return { profile: cleared, standIns };
+}
+
 const emptyAction = {
   sourceTrack: "FireTrack", sourceRecordId: "", title: "", severity: "medium" as const,
   ownerName: "", dueDate: "", interimControl: "", correctiveAction: "", evidenceReference: "",
@@ -60,6 +77,7 @@ export default function ComplianceHubPage() {
   const [editingAction, setEditingAction] = useState<number | null>(null);
   const [actionUpdate, setActionUpdate] = useState({ status: "open", evidenceReference: "", verificationNotes: "" });
   const loadGeneration = useRef(0);
+  const standIns = useRef(new Set<StandInField>());
   const clientQuery = user?.role === "consultant" && activeClientId ? `?clientId=${activeClientId}` : "";
   const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
@@ -89,7 +107,7 @@ export default function ComplianceHubPage() {
         request<Action[]>("/compliance-hub/actions"),
       ]);
       if (generation !== loadGeneration.current) return;
-      setProfile(loadedProfile ? { ...emptyProfile, ...loadedProfile, competentAppointments: loadedProfile.competentAppointments ?? [] } : emptyProfile);
+      showProfile(loadedProfile ? { ...emptyProfile, ...loadedProfile, competentAppointments: loadedProfile.competentAppointments ?? [] } : emptyProfile);
       setGuidance(loadedGuidance.guidance);
       setGuidanceReviewedAt(loadedGuidance.reviewedAt);
       setGaps(loadedGuidance.gaps ?? []);
@@ -106,7 +124,7 @@ export default function ComplianceHubPage() {
     // Prevent a prior consultant-client response from ever being rendered and
     // subsequently saved against the newly selected client.
     loadGeneration.current++;
-    setProfile(emptyProfile);
+    showProfile(emptyProfile);
     setActions([]);
     void refresh();
   }, [activeClientId]);
@@ -115,13 +133,21 @@ export default function ComplianceHubPage() {
     (all[item.track] ??= []).push(item); return all;
   }, {}), [guidance]);
 
+  function showProfile(next: Profile) {
+    const shown = withoutStandIns(next);
+    standIns.current = shown.standIns;
+    setProfile(shown.profile);
+  }
+
   async function saveProfile() {
     const generation = loadGeneration.current;
     setSavingProfile(true);
     try {
-      const saved = await request<Profile>("/compliance-hub/profile", { method: "PUT", body: JSON.stringify(profile) });
+      const body = { ...profile };
+      for (const field of standIns.current) if (!body[field].trim()) body[field] = setupStandIns[field];
+      const saved = await request<Profile>("/compliance-hub/profile", { method: "PUT", body: JSON.stringify(body) });
       if (generation !== loadGeneration.current) return;
-      setProfile(saved);
+      showProfile(saved);
       toast({ title: "Accountability profile saved", description: "Review it whenever your operation, risk assessment or appointments change." });
     } catch (error: any) {
       toast({ title: "Couldn't save profile", description: error.message, variant: "destructive" });
@@ -198,10 +224,10 @@ export default function ComplianceHubPage() {
                 <SelectItem value="england">England</SelectItem><SelectItem value="wales">Wales</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem><SelectItem value="multi_nation">Multiple UK nations</SelectItem>
               </SelectContent></Select></div>
               <Field label="Premises / operation type" value={profile.operationType} disabled={!canAdmin} onChange={operationType => setProfile({ ...profile, operationType })} placeholder="e.g. hospitality venue with commercial kitchen" />
-              <Field label="Responsible person" value={profile.responsiblePersonName} disabled={!canAdmin} onChange={responsiblePersonName => setProfile({ ...profile, responsiblePersonName })} placeholder="Named duty holder" />
-              <Field label="Responsible person's role" value={profile.responsiblePersonRole} disabled={!canAdmin} onChange={responsiblePersonRole => setProfile({ ...profile, responsiblePersonRole })} placeholder="e.g. Director / premises manager" />
+              <Field label="Responsible person" value={profile.responsiblePersonName} disabled={!canAdmin} onChange={responsiblePersonName => setProfile({ ...profile, responsiblePersonName })} placeholder="Named duty holder" selectOnFocus />
+              <Field label="Responsible person's role" value={profile.responsiblePersonRole} disabled={!canAdmin} onChange={responsiblePersonRole => setProfile({ ...profile, responsiblePersonRole })} placeholder="e.g. Business owner, director or premises manager" />
               <Field label="Responsible person's email (optional)" type="email" value={profile.responsiblePersonEmail ?? ""} disabled={!canAdmin} onChange={responsiblePersonEmail => setProfile({ ...profile, responsiblePersonEmail })} />
-              <Field label="Review cadence" value={profile.reviewCadence} disabled={!canAdmin} onChange={reviewCadence => setProfile({ ...profile, reviewCadence })} />
+              <Field label="Review cadence" value={profile.reviewCadence} disabled={!canAdmin} onChange={reviewCadence => setProfile({ ...profile, reviewCadence })} placeholder="e.g. Annual and after significant change" selectOnFocus />
               <div className="space-y-2"><Label>Next review date</Label><Input type="date" disabled={!canAdmin} value={profile.nextReviewDate} onChange={e => setProfile({ ...profile, nextReviewDate: e.target.value })} /></div>
               <div className="space-y-2"><Label>HACCP system review</Label><Select disabled={!canAdmin} value={profile.haccpSystemReviewed ? "reviewed" : "not-reviewed"} onValueChange={v => setProfile({ ...profile, haccpSystemReviewed: v === "reviewed" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="not-reviewed">Not yet confirmed</SelectItem><SelectItem value="reviewed">Reviewed for this operation</SelectItem></SelectContent></Select></div>
               <div className="space-y-2 md:col-span-2"><Label>Water written-scheme reference (where water systems, pools or spas apply)</Label><Input disabled={!canAdmin} value={profile.waterWrittenSchemeReference ?? ""} onChange={e => setProfile({ ...profile, waterWrittenSchemeReference: e.target.value })} placeholder="Document title, revision and storage reference" /><p className="text-xs text-muted-foreground">Record the current risk-assessed written scheme; its controls and monitoring frequencies must not be assumed from generic defaults.</p></div>
@@ -253,6 +279,6 @@ export default function ComplianceHubPage() {
   );
 }
 
-function Field({ label, value, onChange, type = "text", placeholder, disabled }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string; disabled?: boolean }) {
-  return <div className="space-y-2"><Label>{label}</Label><Input type={type} value={value} disabled={disabled} placeholder={placeholder} onChange={e => onChange(e.target.value)} /></div>;
+function Field({ label, value, onChange, type = "text", placeholder, disabled, selectOnFocus }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string; disabled?: boolean; selectOnFocus?: boolean }) {
+  return <div className="space-y-2"><Label>{label}</Label><Input type={type} value={value} disabled={disabled} placeholder={placeholder} selectOnFocus={selectOnFocus} onChange={e => onChange(e.target.value)} /></div>;
 }
