@@ -34,10 +34,11 @@ import {
 import {
   AlertOctagon, Plus, AlertTriangle, CheckCircle2, Clock,
   Pencil, Lock, Search, Filter, FileWarning,
-  ShieldAlert, UserX, Activity, Settings, X, Printer, FileText, Download,
+  ShieldAlert, UserX, Activity, Settings, Printer, FileText, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
+import { StringListEditor } from "@/components/string-list-editor";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -283,24 +284,6 @@ function IncidentConfigDialog() {
       }
     );
   };
-
-  const StringListEditor = ({ items, onChange, placeholder }: { items: string[]; onChange: (v: string[]) => void; placeholder: string }) => (
-    <div className="space-y-2">
-      {items.map((item, i) => (
-        <div key={i} className="flex gap-2 items-center">
-          <Input value={item} placeholder={placeholder} className="h-8 text-sm rounded-sm"
-            onChange={e => { const n = [...items]; n[i] = e.target.value; onChange(n); }} />
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
-            onClick={() => onChange(items.filter((_, x) => x !== i))}>
-            <X className="w-3.5 h-3.5 text-destructive" />
-          </Button>
-        </div>
-      ))}
-      <Button variant="outline" size="sm" onClick={() => onChange([...items, ""])}>
-        <Plus className="w-3.5 h-3.5 mr-1.5" /> Add
-      </Button>
-    </div>
-  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

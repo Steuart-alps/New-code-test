@@ -22,6 +22,7 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useAuth } from "@/context/auth-context";
 import { getApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 // GreenTrack spraying book and stock. Products (pesticides, fertiliser, top
 // dressing...) have stock worked out by the server from deliveries, counts,
@@ -703,6 +704,7 @@ function ApplicationDialog({ open, onClose, application, machines, products, rec
   };
   const [form, setForm] = useState(blank);
   const [lines, setLines] = useState<ProductLine[]>([{ productId: "", rate: "", quantity: "" }]);
+  const newRow = useFocusNewRow();
   const [saving, setSaving] = useState(false);
   const str = (v: number | null) => (v == null ? "" : String(v));
 
@@ -830,7 +832,7 @@ function ApplicationDialog({ open, onClose, application, machines, products, rec
 
           <div>
             <Label>Products used *</Label>
-            <div className="mt-1 space-y-2">
+            <div ref={newRow.ref} className="mt-1 space-y-2">
               {lines.map((line, i) => {
                 const product = products.find(p => String(p.id) === line.productId);
                 const suggested = product && Number(line.rate) > 0 && hectares > 0 ? Math.round(Number(line.rate) * hectares * 1000) / 1000 : null;
@@ -873,7 +875,7 @@ function ApplicationDialog({ open, onClose, application, machines, products, rec
                 );
               })}
               <Button type="button" size="sm" variant="outline" className="h-7 text-xs rounded-sm gap-1"
-                onClick={() => setLines(ls => [...ls, { productId: "", rate: "", quantity: "" }])} disabled={lines.length >= 20}>
+                onClick={() => { newRow.expect(); setLines(ls => [...ls, { productId: "", rate: "", quantity: "" }]); }} disabled={lines.length >= 20}>
                 <Plus className="w-3 h-3" /> Add another product (tank mix)
               </Button>
               {products.filter(p => p.active).length === 0 && (

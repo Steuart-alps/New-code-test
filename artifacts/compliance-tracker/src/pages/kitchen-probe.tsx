@@ -14,6 +14,7 @@ import { format } from "date-fns";
 import { CheckCircle2, XCircle, Save, Plus, Trash2, Thermometer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -172,6 +173,7 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
   const [saving, setSaving] = useState(false);
 
   const [probes, setProbes] = useState<ProbeRow[]>(() => defaultProbes(defaultProbeNames));
+  const newRow = useFocusNewRow();
   const [overallResult, setOverallResult] = useState<"pass" | "fail" | "">("");
   const [checkedBy, setCheckedBy] = useState("");
   const [checkedByRosterId, setCheckedByRosterId] = useState<number | null>(null);
@@ -357,13 +359,13 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
                   <CardDescription className="text-xs mt-1">Record each probe's ice-point and boiling-point readings</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => setProbes(p => [...p, emptyProbe()])}>
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setProbes(p => [...p, emptyProbe()]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Probe
                   </Button>
                 )}
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-4">
+            <CardContent ref={newRow.ref} className="p-4 space-y-4">
               {probes.length === 0 ? (
                 <p className="text-sm text-muted-foreground italic">No probes added.</p>
               ) : (
