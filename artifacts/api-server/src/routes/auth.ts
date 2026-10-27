@@ -31,6 +31,7 @@ import { usersTable, passwordResetTokensTable, clientsTable } from "@workspace/d
 import { passkeysTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
 import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "../lib/email";
+import { sendNewSignupAlert } from "../lib/signupAlert";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { getPerSitePrice, getServicePrice, countClientSites, quantityForSiteCount } from "../lib/billing";
 import { ADDON_KEYS, BUNDLE_KEY, getEntitledServices } from "../lib/services";
@@ -898,8 +899,8 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
   const slug = `${slugBase}-${randomBytes(3).toString("hex")}`;
 
   let clientId: number | null = null;
+  const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
   try {
-    const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     const [client] = await db
       .insert(clientsTable)
       .values({
@@ -969,6 +970,21 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
   }).catch((err) => {
     req.log.error({ err }, "Failed to send welcome email");
   });
+
+  // Let ALPS know, so the new business can be welcomed personally.
+  if (clientId !== null) {
+    void sendNewSignupAlert({
+      businessName: clientName,
+      ownerName: name,
+      ownerEmail: email,
+      businessType,
+      services: requestedServices,
+      bundle,
+      trialEndsAt,
+    }).catch((err) => {
+      req.log.error({ err }, "Failed to send new sign-up alert");
+    });
+  }
 
   // Create a Stripe customer in the background so billing setup later is
   // seamless. Failure here never blocks account creation.
