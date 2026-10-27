@@ -4703,7 +4703,7 @@ paths:
                       $ref: "#/components/schemas/InspectionReportAction"
                   emailedTo:
                     type: array
-                    description: Owners and Managers emailed the action plan
+                    description: Owners, Managers and linked consultants emailed the action plan
                     items:
                       type: string
                 required: [actions, emailedTo]

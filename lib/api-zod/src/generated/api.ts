@@ -6749,7 +6749,7 @@ export const ConfirmInspectionReportActionsResponse = zod.object({
   "to": zod.date().nullable()
 })).optional().describe('Due date changes after the action was created (report detail only), oldest first')
 })),
-  "emailedTo": zod.array(zod.string()).describe('Owners and Managers emailed the action plan')
+  "emailedTo": zod.array(zod.string()).describe('Owners, Managers and linked consultants emailed the action plan')
 })
 
 

@@ -9,6 +9,6 @@ import type { InspectionReportAction } from './inspectionReportAction';
 
 export type ConfirmInspectionReportActions201 = {
   actions: InspectionReportAction[];
-  /** Owners and Managers emailed the action plan */
+  /** Owners, Managers and linked consultants emailed the action plan */
   emailedTo: string[];
 };

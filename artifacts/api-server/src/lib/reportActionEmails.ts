@@ -3,7 +3,8 @@
  * audit or inspection report (routes/inspection-reports.ts): a short summary
  * and the action plan, with an "Assign to" button on each action. One email
  * per person per confirmation, to the business's Owners and Managers who can
- * see the actions' sites, but not to the person who just confirmed them.
+ * see the actions' sites and to the consultants linked to the business (ALPS),
+ * but not to the person who just confirmed them.
  *
  * The buttons are plain links into ComplyTrack (sign-in required) that open
  * the report at that action with its "Assigned to" picker ready; nothing is
@@ -106,7 +107,7 @@ export function buildReportActionPlanEmail(input: PlanEmailInput): { subject: st
   const html = renderEmailLayout({
     bodyHtml,
     subtitle: "Action plan from a report",
-    footerNote: `Sent to Owners and Managers of ${escapeHtml(input.businessName)}`,
+    footerNote: `Sent to the Owners, Managers and consultants of ${escapeHtml(input.businessName)}`,
   });
 
   const text = [
@@ -131,8 +132,9 @@ export function buildReportActionPlanEmail(input: PlanEmailInput): { subject: st
 const rowsOf = <T>(result: unknown): T[] => ((result as { rows?: T[] }).rows ?? []);
 
 /**
- * Email the action plan to the business's Owners and Managers (not the person
- * who confirmed it). Each person gets only the actions at sites they can see.
+ * Email the action plan to the business's Owners, Managers and linked
+ * consultants (not the person who confirmed it). Each person gets only the
+ * actions at sites they can see.
  * Returns the names of the people emailed; a failed send is logged, never thrown.
  */
 export async function sendReportActionPlanEmails(opts: {
@@ -156,7 +158,7 @@ export async function sendReportActionPlanEmails(opts: {
     const siteById = new Map(sites.map((site) => [Number(site.id), site]));
     const trackLabels = new Map(TRACK_MODULES.map((module) => [module.key, module.label]));
     const people = (await loadEligibleOwners(opts.clientId)).filter((person) =>
-      (person.role === "client_admin" || person.role === "client_manager") && person.id !== opts.confirmedByUserId && person.email?.trim());
+      ["client_admin", "client_manager", "consultant"].includes(person.role) && person.id !== opts.confirmedByUserId && person.email?.trim());
     const appUrl = getPublicAppUrl();
     const emailed: string[] = [];
     for (const person of people) {
