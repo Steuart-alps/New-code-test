@@ -81,7 +81,7 @@ export function buildCheckReminderEmailHtml(alerts: CheckAlert[], appUrl: string
         <tbody>${allRows}</tbody>
       </table>
       <div style="margin-top:28px;text-align:center;">
-        <a href="${escapeHtml(appUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        <a href="${escapeHtml(appUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">
           Open ComplyTrack →
         </a>
       </div>

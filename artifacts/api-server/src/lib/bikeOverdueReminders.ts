@@ -76,7 +76,7 @@ function buildEmailHtml(hires: OverdueHire[], appUrl: string): string {
   return renderEmailLayout({
     subtitle: `BikeTrack — overdue hire${hires.length !== 1 ? "s" : ""}`,
     footerNote: `Automatic BikeTrack notification.`,
-    bodyHtml: `<p style="font-size:15px;color:#334155;margin:0 0 20px;">${hires.length} hired bike${hires.length !== 1 ? "s have" : " has"} not been returned by the expected time. Please contact the hirer${hires.length !== 1 ? "s" : ""} or record the return in BikeTrack.</p><table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;"><tbody>${rows}</tbody></table><div style="margin-top:28px;text-align:center;"><a href="${appUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">Open ComplyTrack →</a></div>
+    bodyHtml: `<p style="font-size:15px;color:#334155;margin:0 0 20px;">${hires.length} hired bike${hires.length !== 1 ? "s have" : " has"} not been returned by the expected time. Please contact the hirer${hires.length !== 1 ? "s" : ""} or record the return in BikeTrack.</p><table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;"><tbody>${rows}</tbody></table><div style="margin-top:28px;text-align:center;"><a href="${appUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:16px;font-weight:700;">Open ComplyTrack →</a></div>
 `,
   });
 }

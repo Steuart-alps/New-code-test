@@ -45,6 +45,15 @@ const wrapped = lib.applyEmailLayout(plain);
 assertBranded(wrapped, "plain body");
 assert.ok(wrapped.includes(plain), "plain body kept as written");
 
+// An older body's Arial font is dropped so it reads in the layout's typeface,
+// and small print is raised a step.
+const arial = lib.applyEmailLayout(`<div style="font-family: Arial, sans-serif; max-width: 600px;"><p style="font-size:12px;">Small print</p><p style="font-size:18px;">Big</p></div>`);
+assertBranded(arial, "Arial body");
+assert.doesNotMatch(arial, /Arial, sans-serif/, "body's own Arial font removed");
+assert.match(arial, /<div style="max-width: 600px;">/, "other body styles kept");
+assert.match(arial, /font-size:13px;">Small print/, "12px raised to 13px");
+assert.match(arial, /font-size:18px;">Big/, "larger text unchanged");
+
 // A full document keeps only what is inside its <body>.
 const fullDoc = `<!DOCTYPE html><html><body style="color:#111"><h2>Monthly summary</h2></body></html>`;
 const fromDoc = lib.applyEmailLayout(fullDoc);
@@ -66,6 +75,20 @@ assert.match(reminder, /Safety Check Reminders/);
 assert.match(reminder, /2 days overdue/, "an overdue check reads as overdue, not as due later");
 assert.match(reminder, /You are receiving this as an account manager\./);
 assert.match(reminder, /<a href="https:\/\/app\.example\.test" style="display:inline-block;background:#2563eb;/, "blue button");
+
+// The same-day alert lists its items in the reminder email's table, with a badge each.
+const urgent = lib.buildUrgentAlertEmail("Red Lion <Ltd>", [
+  { kind: "compliance", id: 1, module: "compliance", title: "Fire risk assessment", site_id: null, site_name: null, urgent: true, assignee_user_id: null, owner_name: null, created_by: null },
+  { kind: "fix", id: 2, module: "fix", title: "Dripping tap", site_id: 3, site_name: "Bar", urgent: false, assignee_user_id: null, owner_name: null, created_by: null },
+], "Ann Smith");
+assertBranded(urgent.html, "urgent alert");
+assert.equal(urgent.subject, "2 items need action today at Red Lion <Ltd> — ComplyTrack");
+assert.match(urgent.html, /Needs action today<\/div>/, "subtitle says why it was sent");
+assert.match(urgent.html, /Hello Ann,/);
+assert.match(urgent.html, /2 items need action today at Red Lion &lt;Ltd&gt;\./, "business name escaped");
+assert.match(urgent.html, /<table[\s\S]*Fire risk assessment[\s\S]*>Critical<\/span>[\s\S]*Dripping tap[\s\S]*New FixTrack issue · Bar[\s\S]*>New<\/span>/, "items with badges in a table");
+assert.match(urgent.html, /href="https:\/\/app\.example\.test\/fix-track\/2"/, "each item links to it");
+assert.match(urgent.html, /style="display:inline-block;background:#2563eb;[^"]*font-size:16px;font-weight:700;">Open ComplyTrack/, "blue button");
 
 // Business text in subtitles and notes is escaped by the caller; the layout adds none.
 const named = lib.renderEmailLayout({ bodyHtml: "<p>Hi</p>", subtitle: "SafeTrack", footerNote: "Sent on behalf of A &amp; B." });
