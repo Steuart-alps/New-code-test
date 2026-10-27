@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { useFileDrop } from "@/hooks/use-file-drop";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
+import { localToday } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -382,6 +383,9 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
               {draft.outcome === "unsatisfactory"
                 ? "An unsatisfactory certificate does not move the check's due date; the check stays red until the remedial work is done."
                 : "The next inspection date becomes the check's next due date."}
+              {draft.outcome !== "unsatisfactory" && draft.nextInspectionDate && draft.nextInspectionDate < localToday()
+                ? " That date has already passed, so the check will show as overdue until the next inspection is booked."
+                : ""}
             </p>
 
             <div className="space-y-2">

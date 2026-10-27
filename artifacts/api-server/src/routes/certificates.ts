@@ -391,7 +391,7 @@ async function certificateCheckChoices(req: Request, clientId: number): Promise<
   }
   const rows = await db.select({
     id: complianceItemsTable.id, title: complianceItemsTable.title, frequencyMonths: complianceItemsTable.frequencyMonths,
-    siteName: sitesTable.name, categoryName: categoriesTable.name, contractorName: contractorsTable.name,
+    siteName: sitesTable.name, siteAddress: sitesTable.address, categoryName: categoriesTable.name, contractorName: contractorsTable.name,
   }).from(complianceItemsTable)
     .leftJoin(sitesTable, and(eq(sitesTable.id, complianceItemsTable.siteId), eq(sitesTable.clientId, clientId)))
     .leftJoin(categoriesTable, and(eq(categoriesTable.id, complianceItemsTable.categoryId), eq(categoriesTable.clientId, clientId)))
@@ -404,6 +404,7 @@ async function certificateCheckChoices(req: Request, clientId: number): Promise<
     title: row.title,
     track: trackOf.get(row.title.trim().toLowerCase()) ?? row.categoryName ?? null,
     siteName: row.siteName ?? null,
+    siteAddress: row.siteAddress ?? null,
     contractorName: row.contractorName ?? null,
     frequencyMonths: row.frequencyMonths ?? null,
   }));

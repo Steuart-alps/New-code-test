@@ -42,6 +42,8 @@ export interface CertificateCheckChoice {
   /** The track or category it belongs to, e.g. "FireTrack" or "Electrical". */
   track: string | null;
   siteName: string | null;
+  /** The site's address, so a certificate's installation address can be matched. */
+  siteAddress?: string | null;
   contractorName: string | null;
   frequencyMonths: number | null;
 }
@@ -168,12 +170,13 @@ const resultSchema = z.object({
 const SYSTEM_PROMPT = `You help UK health and safety managers file contractor certificates in ComplyTrack, a compliance app. You read one certificate or inspection report: an EICR, a gas safety record, a fire alarm, emergency lighting or extinguisher service certificate, a LOLER or PUWER examination, a legionella or water report, a PAT test certificate, or similar. A competent person checks and corrects everything you return before it is saved.
 
 What to return:
-- The compliance check it belongs to: pick from the business's checks listed, matching the kind of inspection first, then the site, equipment and contractor. When the person opened this from one check, use that one. When none fits, give check_id null and suggest a new check.
-- Dates exactly as the document gives them, as YYYY-MM-DD. UK documents write dates day first (03/04/2026 is 3 April 2026).
-- Outcome: "satisfactory" or "unsatisfactory" as the document states it (an EICR's overall assessment; a gas record's "safe to use"; a service certificate with remedial work outstanding is unsatisfactory). "not_stated" when it gives none.
+- The compliance check it belongs to: pick from the business's checks listed, matching the kind of inspection first, then the site (compare the installation address and postcode with each site's), equipment and contractor. When the person opened this from one check, use that one. When none fits, give check_id null and suggest a new check.
+- Dates exactly as the document gives them, as YYYY-MM-DD. UK documents write dates day first (03/04/2026 is 3 April 2026). When the inspection took several days, use the first.
+- Next inspection: the date the document recommends. When it gives an interval instead ("not more than 5 years"), count it from the inspection date. Give it even when it is already past.
+- Outcome: "satisfactory" or "unsatisfactory" as the document states it (an EICR's overall assessment; a gas record's "safe to use"; a service certificate with remedial work outstanding is unsatisfactory). "not_stated" when it gives none. Forms often print both words with "delete as appropriate": the word struck through or overtyped with X's is the one that does NOT apply.
 - Defects: every coded observation and every item of remedial work or recommendation, one each.
-  * EICR: use C1, C2, C3 and FI exactly as coded. C1, C2 and FI need work; C3 does not.
-  * Gas: "ID" for Immediately Dangerous, "AR" for At Risk (both need work); "Not to Current Standards" is "other" and does not need work.
+  * EICR: take observations only from the "Observations and recommendations" section (PART 6 on many forms), one per numbered item, using C1, C2, C3 and FI exactly as the electrician coded them. C1, C2 and FI need work; C3 does not. The code key, the count boxes ("0 item(s)"), the summary lines ("Improvement recommended for items: 1,2,3") and the ticks in the schedule of inspections are not observations; never add one from them. Empty rows and "None" mean no observation.
+  * Gas (CP12, CP42 catering and commercial records): "ID" for Immediately Dangerous, "AR" for At Risk (both need work), only when the engineer classified a situation that way or issued a warning notice. "Not to Current Standards" is "other" and does not need work. On Yes/No checklists, each safety requirement answered against safety ("No" to an emergency notice, isolation valve, flame safeguard or interlock; "No" to "safe to use"; CO2 readings "Not acceptable") is "other": it needs work when an appliance is unsafe, the remedial work box describes work, or a warning notice was issued; otherwise it does not. Questions answered N/A, or that only apply when the answer above was Yes, are not defects. The engineer's comments ("Equipment requires full service") are "other" and need work. A gas record's outcome is satisfactory when every appliance is safe to use and no warning notice was issued. When no next date is printed, leave it null.
   * Anything else: "other". It needs work when the document says remedial work is required, a fault was found or a part failed; advice and recommendations do not.
   * Leave out items marked satisfactory, N/A or "pass", and limitations of the inspection.
 - Never include personal names (engineers, residents, staff) except the contractor's company name.
@@ -202,7 +205,7 @@ export async function readCertificate(input: CertificateReadingInput, beforeSend
   const describe = (check: CertificateCheckChoice) => [
     `${check.id} = ${check.title}`,
     check.track ? `track: ${check.track}` : null,
-    check.siteName ? `site: ${check.siteName}` : "all sites",
+    check.siteName ? `site: ${check.siteName}${check.siteAddress ? ` (${clean(check.siteAddress, 160)})` : ""}` : "all sites",
     check.contractorName ? `contractor: ${check.contractorName}` : null,
     check.frequencyMonths ? `every ${check.frequencyMonths} months` : null,
   ].filter(Boolean).join("; ");

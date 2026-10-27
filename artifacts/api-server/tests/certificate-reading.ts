@@ -36,7 +36,7 @@ const { readCertificate } = await import("../src/lib/certificateReading");
 const { ReportReadingError, UnreadableReportError } = await import("../src/lib/reportReading");
 
 const checks = [
-  { id: 11, title: "Electrical Installation Condition Report (EICR)", track: "Electrical", siteName: "Clubhouse", contractorName: "Sparks Ltd", frequencyMonths: 60 },
+  { id: 11, title: "Electrical Installation Condition Report (EICR)", track: "Electrical", siteName: "Clubhouse", siteAddress: "6 Greek Street,\n Leeds LS1 5RW", contractorName: "Sparks Ltd", frequencyMonths: 60 },
   { id: 12, title: "Gas Safety Inspection", track: null, siteName: null, contractorName: null, frequencyMonths: 12 },
   { id: 13, title: "Fire Alarm Maintenance", track: "FireTrack", siteName: "Clubhouse", contractorName: null, frequencyMonths: 6 },
 ];
@@ -87,9 +87,11 @@ try {
   assert.ok(schema.properties.defects.items.properties.code.enum.includes("FI"));
   const [doc, context] = sent.body.messages[0].content;
   assert.equal(doc.type, "document");
-  assert.match(context.text, /11 = Electrical Installation Condition Report \(EICR\); track: Electrical; site: Clubhouse; contractor: Sparks Ltd; every 60 months/);
+  assert.match(context.text, /11 = Electrical Installation Condition Report \(EICR\); track: Electrical; site: Clubhouse \(6 Greek Street, Leeds LS1 5RW\); contractor: Sparks Ltd; every 60 months/);
   assert.match(context.text, /did not say which check/);
   assert.match(sent.body.system, /C1, C2 and FI need work; C3 does not/);
+  assert.match(sent.body.system, /On Yes\/No checklists/);
+  assert.match(sent.body.system, /struck through or overtyped with X's is the one that does NOT apply/);
 
   assert.equal(result.itemId, 11);
   assert.equal(result.issueDate, "2026-10-20");
