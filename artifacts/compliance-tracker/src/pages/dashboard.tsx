@@ -9,6 +9,7 @@ import { ComplianceChecksDue } from "@/components/compliance-checks-due";
 import { TodayByDepartmentCard } from "@/components/today-by-department";
 import { RegisterReviewsDue } from "@/components/register-reviews-due";
 import { DashboardStartCards } from "@/components/dashboard-start-cards";
+import { useBillingReturn } from "@/lib/billing-return";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import {
@@ -482,6 +483,7 @@ function KitchenTrackStatusPill({ siteId }: { siteId: string }) {
 
 export default function Dashboard() {
   const { hasService, services, user } = useAuth();
+  useBillingReturn();
   const canAdmin = useCanAdmin();
   const canManageContractorEmails = canAdmin || useIsMaintenanceManager();
   const hasStandaloneDailytrackAm = hasService("dailytrack_am");

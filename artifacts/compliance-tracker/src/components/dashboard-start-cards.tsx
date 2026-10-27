@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { localToday, onboardingRequest } from "@/lib/onboarding";
 import { TaskItem, useTaskClientId, type TaskList, type TaskRow } from "@/components/task-item";
 import { showQuickTutorialIfNew } from "@/components/quick-tutorial";
+import { readBillingReturn } from "@/lib/billing-return";
 
 type SetupSummary = { needsSetup: boolean; canManage: boolean; deferredAt?: string | null };
 
@@ -35,6 +36,10 @@ function SetupBanner() {
   const { user, activeClientId } = useAuth();
   const [, navigate] = useLocation();
   const [state, setState] = useState<SetupSummary | null>(null);
+  // Coming back from paying is not the moment to open the setup wizard (it
+  // reads as if paying had started a new account), so it is not opened
+  // automatically for the rest of the visit. The banner still shows.
+  const [backFromCheckout] = useState(() => readBillingReturn() !== null);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,10 +52,12 @@ function SetupBanner() {
           return;
         }
         const key = `complytrack:setup-redirected:${activeClientId ?? "own"}`;
+        let alreadyOpened = false;
         try {
-          if (sessionStorage.getItem(key)) return;
+          alreadyOpened = sessionStorage.getItem(key) !== null;
           sessionStorage.setItem(key, "1");
         } catch { /* storage unavailable: still redirect once per load */ }
+        if (alreadyOpened || backFromCheckout) return;
         navigate("/setup");
       })
       .catch(() => { /* the dashboard works without setup state */ });

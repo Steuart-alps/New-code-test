@@ -4,7 +4,7 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
-import { trackModuleActivation } from "@/lib/analytics";
+import { forgetPendingCheckout, pendingCheckoutKey, trackCompletedCheckout } from "@/lib/billing-return";
 import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, KeyRound } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 import { CHECKOUT_ADDONS, SELECTED_MODULE_CARD, SELECTED_MODULE_CHECKBOX, checkoutPerSiteTotal } from "@/lib/addon-catalog";
@@ -20,9 +20,7 @@ export default function TrialEndedPage() {
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [bundle, setBundle] = useState(false);
   const [discountCode, setDiscountCode] = useState("");
-  const checkoutAnalyticsKey = activeClientId === null
-    ? null
-    : `complytrack:analytics:pending-checkout:${activeClientId}`;
+  const checkoutAnalyticsKey = activeClientId === null ? null : pendingCheckoutKey(activeClientId);
 
   const canPay = user?.role === "consultant" || user?.role === "client_admin";
   const total = checkoutPerSiteTotal(selectedAddons.size, bundle);
@@ -30,21 +28,6 @@ export default function TrialEndedPage() {
   const reachesCap = !bundle && total === checkoutPerSiteTotal(0, true);
   const [billingUnavailable, setBillingUnavailable] = useState(false);
   const hasAlpsDiscount = discountCode.trim().length > 0;
-
-  const trackCompletedCheckout = () => {
-    if (!checkoutAnalyticsKey || activeClientId === null) return;
-    try {
-      const modules = JSON.parse(window.sessionStorage.getItem(checkoutAnalyticsKey) ?? "[]");
-      if (Array.isArray(modules)) {
-        modules
-          .filter((module): module is string => typeof module === "string")
-          .forEach((module) => trackModuleActivation(activeClientId, module));
-      }
-      window.sessionStorage.removeItem(checkoutAnalyticsKey);
-    } catch {
-      // Tracking cannot interfere with restored paid access.
-    }
-  };
 
   const toggleAddon = (key: string) => {
     setBundle(false);
@@ -77,13 +60,9 @@ export default function TrialEndedPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("billing") === "success") {
-      recheckAccess().then(trackCompletedCheckout);
-    } else if (params.get("billing") === "cancel" && checkoutAnalyticsKey) {
-      try {
-        window.sessionStorage.removeItem(checkoutAnalyticsKey);
-      } catch {
-        // Storage is only a best-effort analytics deduplication aid.
-      }
+      recheckAccess().then(() => trackCompletedCheckout(activeClientId));
+    } else if (params.get("billing") === "cancel") {
+      forgetPendingCheckout(activeClientId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

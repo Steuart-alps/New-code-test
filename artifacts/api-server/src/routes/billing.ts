@@ -469,8 +469,10 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       payment_method_types: ["card"],
       line_items: lineItems,
       mode: "subscription",
-      success_url: `${baseUrl}/?billing=success&clientId=${clientId}`,
-      cancel_url: `${baseUrl}/?billing=cancel`,
+      // Back to the dashboard of the business being paid for: "/" sends
+      // consultants to their portfolio, which read as a new account.
+      success_url: `${baseUrl}/dashboard?billing=success&clientId=${clientId}`,
+      cancel_url: `${baseUrl}/dashboard?billing=cancel&clientId=${clientId}`,
       metadata: {
         clientId: String(clientId),
         ...(discountReservation
