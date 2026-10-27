@@ -3,6 +3,8 @@ import { Loader2, ImagePlus, Trash2 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
+import { useFileDrop } from "@/hooks/use-file-drop";
+import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -162,6 +164,9 @@ export function RequiredRecordPhotoEvidence({
   evidence,
 }: { evidence: ReturnType<typeof useNewRecordPhotoEvidence> }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  // One photo at a time is verified, so a drop of several takes the first.
+  const drop = useFileDrop(files => { void evidence.addFile(files[0]); },
+    evidence.enabled && evidence.required && !evidence.uploading && evidence.photos.length < 10);
   if (!evidence.enabled) return null;
   if (evidence.loading) return (
     <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -176,11 +181,12 @@ export function RequiredRecordPhotoEvidence({
   );
   if (!evidence.required) return null;
   return (
-    <fieldset className="space-y-3 rounded-md border border-border p-3" aria-label="Required photo evidence">
+    <fieldset {...drop.dropZoneProps} className={cn("space-y-3 rounded-md border p-3 transition-colors", drop.isDragging ? "border-primary bg-primary/5" : "border-border")} aria-label="Required photo evidence">
       <legend className="px-1 text-sm font-medium">Required photo evidence</legend>
       <Badge variant="outline">{evidence.photos.length}/{evidence.minimum} required photos attached</Badge>
       <p className="text-xs text-muted-foreground">
         Attach at least {evidence.minimum} verified {evidence.minimum === 1 ? "photo" : "photos"} before saving.
+        <span className="hidden sm:inline"> You can drag a photo here.</span>
       </p>
       {evidence.photos.map(photo => (
         <div key={photo.id} className="flex items-center justify-between gap-2 text-sm">
@@ -198,7 +204,8 @@ export function RequiredRecordPhotoEvidence({
         {evidence.uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 h-4 w-4" />}
         {evidence.uploading ? "Verifying photo…" : "Add required photo"}
       </Button>
-      <input ref={inputRef} type="file" accept="image/jpeg,image/png" capture="environment"
+      {/* No `capture`: phones then offer both the camera and the photo library. */}
+      <input ref={inputRef} type="file" accept="image/jpeg,image/png"
         aria-label="Select required photo" className="hidden"
         onChange={event => {
           const file = event.target.files?.[0];

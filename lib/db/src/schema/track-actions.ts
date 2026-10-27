@@ -1,4 +1,4 @@
-import { boolean, date, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, date, integer, jsonb, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { departmentsTable } from "./departments";
 import { sitesTable } from "./sites";
@@ -45,6 +45,9 @@ export const trackActionsTable = pgTable("track_actions", {
   dueDate: date("due_date"),
   remedialAction: text("remedial_action"),
   evidenceReference: text("evidence_reference"),
+  /** Photos and videos attached as evidence (private /objects/ paths),
+   *  added through routes/track-actions.ts like FixTrack issue media. */
+  mediaUrls: jsonb("media_urls").notNull().default([]).$type<string[]>(),
   resolutionNotes: text("resolution_notes"),
   status: text("status").notNull(),
   createdBy: integer("created_by"),

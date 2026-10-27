@@ -7,9 +7,12 @@ import { appendAuditEvent } from "../lib/audit";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth } from "../middleware/requireAuth";
 import { ensureDefaultTrackEvidenceRequirements } from "../lib/trackEvidenceRequirements";
 import { sitesTableVisibleTo } from "../lib/departmentSites";
+import { TRACK_ACTION_MODULES } from "./track-actions";
 
 const router = Router();
-const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room"] as const;
+// The same modules as track actions, "audit" (Report actions) included, so
+// evidence can be recorded against any action a track lists.
+const MODULES = TRACK_ACTION_MODULES;
 const evidenceTypes = ["observation", "photo", "document", "certificate", "test_result", "verification", "other"] as const;
 const moduleSchema = z.enum(MODULES);
 const scopeSchema = z.object({ module: moduleSchema, siteId: z.number().int().positive().nullable().optional() }).strict();

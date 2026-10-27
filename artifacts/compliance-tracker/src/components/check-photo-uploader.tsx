@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useAuth } from "@/context/auth-context";
+import { useFileDrop } from "@/hooks/use-file-drop";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -123,6 +124,7 @@ export function CheckPhotoUploader({
   const [uploading, setUploading] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // The control that opened the lightbox, so focus returns to it on close.
@@ -158,15 +160,27 @@ export function CheckPhotoUploader({
 
   // ── Upload flow ───────────────────────────────────────────────────────────
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
     // Reset input so same file can be re-selected
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    e.target.value = "";
+    void uploadFiles(files);
+  };
 
+  // Picked, photographed or dropped photos, one after another.
+  const uploadFiles = async (files: File[]) => {
+    if (readOnly || uploading || files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of files) await uploadFile(file);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadFile = async (file: File) => {
     if (!["image/jpeg", "image/png"].includes(file.type)) {
-      toast({ title: "JPEG or PNG only", description: "Please select a JPEG or PNG image.", variant: "destructive" });
+      toast({ title: "JPEG or PNG only", description: `${file.name} isn't a JPEG or PNG photo.`, variant: "destructive" });
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
@@ -174,7 +188,6 @@ export function CheckPhotoUploader({
       return;
     }
 
-    setUploading(true);
     try {
       // Step 1 — request presigned URL
       const { uploadUrl, objectPath } = await apiFetch<{ uploadUrl: string; objectPath: string }>(
@@ -203,10 +216,11 @@ export function CheckPhotoUploader({
       toast({ title: "Photo added" });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
-    } finally {
-      setUploading(false);
     }
   };
+  const drop = useFileDrop((files) => { void uploadFiles(files); }, !readOnly && !uploading);
+  const dropProps = readOnly ? {} : drop.dropZoneProps;
+  const dropHighlight = drop.isDragging && "rounded-sm ring-2 ring-primary ring-offset-2 bg-primary/5";
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
@@ -246,17 +260,31 @@ export function CheckPhotoUploader({
   }, []);
   const lightboxEl = lightbox && <Lightbox src={lightbox.src} label={lightbox.label} onClose={closeLightbox} />;
 
+  // Without `capture`, phones offer the camera and the photo library; the
+  // camera input opens the camera straight away.
   const fileInput = (
-    <input
-      ref={fileInputRef}
-      type="file"
-      accept="image/jpeg,image/png"
-      capture="environment"
-      className="hidden"
-      tabIndex={-1}
-      aria-hidden="true"
-      onChange={handleFileChange}
-    />
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png"
+        multiple
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={handleFileChange}
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/jpeg,image/png"
+        capture="environment"
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={handleFileChange}
+      />
+    </>
   );
   const status = (
     <span role="status" className="sr-only">{uploading ? "Uploading photo…" : ""}</span>
@@ -275,7 +303,7 @@ export function CheckPhotoUploader({
 
   if (compact) {
     return (
-      <div ref={containerRef} className="flex items-center gap-2 flex-wrap mt-1">
+      <div ref={containerRef} {...dropProps} className={cn("flex items-center gap-2 flex-wrap mt-1", dropHighlight)}>
         {status}
         {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" aria-label="Loading photos" />}
         {loadErrorNotice}
@@ -335,7 +363,7 @@ export function CheckPhotoUploader({
   }
 
   return (
-    <div ref={containerRef} className="space-y-2">
+    <div ref={containerRef} {...dropProps} className={cn("space-y-2", dropHighlight)}>
       {status}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -347,24 +375,38 @@ export function CheckPhotoUploader({
             <span className="text-xs text-muted-foreground">{photos.length} attached</span>
           )}
         </div>
-        {!readOnly && <button
-          ref={addButtonRef}
-          type="button"
-          disabled={uploading}
-          aria-busy={uploading}
-          onClick={() => fileInputRef.current?.click()}
-          className={cn(
-            "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border border-border text-xs font-medium cursor-pointer",
-            "hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-default",
-            focusRing,
-          )}
-        >
-          {uploading ? (
-            <><Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Uploading…</>
-          ) : (
-            <><Camera className="w-3.5 h-3.5" aria-hidden="true" /> Add Photo</>
-          )}
-        </button>}
+        {!readOnly && <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => cameraInputRef.current?.click()}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border border-border text-xs font-medium cursor-pointer",
+              "hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-default",
+              focusRing,
+            )}
+          >
+            <Camera className="w-3.5 h-3.5" aria-hidden="true" /> Take photo
+          </button>
+          <button
+            ref={addButtonRef}
+            type="button"
+            disabled={uploading}
+            aria-busy={uploading}
+            onClick={() => fileInputRef.current?.click()}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border border-border text-xs font-medium cursor-pointer",
+              "hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-default",
+              focusRing,
+            )}
+          >
+            {uploading ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Uploading…</>
+            ) : (
+              <><ImagePlus className="w-3.5 h-3.5" aria-hidden="true" /> Add Photo</>
+            )}
+          </button>
+        </div>}
         {!readOnly && fileInput}
       </div>
 
@@ -378,6 +420,7 @@ export function CheckPhotoUploader({
       {!loading && !loadError && photos.length === 0 && (
         <p className="text-xs text-muted-foreground italic py-1">
               {required ? `At least ${minPhotos} ${minPhotos === 1 ? "photo is" : "photos are"} required for this check.` : "No photos attached."}
+              {!readOnly && <span className="hidden sm:inline"> You can also drag photos here.</span>}
         </p>
       )}
 

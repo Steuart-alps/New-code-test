@@ -23,6 +23,8 @@ import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
 import { takeLinkParams } from "@/lib/deep-link";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { useFileDrop } from "@/hooks/use-file-drop";
+import { cn } from "@/lib/utils";
 import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
 import { Download, FileSearch, Loader2, Plus, Sparkles, Trash2, Upload } from "lucide-react";
 
@@ -41,8 +43,13 @@ const TRACK_PAGES: Record<string, string> = {
   daily_am: "/daily-track-am", daily_pm: "/daily-track-pm", kitchen: "/kitchen", fire: "/fire-safety", legionella: "/legionella",
   pool: "/aqua-track", pat: "/pat-track", pest: "/pest-track", fix: "/fix-track", premises: "/premises-track", doc: "/doc-track",
   safe: "/doc-track", train: "/train-track", hot_tub: "/hot-tub", tree: "/tree-track", bike: "/bike-track", green: "/green-track",
-  swim: "/aqua-track", incident: "/incidents", room: "/room-track",
+  swim: "/aqua-track", incident: "/incidents", room: "/room-track", coshh: "/coshh-track",
 };
+
+// A report can be a document, photos of its pages, or a video walk-round.
+// ComplyTrack reads PDF, Word and photos; for anything else the actions are typed in.
+const REPORT_FILE_ACCEPT = ".pdf,.docx,.doc,.jpg,.jpeg,.png,.webp,.txt,.mp4,.mov,.webm,application/pdf,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm";
+const REPORT_FILE_EXTENSIONS = /\.(pdf|docx?|jpe?g|png|webp|txt|mp4|mov|webm)$/i;
 
 const actionsText = (count: number) => `${count} ${count === 1 ? "action" : "actions"}`;
 
@@ -82,6 +89,16 @@ function UploadDialog({ open, onClose, options, onUploaded }: {
   const [reportDate, setReportDate] = useState("");
   const [siteId, setSiteId] = useState(WHOLE_BUSINESS);
   const [busy, setBusy] = useState(false);
+
+  function choose(picked: File | null) {
+    if (picked && !REPORT_FILE_EXTENSIONS.test(picked.name)) {
+      toast({ title: "That type of file can't be uploaded", description: "Use a PDF, Word file, photo (JPEG, PNG or WebP) or video (MP4, MOV or WebM).", variant: "destructive" });
+      return;
+    }
+    setFile(picked);
+    if (picked && !title) setTitle(picked.name.replace(/\.[^.]+$/, ""));
+  }
+  const drop = useFileDrop((files) => choose(files[0] ?? null), open && !busy);
 
   function reset() {
     setFile(null); setTitle(""); setReportType("alps_audit"); setReportDate(""); setSiteId(WHOLE_BUSINESS); setBusy(false);
@@ -123,17 +140,22 @@ function UploadDialog({ open, onClose, options, onUploaded }: {
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Upload a report</DialogTitle>
-          <DialogDescription>An audit, inspection or survey report. PDF works best; Word files and photos of each page work too.</DialogDescription>
+          <DialogDescription>An audit, inspection or survey report. PDF works best; Word files, photos of each page and videos work too. ComplyTrack can suggest actions from a PDF, Word file or photo; for a video, type the actions in.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-1">
           <div className="space-y-1.5">
             <Label htmlFor="report-file">File</Label>
-            <Input id="report-file" type="file" accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.webp,.txt"
-              onChange={(event) => {
-                const picked = event.target.files?.[0] ?? null;
-                setFile(picked);
-                if (picked && !title) setTitle(picked.name.replace(/\.[^.]+$/, ""));
-              }} />
+            <div
+              {...drop.dropZoneProps}
+              className={cn("space-y-2 rounded-sm border border-dashed p-3 transition-colors", drop.isDragging ? "border-primary bg-primary/5" : "border-border")}
+              data-testid="dropzone-report-file"
+            >
+              <Input id="report-file" type="file" accept={REPORT_FILE_ACCEPT}
+                onChange={(event) => { choose(event.target.files?.[0] ?? null); event.target.value = ""; }} />
+              <p className="text-xs text-muted-foreground">
+                {file ? `Chosen: ${file.name}` : <><span className="hidden sm:inline">Drag the file here, or </span>choose it above.</>}
+              </p>
+            </div>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="report-title">Name</Label>
