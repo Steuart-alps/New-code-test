@@ -2,9 +2,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { CSV_IMPORT_MAX_ROWS } from "./csvImport";
 import { MACHINE_TYPES } from "./machineTypes";
-import { usageFromMessage } from "./aiPricing";
+import { aiEffortFor, aiModelFor, hasServerSideFallback, HAIKU_REFUSAL_RETRY_MODEL, serverSideFallbackParams } from "./aiModels";
+import { combinedUsage, usageFromMessage } from "./aiPricing";
 import { aiScopeRules, promptLabel, WRONG_FILE_PROPERTY } from "./aiScope";
-import { fileContentBlock, ReportReadingError, reportReadingModel } from "./reportReading";
+import { fileContentBlock, ReportReadingError } from "./reportReading";
 import { REGISTER_FILE_WORDING, REGISTER_READING_MAX_BYTES, type RegisterReadingResult } from "./registerReading";
 
 /**
@@ -190,21 +191,28 @@ export async function readList(input: ListReadingInput, beforeSending?: () => Pr
   ].filter(Boolean).join("\n");
 
   const client = new Anthropic();
-  const model = reportReadingModel();
-  const message = await client.beta.messages.stream({
+  const send = (model: string) => client.beta.messages.stream({
     model,
     max_tokens: 64000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...serverSideFallbackParams(model),
     system: SYSTEM_PROMPT(kind),
-    output_config: { effort: "medium", format: { type: "json_schema", schema: outputSchema(kind, siteNames) } },
+    output_config: { effort: aiEffortFor("list_reading"), format: { type: "json_schema", schema: outputSchema(kind, siteNames) } },
     messages: [{
       role: "user",
       content: [content, { type: "text", text: `${context}\n\nList the ${kind.noun} in this file.` }],
     }],
   }).finalMessage();
-
-  const usage = usageFromMessage(message, model);
+  // Claude Haiku 5.5 by default (lib/aiModels.ts). It has no server-side
+  // fallback, so a list it declines is tried once more on Claude Sonnet 5.5.
+  let model = aiModelFor("list_reading");
+  let message = await send(model);
+  let usage = usageFromMessage(message, model);
+  if (message.stop_reason === "refusal" && !hasServerSideFallback(model)) {
+    const declined = usage;
+    model = HAIKU_REFUSAL_RETRY_MODEL;
+    message = await send(model);
+    usage = combinedUsage(usageFromMessage(message, model), declined);
+  }
   if (message.stop_reason === "refusal") throw new ReportReadingError("ComplyTrack could not read this list. Type it into a spreadsheet and upload that instead.", usage);
   if (message.stop_reason === "max_tokens") throw new ReportReadingError("This list is too long to read in one go. Upload it a few pages at a time.", usage);
   const text = message.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("");
@@ -243,8 +251,8 @@ export async function readList(input: ListReadingInput, beforeSending?: () => Pr
     unclear: records.filter((record) => record.unclear).length,
     unclearRows: records.flatMap((record, index) => record.unclear ? [index + 2] : []),
     model: message.model ?? model,
-    inputTokens: message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0),
-    outputTokens: message.usage.output_tokens,
+    inputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens,
+    outputTokens: usage.outputTokens,
     usage,
   };
 }

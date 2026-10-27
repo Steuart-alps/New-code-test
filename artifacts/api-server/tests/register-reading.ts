@@ -9,18 +9,22 @@ import type { AddressInfo } from "node:net";
 type Reply = { stopReason: string; text: string };
 const requests: Array<{ headers: IncomingMessage["headers"]; body: any }> = [];
 let reply: Reply = { stopReason: "end_turn", text: "{}" };
+/** Replies used up one request at a time before falling back to `reply`. */
+let queued: Reply[] = [];
 
 const server = createServer((req, res) => {
   let raw = "";
   req.on("data", (chunk) => { raw += chunk; });
   req.on("end", () => {
-    requests.push({ headers: req.headers, body: JSON.parse(raw) });
+    const body = JSON.parse(raw);
+    requests.push({ headers: req.headers, body });
+    const answer = queued.shift() ?? reply;
     const events: Array<[string, unknown]> = [
-      ["message_start", { type: "message_start", message: { id: "msg_test", type: "message", role: "assistant", model: "claude-opus-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1800, output_tokens: 1 } } }],
+      ["message_start", { type: "message_start", message: { id: "msg_test", type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1800, output_tokens: 1 } } }],
       ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }],
-      ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: reply.text } }],
+      ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: answer.text } }],
       ["content_block_stop", { type: "content_block_stop", index: 0 }],
-      ["message_delta", { type: "message_delta", delta: { stop_reason: reply.stopReason, stop_sequence: null }, usage: { output_tokens: 900 } }],
+      ["message_delta", { type: "message_delta", delta: { stop_reason: answer.stopReason, stop_sequence: null }, usage: { output_tokens: 900 } }],
       ["message_stop", { type: "message_stop" }],
     ];
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -31,7 +35,7 @@ const server = createServer((req, res) => {
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 process.env.ANTHROPIC_API_KEY = "test-key-not-real";
 process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-delete process.env.REPORT_READING_MODEL;
+for (const name of ["REPORT_READING_MODEL", "REGISTER_READING_MODEL", "REGISTER_READING_EFFORT", "LIST_READING_MODEL", "LIST_READING_EFFORT"]) delete process.env[name];
 delete process.env.REGISTER_READING_MONTHLY_LIMIT;
 
 const { readApplianceList, registerReadingMonthlyLimit } = await import("../src/lib/registerReading");
@@ -66,7 +70,8 @@ try {
   const result = await readApplianceList(input, async () => { counted += 1; });
   assert.equal(counted, 1, "the reading is counted once, before it is sent");
   const sent = requests.at(-1)!;
-  assert.equal(sent.body.model, "claude-opus-5-5");
+  assert.equal(sent.body.model, "claude-sonnet-5-5", "PAT registers are read by Claude Sonnet 5.5");
+  assert.equal(sent.body.output_config.effort, "low");
   assert.equal(sent.body.fallbacks, "default");
   assert.match(String(sent.headers["anthropic-beta"]), /server-side-fallback-2026-07-01/);
   assert.equal(sent.body.output_config.format.type, "json_schema");
@@ -134,6 +139,10 @@ try {
   };
   const contractors = await readList({ ...listInput, kind: "contractors", trades: ["Electrical", "Gas"] });
   const contractorRequest = requests.at(-1)!;
+  assert.equal(contractorRequest.body.model, "claude-haiku-5-5", "simple lists are read by Claude Haiku 5.5");
+  assert.equal(contractorRequest.body.output_config.effort, "low");
+  assert.equal(contractorRequest.body.fallbacks, undefined, "Claude Haiku has no server-side fallback to ask for");
+  assert.doesNotMatch(String(contractorRequest.headers["anthropic-beta"] ?? ""), /server-side-fallback/);
   assert.match(contractorRequest.body.messages[0].content[1].text, /Trade options: "Electrical"; "Gas"/);
   assert.doesNotMatch(contractorRequest.body.messages[0].content[1].text, /Sites:/, "contractors have no site column");
   assert.deepEqual(contractors.headers, ["Contact name", "Company", "Email", "Phone", "Address", "Trades", "Gas Safe number", "Public liability expiry", "Notes"]);
@@ -178,6 +187,37 @@ try {
   await assert.rejects(readList({ ...listInput, kind: "room-track-rooms", mimeType: "application/vnd.ms-excel" }), UnreadableReportError);
   assert.equal(requests.length, listBefore, "a spreadsheet is never sent to be read");
   console.log("ok - staff, call point and room lists are read the same way, and unreadable files are not sent");
+
+  // ── A list Claude Haiku declines is tried once more on Claude Sonnet ────
+  const staffRow = { payrollId: null, name: "Jane Smith", jobTitle: "Chef", department: "Kitchen", email: null, unclear: false };
+  queued = [{ stopReason: "refusal", text: "" }, { stopReason: "end_turn", text: JSON.stringify({ rows: [staffRow] }) }];
+  const retryBefore = requests.length;
+  const retried = await readList({ ...listInput, kind: "staff-roster" });
+  assert.equal(requests.length, retryBefore + 2);
+  const retry = requests.at(-1)!;
+  assert.equal(retry.body.model, "claude-sonnet-5-5");
+  assert.equal(retry.body.fallbacks, "default", "the retry keeps Sonnet's own fallback");
+  assert.match(String(retry.headers["anthropic-beta"]), /server-side-fallback-2026-07-01/);
+  assert.equal(retried.rows.length, 1);
+  assert.equal(retried.usage.requestedModel, "claude-sonnet-5-5");
+  assert.equal(retried.usage.inputTokens, 3600, "both requests' tokens count towards the allowance");
+  assert.equal(retried.usage.outputTokens, 1800);
+  queued = [{ stopReason: "refusal", text: "" }, { stopReason: "refusal", text: "" }];
+  await assert.rejects(readList({ ...listInput, kind: "staff-roster" }), /could not read this list/);
+  assert.equal(queued.length, 0, "only one retry");
+  process.env.LIST_READING_MODEL = "claude-sonnet-5-5";
+  process.env.LIST_READING_EFFORT = "MEDIUM";
+  reply = { stopReason: "end_turn", text: JSON.stringify({ rows: [staffRow] }) };
+  await readList({ ...listInput, kind: "staff-roster" });
+  assert.equal(requests.at(-1)!.body.model, "claude-sonnet-5-5", "LIST_READING_MODEL changes the model");
+  assert.equal(requests.at(-1)!.body.output_config.effort, "medium", "LIST_READING_EFFORT changes the effort");
+  assert.equal(requests.at(-1)!.body.fallbacks, "default");
+  process.env.LIST_READING_EFFORT = "flat out";
+  await readList({ ...listInput, kind: "staff-roster" });
+  assert.equal(requests.at(-1)!.body.output_config.effort, "low", "an unknown effort keeps the default");
+  delete process.env.LIST_READING_MODEL;
+  delete process.env.LIST_READING_EFFORT;
+  console.log("ok - a list Claude Haiku declines is tried once on Claude Sonnet, and Render settings can change the model and effort");
 
   console.log("Register reading checks passed.");
 } finally {

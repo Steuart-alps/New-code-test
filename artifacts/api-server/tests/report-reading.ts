@@ -32,6 +32,7 @@ await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 process.env.ANTHROPIC_API_KEY = "test-key-not-real";
 process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 delete process.env.REPORT_READING_MODEL;
+delete process.env.REPORT_READING_EFFORT;
 
 const { docxToText, readReportForActions, ReportReadingError, UnreadableReportError, reportReadingConfigured, canReadReportType } =
   await import("../src/lib/reportReading");

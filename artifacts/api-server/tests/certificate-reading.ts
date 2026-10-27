@@ -31,6 +31,7 @@ await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 process.env.ANTHROPIC_API_KEY = "test-key-not-real";
 process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 delete process.env.CERTIFICATE_READING_MODEL;
+delete process.env.CERTIFICATE_READING_EFFORT;
 
 const { readCertificate } = await import("../src/lib/certificateReading");
 const { ReportReadingError, UnreadableReportError } = await import("../src/lib/reportReading");
@@ -81,6 +82,7 @@ try {
   assert.equal(claimed, 1, "the AI allowance is claimed once, before the file is sent");
   const sent = requests.at(-1)!;
   assert.equal(sent.body.model, "claude-sonnet-5-5", "Sonnet 5.5 by default");
+  assert.equal(sent.body.output_config.effort, "low", "low effort by default");
   assert.equal(sent.body.fallbacks, "default");
   assert.match(String(sent.headers["anthropic-beta"]), /server-side-fallback-2026-07-01/);
   const schema = sent.body.output_config.format.schema;
