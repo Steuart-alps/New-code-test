@@ -17,13 +17,20 @@ const ok = (response, status = 200) => {
 // Days are counted from the latest Wednesday, so no run falls on a Monday
 // (the Owner update day).
 const base = new Date();
-base.setUTCDate(base.getUTCDate() - ((base.getUTCDay() + 4) % 7));
+const sinceBase = (base.getUTCDay() + 4) % 7;
+base.setUTCDate(base.getUTCDate() - sinceBase);
 const day = (offset) => {
   const date = new Date(base);
   date.setUTCDate(date.getUTCDate() + offset);
   return date.toISOString().slice(0, 10);
 };
 const at = (offset) => new Date(`${day(offset)}T08:30:00Z`);
+// The recent visit must be under two weeks old both at the job runs (dated
+// from `base`) and in GET /certificates-outstanding (measured from the real
+// date, up to 6 days after `base`). From Sunday on, 10 days before `base` is
+// already two weeks ago, so it moves to 6. Neither falls on a 14-day reminder
+// at the runs on days 0, 1, 7 and 14.
+const recentVisit = day(sinceBase <= 3 ? -10 : -6);
 
 const sent = [];
 const send = async (email) => { sent.push(email); };
@@ -79,7 +86,7 @@ try {
   const assigned = await check('Emergency Lighting Test', siteA.id, { assigneeUserId: staffA.userId });
   await complete(gas.id, day(-14));
   await complete(eicr.id, day(-14));
-  await complete(recent.id, day(-10));
+  await complete(recent.id, recentVisit);
   await complete(certified.id, day(-20));
   await complete(old.id, day(-120));
   await complete(assigned.id, day(-14));
