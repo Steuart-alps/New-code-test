@@ -32,6 +32,7 @@ import {
   chartTitle, combineIngredients, renderChartHtml, sameSet,
   type AllergenChart, type AllergenIngredient, type AllergenItem, type AllergenMenu,
 } from "@/lib/allergens";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 interface LineForm {
   ingredientId: string;
@@ -77,6 +78,7 @@ export default function AllergensPage() {
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<AllergenItem | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
+  const newRow = useFocusNewRow();
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AllergenItem | null>(null);
   const [historyItem, setHistoryItem] = useState<AllergenItem | null>(null);
@@ -460,7 +462,7 @@ export default function AllergensPage() {
               </div>
 
               {form.mode === "recipe" ? (
-                <div className="space-y-2">
+                <div ref={newRow.ref} className="space-y-2">
                   {formIngredients.length === 0 && (
                     <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
                       No ingredients for this site yet. Add them on the Ingredients tab first.
@@ -496,7 +498,7 @@ export default function AllergensPage() {
                     </div>
                   ))}
                   <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={formIngredients.length === 0}
-                    onClick={() => setForm({ ...form, lines: [...form.lines, { ingredientId: "", quantity: "", unit: "" }] })}>
+                    onClick={() => { newRow.expect(); setForm({ ...form, lines: [...form.lines, { ingredientId: "", quantity: "", unit: "" }] }); }}>
                     <Plus className="w-3.5 h-3.5" /> Add ingredient
                   </Button>
                   <div className="rounded-md border border-border bg-muted/30 p-2 space-y-1">

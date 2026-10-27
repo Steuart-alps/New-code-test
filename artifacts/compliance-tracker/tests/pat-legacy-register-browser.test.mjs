@@ -95,6 +95,7 @@ try {
     if (url.pathname === "/api/photos") return json(route, []);
     if (url.pathname === "/api/pat-track/config") return json(route, { pat_default_tester: "", pat_retest_months: "12", pat_locations: "[]", pat_show_earth_bond: "true", pat_show_insulation: "true" });
     if (url.pathname === "/api/pat-track/status") return json(route, status());
+    if (url.pathname === "/api/pat-track/preset-templates") return json(route, {});
     if (url.pathname === "/api/pat-track/appliances" && method === "GET") return json(route, state.appliances);
     if (url.pathname === "/api/pat-track/tests" && method === "GET") return json(route, state.tests);
     const applianceMatch = url.pathname.match(/^\/api\/pat-track\/appliances\/(\d+)$/);
@@ -135,6 +136,18 @@ try {
   const newTargets = await page.getByTestId("select-legacy-test-appliance").locator("option").allTextContents();
   assert.deepEqual(newTargets, ["Select appliance", "Active kettle (TAG-11)"], "only active appliances are offered for new tests");
   await page.getByTestId("button-cancel-legacy-test").click();
+
+  // Adding a line to a preset puts the cursor straight in its name box.
+  await page.getByTestId("button-open-legacy-preset").click();
+  await page.locator('[data-testid^="button-legacy-preset-"]').first().click();
+  const presetNames = page.getByRole("dialog").locator('input:not([type="checkbox"])');
+  const before = await presetNames.count();
+  await page.getByTestId("button-add-legacy-preset-item").click();
+  assert.equal(await presetNames.count(), before + 1);
+  assert.ok(await presetNames.last().evaluate(el => el === document.activeElement), "the new preset line has the cursor");
+  await page.keyboard.type("Extension lead");
+  assert.equal(await presetNames.last().inputValue(), "Extension lead");
+  await page.getByRole("button", { name: "Cancel" }).click();
 
   // Retirement confirmation accurately describes what happens to the history.
   await page.getByTestId("button-retire-legacy-appliance-11").click();

@@ -18,6 +18,7 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { UploadCloud, FileText, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -73,6 +74,7 @@ export function CertificateFormDialog({
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [defects, setDefects] = useState<DefectDraft[]>([]);
+  const newRow = useFocusNewRow();
   const [defectError, setDefectError] = useState<string | null>(null);
   const [savingDefects, setSavingDefects] = useState(false);
   const isItemCertificate = !!itemId;
@@ -272,11 +274,11 @@ export function CertificateFormDialog({
           )}
 
           {isItemCertificate && (
-            <div className="space-y-2">
+            <div ref={newRow.ref} className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Defects and observations</Label>
                 <Button type="button" variant="outline" size="sm"
-                  onClick={() => setDefects((all) => [...all, { code: outcome === "unsatisfactory" ? "C2" : "C3", description: "", location: "" }])}>
+                  onClick={() => { newRow.expect(); setDefects((all) => [...all, { code: outcome === "unsatisfactory" ? "C2" : "C3", description: "", location: "" }]); }}>
                   <Plus className="w-3.5 h-3.5 mr-1" /> Add defect
                 </Button>
               </div>

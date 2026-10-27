@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,7 @@ export function ChecklistTemplateEditor({
 
   // Add-item form state
   const [newLabel, setNewLabel] = useState("");
+  const newLabelRef = useRef<HTMLInputElement>(null);
   const [newSection, setNewSection] = useState("");
   const [newSectionCustom, setNewSectionCustom] = useState("");
 
@@ -97,6 +98,8 @@ export function ChecklistTemplateEditor({
       : newSection === "__none__" ? undefined : newSection || undefined;
     setItems(prev => [...prev, { label, section, checked: false }]);
     setNewLabel("");
+    // Ready for the next item without clicking back into the box.
+    newLabelRef.current?.focus();
   };
 
   const resetToDefault = () => {
@@ -225,6 +228,7 @@ export function ChecklistTemplateEditor({
                   <Label className="text-xs">Check item *</Label>
                   <div className="flex gap-2">
                     <Input
+                      ref={newLabelRef}
                       value={newLabel}
                       onChange={e => setNewLabel(e.target.value)}
                       onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addItem(); } }}

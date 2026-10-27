@@ -71,6 +71,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { StringListEditor } from "@/components/string-list-editor";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 // CookSafe All-in-One Record field shapes
 type DeliveryRow = {
@@ -167,6 +169,7 @@ function coolingMins(start: string, finish: string): number | null {
 // ── ConfigDialog ───────────────────────────────────────────────────────────────
 function ConfigDialog() {
   const [open, setOpen] = useState(false);
+  const newColdUnit = useFocusNewRow();
   // Which site's template we're editing. null = "All sites (default)" (the
   // client-level template). A number = a specific site's overrides.
   const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
@@ -322,28 +325,6 @@ function ConfigDialog() {
     });
   };
 
-  // Reusable string-list editor
-  const StringListEditor = ({
-    items, onChange, placeholder,
-  }: { items: string[]; onChange: (v: string[]) => void; placeholder: string }) => (
-    <div className="space-y-2">
-      {items.map((item, i) => (
-        <div key={i} className="flex gap-2 items-center">
-          <GripVertical className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <Input value={item} placeholder={placeholder} className="h-8 text-sm rounded-sm"
-            onChange={e => { const n = [...items]; n[i] = e.target.value; onChange(n); }} />
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
-            onClick={() => onChange(items.filter((_, x) => x !== i))}>
-            <Trash2 className="w-3.5 h-3.5 text-destructive" />
-          </Button>
-        </div>
-      ))}
-      <Button variant="outline" size="sm" onClick={() => onChange([...items, ""])}>
-        <Plus className="w-3.5 h-3.5 mr-1.5" /> Add item
-      </Button>
-    </div>
-  );
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -422,7 +403,7 @@ function ConfigDialog() {
             <p className="text-xs text-muted-foreground mb-3">
               Name each fridge and freezer. These rows will appear pre-filled on every new diary day.
             </p>
-            <div className="space-y-2">
+            <div ref={newColdUnit.ref} className="space-y-2">
               {coldUnits.map((unit, i) => (
                 <div key={i} className="flex gap-2 items-center">
                   <GripVertical className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
@@ -444,10 +425,10 @@ function ConfigDialog() {
                 </div>
               ))}
               <div className="flex gap-2 pt-1">
-                <Button variant="outline" size="sm" onClick={() => setColdUnits([...coldUnits, { name: "", type: "fridge" }])}>
+                <Button variant="outline" size="sm" onClick={() => { newColdUnit.expect(); setColdUnits([...coldUnits, { name: "", type: "fridge" }]); }}>
                   <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Fridge
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setColdUnits([...coldUnits, { name: "", type: "freezer" }])}>
+                <Button variant="outline" size="sm" onClick={() => { newColdUnit.expect(); setColdUnits([...coldUnits, { name: "", type: "freezer" }]); }}>
                   <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Freezer
                 </Button>
               </div>
@@ -466,19 +447,19 @@ function ConfigDialog() {
             <div className="space-y-2">
               <Label className="text-sm font-semibold">Hot Temperature items</Label>
               <p className="text-xs text-muted-foreground">Dishes you cook fresh each day (e.g. Roast Chicken, Beef Stew)</p>
-              <StringListEditor items={defaultHotItems} onChange={setDefaultHotItems} placeholder="e.g. Roast Chicken" />
+              <StringListEditor kitchen addLabel="Add item" items={defaultHotItems} onChange={setDefaultHotItems} placeholder="e.g. Roast Chicken" />
             </div>
 
             <div className="space-y-2">
               <Label className="text-sm font-semibold">Hot Holding items</Label>
               <p className="text-xs text-muted-foreground">Items kept hot for service (e.g. Chips, Gravy, Soup)</p>
-              <StringListEditor items={defaultHoldingItems} onChange={setDefaultHoldingItems} placeholder="e.g. Chips" />
+              <StringListEditor kitchen addLabel="Add item" items={defaultHoldingItems} onChange={setDefaultHoldingItems} placeholder="e.g. Chips" />
             </div>
 
             <div className="space-y-2">
               <Label className="text-sm font-semibold">Sous Vide items</Label>
               <p className="text-xs text-muted-foreground">Items you regularly cook sous vide</p>
-              <StringListEditor items={defaultSvItems} onChange={setDefaultSvItems} placeholder="e.g. Duck Breast" />
+              <StringListEditor kitchen addLabel="Add item" items={defaultSvItems} onChange={setDefaultSvItems} placeholder="e.g. Duck Breast" />
             </div>
 
             {selectedSiteId == null && (
@@ -487,7 +468,7 @@ function ConfigDialog() {
                 <p className="text-xs text-muted-foreground">
                   Name the thermometer probes that should appear on each new monthly calibration check. Probe names are shared across all sites.
                 </p>
-                <StringListEditor items={probeNames} onChange={setProbeNames} placeholder="e.g. Blue probe" />
+                <StringListEditor kitchen addLabel="Add item" items={probeNames} onChange={setProbeNames} placeholder="e.g. Blue probe" />
               </div>
             )}
           </TabsContent>
@@ -891,6 +872,7 @@ export function DailyDiaryTab() {
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const newRow = useFocusNewRow();
   const createRecord = useCreateFoodSafetyRecord();
   const updateRecord = useUpdateFoodSafetyRecord();
 
@@ -1270,7 +1252,7 @@ export function DailyDiaryTab() {
   const isSubmitted = isFiled || user?.role === "client_viewer";
 
   return (
-    <div className="space-y-6">
+    <div ref={newRow.ref} className="space-y-6">
       {temperatureAssessment.error && <p role="alert" className="rounded border border-destructive p-3 text-sm text-destructive">{temperatureAssessment.error}</p>}
       {temperatureAssessment.failures.length > 0 && <div role="alert" className="rounded border border-destructive p-3 text-sm">
         <p className="font-medium">Outside configured limits — record the action taken. Each new failed observation opens a manager-verified follow-up.</p>
@@ -1375,11 +1357,11 @@ export function DailyDiaryTab() {
                 {!isSubmitted && (
                   <Button
                     variant="outline" size="sm"
-                    onClick={() => setDeliveries([...deliveries, {
+                    onClick={() => { newRow.expect(); setDeliveries([...deliveries, {
                       supplier: "", items: "", vanClean: "", rawCookedSep: "",
                       tempChilled: "", tempFrozen: "", tempOk: "", conditionOk: "",
                       dateCodesOk: "", allergyAware: "", correctiveActions: "",
-                    }])}
+                    }]); }}
                   >
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Delivery
                   </Button>
@@ -1473,7 +1455,7 @@ export function DailyDiaryTab() {
                 </div>
                 {!isSubmitted && (
                   <Button variant="outline" size="sm"
-                    onClick={() => setColdFood([...coldFood, { unit: "", tempAm: "", tempPm: "", correctiveAction: "" }])}>
+                    onClick={() => { newRow.expect(); setColdFood([...coldFood, { unit: "", tempAm: "", tempPm: "", correctiveAction: "" }]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
@@ -1538,7 +1520,7 @@ export function DailyDiaryTab() {
                   <CardDescription className="text-xs mt-1">Target: {entryCookingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => setCooking([...cooking, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }])}>
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setCooking([...cooking, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
@@ -1586,7 +1568,7 @@ export function DailyDiaryTab() {
                   <CardDescription className="text-xs mt-1">Target: {entryCoolingLimit} · Rows exceeding 90 minutes are flagged red</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => setCooling([...cooling, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }])}>
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setCooling([...cooling, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
@@ -1641,7 +1623,7 @@ export function DailyDiaryTab() {
                   <CardDescription className="text-xs mt-1">Target: {entryReheatingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => setReheating([...reheating, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }])}>
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setReheating([...reheating, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
@@ -1688,7 +1670,7 @@ export function DailyDiaryTab() {
                 </div>
                 {!isSubmitted && (
                   <Button variant="outline" size="sm"
-                    onClick={() => setHotHolding([...hotHolding, { item: "", coreTemp: "", timeOfCheck: "" }])}>
+                    onClick={() => { newRow.expect(); setHotHolding([...hotHolding, { item: "", coreTemp: "", timeOfCheck: "" }]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
@@ -1748,9 +1730,9 @@ export function DailyDiaryTab() {
                   <CardDescription className="text-xs mt-1">Log bath temperature, cooking duration and core probe temperature</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => setSousVide([...sousVide, {
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setSousVide([...sousVide, {
                     item: "", targetTemp: "", waterTemp: "", timeStarted: "", timeFinished: "", coreTemp: "", result: "", notes: "",
-                  }])}>
+                  }]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
