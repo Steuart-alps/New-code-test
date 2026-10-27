@@ -37,10 +37,11 @@ import {
   Tractor, Plus, AlertTriangle, CheckCircle2, Clock, Wrench,
   Pencil, Trash2, Lock, Search, Building2, Filter, ChevronDown, X,
   ShieldAlert, XCircle, CheckCheck, Gauge, Fuel, ClipboardCheck, Droplet, Settings,
-  Upload, Download, SprayCan, Package, Mic,
+  Upload, Download, SprayCan, Package, Mic, Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
+import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
 import { format } from "date-fns";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
@@ -705,16 +706,46 @@ function MachineImportDialog({
   const [rows, setRows] = useState<MachineImportRow[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  // A photo or document of the equipment list read by ComplyTrack (AI add-on).
+  const reading = useListReading("greentrack-equipment", open);
+  const [readFromList, setReadFromList] = useState<ListReadResult | null>(null);
+  const [readingList, setReadingList] = useState(false);
 
   const reset = () => {
     setFileName("");
     setRows([]);
     setErrors([]);
+    setReadFromList(null);
+  };
+
+  const handleListFile = async (file: File) => {
+    reset();
+    setFileName(file.name);
+    setReadingList(true);
+    try {
+      const read = await reading.read(file);
+      const parsed = parseMachineRoster([read.headers, ...read.rows], sites);
+      setRows(parsed.rows);
+      setErrors(parsed.errors);
+      setReadFromList(read);
+    } catch (err) {
+      setFileName("");
+      toast({ title: "Could not read the list", description: err instanceof Error && err.message ? err.message : "Try again, or upload a spreadsheet.", variant: "destructive" });
+    } finally {
+      setReadingList(false);
+    }
+  };
+
+  const downloadReadRows = async () => {
+    if (!readFromList) return;
+    const { downloadExcel } = await import("@/lib/spreadsheet");
+    downloadExcel("greentrack-equipment-read-from-list.xlsx", "Equipment", [readFromList.headers, ...readFromList.rows]);
   };
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
     if (!isSpreadsheetFile(file)) {
+      if (reading.canRead && isPhotoOrPdf(file)) return void handleListFile(file);
       toast({ title: "That isn't a spreadsheet", description: "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
       return;
     }
@@ -729,6 +760,7 @@ function MachineImportDialog({
       return;
     }
     const parsed = parseMachineRoster(table, sites);
+    setReadFromList(null);
     setFileName(file.name);
     setRows(parsed.rows);
     setErrors(parsed.errors);
@@ -770,8 +802,11 @@ function MachineImportDialog({
               <Download className="w-3.5 h-3.5" /> Download Excel template
             </Button>
             {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
+            {readingList && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> Reading your list… this can take a minute</span>}
           </div>
           <SpreadsheetDropZone onFile={file => void handleFile(file)} testId="input-machine-roster-file" className="rounded-sm" />
+          <ListReadingPanel reading={reading} kind="greentrack-equipment" noun="machines" disabled={readingList} onFile={file => void handleListFile(file)} />
+          {readFromList && <ListReadNote result={readFromList} noun="machines" one="machine" kind="greentrack-equipment" onDownload={() => void downloadReadRows()} />}
           <p className="text-xs text-muted-foreground">
             Required columns: <strong>name</strong> and <strong>type</strong>. Supported broad types include
             <strong> ride-on</strong>, <strong>pedestrian</strong>, tractor, utility, and other approved GreenTrack types.

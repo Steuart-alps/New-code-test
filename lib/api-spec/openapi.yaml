@@ -51,6 +51,8 @@ tags:
     description: DailyTrack daily checklist status (AM/PM checklists and manager sign-offs)
   - name: pat-track
     description: PAT testing register operations (appliance inventory and test results)
+  - name: imports
+    description: Reading photo and document lists into the spreadsheet imports
   - name: coshh-track
     description: COSHHTrack assessments, LEV examinations, health surveillance, monitoring and briefings
   - name: premises-track
@@ -2200,6 +2202,73 @@ paths:
           description: The file cannot be read here, or the site is not one of the caller's
         "402":
           description: The business does not have the AI features add-on (code AI_ADDON_REQUIRED)
+        "429":
+          description: This business has used its readings for the month, or its AI allowance (code AI_ALLOWANCE_USED)
+        "502":
+          description: The file could not be read just now
+        "503":
+          description: Reading is not switched on (no Anthropic API key)
+
+  /imports/list-reading/{kind}:
+    get:
+      operationId: getImportListReading
+      tags: [imports]
+      summary: Whether ComplyTrack can read a photo or document list for an import, and this month's use
+      parameters:
+        - in: path
+          name: kind
+          required: true
+          schema:
+            type: string
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster]
+      responses:
+        "200":
+          description: Reading status and the sites the caller can import into
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatRegisterReadingStatus"
+        "404":
+          description: Not one of the imports that can read a list
+
+  /imports/list-reading/{kind}/read:
+    post:
+      operationId: readImportList
+      tags: [imports]
+      summary: Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
+      description: >-
+        Claude reads the file and returns rows in the import's own columns
+        (RoomTrack rooms, contractors, FireTrack call points, GreenTrack
+        equipment or the staff roster). Nothing is saved: the browser sends
+        the rows through the import's usual preview. The file is not stored.
+        Off until the server has an Anthropic API key; readings share the
+        business's monthly number with the PAT register reading.
+      parameters:
+        - in: path
+          name: kind
+          required: true
+          schema:
+            type: string
+            enum: [room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatRegisterReadRequest"
+      responses:
+        "200":
+          description: The rows read from the file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportListReadResult"
+        "400":
+          description: The file cannot be read here, or the site is not one of the caller's
+        "402":
+          description: The business does not have the AI features add-on (code AI_ADDON_REQUIRED)
+        "404":
+          description: Not one of the imports that can read a list
         "429":
           description: This business has used its readings for the month, or its AI allowance (code AI_ALLOWANCE_USED)
         "502":
@@ -8398,6 +8467,24 @@ components:
             items: { type: string }
         unclear: { type: integer, description: "Rows that were hard to read; their Notes start with \"Check:\"" }
       required: [headers, rows, unclear]
+
+    ImportListReadResult:
+      type: object
+      properties:
+        headers:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          items:
+            type: array
+            items: { type: string }
+        unclear: { type: integer, description: "Rows that were hard to read" }
+        unclearRows:
+          type: array
+          description: File row numbers (the header row is row 1) of the rows that were hard to read; where the import has a Notes column, their Notes start with "Check:"
+          items: { type: integer }
+      required: [headers, rows, unclear, unclearRows]
 
     FireCallPointImportRequest:
       type: object

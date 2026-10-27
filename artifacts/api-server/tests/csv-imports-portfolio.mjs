@@ -213,6 +213,20 @@ async function contractorImports(owner, manager, viewer) {
   check("contractors: department manager is refused", (await manager("POST", "/imports/contractors", { headers, rows: [["A", "", "a@example.co.uk", "", ""]] })).status === 403);
   check("contractors: viewer is refused", (await viewer("POST", "/imports/contractors", { headers, rows: [["A", "", "a@example.co.uk", "", ""]], preview: false })).status === 403);
   check("contractors: viewer cannot download the template", (await viewer("GET", "/imports/contractors/template")).status === 403);
+
+  // Reading a photo or document list for the other imports: the same rules as
+  // the PAT reading, with each import's own access (owners and consultants).
+  const list = { fileName: "list.jpg", mimeType: "image/jpeg", data: Buffer.from("not really a photo").toString("base64") };
+  const reading = await owner("GET", "/imports/list-reading/contractors");
+  check("list reading: off until an Anthropic key is set, with this month's use",
+    reading.status === 200 && reading.data?.available === false && reading.data?.usedThisMonth === 0 && Array.isArray(reading.data?.sites),
+    JSON.stringify(reading.data));
+  const off = await owner("POST", "/imports/list-reading/staff-roster/read", list);
+  check("list reading: reading a list is refused while off", off.status === 503 && off.data?.code === "REGISTER_READING_UNAVAILABLE", JSON.stringify(off.data));
+  check("list reading: a department manager is refused (admin-only imports)", (await manager("GET", "/imports/list-reading/room-track-rooms")).status === 403);
+  check("list reading: viewer cannot read a list", (await viewer("POST", "/imports/list-reading/contractors/read", list)).status === 403);
+  check("list reading: PATTrack and unknown imports are not served here",
+    (await owner("GET", "/imports/list-reading/pat-appliances")).status === 404 && (await owner("GET", "/imports/list-reading/nothing")).status === 404);
 }
 
 async function isolation(owner, ownerClientId, other, otherClientId) {

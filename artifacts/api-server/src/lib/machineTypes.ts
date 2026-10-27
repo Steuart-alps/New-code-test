@@ -1,0 +1,22 @@
+/** GreenTrack machine types, as stored on machines and accepted by the equipment import. */
+export const MACHINE_TYPES = [
+  "ride_on_cylinder",
+  "ride_on_rotary",
+  "ride_on",
+  "pedestrian",
+  "fairway_mower",
+  "walk_behind",
+  "tractor",
+  "utility_vehicle",
+  "sprayer_spreader",
+  "aerator",
+  "atv_quad",
+  "blower",
+  "chainsaw",
+  "hedge_trimmer",
+  "topdresser",
+  "scarifier",
+  "roller",
+  "edger_strimmer",
+  "other",
+] as const;

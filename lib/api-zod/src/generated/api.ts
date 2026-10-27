@@ -3368,6 +3368,64 @@ export const ReadPatRegisterListResponse = zod.object({
 
 
 /**
+ * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
+ */
+export const GetImportListReadingParams = zod.object({
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+})
+
+export const getImportListReadingResponseAiPercentUsedMin = 0;
+export const getImportListReadingResponseAiPercentUsedMax = 100;
+
+
+
+export const GetImportListReadingResponse = zod.object({
+  "available": zod.boolean(),
+  "monthlyLimit": zod.number().describe('Readings a business may have each month; 0 means no limit'),
+  "usedThisMonth": zod.number(),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'none']),
+  "percentUsed": zod.number().min(getImportListReadingResponseAiPercentUsedMin).max(getImportListReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
+  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
+  "usedUp": zod.boolean().describe('The allowance is used up for this period')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.'),
+  "sites": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
+ */
+export const ReadImportListParams = zod.object({
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+})
+
+export const readImportListBodyFileNameMax = 255;
+
+
+
+export const ReadImportListBody = zod.object({
+  "fileName": zod.string().max(readImportListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const ReadImportListResponse = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "unclear": zod.number().describe('Rows that were hard to read'),
+  "unclearRows": zod.array(zod.number()).describe('File row numbers (the header row is row 1) of the rows that were hard to read; where the import has a Notes column, their Notes start with \"Check:\"')
+})
+
+
+/**
  * @summary Rename, move, archive or restore a call point (managers)
  */
 export const UpdateFireCallPointParams = zod.object({
