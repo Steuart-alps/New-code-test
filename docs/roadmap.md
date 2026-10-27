@@ -35,6 +35,7 @@ Wednesday 28 October.
 | 16 | Temperature probes and sensors: Bluetooth probes, Wi-Fi fridge, freezer and water tank monitoring | After launch (probes with the phone app) | Hardware bought by each business; possibly a bigger database later | Phone app; choice of sensor make |
 | 17 | Maintenance inventory: stock, cheapest supplier, low-stock reminder | After launch | None | Kitchen supplier price import for the cheapest supplier part |
 | 18 | Reorder the side menu to each user's preference | After launch | None | Nothing |
+| 19 | Bar opening and closing checks, including beer tap tips | After launch | None | Your list of bar checks |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -699,6 +700,33 @@ new modules appear in their default place until the user moves them.
 
 ---
 
+## 19. Bar opening and closing checks (beer tap tips)
+
+**When:** after launch. Asked for on 27 October.
+
+Ready-made bar checks in the DailyTrack opening (AM) and closing (PM)
+checklists, for any business with a bar department:
+
+- **Closing:** beer tap tips (nozzles) removed, washed and left soaking
+  overnight; drip trays emptied and cleaned; glass washer drained and cleaned.
+- **Opening:** tips refitted, clean and undamaged; the first pull of each tap
+  run off before serving.
+
+Further bar items could join later, such as a beer line cleaning record (with
+a reminder when the next clean is due) and a cellar temperature check.
+
+**In the meantime:** a manager can already add these items to their own
+opening and closing checklists with the checklist editor. This item makes them
+part of a ready-made bar list so every new bar gets them without typing.
+
+**Cost:** none. No extra hosting.
+
+**Question for you:** what else should be on the bar list? If you have a bar
+checklist you already use with clients, send it over and it can be the
+starting point.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -747,6 +775,7 @@ work:
 | Kitchen voice input | None |
 | Maintenance inventory | None |
 | Reorder the side menu | None |
+| Bar opening and closing checks | None |
 | FireTrack sound level meter | None |
 | Temperature probes and sensors | Hardware paid by each business (plus a maker subscription for option 1); possibly a larger database plan later; text alerts a few pence each |
 | Label scanning | About 1-2p per label; about 40p for a chemical including its data sheet and COSHH draft (mostly in the Live AI plan already) |
