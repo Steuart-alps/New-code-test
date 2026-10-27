@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { buildSignupPath } from "@/lib/signup-plan";
 import alpsLogo from "@/assets/alps-logo.png";
 import content from "@/content/public-pages.json";
+import { copyrightNotice } from "@/lib/copyright";
 
 // Public marketing pages: modules (/features), free printable logs
 // (/templates) and pricing. Their wording lives in public-pages.json, which
@@ -81,7 +82,7 @@ function PublicLayout({ children }: { children: ReactNode }) {
         <div className="max-w-5xl mx-auto flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between text-sm text-muted-foreground">
           <div className="flex items-center gap-3">
             <img src={alpsLogo} alt="ALPS Consultancy" className="h-5 opacity-70" />
-            <span>© {new Date().getFullYear()} ALPS Consulting Ltd, trading as ALPS Consultancy.</span>
+            <span>{copyrightNotice()}</span>
           </div>
           <div className="flex flex-wrap gap-4">
             <Link href="/features" className="hover:text-foreground">Modules</Link>

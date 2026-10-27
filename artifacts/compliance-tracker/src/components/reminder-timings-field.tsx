@@ -137,7 +137,8 @@ export function ReminderTimingsField({
         })}
       </div>
       <p className="text-xs text-muted-foreground">
-        "Off" stops that type's reminder emails to people; it still shows in the Owner update. Urgent items and new FixTrack issues
+        "Off" stops that type's reminder emails to people; it still shows in the Owner update. For staff training, the
+        "Remind" choice also sets how far ahead each staff member's Monday training email looks, and Off stops it. Urgent items and new FixTrack issues
         are always emailed straight away.
       </p>
     </div>
