@@ -42,7 +42,8 @@ consultants managing portfolios of clients.
 ## Hosting
 
 Render is the only deployment (`render.yaml`: one web service plus PostgreSQL,
-both in Frankfurt). The API server also serves the web build. Configuration is
+both in Frankfurt; the live Google Cloud Storage bucket is in `europe-west3`,
+Frankfurt, too). The API server also serves the web build. Configuration is
 environment variables only (`.env.example`); see `CLAUDE.md` for the deploy
 sequence and the variables each integration needs.
 

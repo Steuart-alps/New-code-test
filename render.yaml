@@ -82,7 +82,8 @@ services:
       # "Save, rebuild, and deploy". Unset = no reports (/readyz notes it).
       - key: SENTRY_DSN
         sync: false
-      # File storage (Google Cloud Storage)
+      # File storage (Google Cloud Storage): a bucket in europe-west3
+      # (Frankfurt), e.g. /bucket/private and /bucket/public.
       - key: GCS_SERVICE_ACCOUNT_JSON
         sync: false
       - key: PRIVATE_OBJECT_DIR
