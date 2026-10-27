@@ -6,9 +6,9 @@
 // reload. A real HEVC-coded HEIC, a truncated JPEG, a GIF and text posing as
 // MP4 are refused with a message and never attached.
 // Videos: MP4, MOV and WebM clips are attached unchanged, served with byte
-// ranges, readable by a viewer but not by another tenant, and play and seek in
-// Chromium from the issue's media list after a reload. Viewers cannot reserve
-// or attach media.
+// ranges, readable by staff but not by a Viewer (Viewers see only their own
+// training) or another tenant, and play and seek in Chromium from the issue's
+// media list after a reload. Viewers cannot reserve or attach media.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -140,7 +140,7 @@ async function main() {
       assert.equal(sha256(part.bytes), sha256(bytes.subarray(start, end + 1)), `${file}: ${range} bytes`);
     }
     assert.equal((await raw(staff, finalized, { range: `bytes=${bytes.length + 10}-` })).status, 416, `${file}: range past the end is refused`);
-    assert.equal((await raw(viewer, finalized, { range: "bytes=0-15" })).status, 206, `${file}: viewer can watch`);
+    assert.equal((await raw(viewer, finalized, { range: "bytes=0-15" })).status, 403, `${file}: viewer (own training only) cannot watch`);
     assert.equal((await raw(foreign, finalized, { range: "bytes=0-15" })).status, 403, `${file}: other tenant's range read refused`);
     assert.equal((await raw(foreign, finalized)).status, 403, `${file}: other tenant's full read refused`);
     videos.push({ path: finalized, file });
