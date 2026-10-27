@@ -118,8 +118,7 @@ export default function SetupPage() {
     void refresh();
   });
 
-  // Stays on the step so several sites can be added in a row.
-  const saveSite = () => run(async () => {
+  async function addTypedSite() {
     if (!siteName.trim()) return;
     const site = await post("/sites", { name: siteName.trim(), address: siteAddress.trim() || null, seedStarterChecks: false }) as { id: number };
     setSiteId((current) => current ?? site.id);
@@ -128,7 +127,11 @@ export default function SetupPage() {
     setSiteAddress("");
     void queryClient.invalidateQueries();
     await load();
-  }, false);
+  }
+  // "Add site" stays on the step so several sites can be added in a row;
+  // "Save and continue" saves any site still typed in and moves on in one click.
+  const saveSite = () => run(addTypedSite, false);
+  const saveSitesAndContinue = () => run(addTypedSite);
 
   const sites = state?.sites ?? [];
   const activeDeptSiteId = deptSiteId ?? sites[0]?.id ?? null;
@@ -298,15 +301,17 @@ export default function SetupPage() {
                     <Input id="setup-site-address" value={siteAddress} onChange={(e) => setSiteAddress(e.target.value)} placeholder="Street, town, postcode" />
                   </div>
                   <div className="flex justify-end">
-                    <Button variant={sites.length > 0 ? "outline" : "default"} onClick={saveSite} disabled={busy || !siteName.trim()}>
-                      <Plus className="w-4 h-4 mr-1" /> {busy ? "Adding…" : "Add site"}
+                    <Button variant="outline" onClick={saveSite} disabled={busy || !siteName.trim()}>
+                      <Plus className="w-4 h-4 mr-1" /> {busy ? "Adding…" : "Add site and add another"}
                     </Button>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">Your plan is priced per site, so each extra site adds to the monthly price once your free trial ends. You can add or remove sites later from Sites.</p>
                 <div className="flex items-center justify-end gap-2 pt-2">
                   {sites.length === 0 && <Button variant="ghost" onClick={() => setStep(2)} disabled={busy}>Skip this step</Button>}
-                  {sites.length > 0 && <Button onClick={() => setStep(2)} disabled={busy}>Continue <ArrowRight className="w-4 h-4 ml-1" /></Button>}
+                  <Button onClick={saveSitesAndContinue} disabled={busy || (sites.length === 0 && !siteName.trim())}>
+                    {busy ? "Saving…" : "Save and continue"} <ArrowRight className="w-4 h-4 ml-1" />
+                  </Button>
                 </div>
               </>
             )}
