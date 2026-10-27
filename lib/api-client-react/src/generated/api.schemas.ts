@@ -1265,11 +1265,12 @@ export type AiStatusPlan = typeof AiStatusPlan[keyof typeof AiStatusPlan];
 export const AiStatusPlan = {
   addon: 'addon',
   trial: 'trial',
+  included: 'included',
   none: 'none',
 } as const;
 
 /**
- * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.
+ * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included ("included").
  */
 export interface AiStatus {
   /** The server has an Anthropic API key, so AI can be offered at all */
@@ -2181,7 +2182,7 @@ export const AppSettingsStorageAutoTopUp = {
 } as const;
 
 /**
- * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
+ * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly.
  */
 export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequency[keyof typeof AppSettingsOwnerUpdateFrequency] | null;
 
@@ -2189,6 +2190,7 @@ export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequ
 export const AppSettingsOwnerUpdateFrequency = {
   weekly: 'weekly',
   daily: 'daily',
+  monthly: 'monthly',
 } as const;
 
 export interface AppSettings {
@@ -2206,7 +2208,7 @@ export interface AppSettings {
   storageWarningThresholdBytes?: string | null;
   /** "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there. */
   storageAutoTopUp?: AppSettingsStorageAutoTopUp;
-  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays). */
+  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly. */
   ownerUpdateFrequency?: AppSettingsOwnerUpdateFrequency;
   /** JSON object keyed by reminder type (track module, "tasks", "contractors", "train"), each {"daysBefore": number|"next_week"|null, "overdueEvery": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; "next_week" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue. */
   reminderTimings?: string | null;
@@ -2605,6 +2607,15 @@ export interface PatRegisterReadResult {
   rows: string[][];
   /** Rows that were hard to read; their Notes start with "Check:" */
   unclear: number;
+}
+
+export interface ImportListReadResult {
+  headers: string[];
+  rows: string[][];
+  /** Rows that were hard to read */
+  unclear: number;
+  /** File row numbers (the header row is row 1) of the rows that were hard to read; where the import has a Notes column, their Notes start with "Check:" */
+  unclearRows: number[];
 }
 
 export interface FireCallPointImportRequest {
@@ -4257,10 +4268,10 @@ export type AiAddonStatusPrice = {
 } | null;
 
 /**
- * The top-up an owner can buy now; null unless the add-on is on and billing is ready
+ * The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan "included") the owner agrees to it and ALPS adds the price to their consultancy invoice.
  */
 export type AiAddonStatusTopUp = {
-  /** Price in pence, before VAT, charged at once */
+  /** Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance) */
   amount: number;
   /** AI use it adds, in pence, until the add-on renews */
   allowance: number;
@@ -4271,7 +4282,7 @@ export type AiAddonStatus = AiStatus & {
   price: AiAddonStatusPrice;
   /** The add-on can be bought now (Stripe ready and the price exists) */
   purchasable: boolean;
-  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready */
+  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan "included") the owner agrees to it and ALPS adds the price to their consultancy invoice. */
   topUp: AiAddonStatusTopUp;
   /**
      * Top-ups paid for since the add-on last renewed
@@ -4945,7 +4956,7 @@ export type SaveInspectionReportDraft200 = {
 
 export type ConfirmInspectionReportActions201 = {
   actions: InspectionReportAction[];
-  /** Owners and Managers emailed the action plan */
+  /** Owners, Managers and linked consultants emailed the action plan */
   emailedTo: string[];
 };
 

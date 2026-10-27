@@ -342,7 +342,7 @@ export default function ItemDetailPage() {
                 {certificates.map(cert => (
                   <div key={cert.id} className="p-4 hover:bg-muted/30 transition-colors flex justify-between items-center group">
                     <div className="min-w-0">
-                      <h4 className="font-semibold truncate">{cert.name}</h4>
+                      <h4 className="font-bold truncate">{cert.name}</h4>
                       <div className="flex flex-wrap gap-3 mt-1.5 text-sm">
                         {cert.outcome && OUTCOME_LABELS[cert.outcome] && (
                           <Badge variant="outline" className={OUTCOME_LABELS[cert.outcome].className}>{OUTCOME_LABELS[cert.outcome].label}</Badge>

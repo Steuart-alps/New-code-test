@@ -115,7 +115,7 @@ export default function MyTrainingPage() {
       <header className="flex items-center justify-between gap-3 border-b border-border bg-white px-4 py-3 sm:px-6">
         <div className="min-w-0">
           <p className="truncate text-xs text-muted-foreground">{client?.name ?? "ComplyTrack"}</p>
-          <h1 className="truncate font-display text-lg font-medium text-[#162D42]">My training</h1>
+          <h1 className="truncate font-display text-lg font-bold text-[#162D42]">My training</h1>
         </div>
         <Button variant="ghost" size="sm" onClick={logout} className="shrink-0 text-destructive" data-testid="button-sign-out">
           <LogOut className="mr-1.5 h-4 w-4" />Sign out

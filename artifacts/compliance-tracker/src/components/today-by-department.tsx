@@ -147,7 +147,7 @@ export function TodayByDepartmentCard({ siteId = null }: { siteId?: number | nul
     <section aria-labelledby="today-by-department-heading" className="rounded-lg border border-border/60 bg-card px-4 py-3" data-testid="card-today-by-department">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div>
-          <h2 id="today-by-department-heading" className="flex items-center gap-1.5 text-sm font-medium">
+          <h2 id="today-by-department-heading" className="flex items-center gap-1.5 text-sm font-bold">
             <Users className="h-4 w-4 text-muted-foreground" /> Today by department
           </h2>
           {dateLabel && <p className="mt-0.5 text-xs text-muted-foreground">{dateLabel} · click a bar to see what's outstanding</p>}

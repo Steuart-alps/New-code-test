@@ -12,5 +12,6 @@ export type AiStatusPlan = typeof AiStatusPlan[keyof typeof AiStatusPlan];
 export const AiStatusPlan = {
   addon: 'addon',
   trial: 'trial',
+  included: 'included',
   none: 'none',
 } as const;

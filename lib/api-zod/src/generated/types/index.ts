@@ -251,6 +251,7 @@ export * from './hotTubOperatingRangesSanitiser';
 export * from './hotTubOperatingRangesTemperature';
 export * from './importExtinguisherPoints200';
 export * from './importExtinguisherPointsBody';
+export * from './importListReadResult';
 export * from './incidentConfig';
 export * from './inspectionReport';
 export * from './inspectionReportAction';

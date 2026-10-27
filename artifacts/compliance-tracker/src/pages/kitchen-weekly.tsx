@@ -211,7 +211,7 @@ export default function WeeklyReviewTab() {
           <CardHeader className="border-b border-border/50 pb-4">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-base font-display">Week Commencing</CardTitle>
+                <CardTitle className="text-base font-display font-bold">Week Commencing</CardTitle>
                 <CardDescription className="text-xs mt-1">Select the Monday for the week being reviewed</CardDescription>
               </div>
               {isSubmitted && (
@@ -231,7 +231,7 @@ export default function WeeklyReviewTab() {
 
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="text-base font-display">Recent Reviews</CardTitle>
+            <CardTitle className="text-base font-display font-bold">Recent Reviews</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {history.length === 0 ? (
@@ -262,7 +262,7 @@ export default function WeeklyReviewTab() {
           {/* Section 1: House Rules */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">House Rules Review</CardTitle>
+              <CardTitle className="text-base font-display font-bold">House Rules Review</CardTitle>
               <CardDescription className="text-xs mt-1">
                 Has each area followed the house rules this week? Answer Yes / No / N/A for each.
               </CardDescription>
@@ -285,7 +285,7 @@ export default function WeeklyReviewTab() {
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">House Rules Deviations Observed</CardTitle>
+                  <CardTitle className="text-base font-display font-bold">House Rules Deviations Observed</CardTitle>
                   <CardDescription className="text-xs mt-1">
                     If any answer above is "No", record the deviation and corrective action taken
                   </CardDescription>
@@ -337,7 +337,7 @@ export default function WeeklyReviewTab() {
           {/* Section 2: Review questions */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Management Review Questions</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Management Review Questions</CardTitle>
               <CardDescription className="text-xs mt-1">
                 Additional review checks covering allergens, suppliers, complaints, training and ongoing records
               </CardDescription>
@@ -358,7 +358,7 @@ export default function WeeklyReviewTab() {
           {/* Additional info */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Additional Information</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Additional Information</CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-4">
               <div className="flex items-center justify-between gap-4 py-2">
@@ -386,7 +386,7 @@ export default function WeeklyReviewTab() {
           {/* Sign-off */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Manager / Proprietor Sign-off</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Manager / Proprietor Sign-off</CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-4">
               <div className="space-y-1.5">

@@ -418,7 +418,7 @@ function RecordDialog({
       </DialogTrigger>
       <DialogContent className="max-w-xl rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">{isEdit ? "Edit Pool Check" : "Record Pool Check"}</DialogTitle>
+          <DialogTitle className="font-display font-bold">{isEdit ? "Edit Pool Check" : "Record Pool Check"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
           {!isEdit && (
@@ -645,7 +645,7 @@ export default function PoolTrackPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium mb-2">PoolTrack</h2>
+                <h2 className="text-2xl font-display font-bold mb-2">PoolTrack</h2>
                 <p className="text-muted-foreground mb-1">Swimming pool water testing logbook. Record pH, chlorine, temperature and clarity checks in line with PWTAG and HSG179.</p>
                 <p className="font-medium text-primary">£10 per site per month</p>
               </div>
@@ -794,7 +794,7 @@ export default function PoolTrackPage() {
         {/* History */}
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="font-display">Check Log</CardTitle>
+            <CardTitle className="font-display font-bold">Check Log</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (

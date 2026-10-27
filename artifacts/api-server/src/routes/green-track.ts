@@ -14,6 +14,7 @@ import {
 } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable } from "../lib/objectStorageUnavailable";
 import { greenLowStockCount } from "../lib/greenStock";
+import { MACHINE_TYPES } from "../lib/machineTypes";
 import {
   NSTS_TEST_INSPECTION_TYPE, isNstsSprayerCategory, nstsNextTestDate, nstsStatus,
 } from "@workspace/api-zod/nsts-sprayer-tests";
@@ -24,27 +25,7 @@ import {
 const router = Router();
 
 // ─── Machine types ────────────────────────────────────────────────────────────
-export const MACHINE_TYPES = [
-  "ride_on_cylinder",
-  "ride_on_rotary",
-  "ride_on",
-  "pedestrian",
-  "fairway_mower",
-  "walk_behind",
-  "tractor",
-  "utility_vehicle",
-  "sprayer_spreader",
-  "aerator",
-  "atv_quad",
-  "blower",
-  "chainsaw",
-  "hedge_trimmer",
-  "topdresser",
-  "scarifier",
-  "roller",
-  "edger_strimmer",
-  "other",
-] as const;
+export { MACHINE_TYPES };
 
 const MACHINE_TYPE_ALIASES: Record<string, string> = {
   "ride-on": "ride_on",

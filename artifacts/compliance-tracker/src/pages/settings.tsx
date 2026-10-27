@@ -459,7 +459,7 @@ function StorageUsageCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <HardDrive className="w-5 h-5 text-sky-600" />
-          <CardTitle className="font-display">File Storage</CardTitle>
+          <CardTitle className="font-display font-bold">File Storage</CardTitle>
         </div>
         <CardDescription>
           Retained documents and evidence for this account. When files reach the storage you pay for, new uploads stop unless automatic top-up is on. Nothing is ever deleted. Owners and admins get one email at 80% (or your warning level, if lower) and one when storage is full.
@@ -772,7 +772,7 @@ function DepartmentsCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-violet-500" />
-          <CardTitle className="font-display">Departments</CardTitle>
+          <CardTitle className="font-display font-bold">Departments</CardTitle>
         </div>
         <CardDescription>
           Each department sits under one of your sites. Staff in a department see only that site
@@ -1347,7 +1347,7 @@ function TrackSummaryRoutingCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Route className="w-5 h-5 text-sky-600" />
-          <CardTitle className="font-display">Track Summary Recipients</CardTitle>
+          <CardTitle className="font-display font-bold">Track Summary Recipients</CardTitle>
         </div>
         <CardDescription>
           Senior management receives every enabled track. Choose departments or named staff for additional track-specific digests.
@@ -1550,7 +1550,7 @@ function SenderDomainCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Globe className="w-5 h-5 text-emerald-600" />
-          <CardTitle className="font-display">Sender Domain</CardTitle>
+          <CardTitle className="font-display font-bold">Sender Domain</CardTitle>
         </div>
         <CardDescription>
           Use your own business email address instead of the default sender. We’ll show you the small setup step needed for your domain.
@@ -1581,7 +1581,7 @@ function SenderDomainCard() {
           <div className="space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <div className="font-semibold font-display text-lg">{state.domainName}</div>
+                <div className="font-bold font-display text-lg">{state.domainName}</div>
                 <div className="mt-1"><StatusBadge status={state.status} /></div>
               </div>
               <div className="flex gap-2">
@@ -1745,7 +1745,7 @@ function EmailSetupGuide({
             <Mail className="w-5 h-5 text-indigo-600" />
           </div>
           <div>
-            <h3 className="font-display font-semibold text-base text-foreground leading-snug">
+            <h3 className="font-display font-bold text-base text-foreground leading-snug">
               Email sender setup
             </h3>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -1850,6 +1850,8 @@ interface BillingConfig {
   cancelledAt?: string | null;
   dataDeletionScheduledAt?: string | null;
   dataDeletedAt?: string | null;
+  /** Every module free with no trial end (set up by ALPS); nothing to pay. */
+  complimentary?: boolean;
   services?: {
     entitled: "all" | string[];
     addons: string[];
@@ -1881,7 +1883,7 @@ function SubscriptionDiscountForm({ billingPath, onApplied }: { billingPath: (pa
         body: JSON.stringify({ discountCode: code.trim() }),
       });
       setCode("");
-      toast({ title: "Discount applied", description: "50% off your subscription from your next invoice." });
+      toast({ title: "Discount applied", description: "50% off ComplyTrack and your tracks from your next invoice." });
       onApplied();
     } catch (err: any) {
       toast({ title: "Couldn't apply the discount", description: err.message, variant: "destructive" });
@@ -1892,7 +1894,7 @@ function SubscriptionDiscountForm({ billingPath, onApplied }: { billingPath: (pa
   return (
     <form onSubmit={apply} className="rounded-lg border border-border p-4 space-y-2">
       <label htmlFor="subscription-discount-code" className="block text-sm font-medium">ALPS client discount code</label>
-      <p className="text-xs text-muted-foreground">If ALPS has given you a discount code, enter it for 50% off your subscription from your next invoice.</p>
+      <p className="text-xs text-muted-foreground">If ALPS has given you a discount code, enter it for 50% off ComplyTrack and your tracks from your next invoice. The AI add-on and extra storage stay full price.</p>
       <div className="flex flex-col sm:flex-row gap-2">
         <Input
           id="subscription-discount-code"
@@ -1941,6 +1943,8 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
   if (!status?.configured) return null;
   const price = status.price ? `${formatMinorUnits(status.price.unitAmount, status.price.currency)} a month + VAT` : "£15 a month + VAT";
   const isOn = status.plan === "addon";
+  // Free with no end date (set up by ALPS): a monthly allowance at no charge.
+  const included = status.plan === "included";
   const topUpPrice = status.topUp ? `${formatMinorUnits(status.topUp.amount, status.topUp.currency)} + VAT` : null;
   const renewal = status.resetsAt ? formatUkDate(status.resetsAt) : null;
 
@@ -1976,20 +1980,20 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display text-lg">AI features</CardTitle>
+          <CardTitle className="font-display font-bold text-lg">AI features</CardTitle>
         </div>
         <CardDescription>
-          {price}, for the whole business. ComplyTrack's AI reads uploaded reports and suggests the actions they ask for, and turns a photo or PDF of an appliance list into PAT register rows. A fair monthly allowance of AI use is included.
+          {included ? "Included free for your business." : `${price}, for the whole business.`} ComplyTrack's AI reads uploaded reports and suggests the actions they ask for, and turns a photo or PDF of an appliance list into PAT register rows. A fair monthly allowance of AI use is included.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 p-6 text-sm">
-        {isOn || status.plan === "trial" ? (
+        {isOn || included || status.plan === "trial" ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
-                <CheckCircle2 className="w-3.5 h-3.5" /> {isOn ? "Active" : "Included in your trial"}
+                <CheckCircle2 className="w-3.5 h-3.5" /> {isOn ? "Active" : included ? "Included" : "Included in your trial"}
               </span>
-              <span className="text-xs text-muted-foreground">{status.percentUsed}% of {isOn ? "this month's" : "your trial"} allowance used</span>
+              <span className="text-xs text-muted-foreground">{status.percentUsed}% of {isOn || included ? "this month's" : "your trial"} allowance used</span>
             </div>
             <Progress value={status.percentUsed} aria-label="AI allowance used" />
             {status.usedUp ? (
@@ -1997,15 +2001,23 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>
                   This month's AI allowance is used up. AI buttons stay off{renewal ? ` until ${renewal}` : " until the add-on renews"}
-                  {isOn && status.topUp ? (canAdmin ? ", or until you buy a top-up below" : ", or until an owner buys a top-up") : ""}; everything else works as normal.
+                  {isOn && status.topUp ? (canAdmin ? ", or until you buy a top-up below" : ", or until an owner buys a top-up") : included ? (canAdmin ? ", or until you agree to a top-up below" : ", or until an owner agrees to a top-up") : ""}; everything else works as normal.
+                </span>
+              </p>
+            ) : status.percentUsed >= 75 ? (
+              <p className="flex items-start gap-1.5 text-amber-800" role="status" data-testid="text-ai-nearly-used">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  This month's AI allowance is nearly used up{renewal ? `. It starts again on ${renewal}` : ""}.
+                  {isOn && status.topUp ? " You can buy a top-up below if you need more." : included && canAdmin ? " You can agree to a top-up below if you need more." : ""}
                 </span>
               </p>
             ) : renewal ? (
               <p className="text-xs text-muted-foreground">The allowance starts again on {renewal}.</p>
             ) : null}
-            {isOn && status.topUpsThisPeriod > 0 && (
+            {(isOn || included) && status.topUpsThisPeriod > 0 && (
               <p className="text-xs text-muted-foreground" data-testid="text-ai-top-ups">
-                {status.topUpsThisPeriod} top-up{status.topUpsThisPeriod === 1 ? "" : "s"} bought this month, included above.
+                {status.topUpsThisPeriod} top-up{status.topUpsThisPeriod === 1 ? "" : "s"} {included ? "added" : "bought"} this month, included above.
               </p>
             )}
           </div>
@@ -2013,10 +2025,10 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border text-xs font-semibold">Not switched on</span>
         )}
 
-        {canAdmin && !hasSubscription && !isOn && (
+        {canAdmin && !hasSubscription && !isOn && !included && (
           <p className="text-xs text-muted-foreground">You can add AI features once you subscribe.</p>
         )}
-        {canAdmin && hasSubscription && !isOn && (
+        {canAdmin && hasSubscription && !isOn && !included && (
           confirming === "add" ? (
             <div className="flex flex-wrap items-center gap-3 rounded-md border border-primary/30 bg-primary/5 p-3">
               <span className="flex-1">The first month ({price}) is charged now, then monthly with your subscription.</span>
@@ -2029,8 +2041,26 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
             </Button>
           )
         )}
-        {canAdmin && hasSubscription && !isOn && !status.purchasable && (
+        {canAdmin && hasSubscription && !isOn && !included && !status.purchasable && (
           <p className="text-xs text-muted-foreground">AI features can't be added online right now. Nothing has been charged; please try again later.</p>
+        )}
+        {canAdmin && included && status.topUp && topUpPrice && (
+          <div className="rounded-lg border p-4">
+            {confirming === "top_up" ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex-1">
+                  {topUpPrice} is added to your next ALPS Consultancy invoice. It adds more AI use until {renewal ?? "the end of the month"}.
+                </span>
+                <Button size="sm" disabled={busy} onClick={buyTopUp} data-testid="button-confirm-ai-invoiced-top-up">{busy ? "Adding…" : "Agree"}</Button>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setConfirming(null); topUpRequestId.current = null; }}>Not now</Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-muted-foreground">Need more this month? A top-up is {topUpPrice}, added to your ALPS Consultancy invoice.</span>
+                <Button size="sm" variant="outline" onClick={() => setConfirming("top_up")} data-testid="button-ai-invoiced-top-up">Request a top-up</Button>
+              </div>
+            )}
+          </div>
         )}
         {canAdmin && isOn && status.topUp && topUpPrice && (
           <div className="space-y-3 rounded-lg border p-4">
@@ -2262,6 +2292,7 @@ function BillingCard() {
     ? (config?.subscription?.status ?? "active").replace(/_/g, " ")
     : config?.cancelledAt ? "cancelled" : (config?.subscription?.status === "trial" || !config?.subscription?.status ? "trial" : "no active subscription");
   const billingAvailable = config?.billingAvailable !== false;
+  const complimentary = config?.complimentary === true && !hasSubscription;
 
   return (
     <>
@@ -2269,15 +2300,25 @@ function BillingCard() {
         <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
           <div className="flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-primary" />
-            <CardTitle className="font-display">Billing &amp; Subscription</CardTitle>
+            <CardTitle className="font-display font-bold">Billing &amp; Subscription</CardTitle>
           </div>
           <CardDescription>
-            You're billed based on active services and sites. Your total scales automatically with the number of sites on your account.
+            {complimentary
+              ? "Your account is set up by ALPS Consultancy, so there is nothing to pay."
+              : "You're billed based on active services and sites. Your total scales automatically with the number of sites on your account."}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-6 space-y-5">
           {loading ? (
             <div className="py-6 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
+          ) : complimentary ? (
+            <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-emerald-900" data-testid="billing-complimentary">
+              <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold">Every module is included free</div>
+                <p className="text-sm mt-0.5">There is no trial end date and no payment to set up. Add as many sites as you need.</p>
+              </div>
+            </div>
           ) : (
             <>
               <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-4">
@@ -2355,7 +2396,7 @@ function BillingCard() {
       {!loading && servicesConfig && (
         <Card className="shadow-lg border-border/50 bg-card mb-6">
           <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-            <CardTitle className="font-display text-lg">Services</CardTitle>
+            <CardTitle className="font-display font-bold text-lg">Services</CardTitle>
             <CardDescription>Add or remove services from your account.</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
@@ -2404,7 +2445,7 @@ function BillingCard() {
                             </span>
                           ) : onTrial ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold">
-                              Included in your trial
+                              {complimentary ? "Included" : "Included in your trial"}
                             </span>
                           ) : purchaseBlocked ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold">
@@ -2439,7 +2480,7 @@ function BillingCard() {
                           </p>
                         )}
                       </div>
-                      {canAdmin && !hasSubscription ? (
+                      {complimentary ? null : canAdmin && !hasSubscription ? (
                         <div className="text-xs text-muted-foreground max-w-[200px] text-right">
                           Choose your services when you subscribe
                         </div>
@@ -2614,7 +2655,7 @@ function DataExportCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Download className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Data Export</CardTitle>
+          <CardTitle className="font-display font-bold">Data Export</CardTitle>
         </div>
         <CardDescription>
           Download all your compliance records as a ZIP file containing CSVs for every module — food safety, fire safety, documents, training, contractors and more. Useful before cancelling or for offline audit archives.
@@ -2672,7 +2713,7 @@ function InvoicesCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Invoices</CardTitle>
+          <CardTitle className="font-display font-bold">Invoices</CardTitle>
         </div>
         <CardDescription>
           Invoices are issued by Stripe each billing cycle and emailed to you automatically. Download past invoices here.
@@ -2911,7 +2952,7 @@ function PhotoRequirementsCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Camera className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Photo Requirements</CardTitle>
+          <CardTitle className="font-display font-bold">Photo Requirements</CardTitle>
         </div>
         <CardDescription>
           Choose which record types must include at least one photo. Staff will see a <strong>Required</strong> badge on those records.
@@ -3083,7 +3124,7 @@ function RequiredActionTemplatesCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <div className="flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-primary" /><CardTitle className="font-display">Required Action Templates</CardTitle></div>
+        <div className="flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-primary" /><CardTitle className="font-display font-bold">Required Action Templates</CardTitle></div>
         <CardDescription>Standardise actions for each module. Selecting a template creates an editable snapshot, so later template changes do not alter existing actions.</CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -3109,6 +3150,10 @@ function RequiredActionTemplatesCard() {
 // kept in the address (/settings#reminders), so links and emails can open the
 // right one. Older links name a card on the former single page; they still
 // open the section that card now lives in.
+
+type OwnerUpdateFrequency = "daily" | "weekly" | "monthly";
+const parseOwnerUpdateFrequency = (value: unknown): OwnerUpdateFrequency =>
+  value === "daily" || value === "monthly" ? value : "weekly";
 
 type SettingsSectionId = "billing" | "business" | "departments" | "reminders" | "email" | "checks" | "storage" | "security";
 
@@ -3203,7 +3248,7 @@ export default function SettingsPage() {
     maintenanceEmail: "",
     additionalReminderEmails: "",
     notifyClientAdmins: "false",
-    ownerUpdateFrequency: "weekly" as "weekly" | "daily",
+    ownerUpdateFrequency: "weekly" as OwnerUpdateFrequency,
     smtpFrom: "",
     smtpFromName: "",
     resendApiKey: "",
@@ -3244,7 +3289,7 @@ export default function SettingsPage() {
         maintenanceEmail: (settings as any).maintenanceEmail || "",
         additionalReminderEmails: (settings as any).additionalReminderEmails || "",
         notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
-        ownerUpdateFrequency: settings.ownerUpdateFrequency === "daily" ? "daily" : "weekly",
+        ownerUpdateFrequency: parseOwnerUpdateFrequency(settings.ownerUpdateFrequency),
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
         resendApiKey: (settings as any).resendApiKey || "",
@@ -3290,7 +3335,7 @@ export default function SettingsPage() {
         <SettingsMenu active={section} onSelect={openSection} />
         <div className="max-w-4xl min-w-0 space-y-6" data-testid={`settings-section-${section}`}>
           <div>
-            <h2 className="flex items-center gap-2 font-display text-xl font-semibold text-foreground">
+            <h2 className="flex items-center gap-2 font-display text-xl font-bold text-foreground">
               <sectionInfo.Icon className="h-5 w-5 text-primary" />
               {sectionInfo.label}
             </h2>
@@ -3311,7 +3356,7 @@ export default function SettingsPage() {
                 <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
                   <div className="flex items-center gap-2">
                     <Settings2 className="w-5 h-5 text-primary" />
-                    <CardTitle className="font-display">General Preferences</CardTitle>
+                    <CardTitle className="font-display font-bold">General Preferences</CardTitle>
                   </div>
                   <CardDescription>Global configuration for the compliance tracker.</CardDescription>
                 </CardHeader>
@@ -3373,7 +3418,7 @@ export default function SettingsPage() {
               <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
                 <div className="flex items-center gap-2">
                   <Bell className="w-5 h-5 text-amber-500" />
-                  <CardTitle className="font-display">Reminder Notifications</CardTitle>
+                  <CardTitle className="font-display font-bold">Reminder Notifications</CardTitle>
                 </div>
                 <CardDescription>
                   Each person gets one email at 8am, only on days when something of theirs needs a reminder: by default the day
@@ -3388,21 +3433,23 @@ export default function SettingsPage() {
                   <Label htmlFor="ownerUpdateFrequency">Owner update</Label>
                   <p className="text-xs text-muted-foreground">
                     One email to the Owners listing what was done, what is overdue and who has it, what is due, anything with no one
-                    assigned, expiries in the next 60 days, each person's outstanding training (TrainTrack) and documents still to sign. Managers get one for their own departments.
-                    Sent at 8am in your account timezone.
+                    assigned, expiries in the next 60 days, each person's outstanding training (TrainTrack) and documents still to sign. Managers get one for their own departments, weekly
+                    when you choose monthly. Sent at 8am in your account timezone. Choosing monthly doesn't hold anything back: urgent items still come the same day,
+                    and each person still gets their own reminders.
                   </p>
                   <Select
                     value={formData.ownerUpdateFrequency}
                     onValueChange={(value) =>
-                      setFormData((prev) => ({ ...prev, ownerUpdateFrequency: value === "daily" ? "daily" : "weekly" }))
+                      setFormData((prev) => ({ ...prev, ownerUpdateFrequency: parseOwnerUpdateFrequency(value) }))
                     }
                   >
                     <SelectTrigger id="ownerUpdateFrequency" className="sm:w-64">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="weekly">Weekly, on Mondays</SelectItem>
                       <SelectItem value="daily">Every day</SelectItem>
+                      <SelectItem value="weekly">Weekly, on Mondays</SelectItem>
+                      <SelectItem value="monthly">Monthly, on the first Monday</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -3520,7 +3567,7 @@ export default function SettingsPage() {
               <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
                 <div className="flex items-center gap-2">
                   <Mail className="w-5 h-5 text-indigo-500" />
-                  <CardTitle className="font-display">Email Settings</CardTitle>
+                  <CardTitle className="font-display font-bold">Email Settings</CardTitle>
                 </div>
                 <CardDescription>
                   Choose the sender name and email address your recipients will see. We handle delivery for you.
@@ -3697,7 +3744,7 @@ function TodayByDepartmentRolesCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6" data-testid="card-today-by-department-roles">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <Users className="w-4 h-4" /> Today by department on the dashboard
         </CardTitle>
         <CardDescription>
@@ -3775,7 +3822,7 @@ function TwoFactorPolicyCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6" data-testid="card-two-factor-policy">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <ShieldCheck className="w-4 h-4" /> Two-factor requirement
         </CardTitle>
         <CardDescription>
@@ -3955,7 +4002,7 @@ export function TwoFactorCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <KeyRound className="w-4 h-4" /> Two-Factor Authentication
         </CardTitle>
         <CardDescription>
@@ -4186,7 +4233,7 @@ function PasskeyCard() {
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <CardTitle className="font-display text-lg flex items-center gap-2">
+        <CardTitle className="font-display font-bold text-lg flex items-center gap-2">
           <KeyRound className="w-4 h-4" /> Passkeys
         </CardTitle>
         <CardDescription>
@@ -4274,7 +4321,7 @@ function ModulesCard() {
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Package className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Modules</CardTitle>
+          <CardTitle className="font-display font-bold">Modules</CardTitle>
         </div>
         <CardDescription>
           Activate or deactivate product modules for your account.

@@ -49,6 +49,7 @@ const input = {
   itemId: null as number | null,
 };
 const reading = (overrides: Record<string, unknown> = {}) => JSON.stringify({
+  wrong_file: false,
   certificate_type: "Electrical Installation Condition Report (EICR)",
   name: "EICR 2026 - Clubhouse",
   check_id: 11,
@@ -87,7 +88,10 @@ try {
   assert.ok(schema.properties.defects.items.properties.code.enum.includes("FI"));
   const [doc, context] = sent.body.messages[0].content;
   assert.equal(doc.type, "document");
-  assert.match(context.text, /11 = Electrical Installation Condition Report \(EICR\); track: Electrical; site: Clubhouse \(6 Greek Street, Leeds LS1 5RW\); contractor: Sparks Ltd; every 60 months/);
+  assert.match(context.text, /11 = "Electrical Installation Condition Report \(EICR\)"; track: "Electrical"; site: "Clubhouse" \("6 Greek Street, Leeds LS1 5RW"\); contractor: "Sparks Ltd"; every 60 months/);
+  assert.match(context.text, /File name: "eicr\.pdf"/, "typed names are quoted as labels");
+  assert.ok(schema.required.includes("wrong_file"));
+  assert.match(sent.body.system, /Scope: you only read a contractor certificate or inspection report/);
   assert.match(context.text, /did not say which check/);
   assert.match(sent.body.system, /C1, C2 and FI need work; C3 does not/);
   assert.match(sent.body.system, /On Yes\/No checklists/);
@@ -160,7 +164,9 @@ try {
   await assert.rejects(readCertificate(input), /too long/);
   reply = { stopReason: "end_turn", text: "not json" };
   await assert.rejects(readCertificate(input), ReportReadingError);
-  console.log("ok - unusable replies give a message the person can act on");
+  reply = { stopReason: "end_turn", text: reading({ wrong_file: true }) };
+  await assert.rejects(readCertificate(input), /does not look like a contractor certificate/);
+  console.log("ok - unusable replies and files that are not certificates give a message the person can act on");
 
   console.log("Certificate reading checks passed.");
 } finally {

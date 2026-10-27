@@ -149,6 +149,7 @@ import type {
   HotTubConfigUpdate,
   ImportExtinguisherPoints200,
   ImportExtinguisherPointsBody,
+  ImportListReadResult,
   IncidentConfig,
   InspectionReport,
   InspectionReportDetail,
@@ -7290,6 +7291,156 @@ export const useReadPatRegisterList = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReadPatRegisterListMutationOptions(options));
+    }
+
+export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+
+
+
+
+  return `/api/imports/list-reading/${kind}`
+}
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
+ */
+export const getImportListReading = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: RequestInit): Promise<PatRegisterReadingStatus> => {
+
+  return customFetch<PatRegisterReadingStatus>(getGetImportListReadingUrl(kind),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportListReadingQueryKey = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+    return [
+    `/api/imports/list-reading/${kind}`
+    ] as const;
+    }
+
+
+export const getGetImportListReadingQueryOptions = <TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportListReadingQueryKey(kind);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportListReading>>> = ({ signal }) => getImportListReading(kind, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: kind !== null && kind !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetImportListReadingQueryResult = NonNullable<Awaited<ReturnType<typeof getImportListReading>>>
+export type GetImportListReadingQueryError = ErrorType<void>
+
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
+ */
+
+export function useGetImportListReading<TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(
+ kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetImportListReadingQueryOptions(kind,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+
+
+
+
+  return `/api/imports/list-reading/${kind}/read`
+}
+
+/**
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
+ */
+export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',
+    patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<ImportListReadResult> => {
+
+  return customFetch<ImportListReadResult>(getReadImportListUrl(kind),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(patRegisterReadRequest)
+  }
+);}
+
+
+
+
+
+export const getReadImportListMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext> => {
+
+const mutationKey = ['readImportList'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readImportList>>, {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}> = (props) => {
+          const {kind,data} = props ?? {};
+
+          return  readImportList(kind,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReadImportListMutationResult = NonNullable<Awaited<ReturnType<typeof readImportList>>>
+    export type ReadImportListMutationBody = BodyType<PatRegisterReadRequest>
+    export type ReadImportListMutationError = ErrorType<void>
+
+    /**
+ * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
+ */
+export const useReadImportList = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof readImportList>>,
+        TError,
+        {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>},
+        TContext
+      > => {
+      return useMutation(getReadImportListMutationOptions(options));
     }
 
 export const getUpdateFireCallPointUrl = (id: number,) => {

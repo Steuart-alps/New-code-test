@@ -38,7 +38,8 @@ function subscriptionLabel(business: PortfolioBusiness): { text: string; tone: "
     case "subscribed": return { text: "Subscribed", tone: "good" };
     case "past_due": return { text: "Payment overdue", tone: "bad" };
     case "cancelling": return { text: "Cancelling", tone: "warn" };
-    case "trial": return { text: business.trialEndsAt ? `Trial until ${ukDate(business.trialEndsAt)}` : "Trial", tone: "warn" };
+    // No trial end date: a business ALPS set up with every module free.
+    case "trial": return business.trialEndsAt ? { text: `Trial until ${ukDate(business.trialEndsAt)}`, tone: "warn" } : { text: "Free, no end date", tone: "good" };
     case "trial_ended": return { text: "Trial ended", tone: "bad" };
     case "cancelled": return { text: "Cancelled", tone: "muted" };
     default: return { text: "Not known", tone: "muted" };
@@ -145,7 +146,7 @@ function BrandingCard() {
   return (
     <Card className="space-y-4 rounded-sm p-4 sm:p-5">
       <div>
-        <h2 className="font-semibold">Your practice branding</h2>
+        <h2 className="font-bold">Your practice branding</h2>
         <p className="text-sm text-muted-foreground">Businesses you manage see “Managed by” with your practice name and logo.</p>
       </div>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end">

@@ -455,7 +455,7 @@ function ReportDetail({ reportId, options, focusActionId, onRemoved }: {
     <Card className="rounded-sm p-5 space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-[#162D42]">{report.title}</h2>
+          <h2 className="text-lg font-bold text-[#162D42]">{report.title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {[typeLabel, formatDate(report.reportDate), siteName(report.siteId), `Uploaded by ${report.uploadedByName}`].filter(Boolean).join(" · ")}
           </p>
@@ -469,7 +469,7 @@ function ReportDetail({ reportId, options, focusActionId, onRemoved }: {
       </div>
 
       <section className="space-y-3">
-        <h3 className="font-medium text-[#162D42]">Actions to create</h3>
+        <h3 className="font-bold text-[#162D42]">Actions to create</h3>
         {reading.available && report.readable ? (
           <div className="rounded-sm border border-violet-200 bg-violet-50/60 p-4 text-sm space-y-2">
             <p>ComplyTrack can read this report and suggest the actions it asks for. The report is sent to Anthropic, our AI provider, to read; it isn't used to train their AI. It takes up to two minutes. You check every action before anything is created.</p>
@@ -523,7 +523,7 @@ function ReportDetail({ reportId, options, focusActionId, onRemoved }: {
 
       {report.actions.length > 0 && (
         <section className="space-y-2">
-          <h3 className="font-medium text-[#162D42]">Actions created from this report</h3>
+          <h3 className="font-bold text-[#162D42]">Actions created from this report</h3>
           <ul className="divide-y rounded-sm border">
             {report.actions.map((action) => (
               <CreatedActionRow key={action.id} action={action} options={options} focused={action.id === focusActionId}

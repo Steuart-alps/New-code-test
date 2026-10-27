@@ -298,7 +298,7 @@ export default function ContractorPortalPage() {
         </div>
 
         <div className={`rounded-2xl border p-5 ${warnings.length ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`} data-testid="status-compliance-summary">
-          <h2 className="font-semibold text-slate-900 flex items-center gap-2">
+          <h2 className="font-bold text-slate-900 flex items-center gap-2">
             {warnings.length ? <AlertTriangle className="w-5 h-5 text-amber-600" /> : <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
             Compliance summary
           </h2>
@@ -312,7 +312,7 @@ export default function ContractorPortalPage() {
 
         {/* Insurance card */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-          <h2 className="font-semibold text-slate-900">Insurance</h2>
+          <h2 className="font-bold text-slate-900">Insurance</h2>
           <p className="text-xs text-slate-500">Enter your next insurance renewal date (covers all policies — PL, PI, etc.)</p>
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex-1 min-w-[180px]">
@@ -328,7 +328,7 @@ export default function ContractorPortalPage() {
 
         {/* DBS / PVG card */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-          <h2 className="font-semibold text-slate-900">DBS / PVG Check</h2>
+          <h2 className="font-bold text-slate-900">DBS / PVG Check</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Check type</label>
@@ -352,7 +352,7 @@ export default function ContractorPortalPage() {
 
         {/* Gas Safe registration */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-          <h2 className="font-semibold text-slate-900">Gas Safe registration</h2>
+          <h2 className="font-bold text-slate-900">Gas Safe registration</h2>
           <p className="text-xs text-slate-500">Leave blank if not applicable to your trade.</p>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Gas Safe registration number</label>
@@ -363,7 +363,7 @@ export default function ContractorPortalPage() {
 
         {/* Contact details */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-          <h2 className="font-semibold text-slate-900">Contact details</h2>
+          <h2 className="font-bold text-slate-900">Contact details</h2>
           <div className="text-sm"><span className="text-slate-500">Company: </span><span className="text-slate-900" data-testid="text-contractor-company">{data.company || "Not provided"}</span></div>
           <div className="text-sm"><span className="text-slate-500">Email: </span><span className="text-slate-900" data-testid="text-contractor-email">{data.email}</span></div>
           <div>
@@ -388,7 +388,7 @@ export default function ContractorPortalPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
             <div>
-              <h2 className="font-semibold text-slate-900">Certificates &amp; licences</h2>
+              <h2 className="font-bold text-slate-900">Certificates &amp; licences</h2>
               <p className="text-xs text-slate-500 mt-0.5">Upload copies for your client's records</p>
             </div>
             <button onClick={() => setShowAddCert(true)}

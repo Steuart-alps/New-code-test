@@ -190,7 +190,7 @@ function ContractorJobCard({ issue, canAssign, onAssign }: { issue: Issue; canAs
   return (
     <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-3" data-testid="card-contractor-job">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold flex items-center gap-2">
+        <h3 className="text-sm font-bold flex items-center gap-2">
           <Wrench className="w-4 h-4 text-muted-foreground" /> Contractor
         </h3>
         {canAssign && !waitingApproval && issue.emailRequestStatus !== "sending" && (
@@ -497,7 +497,7 @@ export default function FixTrackDetailPage() {
             <AlertTriangle className="w-8 h-8 text-muted-foreground" />
           </div>
           <div>
-            <h2 className="text-lg font-medium">Issue Not Found</h2>
+            <h2 className="text-lg font-bold">Issue Not Found</h2>
             <p className="text-muted-foreground text-sm">The maintenance issue could not be loaded or doesn't exist.</p>
           </div>
           <Button variant="outline" onClick={() => setLocation("/fix-track")}>
@@ -544,7 +544,7 @@ export default function FixTrackDetailPage() {
               <span className={cn("text-xs px-2.5 py-1 rounded-md border font-medium shadow-sm", priorityMeta.color)}>{priorityMeta.label}</span>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-display font-medium text-foreground tracking-tight leading-tight flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-display font-bold text-foreground tracking-tight leading-tight flex items-center gap-3">
               <span>{issue.title}</span>
               <span className="text-lg text-muted-foreground font-sans">#{issue.id}</span>
             </h1>
@@ -594,7 +594,7 @@ export default function FixTrackDetailPage() {
         <div className="space-y-6">
           {issue.description && (
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
+              <h3 className="text-sm font-bold flex items-center gap-2">
                 <FileText className="w-4 h-4 text-muted-foreground" /> Details
               </h3>
               <div className="bg-card border rounded-xl p-5 text-sm leading-relaxed whitespace-pre-wrap shadow-sm">
@@ -605,7 +605,7 @@ export default function FixTrackDetailPage() {
 
           {((issue.mediaUrls && issue.mediaUrls.length > 0) || issue.completionDocumentPath || canEdit) && (
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
+              <h3 className="text-sm font-bold flex items-center gap-2">
                 <Camera className="w-4 h-4 text-muted-foreground" /> Attachments
               </h3>
               {issue.mediaUrls && issue.mediaUrls.length > 0 && (
@@ -714,7 +714,7 @@ export default function FixTrackDetailPage() {
 
         {/* Activity & Notes */}
         <div className="space-y-4 pt-6">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
+          <h3 className="text-sm font-bold flex items-center gap-2">
             <Clock className="w-4 h-4 text-muted-foreground" /> Activity & Notes
           </h3>
           

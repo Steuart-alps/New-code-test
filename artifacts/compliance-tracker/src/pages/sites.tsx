@@ -154,7 +154,7 @@ export default function SitesPage() {
               <div className="flex items-start justify-between gap-3 mb-3">
                 <Link href={`/sites/${site.id}`} className="flex items-center gap-3 flex-1 min-w-0 hover:text-primary transition-colors">
                   <Building2 className="w-4 h-4 flex-shrink-0 opacity-70" />
-                  <span className="font-semibold text-lg font-display truncate">{site.name}</span>
+                  <span className="font-bold text-lg font-display truncate">{site.name}</span>
                 </Link>
                 <div className="flex gap-1 flex-shrink-0">
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(site)}>
@@ -221,7 +221,7 @@ export default function SitesPage() {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display">{editingId ? "Edit Site" : "Add Site"}</DialogTitle>
+            <DialogTitle className="font-display font-bold">{editingId ? "Edit Site" : "Add Site"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} id="sites-page-form" className="space-y-4 py-2">
             <div className="space-y-1.5">

@@ -317,7 +317,7 @@ function SetupChecklist({
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary mb-1">
             Getting started
           </p>
-          <h2 className="text-lg font-display font-semibold text-foreground">
+          <h2 className="text-lg font-display font-bold text-foreground">
             Finish setting up your account
           </h2>
           <p className="text-sm text-muted-foreground mt-1">

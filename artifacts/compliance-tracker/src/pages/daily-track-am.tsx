@@ -244,7 +244,7 @@ export function ChecklistCard({
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Icon className="w-4 h-4 text-primary opacity-80" />
-            <h3 className="font-semibold font-display">{CHECKLIST_LABELS[type]}</h3>
+            <h3 className="font-bold font-display">{CHECKLIST_LABELS[type]}</h3>
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && !submitted && (

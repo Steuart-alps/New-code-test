@@ -345,7 +345,7 @@ function PoolRecordDialog({
         }
       </DialogTrigger>
       <DialogContent className="max-w-xl rounded-sm max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-display">{isEdit ? "Edit Pool Check" : "Record Pool Check"}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-display font-bold">{isEdit ? "Edit Pool Check" : "Record Pool Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4">
           {!isEdit && (
             <div className="space-y-1.5">
@@ -821,7 +821,7 @@ export default function AquaTrackPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium mb-2">AquaTrack</h2>
+                <h2 className="text-2xl font-display font-bold mb-2">AquaTrack</h2>
                 <p className="text-muted-foreground mb-1">Pool and swim records — water testing, lifeguard sessions, surveillance, first-aid readiness and incident evidence to support your site operating procedures.</p>
                 <p className="font-medium text-primary">£10 per site per month</p>
               </div>
@@ -858,7 +858,7 @@ export default function AquaTrackPage() {
               <Anchor className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <h1 className="text-lg font-display font-semibold">AquaTrack</h1>
+              <h1 className="text-lg font-display font-bold">AquaTrack</h1>
               <p className="text-sm text-muted-foreground">Pool water quality · Sessions · Surveillance · Safety</p>
             </div>
           </div>
@@ -1037,7 +1037,7 @@ export default function AquaTrackPage() {
 
             {/* Check log */}
             <Card>
-              <CardHeader className="border-b border-border/50 pb-4"><CardTitle className="font-display">Water Quality Log</CardTitle></CardHeader>
+              <CardHeader className="border-b border-border/50 pb-4"><CardTitle className="font-display font-bold">Water Quality Log</CardTitle></CardHeader>
               <CardContent className="p-0">
                 {poolLoading ? (
                   <div className="p-12 flex justify-center"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>

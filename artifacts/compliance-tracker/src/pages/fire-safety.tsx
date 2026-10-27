@@ -480,7 +480,7 @@ function CallPointRotationCard({ siteId, sites, enabled }: {
       <CardHeader className="border-b border-border/50 pb-3">
         <div className="flex items-center gap-2">
           <BellRing className="w-4 h-4 text-primary" />
-          <CardTitle className="text-base font-display">Alarm test call points</CardTitle>
+          <CardTitle className="text-base font-display font-bold">Alarm test call points</CardTitle>
         </div>
       </CardHeader>
       <CardContent className="p-4 space-y-3 text-sm">
@@ -1143,7 +1143,7 @@ function RecordCheckDialog({
       </DialogTrigger>
       <DialogContent className="max-w-xl rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">Record Fire Safety Check</DialogTitle>
+          <DialogTitle className="font-display font-bold">Record Fire Safety Check</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
           {/* Check type — grouped */}
@@ -1411,7 +1411,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
       </DialogTrigger>
       <DialogContent className="max-w-xl rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">
+          <DialogTitle className="font-display font-bold">
             Edit — {CHECK_TYPE_LABELS[checkType] ?? check.checkType}
           </DialogTitle>
         </DialogHeader>
@@ -1623,7 +1623,7 @@ export default function FireSafetyPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">FireTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">FireTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Digital fire safety logbook — record checks, fire walks, and alarm panel inspections.
                 </p>
@@ -1762,7 +1762,7 @@ export default function FireSafetyPage() {
           <CardHeader className="border-b border-border/50 pb-4">
             <div className="flex items-center gap-2">
               <Filter className="w-4 h-4 text-muted-foreground" />
-              <CardTitle className="text-base font-display">Filter History</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Filter History</CardTitle>
             </div>
           </CardHeader>
           <CardContent className="p-4">
@@ -1801,7 +1801,7 @@ export default function FireSafetyPage() {
         {/* Check history */}
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="font-display">Check History</CardTitle>
+            <CardTitle className="font-display font-bold">Check History</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {checksLoading ? (

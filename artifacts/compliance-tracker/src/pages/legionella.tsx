@@ -462,7 +462,7 @@ function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle className="font-display">Add Outlet</DialogTitle>
+          <DialogTitle className="font-display font-bold">Add Outlet</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
@@ -575,7 +575,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
     <Dialog open onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">{checkType === "outlet_flush" ? "Log Weekly Flush" : "Log Sentinel Test"}</DialogTitle>
+          <DialogTitle className="font-display font-bold">{checkType === "outlet_flush" ? "Log Weekly Flush" : "Log Sentinel Test"}</DialogTitle>
           <p className="text-sm text-muted-foreground">{locationStr}</p>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -713,7 +713,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
       <CardHeader className="border-b border-border/50 pb-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <CardTitle className="font-display text-base flex items-center gap-2">
+            <CardTitle className="font-display font-bold text-base flex items-center gap-2">
               Sentinel and little-used outlets
               {total > 0 && (
                 <span className={cn(
@@ -987,7 +987,7 @@ function RecordCheckDialog({
       </DialogTrigger>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">Record Legionella Check</DialogTitle>
+          <DialogTitle className="font-display font-bold">Record Legionella Check</DialogTitle>
         </DialogHeader>
         {equipment && (
           <div className="flex items-center justify-between gap-2 rounded-sm border bg-muted/40 px-3 py-2 text-sm">
@@ -1149,7 +1149,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
       </DialogTrigger>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display">Edit Check</DialogTitle>
+          <DialogTitle className="font-display font-bold">Edit Check</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="space-y-1.5">
@@ -1306,7 +1306,7 @@ export default function LegionellaPage() {
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">LegionellaTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">LegionellaTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Digital Legionella water safety logbook — record a site-specific written scheme, monitoring and actions.
                 </p>
@@ -1473,7 +1473,7 @@ export default function LegionellaPage() {
           <CardHeader className="border-b border-border/50 pb-4">
             <div className="flex items-center gap-2">
               <Filter className="w-4 h-4 text-muted-foreground" />
-              <CardTitle className="text-base font-display">Filter History</CardTitle>
+              <CardTitle className="text-base font-display font-bold">Filter History</CardTitle>
             </div>
           </CardHeader>
           <CardContent className="p-4">
@@ -1518,7 +1518,7 @@ export default function LegionellaPage() {
         {/* Check History */}
         <Card>
           <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="font-display">Check History</CardTitle>
+            <CardTitle className="font-display font-bold">Check History</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {checksLoading ? (

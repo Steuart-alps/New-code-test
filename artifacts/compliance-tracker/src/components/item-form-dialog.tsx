@@ -169,7 +169,7 @@ export function ItemFormDialog({
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-[580px] bg-card text-card-foreground p-0 gap-0">
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-border">
-          <DialogTitle className="text-lg font-display">
+          <DialogTitle className="text-lg font-display font-bold">
             {item ? "Edit Compliance Check" : "Add Compliance Check"}
           </DialogTitle>
         </DialogHeader>

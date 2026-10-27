@@ -1176,11 +1176,11 @@ export const GetCertificateReadingResponse = zod.object({
   "ai": zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(getCertificateReadingResponseAiPercentUsedMin).max(getCertificateReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.'),
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
   "fixTrack": zod.boolean().describe('Whether the business has FixTrack, where remedial work and quotes live.')
 })
 
@@ -1700,7 +1700,7 @@ export const GetSettingsResponse = zod.object({
   "accountTimezone": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
   "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
-  "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily', 'monthly']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly.'),
   "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
@@ -1724,7 +1724,7 @@ export const UpdateSettingsBody = zod.object({
   "accountTimezone": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish(),
   "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
-  "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily', 'monthly']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly.'),
   "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
@@ -1744,7 +1744,7 @@ export const UpdateSettingsResponse = zod.object({
   "accountTimezone": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish(),
   "storageAutoTopUp": zod.enum(['true', 'false']).nullish().describe('\"true\" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there.'),
-  "ownerUpdateFrequency": zod.enum(['weekly', 'daily']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).'),
+  "ownerUpdateFrequency": zod.enum(['weekly', 'daily', 'monthly']).nullish().describe('How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly.'),
   "reminderTimings": zod.string().nullish().describe('JSON object keyed by reminder type (track module, \"tasks\", \"contractors\", \"train\"), each {\"daysBefore\": number|\"next_week\"|null, \"overdueEvery\": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; \"next_week\" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue.')
 })
 
@@ -3321,21 +3321,21 @@ export const getAiAddonResponseTwoAutoTopUpLimitMin = 0;
 export const GetAiAddonResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(getAiAddonResponseOnePercentUsedMin).max(getAiAddonResponseOnePercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.').and(zod.object({
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
   "price": zod.object({
   "unitAmount": zod.number().describe('Monthly price in pence, before VAT'),
   "currency": zod.string()
 }).nullable(),
   "purchasable": zod.boolean().describe('The add-on can be bought now (Stripe ready and the price exists)'),
   "topUp": zod.object({
-  "amount": zod.number().describe('Price in pence, before VAT, charged at once'),
+  "amount": zod.number().describe('Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance)'),
   "allowance": zod.number().describe('AI use it adds, in pence, until the add-on renews'),
   "currency": zod.string()
-}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready'),
+}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan \"included\") the owner agrees to it and ALPS adds the price to their consultancy invoice.'),
   "topUpsThisPeriod": zod.number().min(getAiAddonResponseTwoTopUpsThisPeriodMin).describe('Top-ups paid for since the add-on last renewed'),
   "autoTopUp": zod.boolean().describe('A top-up is bought automatically when the allowance runs out'),
   "autoTopUpLimit": zod.number().min(getAiAddonResponseTwoAutoTopUpLimitMin).describe('Most automatic top-ups in one period')
@@ -3364,21 +3364,21 @@ export const changeAiAddonResponseTwoAutoTopUpLimitMin = 0;
 export const ChangeAiAddonResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(changeAiAddonResponseOnePercentUsedMin).max(changeAiAddonResponseOnePercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.').and(zod.object({
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
   "price": zod.object({
   "unitAmount": zod.number().describe('Monthly price in pence, before VAT'),
   "currency": zod.string()
 }).nullable(),
   "purchasable": zod.boolean().describe('The add-on can be bought now (Stripe ready and the price exists)'),
   "topUp": zod.object({
-  "amount": zod.number().describe('Price in pence, before VAT, charged at once'),
+  "amount": zod.number().describe('Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance)'),
   "allowance": zod.number().describe('AI use it adds, in pence, until the add-on renews'),
   "currency": zod.string()
-}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready'),
+}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan \"included\") the owner agrees to it and ALPS adds the price to their consultancy invoice.'),
   "topUpsThisPeriod": zod.number().min(changeAiAddonResponseTwoTopUpsThisPeriodMin).describe('Top-ups paid for since the add-on last renewed'),
   "autoTopUp": zod.boolean().describe('A top-up is bought automatically when the allowance runs out'),
   "autoTopUpLimit": zod.number().min(changeAiAddonResponseTwoAutoTopUpLimitMin).describe('Most automatic top-ups in one period')
@@ -3400,11 +3400,11 @@ export const GetPatRegisterReadingResponse = zod.object({
   "ai": zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(getPatRegisterReadingResponseAiPercentUsedMin).max(getPatRegisterReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.'),
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
   "sites": zod.array(zod.object({
   "id": zod.number(),
   "name": zod.string()
@@ -3431,6 +3431,64 @@ export const ReadPatRegisterListResponse = zod.object({
   "headers": zod.array(zod.string()),
   "rows": zod.array(zod.array(zod.string())),
   "unclear": zod.number().describe('Rows that were hard to read; their Notes start with \"Check:\"')
+})
+
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
+ */
+export const GetImportListReadingParams = zod.object({
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+})
+
+export const getImportListReadingResponseAiPercentUsedMin = 0;
+export const getImportListReadingResponseAiPercentUsedMax = 100;
+
+
+
+export const GetImportListReadingResponse = zod.object({
+  "available": zod.boolean(),
+  "monthlyLimit": zod.number().describe('Readings a business may have each month; 0 means no limit'),
+  "usedThisMonth": zod.number(),
+  "ai": zod.object({
+  "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
+  "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
+  "percentUsed": zod.number().min(getImportListReadingResponseAiPercentUsedMin).max(getImportListReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
+  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
+  "usedUp": zod.boolean().describe('The allowance is used up for this period')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
+  "sites": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
+ */
+export const ReadImportListParams = zod.object({
+  "kind": zod.enum(['room-track-rooms', 'contractors', 'fire-call-points', 'greentrack-equipment', 'staff-roster'])
+})
+
+export const readImportListBodyFileNameMax = 255;
+
+
+
+export const ReadImportListBody = zod.object({
+  "fileName": zod.string().max(readImportListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const ReadImportListResponse = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "unclear": zod.number().describe('Rows that were hard to read'),
+  "unclearRows": zod.array(zod.number()).describe('File row numbers (the header row is row 1) of the rows that were hard to read; where the import has a Notes column, their Notes start with \"Check:\"')
 })
 
 
@@ -6573,11 +6631,11 @@ export const GetInspectionReportOptionsResponse = zod.object({
   "ai": zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
-  "plan": zod.enum(['addon', 'trial', 'none']),
+  "plan": zod.enum(['addon', 'trial', 'included', 'none']),
   "percentUsed": zod.number().min(getInspectionReportOptionsResponseReadingAiPercentUsedMin).max(getInspectionReportOptionsResponseReadingAiPercentUsedMax).describe('Share of this period\'s allowance used'),
   "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
   "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").')
 })
 })
 
@@ -6816,7 +6874,7 @@ export const ConfirmInspectionReportActionsResponse = zod.object({
   "to": zod.date().nullable()
 })).optional().describe('Due date changes after the action was created (report detail only), oldest first')
 })),
-  "emailedTo": zod.array(zod.string()).describe('Owners and Managers emailed the action plan')
+  "emailedTo": zod.array(zod.string()).describe('Owners, Managers and linked consultants emailed the action plan')
 })
 
 

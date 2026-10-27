@@ -623,7 +623,7 @@ function RecordSection({ title, description, kind, items, saving, verifications,
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div><h2 className="text-xl font-semibold">{title}</h2><p className="mt-1 text-sm text-muted-foreground">{description}</p></div>
+        <div><h2 className="text-xl font-bold">{title}</h2><p className="mt-1 text-sm text-muted-foreground">{description}</p></div>
         <Button onClick={onAdd}><Plus className="mr-2 h-4 w-4" />Add record</Button>
       </div>
       {editor?.kind === kind && <RecordEditor key={`${kind}-${editor.record?.id ?? "new"}`} kind={kind} record={editor.record} saving={saving} onCancel={onCancel} onSave={onSave} />}

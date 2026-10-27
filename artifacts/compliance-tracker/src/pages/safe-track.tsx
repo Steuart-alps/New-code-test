@@ -793,7 +793,7 @@ export default function SafeTrackPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display">
+            <DialogTitle className="font-display font-bold">
               {editing ? "Edit" : "Add"} {currentTab?.singularLabel}
             </DialogTitle>
           </DialogHeader>

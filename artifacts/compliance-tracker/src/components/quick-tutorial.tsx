@@ -215,7 +215,7 @@ export function QuickTutorial() {
           <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
             Quick tutorial · {index + 1} of {steps.length}
           </p>
-          <DialogTitle className="font-display text-xl">{step.title}</DialogTitle>
+          <DialogTitle className="font-display font-bold text-xl">{step.title}</DialogTitle>
           <DialogDescription asChild>
             <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
               {step.body.map((line) => <p key={line}>{line}</p>)}

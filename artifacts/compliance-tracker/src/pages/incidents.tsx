@@ -773,7 +773,7 @@ ${rows.map(r => `<tr>
                 <Lock className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h2 className="text-2xl font-display font-medium text-foreground mb-2">IncidentTrack</h2>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-2">IncidentTrack</h2>
                 <p className="text-muted-foreground mb-1">
                   Digital accident and incident logbook — record investigation, reportability decisions, HSE references and follow-up actions. Confirm RIDDOR duties for each event.
                 </p>
@@ -1481,11 +1481,11 @@ ${rows.map(r => `<tr>
                 </div>
               ))}
             <div className="border-t pt-3 space-y-2 text-sm">
-              <h3 className="font-semibold">Investigation & evidence</h3>
+              <h3 className="font-bold">Investigation & evidence</h3>
               <p>{historyIncident?.investigationFindings || "No investigation findings recorded yet."}</p>
               {historyIncident?.correctiveActions && <p className="text-muted-foreground">Proposed actions: {historyIncident.correctiveActions}</p>}
               {historyIncident && <CheckPhotoUploader entityType="incident" entityId={historyIncident.id} compact />}
-              <h3 className="font-semibold pt-2">Linked corrective actions</h3>
+              <h3 className="font-bold pt-2">Linked corrective actions</h3>
               {isLoadingActions ? <p>Loading actions…</p> : linkedActions.length === 0 ?
                 <p className="text-muted-foreground">No linked corrective actions yet.</p> :
                 linkedActions.map(action => (
@@ -1498,7 +1498,7 @@ ${rows.map(r => `<tr>
                 ))}
               <Link href="/compliance-hub"><Button variant="outline" size="sm">Review and verify actions in Compliance Hub</Button></Link>
               {canAdmin && <div className="space-y-2 border-t pt-3">
-                <h4 className="font-medium">Add a linked action</h4>
+                <h4 className="font-bold">Add a linked action</h4>
                 <Input aria-label="Action title" dictation placeholder="Action title" value={actionDraft.title} onChange={e => setActionDraft(d => ({ ...d, title: e.target.value }))} />
                 <Input aria-label="Action owner" placeholder="Action owner" value={actionDraft.ownerName} onChange={e => setActionDraft(d => ({ ...d, ownerName: e.target.value }))} />
                 <Textarea aria-label="Corrective action" placeholder="Corrective action to complete" value={actionDraft.correctiveAction} onChange={e => setActionDraft(d => ({ ...d, correctiveAction: e.target.value }))} />

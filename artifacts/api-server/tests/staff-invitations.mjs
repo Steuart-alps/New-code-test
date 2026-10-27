@@ -137,6 +137,12 @@ async function main() {
 
   const invitationEmail = capturedEmails().find((email) => email.to === invitedEmail);
   check("invitation email is captured for the invited staff member", !!invitationEmail);
+  // The email says who added them, to which business and with what role, so
+  // a wrong role is spotted straight away.
+  const businessName = execFileSync("psql", [process.env.DATABASE_URL, "-X", "-At", "-c", `SELECT name FROM clients WHERE id = ${Number(clientId)}`], { encoding: "utf8" }).trim();
+  check("invitation names who added them", !!invitationEmail?.html?.includes("Invitation Admin has added you") && !!invitationEmail?.text?.includes("Invitation Admin has added you"), invitationEmail?.text);
+  check("invitation names the business", !!businessName && !!invitationEmail?.text?.includes(`added you to ${businessName} on ComplyTrack`), `${businessName} / ${invitationEmail?.text}`);
+  check("invitation names the role", !!invitationEmail?.html?.includes("<strong>Your role:</strong> Staff") && !!invitationEmail?.text?.includes("Your role: Staff"), invitationEmail?.text);
   const urlMatch = invitationEmail?.html?.match(/href="([^"]*\/reset-password\?token=[^"]+)"/);
   let invitationUrl = null;
   try {
@@ -251,6 +257,22 @@ async function main() {
   check("forgot-password created a live reset link", tokenRows(invitedId).some((row) => row.unused));
   const afterForgot = await invitationOf(admin, invitedId);
   check("a reset link doesn't reopen a completed invitation", afterForgot.row?.invitation?.status === "completed", JSON.stringify(afterForgot.row));
+
+  // A Manager's invitation lists their departments, escaped in the HTML.
+  const kitchen = await admin("POST", "/departments", { name: "Food & Drink", clientId });
+  const bar = await admin("POST", "/departments", { name: "Bar", clientId });
+  check("create departments for the Manager invitation", kitchen.status === 201 && bar.status === 201, `${kitchen.status} ${bar.status}`);
+  const managerEmail = `staff-invite-manager-${ts}@test.local`;
+  const manager = await admin("POST", "/users", { email: managerEmail, name: "Invited Manager", role: "client_manager", clientId, departmentIds: [kitchen.data?.id, bar.data?.id] });
+  check("create Manager without password", manager.status === 201 && manager.data?.inviteEmail === "sent", JSON.stringify(manager.data));
+  const managerInvite = capturedEmails().filter((email) => email.to === managerEmail).at(-1);
+  check("Manager invitation names the role and departments", !!managerInvite?.text?.includes("Your role: Manager (Food & Drink, Bar)"), managerInvite?.text);
+  check("Manager invitation escapes department names in the HTML", !!managerInvite?.html?.includes("Manager (Food &amp; Drink, Bar)"), managerInvite?.html);
+  const maintenanceEmail = `staff-invite-maintenance-${ts}@test.local`;
+  const maintenance = await admin("POST", "/users", { email: maintenanceEmail, name: "Invited Maintenance", role: "client_manager", clientId, allDepartments: true, isMaintenanceManager: true });
+  check("create Maintenance manager without password", maintenance.status === 201, JSON.stringify(maintenance.data));
+  const maintenanceInvite = capturedEmails().filter((email) => email.to === maintenanceEmail).at(-1);
+  check("Maintenance manager invitation says so, with every department", !!maintenanceInvite?.text?.includes("Your role: Maintenance manager (all departments)"), maintenanceInvite?.text);
 
   const explicitEmail = `staff-invite-explicit-${ts}@test.local`;
   const beforeExplicit = capturedEmails().filter((email) => email.to === explicitEmail).length;

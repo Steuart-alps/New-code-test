@@ -70,7 +70,7 @@ export default function CategoriesPage() {
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <Link href={`/categories/${cat.id}`} className="flex items-center gap-3 flex-1 min-w-0 hover:text-primary transition-colors">
                     <div className="w-3 h-3 rounded-full shadow-sm flex-shrink-0" style={{ backgroundColor: cat.color }} />
-                    <span className="font-semibold text-lg font-display truncate">{cat.name}</span>
+                    <span className="font-bold text-lg font-display truncate">{cat.name}</span>
                   </Link>
                   <div className="flex gap-1 flex-shrink-0">
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(cat)}>
@@ -103,7 +103,7 @@ export default function CategoriesPage() {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display">{editingId ? "Edit Category" : "Add Category"}</DialogTitle>
+            <DialogTitle className="font-display font-bold">{editingId ? "Edit Category" : "Add Category"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} id="cat-form" className="space-y-4 py-2">
             <div className="space-y-1.5">
