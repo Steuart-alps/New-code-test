@@ -1850,6 +1850,8 @@ interface BillingConfig {
   cancelledAt?: string | null;
   dataDeletionScheduledAt?: string | null;
   dataDeletedAt?: string | null;
+  /** Every module free with no trial end (set up by ALPS); nothing to pay. */
+  complimentary?: boolean;
   services?: {
     entitled: "all" | string[];
     addons: string[];
@@ -2262,6 +2264,7 @@ function BillingCard() {
     ? (config?.subscription?.status ?? "active").replace(/_/g, " ")
     : config?.cancelledAt ? "cancelled" : (config?.subscription?.status === "trial" || !config?.subscription?.status ? "trial" : "no active subscription");
   const billingAvailable = config?.billingAvailable !== false;
+  const complimentary = config?.complimentary === true && !hasSubscription;
 
   return (
     <>
@@ -2272,12 +2275,22 @@ function BillingCard() {
             <CardTitle className="font-display font-bold">Billing &amp; Subscription</CardTitle>
           </div>
           <CardDescription>
-            You're billed based on active services and sites. Your total scales automatically with the number of sites on your account.
+            {complimentary
+              ? "Your account is set up by ALPS Consultancy, so there is nothing to pay."
+              : "You're billed based on active services and sites. Your total scales automatically with the number of sites on your account."}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-6 space-y-5">
           {loading ? (
             <div className="py-6 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
+          ) : complimentary ? (
+            <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-emerald-900" data-testid="billing-complimentary">
+              <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold">Every module is included free</div>
+                <p className="text-sm mt-0.5">There is no trial end date and no payment to set up. Add as many sites as you need.</p>
+              </div>
+            </div>
           ) : (
             <>
               <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-4">
@@ -2404,7 +2417,7 @@ function BillingCard() {
                             </span>
                           ) : onTrial ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold">
-                              Included in your trial
+                              {complimentary ? "Included" : "Included in your trial"}
                             </span>
                           ) : purchaseBlocked ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold">
@@ -2439,7 +2452,7 @@ function BillingCard() {
                           </p>
                         )}
                       </div>
-                      {canAdmin && !hasSubscription ? (
+                      {complimentary ? null : canAdmin && !hasSubscription ? (
                         <div className="text-xs text-muted-foreground max-w-[200px] text-right">
                           Choose your services when you subscribe
                         </div>

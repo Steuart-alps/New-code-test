@@ -155,10 +155,15 @@ router.get("/config", requireAuth, async (req, res) => {
     let subscribed = false;
     let perSiteRate = perSite?.unitAmount ?? 0;
     let selectedServices: string[] = [];
+    // A business created by a platform operator has no trial end: every
+    // module is free with no end date (e.g. included in an ALPS consultancy
+    // contract), so Settings says so instead of offering checkout.
+    let complimentary = false;
     if (clientId) {
       entitled = await getEntitledServices(clientId);
       const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
       selectedServices = Array.isArray(client?.selectedServices) ? client.selectedServices : [];
+      complimentary = Boolean(client) && client!.trialEndsAt === null;
       if (client?.stripeCustomerId) {
         try {
           const live = await findLiveSubscription(client.stripeCustomerId);
@@ -189,6 +194,8 @@ router.get("/config", requireAuth, async (req, res) => {
         }
       }
     }
+    // A paid subscription on such a business is shown as a subscription.
+    if (subscribed) complimentary = false;
     const monthlyTotal = perSiteRate * billableQuantity;
 
     // Same read-only price check that add-on activation enforces, so Settings
@@ -242,6 +249,7 @@ router.get("/config", requireAuth, async (req, res) => {
       cancelledAt,
       dataDeletionScheduledAt,
       dataDeletedAt,
+      complimentary,
       // Checkout and add-ons are unavailable while Stripe is unconfigured or
       // its catalogue unverified; a lapsed trial keeps access meanwhile.
       billingAvailable: Boolean(publishableKey) && isBillingActivationAllowed(),

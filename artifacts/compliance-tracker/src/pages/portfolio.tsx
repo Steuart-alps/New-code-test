@@ -38,7 +38,8 @@ function subscriptionLabel(business: PortfolioBusiness): { text: string; tone: "
     case "subscribed": return { text: "Subscribed", tone: "good" };
     case "past_due": return { text: "Payment overdue", tone: "bad" };
     case "cancelling": return { text: "Cancelling", tone: "warn" };
-    case "trial": return { text: business.trialEndsAt ? `Trial until ${ukDate(business.trialEndsAt)}` : "Trial", tone: "warn" };
+    // No trial end date: a business ALPS set up with every module free.
+    case "trial": return business.trialEndsAt ? { text: `Trial until ${ukDate(business.trialEndsAt)}`, tone: "warn" } : { text: "Free, no end date", tone: "good" };
     case "trial_ended": return { text: "Trial ended", tone: "bad" };
     case "cancelled": return { text: "Cancelled", tone: "muted" };
     default: return { text: "Not known", tone: "muted" };
