@@ -40,6 +40,7 @@ import {
   Upload, Download, SprayCan, Package, Mic,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
 import { format } from "date-fns";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
@@ -617,50 +618,14 @@ type MachineImportRow = {
   active: boolean;
 };
 
-function parseCsvRows(text: string): string[][] {
-  const output: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  const source = text.replace(/^\uFEFF/, "");
-  for (let i = 0; i < source.length; i += 1) {
-    const char = source[i];
-    if (char === '"') {
-      if (quoted && source[i + 1] === '"') {
-        cell += '"';
-        i += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (char === "," && !quoted) {
-      row.push(cell.trim());
-      cell = "";
-    } else if ((char === "\n" || char === "\r") && !quoted) {
-      if (char === "\r" && source[i + 1] === "\n") i += 1;
-      row.push(cell.trim());
-      if (row.some(Boolean)) output.push(row);
-      row = [];
-      cell = "";
-    } else {
-      cell += char;
-    }
-  }
-  if (cell || row.length) {
-    row.push(cell.trim());
-    if (row.some(Boolean)) output.push(row);
-  }
-  return output;
-}
-
 function importHeaderKey(value: string): string {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
 
-function parseMachineRosterCsv(
-  text: string,
+function parseMachineRoster(
+  table: string[][],
   sites: { id: number; name: string }[],
 ): { rows: MachineImportRow[]; errors: string[] } {
-  const table = parseCsvRows(text);
   if (table.length < 2) return { rows: [], errors: ["Add a header row and at least one equipment row."] };
 
   const aliases: Record<string, string[]> = {
@@ -681,8 +646,8 @@ function parseMachineRosterCsv(
     names.map(name => headers.indexOf(name)).find(index => index >= 0) ?? -1,
   ])) as Record<string, number>;
   const errors: string[] = [];
-  if (indexes.name < 0) errors.push("The CSV needs a name or equipment column.");
-  if (indexes.type < 0) errors.push("The CSV needs a type or category column.");
+  if (indexes.name < 0) errors.push("The spreadsheet needs a name or equipment column.");
+  if (indexes.type < 0) errors.push("The spreadsheet needs a type or category column.");
   if (errors.length) return { rows: [], errors };
 
   const siteByName = new Map(sites.map(site => [site.name.trim().toLowerCase(), site.id]));
@@ -717,18 +682,13 @@ function parseMachineRosterCsv(
   return { rows, errors };
 }
 
-function downloadMachineRosterTemplate() {
-  const csv = [
-    "name,type,make,model,serial_no,reg_no,year,site,notes,active",
-    'Greens mower 1,ride-on,Toro,Reelmaster 5010,RM-001,GT-01,2021,,Main cutting unit,true',
-    'Pedestrian mower 1,pedestrian,Honda,HRX 537,PM-001,GT-02,2022,,Walk-behind mower,true',
-  ].join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "greentrack-equipment-template.csv";
-  link.click();
-  URL.revokeObjectURL(url);
+async function downloadMachineRosterTemplate() {
+  const { downloadExcel } = await import("@/lib/spreadsheet");
+  downloadExcel("greentrack-equipment-template.xlsx", "Equipment", [
+    ["name", "type", "make", "model", "serial_no", "reg_no", "year", "site", "notes", "active"],
+    ["Greens mower 1", "ride-on", "Toro", "Reelmaster 5010", "RM-001", "GT-01", "2021", "", "Main cutting unit", "true"],
+    ["Pedestrian mower 1", "pedestrian", "Honda", "HRX 537", "PM-001", "GT-02", "2022", "", "Walk-behind mower", "true"],
+  ]);
 }
 
 function MachineImportDialog({
@@ -754,21 +714,21 @@ function MachineImportDialog({
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
-    let text: string;
-    if (/\.xlsx?$/i.test(file.name)) {
-      // An Excel file is read in the browser and its first sheet treated as CSV.
-      try {
-        const XLSX = await import("@e965/xlsx");
-        const book = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
-        text = XLSX.utils.sheet_to_csv(book.Sheets[book.SheetNames[0]], { blankrows: false });
-      } catch {
-        toast({ title: "Could not read file", description: "Make sure it is a valid .xlsx or .xls file.", variant: "destructive" });
-        return;
-      }
-    } else {
-      text = await file.text();
+    if (!isSpreadsheetFile(file)) {
+      toast({ title: "That isn't a spreadsheet", description: "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
+      return;
     }
-    const parsed = parseMachineRosterCsv(text, sites);
+    let table: string[][];
+    try {
+      // Excel or CSV, read in the browser from the first sheet.
+      const { readSpreadsheet } = await import("@/lib/spreadsheet");
+      const sheet = await readSpreadsheet(file);
+      table = sheet.headers.length ? [sheet.headers, ...sheet.rows].map(row => row.map(cell => cell.trim())).filter(row => row.some(Boolean)) : [];
+    } catch (err) {
+      toast({ title: "Could not read file", description: err instanceof Error && err.message ? err.message : "Make sure it is an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
+      return;
+    }
+    const parsed = parseMachineRoster(table, sites);
     setFileName(file.name);
     setRows(parsed.rows);
     setErrors(parsed.errors);
@@ -807,16 +767,11 @@ function MachineImportDialog({
         <div className="space-y-4 py-1">
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" size="sm" className="gap-1.5 rounded-sm" onClick={downloadMachineRosterTemplate}>
-              <Download className="w-3.5 h-3.5" /> Download CSV template
+              <Download className="w-3.5 h-3.5" /> Download Excel template
             </Button>
-            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm border border-border px-3 py-2 text-sm hover:bg-muted/40">
-              <Upload className="w-3.5 h-3.5" />
-              Choose CSV or Excel file
-              <input type="file" accept=".csv,text/csv,.xlsx,.xls" className="sr-only" data-testid="input-machine-roster-file"
-                onChange={e => { void handleFile(e.target.files?.[0]); e.target.value = ""; }} />
-            </label>
             {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
           </div>
+          <SpreadsheetDropZone onFile={file => void handleFile(file)} testId="input-machine-roster-file" className="rounded-sm" />
           <p className="text-xs text-muted-foreground">
             Required columns: <strong>name</strong> and <strong>type</strong>. Supported broad types include
             <strong> ride-on</strong>, <strong>pedestrian</strong>, tractor, utility, and other approved GreenTrack types.

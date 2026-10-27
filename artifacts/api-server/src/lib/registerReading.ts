@@ -26,7 +26,7 @@ export function registerReadingMonthlyLimit(): number {
 export const REGISTER_FILE_WORDING: UnreadableFileWording = {
   tooLarge: "This file is too large to read (8 MB at most). Upload a smaller file, or a photo of each page.",
   photoTooLarge: "This photo is too large to read (5 MB at most). Take it again at a lower size, or upload a PDF.",
-  unsupported: "ComplyTrack can read a photo, PDF or Word (.docx) list here. Upload Excel and CSV files with \"Choose a CSV or Excel file\" above.",
+  unsupported: "ComplyTrack can read a photo, PDF or Word (.docx) list here. Upload Excel and CSV files with \"Choose an Excel spreadsheet\" above.",
   noText: "No text was found in this file. Upload a photo or PDF of the list instead.",
   docxNoText: "This Word file has no readable text. Save it as a PDF and upload that.",
 };

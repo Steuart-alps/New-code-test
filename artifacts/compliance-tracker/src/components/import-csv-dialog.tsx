@@ -1,12 +1,13 @@
 import { useRef, useState } from "react";
-import * as XLSX from "@e965/xlsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Download, FileSpreadsheet, Loader2, Sparkles, Upload, X } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
 import { API_BASE, getApiErrorMessage } from "@/lib/api";
-import { downloadFile } from "@/lib/download";
+import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
+import { downloadCsvAsExcel, downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
+import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
 import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
 import type { AiStatus } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
@@ -23,25 +24,25 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     required: "Appliance name",
     optional: "Asset tag, Appliance type, Site, Location, Notes",
     matching: "Rows match existing appliances by asset tag, or by name, site and location when there is no asset tag.",
-    template: "pattrack-appliances-template.csv",
+    template: "pattrack-appliances-template",
   },
   "room-track-rooms": {
-    title: "Import rooms",
+    title: "Import rooms from a spreadsheet",
     noun: "rooms",
     one: "room",
     required: "Room number",
     optional: "Room name, Floor, Site, Notes",
     matching: "Rows match existing rooms by site and room number.",
-    template: "roomtrack-rooms-template.csv",
+    template: "roomtrack-rooms-template",
   },
   contractors: {
-    title: "Import contractors",
+    title: "Import contractors from a spreadsheet",
     noun: "contractors",
     one: "contractor",
     required: "Contact name, Email",
     optional: "Company, Phone, Address, Trades (separate with ;), Gas Safe number, Public liability expiry (DD/MM/YYYY), Notes",
     matching: "Rows match existing contractors by email address.",
-    template: "contractors-template.csv",
+    template: "contractors-template",
   },
   "fire-call-points": {
     title: "Upload call points",
@@ -50,7 +51,7 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     required: "Call point",
     optional: "Location, Site (leave blank for the site chosen here)",
     matching: "List them in the order you want them tested: new call points join the end of the rotation in file order. Rows match existing call points by site and call point name.",
-    template: "firetrack-call-points-template.csv",
+    template: "firetrack-call-points-template",
   },
 };
 
@@ -69,21 +70,6 @@ const ACTION_STYLE: Record<RowAction, { label: string; className: string }> = {
   skip: { label: "Skip", className: "bg-muted text-muted-foreground border-border" },
   error: { label: "Error", className: "bg-rose-50 text-rose-800 border-rose-200" },
 };
-
-/** Read the first sheet of an Excel or CSV file as a header row plus cell text. */
-async function readSpreadsheet(file: File): Promise<{ headers: string[]; rows: string[][] }> {
-  const isCsv = /\.csv$/i.test(file.name) || file.type === "text/csv";
-  // CSV text is read raw so "01/02/2027" stays a UK date string instead of
-  // being reinterpreted as a US month/day date.
-  const workbook = isCsv
-    ? XLSX.read(await file.text(), { type: "string", raw: true })
-    : XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  if (!sheet) return { headers: [], rows: [] };
-  const table = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "", blankrows: false, dateNF: "yyyy-mm-dd" });
-  const [headers = [], ...rows] = table;
-  return { headers: headers.map(value => String(value ?? "")), rows: rows.map(row => row.map(value => String(value ?? ""))) };
-}
 
 interface RegisterReading { available: boolean; monthlyLimit: number; usedThisMonth: number; ai: AiStatus; sites: Array<{ id: number; name: string }> }
 
@@ -139,7 +125,6 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
   const clientApiFetch = useActiveClientApi();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const fileInput = useRef<HTMLInputElement>(null);
   const listInput = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   // PATTrack only: a photo or document read by ComplyTrack instead of a spreadsheet.
@@ -163,7 +148,6 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
 
   function reset() {
     setFile(null); setSheet(null); setResult(null); setError(null); setBusy(null); setReadFromList(null);
-    if (fileInput.current) fileInput.current.value = "";
     if (listInput.current) listInput.current.value = "";
   }
   function close() {
@@ -197,6 +181,16 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
     }
   }
 
+  /** A picked or dropped file: spreadsheets are imported; on PATTrack a photo or document is read instead. */
+  function dropped(selected: File) {
+    if (isSpreadsheetFile(selected)) return void choose(selected);
+    if (reading && listMimeType(selected) && aiAllowanceState(reading.ai).canUse && readsLeft !== 0) return void readList(selected);
+    reset();
+    setError(reading
+      ? "That isn't an Excel or CSV file. For a photo, PDF or Word list, use \"Choose a photo or document\" below."
+      : "That isn't an Excel or CSV file. Save it from Excel as .xlsx and try again.");
+  }
+
   async function readList(selected: File) {
     reset();
     setFile(selected);
@@ -225,9 +219,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
   /** The rows ComplyTrack read, as a spreadsheet the person can correct and upload. */
   function downloadReadRows() {
     if (!sheet) return;
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([sheet.headers, ...sheet.rows]), "Appliances");
-    XLSX.writeFile(workbook, "pat-register-read-from-list.xlsx");
+    downloadExcel("pat-register-read-from-list.xlsx", "Appliances", [sheet.headers, ...sheet.rows]);
   }
 
   async function confirm() {
@@ -247,10 +239,14 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
     }
   }
 
-  async function downloadTemplate() {
+  /** The template is an Excel file by default; the CSV version is still offered. */
+  async function downloadTemplate(format: "xlsx" | "csv") {
     try {
       const query = activeClientId ? `?clientId=${encodeURIComponent(activeClientId)}` : "";
-      await downloadFile(`${API_BASE}/imports/${type}/template${query}`, config.template);
+      const response = await fetch(`${API_BASE}/imports/${type}/template${query}`, { credentials: "include" });
+      if (!response.ok) throw new Error(await getDownloadErrorMessage(response, `Download failed (${response.status})`));
+      if (format === "csv") downloadBlob(await response.blob(), `${config.template}.csv`);
+      else downloadCsvAsExcel(`${config.template}.xlsx`, config.noun[0].toUpperCase() + config.noun.slice(1), await response.text());
     } catch (err) {
       toast({ title: "Template download failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     }
@@ -265,7 +261,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> {config.title}</DialogTitle>
           <DialogDescription>
-            Upload a CSV or Excel file. Nothing changes until you have checked the preview and confirmed.
+            Upload an Excel spreadsheet (a CSV file works too). Nothing changes until you have checked the preview and confirmed.
           </DialogDescription>
         </DialogHeader>
 
@@ -273,21 +269,20 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
           <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground">Required column{config.required.includes(",") ? "s" : ""}:</span> {config.required}</p>
             <p><span className="font-medium text-foreground">Optional:</span> {config.optional}</p>
-            <p>{config.matching} Blank cells leave existing details unchanged. Sites are matched by name. Up to 1,000 rows per file.</p>
-            <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={downloadTemplate} data-testid={`button-download-${type}-template`}>
-              <Download className="mr-1 h-3.5 w-3.5" /> Download the template
-            </Button>
+            <p>Put the column headings in the first row. {config.matching} Blank cells leave existing details unchanged. Sites are matched by name. Up to 1,000 rows per file.</p>
+            <p className="flex flex-wrap items-center gap-x-2">
+              <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => void downloadTemplate("xlsx")} data-testid={`button-download-${type}-template`}>
+                <Download className="mr-1 h-3.5 w-3.5" /> Download the Excel template
+              </Button>
+              <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs text-muted-foreground" onClick={() => void downloadTemplate("csv")} data-testid={`button-download-${type}-template-csv`}>
+                or the CSV version
+              </Button>
+            </p>
           </div>
 
-          <input ref={fileInput} type="file" accept=".csv,.xlsx,.xls" className="hidden" data-testid={`input-${type}-file`}
-            onChange={event => { const selected = event.target.files?.[0]; if (selected) void choose(selected); }} />
           {!file ? (
             <>
-              <button type="button" onClick={() => fileInput.current?.click()}
-                className="w-full rounded-lg border-2 border-dashed p-6 text-center transition-colors hover:border-primary/50 hover:bg-muted/20">
-                <FileSpreadsheet className="mx-auto mb-2 h-8 w-8 text-muted-foreground opacity-50" />
-                <span className="text-sm font-medium text-muted-foreground">Choose a CSV or Excel file</span>
-              </button>
+              <SpreadsheetDropZone onFile={dropped} testId={`input-${type}-file`} />
               {reading && (
                 <div className="space-y-2 rounded-lg border p-3" data-testid="pat-register-reading">
                   <p className="flex items-center gap-1.5 text-sm font-medium"><Sparkles className="h-4 w-4 text-primary" /> Only have a paper list, photo or PDF?</p>
@@ -403,11 +398,11 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
 }
 
 /**
- * "Import CSV" button plus its dialog, for register pages. Hidden for users
+ * "Import spreadsheet" button plus its dialog, for register pages. Hidden for users
  * the API would refuse: viewers, and staff other than PATTrack department
  * managers.
  */
-export function ImportCsvButton({ type, onImported, className, siteId, label = "Import CSV" }: {
+export function ImportCsvButton({ type, onImported, className, siteId, label = "Import spreadsheet" }: {
   type: ImportCsvType; onImported?: () => void; className?: string; siteId?: number | null; label?: string;
 }) {
   const { user } = useAuth();

@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import * as XLSX from "@e965/xlsx";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
@@ -10,8 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Plus, Pencil, Trash2, Loader2, Search, UserCheck, UserX, Upload, FileSpreadsheet, X, Printer } from "lucide-react";
+import { Users, Plus, Pencil, Trash2, Loader2, Search, UserCheck, UserX, Upload, FileSpreadsheet, X, Printer, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
+import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
 import { printHtmlDocument } from "@/lib/download";
 
 interface StaffMember {
@@ -167,41 +168,34 @@ interface ParsedStaff {
   email: string | null;
 }
 
-function parseExcel(file: File): Promise<ParsedStaff[]> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target!.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: "" });
+/** Staff rows from an Excel or CSV file, a Word table or a text list. */
+async function parseExcel(file: File): Promise<ParsedStaff[]> {
+  const { headers, rows } = await readSpreadsheet(file);
 
-        // Normalise header names
-        const normalise = (k: string) => k.toLowerCase().replace(/[\s_-]/g, "");
-        const find = (row: Record<string, any>, ...keys: string[]) => {
-          const entry = Object.entries(row).find(([k]) => keys.includes(normalise(k)));
-          return entry ? String(entry[1]).trim() || null : null;
-        };
+  // Normalise header names
+  const normalise = (k: string) => k.toLowerCase().replace(/[\s_-]/g, "");
+  const keys = headers.map(normalise);
+  const find = (row: string[], ...names: string[]) => {
+    const index = keys.findIndex(key => names.includes(key));
+    return index >= 0 ? (row[index] ?? "").trim() || null : null;
+  };
 
-        const members: ParsedStaff[] = rows
-          .map(row => ({
-            externalPayrollId: find(row, "payrollid", "employeeid", "staffid", "workforceid", "identifier") ?? "",
-            name:       find(row, "name", "fullname", "staffname", "employeename") ?? "",
-            jobTitle:   find(row, "jobtitle", "title", "role", "position", "job"),
-            department: find(row, "department", "dept", "team", "area", "division"),
-            email:      find(row, "email", "emailaddress", "mail"),
-          }))
-          .filter(m => m.name.length > 0 || m.externalPayrollId.length > 0);
+  return rows
+    .map(row => ({
+      externalPayrollId: find(row, "payrollid", "employeeid", "staffid", "workforceid", "identifier") ?? "",
+      name:       find(row, "name", "fullname", "staffname", "employeename") ?? "",
+      jobTitle:   find(row, "jobtitle", "title", "role", "position", "job"),
+      department: find(row, "department", "dept", "team", "area", "division"),
+      email:      find(row, "email", "emailaddress", "mail"),
+    }))
+    .filter(m => m.name.length > 0 || m.externalPayrollId.length > 0);
+}
 
-        resolve(members);
-      } catch (err) {
-        reject(err);
-      }
-    };
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsArrayBuffer(file);
-  });
+function downloadStaffTemplate() {
+  downloadExcel("staff-roster-template.xlsx", "Staff", [
+    ["Payroll ID", "Name", "Job Title", "Department", "Email"],
+    ["1001", "Jane Smith", "Chef de partie", "Kitchen", "jane.smith@example.com"],
+  ]);
 }
 
 function parsePasteText(text: string): ParsedStaff[] {
@@ -216,7 +210,6 @@ function parsePasteText(text: string): ParsedStaff[] {
 
 function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean; onClose: () => void; onImported: () => void; sites: Site[] }) {
   const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"excel" | "paste">("excel");
   const [text, setText] = useState("");
   const [excelFile, setExcelFile] = useState<File | null>(null);
@@ -232,14 +225,18 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
   }
 
   async function handleFileChange(file: File) {
+    if (!isSpreadsheetFile(file)) {
+      toast({ title: "That isn't a spreadsheet", description: "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
+      return;
+    }
     setExcelFile(file);
     setParsing(true);
     try {
       const members = await parseExcel(file);
       setPreview(members);
       setReconciliation(null);
-    } catch {
-      toast({ title: "Could not read file", description: "Make sure it is a valid .xlsx or .xls file.", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Could not read file", description: err instanceof Error && err.message ? err.message : "Make sure it is an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
       setExcelFile(null);
     } finally {
       setParsing(false);
@@ -291,7 +288,7 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
                 mode === "excel" ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:text-foreground")}
               onClick={() => setMode("excel")}
             >
-              <FileSpreadsheet className="w-4 h-4" /> Upload Excel / CSV
+              <FileSpreadsheet className="w-4 h-4" /> Upload a spreadsheet
             </button>
             <button
               className={cn("flex-1 py-2 font-medium transition-colors",
@@ -305,23 +302,13 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
           {mode === "excel" ? (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                 Upload the complete current roster as Excel or CSV. Required columns: <strong>Payroll ID</strong> and <strong>Name</strong>. Optional columns: Job Title, Department and Email.
+                 Upload the complete current roster as an Excel spreadsheet (a CSV file works too). Required columns: <strong>Payroll ID</strong> and <strong>Name</strong>. Optional columns: Job Title, Department and Email.
               </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleFileChange(f); }}
-              />
+              <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={downloadStaffTemplate} data-testid="button-download-staff-roster-template">
+                <Download className="mr-1 h-3.5 w-3.5" /> Download the Excel template
+              </Button>
               {!excelFile ? (
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full border-2 border-dashed rounded-lg p-6 text-center hover:border-primary/50 hover:bg-muted/20 transition-colors"
-                >
-                  <FileSpreadsheet className="w-8 h-8 mx-auto mb-2 text-muted-foreground opacity-50" />
-                  <p className="text-sm font-medium text-muted-foreground">Click to choose an Excel or CSV file</p>
-                </button>
+                <SpreadsheetDropZone onFile={handleFileChange} testId="input-staff-roster-file" />
               ) : (
                 <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/20">
                   <FileSpreadsheet className="w-5 h-5 text-green-600 flex-shrink-0" />
@@ -333,7 +320,7 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
                       <p className="text-xs text-muted-foreground">{preview.length} staff member{preview.length === 1 ? "" : "s"} found</p>
                     )}
                   </div>
-                  <button onClick={() => { setExcelFile(null); setPreview([]); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                  <button onClick={() => { setExcelFile(null); setPreview([]); }}
                     className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground">
                     <X className="w-4 h-4" />
                   </button>
@@ -591,7 +578,7 @@ ${rows.map(s => `<tr>
             <Printer className="w-4 h-4" /> Print Roster
           </Button>
           <Button variant="outline" onClick={() => setBulkOpen(true)} className="gap-1.5">
-            <Upload className="w-4 h-4" /> Bulk Import
+            <Upload className="w-4 h-4" /> Import spreadsheet
           </Button>
           <Button variant="outline" onClick={generateKioskLink} disabled={generatingKioskToken} className="gap-1.5">
             {generatingKioskToken && <Loader2 className="w-4 h-4 animate-spin" />} Open kiosk
@@ -644,13 +631,13 @@ ${rows.map(s => `<tr>
               {staff.length === 0 ? "No staff added yet" : "No staff match your search"}
             </p>
             <p className="text-sm text-muted-foreground mt-1">
-              {staff.length === 0 ? "Add staff members individually or use Bulk Import to paste a list." : "Try a different search."}
+              {staff.length === 0 ? "Add staff members individually or import a spreadsheet." : "Try a different search."}
             </p>
           </div>
           {staff.length === 0 && (
             <div className="flex gap-2 mt-1">
               <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)} className="gap-1.5">
-                <Upload className="w-3.5 h-3.5" /> Bulk Import
+                <Upload className="w-3.5 h-3.5" /> Import spreadsheet
               </Button>
               <Button size="sm" onClick={() => { setEditing(null); setDialogOpen(true); }} className="gap-1.5">
                 <Plus className="w-3.5 h-3.5" /> Add Staff
