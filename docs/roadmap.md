@@ -34,6 +34,7 @@ Wednesday 28 October.
 | 15 | FireTrack: sound level meter for fire alarm tests | After launch (with the iPhone app) | None | Phone app; your check of the dB limits |
 | 16 | Temperature probes and sensors: Bluetooth probes, Wi-Fi fridge, freezer and water tank monitoring | After launch (probes with the phone app) | Hardware bought by each business; possibly a bigger database later | Phone app; choice of sensor make |
 | 17 | Maintenance inventory: stock, cheapest supplier, low-stock reminder | After launch | None | Kitchen supplier price import for the cheapest supplier part |
+| 18 | Reorder the side menu to each user's preference | After launch | None | Nothing |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -677,6 +678,27 @@ across all of a business's sites?
 
 ---
 
+## 18. Reorder the side menu
+
+**When:** after launch. Asked for on 27 October.
+
+Each user can arrange the left-hand menu in the order they prefer, by
+dragging items (and whole groups) up or down. The order is saved for that
+person only, so everyone else keeps their own layout, and a "Reset to
+default" button puts it back.
+
+**Builds on what exists.** Users can already pin favourite modules to the top
+of the menu. Those pins are kept in the browser, so they don't follow a person
+to another computer or phone. The new order (and the pins with it) would be
+saved with the user's account, so the same menu appears wherever they sign in.
+
+Items a user isn't allowed to see stay hidden whatever order they choose, and
+new modules appear in their default place until the user moves them.
+
+**Cost:** none. No extra hosting.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -724,6 +746,7 @@ work:
 | Supplier allergens and prices | Pennies per invoice or product read; nothing for a supplier file |
 | Kitchen voice input | None |
 | Maintenance inventory | None |
+| Reorder the side menu | None |
 | FireTrack sound level meter | None |
 | Temperature probes and sensors | Hardware paid by each business (plus a maker subscription for option 1); possibly a larger database plan later; text alerts a few pence each |
 | Label scanning | About 1-2p per label; about 40p for a chemical including its data sheet and COSHH draft (mostly in the Live AI plan already) |
