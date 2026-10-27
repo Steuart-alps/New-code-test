@@ -296,14 +296,14 @@ function SetupChecklist({
       label: "Set the admin alert email",
       detail: "Choose where overdue and compliance alerts should be sent.",
       done: Boolean(notificationEmail.trim()),
-      href: "/settings",
+      href: "/settings#admin-alert-email",
       icon: Mail,
     },
     {
       label: "Review your modules",
       detail: "Make sure the tracks you need are enabled for this account.",
       done: hasModules,
-      href: "/settings",
+      href: "/settings#services",
       icon: Settings2,
     },
   ];

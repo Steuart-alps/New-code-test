@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocationProperty } from "wouter/use-browser-location";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
@@ -3103,6 +3104,70 @@ function RequiredActionTemplatesCard() {
   );
 }
 
+// ── Settings menu ─────────────────────────────────────────────────────────────
+// Settings is split into sections so each one is easy to find. The section is
+// kept in the address (/settings#reminders), so links and emails can open the
+// right one. Older links name a card on the former single page; they still
+// open the section that card now lives in.
+
+type SettingsSectionId = "billing" | "business" | "departments" | "reminders" | "email" | "checks" | "storage" | "security";
+
+const SETTINGS_SECTIONS: { id: SettingsSectionId; label: string; description: string; Icon: typeof Settings2 }[] = [
+  { id: "billing", label: "Billing and services", description: "Your plan, the services on your account, AI features and invoices.", Icon: CreditCard },
+  { id: "business", label: "Business details", description: "Company name, timezone, reminder lead time and type of business.", Icon: Building2 },
+  { id: "departments", label: "Departments and owners", description: "Departments, who sees the Today by department card, and who owns each track.", Icon: Users },
+  { id: "reminders", label: "Reminders and alerts", description: "When reminders are sent, the Owner update and the admin alert email.", Icon: Bell },
+  { id: "email", label: "Email sending", description: "The sender name, address and domain your emails come from.", Icon: Mail },
+  { id: "checks", label: "Checks and photos", description: "Required action templates and when photos must be added.", Icon: ClipboardCheck },
+  { id: "storage", label: "Storage and your data", description: "File storage, downloading all your records and data deletion.", Icon: HardDrive },
+  { id: "security", label: "Sign-in security", description: "Two-step sign-in and passkeys.", Icon: ShieldCheck },
+];
+
+const SETTINGS_SECTION_ALIASES: Record<string, SettingsSectionId> = {
+  ai: "billing",
+  services: "billing",
+  "data-export": "storage",
+  "admin-alert-email": "reminders",
+  "email-sender-section": "email",
+  "email-settings-section": "email",
+};
+
+function settingsSectionFromHash(hash: string): SettingsSectionId {
+  const key = decodeURIComponent(hash.replace(/^#/, ""));
+  return SETTINGS_SECTIONS.find(section => section.id === key)?.id ?? SETTINGS_SECTION_ALIASES[key] ?? "billing";
+}
+
+function SettingsMenu({ active, onSelect }: { active: SettingsSectionId; onSelect: (id: SettingsSectionId) => void }) {
+  return (
+    <nav aria-label="Settings menu" className="mb-6 xl:mb-0">
+      <ul className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-1 xl:gap-1">
+        {SETTINGS_SECTIONS.map(({ id, label, Icon }) => {
+          const current = id === active;
+          return (
+            <li key={id}>
+              <a
+                href={`#${id}`}
+                onClick={(e) => { e.preventDefault(); onSelect(id); }}
+                aria-current={current ? "page" : undefined}
+                data-testid={`settings-menu-${id}`}
+                className={cn(
+                  "flex h-full items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors xl:border-transparent",
+                  current
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : "border-border bg-card text-foreground hover:bg-muted xl:bg-transparent",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="leading-tight">{label}</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
 export default function SettingsPage() {
   const { data: settings, isLoading } = useGetSettings();
   const { updateSettings, triggerTestEmail } = useAppMutations();
@@ -3144,6 +3209,27 @@ export default function SettingsPage() {
     resendApiKey: "",
     accountTimezone: "Europe/London",
   });
+
+  // The section shown follows the address, so links and the browser's back
+  // button open the right one.
+  const hash = useLocationProperty(() => window.location.hash);
+  const section = settingsSectionFromHash(hash);
+  const openSection = (id: SettingsSectionId) => {
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${id}`);
+  };
+
+  // "Set the admin alert email" (Getting started) opens Reminders and alerts
+  // with the field in view and ready to type in.
+  const focusAlertEmail = hash === "#admin-alert-email";
+  useEffect(() => {
+    if (!focusAlertEmail || isLoading || billingLocked) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const field = document.getElementById("admin-alert-email");
+      field?.scrollIntoView({ block: "center" });
+      document.getElementById("notificationEmail")?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusAlertEmail, isLoading, billingLocked]);
 
   const [reminderTimings, setReminderTimings] = useState<ReminderTimings>({});
   const [testEmail, setTestEmail] = useState("");
@@ -3196,281 +3282,346 @@ export default function SettingsPage() {
   );
   if (isLoading) return <AppLayout title="Settings"><div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mt-10" /></AppLayout>;
 
+  const sectionInfo = SETTINGS_SECTIONS.find(entry => entry.id === section)!;
+
   return (
-    <AppLayout title="System Settings">
-      <div className="max-w-4xl space-y-6">
-        <BillingCard />
-        <InvoicesCard />
-        {canAdmin && <StorageUsageCard />}
-        <DataExportCard />
-        <DataDeletionRequestCard />
-        <DepartmentsCard />
-        {canAdmin && <TodayByDepartmentRolesCard />}
-        {canAdmin && <RequiredActionTemplatesCard />}
-        <TrackOwnersCard />
-        <PhotoRequirementsCard />
-        {canAdmin && <BusinessTypeCard />}
-        <form onSubmit={handleSave}>
-          <Card className="shadow-lg border-border/50 bg-card mb-6">
-            <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-              <div className="flex items-center gap-2">
-                <Settings2 className="w-5 h-5 text-primary" />
-                <CardTitle className="font-display">General Preferences</CardTitle>
-              </div>
-              <CardDescription>Global configuration for the compliance tracker.</CardDescription>
-            </CardHeader>
-            <CardContent className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>Company Name</Label>
-                  <Input name="companyName" value={formData.companyName} onChange={handleChange} placeholder="Acme Corp" />
+    <AppLayout title="Settings">
+      <div className="max-w-6xl xl:grid xl:grid-cols-[15rem_minmax(0,1fr)] xl:gap-8 xl:items-start">
+        <SettingsMenu active={section} onSelect={openSection} />
+        <div className="max-w-4xl min-w-0 space-y-6" data-testid={`settings-section-${section}`}>
+          <div>
+            <h2 className="flex items-center gap-2 font-display text-xl font-semibold text-foreground">
+              <sectionInfo.Icon className="h-5 w-5 text-primary" />
+              {sectionInfo.label}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">{sectionInfo.description}</p>
+          </div>
+
+          {section === "billing" && (
+            <>
+              <BillingCard />
+              <InvoicesCard />
+            </>
+          )}
+
+          {section === "business" && (
+            <>
+              <form onSubmit={handleSave}>
+              <Card className="shadow-lg border-border/50 bg-card mb-6">
+                <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Settings2 className="w-5 h-5 text-primary" />
+                    <CardTitle className="font-display">General Preferences</CardTitle>
+                  </div>
+                  <CardDescription>Global configuration for the compliance tracker.</CardDescription>
+                </CardHeader>
+                <CardContent className="p-6 space-y-4">
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                      <Label>Company Name</Label>
+                      <Input name="companyName" value={formData.companyName} onChange={handleChange} placeholder="Acme Corp" />
+                    </div>
+                    <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                      <Label>Default Reminder Lead Time (Days)</Label>
+                      <p className="text-xs text-muted-foreground">Reminders sent this many days before a check is due. Default: 30 days.</p>
+                      <Input type="number" name="defaultLeadTimeDays" value={formData.defaultLeadTimeDays} onChange={handleChange} />
+                    </div>
+                    <div className="space-y-1.5 col-span-2">
+                      <Label>Account Timezone</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Used for daily entry dates, the staff correction cutoff and SafeTrack reminder times. Existing accounts default to UK time (Europe/London).
+                      </p>
+                      <Select
+                        value={formData.accountTimezone || "Europe/London"}
+                        onValueChange={(value) => setFormData((prev) => ({ ...prev, accountTimezone: value }))}
+                      >
+                        <SelectTrigger aria-label="Account timezone" data-testid="select-account-timezone">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {formData.accountTimezone && !TIMEZONE_OPTIONS.some(o => o.value === formData.accountTimezone) && (
+                            <SelectItem value={formData.accountTimezone}>{formData.accountTimezone}</SelectItem>
+                          )}
+                          {TIMEZONE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </CardContent>
+                <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-end">
+                  <Button type="submit" disabled={updateSettings.isPending} className="shadow-lg shadow-primary/20">
+                    {updateSettings.isPending ? "Saving..." : "Save Settings"}
+                  </Button>
+                </CardFooter>
+              </Card>
+              </form>
+              {canAdmin && <BusinessTypeCard />}
+            </>
+          )}
+
+          {section === "departments" && (
+            <>
+              <DepartmentsCard />
+              {canAdmin && <TodayByDepartmentRolesCard />}
+              <TrackOwnersCard />
+            </>
+          )}
+
+          {section === "reminders" && (
+            <form onSubmit={handleSave}>
+            <Card className="shadow-lg border-border/50 bg-card mb-6">
+              <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-5 h-5 text-amber-500" />
+                  <CardTitle className="font-display">Reminder Notifications</CardTitle>
                 </div>
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>Default Reminder Lead Time (Days)</Label>
-                  <p className="text-xs text-muted-foreground">Reminders sent this many days before a check is due. Default: 30 days.</p>
-                  <Input type="number" name="defaultLeadTimeDays" value={formData.defaultLeadTimeDays} onChange={handleChange} />
-                </div>
-                <div className="space-y-1.5 col-span-2">
-                  <Label>Account Timezone</Label>
+                <CardDescription>
+                  Each person gets one email at 8am, only on days when something of theirs needs a reminder: by default the day
+                  before it is due, then the day after if it goes overdue and once a week after that (change this per type below). Anything with no one assigned goes to the track's owner,
+                  or to the Owners when no owner is set (see Departments and owners). Urgent actions (including checks recorded as unsafe), critical
+                  compliance checks and new FixTrack issues are emailed as soon as they are raised. On Mondays, everyone on the staff
+                  roster with an email is also sent their own outstanding training (expired or expiring, and anything to sign).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-6 space-y-5">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ownerUpdateFrequency">Owner update</Label>
                   <p className="text-xs text-muted-foreground">
-                    Used for daily entry dates, the staff correction cutoff and SafeTrack reminder times. Existing accounts default to UK time (Europe/London).
+                    One email to the Owners listing what was done, what is overdue and who has it, what is due, anything with no one
+                    assigned, expiries in the next 60 days, each person's outstanding training (TrainTrack) and documents still to sign. Managers get one for their own departments.
+                    Sent at 8am in your account timezone.
                   </p>
                   <Select
-                    value={formData.accountTimezone || "Europe/London"}
-                    onValueChange={(value) => setFormData((prev) => ({ ...prev, accountTimezone: value }))}
+                    value={formData.ownerUpdateFrequency}
+                    onValueChange={(value) =>
+                      setFormData((prev) => ({ ...prev, ownerUpdateFrequency: value === "daily" ? "daily" : "weekly" }))
+                    }
                   >
-                    <SelectTrigger aria-label="Account timezone" data-testid="select-account-timezone">
+                    <SelectTrigger id="ownerUpdateFrequency" className="sm:w-64">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {formData.accountTimezone && !TIMEZONE_OPTIONS.some(o => o.value === formData.accountTimezone) && (
-                        <SelectItem value={formData.accountTimezone}>{formData.accountTimezone}</SelectItem>
-                      )}
-                      {TIMEZONE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      <SelectItem value="weekly">Weekly, on Mondays</SelectItem>
+                      <SelectItem value="daily">Every day</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-lg border-border/50 bg-card mb-6">
-            <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-              <div className="flex items-center gap-2">
-                <Bell className="w-5 h-5 text-amber-500" />
-                <CardTitle className="font-display">Reminder Notifications</CardTitle>
-              </div>
-              <CardDescription>
-                Each person gets one email at 8am, only on days when something of theirs needs a reminder: by default the day
-                before it is due, then the day after if it goes overdue and once a week after that (change this per type below). Anything with no one assigned goes to the track's owner,
-                or to the Owners when no owner is set (Track Owners above). Urgent actions (including checks recorded as unsafe), critical
-                compliance checks and new FixTrack issues are emailed as soon as they are raised. On Mondays, everyone on the staff
-                roster with an email is also sent their own outstanding training (expired or expiring, and anything to sign).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-6 space-y-5">
-              <div className="space-y-1.5">
-                <Label htmlFor="ownerUpdateFrequency">Owner update</Label>
-                <p className="text-xs text-muted-foreground">
-                  One email to the Owners listing what was done, what is overdue and who has it, what is due, anything with no one
-                  assigned, expiries in the next 60 days, each person's outstanding training (TrainTrack) and documents still to sign. Managers get one for their own departments.
-                  Sent at 8am in your account timezone.
-                </p>
-                <Select
-                  value={formData.ownerUpdateFrequency}
-                  onValueChange={(value) =>
-                    setFormData((prev) => ({ ...prev, ownerUpdateFrequency: value === "daily" ? "daily" : "weekly" }))
-                  }
+                <ReminderTimingsField
+                  value={reminderTimings}
+                  onChange={setReminderTimings}
+                  contractorLeadDays={Number(formData.contractorComplianceLeadTimeDays) || 30}
+                />
+                <div
+                  id="admin-alert-email"
+                  className={cn(
+                    "space-y-1.5 scroll-mt-6 rounded-md transition-shadow",
+                    focusAlertEmail && "ring-2 ring-primary/60 ring-offset-4 ring-offset-card",
+                  )}
                 >
-                  <SelectTrigger id="ownerUpdateFrequency" className="sm:w-64">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="weekly">Weekly, on Mondays</SelectItem>
-                    <SelectItem value="daily">Every day</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <ReminderTimingsField
-                value={reminderTimings}
-                onChange={setReminderTimings}
-                contractorLeadDays={Number(formData.contractorComplianceLeadTimeDays) || 30}
-              />
-              <div className="space-y-1.5">
-                <Label>Admin / Owner Notification Email</Label>
-                <p className="text-xs text-muted-foreground">
-                  The Owner update goes to this address instead of to each Owner. If left blank, each Owner gets it.
-                </p>
-                <Input
-                  type="email"
-                  name="notificationEmail"
-                  value={formData.notificationEmail}
-                  onChange={handleChange}
-                  placeholder="owner@yourcompany.com"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Contractor expiry warning lead time (days)</Label>
-                <p className="text-xs text-muted-foreground">
-                  Insurance, DBS / PVG and certificate reminders go to your Maintenance managers (or the Owners) this many days
-                  before expiry, and again the day before. Existing accounts use 30 days.
-                </p>
-                <Input
-                  type="number"
-                  name="contractorComplianceLeadTimeDays"
-                  min="0"
-                  max="365"
-                  step="1"
-                  value={formData.contractorComplianceLeadTimeDays}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Maintenance / Office CC Emails</Label>
-                <p className="text-xs text-muted-foreground">
-                  These addresses will be copied on every contractor reminder email. Separate multiple addresses with a comma.
-                </p>
-                <Input
-                  name="maintenanceEmail"
-                  value={formData.maintenanceEmail}
-                  onChange={handleChange}
-                  placeholder="maintenance@yourcompany.com, office@yourcompany.com"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Additional Recipients</Label>
-                <p className="text-xs text-muted-foreground">
-                  Optional extra addresses to copy on reminders — useful for site managers, directors, or external auditors. Separate with commas, semicolons, or new lines.
-                </p>
-                <Textarea
-                  name="additionalReminderEmails"
-                  value={formData.additionalReminderEmails}
-                  onChange={handleChange}
-                  rows={2}
-                  placeholder="director@yourcompany.com, sitemanager@yourcompany.com"
-                />
-              </div>
-
-              <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 p-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
-                  checked={formData.notifyClientAdmins === "true"}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, notifyClientAdmins: e.target.checked ? "true" : "false" }))
-                  }
-                />
-                <span className="text-sm">
-                  <span className="font-medium">Always copy account admins on every reminder</span>
-                  <span className="block text-xs text-muted-foreground mt-0.5">
-                    When ticked, every reminder email is automatically copied to the email address of every active admin user on this account — including yours when you trigger a manual send.
-                  </span>
-                </span>
-              </label>
-            </CardContent>
-          </Card>
-
-          {showEmailGuide && (
-            <EmailSetupGuide
-              settings={(settings as any) ?? {}}
-              onDismiss={handleDismissGuide}
-            />
-          )}
-
-          <div id="email-sender-section">
-            <SenderDomainCard />
-          </div>
-
-          <div id="email-settings-section">
-          <Card className="shadow-lg border-border/50 bg-card">
-            <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-              <div className="flex items-center gap-2">
-                <Mail className="w-5 h-5 text-indigo-500" />
-                <CardTitle className="font-display">Email Settings</CardTitle>
-              </div>
-              <CardDescription>
-                Choose the sender name and email address your recipients will see. We handle delivery for you.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-6 space-y-4">
-              <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800">
-                <Mail className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                Add your sender details below, then send a test email to confirm everything is working.
-              </div>
-              <div className="grid grid-cols-2 gap-6 pt-2">
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>Sender email address</Label>
-                  <p className="text-xs text-muted-foreground">This is the address contractors and staff will see.</p>
-                  <Input name="smtpFrom" value={formData.smtpFrom} onChange={handleChange} placeholder="compliance@yourcompany.com" />
-                </div>
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>Sender name</Label>
-                  <Input name="smtpFromName" value={formData.smtpFromName} onChange={handleChange} placeholder="Acme Compliance Team" />
-                </div>
-              </div>
-
-              <details className="pt-2 border-t border-border/50 mt-2">
-                <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
-                  Advanced email settings
-                </summary>
-                <div className="space-y-1.5 pt-3">
-                  <Label>Use your own email provider account</Label>
+                  <Label htmlFor="notificationEmail">Admin alert email</Label>
                   <p className="text-xs text-muted-foreground">
-                    Most clients can leave this blank. Only use this if your administrator has asked you to connect a separate email account.
+                    The Owner update goes to this address instead of to each Owner. If left blank, each Owner gets it.
                   </p>
                   <Input
-                    name="resendApiKey"
-                    type="password"
-                    autoComplete="off"
-                    value={formData.resendApiKey}
+                    id="notificationEmail"
+                    type="email"
+                    name="notificationEmail"
+                    value={formData.notificationEmail}
                     onChange={handleChange}
-                    placeholder={(settings as any)?.resendApiKeySet ? "Saved key (leave blank to keep it)" : "Optional provider key"}
+                    placeholder="owner@yourcompany.com"
                   />
-                  {(settings as any)?.resendApiKeySet && (
-                    <div className="flex items-center justify-between gap-3 pt-1">
-                      <p className="text-xs text-muted-foreground">A provider key is saved. Leaving the box blank keeps it.</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        data-testid="button-remove-provider-key"
-                        disabled={updateSettings.isPending}
-                        onClick={() => updateSettings.mutate({ data: { resendApiKey: null } as AppSettings })}
-                      >
-                        Remove key
-                      </Button>
-                    </div>
-                  )}
                 </div>
-              </details>
-            </CardContent>
-            <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <Input
-                  placeholder="Send a test to…"
-                  value={testEmail}
-                  onChange={(e) => setTestEmail(e.target.value)}
-                  className="w-64"
-                />
-                <Button type="button" variant="secondary" onClick={handleTestEmail} disabled={triggerTestEmail.isPending || !testEmail}>
-                  <Send className="w-4 h-4 mr-2" /> {triggerTestEmail.isPending ? "Sending..." : "Send test email"}
-                </Button>
-              </div>
-              <Button type="submit" disabled={updateSettings.isPending} className="shadow-lg shadow-primary/20">
-                {updateSettings.isPending ? "Saving..." : "Save Settings"}
-              </Button>
-            </CardFooter>
-          </Card>
-          </div>
-        </form>
 
-        {/* Two-Factor Authentication */}
-        {canAdmin && <TwoFactorPolicyCard />}
-        <TwoFactorCard key={user?.id ?? "signed-out"} />
-        <PasskeyCard />
+                <div className="space-y-1.5">
+                  <Label>Contractor expiry warning lead time (days)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Insurance, DBS / PVG and certificate reminders go to your Maintenance managers (or the Owners) this many days
+                    before expiry, and again the day before. Existing accounts use 30 days.
+                  </p>
+                  <Input
+                    type="number"
+                    name="contractorComplianceLeadTimeDays"
+                    min="0"
+                    max="365"
+                    step="1"
+                    value={formData.contractorComplianceLeadTimeDays}
+                    onChange={handleChange}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Maintenance / Office CC Emails</Label>
+                  <p className="text-xs text-muted-foreground">
+                    These addresses will be copied on every contractor reminder email. Separate multiple addresses with a comma.
+                  </p>
+                  <Input
+                    name="maintenanceEmail"
+                    value={formData.maintenanceEmail}
+                    onChange={handleChange}
+                    placeholder="maintenance@yourcompany.com, office@yourcompany.com"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Additional Recipients</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Optional extra addresses to copy on reminders — useful for site managers, directors, or external auditors. Separate with commas, semicolons, or new lines.
+                  </p>
+                  <Textarea
+                    name="additionalReminderEmails"
+                    value={formData.additionalReminderEmails}
+                    onChange={handleChange}
+                    rows={2}
+                    placeholder="director@yourcompany.com, sitemanager@yourcompany.com"
+                  />
+                </div>
+
+                <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 p-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                    checked={formData.notifyClientAdmins === "true"}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, notifyClientAdmins: e.target.checked ? "true" : "false" }))
+                    }
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium">Always copy account admins on every reminder</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      When ticked, every reminder email is automatically copied to the email address of every active admin user on this account — including yours when you trigger a manual send.
+                    </span>
+                  </span>
+                </label>
+              </CardContent>
+              <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-end">
+                <Button type="submit" disabled={updateSettings.isPending} className="shadow-lg shadow-primary/20">
+                  {updateSettings.isPending ? "Saving..." : "Save Settings"}
+                </Button>
+              </CardFooter>
+            </Card>
+            </form>
+          )}
+
+          {section === "email" && (
+            <form onSubmit={handleSave}>
+            {showEmailGuide && (
+              <EmailSetupGuide
+                settings={(settings as any) ?? {}}
+                onDismiss={handleDismissGuide}
+              />
+            )}
+
+            <div id="email-sender-section">
+              <SenderDomainCard />
+            </div>
+
+            <div id="email-settings-section">
+            <Card className="shadow-lg border-border/50 bg-card">
+              <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-5 h-5 text-indigo-500" />
+                  <CardTitle className="font-display">Email Settings</CardTitle>
+                </div>
+                <CardDescription>
+                  Choose the sender name and email address your recipients will see. We handle delivery for you.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-6 space-y-4">
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800">
+                  <Mail className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                  Add your sender details below, then send a test email to confirm everything is working.
+                </div>
+                <div className="grid grid-cols-2 gap-6 pt-2">
+                  <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                    <Label>Sender email address</Label>
+                    <p className="text-xs text-muted-foreground">This is the address contractors and staff will see.</p>
+                    <Input name="smtpFrom" value={formData.smtpFrom} onChange={handleChange} placeholder="compliance@yourcompany.com" />
+                  </div>
+                  <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                    <Label>Sender name</Label>
+                    <Input name="smtpFromName" value={formData.smtpFromName} onChange={handleChange} placeholder="Acme Compliance Team" />
+                  </div>
+                </div>
+
+                <details className="pt-2 border-t border-border/50 mt-2">
+                  <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+                    Advanced email settings
+                  </summary>
+                  <div className="space-y-1.5 pt-3">
+                    <Label>Use your own email provider account</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Most clients can leave this blank. Only use this if your administrator has asked you to connect a separate email account.
+                    </p>
+                    <Input
+                      name="resendApiKey"
+                      type="password"
+                      autoComplete="off"
+                      value={formData.resendApiKey}
+                      onChange={handleChange}
+                      placeholder={(settings as any)?.resendApiKeySet ? "Saved key (leave blank to keep it)" : "Optional provider key"}
+                    />
+                    {(settings as any)?.resendApiKeySet && (
+                      <div className="flex items-center justify-between gap-3 pt-1">
+                        <p className="text-xs text-muted-foreground">A provider key is saved. Leaving the box blank keeps it.</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          data-testid="button-remove-provider-key"
+                          disabled={updateSettings.isPending}
+                          onClick={() => updateSettings.mutate({ data: { resendApiKey: null } as AppSettings })}
+                        >
+                          Remove key
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              </CardContent>
+              <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <Input
+                    placeholder="Send a test to…"
+                    value={testEmail}
+                    onChange={(e) => setTestEmail(e.target.value)}
+                    className="w-64"
+                  />
+                  <Button type="button" variant="secondary" onClick={handleTestEmail} disabled={triggerTestEmail.isPending || !testEmail}>
+                    <Send className="w-4 h-4 mr-2" /> {triggerTestEmail.isPending ? "Sending..." : "Send test email"}
+                  </Button>
+                </div>
+                <Button type="submit" disabled={updateSettings.isPending} className="shadow-lg shadow-primary/20">
+                  {updateSettings.isPending ? "Saving..." : "Save Settings"}
+                </Button>
+              </CardFooter>
+            </Card>
+            </div>
+            </form>
+          )}
+
+          {section === "checks" && (
+            <>
+              {canAdmin && <RequiredActionTemplatesCard />}
+              <PhotoRequirementsCard />
+            </>
+          )}
+
+          {section === "storage" && (
+            <>
+              {canAdmin && <StorageUsageCard />}
+              <DataExportCard />
+              <DataDeletionRequestCard />
+            </>
+          )}
+
+          {section === "security" && (
+            <>
+              {canAdmin && <TwoFactorPolicyCard />}
+              <TwoFactorCard key={user?.id ?? "signed-out"} />
+              <PasskeyCard />
+            </>
+          )}
+        </div>
       </div>
     </AppLayout>
   );
