@@ -2,7 +2,7 @@ import { LegalLayout } from "./legal-layout";
 
 export default function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy Policy" updated="26 October 2026">
+    <LegalLayout title="Privacy Policy" updated="27 October 2026">
       <section>
         <h2>1. Who we are</h2>
         <p>
@@ -51,7 +51,8 @@ export default function PrivacyPage() {
           by law.
         </p>
         <p>
-          Our hosting provider is Render (servers and database in Frankfurt, Germany) and our email provider is Resend.
+          Our hosting provider is Render (servers and database in Frankfurt, Germany), photos and files are kept in
+          Google Cloud Storage in Frankfurt, Germany, and our email provider is Resend.
           For the compliance records your business keeps, these providers are our sub-processors; section 5 of our{" "}
           <a href="/terms" className="text-primary underline underline-offset-2">Terms of Service</a> sets out how we
           act as your processor.
