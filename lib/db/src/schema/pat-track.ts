@@ -86,6 +86,8 @@ export const patEquipmentTemplatesTable = pgTable("pat_equipment_templates", {
   siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
+  // Filled into a room's area type when the template is chosen for it.
+  areaType: text("area_type"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
