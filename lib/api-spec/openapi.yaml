@@ -5192,6 +5192,49 @@ components:
           properties:
             paying: { type: integer }
             onTrial: { type: integer }
+        ai:
+          nullable: true
+          description: AI income against what Claude cost, in pence before VAT; null when it could not be read
+          allOf:
+            - $ref: "#/components/schemas/BusinessDashboardAi"
+    BusinessDashboardAiAmounts:
+      type: object
+      required: [addonPence, topUpPence, invoicedTopUpPence, incomePence, costPence, marginPence, requests]
+      properties:
+        addonPence: { type: integer, description: The AI add-on paid through Stripe }
+        topUpPence: { type: integer, description: Top-ups paid through Stripe }
+        invoicedTopUpPence: { type: integer, description: Top-ups a free business agreed to, invoiced by ALPS }
+        incomePence: { type: integer }
+        costPence: { type: integer, description: What Claude charged, converted from dollars }
+        marginPence: { type: integer }
+        requests: { type: integer }
+    BusinessDashboardAi:
+      type: object
+      required: [months, businesses, totals, usdToGbp, addonIncomeAvailable]
+      properties:
+        months:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/BusinessDashboardAiAmounts"
+              - type: object
+                required: [month]
+                properties:
+                  month: { type: string, description: YYYY-MM (UTC) }
+        businesses:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/BusinessDashboardAiAmounts"
+              - type: object
+                required: [clientId, businessName, free]
+                properties:
+                  clientId: { type: integer, nullable: true }
+                  businessName: { type: string }
+                  free: { type: boolean, description: A free business (no trial end); ALPS pays for its allowance }
+        totals: { $ref: "#/components/schemas/BusinessDashboardAiAmounts" }
+        usdToGbp: { type: number }
+        addonIncomeAvailable: { type: boolean, description: False when paid Stripe invoices could not be read }
     AllergenKey:
       type: string
       description: One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014

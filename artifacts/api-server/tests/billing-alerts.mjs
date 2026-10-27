@@ -245,6 +245,66 @@ try {
   assert.equal(quiet[1].kind, "new_subscription");
   assert.match(quiet[1].summary, /Discount: ALPS client 50% discount \(ALPS code ending K7Q2\), £30\.00 off this payment/);
 
+  // AI income against Claude cost (Business dashboard), in 2031 so nothing else counts.
+  const paidAi = await createTenant("ai-finance-paid");
+  const freeAi = await createTenant("ai-finance-free");
+  await db.execute(sql`UPDATE clients SET stripe_customer_id = 'cus_ai_fin', name = 'Paid AI Co' WHERE id = ${paidAi.clientId}`);
+  await db.execute(sql`UPDATE clients SET trial_ends_at = NULL, name = 'Pilot Co' WHERE id = ${freeAi.clientId}`);
+  await db.execute(sql`CREATE SCHEMA IF NOT EXISTS stripe`);
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS stripe.prices (id text PRIMARY KEY, metadata jsonb)`);
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS stripe.invoices (_raw_data jsonb)`);
+  await db.execute(sql`INSERT INTO stripe.prices (id, metadata) VALUES ('price_ai_fin', '{"service_key":"ai"}'), ('price_core_fin', '{}')`);
+  const paidAt = (day) => Math.floor(new Date(`${day}T10:00:00Z`).getTime() / 1000);
+  const stripeInvoice = (fields) => JSON.stringify({ object: "invoice", status: "paid", currency: "gbp", customer: "cus_ai_fin", customer_name: "Paid AI Co", metadata: {}, lines: { data: [] }, ...fields });
+  for (const raw of [
+    // The add-on's first month, on its own invoice.
+    stripeInvoice({ status_transitions: { paid_at: paidAt("2031-01-10") }, total_excluding_tax: 1500, metadata: { addon_service: "ai", client_id: String(paidAi.clientId) } }),
+    // A renewal: the AI line (basil shape) counts, less its discount; the module line does not.
+    stripeInvoice({ status_transitions: { paid_at: paidAt("2031-02-10") }, total_excluding_tax: 4200, lines: { data: [
+      { amount: 3000, pricing: { price_details: { price: "price_core_fin" } }, discount_amounts: [{ amount: 1500 }] },
+      { amount: 1500, pricing: { price_details: { price: "price_ai_fin" } }, discount_amounts: [{ amount: 300 }] },
+    ] } }),
+    // The older line shape counts too.
+    stripeInvoice({ status_transitions: { paid_at: paidAt("2031-02-20") }, lines: { data: [{ amount: 1500, price: { id: "price_ai_fin" } }] } }),
+    // Not paid, or paid outside the dates: left out.
+    stripeInvoice({ status: "open", status_transitions: { paid_at: null }, created: paidAt("2031-02-12"), lines: { data: [{ amount: 1500, price: { id: "price_ai_fin" } }] } }),
+    stripeInvoice({ status_transitions: { paid_at: paidAt("2030-12-31") }, total_excluding_tax: 1500, metadata: { addon_service: "ai" } }),
+  ]) {
+    await db.execute(sql`INSERT INTO stripe.invoices (_raw_data) VALUES (${raw}::jsonb)`);
+  }
+  await db.execute(sql`INSERT INTO ai_top_ups (client_id, request_id, amount_pence, allowance_pence, status, created_at, settled_at) VALUES
+    (${paidAi.clientId}, 'fin-1', 600, 400, 'paid', '2031-01-20T10:00:00Z', '2031-01-20T10:00:05Z'),
+    (${paidAi.clientId}, 'fin-2', 600, 400, 'failed', '2031-01-21T10:00:00Z', NULL),
+    (${freeAi.clientId}, 'fin-3', 600, 400, 'paid', '2031-02-03T10:00:00Z', '2031-02-03T10:00:00Z')`);
+  await db.execute(sql`INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros, created_at) VALUES
+    (${paidAi.clientId}, 'report_reading', 'done', 2000000, '2031-01-15T10:00:00Z'),
+    (${paidAi.clientId}, 'report_reading', 'pending', 9000000, '2031-01-16T10:00:00Z'),
+    (${freeAi.clientId}, 'register_reading', 'done', 1000000, '2031-02-04T10:00:00Z'),
+    (${freeAi.clientId}, 'register_reading', 'failed', 500000, '2031-02-28T23:59:00Z'),
+    (${freeAi.clientId}, 'register_reading', 'done', 7000000, '2031-03-01T00:00:00Z')`);
+  const ai = await alerts.getAiFinance(
+    { from: new Date("2031-01-01T00:00:00Z"), to: new Date("2031-03-01T00:00:00Z") },
+    { aiPriceId: null, usdToGbp: 0.8 },
+  );
+  const amounts = (row) => [row.addonPence, row.topUpPence, row.invoicedTopUpPence, row.incomePence, row.costPence, row.marginPence, row.requests];
+  assert.equal(ai.addonIncomeAvailable, true);
+  assert.deepEqual(amounts(ai.totals), [1500 + 1200 + 1500, 600, 600, 5400, 280, 5120, 3]);
+  assert.deepEqual(ai.months.map((m) => [m.month, ...amounts(m)]), [
+    ["2031-01", 1500, 600, 0, 2100, 160, 1940, 1],
+    ["2031-02", 2700, 0, 600, 3300, 120, 3180, 2],
+  ]);
+  assert.deepEqual(ai.businesses.map((b) => [b.businessName, b.free, b.clientId, ...amounts(b)]), [
+    ["Paid AI Co", false, paidAi.clientId, 4200, 600, 0, 4800, 160, 4640, 1],
+    ["Pilot Co", true, freeAi.clientId, 0, 0, 600, 600, 120, 480, 2],
+  ]);
+  // A month with nothing still shows, so the chart has no gaps.
+  const quietMonths = await alerts.getAiFinance(
+    { from: new Date("2031-04-01T00:00:00Z"), to: new Date("2031-06-01T00:00:00Z") },
+    { aiPriceId: null, usdToGbp: 0.8 },
+  );
+  assert.deepEqual(quietMonths.months.map((m) => [m.month, m.incomePence, m.costPence]), [["2031-04", 0, 0], ["2031-05", 0, 0]]);
+  assert.deepEqual(quietMonths.businesses, []);
+
   console.log("Billing alert test passed");
 } finally {
   await pool.end();

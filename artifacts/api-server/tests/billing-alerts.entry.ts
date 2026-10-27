@@ -7,3 +7,4 @@ export {
   getBillingSummary,
   moduleForTable,
 } from "../src/lib/billingAlerts";
+export { getAiFinance } from "../src/lib/aiFinance";
