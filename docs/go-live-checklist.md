@@ -8,7 +8,7 @@ Full detail for each step: the [launch plan](https://claude.ai/artifact/EamQtVRf
 
 ## Must do before Monday
 
-- [ ] **1. Set the admin email on Render** (5 min). Render → **complytrack** → **Environment** → add `ADMIN_EMAIL` = `info@alpsconsultancy.co.uk` → **Save, rebuild and deploy**. Without it, owners can't ask to delete their data, and you get no billing or new sign-up emails. Type "admin email set" in [Launch plan for 26 October][launch].
+- [x] **1. Set the admin email on Render** (5 min). Render → **complytrack** → **Environment** → add `ADMIN_EMAIL` = `info@alpsconsultancy.co.uk` → **Save, rebuild and deploy**. Without it, owners can't ask to delete their data, and you get no billing or new sign-up emails. Type "admin email set" in [Launch plan for 26 October][launch]. *Done 27 Oct.*
 - [x] **2. Fix the VAT setting in Stripe** (5 min). Stripe → **Settings** → **Tax** → **Settings** → "Include tax in prices" = **No (Exclusive)**. At the moment £10 is charged as £8.33 + £1.67 VAT instead of £10 + £2 VAT. Type "tax set" in [Accounting and VAT][vat]. *Done 27 Oct: prices now follow the Exclusive default.*
 - [x] **3. Answer the Terms questions** (5 min), in [Launch plan for 26 October][launch]:
   - Is it right that an extra site is charged £10 straight away? (That's what the app does. The new Terms say so.)
