@@ -1205,7 +1205,7 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
 
   if (!(process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1")
     && await isTwoFactorRequired(result.user)) {
-    res.json({ requires2faSetup: true, setupUrl: `${getPublicAppUrl().replace(/\/$/, "")}/settings` });
+    res.json({ requires2faSetup: true, setupUrl: `${getPublicAppUrl().replace(/\/$/, "")}/settings#security` });
     return;
   }
 

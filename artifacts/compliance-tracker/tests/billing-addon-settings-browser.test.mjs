@@ -187,6 +187,8 @@ async function routeApi(route, url) {
     return jsonResponse(route, { modules: [], owners: [], sites: [], users: [], defaultRecipients: [] });
   }
   if (pathname === "/api/billing/storage" && method === "GET") return jsonResponse(route, { subscribed: false });
+  // The AI features card (#188) stays hidden when AI billing is not configured.
+  if (pathname === "/api/billing/ai" && method === "GET") return jsonResponse(route, { configured: false });
   // The header's notification bell (#92).
   if (pathname === "/api/notifications" && method === "GET") {
     return jsonResponse(route, { notifications: [], unreadCount: 0 });
@@ -651,6 +653,43 @@ try {
   assert.deepEqual(pageErrors, [], `Settings must not throw: ${pageErrors.join("; ")}`);
   assert.deepEqual(consoleErrors.filter(text => !isExpectedResourceError(text)), [], `unexpected console errors: ${consoleErrors.join("; ")}`);
   console.log("Settings add-on price availability checks passed.");
+
+  // The Settings menu: each section opens from the menu, and the Getting
+  // started "Set the admin alert email" link opens Reminders and alerts with
+  // the field focused. Older links to a card open the section it lives in.
+  const sections = {
+    billing: "Billing and services",
+    business: "Business details",
+    departments: "Departments and owners",
+    reminders: "Reminders and alerts",
+    email: "Email sending",
+    checks: "Checks and photos",
+    storage: "Storage and your data",
+    security: "Sign-in security",
+  };
+  for (const [id, label] of Object.entries(sections)) {
+    await page.getByTestId(`settings-menu-${id}`).click();
+    await page.getByTestId(`settings-section-${id}`).getByRole("heading", { name: label, exact: true }).waitFor({ state: "visible" });
+    assert.equal(new URL(page.url()).hash, `#${id}`, `${label} is kept in the address`);
+    assert.equal(await page.getByTestId(`settings-menu-${id}`).getAttribute("aria-current"), "page");
+  }
+  await page.getByTestId("settings-menu-reminders").click();
+  await page.getByLabel("Admin alert email", { exact: true }).waitFor({ state: "visible" });
+  await page.getByTestId("settings-menu-billing").click();
+  assert.equal(await page.getByLabel("Admin alert email", { exact: true }).count(), 0, "other sections are hidden");
+  for (const [hash, id] of [["admin-alert-email", "reminders"], ["data-export", "storage"], ["email-settings-section", "email"], ["ai", "billing"], ["nonsense", "billing"]]) {
+    await page.goto(`${baseUrl}/tests/billing-addon-settings-harness.html#${hash}`, { waitUntil: "domcontentloaded" });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId(`settings-section-${id}`).waitFor({ state: "visible" });
+  }
+  await page.goto(`${baseUrl}/tests/billing-addon-settings-harness.html#admin-alert-email`, { waitUntil: "domcontentloaded" });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const alertEmail = page.getByLabel("Admin alert email", { exact: true });
+  await alertEmail.waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.id === "notificationEmail");
+  assert.deepEqual(unexpectedApiRequests, [], `unexpected API requests: ${JSON.stringify(unexpectedApiRequests)}`);
+  assert.deepEqual(pageErrors, [], `Settings menu must not throw: ${pageErrors.join("; ")}`);
+  console.log("Settings menu checks passed.");
 
   for (const { search, body } of analyticsRequests) {
     assert.equal(search, "", `analytics events must not carry the business id: ${search}`);
