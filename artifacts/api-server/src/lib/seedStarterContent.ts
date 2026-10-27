@@ -130,6 +130,13 @@ export const STARTER: StarterCategory[] = [
     ],
   },
   {
+    name: "Health & Safety",
+    color: "#0ea5e9",
+    checks: [
+      { title: "Health and Safety Policy Review", description: "Review your health and safety policy at least once a year and whenever something significant changes. A business with five or more employees must have its policy written down and bring it to their attention (Health and Safety at Work etc. Act 1974, section 2(3)).", priority: "high", leadTimeDays: 30, frequencyMonths: 12 },
+    ],
+  },
+  {
     name: "Insurance",
     color: "#64748b",
     checks: [

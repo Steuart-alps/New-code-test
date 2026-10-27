@@ -65,6 +65,7 @@ export const DEFAULT_TRAINTRACK_TYPES = [
   "RIDDOR Awareness",
   "Asbestos Awareness",
   "Display Screen Equipment (DSE)",
+  "Toolbox Talk",
   // DBS / PVG disclosure checks
   "DBS Check (Basic)",
   "DBS Check (Standard)",

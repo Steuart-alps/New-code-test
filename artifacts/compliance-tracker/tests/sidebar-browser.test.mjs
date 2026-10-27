@@ -7,7 +7,7 @@ import { chromium } from "@playwright/test";
 // Browser regression for the grouped sidebar (src/components/layout.tsx and
 // src/lib/nav-groups.ts), on the desktop sidebar and the phone drawer.
 // Sections:
-//   - Core Work starts open and the rest closed; a section of only locked links stays closed,
+//   - Home, Set up and Compliance start open and the rest closed; a section of only locked links stays closed,
 //   - the current page's section opens, on load and on navigation,
 //   - open/closed choices survive a reload and are kept per user and per business.
 // Pinned links:
@@ -92,21 +92,27 @@ try {
   async function load(path = "/asbestos") {
     await page.goto(`${baseUrl}${path}`);
     // The desktop sidebar is hidden (not just closed) at phone width.
-    await desktop.getByRole("button", { name: "Core Work", exact: true, includeHidden: true }).waitFor({ state: "attached" });
+    await desktop.getByRole("button", { name: "Home", exact: true, includeHidden: true }).waitFor({ state: "attached" });
   }
 
   const sectionTrigger = (scope, title) => scope.getByRole("button", { name: title, exact: true });
   const isOpen = (scope, title) => sectionTrigger(scope, title).getAttribute("aria-expanded").then(v => v === "true");
   const openStates = async scope => Object.fromEntries(await Promise.all(
-    ["Core Work", "Safety", "Food & Water", "Operations", "People & Training", "Reporting", "Administration"]
+    ["Home", "Set up", "Compliance", "Safety", "Food & Water", "Operations", "People & Training", "Reporting", "Other", "Administration"]
       .map(async title => [title, await isOpen(scope, title)])));
 
   // ─── Sections ─────────────────────────────────────────────────────────────
   await load("/account-security");
   assert.deepEqual(await openStates(desktop), {
-    "Core Work": true, Safety: false, "Food & Water": false, Operations: false,
-    "People & Training": false, Reporting: false, Administration: false,
-  }, "Core Work starts open and the rest closed");
+    Home: true, "Set up": true, Compliance: true, Safety: false, "Food & Water": false, Operations: false,
+    "People & Training": false, Reporting: false, Other: false, Administration: false,
+  }, "Home, Set up and Compliance start open and the rest closed");
+
+  // Sections run in the order a business sets up the service.
+  const sectionOrder = await desktop.locator("nav button[aria-expanded]").allTextContents();
+  assert.deepEqual(sectionOrder.map(t => t.trim()),
+    ["Home", "Set up", "Compliance", "Safety", "Food & Water", "Operations", "People & Training", "Reporting", "Other", "Administration"],
+    "Sections follow the setup order");
 
   // The current page's section opens on load, even over a saved close.
   await page.evaluate(key => window.localStorage.setItem(key, "false"), groupKey("food-water"));
@@ -123,24 +129,24 @@ try {
   assert.ok(await isOpen(desktop, "Safety"), "Navigating opens the new page's section");
 
   // A toggle is saved and survives a reload.
-  await sectionTrigger(desktop, "Core Work").click();
+  await sectionTrigger(desktop, "Home").click();
   await sectionTrigger(desktop, "Reporting").click();
   assert.equal(await page.evaluate(key => window.localStorage.getItem(key), groupKey("core")), "false");
   await load("/account-security");
-  assert.ok(!(await isOpen(desktop, "Core Work")) && await isOpen(desktop, "Reporting"), "Saved section state survives a reload");
+  assert.ok(!(await isOpen(desktop, "Home")) && await isOpen(desktop, "Reporting"), "Saved section state survives a reload");
 
   // Another business, and another user on the same business, start from the defaults.
   session.clientId = 2;
   await load("/account-security");
-  assert.ok(await isOpen(desktop, "Core Work") && !(await isOpen(desktop, "Reporting")), "Section state is per business");
+  assert.ok(await isOpen(desktop, "Home") && !(await isOpen(desktop, "Reporting")), "Section state is per business");
   session.clientId = 1;
   session.userId = 8;
   await load("/account-security");
-  assert.ok(await isOpen(desktop, "Core Work") && !(await isOpen(desktop, "Reporting")), "Section state is per user");
+  assert.ok(await isOpen(desktop, "Home") && !(await isOpen(desktop, "Reporting")), "Section state is per user");
   session.userId = 7;
   await load("/account-security");
-  assert.ok(!(await isOpen(desktop, "Core Work")), "The first user's choice is still there");
-  await sectionTrigger(desktop, "Core Work").click();
+  assert.ok(!(await isOpen(desktop, "Home")), "The first user's choice is still there");
+  await sectionTrigger(desktop, "Home").click();
   await sectionTrigger(desktop, "Reporting").click();
 
   // A section whose links are all locked stays closed, even when saved open.
@@ -161,8 +167,8 @@ try {
   await load("/account-security");
   await page.locator("header button").first().click();
   let drawer = page.getByRole("dialog");
-  await sectionTrigger(drawer, "Core Work").waitFor();
-  assert.ok(await isOpen(drawer, "Core Work") && !(await isOpen(drawer, "Operations")), "The drawer starts with the same sections open");
+  await sectionTrigger(drawer, "Home").waitFor();
+  assert.ok(await isOpen(drawer, "Home") && !(await isOpen(drawer, "Operations")), "The drawer starts with the same sections open");
   await sectionTrigger(drawer, "Operations").click();
   await page.keyboard.press("Escape");
   await drawer.waitFor({ state: "detached" });
@@ -185,7 +191,7 @@ try {
   assert.equal(await desktop.getByRole("button", { name: "Pin Asbestos Register" }).count(), 1,
     "Links without a service key can be pinned");
 
-  // Pin FireTrack (Safety, open because /asbestos is in it) and Dashboard (Core).
+  // Pin FireTrack (Safety, open because /asbestos is in it) and Dashboard (Home).
   await desktop.locator('a[href="/fire-safety"]').hover();
   await desktop.getByRole("button", { name: "Pin FireTrack" }).click();
   await desktop.getByRole("button", { name: "Pin Dashboard" }).click();
@@ -239,7 +245,7 @@ try {
   assert.equal((await pinnedLabels(desktop)).length, 6);
   assert.ok(await desktop.getByRole("button", { name: "Pin Asbestos Register" }).isDisabled(),
     "A seventh pin is refused");
-  assert.ok(await desktop.getByRole("button", { name: "Unpin Tasks" }).first().isEnabled());
+  assert.ok(await desktop.getByRole("button", { name: "Unpin Other reminders" }).first().isEnabled());
 
   assert.deepEqual(pageErrors, [], "No page errors");
   console.log("Sidebar sections and pinned links browser tests passed.");
