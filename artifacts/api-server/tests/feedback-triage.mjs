@@ -312,6 +312,49 @@ test("feedback triage persists filtered reports and enforces role and selected-c
     assert.ok(!(await a.request("GET", "/feedback")).data.some(row => row.id === submitted.data.id));
   });
 
+  await t.test("consultants get one list across their businesses; others cannot, and foreign tenants never appear", async () => {
+    const linked = await a.request("POST", "/clients", { name: "Feedback All Businesses", slug: `feedback-all-${stamp}` });
+    assert.equal(linked.status, 201);
+    const submitted = await a.request("POST", `/feedback?clientId=${linked.data.id}`, {
+      category: "bug", summary: "All-businesses report", details: "Should appear in the consultant's combined list.",
+      appVersion: "abc1234def56",
+    });
+    assert.equal(submitted.status, 201);
+    const all = await a.request("GET", "/feedback/all-businesses");
+    assert.equal(all.status, 200);
+    const row = all.data.find(item => item.id === submitted.data.id);
+    assert.ok(row, "linked business report is listed");
+    assert.equal(row.clientId, linked.data.id);
+    assert.equal(row.clientName, "Feedback All Businesses");
+    assert.equal(row.appVersion, "abc1234def56");
+    assert.equal(row.hasScreenshot, false);
+    assert.ok(all.data.some(item => item.id === reports[0]), "own business report is listed");
+    assert.ok(!all.data.some(item => item.id === foreign.data.id), "unlinked tenant never appears");
+    const ids = all.data.map(item => item.id);
+    assert.deepEqual(ids, [...ids].sort((x, y) => y - x), "newest first");
+    const bugs = await a.request("GET", "/feedback/all-businesses?category=bug");
+    assert.ok(bugs.data.every(item => item.category === "bug"));
+    assert.equal((await a.request("GET", "/feedback/all-businesses?status=invalid")).status, 400);
+    assert.equal((await b.request("GET", "/feedback/all-businesses")).status, 403);
+    assert.equal((await anonymous("GET", "/feedback/all-businesses")).status, 401);
+  });
+
+  await t.test("screenshots: only images are signed, foreign uploads are refused and nothing is saved", async () => {
+    assert.equal((await a.request("POST", "/feedback/screenshot/request-upload", { contentType: "application/pdf" })).status, 400);
+    assert.equal((await anonymous("POST", "/feedback/screenshot/request-upload", { contentType: "image/png" })).status, 401);
+    const before = (await a.request("GET", "/feedback")).data.length;
+    const spoofed = await a.request("POST", "/feedback", {
+      category: "bug", summary: "Spoofed screenshot", details: "Points at another tenant's staged upload.",
+      screenshot: { objectPath: `/objects/uploads/tenant-${b.clientId}/00000000-0000-4000-8000-000000000000`, fileName: "x.png" },
+    });
+    assert.equal(spoofed.status, 403);
+    assert.equal((await a.request("GET", "/feedback")).data.length, before, "rejected report is not saved");
+    const plain = (await a.request("GET", "/feedback")).data[0];
+    assert.equal((await a.request("GET", `/feedback/${plain.id}/screenshot`)).status, 404);
+    assert.equal((await a.request("GET", `/feedback/${foreign.data.id}/screenshot`)).status, 404);
+    assert.equal((await a.request("GET", `/feedback/${foreign.data.id}/screenshot?clientId=${b.clientId}`)).status, 403);
+  });
+
   await t.test("client administrators can triage; staff and viewers can submit but cannot read internal notes", async () => {
     for (const role of ["client_admin", "client_staff", "client_viewer"]) {
       const email = `feedback-${role}-${stamp}@test.local`;
@@ -331,6 +374,9 @@ test("feedback triage persists filtered reports and enforces role and selected-c
         category: "feedback", summary: `${role} submission`, details: "All authenticated roles can continue submitting feedback.",
       })).status, 201);
       assert.equal((await request("GET", `/feedback?clientId=${b.clientId}`)).status, 403);
+      // Every role may attach a screenshot (the type check answers, not the role guard).
+      assert.equal((await request("POST", "/feedback/screenshot/request-upload", { contentType: "text/plain" })).status, 400);
+      assert.equal((await request("GET", "/feedback/all-businesses")).status, 403);
     }
     const reloaded = (await a.request("GET", "/feedback")).data.find(row => row.id === reports[0]);
     assert.equal(reloaded.internalNote, "Manager-only response.");

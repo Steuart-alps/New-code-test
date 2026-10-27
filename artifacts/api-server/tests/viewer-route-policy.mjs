@@ -73,6 +73,7 @@ const EXCEPTIONS = {
   "safe-track.ts POST /sops/:id/self-acknowledge": ownAction("acknowledge a document for oneself", /\brequireAuth\b/, /\bselfAckRoute\(/),
   "safe-track.ts POST /handbook/:id/self-acknowledge": ownAction("acknowledge a document for oneself", /\brequireAuth\b/, /\bselfAckRoute\(/),
   "feedback.ts POST /feedback": ownAction("send product feedback", /\brequireAuth\b/),
+  "feedback.ts POST /feedback/screenshot/request-upload": ownAction("attach a screenshot to own feedback (verified on send)", /\brequireAuth\b/, /\bensureUploadCapacity\b/),
   "analytics.ts POST /analytics/events": ownAction("first-party analytics event (no tenant data)", /\brequireCookieSession\b/, /\bvalidateAnalyticsEvent\(/),
   "admin.ts POST /admin/seed-demo": secretToken("demo price seed", /\bprocess\.env\.DEMO_SEED_TOKEN\b/, /\bpresented !== token\b/),
 };

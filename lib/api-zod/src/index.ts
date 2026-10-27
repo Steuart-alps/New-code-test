@@ -8,10 +8,12 @@ export * from './kitchen-temperature';
 // add the name here, preferring the ./generated/api copy.
 export {
   AddPrivacyRetentionVerificationParams,
+  GetFeedbackScreenshotParams,
   GetFoodSafetyRecordByDateParams,
   GetStorageUsageResponse,
   ImportExtinguisherPointsBody,
   ListFeedbackReportHistoryParams,
+  RequestFeedbackScreenshotUploadBody,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   SavePATPresetTemplateBody,

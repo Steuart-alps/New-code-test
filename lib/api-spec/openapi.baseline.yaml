@@ -83,6 +83,85 @@ paths:
                 items: { $ref: "#/components/schemas/FeedbackReport" }
         "403":
           description: Not an administrator or not authorised for this client
+  /feedback/all-businesses:
+    get:
+      operationId: listAllBusinessesFeedbackReports
+      tags: [feedback]
+      summary: Feedback from every business the consultant may open, newest first (consultants only, at most 500)
+      parameters:
+        - in: query
+          name: category
+          schema: { type: string, enum: [feedback, bug, feature] }
+        - in: query
+          name: status
+          schema: { type: string, enum: [new, reviewing, resolved] }
+      responses:
+        "200":
+          description: Reports, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackReport" }
+        "400":
+          description: Invalid filter
+        "403":
+          description: Not a consultant
+  /feedback/screenshot/request-upload:
+    post:
+      operationId: requestFeedbackScreenshotUpload
+      tags: [feedback]
+      summary: Presigned upload for a screenshot to attach to feedback (any signed-in user)
+      description: >
+        The returned objectPath is sent as screenshot.objectPath with the
+        feedback; the image is verified and secured when the feedback is saved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contentType]
+              properties:
+                contentType: { type: string, enum: [image/png, image/jpeg, image/webp] }
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackScreenshotUpload" }
+        "400":
+          description: Not a PNG, JPEG or WebP image
+        "409":
+          description: The business's paid storage is full (code STORAGE_FULL)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: File storage is unavailable (code OBJECT_STORAGE_UNAVAILABLE)
+  /feedback/{id}/screenshot:
+    get:
+      operationId: getFeedbackScreenshot
+      tags: [feedback]
+      summary: Short-lived link to a report's screenshot in the selected client (administrators only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: clientId
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Download link, valid for 15 minutes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackScreenshotLink" }
+        "403":
+          description: Not an administrator or not authorised for this client
+        "404":
+          description: Report not found or has no screenshot
   /feedback/{id}:
     patch:
       operationId: updateFeedbackReport
@@ -5278,7 +5357,7 @@ components:
         site_name: { type: string, nullable: true }
     FeedbackReport:
       type: object
-      required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, updatedByName, revision, submitterName]
+      required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, updatedByName, revision, submitterName, clientName, hasScreenshot, appVersion]
       properties:
         id: { type: integer }
         clientId: { type: integer }
@@ -5295,6 +5374,21 @@ components:
         updatedByName: { type: [string, "null"] }
         revision: { type: integer, minimum: 0 }
         submitterName: { type: [string, "null"] }
+        clientName: { type: [string, "null"] }
+        hasScreenshot: { type: boolean }
+        appVersion: { type: [string, "null"], description: Web build (commit) the report was sent from }
+    FeedbackScreenshotUpload:
+      type: object
+      required: [uploadUrl, objectPath]
+      properties:
+        uploadUrl: { type: string }
+        objectPath: { type: string }
+    FeedbackScreenshotLink:
+      type: object
+      required: [downloadUrl, fileName]
+      properties:
+        downloadUrl: { type: string }
+        fileName: { type: string }
     FeedbackReportUpdate:
       type: object
       additionalProperties: false
