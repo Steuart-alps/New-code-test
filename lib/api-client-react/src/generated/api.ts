@@ -84,6 +84,8 @@ import type {
   FeedbackReportConflict,
   FeedbackReportUpdate,
   FeedbackReviewEvent,
+  FeedbackScreenshotLink,
+  FeedbackScreenshotUpload,
   FireCallPoint,
   FireCallPointImportRequest,
   FireCallPointImportResult,
@@ -102,6 +104,7 @@ import type {
   FoodSafetyRecordSummary,
   GetCoshhTrackStatusParams,
   GetDailyTrackHistoryParams,
+  GetFeedbackScreenshotParams,
   GetFireSafetyConfigParams,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
@@ -154,6 +157,7 @@ import type {
   LegionellaCheck,
   LegionellaConfig,
   LegionellaStatus,
+  ListAllBusinessesFeedbackReportsParams,
   ListAllergenChartSignoffsParams,
   ListAllergenMenusParams,
   ListAssigneesParams,
@@ -211,6 +215,7 @@ import type {
   PublishPrivacyIntakeLinkParams,
   RecordCoshhSignOffs200,
   RecordFoodSafetyColdReadingParams,
+  RequestFeedbackScreenshotUploadBody,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
@@ -354,6 +359,251 @@ export function useListFeedbackReports<TData = Awaited<ReturnType<typeof listFee
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListFeedbackReportsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListAllBusinessesFeedbackReportsUrl = (params?: ListAllBusinessesFeedbackReportsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/feedback/all-businesses?${stringifiedParams}` : `/api/feedback/all-businesses`
+}
+
+/**
+ * @summary Feedback from every business the consultant may open, newest first (consultants only, at most 500)
+ */
+export const listAllBusinessesFeedbackReports = async (params?: ListAllBusinessesFeedbackReportsParams, options?: RequestInit): Promise<FeedbackReport[]> => {
+
+  return customFetch<FeedbackReport[]>(getListAllBusinessesFeedbackReportsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAllBusinessesFeedbackReportsQueryKey = (params?: ListAllBusinessesFeedbackReportsParams,) => {
+    return [
+    `/api/feedback/all-businesses`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAllBusinessesFeedbackReportsQueryOptions = <TData = Awaited<ReturnType<typeof listAllBusinessesFeedbackReports>>, TError = ErrorType<void>>(params?: ListAllBusinessesFeedbackReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllBusinessesFeedbackReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAllBusinessesFeedbackReportsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAllBusinessesFeedbackReports>>> = ({ signal }) => listAllBusinessesFeedbackReports(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAllBusinessesFeedbackReports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAllBusinessesFeedbackReportsQueryResult = NonNullable<Awaited<ReturnType<typeof listAllBusinessesFeedbackReports>>>
+export type ListAllBusinessesFeedbackReportsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Feedback from every business the consultant may open, newest first (consultants only, at most 500)
+ */
+
+export function useListAllBusinessesFeedbackReports<TData = Awaited<ReturnType<typeof listAllBusinessesFeedbackReports>>, TError = ErrorType<void>>(
+ params?: ListAllBusinessesFeedbackReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAllBusinessesFeedbackReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAllBusinessesFeedbackReportsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRequestFeedbackScreenshotUploadUrl = () => {
+
+
+
+
+  return `/api/feedback/screenshot/request-upload`
+}
+
+/**
+ * The returned objectPath is sent as screenshot.objectPath with the feedback; the image is verified and secured when the feedback is saved.
+ * @summary Presigned upload for a screenshot to attach to feedback (any signed-in user)
+ */
+export const requestFeedbackScreenshotUpload = async (requestFeedbackScreenshotUploadBody: RequestFeedbackScreenshotUploadBody, options?: RequestInit): Promise<FeedbackScreenshotUpload> => {
+
+  return customFetch<FeedbackScreenshotUpload>(getRequestFeedbackScreenshotUploadUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(requestFeedbackScreenshotUploadBody)
+  }
+);}
+
+
+
+
+
+export const getRequestFeedbackScreenshotUploadMutationOptions = <TError = ErrorType<void | ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestFeedbackScreenshotUpload>>, TError,{data: BodyType<RequestFeedbackScreenshotUploadBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestFeedbackScreenshotUpload>>, TError,{data: BodyType<RequestFeedbackScreenshotUploadBody>}, TContext> => {
+
+const mutationKey = ['requestFeedbackScreenshotUpload'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestFeedbackScreenshotUpload>>, {data: BodyType<RequestFeedbackScreenshotUploadBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  requestFeedbackScreenshotUpload(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestFeedbackScreenshotUploadMutationResult = NonNullable<Awaited<ReturnType<typeof requestFeedbackScreenshotUpload>>>
+    export type RequestFeedbackScreenshotUploadMutationBody = BodyType<RequestFeedbackScreenshotUploadBody>
+    export type RequestFeedbackScreenshotUploadMutationError = ErrorType<void | ErrorResponse>
+
+    /**
+ * @summary Presigned upload for a screenshot to attach to feedback (any signed-in user)
+ */
+export const useRequestFeedbackScreenshotUpload = <TError = ErrorType<void | ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestFeedbackScreenshotUpload>>, TError,{data: BodyType<RequestFeedbackScreenshotUploadBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestFeedbackScreenshotUpload>>,
+        TError,
+        {data: BodyType<RequestFeedbackScreenshotUploadBody>},
+        TContext
+      > => {
+      return useMutation(getRequestFeedbackScreenshotUploadMutationOptions(options));
+    }
+
+export const getGetFeedbackScreenshotUrl = (id: number,
+    params?: GetFeedbackScreenshotParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/feedback/${id}/screenshot?${stringifiedParams}` : `/api/feedback/${id}/screenshot`
+}
+
+/**
+ * @summary Short-lived link to a report's screenshot in the selected client (administrators only)
+ */
+export const getFeedbackScreenshot = async (id: number,
+    params?: GetFeedbackScreenshotParams, options?: RequestInit): Promise<FeedbackScreenshotLink> => {
+
+  return customFetch<FeedbackScreenshotLink>(getGetFeedbackScreenshotUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFeedbackScreenshotQueryKey = (id: number,
+    params?: GetFeedbackScreenshotParams,) => {
+    return [
+    `/api/feedback/${id}/screenshot`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFeedbackScreenshotQueryOptions = <TData = Awaited<ReturnType<typeof getFeedbackScreenshot>>, TError = ErrorType<void>>(id: number,
+    params?: GetFeedbackScreenshotParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFeedbackScreenshot>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFeedbackScreenshotQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFeedbackScreenshot>>> = ({ signal }) => getFeedbackScreenshot(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFeedbackScreenshot>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFeedbackScreenshotQueryResult = NonNullable<Awaited<ReturnType<typeof getFeedbackScreenshot>>>
+export type GetFeedbackScreenshotQueryError = ErrorType<void>
+
+
+/**
+ * @summary Short-lived link to a report's screenshot in the selected client (administrators only)
+ */
+
+export function useGetFeedbackScreenshot<TData = Awaited<ReturnType<typeof getFeedbackScreenshot>>, TError = ErrorType<void>>(
+ id: number,
+    params?: GetFeedbackScreenshotParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFeedbackScreenshot>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFeedbackScreenshotQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

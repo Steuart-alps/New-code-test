@@ -2,17 +2,18 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { FeedbackReport, FeedbackReportConflict, FeedbackReviewEvent } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useIsConsultant } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
-import { getApiErrorMessage } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Inbox, RefreshCw, X, AlertTriangle, Lock, History } from "lucide-react";
+import { Inbox, RefreshCw, X, AlertTriangle, Lock, History, Image as ImageIcon, Building2 } from "lucide-react";
 
 type Status = "new" | "reviewing" | "resolved";
+type Scope = "business" | "all";
 const ALL = "all";
 const CATEGORY_LABELS: Record<string, string> = { feedback: "Feedback", bug: "Bug", feature: "Feature request" };
 const STATUS_LABELS: Record<Status, string> = { new: "New", reviewing: "Reviewing", resolved: "Resolved" };
@@ -30,6 +31,12 @@ class SaveConflictError extends Error {
   constructor(message: string, readonly latest: FeedbackReport) { super(message); }
 }
 
+// Calls the API for the business a report belongs to (one list can mix businesses).
+function forClient(clientId: number) {
+  return (path: string, init?: RequestInit) =>
+    apiFetch(`${path}${path.includes("?") ? "&" : "?"}clientId=${encodeURIComponent(clientId)}`, init);
+}
+
 function fmt(d: string | null) {
   if (!d) return "";
   return new Date(d).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -37,9 +44,15 @@ function fmt(d: string | null) {
 
 export default function FeedbackInboxPage() {
   const canAdmin = useCanAdmin();
+  const isConsultant = useIsConsultant();
   const { activeClientId } = useAuth();
   const api = useActiveClientApi();
   const queryClient = useQueryClient();
+  // Consultants can switch to one list across every business they look after
+  // (the feedback email links straight to it with ?view=all).
+  const [scope, setScope] = useState<Scope>(() =>
+    isConsultant && new URLSearchParams(window.location.search).get("view") === "all" ? "all" : "business");
+  const allBusinesses = isConsultant && scope === "all";
   const [category, setCategory] = useState(ALL);
   const [status, setStatus] = useState(ALL);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -60,12 +73,14 @@ export default function FeedbackInboxPage() {
   const qs = params.toString();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery<FeedbackReport[]>({
-    queryKey: ["feedback", activeClientId, category, status],
-    enabled: canAdmin && !!activeClientId,
+    queryKey: allBusinesses ? ["feedback-all", category, status] : ["feedback", activeClientId, category, status],
+    enabled: canAdmin && (allBusinesses || !!activeClientId),
     staleTime: 30_000,
     refetchInterval: 60_000,
     queryFn: async ({ signal }) => {
-      const res = await api(`/feedback${qs ? `?${qs}` : ""}`, { signal });
+      const res = allBusinesses
+        ? await apiFetch(`/feedback/all-businesses${qs ? `?${qs}` : ""}`, { signal })
+        : await api(`/feedback${qs ? `?${qs}` : ""}`, { signal });
       if (!res.ok) throw new Error(await getApiErrorMessage(res, "Could not load feedback."));
       return res.json();
     },
@@ -80,7 +95,7 @@ export default function FeedbackInboxPage() {
     setSaveError(null);
     setCategory(ALL);
     setStatus(ALL);
-  }, [activeClientId]);
+  }, [activeClientId, scope]);
 
   const selected = data?.find(r => r.id === selectedId) ?? null;
   const dirty = !!base && (draftStatus !== base.status || draftNote !== base.note);
@@ -109,12 +124,25 @@ export default function FeedbackInboxPage() {
 
   const history = useQuery<FeedbackReviewEvent[]>({
     // Keyed by revision so a newly saved version refetches its history.
-    queryKey: ["feedback-history", activeClientId, selectedId, shown?.revision ?? null],
-    enabled: canAdmin && !!activeClientId && selectedId !== null,
+    queryKey: ["feedback-history", shown?.clientId ?? null, selectedId, shown?.revision ?? null],
+    enabled: canAdmin && !!shown && selectedId !== null,
     staleTime: 30_000,
     queryFn: async ({ signal }) => {
-      const res = await api(`/feedback/${selectedId}/history`, { signal });
+      const res = await forClient(shown!.clientId)(`/feedback/${selectedId}/history`, { signal });
       if (!res.ok) throw new Error(await getApiErrorMessage(res, "Could not load review history."));
+      return res.json();
+    },
+  });
+
+  const screenshot = useQuery<{ downloadUrl: string; fileName: string }>({
+    // Links last 15 minutes; fetch a fresh one well before that.
+    queryKey: ["feedback-screenshot", shown?.clientId ?? null, shown?.id ?? null],
+    enabled: canAdmin && !!shown?.hasScreenshot,
+    staleTime: 10 * 60_000,
+    gcTime: 10 * 60_000,
+    queryFn: async ({ signal }) => {
+      const res = await forClient(shown!.clientId)(`/feedback/${shown!.id}/screenshot`, { signal });
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "Could not load the screenshot."));
       return res.json();
     },
   });
@@ -148,23 +176,32 @@ export default function FeedbackInboxPage() {
 
   // Publish a saved report immediately: reopening while the refetch is in
   // flight must not initialise a new draft from the previous note.
-  function publish(report: FeedbackReport, clientId: string | number | null) {
-    for (const [key, rows] of queryClient.getQueriesData<FeedbackReport[]>({
-      queryKey: ["feedback", clientId],
-    })) {
+  // Updates both the business inbox and the all-businesses list; each key
+  // ends with its category and status filters.
+  function publish(report: FeedbackReport) {
+    const cached = [
+      ...queryClient.getQueriesData<FeedbackReport[]>({ queryKey: ["feedback", report.clientId] }),
+      ...queryClient.getQueriesData<FeedbackReport[]>({ queryKey: ["feedback-all"] }),
+    ];
+    for (const [key, rows] of cached) {
       if (!rows) continue;
+      const [cat, st] = key.slice(-2);
       queryClient.setQueryData(key, rows
         .map(row => row.id === report.id ? report : row)
-        .filter(row => (key[2] === ALL || row.category === key[2])
-          && (key[3] === ALL || row.status === key[3])));
+        .filter(row => (cat === ALL || row.category === cat)
+          && (st === ALL || row.status === st)));
     }
+  }
+  function refreshLists(clientId: number) {
+    queryClient.invalidateQueries({ queryKey: ["feedback", clientId] });
+    queryClient.invalidateQueries({ queryKey: ["feedback-all"] });
   }
 
   const save = useMutation({
     mutationFn: async (vars: {
-      id: number; clientId: string | number | null; expectedRevision: number; status: Status; internalNote: string;
+      id: number; reportClientId: number; clientId: string | number | null; expectedRevision: number; status: Status; internalNote: string;
     }) => {
-      const res = await api(`/feedback/${vars.id}`, {
+      const res = await forClient(vars.reportClientId)(`/feedback/${vars.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expectedRevision: vars.expectedRevision, status: vars.status, internalNote: vars.internalNote }),
@@ -179,14 +216,14 @@ export default function FeedbackInboxPage() {
       return (await res.json()) as FeedbackReport;
     },
     onSuccess: (report, vars) => {
-      publish(report, vars.clientId);
-      queryClient.invalidateQueries({ queryKey: ["feedback", vars.clientId] });
+      publish(report);
+      refreshLists(vars.reportClientId);
       if (clientRef.current === vars.clientId) close();
     },
     onError: (e, vars) => {
       if (e instanceof SaveConflictError) {
-        publish(e.latest, vars.clientId);
-        queryClient.invalidateQueries({ queryKey: ["feedback", vars.clientId] });
+        publish(e.latest);
+        refreshLists(vars.reportClientId);
       }
       if (clientRef.current !== vars.clientId) return;
       // The draft fields are left untouched so the unsaved note survives.
@@ -203,7 +240,18 @@ export default function FeedbackInboxPage() {
     <AppLayout title="Feedback inbox">
       <div className="space-y-5">
         <div className="flex flex-wrap items-center gap-3">
-          <p className="text-sm text-muted-foreground mr-auto">Reports submitted by people at this client.</p>
+          <p className="text-sm text-muted-foreground mr-auto">
+            {allBusinesses ? "Reports from every business you look after, newest first." : "Reports submitted by people at this client."}
+          </p>
+          {isConsultant && (
+            <Select value={scope} onValueChange={v => setScope(v as Scope)} disabled={save.isPending}>
+              <SelectTrigger className="w-48" aria-label="Which businesses" data-testid="filter-feedback-scope"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="business">This business</SelectItem>
+                <SelectItem value="all">All businesses</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           <Select value={category} onValueChange={setCategory} disabled={save.isPending}>
             <SelectTrigger className="w-44" aria-label="Filter by feedback type" data-testid="filter-category"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -255,10 +303,13 @@ export default function FeedbackInboxPage() {
                 <div className="flex items-center gap-2 mb-1">
                   <Badge className={`rounded-sm ${STATUS_STYLES[r.status]}`}>{STATUS_LABELS[r.status]}</Badge>
                   <span className="text-xs uppercase tracking-wide text-muted-foreground">{CATEGORY_LABELS[r.category]}</span>
+                  {r.hasScreenshot && <ImageIcon className="w-3.5 h-3.5 text-muted-foreground" aria-label="Has a screenshot" />}
                   <span className="ml-auto text-xs text-muted-foreground">{fmt(r.createdAt)}</span>
                 </div>
                 <p className={`text-sm truncate ${r.status === "new" ? "font-semibold" : ""}`}>{r.summary}</p>
-                <p className="text-xs text-muted-foreground truncate">{r.submitterName ?? "Unknown submitter"}</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {r.submitterName ?? "Unknown submitter"}{allBusinesses && r.clientName ? ` · ${r.clientName}` : ""}
+                </p>
               </button>
             ))}
           </div>
@@ -276,15 +327,38 @@ export default function FeedbackInboxPage() {
                   <Button variant="ghost" size="icon" onClick={close} disabled={save.isPending} aria-label="Close report" data-testid="button-close-feedback"><X className="w-4 h-4" /></Button>
                 </div>
                 <dl className="grid grid-cols-2 gap-3 text-sm">
+                  {allBusinesses && (
+                    <div className="col-span-2"><dt className="text-xs text-muted-foreground">Business</dt>
+                      <dd className="flex items-center gap-1.5" data-testid="text-feedback-business"><Building2 className="w-3.5 h-3.5 text-muted-foreground" />{shown.clientName ?? `Business ${shown.clientId}`}</dd></div>
+                  )}
                   <div><dt className="text-xs text-muted-foreground">Submitted by</dt><dd>{shown.submitterName ?? "Unknown"}</dd></div>
                   <div><dt className="text-xs text-muted-foreground">Received</dt><dd>{fmt(shown.createdAt)}</dd></div>
                   <div className="col-span-2"><dt className="text-xs text-muted-foreground">Page</dt><dd className="font-mono text-xs break-all" data-testid="text-feedback-path">{shown.pagePath ?? "Not recorded"}</dd></div>
+                  {shown.appVersion && <div className="col-span-2"><dt className="text-xs text-muted-foreground">App version</dt><dd className="font-mono text-xs break-all">{shown.appVersion}</dd></div>}
                   {shown.updatedAt && <div className="col-span-2"><dt className="text-xs text-muted-foreground">Last updated</dt><dd>{fmt(shown.updatedAt)}{shown.updatedByName ? ` by ${shown.updatedByName}` : ""}</dd></div>}
                 </dl>
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Details</p>
                   <p className="text-sm whitespace-pre-wrap break-words bg-muted/50 p-3" data-testid="text-feedback-details">{shown.details}</p>
                 </div>
+                {shown.hasScreenshot && (
+                  <div data-testid="section-feedback-screenshot">
+                    <p className="text-xs text-muted-foreground mb-1">Screenshot</p>
+                    {screenshot.isLoading && <Skeleton className="h-40 w-full" />}
+                    {screenshot.isError && (
+                      <div className="flex items-center gap-2 text-sm text-destructive">
+                        {screenshot.error instanceof Error ? screenshot.error.message : "Could not load the screenshot."}
+                        <Button variant="outline" size="sm" onClick={() => screenshot.refetch()}>Try again</Button>
+                      </div>
+                    )}
+                    {screenshot.data && (
+                      <a href={screenshot.data.downloadUrl} target="_blank" rel="noopener noreferrer" title="Open full size">
+                        <img src={screenshot.data.downloadUrl} alt={`Screenshot: ${screenshot.data.fileName}`}
+                          className="max-h-80 w-auto border" />
+                      </a>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-3 border-t pt-4">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Lock className="w-3.5 h-3.5" />
@@ -341,7 +415,7 @@ export default function FeedbackInboxPage() {
                         if (!base) return;
                         setSaveError(null);
                         save.mutate({
-                          id: shown.id, clientId: activeClientId, expectedRevision: base.revision,
+                          id: shown.id, reportClientId: shown.clientId, clientId: activeClientId, expectedRevision: base.revision,
                           status: draftStatus, internalNote: draftNote,
                         });
                       }}

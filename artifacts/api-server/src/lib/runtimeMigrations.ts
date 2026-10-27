@@ -5994,6 +5994,14 @@ async function migrateDoctrackSafetrackMerge() {
       ADD COLUMN IF NOT EXISTS updated_by integer REFERENCES users(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS updated_at timestamp
   `);
+  // Optional screenshot (a verified, tenant-owned image) and the web build the
+  // report came from.
+  await db.execute(sql`
+    ALTER TABLE feedback_reports
+      ADD COLUMN IF NOT EXISTS screenshot_object_path text,
+      ADD COLUMN IF NOT EXISTS screenshot_file_name text,
+      ADD COLUMN IF NOT EXISTS app_version text
+  `);
   await migrateFeedbackReviewHistory();
 
   // 5. Migrate acknowledgements — only for rows whose source doc was already migrated.

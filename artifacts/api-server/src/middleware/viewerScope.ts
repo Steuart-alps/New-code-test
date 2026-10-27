@@ -16,6 +16,7 @@ const VIEWER_ROUTES: Array<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/train-track\/my-documents\/\d+\/download-url\/?$/ },
   { method: "POST", path: /^\/train-track\/my-documents\/\d+\/sign\/?$/ },
   { method: "POST", path: /^\/feedback\/?$/ },
+  { method: "POST", path: /^\/feedback\/screenshot\/request-upload\/?$/ },
   { method: "POST", path: /^\/mobile\/push-token\/?$/ },
   { method: "DELETE", path: /^\/mobile\/push-token\/?$/ },
 ];

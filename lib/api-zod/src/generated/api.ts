@@ -36,9 +36,78 @@ export const ListFeedbackReportsResponseItem = zod.object({
   "updatedBy": zod.number().nullable(),
   "updatedByName": zod.string().nullable(),
   "revision": zod.number().min(listFeedbackReportsResponseRevisionMin),
-  "submitterName": zod.string().nullable()
+  "submitterName": zod.string().nullable(),
+  "clientName": zod.string().nullable(),
+  "hasScreenshot": zod.boolean(),
+  "appVersion": zod.string().nullable().describe('Web build (commit) the report was sent from')
 })
 export const ListFeedbackReportsResponse = zod.array(ListFeedbackReportsResponseItem)
+
+
+/**
+ * @summary Feedback from every business the consultant may open, newest first (consultants only, at most 500)
+ */
+export const ListAllBusinessesFeedbackReportsQueryParams = zod.object({
+  "category": zod.enum(['feedback', 'bug', 'feature']).optional(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']).optional()
+})
+
+export const listAllBusinessesFeedbackReportsResponseRevisionMin = 0;
+
+
+
+export const ListAllBusinessesFeedbackReportsResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "category": zod.enum(['feedback', 'bug', 'feature']),
+  "summary": zod.string(),
+  "details": zod.string(),
+  "pagePath": zod.string().nullable(),
+  "emailStatus": zod.string(),
+  "createdAt": zod.date(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']),
+  "internalNote": zod.string(),
+  "updatedAt": zod.date().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "updatedByName": zod.string().nullable(),
+  "revision": zod.number().min(listAllBusinessesFeedbackReportsResponseRevisionMin),
+  "submitterName": zod.string().nullable(),
+  "clientName": zod.string().nullable(),
+  "hasScreenshot": zod.boolean(),
+  "appVersion": zod.string().nullable().describe('Web build (commit) the report was sent from')
+})
+export const ListAllBusinessesFeedbackReportsResponse = zod.array(ListAllBusinessesFeedbackReportsResponseItem)
+
+
+/**
+ * The returned objectPath is sent as screenshot.objectPath with the feedback; the image is verified and secured when the feedback is saved.
+ * @summary Presigned upload for a screenshot to attach to feedback (any signed-in user)
+ */
+export const RequestFeedbackScreenshotUploadBody = zod.object({
+  "contentType": zod.enum(['image/png', 'image/jpeg', 'image/webp'])
+})
+
+export const RequestFeedbackScreenshotUploadResponse = zod.object({
+  "uploadUrl": zod.string(),
+  "objectPath": zod.string()
+})
+
+
+/**
+ * @summary Short-lived link to a report's screenshot in the selected client (administrators only)
+ */
+export const GetFeedbackScreenshotParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetFeedbackScreenshotQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const GetFeedbackScreenshotResponse = zod.object({
+  "downloadUrl": zod.string(),
+  "fileName": zod.string()
+})
 
 
 /**
@@ -83,7 +152,10 @@ export const UpdateFeedbackReportResponse = zod.object({
   "updatedBy": zod.number().nullable(),
   "updatedByName": zod.string().nullable(),
   "revision": zod.number().min(updateFeedbackReportResponseRevisionMin),
-  "submitterName": zod.string().nullable()
+  "submitterName": zod.string().nullable(),
+  "clientName": zod.string().nullable(),
+  "hasScreenshot": zod.boolean(),
+  "appVersion": zod.string().nullable().describe('Web build (commit) the report was sent from')
 })
 
 

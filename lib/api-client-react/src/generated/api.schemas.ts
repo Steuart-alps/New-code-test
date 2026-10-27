@@ -316,6 +316,24 @@ export interface FeedbackReport {
   revision: number;
   /** @nullable */
   submitterName: string | null;
+  /** @nullable */
+  clientName: string | null;
+  hasScreenshot: boolean;
+  /**
+     * Web build (commit) the report was sent from
+     * @nullable
+     */
+  appVersion: string | null;
+}
+
+export interface FeedbackScreenshotUpload {
+  uploadUrl: string;
+  objectPath: string;
+}
+
+export interface FeedbackScreenshotLink {
+  downloadUrl: string;
+  fileName: string;
 }
 
 export type FeedbackReportUpdateStatus = typeof FeedbackReportUpdateStatus[keyof typeof FeedbackReportUpdateStatus];
@@ -4199,6 +4217,46 @@ export const ListFeedbackReportsStatus = {
   reviewing: 'reviewing',
   resolved: 'resolved',
 } as const;
+
+export type ListAllBusinessesFeedbackReportsParams = {
+category?: ListAllBusinessesFeedbackReportsCategory;
+status?: ListAllBusinessesFeedbackReportsStatus;
+};
+
+export type ListAllBusinessesFeedbackReportsCategory = typeof ListAllBusinessesFeedbackReportsCategory[keyof typeof ListAllBusinessesFeedbackReportsCategory];
+
+
+export const ListAllBusinessesFeedbackReportsCategory = {
+  feedback: 'feedback',
+  bug: 'bug',
+  feature: 'feature',
+} as const;
+
+export type ListAllBusinessesFeedbackReportsStatus = typeof ListAllBusinessesFeedbackReportsStatus[keyof typeof ListAllBusinessesFeedbackReportsStatus];
+
+
+export const ListAllBusinessesFeedbackReportsStatus = {
+  new: 'new',
+  reviewing: 'reviewing',
+  resolved: 'resolved',
+} as const;
+
+export type RequestFeedbackScreenshotUploadBodyContentType = typeof RequestFeedbackScreenshotUploadBodyContentType[keyof typeof RequestFeedbackScreenshotUploadBodyContentType];
+
+
+export const RequestFeedbackScreenshotUploadBodyContentType = {
+  'image/png': 'image/png',
+  'image/jpeg': 'image/jpeg',
+  'image/webp': 'image/webp',
+} as const;
+
+export type RequestFeedbackScreenshotUploadBody = {
+  contentType: RequestFeedbackScreenshotUploadBodyContentType;
+};
+
+export type GetFeedbackScreenshotParams = {
+clientId?: number;
+};
 
 export type UpdateFeedbackReportParams = {
 clientId?: number;
