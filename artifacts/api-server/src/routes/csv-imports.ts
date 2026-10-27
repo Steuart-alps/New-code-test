@@ -10,6 +10,7 @@ import { siteVisibleSql } from "../lib/departmentSites";
 import { getAccountToday } from "../lib/accountClock";
 import { ReportReadingError, reportReadingConfigured, UnreadableReportError } from "../lib/reportReading";
 import { readApplianceList, REGISTER_READING_MAX_BYTES, registerReadingMonthlyLimit } from "../lib/registerReading";
+import { isListReadingKind, readList, type ListReadingKind } from "../lib/listReading";
 import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
 import {
   CSV_IMPORT_MAX_CELL_LENGTH,
@@ -502,6 +503,86 @@ router.post("/imports/pat-appliances/read", requireAuth, denyViewers, requirePat
     if (err instanceof RegisterReadLimitError) return res.status(429).json({ error: err.message, code: "REGISTER_READING_LIMIT" });
     if (err instanceof UnreadableReportError) return res.status(400).json({ error: err.message });
     if (!(err instanceof ReportReadingError)) req.log.error({ err }, "PAT register list reading failed");
+    res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read this list just now. Try again later, or upload a spreadsheet." });
+  }
+});
+
+// ── Reading a photo, scan, PDF or Word list for the other imports ──────────
+// The same as the PAT register reading above, for RoomTrack rooms,
+// contractors, FireTrack call points, GreenTrack equipment and the staff
+// roster (lib/listReading.ts). Readings share the PAT monthly count, so
+// REGISTER_READING_MONTHLY_LIMIT is the number of lists a business may have
+// read a month across all imports. Each kind keeps its import's own access
+// rule: owners and consultants, with the track switched on.
+const LIST_READING_ACCESS: Record<ListReadingKind, RequestHandler[]> = {
+  "room-track-rooms": [requireClientAdmin, requireService("roomtrack")],
+  contractors: [requireClientAdmin],
+  "fire-call-points": [requireClientAdmin, requireService("firetrack")],
+  "greentrack-equipment": [requireClientAdmin, requireService("greentrack")],
+  "staff-roster": [requireClientAdmin],
+};
+
+/** Runs the access rule for the :kind in the path; unknown kinds are 404. */
+const requireListReadingAccess: RequestHandler = (req, res, next) => {
+  const kind = req.params.kind;
+  if (!isListReadingKind(kind)) return res.status(404).json({ error: "Not found" });
+  const chain = LIST_READING_ACCESS[kind];
+  const run = (index: number): void => {
+    if (index === chain.length) return next();
+    chain[index](req, res, (err?: unknown) => (err ? next(err) : run(index + 1)));
+  };
+  run(0);
+};
+
+router.get("/imports/list-reading/:kind", requireAuth, requireListReadingAccess, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const month = (await getAccountToday(clientId)).slice(0, 7);
+  const [sites, used, ai] = await Promise.all([
+    importableSites(clientId, getActiveDepartmentId(req)), registerReadsThisMonth(clientId, month), getAiStatus(clientId),
+  ]);
+  res.json({ available: reportReadingConfigured(), monthlyLimit: registerReadingMonthlyLimit(), usedThisMonth: used, ai, sites });
+});
+
+router.post("/imports/list-reading/:kind/read", requireAuth, denyViewers, requireListReadingAccess, async (req, res) => {
+  const kind = req.params.kind as ListReadingKind;
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!reportReadingConfigured()) {
+    return res.status(503).json({ error: "Reading photos and documents is not switched on yet. Upload a spreadsheet instead.", code: "REGISTER_READING_UNAVAILABLE" });
+  }
+  const parsed = registerReadBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a photo, PDF or Word file of your list (8 MB at most)" });
+  const sites = await importableSites(clientId, getActiveDepartmentId(req));
+  const siteId = parsed.data.siteId ?? null;
+  if (siteId !== null && !sites.some((site) => site.id === siteId)) return res.status(400).json({ error: "Choose one of your sites" });
+  const trades = kind === "contractors" ? await getEffectiveOptionList(clientId, "fixtrack_trades") : undefined;
+
+  const bytes = Buffer.from(parsed.data.data, "base64");
+  const month = (await getAccountToday(clientId)).slice(0, 7);
+  const limit = registerReadingMonthlyLimit();
+  let aiUseId: number | null = null;
+  try {
+    // A file Claude cannot read is turned away before it counts towards the
+    // limit or the AI allowance (lib/aiAllowance.ts).
+    const result = await readList({ kind, bytes, mimeType: parsed.data.mimeType, fileName: parsed.data.fileName, sites, siteId, trades }, async () => {
+      aiUseId = await claimAiUse({
+        clientId, userId: req.currentUser?.id ?? null, feature: "register_reading",
+        estimatePence: REGISTER_READING_ESTIMATE_PENCE, instead: "Upload a spreadsheet instead.",
+      });
+      if (!await claimRegisterRead(clientId, month, limit)) {
+        throw new RegisterReadLimitError(`This business has had ${limit} lists read this month, the most allowed. Upload a spreadsheet instead, or ask ALPS.`);
+      }
+    });
+    if (aiUseId !== null) await settleAiUse(aiUseId, result.usage, true);
+    req.log.info({ clientId, kind, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, rows: result.rows.length }, "Import list read");
+    res.json({ headers: result.headers, rows: result.rows, unclear: result.unclear, unclearRows: result.unclearRows });
+  } catch (err) {
+    if (aiUseId !== null) await settleAiUse(aiUseId, err instanceof ReportReadingError ? err.usage ?? null : null, false);
+    if (err instanceof AiUnavailableError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof RegisterReadLimitError) return res.status(429).json({ error: err.message, code: "REGISTER_READING_LIMIT" });
+    if (err instanceof UnreadableReportError) return res.status(400).json({ error: err.message });
+    if (!(err instanceof ReportReadingError)) req.log.error({ err, kind }, "Import list reading failed");
     res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read this list just now. Try again later, or upload a spreadsheet." });
   }
 });

@@ -2511,6 +2511,15 @@ export interface PatRegisterReadResult {
   unclear: number;
 }
 
+export interface ImportListReadResult {
+  headers: string[];
+  rows: string[][];
+  /** Rows that were hard to read */
+  unclear: number;
+  /** File row numbers (the header row is row 1) of the rows that were hard to read; where the import has a Notes column, their Notes start with "Check:" */
+  unclearRows: number[];
+}
+
 export interface FireCallPointImportRequest {
   headers: string[];
   rows: string[][];
