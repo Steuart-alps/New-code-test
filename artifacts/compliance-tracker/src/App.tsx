@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/context/auth-context";
 
 import { trackModuleFirstUse } from "@/lib/analytics";
 import { pendingScanPath, rememberScanPath } from "@/lib/scan-return";
+import { readBillingReturn } from "@/lib/billing-return";
 
 // Each page is its own chunk so the landing and sign-in pages stay small and a
 // page's code is only downloaded when someone opens it.
@@ -214,6 +215,9 @@ function ProtectedRoutes() {
   if (location === "/login" || location === "/") {
     const scanPath = pendingScanPath();
     if (scanPath) return <Redirect to={scanPath} />;
+    // Back from Stripe Checkout (sessions opened before it returned to
+    // /dashboard): straight into the business that was paid for.
+    if (readBillingReturn()) return <Redirect to={`/dashboard${window.location.search}`} />;
     // Consultants land on their portfolio, which forwards to the dashboard
     // unless they manage two or more businesses.
     return <Redirect to={user.role === "consultant" ? "/portfolio?from=landing" : "/dashboard"} />;
