@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { strFromU8, unzipSync } from "fflate";
 import { z } from "zod";
+import { usageFromMessage, type AiCallUsage } from "./aiPricing";
 
 /**
  * Reads an uploaded audit or inspection report with Claude and suggests the
@@ -29,8 +30,18 @@ export function reportReadingMonthlyLimit(): number {
   return Number.isInteger(raw) && raw >= 0 ? raw : 20;
 }
 
-/** A reading that failed for a reason the person can act on; the message is shown to them. */
-export class ReportReadingError extends Error {}
+/**
+ * A reading that failed for a reason the person can act on; the message is
+ * shown to them. `usage` is set when Claude had already answered, so the
+ * request's cost still counts towards the AI allowance.
+ */
+export class ReportReadingError extends Error {
+  usage?: AiCallUsage;
+  constructor(message: string, usage?: AiCallUsage) {
+    super(message);
+    this.usage = usage;
+  }
+}
 /** A file Claude cannot read here; the person is asked for a PDF instead. */
 export class UnreadableReportError extends ReportReadingError {}
 
@@ -165,6 +176,7 @@ export type ReportReadingResult = {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  usage: AiCallUsage;
 };
 
 export interface ReportReadingInput {
@@ -223,13 +235,14 @@ export async function readReportForActions(input: ReportReadingInput): Promise<R
     }],
   }).finalMessage();
 
-  if (message.stop_reason === "refusal") throw new ReportReadingError("ComplyTrack could not read this report. Type the actions in instead.");
-  if (message.stop_reason === "max_tokens") throw new ReportReadingError("This report is too long to read in one go. Type the actions in, or upload it in parts.");
+  const usage = usageFromMessage(message, model);
+  if (message.stop_reason === "refusal") throw new ReportReadingError("ComplyTrack could not read this report. Type the actions in instead.", usage);
+  if (message.stop_reason === "max_tokens") throw new ReportReadingError("This report is too long to read in one go. Type the actions in, or upload it in parts.", usage);
   const text = message.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("");
   let json: unknown = null;
   try { json = JSON.parse(text); } catch { /* reported below */ }
   const parsed = resultSchema.safeParse(json);
-  if (!parsed.success) throw new ReportReadingError("ComplyTrack could not understand its reading of this report. Try again or type the actions in.");
+  if (!parsed.success) throw new ReportReadingError("ComplyTrack could not understand its reading of this report. Try again or type the actions in.", usage);
 
   const isDate = (value: string | null) => !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
   return {
@@ -246,5 +259,6 @@ export async function readReportForActions(input: ReportReadingInput): Promise<R
     model: message.model ?? model,
     inputTokens: message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0),
     outputTokens: message.usage.output_tokens,
+    usage,
   };
 }
