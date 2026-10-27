@@ -265,6 +265,9 @@ jobs:
       - name: Reading PAT register lists with Claude (stand-in API, no key)
         run: pnpm --filter @workspace/api-server run test:register-reading
 
+      - name: Reading certificates with Claude (stand-in API, no key)
+        run: pnpm --filter @workspace/api-server run test:certificate-reading
+
       - name: Pricing AI requests (pure)
         run: pnpm --filter @workspace/api-server run test:ai-pricing
 

@@ -193,16 +193,15 @@ export async function createDefect(tx: Tx, input: {
   fixTrack: { enabled: boolean; issueType?: string };
   user: { id: number; name: string | null };
   today: string;
+  /** Set (a job id, or null for none) when the caller has already decided the
+   *  defect's job, as with one remedial job for a certificate. */
+  job?: number | null;
 }) {
   const { clientId, certificate, item, defect, user, today } = input;
-  let fixTrackIssueId: number | null = null;
-  if (input.fixTrack.enabled) {
+  let fixTrackIssueId: number | null = input.job ?? null;
+  if (input.job === undefined && input.fixTrack.enabled) {
     const plan = defectFixTrackPlan(defect.code);
-    let siteName: string | null = null;
-    if (item.siteId != null) {
-      const [site] = (await tx.execute(sql`SELECT name FROM sites WHERE id = ${item.siteId} AND client_id = ${clientId} LIMIT 1`)).rows as Array<{ name: string }>;
-      siteName = site?.name ?? null;
-    }
+    const siteName = await itemSiteName(tx, clientId, item.siteId);
     const codeLabel = defect.code === "other" ? "Observation" : defect.code;
     const title = `${checkLabel(item.title)} ${codeLabel}: ${defect.description}`.slice(0, 300);
     const [issue] = await tx.insert(fixTrackIssuesTable).values({
@@ -233,6 +232,66 @@ export async function createDefect(tx: Tx, input: {
     RETURNING id
   `)).rows as Array<{ id: number }>;
   return { id: Number(row!.id), fixTrackIssueId };
+}
+
+async function itemSiteName(tx: Tx, clientId: number, siteId: number | null): Promise<string | null> {
+  if (siteId == null) return null;
+  const [site] = (await tx.execute(sql`SELECT name FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1`)).rows as Array<{ name: string }>;
+  return site?.name ?? null;
+}
+
+const PRIORITY_ORDER = ["urgent", "high", "medium", "low"] as const;
+
+/**
+ * One FixTrack job for all the remedial work on a certificate (the AI
+ * certificate reader's way, so one quote request covers it): the most urgent
+ * defect sets its priority and target date, and the description lists every
+ * item. Returns the job's id; the caller links the defects to it.
+ */
+export async function createRemedialJob(tx: Tx, input: {
+  clientId: number;
+  certificate: { id: number; name: string };
+  item: { id: number; title: string; siteId: number | null };
+  defects: DefectInput[];
+  issueType?: string;
+  user: { id: number; name: string | null };
+  today: string;
+}): Promise<number> {
+  const { clientId, certificate, item, defects, user, today } = input;
+  const plans = defects.map((defect) => defectFixTrackPlan(defect.code));
+  const priority = PRIORITY_ORDER.find((p) => plans.some((plan) => plan.priority === p)) ?? "medium";
+  const targets = plans.map((plan) => plan.targetDays).filter((days): days is number => days != null);
+  const codeSummary = [...ACTION_DEFECT_CODES, "C3", "other"]
+    .map((code) => [code, defects.filter((defect) => defect.code === code).length] as const)
+    .filter(([, count]) => count > 0)
+    .map(([code, count]) => `${count} × ${code}`)
+    .join(", ");
+  const siteName = await itemSiteName(tx, clientId, item.siteId);
+  const lines = defects.map((defect, index) => [
+    `${index + 1}. ${defect.code === "other" ? "Remedial work" : `${defect.code} (${DEFECT_LABELS[defect.code]})`}: ${defect.description}`,
+    defect.location?.trim() ? ` (${defect.location.trim()})` : "",
+  ].join(""));
+  const [issue] = await tx.insert(fixTrackIssuesTable).values({
+    clientId,
+    siteId: item.siteId,
+    title: `${checkLabel(item.title)} remedial work: ${codeSummary}`.slice(0, 300),
+    issueType: input.issueType ?? fixTrackIssueTypeFor(item.title),
+    location: (siteName || "See compliance check").slice(0, 300),
+    description: [
+      `Remedial work from certificate "${certificate.name}" for compliance check "${item.title}":`,
+      ...lines,
+      "",
+      `Compliance check: ${item.id}; certificate: ${certificate.id}.`,
+    ].join("\n").slice(0, 5000),
+    priority,
+    status: "reported",
+    reportedBy: user.name?.trim() || "ComplyTrack",
+    reportedDate: today,
+    targetDate: targets.length ? addCalendarDays(today, Math.min(...targets)) : null,
+    createdBy: user.id,
+  }).returning({ id: fixTrackIssuesTable.id });
+  await tx.insert(fixTrackIssueActivityTable).values({ clientId, issueId: issue!.id, eventType: "status", status: "reported", createdBy: user.id });
+  return issue!.id;
 }
 
 export type DefectView = {

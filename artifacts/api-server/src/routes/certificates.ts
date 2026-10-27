@@ -1,8 +1,10 @@
 import { Router, type IRouter, type Request } from "express";
 import { db } from "@workspace/db";
 import { reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
-import { certificatesTable, certificateDefectsTable, contractorsTable, complianceItemsTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import {
+  certificatesTable, certificateDefectsTable, contractorsTable, complianceItemsTable, sitesTable, categoriesTable,
+} from "@workspace/db/schema";
+import { eq, and, or, isNull, inArray } from "drizzle-orm";
 import {
   ListCertificatesParams,
   CreateCertificateParams,
@@ -10,14 +12,22 @@ import {
   DeleteCertificateParams,
 } from "@workspace/api-zod";
 import { z } from "zod";
-import { requireAuth, requireClientAdmin, canAccessClient, denyViewers } from "../middleware/requireAuth";
+import {
+  requireAuth, requireClientAdmin, canAccessClient, denyViewers, getActiveDepartmentId, getClientId,
+} from "../middleware/requireAuth";
+import { sitesTableVisibleTo } from "../lib/departmentSites";
+import { CONTRACTOR_VISIT_TYPES } from "../lib/contractorVisits";
+import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
+import { ReportReadingError, UnreadableReportError, reportReadingConfigured } from "../lib/reportReading";
+import { CERTIFICATE_READING_MAX_BYTES, readCertificate, type CertificateCheckChoice } from "../lib/certificateReading";
 import { appendAuditEvent } from "../lib/audit";
 import { getAccountToday } from "../lib/accountClock";
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { addMonthsUtc } from "../lib/complianceCompletion";
 import {
-  CERTIFICATE_OUTCOMES, DEFECT_CODES, createDefect, defectsForCertificates, fixTrackIssueTypeFor, outcomeMovesDueDate,
+  ACTION_DEFECT_CODES, CERTIFICATE_OUTCOMES, DEFECT_CODES, createDefect, createRemedialJob, defectsForCertificates,
+  fixTrackIssueTypeFor, outcomeMovesDueDate,
 } from "../lib/certificateOutcomes";
 import { ObjectContentError, ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
 
@@ -41,10 +51,17 @@ const DefectBody = z.object({
 type DefectBodyValue = z.infer<typeof DefectBody>;
 
 // Item certificates also record the outcome and, on creation, their defects.
+// With remedialJob (the AI certificate reader), the defects that need work
+// share one FixTrack job, so one quote request covers them, and the rest (C3s,
+// advice) open no job. needsWork defaults from the code: C1/C2/FI/ID/AR.
 const CreateItemCertificateBody = CreateCertificateBody.extend({
   outcome: z.enum(CERTIFICATE_OUTCOMES).optional(),
-  defects: z.array(DefectBody).max(100).optional(),
+  defects: z.array(DefectBody.extend({ needsWork: z.boolean().optional() })).max(100).optional(),
+  remedialJob: z.boolean().optional(),
+  /** The details were read by ComplyTrack's AI and checked by the person saving. */
+  readByAi: z.boolean().optional(),
 });
+type ItemDefectValue = DefectBodyValue & { needsWork?: boolean };
 const UpdateItemCertificateBody = CreateCertificateBody.extend({
   outcome: z.enum(CERTIFICATE_OUTCOMES),
 }).partial();
@@ -162,14 +179,28 @@ async function fixTrackSetup(clientId: number, itemTitle: string) {
 }
 
 /** Record defects (and their FixTrack jobs) for the item's own client. */
-async function addDefects(req: Request, item: Item, cert: Cert, defects: DefectBodyValue[]) {
+async function addDefects(req: Request, item: Item, cert: Cert, defects: ItemDefectValue[], remedialJob = false) {
   if (!defects.length) return [];
   const fixTrack = await fixTrackSetup(item.clientId, item.title);
   const today = await getAccountToday(item.clientId);
   const user = req.currentUser!;
   return db.transaction(async (tx) => {
+    let job: number | null | undefined;
+    if (remedialJob) {
+      const work = defects.filter((d) => d.needsWork ?? ACTION_DEFECT_CODES.includes(d.code));
+      job = fixTrack.enabled && work.length ? await createRemedialJob(tx, {
+        clientId: item.clientId,
+        certificate: { id: cert.id, name: cert.name },
+        item: { id: item.id, title: item.title, siteId: item.siteId },
+        defects: work,
+        issueType: fixTrack.issueType,
+        user: { id: user.id, name: user.name ?? null },
+        today,
+      }) : null;
+    }
     const created: Array<{ id: number; fixTrackIssueId: number | null }> = [];
-    for (const defect of defects) {
+    for (const { needsWork, ...defect } of defects) {
+      const inJob = needsWork ?? ACTION_DEFECT_CODES.includes(defect.code);
       created.push(await createDefect(tx, {
         clientId: item.clientId,
         certificate: { id: cert.id, name: cert.name },
@@ -178,6 +209,7 @@ async function addDefects(req: Request, item: Item, cert: Cert, defects: DefectB
         fixTrack,
         user: { id: user.id, name: user.name ?? null },
         today,
+        ...(remedialJob ? { job: inJob ? job ?? null : null } : {}),
       }));
     }
     return created;
@@ -190,17 +222,21 @@ router.post("/items/:itemId/certificates", requireAuth, denyViewers, requireClie
   if (!parsed.success) return void res.status(400).json({ error: "Invalid certificate", details: parsed.error.flatten() });
   const item = await assertItemAccess(req, itemId);
   if (!item) return void res.status(404).json({ error: "Compliance item not found" });
-  const { defects = [], ...body } = parsed.data;
+  const { defects = [], remedialJob = false, readByAi = false, ...body } = parsed.data;
   if (body.fileUrl && !await secureCertificateFile(req, res, body.fileUrl, item.clientId)) return;
   const [cert] = await db.insert(certificatesTable)
     .values({ ...body, outcome: body.outcome ?? "not_stated", itemId, contractorId: null })
     .returning();
-  const created = await addDefects(req, item, cert!, defects);
+  const created = await addDefects(req, item, cert!, defects, remedialJob);
   if (outcomeMovesDueDate(cert!.outcome)) await updateItemDueDate(itemId, { kind: "sync" });
   await appendAuditEvent(req, {
     clientId: item.clientId, entityType: "compliance_item", entityId: itemId, action: "certificate_added",
     after: cert,
-    metadata: { certificateId: cert!.id, defects: defects.map((d, i) => ({ ...d, fixTrackIssueId: created[i]?.fixTrackIssueId ?? null })) },
+    metadata: {
+      certificateId: cert!.id,
+      defects: defects.map((d, i) => ({ ...d, fixTrackIssueId: created[i]?.fixTrackIssueId ?? null })),
+      ...(readByAi ? { readByAi: true } : {}),
+    },
   });
   const [view] = await withDefects(item.clientId, [cert!]);
   res.status(201).json(view);
@@ -323,6 +359,101 @@ router.delete("/items/:itemId/certificates/:id/defects/:defectId", requireAuth, 
     before: defect, metadata: { certificateId: found.cert.id, defectId },
   });
   res.status(204).send();
+});
+
+// ----- Reading a certificate with ComplyTrack's AI -----
+//
+// The browser sends the file; Claude (lib/certificateReading.ts) says which
+// check it is for, its dates, outcome and defects. Nothing is saved: the
+// person checks and corrects the reading, then saves the certificate through
+// POST /items/:itemId/certificates (with remedialJob, so the work that needs
+// doing shares one FixTrack job a quote can be asked for). The file is only
+// stored when they save it.
+
+/** Held against the AI allowance while a certificate is read; a long EICR costs about this. */
+const CERTIFICATE_READING_ESTIMATE_PENCE = 15;
+
+const certificateReadBody = z.object({
+  fileName: z.string().trim().min(1).max(255),
+  mimeType: z.string().trim().min(1).max(200),
+  data: z.string().min(1).max(Math.ceil(CERTIFICATE_READING_MAX_BYTES / 3) * 4 + 4),
+  itemId: z.number().int().positive().nullable().optional(),
+}).strict();
+
+/** The checks the person can file a certificate against, described for Claude. */
+async function certificateCheckChoices(req: Request, clientId: number): Promise<CertificateCheckChoice[]> {
+  const conditions = [eq(complianceItemsTable.clientId, clientId)];
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) {
+    const allowedSites = db.select({ id: sitesTable.id }).from(sitesTable)
+      .where(and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(deptId)));
+    conditions.push(or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites))!);
+  }
+  const rows = await db.select({
+    id: complianceItemsTable.id, title: complianceItemsTable.title, frequencyMonths: complianceItemsTable.frequencyMonths,
+    siteName: sitesTable.name, categoryName: categoriesTable.name, contractorName: contractorsTable.name,
+  }).from(complianceItemsTable)
+    .leftJoin(sitesTable, and(eq(sitesTable.id, complianceItemsTable.siteId), eq(sitesTable.clientId, clientId)))
+    .leftJoin(categoriesTable, and(eq(categoriesTable.id, complianceItemsTable.categoryId), eq(categoriesTable.clientId, clientId)))
+    .leftJoin(contractorsTable, and(eq(contractorsTable.id, complianceItemsTable.contractorId), eq(contractorsTable.clientId, clientId)))
+    .where(and(...conditions))
+    .orderBy(complianceItemsTable.title, complianceItemsTable.id);
+  const trackOf = new Map(CONTRACTOR_VISIT_TYPES.map((type) => [type.title.trim().toLowerCase(), type.trackLabel]));
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    track: trackOf.get(row.title.trim().toLowerCase()) ?? row.categoryName ?? null,
+    siteName: row.siteName ?? null,
+    contractorName: row.contractorName ?? null,
+    frequencyMonths: row.frequencyMonths ?? null,
+  }));
+}
+
+router.get("/certificates/reading", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  const [ai, services] = await Promise.all([getAiStatus(clientId), getEntitledServices(clientId)]);
+  res.json({ available: reportReadingConfigured(), ai, fixTrack: isEntitled(services, "fixtrack") });
+});
+
+router.post("/certificates/read", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  if (!reportReadingConfigured()) {
+    return void res.status(503).json({ error: "Reading certificates is not switched on yet. Fill the certificate in by hand.", code: "CERTIFICATE_READING_UNAVAILABLE" });
+  }
+  const parsed = certificateReadBody.safeParse(req.body);
+  if (!parsed.success) return void res.status(400).json({ error: "Choose a PDF, photo or Word certificate (15 MB at most)" });
+  const checks = await certificateCheckChoices(req, clientId);
+  const itemId = parsed.data.itemId ?? null;
+  if (itemId !== null && !checks.some((check) => check.id === itemId)) {
+    return void res.status(404).json({ error: "Compliance item not found" });
+  }
+
+  let aiUseId: number | null = null;
+  try {
+    // A file Claude cannot read is turned away before it counts towards the
+    // AI allowance (lib/aiAllowance.ts).
+    const result = await readCertificate({
+      bytes: Buffer.from(parsed.data.data, "base64"), mimeType: parsed.data.mimeType, fileName: parsed.data.fileName,
+      today: await getAccountToday(clientId), checks, itemId,
+    }, async () => {
+      aiUseId = await claimAiUse({
+        clientId, userId: req.currentUser?.id ?? null, feature: "certificate_reading",
+        estimatePence: CERTIFICATE_READING_ESTIMATE_PENCE, instead: "Fill the certificate in by hand instead.",
+      });
+    });
+    if (aiUseId !== null) await settleAiUse(aiUseId, result.usage, true);
+    req.log.info({ clientId, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, defects: result.defects.length }, "Certificate read");
+    const { usage: _usage, model: _model, inputTokens: _in, outputTokens: _out, ...reading } = result;
+    res.json(reading);
+  } catch (err) {
+    if (aiUseId !== null) await settleAiUse(aiUseId, err instanceof ReportReadingError ? err.usage ?? null : null, false);
+    if (err instanceof AiUnavailableError) return void res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof UnreadableReportError) return void res.status(400).json({ error: err.message });
+    if (!(err instanceof ReportReadingError)) req.log.error({ err }, "Certificate reading failed");
+    res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read this certificate just now. Try again later, or fill it in by hand." });
+  }
 });
 
 async function assertContractorAccess(req: Request, contractorId: number) {
