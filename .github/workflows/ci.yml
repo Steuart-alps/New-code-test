@@ -271,6 +271,9 @@ jobs:
       - name: Pricing AI requests (pure)
         run: pnpm --filter @workspace/api-server run test:ai-pricing
 
+      - name: AI allowance rollover ledger (pure)
+        run: pnpm --filter @workspace/api-server run test:ai-credit
+
       - name: AI features add-on and allowance (production schema base)
         run: pnpm --filter @workspace/api-server run test:ai-addon
 

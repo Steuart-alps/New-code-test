@@ -10656,16 +10656,20 @@ components:
       type: object
       description: >-
         The AI features add-on for this business: £15 a month, which includes
-        a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.
+        a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest
+        used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable.
         A business with no trial end (every module free, set up by ALPS) has the monthly allowance included ("included").
       properties:
         configured: { type: boolean, description: "The server has an Anthropic API key, so AI can be offered at all" }
         active: { type: boolean, description: "The business has the AI add-on (or a trial allowance) now" }
         plan: { type: string, enum: [addon, trial, included, none] }
-        percentUsed: { type: integer, minimum: 0, maximum: 100, description: "Share of this period's allowance used" }
-        resetsAt: { type: string, format: date-time, nullable: true, description: "When the allowance starts again" }
-        usedUp: { type: boolean, description: "The allowance is used up for this period" }
-      required: [configured, active, plan, percentUsed, resetsAt, usedUp]
+        percentUsed: { type: integer, minimum: 0, maximum: 100, description: "Share of what is available this period, allowance carried over included, that is used" }
+        resetsAt: { type: string, format: date-time, nullable: true, description: "When the next month's allowance is added" }
+        usedUp: { type: boolean, description: "Everything available, allowance carried over included, is used up" }
+        carriedOverPercent: { type: integer, minimum: 0, description: "Unused allowance carried over from earlier months, as a share of one month's allowance (150 = a month and a half)" }
+        nextLapseAt: { type: string, format: date-time, nullable: true, description: "When the oldest carried-over allowance lapses if unused" }
+        nextLapsePercent: { type: integer, minimum: 0, description: "How much lapses then, as a share of one month's allowance" }
+      required: [configured, active, plan, percentUsed, resetsAt, usedUp, carriedOverPercent, nextLapseAt, nextLapsePercent]
 
     AiAddonStatus:
       allOf:

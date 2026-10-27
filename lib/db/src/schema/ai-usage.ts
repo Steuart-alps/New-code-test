@@ -38,7 +38,10 @@ export const aiUsageTable = pgTable("ai_usage", {
 /**
  * An AI top-up bought for a business once its monthly allowance runs low:
  * charged at once as a one-off invoice, it adds allowance_pence of AI use
- * until the add-on renews (api-server src/lib/aiTopUp.ts). request_id makes a
+ * (api-server src/lib/aiAllowance.ts). Unused, it carries over like the
+ * monthly allowance and lapses at expires_at, 12 months after the end of the
+ * month it was bought in (rows from before rollover: 13 months after
+ * created_at). request_id makes a
  * repeated request (a double click, a retry) charge only once. Automatic
  * top-ups use "auto-<period start>-<n>", so requests running together share one.
  */
@@ -54,9 +57,33 @@ export const aiTopUpsTable = pgTable("ai_top_ups", {
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   settledAt: timestamp("settled_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("uq_ai_top_ups_client_request").on(table.clientId, table.requestId),
   index("idx_ai_top_ups_client_created").on(table.clientId, table.createdAt),
   check("ck_ai_top_ups_status", sql`${table.status} IN ('pending', 'paid', 'failed', 'unknown')`),
   check("ck_ai_top_ups_amounts", sql`${table.amountPence} > 0 AND ${table.allowancePence} >= 0`),
+]);
+
+/**
+ * One month's AI allowance given to a business: the add-on's £10 for a paid
+ * period, the free allowance for a business ALPS set up with no trial end, or
+ * a trial's allowance. Unused allowance carries over (Steuart, 2026-10-27:
+ * "left over unused AI usage is rolled over for up to 12 months, then comes
+ * back to me as profit"): AI use always comes out of the oldest allowance
+ * first, and whatever is left lapses at expires_at, 12 months after the end of
+ * the month it was for. period_key ("addon:2026-10", "included:2026-10",
+ * "trial") gives each month one grant however often it is recorded.
+ */
+export const aiAllowanceGrantsTable = pgTable("ai_allowance_grants", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  periodKey: text("period_key").notNull(),
+  allowancePence: integer("allowance_pence").notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("uq_ai_allowance_grants_client_period").on(table.clientId, table.periodKey),
+  check("ck_ai_allowance_grants_amount", sql`${table.allowancePence} >= 0`),
 ]);

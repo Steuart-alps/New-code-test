@@ -2,7 +2,7 @@ import { LegalLayout } from "./legal-layout";
 
 export default function TermsPage() {
   return (
-    <LegalLayout title="Terms of Service" updated="26 October 2026">
+    <LegalLayout title="Terms of Service" updated="27 October 2026">
       <section>
         <h2>1. Who we are</h2>
         <p>
@@ -26,6 +26,7 @@ export default function TermsPage() {
           <li>When the trial ends, continued use requires an active paid subscription, billed monthly per site through our payment provider, Stripe.</li>
           <li>Each site you add is charged straight away for one full month at your per-site price, and is then included in your monthly bill. Removing a site lowers your next bill; no refund or credit is given for the current period.</li>
           <li>You can cancel at any time. Cancellation takes effect at the end of the current billing period; no partial refunds are given for unused time.</li>
+          <li>The optional AI features add-on is billed monthly for the whole business and includes a monthly allowance of AI use; top-ups add more. Unused allowance and top-ups carry over and are used oldest first. Anything still unused 12 months after the end of the month it was given for lapses. Unused allowance has no cash value and is not refunded, including when the add-on or your subscription ends.</li>
           <li>Prices are displayed before purchase and may change with at least 30 days' notice.</li>
         </ul>
       </section>

@@ -2466,7 +2466,7 @@ export const AiStatusPlan = {
 } as const;
 
 /**
- * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included ("included").
+ * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included ("included").
  */
 export interface AiStatus {
   /** The server has an Anthropic API key, so AI can be offered at all */
@@ -2475,15 +2475,27 @@ export interface AiStatus {
   active: boolean;
   plan: AiStatusPlan;
   /**
-     * Share of this period's allowance used
+     * Share of what is available this period, allowance carried over included, that is used
      * @minimum 0
      * @maximum 100
      */
   percentUsed: number;
-  /** When the allowance starts again */
+  /** When the next month's allowance is added */
   resetsAt: string | null;
-  /** The allowance is used up for this period */
+  /** Everything available, allowance carried over included, is used up */
   usedUp: boolean;
+  /**
+     * Unused allowance carried over from earlier months, as a share of one month's allowance (150 = a month and a half)
+     * @minimum 0
+     */
+  carriedOverPercent: number;
+  /** When the oldest carried-over allowance lapses if unused */
+  nextLapseAt: string | null;
+  /**
+     * How much lapses then, as a share of one month's allowance
+     * @minimum 0
+     */
+  nextLapsePercent: number;
 }
 
 export interface PatRegisterReadingStatus {

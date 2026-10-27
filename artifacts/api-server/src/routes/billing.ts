@@ -775,7 +775,7 @@ const aiAddonChangeSchema = z.discriminatedUnion("action", [
 // POST /api/billing/ai — the AI features add-on. add: one £15 monthly item per
 // business, the first month charged at once (or nothing is switched on).
 // remove: taken off at once, no refund, like other add-ons. top_up: a one-off
-// charge now for more AI use until renewal. auto_top_up: the owner's choice.
+// charge now for more AI use, which carries over if unused. auto_top_up: the owner's choice.
 router.post("/ai", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const parsed = aiAddonChangeSchema.safeParse(req.body);
   if (!parsed.success) {

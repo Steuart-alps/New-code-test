@@ -13,9 +13,11 @@
 //     month at once; a failed charge switches nothing on;
 //   - the per-site quantity sync and the per-site price never include it;
 //   - each request is priced from the tokens Claude reports and counted
-//     against the add-on's current billing period only;
-//   - once the allowance is used, AI is refused until the period renews, and
-//     requests running together cannot all slip past it;
+//     against the business's allowance, oldest first;
+//   - unused allowance and top-ups carry over and lapse 12 months after the
+//     end of their month; Settings shows what carried over and when it lapses;
+//   - once everything available is used, AI is refused until more is added,
+//     and requests running together cannot all slip past it;
 //   - a failed reading still counts what Claude charged; one turned away
 //     before sending counts nothing;
 //   - a top-up is charged at once and adds its use until renewal; a declined
@@ -27,7 +29,8 @@
 //   - a business with no trial end (every module free, set up by ALPS) gets
 //     the monthly allowance free each calendar month; its owner may agree to a
 //     top-up, which ALPS invoices (no Stripe charge), and a repeat adds one;
-//   - owners are warned once when 75% of a period's allowance is used.
+//   - owners are warned once when 75% of what is available (carried over
+//     included) is used.
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
@@ -240,14 +243,42 @@ async function main(base) {
   same("and is not tried again for a day", [(await readList(user)).status, (await autoRows()).length], [429, 3]);
   same("switched off again", (await user("POST", "/billing/ai", { action: "auto_top_up", enabled: false })).data?.autoTopUp, false);
 
-  await query("UPDATE ai_usage SET created_at = to_timestamp($2) - interval '1 day' WHERE client_id = $1", [clientId, periodStart]);
-  await query("UPDATE ai_top_ups SET created_at = to_timestamp($2) - interval '1 day' WHERE client_id = $1", [clientId, periodStart]);
-  same("use and top-ups from an earlier period do not count", [(await readList(user)).status, (await user("GET", "/billing/ai")).data?.topUpsThisPeriod], [200, 0]);
+  console.log("\n── unused allowance carries over, oldest first, for 12 months ──");
+  await query("DELETE FROM ai_usage WHERE client_id = $1", [clientId]);
+  await query("DELETE FROM ai_top_ups WHERE client_id = $1", [clientId]);
+  same("this period's £10 was recorded once", (await query("SELECT allowance_pence, starts_at = to_timestamp($2) AS from_period_start FROM ai_allowance_grants WHERE client_id = $1", [clientId, periodStart])),
+    [{ allowance_pence: 1000, from_period_start: true }]);
+  // Last period: £10 given and £4 used, plus a £4 top-up never used, so £10 carries over.
+  const lastStart = periodStart - 30 * 86400;
+  await query(`INSERT INTO ai_allowance_grants (client_id, period_key, allowance_pence, starts_at, expires_at)
+    VALUES ($1, 'addon:last', 1000, to_timestamp($2), to_timestamp($3) + interval '12 months')`, [clientId, lastStart, periodStart]);
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros, created_at) VALUES ($1, 'report_reading', 'done', 5000000, to_timestamp($2))", [clientId, lastStart + 86400]);
+  await query(`INSERT INTO ai_top_ups (client_id, request_id, amount_pence, allowance_pence, status, created_at, expires_at)
+    VALUES ($1, 'last-period', 600, 400, 'paid', to_timestamp($2), to_timestamp($3) + interval '12 months')`, [clientId, lastStart + 2 * 86400, periodStart]);
+  // Older still: £10 that lapsed unused before any of that use.
+  await query(`INSERT INTO ai_allowance_grants (client_id, period_key, allowance_pence, starts_at, expires_at)
+    VALUES ($1, 'addon:old', 1000, now() - interval '14 months', to_timestamp($2))`, [clientId, lastStart]);
+  const [{ lapse }] = await query("SELECT expires_at AS lapse FROM ai_allowance_grants WHERE client_id = $1 AND period_key = 'addon:last'", [clientId]);
+  const carried = (await user("GET", "/billing/ai")).data;
+  same("a month's worth carries over, lapsing 12 months after last period; lapsed allowance is gone",
+    [carried?.carriedOverPercent, carried?.nextLapseAt, carried?.nextLapsePercent, carried?.percentUsed, carried?.usedUp, carried?.topUpsThisPeriod],
+    [100, new Date(lapse).toISOString(), 100, 0, false, 0]);
+  // £12 this period: the £10 carried over goes first, then £2 of this period's £10.
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 15000000)", [clientId]);
+  const afterCarried = (await user("GET", "/billing/ai")).data;
+  same("oldest used first: nothing carried over is left, 60% of the £20 available used",
+    [afterCarried?.carriedOverPercent, afterCarried?.nextLapseAt, afterCarried?.percentUsed, afterCarried?.usedUp], [0, null, 60, false]);
+  same("so reading still works", (await readList(user)).status, 200);
+  same("no warning at 60% of what is available", await t.warnIfAllowanceNearlyUsed(clientId), false);
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 3750000)", [clientId]);
+  same("warned at 75% of what is available, carried over included", await t.warnIfAllowanceNearlyUsed(clientId), true);
 
   console.log("\n── requests running together cannot all slip past ──");
+  await query("DELETE FROM ai_usage WHERE client_id = $1", [clientId]);
+  await query("DELETE FROM ai_top_ups WHERE client_id = $1", [clientId]);
+  await query("DELETE FROM ai_allowance_grants WHERE client_id = $1 AND period_key IN ('addon:last', 'addon:old')", [clientId]);
   // Leave about 1p of the allowance: the first request's 30p hold uses it.
-  const spent = Number((await query("SELECT coalesce(sum(cost_usd_micros), 0)::bigint AS s FROM ai_usage WHERE client_id = $1 AND created_at >= to_timestamp($2)", [clientId, periodStart]))[0].s);
-  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', $2)", [clientId, 12500000 - 12500 - spent]);
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', $2)", [clientId, 12500000 - 12500]);
   claudeDelayMs = 300;
   const together = await Promise.all([readList(user), readList(user), readList(user)]);
   claudeDelayMs = 0;
@@ -284,9 +315,13 @@ async function main(base) {
     [true, "included", 0, monthEnd, { amount: 600, allowance: 400, currency: "gbp" }]);
   const freeRead = await readList(free.user);
   same("reading works with no subscription", [freeRead.status, (await usageRows(free.clientId)).length], [200, 1]);
-  // Last month's use does not count against this month.
+  same("this month's allowance is recorded for the free business", (await query("SELECT period_key FROM ai_allowance_grants WHERE client_id = $1", [free.clientId])).map((row) => row.period_key),
+    [`included:${new Date().toISOString().slice(0, 7)}`]);
+  // Last month's £10 was all used last month, so nothing carries over.
+  await query(`INSERT INTO ai_allowance_grants (client_id, period_key, allowance_pence, starts_at, expires_at)
+    VALUES ($1, 'included:last', 1000, date_trunc('month', now()) - interval '1 month', date_trunc('month', now()) + interval '12 months')`, [free.clientId]);
   await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros, created_at) VALUES ($1, 'report_reading', 'done', 12500000, date_trunc('month', now()) - interval '1 day')", [free.clientId]);
-  same("last month's use is not counted", (await free.user("GET", "/billing/ai")).data?.usedUp, false);
+  same("last month's use came out of last month's allowance", [(await free.user("GET", "/billing/ai")).data?.usedUp, (await free.user("GET", "/billing/ai")).data?.carriedOverPercent], [false, 0]);
   same("no warning below 75%", await t.warnIfAllowanceNearlyUsed(free.clientId), false);
   // £8 of £10 ($10 at 80p a dollar): past the 75% warning.
   await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 10000000)", [free.clientId]);
@@ -308,6 +343,19 @@ async function main(base) {
   same("the same request adds nothing more", (await free.user("POST", "/billing/ai", { action: "top_up", requestId: freeRequest })).data?.topUpsThisPeriod, 1);
   same("reading works again after the top-up", (await readList(free.user)).status, 200);
   same("no new warning until 75% of the bigger allowance", await t.warnIfAllowanceNearlyUsed(free.clientId), false);
+
+  console.log("\n── months nobody looked at still get their allowance ──");
+  // Recorded three months ago, then nothing until now: the months between are filled in.
+  await query("DELETE FROM ai_allowance_grants WHERE client_id = $1", [free.clientId]);
+  await query(`INSERT INTO ai_allowance_grants (client_id, period_key, allowance_pence, starts_at, expires_at)
+    VALUES ($1, to_char(date_trunc('month', now()) - interval '3 months', '"included:"YYYY-MM'), 1000,
+            date_trunc('month', now()) - interval '3 months', date_trunc('month', now()) + interval '10 months')`, [free.clientId]);
+  t.invalidateAiPlan(free.clientId);
+  await free.user("GET", "/billing/ai");
+  same("each missing month is added once", Number((await query("SELECT count(*)::int AS n FROM ai_allowance_grants WHERE client_id = $1", [free.clientId]))[0].n), 4);
+  t.invalidateAiPlan(free.clientId);
+  await free.user("GET", "/billing/ai");
+  same("and never twice", Number((await query("SELECT count(*)::int AS n FROM ai_allowance_grants WHERE client_id = $1", [free.clientId]))[0].n), 4);
 }
 
 // ─── run ────────────────────────────────────────────────────────────────────
