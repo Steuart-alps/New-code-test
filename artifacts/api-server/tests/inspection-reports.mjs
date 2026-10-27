@@ -39,6 +39,12 @@ try {
   const maintenance = await createUser(owner, { role: 'client_manager', isMaintenanceManager: true, name: 'Sam Maintenance' });
   const staff = await createUser(owner, { role: 'client_staff' });
   const viewer = await createUser(owner, { role: 'client_viewer' });
+  // A consultant (ALPS) linked to the business, and one who is not.
+  const consultant = await createTenant('inspection-reports-consultant');
+  await pool.query("UPDATE users SET role = 'consultant', name = 'Alex ALPS' WHERE id = $1", [consultant.userId]);
+  await pool.query('INSERT INTO consultant_clients (user_id, client_id) VALUES ($1, $2)', [consultant.userId, owner.clientId]);
+  const unlinkedConsultant = await createTenant('inspection-reports-unlinked-consultant');
+  await pool.query("UPDATE users SET role = 'consultant', name = 'Una Unlinked' WHERE id = $1", [unlinkedConsultant.userId]);
 
   // ── Who may use it ───────────────────────────────────────────────────────
   const options = ok(await owner.request('GET', '/inspection-reports/options'));
@@ -155,10 +161,10 @@ try {
   console.log('ok - confirming creates open actions linked to the report, marked AI-drafted or typed, with who confirmed them');
 
   // ── The action plan email goes out the same day ──────────────────────────
-  assert.deepEqual([...emailedTo].sort(), ['Morgan Manager', 'Sam Maintenance'],
-    'Owners and Managers get the plan, not the person who confirmed it');
+  assert.deepEqual([...emailedTo].sort(), ['Alex ALPS', 'Morgan Manager', 'Sam Maintenance'],
+    "Owners, Managers and the business's consultants get the plan, not the person who confirmed it");
   const plans = outbox().slice(sentBefore).filter((email) => email.subject.startsWith('Action plan: Care Inspectorate inspection'));
-  assert.equal(plans.length, 2, 'one email per person');
+  assert.equal(plans.length, 3, 'one email per person');
   const toSam = plans.find((email) => email.html.includes('Hi Sam Maintenance'));
   const toMorgan = plans.find((email) => email.html.includes('Hi Morgan Manager'));
   assert.ok(toSam && toMorgan);
@@ -170,8 +176,11 @@ try {
   assert.ok(toSam.html.indexOf(door.title) < toSam.html.indexOf(staffing.title), 'urgent actions come first');
   assert.ok(!toMorgan.html.includes(door.title) && toMorgan.html.includes(staffing.title),
     "a Manager is sent only the actions at sites they can see");
+  const toAlex = plans.find((email) => email.html.includes('Hi Alex ALPS'));
+  for (const action of [door, falls, staffing]) assert.ok(toAlex?.html.includes(action.title), 'the consultant sees every action');
+  assert.match(toAlex.html, /Assign to…/);
   assert.match(toSam.text, new RegExp(`Assign to someone: \\S+report=${homeReport}&action=${staffing.id}`));
-  console.log('ok - the action plan is emailed the same day to Owners and Managers, with a link to assign each action');
+  console.log('ok - the action plan is emailed the same day to Owners, Managers and linked consultants, with a link to assign each action');
 
   // ── Due dates on report actions ──────────────────────────────────────────
   assert.equal((await staff.request('PATCH', `/track-actions/${door.id}`, { dueDate: isoDay(30) })).status, 403,

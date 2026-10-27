@@ -392,7 +392,7 @@ router.post("/inspection-reports/:id/confirm", requireAuth, denyViewers, canMana
     return rows;
   });
   if (!created) return res.status(404).json({ error: "Report not found" });
-  // Same day: the Owners and Managers get the action plan, with a button to assign each action.
+  // Same day: the Owners, Managers and linked consultants get the action plan, with a button to assign each action.
   const emailedTo = await sendReportActionPlanEmails({
     clientId, reportId: id, reportTitle: report.title, reportTypeLabel: REPORT_TYPE_LABELS[report.reportType],
     reportDate: report.reportDate, summary: report.aiSummary, confirmedByUserId: req.currentUser!.id, confirmedBy: confirmer,
