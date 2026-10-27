@@ -27,6 +27,8 @@ const GIB = 1024 ** 3;
 process.env.SESSION_SECRET ||= "storage-capacity-test-only-not-a-real-secret";
 process.env.LOG_LEVEL ||= "error";
 for (const name of ["STORAGE_ADDON_PRICE_ID", "STORAGE_INCLUDED_GIB_BY_SERVICE"]) delete process.env[name];
+// The arithmetic below is worked with 1 GiB included (the default is now 10 GiB).
+process.env.STORAGE_INCLUDED_GIB_BY_SERVICE = JSON.stringify({ core: 1, bundle: 1 });
 
 let passed = 0;
 const failures = [];
