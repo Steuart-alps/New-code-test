@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { FoodJurisdictionOptions, KitchenGuidanceNote } from "./kitchen-temperature-guidance";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 type RangeKey = "fridge" | "freezer" | "chilledDelivery" | "frozenDelivery" | "cooking" | "cooling" | "reheating" | "hotHolding" | "sousVide";
 const labels: Record<RangeKey, string> = {
@@ -27,7 +28,8 @@ function ItemRules({ kind, rules, disabled, onChange }: {
   const { key, unit, section } = holdFields[kind];
   const items = rules.items[kind] as Array<{ item: string; min: number | null } & Record<string, unknown>>;
   const set = (next: typeof items) => onChange({ ...rules, items: { ...rules.items, [kind]: next } });
-  return <fieldset className="space-y-2 rounded-sm border p-3">
+  const newRow = useFocusNewRow<HTMLFieldSetElement>();
+  return <fieldset ref={newRow.ref} className="space-y-2 rounded-sm border p-3">
     <legend className="px-1 text-sm font-medium">{section}: item rules</legend>
     <p className="text-xs text-muted-foreground">An item listed here uses its own minimum and hold time instead of the {section.toLowerCase()} values above. Leave a field blank for no numeric control.</p>
     {items.length === 0 && <p className="text-xs text-muted-foreground">No item rules.</p>}
@@ -42,7 +44,7 @@ function ItemRules({ kind, rules, disabled, onChange }: {
         onClick={() => set(items.filter((_, i) => i !== index))}>Remove</Button>
     </div>)}
     {!disabled && <Button type="button" variant="outline" size="sm"
-      onClick={() => set([...items, { item: "", min: rules[kind].min, [key]: (kind === "cooking" ? rules.cookingHoldSeconds : rules.sousVideHoldMinutes) }])}>Add item rule</Button>}
+      onClick={() => { newRow.expect(); set([...items, { item: "", min: rules[kind].min, [key]: (kind === "cooking" ? rules.cookingHoldSeconds : rules.sousVideHoldMinutes) }]); }}>Add item rule</Button>}
   </fieldset>;
 }
 export function KitchenTemperatureControls() {

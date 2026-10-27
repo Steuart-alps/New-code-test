@@ -53,6 +53,7 @@ import { dictationSupported } from "@/components/dictation-button";
 import { getApiErrorMessage } from "@/lib/api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -107,6 +108,7 @@ function GreenConfigDialog() {
   const updateConfig = useUpdateGreenTrackConfig();
 
   const [defaultOperators, setDefaultOperators] = useState<string[]>([]);
+  const newRow = useFocusNewRow();
   const [showFuel, setShowFuel] = useState(true);
 
   useEffect(() => {
@@ -148,7 +150,7 @@ function GreenConfigDialog() {
           <p className="text-sm text-muted-foreground mt-1">Configure defaults for pre-use checks.</p>
         </DialogHeader>
         <div className="space-y-4 py-1">
-          <div className="space-y-2">
+          <div ref={newRow.ref} className="space-y-2">
             <Label>Default operators</Label>
             <p className="text-xs text-muted-foreground">These appear as suggestions in the operator field on pre-use checks.</p>
             {defaultOperators.map((op, i) => (
@@ -161,7 +163,7 @@ function GreenConfigDialog() {
                 </Button>
               </div>
             ))}
-            <Button variant="outline" size="sm" onClick={() => setDefaultOperators([...defaultOperators, ""])}>
+            <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setDefaultOperators([...defaultOperators, ""]); }}>
               <Plus className="w-3.5 h-3.5 mr-1.5" /> Add operator
             </Button>
           </div>

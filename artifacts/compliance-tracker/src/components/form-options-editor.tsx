@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
   const [items, setItems] = useState<string[]>([]);
   const [disabledItems, setDisabledItems] = useState<string[]>([]);
   const [newItem, setNewItem] = useState("");
+  const newItemRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const { data } = useFormOptions();
   const call = useFormOptionsApi();
@@ -73,6 +74,8 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
     setItems([...items, disabledMatch ?? trimmed]);
     if (disabledMatch) setDisabledItems(disabledItems.filter(item => item !== disabledMatch));
     setNewItem("");
+    // Ready for the next option without clicking back into the box.
+    newItemRef.current?.focus();
   };
 
   const updateItem = (idx: number, value: string) =>
@@ -203,6 +206,7 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
 
           <div className="flex items-center gap-2">
             <Input
+              ref={newItemRef}
               className="rounded-sm h-9"
               placeholder="Add an option…"
               value={newItem}

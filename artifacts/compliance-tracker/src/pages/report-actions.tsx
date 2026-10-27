@@ -27,6 +27,7 @@ import { useFileDrop } from "@/hooks/use-file-drop";
 import { cn } from "@/lib/utils";
 import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
 import { Download, FileSearch, Loader2, Plus, Sparkles, Trash2, Upload } from "lucide-react";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 type Draft = InspectionReportDraftAction & { key: string };
 type Severity = InspectionReportDraftAction["severity"];
@@ -367,6 +368,7 @@ function ReportDetail({ reportId, options, focusActionId, onRemoved }: {
     queryFn: () => readJson<InspectionReportDetail>(`/inspection-reports/${reportId}`, "Couldn't load the report"),
   });
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const newRow = useFocusNewRow<HTMLElement>();
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<null | "read" | "save" | "confirm" | "remove" | "download">(null);
   const [checked, setChecked] = useState(false);
@@ -468,7 +470,7 @@ function ReportDetail({ reportId, options, focusActionId, onRemoved }: {
         </div>
       </div>
 
-      <section className="space-y-3">
+      <section ref={newRow.ref} className="space-y-3">
         <h3 className="font-bold text-[#162D42]">Actions to create</h3>
         {reading.available && report.readable ? (
           <div className="rounded-sm border border-violet-200 bg-violet-50/60 p-4 text-sm space-y-2">
@@ -495,7 +497,7 @@ function ReportDetail({ reportId, options, focusActionId, onRemoved }: {
             onChange={(next) => update(drafts.map((item) => item.key === action.key ? next : item))}
             onRemove={() => update(drafts.filter((item) => item.key !== action.key))} />
         ))}
-        <Button type="button" variant="outline" size="sm" onClick={() => update([...drafts, blankAction(report.siteId)])}>
+        <Button type="button" variant="outline" size="sm" onClick={() => { newRow.expect(); update([...drafts, blankAction(report.siteId)]); }}>
           <Plus className="mr-1.5 h-4 w-4" />Add an action
         </Button>
 

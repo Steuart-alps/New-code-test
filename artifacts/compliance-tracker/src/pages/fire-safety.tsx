@@ -59,6 +59,8 @@ import {
   EMPTY_SOUND_LEVEL, parseSoundLevel, SoundLevelField, soundLevelRequest, SoundLevelVerdictText, type SoundLevelValue,
 } from "@/components/sound-level-field";
 import { SOUND_LEVEL_MIN_DB } from "@/lib/fire-sound-level";
+import { StringListEditor } from "@/components/string-list-editor";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -593,7 +595,9 @@ function EscapeRouteEditor({
   routes: EscapeRoute[];
   onChange: (routes: EscapeRoute[]) => void;
 }) {
+  const newRow = useFocusNewRow();
   function add() {
+    newRow.expect();
     onChange([...routes, { name: "", status: "clear", note: "" }]);
   }
   function remove(i: number) {
@@ -604,7 +608,7 @@ function EscapeRouteEditor({
   }
 
   return (
-    <div className="space-y-2">
+    <div ref={newRow.ref} className="space-y-2">
       {routes.length === 0 && (
         <p className="text-xs text-muted-foreground italic">No routes added yet. Add each escape route below.</p>
       )}
@@ -737,6 +741,7 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
 
   const [defaultPerformer, setDefaultPerformer] = useState("");
   const [escapeRoutes, setEscapeRoutes] = useState<Array<{ name: string; location: string }>>([]);
+  const newRow = useFocusNewRow();
   const [alarmZones, setAlarmZones] = useState<string[]>([]);
   const [extinguisherPoints, setExtinguisherPoints] = useState<string[]>([]);
   const [frequencyDays, setFrequencyDays] = useState<Record<string, string>>(
@@ -792,24 +797,6 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
       }
     );
   };
-
-  const StringListEditor = ({ items, onChange, placeholder }: { items: string[]; onChange: (v: string[]) => void; placeholder: string }) => (
-    <div className="space-y-2">
-      {items.map((item, i) => (
-        <div key={i} className="flex gap-2 items-center">
-          <Input value={item} placeholder={placeholder} className="h-8 text-sm rounded-sm"
-            onChange={e => { const n = [...items]; n[i] = e.target.value; onChange(n); }} />
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
-            onClick={() => onChange(items.filter((_, x) => x !== i))}>
-            <X className="w-3.5 h-3.5 text-destructive" />
-          </Button>
-        </div>
-      ))}
-      <Button variant="outline" size="sm" onClick={() => onChange([...items, ""])}>
-        <Plus className="w-3.5 h-3.5 mr-1.5" /> Add
-      </Button>
-    </div>
-  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -892,7 +879,7 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
             <p className="text-xs text-muted-foreground">
               List your named escape routes. They'll be pre-loaded when recording a fire walk so staff just mark each one clear or obstructed.
             </p>
-            <div className="space-y-2">
+            <div ref={newRow.ref} className="space-y-2">
               {escapeRoutes.map((r, i) => (
                 <div key={i} className="flex gap-2 items-start">
                   <div className="flex-1 space-y-1">
@@ -909,7 +896,7 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
                   </Button>
                 </div>
               ))}
-              <Button variant="outline" size="sm" onClick={() => setEscapeRoutes([...escapeRoutes, { name: "", location: "" }])}>
+              <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setEscapeRoutes([...escapeRoutes, { name: "", location: "" }]); }}>
                 <Plus className="w-3.5 h-3.5 mr-1.5" /> Add route
               </Button>
             </div>
