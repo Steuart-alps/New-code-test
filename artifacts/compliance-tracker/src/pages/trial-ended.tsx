@@ -269,8 +269,8 @@ export default function TrialEndedPage() {
               />
               <p className="mt-2 text-xs text-muted-foreground">
                 {hasAlpsDiscount
-                  ? "Your code will be checked before Checkout opens. If valid, 50% off applies to this subscription, including future monthly invoices."
-                  : "If ALPS has given you a discount code, enter it here for 50% off this subscription, including future monthly invoices."}
+                  ? "Your code will be checked before Checkout opens. If valid, 50% off applies to ComplyTrack and your tracks, including future monthly invoices (not the AI add-on or extra storage)."
+                  : "If ALPS has given you a discount code, enter it here for 50% off ComplyTrack and your tracks, including future monthly invoices (not the AI add-on or extra storage)."}
               </p>
             </div>
           </div>

@@ -1883,7 +1883,7 @@ function SubscriptionDiscountForm({ billingPath, onApplied }: { billingPath: (pa
         body: JSON.stringify({ discountCode: code.trim() }),
       });
       setCode("");
-      toast({ title: "Discount applied", description: "50% off your subscription from your next invoice." });
+      toast({ title: "Discount applied", description: "50% off ComplyTrack and your tracks from your next invoice." });
       onApplied();
     } catch (err: any) {
       toast({ title: "Couldn't apply the discount", description: err.message, variant: "destructive" });
@@ -1894,7 +1894,7 @@ function SubscriptionDiscountForm({ billingPath, onApplied }: { billingPath: (pa
   return (
     <form onSubmit={apply} className="rounded-lg border border-border p-4 space-y-2">
       <label htmlFor="subscription-discount-code" className="block text-sm font-medium">ALPS client discount code</label>
-      <p className="text-xs text-muted-foreground">If ALPS has given you a discount code, enter it for 50% off your subscription from your next invoice.</p>
+      <p className="text-xs text-muted-foreground">If ALPS has given you a discount code, enter it for 50% off ComplyTrack and your tracks from your next invoice. The AI add-on and extra storage stay full price.</p>
       <div className="flex flex-col sm:flex-row gap-2">
         <Input
           id="subscription-discount-code"
