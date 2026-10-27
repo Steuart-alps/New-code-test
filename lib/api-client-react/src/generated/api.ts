@@ -38,6 +38,7 @@ import type {
   Assignee,
   AuditLogEntry,
   BikeTrackConfig,
+  BusinessDashboard,
   Category,
   Certificate,
   CertificateDefect,
@@ -104,6 +105,7 @@ import type {
   FoodSafetyMonthlySummary,
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
+  GetBusinessDashboardParams,
   GetCoshhTrackStatusParams,
   GetDailyTrackHistoryParams,
   GetFeedbackScreenshotParams,
@@ -1538,6 +1540,91 @@ export function useListAuditLog<TData = Awaited<ReturnType<typeof listAuditLog>>
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListAuditLogQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetBusinessDashboardUrl = (params?: GetBusinessDashboardParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/business-dashboard?${stringifiedParams}` : `/api/admin/business-dashboard`
+}
+
+/**
+ * The figures of ALPS's Monday billing digest for any dates (inclusive, UTC days). Without dates, the last 7 days. At most three years.
+ * @summary New subscriptions, cancellations, plan changes, trials and module activity between two dates (platform operators only)
+ */
+export const getBusinessDashboard = async (params?: GetBusinessDashboardParams, options?: RequestInit): Promise<BusinessDashboard> => {
+
+  return customFetch<BusinessDashboard>(getGetBusinessDashboardUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBusinessDashboardQueryKey = (params?: GetBusinessDashboardParams,) => {
+    return [
+    `/api/admin/business-dashboard`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetBusinessDashboardQueryOptions = <TData = Awaited<ReturnType<typeof getBusinessDashboard>>, TError = ErrorType<void>>(params?: GetBusinessDashboardParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBusinessDashboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBusinessDashboardQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBusinessDashboard>>> = ({ signal }) => getBusinessDashboard(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBusinessDashboard>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetBusinessDashboardQueryResult = NonNullable<Awaited<ReturnType<typeof getBusinessDashboard>>>
+export type GetBusinessDashboardQueryError = ErrorType<void>
+
+
+/**
+ * @summary New subscriptions, cancellations, plan changes, trials and module activity between two dates (platform operators only)
+ */
+
+export function useGetBusinessDashboard<TData = Awaited<ReturnType<typeof getBusinessDashboard>>, TError = ErrorType<void>>(
+ params?: GetBusinessDashboardParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBusinessDashboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetBusinessDashboardQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

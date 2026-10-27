@@ -5,6 +5,66 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export interface BusinessDashboardChange {
+  businessName: string;
+  summary: string;
+  /** Monthly amount before VAT gained, lost or changed */
+  monthlyPence: number;
+  /**
+     * Cancellation reason key
+     * @nullable
+     */
+  reason: string | null;
+  at: string;
+}
+
+export type BusinessDashboardTrialsItem = {
+  businessName: string;
+  at: string;
+};
+
+export type BusinessDashboardReasonsItem = {
+  reason: string;
+  label: string;
+  count: number;
+};
+
+export type BusinessDashboardModulesItem = {
+  module: string;
+  changes: number;
+  businesses: number;
+};
+
+export type BusinessDashboardWeeksItem = {
+  weekStart: string;
+  newCount: number;
+  cancelledCount: number;
+  netPence: number;
+};
+
+export type BusinessDashboardTotals = {
+  paying: number;
+  onTrial: number;
+};
+
+export interface BusinessDashboard {
+  from: string;
+  to: string;
+  newSubscriptions: BusinessDashboardChange[];
+  cancellations: BusinessDashboardChange[];
+  planChanges: BusinessDashboardChange[];
+  trials: BusinessDashboardTrialsItem[];
+  gainedPence: number;
+  lostPence: number;
+  planChangePence: number;
+  netPence: number;
+  netBusinesses: number;
+  reasons: BusinessDashboardReasonsItem[];
+  modules: BusinessDashboardModulesItem[];
+  weeks: BusinessDashboardWeeksItem[];
+  totals: BusinessDashboardTotals;
+}
+
 /**
  * One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014
  */
@@ -4421,6 +4481,11 @@ export const ListAuditLogModule = {
   doc: 'doc',
   incidents: 'incidents',
 } as const;
+
+export type GetBusinessDashboardParams = {
+from?: string;
+to?: string;
+};
 
 export type ListPublicLinkAccessParams = {
 linkType?: ListPublicLinkAccessLinkType;

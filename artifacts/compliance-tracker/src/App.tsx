@@ -70,6 +70,7 @@ const RoomTrackPage = lazy(() => import("@/pages/room-track"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
 const ComplianceHubPage = lazy(() => import("@/pages/compliance-hub"));
 const FeedbackInboxPage = lazy(() => import("@/pages/feedback-inbox"));
+const BusinessDashboardPage = lazy(() => import("@/pages/business-dashboard"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const DailyOverviewPage = lazy(() => import("@/pages/daily-overview"));
 const DailyChecklistPage = lazy(() => import("@/pages/daily-checklist"));
@@ -286,6 +287,7 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/privacy-governance" component={PrivacyGovernancePage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
       {isConsultant && <Route path="/portfolio" component={PortfolioPage} />}
+      {user.platformOperator && <Route path="/business-dashboard" component={BusinessDashboardPage} />}
       {canAdmin && <Route path="/daily/overview" component={DailyOverviewPage} />}
       <Route path="/daily/am">{() => <DailyChecklistPage type="am" />}</Route>
       <Route path="/daily/pm">{() => <DailyChecklistPage type="pm" />}</Route>

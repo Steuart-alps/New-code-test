@@ -1,11 +1,13 @@
 import { getStripeSync } from "./stripeClient";
 import { syncClientSubscriptionState } from "./subscriptionState";
 import { sendCancellationWarningEmail, sendPaymentFailedEmail } from "./offboarding";
+import { recordPlanChange, sendCancellationAlert, sendNewSubscriptionAlert, withdrawCancellation } from "./billingAlerts";
 import { logger } from "./logger";
 
 export interface StripeWebhookEvent {
+  id?: string;
   type?: string;
-  data?: { object?: Record<string, any> };
+  data?: { object?: Record<string, any>; previous_attributes?: Record<string, any> };
 }
 
 export class WebhookHandlers {
@@ -48,6 +50,27 @@ export class WebhookHandlers {
         await sendCancellationWarningEmail({ stripeCustomerId: customer, accessEndsAt })
           .catch((err) => logger.warn({ err }, "Cancellation warning email failed"));
       }
+
+      // For ALPS's Monday digest: cancellations, and modules, AI, storage or
+      // sites added or removed.
+      await sendCancellationAlert(object)
+        .catch((err) => logger.warn({ err }, "Cancellation could not be recorded for ALPS"));
+      if (event.type === "customer.subscription.updated") {
+        if (event.data?.previous_attributes?.cancel_at_period_end === true) {
+          await withdrawCancellation(object)
+            .catch((err) => logger.warn({ err }, "Could not withdraw a cancellation from the ALPS digest"));
+        }
+        await recordPlanChange(event)
+          .catch((err) => logger.warn({ err }, "Plan change for the ALPS digest could not be recorded"));
+      }
+      return;
+    }
+
+    // The first paid invoice of a subscription: a business has started
+    // paying (recorded once per subscription for ALPS's Monday digest).
+    if (event.type === "invoice.paid") {
+      await sendNewSubscriptionAlert(object)
+        .catch((err) => logger.warn({ err }, "New subscription could not be recorded for ALPS"));
       return;
     }
 
