@@ -1,12 +1,13 @@
 import { getStripeSync } from "./stripeClient";
 import { syncClientSubscriptionState } from "./subscriptionState";
 import { sendCancellationWarningEmail, sendPaymentFailedEmail } from "./offboarding";
-import { sendNewSubscriptionAlert } from "./subscriptionAlert";
+import { recordPlanChange, sendCancellationAlert, sendNewSubscriptionAlert, withdrawCancellation } from "./billingAlerts";
 import { logger } from "./logger";
 
 export interface StripeWebhookEvent {
+  id?: string;
   type?: string;
-  data?: { object?: Record<string, any> };
+  data?: { object?: Record<string, any>; previous_attributes?: Record<string, any> };
 }
 
 export class WebhookHandlers {
@@ -48,6 +49,19 @@ export class WebhookHandlers {
           null;
         await sendCancellationWarningEmail({ stripeCustomerId: customer, accessEndsAt })
           .catch((err) => logger.warn({ err }, "Cancellation warning email failed"));
+      }
+
+      // ALPS: an email for a cancellation; modules, AI, storage or sites
+      // added or removed go in the Monday digest.
+      await sendCancellationAlert(object)
+        .catch((err) => logger.warn({ err }, "Cancellation alert to ALPS could not be sent"));
+      if (event.type === "customer.subscription.updated") {
+        if (event.data?.previous_attributes?.cancel_at_period_end === true) {
+          await withdrawCancellation(object)
+            .catch((err) => logger.warn({ err }, "Could not withdraw a cancellation from the ALPS digest"));
+        }
+        await recordPlanChange(event)
+          .catch((err) => logger.warn({ err }, "Plan change for the ALPS digest could not be recorded"));
       }
       return;
     }

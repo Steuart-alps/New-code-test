@@ -2318,7 +2318,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateEquipmentLabels();
     await migrateInspectionReports();
     await migrateAiUsage();
-    await migrateNewSubscriptionAlerts();
+    await migrateBillingAlerts();
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
@@ -6397,14 +6397,23 @@ async function migrateAiUsage() {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_ai_top_ups_client_created" ON "ai_top_ups" ("client_id", "created_at")`);
 }
 
-// One row per Stripe subscription ALPS has been told about
-// (lib/subscriptionAlert.ts), so a repeated webhook sends one email.
-async function migrateNewSubscriptionAlerts() {
+// Billing changes ALPS is told about (lib/billingAlerts.ts): one row per new
+// subscription, cancellation and plan change, so a repeated webhook sends one
+// email, and the Monday digest lists the week from these rows.
+async function migrateBillingAlerts() {
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS "new_subscription_alerts" (
-      "stripe_subscription_id" text PRIMARY KEY,
-      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
-      "created_at" timestamptz NOT NULL DEFAULT now()
+    CREATE TABLE IF NOT EXISTS "billing_alerts" (
+      "id" serial PRIMARY KEY,
+      "kind" text NOT NULL,
+      "alert_key" text NOT NULL,
+      "client_id" integer REFERENCES "clients"("id") ON DELETE SET NULL,
+      "business_name" text,
+      "summary" text,
+      "monthly_pence" integer NOT NULL DEFAULT 0,
+      "reason" text,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "uq_billing_alerts_kind_key" UNIQUE ("kind", "alert_key")
     )
   `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_billing_alerts_created" ON "billing_alerts" ("created_at")`);
 }

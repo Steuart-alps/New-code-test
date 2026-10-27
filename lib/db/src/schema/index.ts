@@ -134,4 +134,4 @@ export * from "./track-notifications";
 export * from "./equipment";
 export * from "./inspection-reports";
 export * from "./ai-usage";
-export * from "./subscription-alerts";
+export * from "./billing-alerts";
