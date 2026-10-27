@@ -607,7 +607,8 @@ const templateItemSchema = z.object({
 });
 const templateSchema = z.object({
   siteId: z.number().int().positive().nullable().optional(), name: z.string().min(1).max(200),
-  description: optionalText, active: z.boolean().optional(), items: z.array(templateItemSchema).max(500).optional(),
+  description: optionalText, areaType: z.string().trim().max(100).nullable().optional(),
+  active: z.boolean().optional(), items: z.array(templateItemSchema).max(500).optional(),
 });
 const roomSchema = z.object({
   siteId: z.number().int().positive(), name: z.string().min(1).max(200),
@@ -730,7 +731,7 @@ router.post("/equipment-templates", requireAuth, denyViewers, async (req, res) =
   if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (access === "missing") return res.status(400).json({ error: "Invalid siteId for this client" });
   const row = await db.transaction(async tx => {
-    const template = resultRows(await tx.execute(sql`INSERT INTO pat_equipment_templates (client_id,site_id,name,description,active) VALUES (${clientId},${d.siteId ?? null},${d.name},${d.description ?? null},${d.active ?? true}) RETURNING *`))[0];
+    const template = resultRows(await tx.execute(sql`INSERT INTO pat_equipment_templates (client_id,site_id,name,description,area_type,active) VALUES (${clientId},${d.siteId ?? null},${d.name},${d.description ?? null},${d.areaType || null},${d.active ?? true}) RETURNING *`))[0];
     for (const [index, item] of (d.items ?? []).entries()) await tx.execute(sql`INSERT INTO pat_equipment_template_items (client_id,template_id,name,appliance_type,quantity,notes,sort_order) VALUES (${clientId},${template.id},${item.name},${item.applianceType ?? "Other"},${item.quantity ?? 1},${item.notes ?? null},${item.sortOrder ?? index})`);
     return template;
   }); res.status(201).json(row);
@@ -756,7 +757,7 @@ router.put("/equipment-templates/:id", requireAuth, denyViewers, async (req, res
     if (incompatibleRoom) return res.status(409).json({ error: "Template is assigned to rooms at a different site" });
   }
   const row = await db.transaction(async tx => {
-    const template = resultRows(await tx.execute(sql`UPDATE pat_equipment_templates SET site_id=${d.siteId ?? null},name=${d.name},description=${d.description ?? null},active=${d.active ?? true},updated_at=now() WHERE id=${id} AND client_id=${clientId} RETURNING *`))[0];
+    const template = resultRows(await tx.execute(sql`UPDATE pat_equipment_templates SET site_id=${d.siteId ?? null},name=${d.name},description=${d.description ?? null},area_type=${d.areaType === undefined ? sql`area_type` : (d.areaType || null)},active=${d.active ?? true},updated_at=now() WHERE id=${id} AND client_id=${clientId} RETURNING *`))[0];
     if (!template) return null;
     if (d.items) { await tx.execute(sql`DELETE FROM pat_equipment_template_items WHERE template_id=${id} AND client_id=${clientId}`); for (const [index,item] of d.items.entries()) await tx.execute(sql`INSERT INTO pat_equipment_template_items (client_id,template_id,name,appliance_type,quantity,notes,sort_order) VALUES (${clientId},${id},${item.name},${item.applianceType ?? "Other"},${item.quantity ?? 1},${item.notes ?? null},${item.sortOrder ?? index})`); }
     return template;

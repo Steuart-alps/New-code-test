@@ -5183,6 +5183,9 @@ async function migratePATtrack() {
       "created_at" timestamp NOT NULL DEFAULT now(), "updated_at" timestamp NOT NULL DEFAULT now()
     )
   `);
+  // Added later: a template's area type is copied into a room when the
+  // template is chosen. Existing templates keep NULL until someone sets one.
+  await db.execute(sql`ALTER TABLE "pat_equipment_templates" ADD COLUMN IF NOT EXISTS "area_type" text`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "pat_equipment_template_items" (
       "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
