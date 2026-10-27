@@ -1,6 +1,7 @@
 import { getStripeSync } from "./stripeClient";
 import { syncClientSubscriptionState } from "./subscriptionState";
 import { sendCancellationWarningEmail, sendPaymentFailedEmail } from "./offboarding";
+import { sendNewSubscriptionAlert } from "./subscriptionAlert";
 import { logger } from "./logger";
 
 export interface StripeWebhookEvent {
@@ -48,6 +49,14 @@ export class WebhookHandlers {
         await sendCancellationWarningEmail({ stripeCustomerId: customer, accessEndsAt })
           .catch((err) => logger.warn({ err }, "Cancellation warning email failed"));
       }
+      return;
+    }
+
+    // The first paid invoice of a subscription: tell ALPS a business has
+    // started paying (sent once per subscription).
+    if (event.type === "invoice.paid") {
+      await sendNewSubscriptionAlert(object)
+        .catch((err) => logger.warn({ err }, "New subscription alert could not be sent"));
       return;
     }
 

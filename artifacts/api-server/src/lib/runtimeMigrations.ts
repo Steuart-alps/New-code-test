@@ -2318,6 +2318,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateEquipmentLabels();
     await migrateInspectionReports();
     await migrateAiUsage();
+    await migrateNewSubscriptionAlerts();
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
@@ -6394,4 +6395,16 @@ async function migrateAiUsage() {
   `);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_ai_top_ups_client_request" ON "ai_top_ups" ("client_id", "request_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_ai_top_ups_client_created" ON "ai_top_ups" ("client_id", "created_at")`);
+}
+
+// One row per Stripe subscription ALPS has been told about
+// (lib/subscriptionAlert.ts), so a repeated webhook sends one email.
+async function migrateNewSubscriptionAlerts() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "new_subscription_alerts" (
+      "stripe_subscription_id" text PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
 }

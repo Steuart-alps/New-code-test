@@ -310,6 +310,10 @@ jobs:
       - name: Cancellation warning tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:cancellation-warnings:fresh
 
+      # ALPS is emailed once when a business starts a paid subscription.
+      - name: New subscription alert tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:new-subscription-alert
+
       # Reviewed account deletion: no purge before approval, the 30-day wait or
       # with a legal hold; only the tenant's ACL-owned files; durable outcome.
       - name: Approved account deletion tests (production schema base)

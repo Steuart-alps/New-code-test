@@ -71,6 +71,7 @@
     "test:trial-reminders": "bash tests/run-db-workflow.sh tests/trial-reminders.mjs",
     "test:cancellation-warnings": "bash tests/run-db-workflow.sh tests/cancellation-warning.mjs",
     "test:cancellation-warnings:fresh": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/cancellation-warning-stripe-shape.mjs",
+    "test:new-subscription-alert": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/new-subscription-alert.mjs",
     "test:data-deletion-request": "bash tests/run-data-deletion-request.sh",
     "test:modules": "bash tests/run-db-workflow.sh tests/module-routes.mjs",
     "test:modules:ci": "bash tests/run-module-routes.sh",
