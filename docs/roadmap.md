@@ -38,6 +38,7 @@ Wednesday 28 October.
 | 19 | Bar opening and closing checks, including beer tap tips | After launch | None | Your list of bar checks |
 | 20 | Send site safety information to contractors before their visit | After launch | None | Contractor sign-in work (in its own thread) |
 | 21 | White-labelling for resellers (for example insurance brokers) | After launch | Possibly small extra email and web address costs per partner | Your answers on billing and what partners see |
+| 22 | Let Owners choose the AI model and effort for each AI feature | After launch | Depends on the choices made; capped | AI features live first |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -809,6 +810,37 @@ partner. I'll flag it before it's added.
 
 ---
 
+## 22. Choose the AI model and effort per feature
+
+**When:** after launch. Asked for on 27 October.
+
+For now each AI feature (certificate scanning, COSHH drafts, label scanning,
+audit report actions, the help chat and so on) uses a fixed AI model and
+effort level, chosen for the best balance of quality and cost. Those fixed
+choices are being set in the thread "Set AI model and effort per feature".
+
+Later, an Owner could change them per feature in Settings, for example:
+
+- **Better quality:** a stronger model or more effort for COSHH drafts, where
+  accuracy matters most.
+- **Lower cost or faster:** a lighter model for simple reads such as
+  certificates and labels.
+
+**Guard rails.** Plain wording ("Standard", "Thorough", "Fast") rather than
+model names; the cost difference shown next to each choice; ALPS's monthly
+spending limit and each business's fair-use limit still apply; and a "Reset to
+recommended" button. Whatever the choice, a person still checks and confirms
+every AI result before it is saved.
+
+**Cost:** depends on what businesses choose. Stronger models and more effort
+cost more per use, so this may be best offered as a paid option or limited to
+the higher plans. The spending caps keep it in check.
+
+**Question for you:** should a business pay extra to choose the stronger
+setting, or should it be included?
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -859,6 +891,7 @@ work:
 | Reorder the side menu | None |
 | Bar opening and closing checks | None |
 | Site safety information to contractors | None |
+| Choose AI model and effort | Depends on choices; stronger settings cost more per use, capped by spending limits |
 | White-labelling for resellers | Little or none for hosting; possibly a small cost per partner web address and email address |
 | FireTrack sound level meter | None |
 | Temperature probes and sensors | Hardware paid by each business (plus a maker subscription for option 1); possibly a larger database plan later; text alerts a few pence each |
