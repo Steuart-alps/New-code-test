@@ -3265,10 +3265,10 @@ export const GetAiAddonResponse = zod.object({
 }).nullable(),
   "purchasable": zod.boolean().describe('The add-on can be bought now (Stripe ready and the price exists)'),
   "topUp": zod.object({
-  "amount": zod.number().describe('Price in pence, before VAT, charged at once'),
+  "amount": zod.number().describe('Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance)'),
   "allowance": zod.number().describe('AI use it adds, in pence, until the add-on renews'),
   "currency": zod.string()
-}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready'),
+}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan \"included\") the owner agrees to it and ALPS adds the price to their consultancy invoice.'),
   "topUpsThisPeriod": zod.number().min(getAiAddonResponseTwoTopUpsThisPeriodMin).describe('Top-ups paid for since the add-on last renewed'),
   "autoTopUp": zod.boolean().describe('A top-up is bought automatically when the allowance runs out'),
   "autoTopUpLimit": zod.number().min(getAiAddonResponseTwoAutoTopUpLimitMin).describe('Most automatic top-ups in one period')
@@ -3308,10 +3308,10 @@ export const ChangeAiAddonResponse = zod.object({
 }).nullable(),
   "purchasable": zod.boolean().describe('The add-on can be bought now (Stripe ready and the price exists)'),
   "topUp": zod.object({
-  "amount": zod.number().describe('Price in pence, before VAT, charged at once'),
+  "amount": zod.number().describe('Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance)'),
   "allowance": zod.number().describe('AI use it adds, in pence, until the add-on renews'),
   "currency": zod.string()
-}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready'),
+}).nullable().describe('The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan \"included\") the owner agrees to it and ALPS adds the price to their consultancy invoice.'),
   "topUpsThisPeriod": zod.number().min(changeAiAddonResponseTwoTopUpsThisPeriodMin).describe('Top-ups paid for since the add-on last renewed'),
   "autoTopUp": zod.boolean().describe('A top-up is bought automatically when the allowance runs out'),
   "autoTopUpLimit": zod.number().min(changeAiAddonResponseTwoAutoTopUpLimitMin).describe('Most automatic top-ups in one period')

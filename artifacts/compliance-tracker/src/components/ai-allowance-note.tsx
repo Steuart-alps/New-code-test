@@ -20,11 +20,13 @@ export function aiAllowanceState(ai: AiStatus): { canUse: boolean; note: string 
       note: ai.plan === "trial"
         ? "Your trial's AI allowance is used up. It comes with the AI features add-on once you subscribe."
         : ai.plan === "included"
-        ? `This month's AI allowance is used up. It starts again ${formatResetDate(ai.resetsAt)}.`
+        ? `This month's AI allowance is used up. It starts again ${formatResetDate(ai.resetsAt)}, or an owner can agree to a top-up in Settings.`
         : `This month's AI allowance is used up. It starts again ${formatResetDate(ai.resetsAt)}, or an owner can buy a top-up in Settings.`,
     };
   }
-  return { canUse: true, note: `${ai.percentUsed}% of ${ai.plan === "trial" ? "your trial's" : "this month's"} AI allowance used.` };
+  // Steuart, 2026-10-27: warn everyone once 75% is used.
+  const nearlyUsed = ai.percentUsed >= 75 ? ", so it's nearly used up" : "";
+  return { canUse: true, note: `${ai.percentUsed}% of ${ai.plan === "trial" ? "your trial's" : "this month's"} AI allowance used${nearlyUsed}.` };
 }
 
 /** One line under an AI button, with a link to Settings when the add-on is off or used up. */
@@ -33,7 +35,7 @@ export function AiAllowanceNote({ ai }: { ai: AiStatus }) {
   return (
     <span className="text-xs text-muted-foreground" data-testid="ai-allowance-note">
       {note}
-      {(!ai.active || (ai.usedUp && ai.plan === "addon")) && <> <a href="/settings#ai" className="font-semibold underline underline-offset-2">Open Settings</a></>}
+      {(!ai.active || (ai.usedUp && (ai.plan === "addon" || ai.plan === "included"))) && <> <a href="/settings#ai" className="font-semibold underline underline-offset-2">Open Settings</a></>}
     </span>
   );
 }

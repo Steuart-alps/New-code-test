@@ -25,7 +25,9 @@
 //     not again for a day after a declined charge;
 //   - switching it off removes the item at once, with no proration;
 //   - a business with no trial end (every module free, set up by ALPS) gets
-//     the monthly allowance free each calendar month, with no top-ups.
+//     the monthly allowance free each calendar month; its owner may agree to a
+//     top-up, which ALPS invoices (no Stripe charge), and a repeat adds one;
+//   - owners are warned once when 75% of a period's allowance is used.
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
@@ -277,20 +279,35 @@ async function main(base) {
   await query("UPDATE clients SET trial_ends_at = NULL WHERE id = $1", [free.clientId]);
   const monthEnd = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)).toISOString();
   const included = (await free.user("GET", "/billing/ai")).data;
-  same("included, renewing at the start of next month, no top-ups",
+  same("included, renewing at the start of next month, top-ups invoiced by ALPS",
     [included?.active, included?.plan, included?.percentUsed, included?.resetsAt, included?.topUp],
-    [true, "included", 0, monthEnd, null]);
+    [true, "included", 0, monthEnd, { amount: 600, allowance: 400, currency: "gbp" }]);
   const freeRead = await readList(free.user);
   same("reading works with no subscription", [freeRead.status, (await usageRows(free.clientId)).length], [200, 1]);
   // Last month's use does not count against this month.
   await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros, created_at) VALUES ($1, 'report_reading', 'done', 12500000, date_trunc('month', now()) - interval '1 day')", [free.clientId]);
   same("last month's use is not counted", (await free.user("GET", "/billing/ai")).data?.usedUp, false);
-  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 12500000)", [free.clientId]);
+  same("no warning below 75%", await t.warnIfAllowanceNearlyUsed(free.clientId), false);
+  // £8 of £10 ($10 at 80p a dollar): past the 75% warning.
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 10000000)", [free.clientId]);
+  same("warned once at 75% used", [await t.warnIfAllowanceNearlyUsed(free.clientId), await t.warnIfAllowanceNearlyUsed(free.clientId)], [true, false]);
+  same("the warning is recorded as sent",
+    (await query("SELECT count(*)::int AS n FROM scheduled_email_claims WHERE job = 'ai-allowance-warning' AND sent_at IS NOT NULL AND delivery_key LIKE $1", [`${free.clientId}:%`]))[0]?.n, 1);
+  await query("INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros) VALUES ($1, 'report_reading', 'done', 2500000)", [free.clientId]);
   const freeOver = await readList(free.user);
   same("refused once this month's allowance is used", [freeOver.status, freeOver.data?.code], [429, "AI_ALLOWANCE_USED"]);
-  check("says when it starts again, with no top-up offered",
-    /starts again on/.test(freeOver.data?.error ?? "") && !/top-up/.test(freeOver.data?.error ?? ""), freeOver.data?.error);
-  same("no top-up for an included allowance (no subscription to charge)", (await free.user("POST", "/billing/ai", { action: "top_up", requestId: crypto.randomUUID() })).status, 400);
+  check("says when it starts again and that an owner can agree to a top-up",
+    /starts again on/.test(freeOver.data?.error ?? "") && /agree to a top-up/.test(freeOver.data?.error ?? ""), freeOver.data?.error);
+  const freeRequest = crypto.randomUUID();
+  t.calls.length = 0;
+  const freeTopUp = await free.user("POST", "/billing/ai", { action: "top_up", requestId: freeRequest });
+  same("the owner agrees to a top-up", [freeTopUp.status, freeTopUp.data?.topUpsThisPeriod, freeTopUp.data?.usedUp], [200, 1, false]);
+  same("nothing is charged in Stripe", t.calls.length, 0);
+  same("recorded at the normal price for ALPS to invoice", await query("SELECT amount_pence, allowance_pence, status FROM ai_top_ups WHERE client_id = $1", [free.clientId]),
+    [{ amount_pence: 600, allowance_pence: 400, status: "paid" }]);
+  same("the same request adds nothing more", (await free.user("POST", "/billing/ai", { action: "top_up", requestId: freeRequest })).data?.topUpsThisPeriod, 1);
+  same("reading works again after the top-up", (await readList(free.user)).status, 200);
+  same("no new warning until 75% of the bigger allowance", await t.warnIfAllowanceNearlyUsed(free.clientId), false);
 }
 
 // ─── run ────────────────────────────────────────────────────────────────────

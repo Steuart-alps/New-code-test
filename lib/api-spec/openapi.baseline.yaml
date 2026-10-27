@@ -10683,9 +10683,11 @@ components:
             topUp:
               type: object
               nullable: true
-              description: The top-up an owner can buy now; null unless the add-on is on and billing is ready
+              description: >-
+                The top-up an owner can buy now; null unless the add-on is on and billing is ready.
+                On an included allowance (plan "included") the owner agrees to it and ALPS adds the price to their consultancy invoice.
               properties:
-                amount: { type: integer, description: "Price in pence, before VAT, charged at once" }
+                amount: { type: integer, description: "Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance)" }
                 allowance: { type: integer, description: "AI use it adds, in pence, until the add-on renews" }
                 currency: { type: string }
               required: [amount, allowance, currency]

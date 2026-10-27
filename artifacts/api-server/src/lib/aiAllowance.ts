@@ -7,6 +7,7 @@ import { getUncachableStripeClient } from "./stripeClient";
 import { emailButton, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./email";
 import { logger } from "./logger";
 import { aiCostUsdMicros, type AiCallUsage } from "./aiPricing";
+import { claimEmailDelivery, emailDeliveryIdempotencyKey, markEmailDeliverySent, pruneSentEmailDeliveries, settleEmailDelivery } from "./emailDeliveryClaims";
 
 export { aiCostUsdMicros, usageFromMessage, type AiCallUsage } from "./aiPricing";
 
@@ -25,7 +26,10 @@ export { aiCostUsdMicros, usageFromMessage, type AiCallUsage } from "./aiPricing
  * the business's live subscription, AI is unavailable (trials included,
  * unless AI_TRIAL_ALLOWANCE_PENCE gives them a small amount to try). A
  * business with no trial end (every module free, set up by ALPS) gets the
- * same monthly allowance free, counted per calendar month, with no top-ups.
+ * same monthly allowance free, counted per calendar month. When it runs out,
+ * its Owner may agree to a top-up at the normal price, which ALPS adds to the
+ * business's consultancy invoice (Steuart, 2026-10-27): no card is charged,
+ * ALPS is emailed, and nothing tops it up automatically.
  */
 
 function envPence(name: string, fallback: number): number {
@@ -162,9 +166,9 @@ async function topUpAllowancePence(executor: Pick<typeof db, "execute">, clientI
   return Number((result.rows[0] as { pence?: unknown } | undefined)?.pence ?? 0);
 }
 
-/** The period's allowance: the plan's, plus top-ups for an add-on. */
+/** The period's allowance: the plan's, plus top-ups for an add-on or an included allowance. */
 async function periodAllowancePence(executor: Pick<typeof db, "execute">, clientId: number, plan: Exclude<AiPlan, { kind: "none" }>): Promise<number> {
-  return plan.allowancePence + (plan.kind === "addon" ? await topUpAllowancePence(executor, clientId, plan.periodStart) : 0);
+  return plan.allowancePence + (plan.kind === "addon" || plan.kind === "included" ? await topUpAllowancePence(executor, clientId, plan.periodStart) : 0);
 }
 
 async function spentUsdMicros(executor: Pick<typeof db, "execute">, clientId: number, since: Date): Promise<number> {
@@ -279,7 +283,7 @@ async function claimWithinAllowance(input: AiClaim, plan: Exclude<AiPlan, { kind
         plan.kind === "trial"
           ? `The AI allowance for your free trial is used up. It comes with the AI features add-on once you subscribe. ${input.instead}`
           : plan.kind === "included"
-          ? `This business has used its AI allowance for this month. It starts again ${formatResetDate(plan.periodEnd)}. ${input.instead}`
+          ? `This business has used its AI allowance for this month. It starts again ${formatResetDate(plan.periodEnd)}, or an owner can agree to a top-up in Settings, Billing, added to your ALPS Consultancy invoice. ${input.instead}`
           : `This business has used its AI allowance for this month. It starts again ${formatResetDate(plan.periodEnd)}, or an owner can buy a top-up in Settings, Billing. ${input.instead}`,
         429,
       );
@@ -301,7 +305,7 @@ async function claimWithinAllowance(input: AiClaim, plan: Exclude<AiPlan, { kind
  */
 export async function settleAiUse(id: number, usage: AiCallUsage | null, ok: boolean): Promise<void> {
   try {
-    await db.update(aiUsageTable).set({
+    const [settled] = await db.update(aiUsageTable).set({
       status: ok ? "done" : "failed",
       model: usage?.model ?? null,
       inputTokens: usage?.inputTokens ?? 0,
@@ -311,11 +315,80 @@ export async function settleAiUse(id: number, usage: AiCallUsage | null, ok: boo
       webSearches: usage?.webSearches ?? 0,
       costUsdMicros: usage ? aiCostUsdMicros(usage) : 0,
       settledAt: new Date(),
-    }).where(eq(aiUsageTable.id, id));
+    }).where(eq(aiUsageTable.id, id)).returning({ clientId: aiUsageTable.clientId });
+    if (settled && usage) {
+      void warnIfAllowanceNearlyUsed(settled.clientId).catch((err) =>
+        logger.error({ err, clientId: settled.clientId }, "AI allowance warning email failed"));
+    }
   } catch (err) {
     // The pending row keeps counting at its estimate, so the allowance stays safe.
     logger.error({ err, aiUsageId: id }, "Could not record the cost of an AI request");
   }
+}
+
+/** Share of a period's allowance at which the business is warned (Steuart, 2026-10-27: 75% used). */
+export const AI_WARNING_SHARE = 0.75;
+const AI_WARNING_JOB = "ai-allowance-warning";
+
+/**
+ * Email the owners once a period's allowance is 75% used, once per period and
+ * allowance (a top-up raises the allowance, so it can warn again nearer the
+ * new limit). For a free business, ALPS (its linked consultants) hears too.
+ */
+export async function warnIfAllowanceNearlyUsed(clientId: number): Promise<boolean> {
+  const plan = await getAiPlan(clientId);
+  if (plan.kind !== "addon" && plan.kind !== "included") return false;
+  const [usedPence, allowancePence] = await Promise.all([
+    spentUsdMicros(db, clientId, plan.periodStart).then(usdMicrosToPence),
+    periodAllowancePence(db, clientId, plan),
+  ]);
+  if (allowancePence <= 0 || usedPence < allowancePence * AI_WARNING_SHARE) return false;
+  const claim = await claimEmailDelivery(AI_WARNING_JOB, `${clientId}:${plan.periodStart.toISOString()}:${allowancePence}`);
+  if (!claim) return false;
+
+  try {
+    const [client] = await db.select({ name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+    const people = await db.execute(sql`
+      SELECT DISTINCT u.id, u.name, u.email FROM users u
+       WHERE u.active AND u.email IS NOT NULL AND u.email <> ''
+         AND ((u.client_id = ${clientId} AND u.role IN ('consultant', 'client_admin'))
+           OR (${plan.kind === "included"} AND u.role = 'consultant' AND EXISTS (
+             SELECT 1 FROM consultant_clients cc WHERE cc.user_id = u.id AND cc.client_id = ${clientId})))
+       ORDER BY u.id LIMIT 30
+    `);
+    const company = client?.name ?? "Your business";
+    const percent = Math.min(100, Math.round((usedPence / allowancePence) * 100));
+    const price = `${formatPounds(aiTopUpPricePence())} + VAT`;
+    const whenOut = plan.kind === "included"
+      ? `When it runs out, AI buttons pause until it starts again, or an owner can agree to a top-up (${price}, added to your ALPS Consultancy invoice) in Settings.`
+      : await isAiAutoTopUpOn(clientId)
+      ? `Automatic top-ups are on, so when it runs out we'll add one (${price}) and email you.`
+      : `When it runs out, AI buttons pause until it starts again, or an owner can buy a top-up (${price}) in Settings.`;
+    const lines = [
+      `<strong>${escapeHtml(company)}</strong> has used ${percent}% of this month's ComplyTrack AI allowance. It starts again ${formatResetDate(plan.periodEnd)}.`,
+      escapeHtml(whenOut),
+      "Everything else in ComplyTrack keeps working as normal.",
+    ];
+    const subject = `${company}: ${percent}% of this month's AI allowance used`;
+    const url = `${getPublicAppUrl()}/settings#ai`;
+    for (const person of people.rows as Array<{ id: number; name: string | null; email: string }>) {
+      const name = person.name ?? "";
+      const html = `
+    <h2 style="color: #1e293b; margin-top: 0;">AI allowance ${percent}% used</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    ${lines.map((line) => `<p>${line}</p>`).join("\n    ")}
+    <p style="margin: 24px 0; text-align: center;">${emailButton(escapeHtml(url), "Open AI settings")}</p>
+    <p>Best regards,<br><strong>ComplyTrack</strong></p>`;
+      const text = [`AI allowance ${percent}% used`, "", `Hi ${name},`, "", ...lines.map((line) => line.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&")), "", url, "", "Best regards,", "ComplyTrack"].join("\n");
+      await sendSystemEmail({ to: person.email, subject, html, text, idempotencyKey: emailDeliveryIdempotencyKey(claim, person.id) });
+    }
+    await markEmailDeliverySent(claim);
+  } catch (err) {
+    await settleEmailDelivery(claim).catch(() => {});
+    throw err;
+  }
+  void pruneSentEmailDeliveries(AI_WARNING_JOB, 400).catch(() => {});
+  return true;
 }
 
 // ── Top-ups ─────────────────────────────────────────────────────────────────
@@ -361,6 +434,7 @@ export async function buyAiTopUp(input: {
 }): Promise<AiTopUpResult> {
   const log = input.log ?? logger;
   const plan = await getAiPlan(input.clientId);
+  if (plan.kind === "included") return addInvoicedTopUp(input, log);
   if (plan.kind !== "addon") return "no_addon";
   const [client] = await db.select({ stripeCustomerId: clientsTable.stripeCustomerId })
     .from(clientsTable).where(eq(clientsTable.id, input.clientId)).limit(1);
@@ -405,6 +479,73 @@ export async function buyAiTopUp(input: {
     log.error({ clientId: input.clientId, topUpId: row.id }, "AI top-up payment outcome unknown; counted until checked in Stripe");
   }
   return status;
+}
+
+/**
+ * A top-up an owner agreed to on an included allowance: added at once and
+ * recorded as paid at the normal price, which ALPS adds to the business's
+ * consultancy invoice, so nothing is charged here and ALPS is emailed. A
+ * repeated requestId adds nothing more.
+ */
+async function addInvoicedTopUp(
+  input: { clientId: number; userId: number | null; requestId: string },
+  log: Pick<typeof logger, "error">,
+): Promise<AiTopUpResult> {
+  const [row] = await db.insert(aiTopUpsTable).values({
+    clientId: input.clientId,
+    userId: input.userId,
+    requestId: input.requestId,
+    automatic: false,
+    amountPence: aiTopUpPricePence(),
+    allowancePence: aiTopUpAllowancePence(),
+    currency: AI_ADDON_CURRENCY,
+    status: "paid",
+    settledAt: new Date(),
+  }).onConflictDoNothing().returning({ id: aiTopUpsTable.id });
+  if (!row) {
+    const [earlier] = await db.select({ status: aiTopUpsTable.status }).from(aiTopUpsTable)
+      .where(and(eq(aiTopUpsTable.clientId, input.clientId), eq(aiTopUpsTable.requestId, input.requestId))).limit(1);
+    return (earlier?.status ?? "pending") as AiTopUpResult;
+  }
+  void emailInvoicedTopUp(input.clientId, input.userId).catch((err) =>
+    log.error({ err, clientId: input.clientId, topUpId: row.id }, "AI top-up invoice email to ALPS failed"));
+  return "paid";
+}
+
+/** Ask ALPS (ADMIN_EMAIL and the business's consultants) to invoice an agreed top-up. */
+async function emailInvoicedTopUp(clientId: number, userId: number | null): Promise<void> {
+  const [client] = await db.select({ name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  const agreedBy = userId == null ? null : (await db.execute(sql`SELECT name, email FROM users WHERE id = ${userId}`)).rows[0] as
+    { name: string | null; email: string } | undefined;
+  const consultants = await db.execute(sql`
+    SELECT DISTINCT u.email FROM users u
+      JOIN consultant_clients cc ON cc.user_id = u.id
+     WHERE cc.client_id = ${clientId} AND u.active AND u.role = 'consultant'
+       AND u.email IS NOT NULL AND u.email <> ''
+     LIMIT 10
+  `);
+  const recipients = new Set((consultants.rows as Array<{ email: string }>).map((row) => row.email.toLowerCase()));
+  const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  if (adminEmail) recipients.add(adminEmail);
+  if (!recipients.size) {
+    logger.error({ clientId }, "No ALPS address to tell about an agreed AI top-up; add it to the invoice from ai_top_ups");
+    return;
+  }
+  const company = client?.name ?? `Business ${clientId}`;
+  const who = agreedBy ? `${agreedBy.name || agreedBy.email} (${agreedBy.email})` : "an owner";
+  const price = formatPounds(aiTopUpPricePence());
+  const date = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/London" });
+  const lines = [
+    `<strong>${escapeHtml(company)}</strong> used this month's included AI allowance, and ${escapeHtml(who)} agreed to a top-up on ${date}.`,
+    `Please add <strong>${price} + VAT</strong> to their next ALPS Consultancy invoice. Their extra ${formatPounds(aiTopUpAllowancePence())} of AI use is already switched on for this month.`,
+  ];
+  const subject = `${company}: AI top-up agreed, add ${price} + VAT to their invoice`;
+  const html = `
+    <h2 style="color: #1e293b; margin-top: 0;">AI top-up to invoice</h2>
+    ${lines.map((line) => `<p>${line}</p>`).join("\n    ")}
+    <p>Best regards,<br><strong>ComplyTrack</strong></p>`;
+  const text = ["AI top-up to invoice", "", ...lines.map((line) => line.replace(/<[^>]+>/g, "")), "", "Best regards,", "ComplyTrack"].join("\n");
+  for (const to of recipients) await sendSystemEmail({ to, subject, html, text });
 }
 
 /** A declined automatic top-up is not tried again for this long. */

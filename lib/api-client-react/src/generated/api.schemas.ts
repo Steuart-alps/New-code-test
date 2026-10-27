@@ -4171,10 +4171,10 @@ export type AiAddonStatusPrice = {
 } | null;
 
 /**
- * The top-up an owner can buy now; null unless the add-on is on and billing is ready
+ * The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan "included") the owner agrees to it and ALPS adds the price to their consultancy invoice.
  */
 export type AiAddonStatusTopUp = {
-  /** Price in pence, before VAT, charged at once */
+  /** Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance) */
   amount: number;
   /** AI use it adds, in pence, until the add-on renews */
   allowance: number;
@@ -4185,7 +4185,7 @@ export type AiAddonStatus = AiStatus & {
   price: AiAddonStatusPrice;
   /** The add-on can be bought now (Stripe ready and the price exists) */
   purchasable: boolean;
-  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready */
+  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan "included") the owner agrees to it and ALPS adds the price to their consultancy invoice. */
   topUp: AiAddonStatusTopUp;
   /**
      * Top-ups paid for since the add-on last renewed

@@ -739,10 +739,14 @@ async function aiAddonStatus(clientId: number) {
     price: price ? { unitAmount: price.unitAmount, currency: price.currency } : null,
     // Buying needs Stripe ready and the price to exist.
     purchasable: Boolean(price) && billingReady,
-    topUp: plan.kind === "addon" && billingReady
+    // An included allowance (free business): an owner agrees to a top-up,
+    // which ALPS adds to their consultancy invoice, so Stripe is not needed.
+    topUp: plan.kind === "included"
+      ? { amount: aiTopUpPricePence(), allowance: aiTopUpAllowancePence(), currency: "gbp" }
+      : plan.kind === "addon" && billingReady
       ? { amount: aiTopUpPricePence(), allowance: aiTopUpAllowancePence(), currency: "gbp" }
       : null,
-    topUpsThisPeriod: plan.kind === "addon" ? await countAiTopUps(clientId, plan.periodStart) : 0,
+    topUpsThisPeriod: plan.kind === "addon" || plan.kind === "included" ? await countAiTopUps(clientId, plan.periodStart) : 0,
     autoTopUp,
     autoTopUpLimit: aiAutoTopUpLimit(),
   };
@@ -781,6 +785,17 @@ router.post("/ai", requireAuth, requireRole("consultant", "client_admin"), async
   const { action } = change;
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "clientId required" });
+
+  // A free business's included allowance: the owner agrees to a top-up and
+  // ALPS adds it to their consultancy invoice; no card or Stripe involved.
+  if (change.action === "top_up") {
+    invalidateAiPlan(clientId);
+    if ((await getAiPlan(clientId)).kind === "included") {
+      const outcome = await buyAiTopUp({ clientId, userId: req.currentUser?.id ?? null, requestId: change.requestId, automatic: false, log: req.log });
+      if (outcome !== "paid") return res.status(409).json({ error: "That top-up was not added. Please refresh and try again." });
+      return res.json(await aiAddonStatus(clientId));
+    }
+  }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client?.stripeCustomerId) return res.status(400).json({ error: "Subscribe to ComplyTrack first, then add AI features." });
