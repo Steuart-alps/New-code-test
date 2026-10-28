@@ -5358,7 +5358,7 @@ components:
             - $ref: "#/components/schemas/BusinessDashboardAi"
     BusinessDashboardAiAmounts:
       type: object
-      required: [addonPence, topUpPence, invoicedTopUpPence, incomePence, costPence, marginPence, requests]
+      required: [addonPence, topUpPence, invoicedTopUpPence, incomePence, costPence, marginPence, requests, lapsedPence]
       properties:
         addonPence: { type: integer, description: The AI add-on paid through Stripe }
         topUpPence: { type: integer, description: Top-ups paid through Stripe }
@@ -5367,6 +5367,7 @@ components:
         costPence: { type: integer, description: What Claude charged, converted from dollars }
         marginPence: { type: integer }
         requests: { type: integer }
+        lapsedPence: { type: integer, description: Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin) }
     BusinessDashboardAi:
       type: object
       required: [months, businesses, totals, usdToGbp, addonIncomeAvailable]
