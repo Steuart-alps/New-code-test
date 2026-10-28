@@ -4861,6 +4861,8 @@ async function migrateClientDocuments() {
     CREATE INDEX IF NOT EXISTS "IDX_client_documents_client"
     ON "client_documents" ("client_id", "created_at")
   `);
+  // KitchenTrack HACCP plans and recipe spec sheets; NULL = general document.
+  await db.execute(sql`ALTER TABLE "client_documents" ADD COLUMN IF NOT EXISTS "category" text`);
 }
 
 async function migrateIncidents() {

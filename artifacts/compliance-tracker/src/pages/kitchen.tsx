@@ -39,7 +39,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2 } from "lucide-react";
+import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2, FileText } from "lucide-react";
+import { DocumentLibrary, type DocumentCategory } from "@/components/document-library";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { cn } from "@/lib/utils";
@@ -104,6 +105,7 @@ type CookingRow = {
 type CoolingRow = {
   item: string;
   timeStart: string;          // Time cooling started
+  startTemp?: string;         // Core temp when cooling started (°C), a record only
   timeFinish: string;         // Time cooling finished
   coreTemp: string;           // Core temp after cooling (°C) — target ≤8°C within 90 min
 };
@@ -130,7 +132,7 @@ type SousVideRow = {
   notes: string;
 };
 
-type ActiveTab = "diary" | "weekly" | "probe" | "cleaning" | "checks";
+type ActiveTab = "diary" | "weekly" | "probe" | "cleaning" | "checks" | "documents";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 function buildDiaryBaseline(record: FoodSafetyRecord) {
@@ -1526,7 +1528,7 @@ export function DailyDiaryTab() {
                 )}
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="p-0 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
@@ -1568,27 +1570,28 @@ export function DailyDiaryTab() {
                   <CardDescription className="text-xs mt-1">Target: {entryCoolingLimit} · Rows exceeding 90 minutes are flagged red</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setCooling([...cooling, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }]); }}>
+                  <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setCooling([...cooling, { item: "", timeStart: "", startTemp: "", timeFinish: "", coreTemp: "" }]); }}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="p-0 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
                     <th className="text-left px-3 py-2 font-medium text-muted-foreground">Food item</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Cooling started</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Start temp (°C)</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Cooling finished</th>
-                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Duration</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">End temp (°C)</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Duration</th>
                     {!isSubmitted && <th className="w-8" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {cooling.length === 0
-                    ? <tr><td colSpan={6} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooling records yet.</td></tr>
+                    ? <tr><td colSpan={7} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooling records yet.</td></tr>
                     : cooling.map((row, i) => {
                       const upd = (f: keyof CoolingRow, v: string) => { const n = [...cooling]; n[i] = { ...n[i], [f]: v }; setCooling(n); };
                       const mins = coolingMins(row.timeStart, row.timeFinish);
@@ -1598,13 +1601,14 @@ export function DailyDiaryTab() {
                         <tr key={i} className={cn("hover:bg-muted/10", overTime && "bg-rose-50")}>
                           <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Soup" /></td>
                           <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input inputMode="decimal" aria-label={`${row.item || `Cooling row ${i + 1}`} temperature when cooling started`} value={row.startTemp ?? ""} disabled={isSubmitted} onChange={e => upd("startTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
                           <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
                           <td className="px-2 py-1.5">
                             <span className={cn("text-xs font-medium", overTime ? "text-rose-600" : "text-muted-foreground")}>
                               {overTime && <AlertTriangle className="w-3 h-3 inline mr-0.5" />}{durationLabel}
                             </span>
                           </td>
-                          <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
                           {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setCooling(cooling.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
                         </tr>
                       );
@@ -1629,7 +1633,7 @@ export function DailyDiaryTab() {
                 )}
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="p-0 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
@@ -2281,6 +2285,12 @@ const TABS: { id: ActiveTab; label: string; icon: any; description: string }[] =
   { id: "weekly",   label: "Weekly Review",         icon: ClipboardList, description: "Combined CookSafe house rules + management review" },
   { id: "probe",    label: "Probe Check",           icon: Thermometer,   description: "Monthly probe thermometer calibration record" },
   { id: "cleaning", label: "Cleaning Schedule",     icon: Sparkles,      description: "Daily, weekly and monthly cleaning task schedule and sign-off" },
+  { id: "documents", label: "HACCP & Recipes",      icon: FileText,      description: "HACCP plans and recipe spec sheets" },
+];
+
+const KITCHEN_DOCUMENT_CATEGORIES: DocumentCategory[] = [
+  { value: "haccp", label: "HACCP plan" },
+  { value: "recipe_spec", label: "Recipe spec sheet" },
 ];
 
 export default function KitchenPage() {
@@ -2396,7 +2406,7 @@ export default function KitchenPage() {
         )}
 
         {/* Tab bar */}
-        <div className="flex gap-1 p-1 bg-muted/50 rounded-xl w-full sm:w-auto sm:inline-flex border border-border/50">
+        <div className="flex flex-wrap gap-1 p-1 bg-muted/50 rounded-xl w-full sm:w-auto sm:inline-flex border border-border/50">
           {TABS.map(tab => {
             const Icon = tab.icon;
             return (
@@ -2423,6 +2433,8 @@ export default function KitchenPage() {
         {activeTab === "weekly"   && <WeeklyReviewTab />}
         {activeTab === "probe"    && <ProbeCheckTab defaultProbeNamesJson={foodSafetyConfig?.food_probe_names} />}
         {activeTab === "cleaning" && <CleaningScheduleTab />}
+        {activeTab === "documents" && <DocumentLibrary categories={KITCHEN_DOCUMENT_CATEGORIES}
+          emptyText="Upload your HACCP plan and recipe spec sheets so the whole kitchen team can find them." />}
       </div>
     </AppLayout>
   );

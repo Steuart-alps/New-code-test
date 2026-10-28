@@ -74,6 +74,8 @@ interface CoreTemperatureReading {
   coreTemp: string;
   timeStart: string;
   timeFinish: string;
+  /** Cooling only: core temperature when cooling started, a record only. */
+  startTemp?: string;
   /** Cooking only: seconds held at the core temperature. */
   holdSeconds?: string;
 }
@@ -686,7 +688,7 @@ function KitchenTemperatureFields() {
           hold={temperatureAssessment.rules ? kitchenHoldRequirement(temperatureAssessment.rules, 'hotTemperature', cooking.item)?.limit ?? null : null} />
       ) : null}
       {config?.food_show_cooling !== 'false' ? (
-        <CoreTemperatureCard title="Cooling" icon="wind" value={cooling} onChange={(value) => { markDirty(); setCooling(value); }} />
+        <CoreTemperatureCard title="Cooling" icon="wind" value={cooling} onChange={(value) => { markDirty(); setCooling(value); }} startTemp />
       ) : null}
       {config?.food_show_reheating !== 'false' ? (
         <CoreTemperatureCard
@@ -758,6 +760,7 @@ function CoreTemperatureCard({
   value,
   onChange,
   hold,
+  startTemp,
 }: {
   title: string;
   icon: React.ComponentProps<typeof Feather>['name'];
@@ -765,6 +768,8 @@ function CoreTemperatureCard({
   /** Cooking: the minimum seconds this item must be held (null = no control,
    *  but the time can still be recorded); undefined hides the field. */
   hold?: number | null;
+  /** Cooling: also record the core temperature when cooling started. */
+  startTemp?: boolean;
   value: CoreTemperatureReading;
   onChange: React.Dispatch<React.SetStateAction<CoreTemperatureReading>>;
 }) {
@@ -774,11 +779,26 @@ function CoreTemperatureCard({
       <SectionTitle icon={icon} title={title} color={colors.foreground} />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <TextInputField label="Food item" value={value.item} onChange={(item) => onChange((row) => ({ ...row, item }))} />
-        <TemperatureInput label="Core °C" value={value.coreTemp} onChange={(coreTemp) => onChange((row) => ({ ...row, coreTemp }))} />
-        <View style={styles.inputRow}>
-          <TextInputField label="Start time" value={value.timeStart} onChange={(timeStart) => onChange((row) => ({ ...row, timeStart }))} placeholder="HH:mm" compact />
-          <TextInputField label="Finish time" value={value.timeFinish} onChange={(timeFinish) => onChange((row) => ({ ...row, timeFinish }))} placeholder="HH:mm" compact />
-        </View>
+        {startTemp ? (
+          <>
+            <View style={styles.inputRow}>
+              <TextInputField label="Start time" value={value.timeStart} onChange={(timeStart) => onChange((row) => ({ ...row, timeStart }))} placeholder="HH:mm" compact />
+              <TemperatureInput label="Start °C" value={value.startTemp ?? ''} onChange={(startTemp) => onChange((row) => ({ ...row, startTemp }))} />
+            </View>
+            <View style={styles.inputRow}>
+              <TextInputField label="Finish time" value={value.timeFinish} onChange={(timeFinish) => onChange((row) => ({ ...row, timeFinish }))} placeholder="HH:mm" compact />
+              <TemperatureInput label="End °C" value={value.coreTemp} onChange={(coreTemp) => onChange((row) => ({ ...row, coreTemp }))} />
+            </View>
+          </>
+        ) : (
+          <>
+            <TemperatureInput label="Core °C" value={value.coreTemp} onChange={(coreTemp) => onChange((row) => ({ ...row, coreTemp }))} />
+            <View style={styles.inputRow}>
+              <TextInputField label="Start time" value={value.timeStart} onChange={(timeStart) => onChange((row) => ({ ...row, timeStart }))} placeholder="HH:mm" compact />
+              <TextInputField label="Finish time" value={value.timeFinish} onChange={(timeFinish) => onChange((row) => ({ ...row, timeFinish }))} placeholder="HH:mm" compact />
+            </View>
+          </>
+        )}
         {hold !== undefined ? (
           <TextInputField label={hold === null ? 'Held at core temp (seconds)' : `Held at core temp (seconds, at least ${hold})`}
             value={value.holdSeconds ?? ''} onChange={(holdSeconds) => onChange((row) => ({ ...row, holdSeconds }))} placeholder="e.g. 30" compact numeric />
