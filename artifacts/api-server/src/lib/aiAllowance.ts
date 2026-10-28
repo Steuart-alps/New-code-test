@@ -1,5 +1,5 @@
 import { db } from "@workspace/db";
-import { aiTopUpsTable, aiUsageTable, appSettingsTable, clientsTable, type AiUsageFeature } from "@workspace/db/schema";
+import { aiAllowanceGrantsTable, aiTopUpsTable, aiUsageTable, appSettingsTable, clientsTable, type AiUsageFeature } from "@workspace/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { collectAddonFirstMonthInvoice, findLiveSubscription, type AddonPaymentResult } from "./billing";
 import { AI_ADDON_CURRENCY, AI_ADDON_LABEL, isAiSubscriptionItem } from "./aiAddonItem";
@@ -7,9 +7,11 @@ import { getUncachableStripeClient } from "./stripeClient";
 import { emailButton, escapeHtml, getPublicAppUrl, sendSystemEmail } from "./email";
 import { logger } from "./logger";
 import { aiCostUsdMicros, type AiCallUsage } from "./aiPricing";
+import { addMonthsUtc, replayAiCredit, type AiCreditBalance } from "./aiCredit";
 import { claimEmailDelivery, emailDeliveryIdempotencyKey, markEmailDeliverySent, pruneSentEmailDeliveries, settleEmailDelivery } from "./emailDeliveryClaims";
 
 export { aiCostUsdMicros, usageFromMessage, type AiCallUsage } from "./aiPricing";
+export { addMonthsUtc, replayAiCredit, type AiCreditBalance, type AiCreditLot, type AiCreditUse } from "./aiCredit";
 
 /**
  * The AI features add-on (Steuart, 2026-10-27: "£15, with £10 allocated to
@@ -19,8 +21,16 @@ export { aiCostUsdMicros, usageFromMessage, type AiCallUsage } from "./aiPricing
  * period, plus any top-ups bought in that period (default £6 for £4 more, the
  * same split). An owner buys a top-up in Settings, or switches on automatic
  * top-ups (at most AI_AUTO_TOP_UP_LIMIT a period); otherwise the AI buttons
- * stop until the period renews. Every request to Claude goes through
- * claimAiUse → settleAiUse, which keeps a priced ledger in ai_usage.
+ * stop until the next month's allowance is added. Every request to Claude goes
+ * through claimAiUse → settleAiUse, which keeps a priced ledger in ai_usage.
+ *
+ * Unused allowance carries over (Steuart, 2026-10-27: "left over unused AI
+ * usage is rolled over for up to 12 months, then comes back to me as profit";
+ * "this includes top ups"). Each month's allowance is recorded in
+ * ai_allowance_grants and each top-up in ai_top_ups; AI use comes out of the
+ * oldest first, and whatever is still unused 12 months after the end of the
+ * month it was for lapses (so £120 given over a year with £50 used leaves £70
+ * with ALPS). The same applies to a free business's allowance.
  *
  * Without ANTHROPIC_API_KEY nothing is offered at all. Without the add-on on
  * the business's live subscription, AI is unavailable (trials included,
@@ -48,7 +58,7 @@ export function aiTopUpPricePence(): number {
   return pence > 0 ? pence : 600;
 }
 
-/** AI use a top-up adds until the add-on renews, in pence (default £4). */
+/** AI use a top-up adds, in pence (default £4); unused, it carries over like the monthly allowance. */
 export function aiTopUpAllowancePence(): number {
   return envPence("AI_TOP_UP_ALLOWANCE_PENCE", 400);
 }
@@ -84,8 +94,19 @@ export function aiConfigured(): boolean {
   return !!process.env.ANTHROPIC_API_KEY?.trim();
 }
 
+/** Unused allowance lapses this many months after the end of the month it was for. */
+export const AI_ROLLOVER_MONTHS = 12;
+
+/** How far back the ledger is read: ai_usage and grants older than this are deleted at start-up. */
+const AI_LEDGER_MONTHS = 25;
+
+/** When allowance for a period that ends at `periodEnd` (or, unknown, a month after its start) lapses. */
+function rolloverExpiry(periodStart: Date, periodEnd: Date | null): Date {
+  return addMonthsUtc(periodEnd ?? addMonthsUtc(periodStart, 1), AI_ROLLOVER_MONTHS);
+}
+
 export type AiPlan =
-  | { kind: "addon"; periodStart: Date; periodEnd: Date | null; allowancePence: number }
+  | { kind: "addon"; periodStart: Date; periodEnd: Date | null; allowancePence: number; since: Date | null }
   | { kind: "trial"; periodStart: Date; periodEnd: Date | null; allowancePence: number }
   | { kind: "included"; periodStart: Date; periodEnd: Date; allowancePence: number }
   | { kind: "none" };
@@ -121,7 +142,7 @@ export async function getAiPlan(clientId: number): Promise<AiPlan> {
     try {
       const subscription = await findLiveSubscription(client.stripeCustomerId);
       const item = subscription?.items.data.find(isAiSubscriptionItem) as
-        | { current_period_start?: number; current_period_end?: number } | undefined;
+        | { created?: number; current_period_start?: number; current_period_end?: number } | undefined;
       if (subscription && item) {
         const raw = subscription as unknown as { current_period_start?: number; current_period_end?: number };
         const periodStart = fromStripeTime(item.current_period_start) ?? fromStripeTime(raw.current_period_start);
@@ -132,6 +153,8 @@ export async function getAiPlan(clientId: number): Promise<AiPlan> {
           periodStart: periodStart ?? new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)),
           periodEnd,
           allowancePence: aiMonthlyAllowancePence(),
+          // The add-on has been on, unbroken, since its item was created.
+          since: fromStripeTime(item.created),
         };
       }
     } catch (err) {
@@ -153,8 +176,64 @@ export async function getAiPlan(clientId: number): Promise<AiPlan> {
   if (plan.kind === "none" && trialRunning && aiTrialAllowancePence() > 0) {
     plan = { kind: "trial", periodStart: client.createdAt, periodEnd: client.trialEndsAt, allowancePence: aiTrialAllowancePence() };
   }
+  if (plan.kind !== "none") {
+    try {
+      await recordAiGrants(clientId, plan);
+    } catch (err) {
+      // Without this month's grant the business simply has less to use; try again next lookup.
+      logger.error({ err, clientId }, "Could not record this month's AI allowance");
+      return plan;
+    }
+  }
   planCache.set(clientId, { plan, expiresAt: Date.now() + PLAN_TTL_MS });
   return plan;
+}
+
+/** Most earlier months filled in at once: older allowance has lapsed anyway. */
+const AI_GRANT_BACKFILL_MONTHS = AI_ROLLOVER_MONTHS + 1;
+
+/**
+ * Record the allowance for the plan's current period, once, so it can carry
+ * over. Months nobody looked at are filled in too: for the add-on, every
+ * period since its item was created (it has been paid for throughout); for a
+ * free business, every month since the last one recorded. A trial's allowance
+ * is recorded once and lapses when the trial ends.
+ */
+async function recordAiGrants(clientId: number, plan: Exclude<AiPlan, { kind: "none" }>): Promise<void> {
+  if (plan.allowancePence <= 0) return;
+  const rows: Array<typeof aiAllowanceGrantsTable.$inferInsert> = [];
+  if (plan.kind === "trial") {
+    rows.push({
+      clientId,
+      periodKey: "trial",
+      allowancePence: plan.allowancePence,
+      startsAt: plan.periodStart,
+      expiresAt: plan.periodEnd ?? addMonthsUtc(plan.periodStart, 1),
+    });
+  } else {
+    let since = plan.periodStart;
+    if (plan.kind === "addon" && plan.since) since = plan.since;
+    if (plan.kind === "included") {
+      const [latest] = await db.select({ startsAt: aiAllowanceGrantsTable.startsAt }).from(aiAllowanceGrantsTable)
+        .where(and(eq(aiAllowanceGrantsTable.clientId, clientId), sql`${aiAllowanceGrantsTable.periodKey} LIKE 'included:%'`))
+        .orderBy(sql`${aiAllowanceGrantsTable.startsAt} DESC`).limit(1);
+      if (latest && latest.startsAt < plan.periodStart) since = latest.startsAt;
+    }
+    for (let back = 0; back <= AI_GRANT_BACKFILL_MONTHS; back++) {
+      const startsAt = back === 0 ? plan.periodStart : addMonthsUtc(plan.periodStart, -back);
+      const endsAt = back === 0 ? plan.periodEnd : addMonthsUtc(plan.periodStart, 1 - back);
+      if (back > 0 && endsAt && endsAt <= since) break;
+      rows.push({
+        clientId,
+        // One grant a calendar month, so a period recorded again (or filled in) is never given twice.
+        periodKey: `${plan.kind}:${startsAt.toISOString().slice(0, 7)}`,
+        allowancePence: plan.allowancePence,
+        startsAt,
+        expiresAt: rolloverExpiry(startsAt, endsAt),
+      });
+    }
+  }
+  await db.insert(aiAllowanceGrantsTable).values(rows).onConflictDoNothing();
 }
 
 /** AI use added by top-ups paid for since `since` (the add-on's period start). */
@@ -166,9 +245,35 @@ async function topUpAllowancePence(executor: Pick<typeof db, "execute">, clientI
   return Number((result.rows[0] as { pence?: unknown } | undefined)?.pence ?? 0);
 }
 
-/** The period's allowance: the plan's, plus top-ups for an add-on or an included allowance. */
-async function periodAllowancePence(executor: Pick<typeof db, "execute">, clientId: number, plan: Exclude<AiPlan, { kind: "none" }>): Promise<number> {
-  return plan.allowancePence + (plan.kind === "addon" || plan.kind === "included" ? await topUpAllowancePence(executor, clientId, plan.periodStart) : 0);
+/** The business's AI balance now, from its allowances, top-ups and use over the ledger's two years. */
+async function aiCreditBalance(executor: Pick<typeof db, "execute">, clientId: number, now = new Date()): Promise<AiCreditBalance> {
+  const from = addMonthsUtc(now, -AI_LEDGER_MONTHS).toISOString();
+  const [lots, uses] = await Promise.all([
+    executor.execute(sql`
+      SELECT starts_at, expires_at, allowance_pence FROM ai_allowance_grants
+       WHERE client_id = ${clientId} AND expires_at > ${from}
+      UNION ALL
+      SELECT created_at, coalesce(expires_at, created_at + interval '13 months'), allowance_pence FROM ai_top_ups
+       WHERE client_id = ${clientId} AND status IN ('paid', 'unknown')
+         AND coalesce(expires_at, created_at + interval '13 months') > ${from}
+    `),
+    executor.execute(sql`
+      SELECT created_at, cost_usd_micros FROM ai_usage
+       WHERE client_id = ${clientId} AND created_at >= ${from}
+    `),
+  ]);
+  return replayAiCredit(
+    (lots.rows as Array<{ starts_at: string | Date; expires_at: string | Date; allowance_pence: unknown }>).map((row) => ({
+      startsAt: new Date(row.starts_at),
+      expiresAt: new Date(row.expires_at),
+      pence: Number(row.allowance_pence),
+    })),
+    (uses.rows as Array<{ created_at: string | Date; cost_usd_micros: unknown }>).map((row) => ({
+      at: new Date(row.created_at),
+      pence: usdMicrosToPence(Number(row.cost_usd_micros)),
+    })),
+    now,
+  );
 }
 
 async function spentUsdMicros(executor: Pick<typeof db, "execute">, clientId: number, since: Date): Promise<number> {
@@ -179,18 +284,34 @@ async function spentUsdMicros(executor: Pick<typeof db, "execute">, clientId: nu
   return Number((result.rows[0] as { spent?: unknown } | undefined)?.spent ?? 0);
 }
 
+/**
+ * Share of what the business has had to use this period that is used, 0-100:
+ * this period's use against that use plus what is left, so allowance carried
+ * over counts (Steuart, 2026-10-27: the 75% warning is on the total available).
+ */
+function percentOfAvailableUsed(usedPence: number, balancePence: number): number {
+  const available = usedPence + Math.max(0, balancePence);
+  return available > 0 ? Math.min(100, Math.round((usedPence / available) * 100)) : 100;
+}
+
 export interface AiStatus {
   /** ANTHROPIC_API_KEY is set, so AI can be offered at all. */
   configured: boolean;
   /** The business has the add-on (or a trial or included allowance) right now. */
   active: boolean;
   plan: "addon" | "trial" | "included" | "none";
-  /** Share of this period's allowance used, 0-100. */
+  /** Share of what is available this period (carried over included) that is used, 0-100. */
   percentUsed: number;
-  /** When the allowance starts again (the add-on's renewal), if known. */
+  /** When the next month's allowance is added (the add-on's renewal), if known. */
   resetsAt: string | null;
-  /** True when the allowance is used up for this period. */
+  /** True when everything available, carried over included, is used up. */
   usedUp: boolean;
+  /** Unused allowance carried over from earlier months, as a share of one month's allowance (150 = a month and a half). */
+  carriedOverPercent: number;
+  /** When the oldest unused allowance lapses, if any carried over. */
+  nextLapseAt: string | null;
+  /** How much lapses then, as a share of one month's allowance. */
+  nextLapsePercent: number;
 }
 
 /** What the screens show about AI for a business. */
@@ -198,20 +319,28 @@ export async function getAiStatus(clientId: number): Promise<AiStatus> {
   const configured = aiConfigured();
   const plan = await getAiPlan(clientId);
   if (plan.kind === "none") {
-    return { configured, active: false, plan: "none", percentUsed: 0, resetsAt: null, usedUp: false };
+    return { configured, active: false, plan: "none", percentUsed: 0, resetsAt: null, usedUp: false, carriedOverPercent: 0, nextLapseAt: null, nextLapsePercent: 0 };
   }
-  const [usedPence, allowancePence] = await Promise.all([
+  const [usedPence, credit] = await Promise.all([
     spentUsdMicros(db, clientId, plan.periodStart).then(usdMicrosToPence),
-    periodAllowancePence(db, clientId, plan),
+    aiCreditBalance(db, clientId),
   ]);
-  const percentUsed = allowancePence > 0 ? Math.min(100, Math.round((usedPence / allowancePence) * 100)) : 100;
+  const carried = credit.open.filter((lot) => lot.startsAt < plan.periodStart);
+  const nextLapse = carried[0]?.expiresAt ?? null;
+  const monthly = aiMonthlyAllowancePence();
+  const shareOfMonth = (pence: number) => plan.kind === "trial" || monthly <= 0 ? 0 : Math.round((pence / monthly) * 100);
   return {
     configured,
     active: true,
     plan: plan.kind,
-    percentUsed,
+    percentUsed: percentOfAvailableUsed(usedPence, credit.balancePence),
     resetsAt: plan.kind === "addon" || plan.kind === "included" ? plan.periodEnd?.toISOString() ?? null : null,
-    usedUp: usedPence >= allowancePence,
+    usedUp: credit.balancePence <= 0,
+    carriedOverPercent: shareOfMonth(carried.reduce((sum, lot) => sum + lot.remainingPence, 0)),
+    nextLapseAt: nextLapse?.toISOString() ?? null,
+    nextLapsePercent: nextLapse
+      ? shareOfMonth(carried.filter((lot) => lot.expiresAt.getTime() === nextLapse.getTime()).reduce((sum, lot) => sum + lot.remainingPence, 0))
+      : 0,
   };
 }
 
@@ -276,15 +405,14 @@ export async function claimAiUse(input: AiClaim): Promise<number> {
 async function claimWithinAllowance(input: AiClaim, plan: Exclude<AiPlan, { kind: "none" }>): Promise<number> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${AI_LOCK_NS}, ${input.clientId})`);
-    const usedPence = usdMicrosToPence(await spentUsdMicros(tx, input.clientId, plan.periodStart));
-    if (usedPence >= await periodAllowancePence(tx, input.clientId, plan)) {
+    if ((await aiCreditBalance(tx, input.clientId)).balancePence <= 0) {
       throw new AiUnavailableError(
         "AI_ALLOWANCE_USED",
         plan.kind === "trial"
           ? `The AI allowance for your free trial is used up. It comes with the AI features add-on once you subscribe. ${input.instead}`
           : plan.kind === "included"
-          ? `This business has used its AI allowance for this month. It starts again ${formatResetDate(plan.periodEnd)}, or an owner can agree to a top-up in Settings, Billing, added to your ALPS Consultancy invoice. ${input.instead}`
-          : `This business has used its AI allowance for this month. It starts again ${formatResetDate(plan.periodEnd)}, or an owner can buy a top-up in Settings, Billing. ${input.instead}`,
+          ? `This business has used all its AI allowance, including any carried over. It starts again ${formatResetDate(plan.periodEnd)}, or an owner can agree to a top-up in Settings, Billing, added to your ALPS Consultancy invoice. ${input.instead}`
+          : `This business has used all its AI allowance, including any carried over. It starts again ${formatResetDate(plan.periodEnd)}, or an owner can buy a top-up in Settings, Billing. ${input.instead}`,
         429,
       );
     }
@@ -326,24 +454,27 @@ export async function settleAiUse(id: number, usage: AiCallUsage | null, ok: boo
   }
 }
 
-/** Share of a period's allowance at which the business is warned (Steuart, 2026-10-27: 75% used). */
+/** Share of what is available at which the business is warned (Steuart, 2026-10-27: 75% used). */
 export const AI_WARNING_SHARE = 0.75;
 const AI_WARNING_JOB = "ai-allowance-warning";
 
 /**
- * Email the owners once a period's allowance is 75% used, once per period and
- * allowance (a top-up raises the allowance, so it can warn again nearer the
- * new limit). For a free business, ALPS (its linked consultants) hears too.
+ * Email the owners once 75% of what the business has available this period
+ * (allowance carried over included) is used, once per period and per top-up
+ * (a top-up adds more, so it can warn again nearer the new limit). For a free
+ * business, ALPS (its linked consultants) hears too.
  */
 export async function warnIfAllowanceNearlyUsed(clientId: number): Promise<boolean> {
   const plan = await getAiPlan(clientId);
   if (plan.kind !== "addon" && plan.kind !== "included") return false;
-  const [usedPence, allowancePence] = await Promise.all([
+  const [usedPence, credit, topUpPence] = await Promise.all([
     spentUsdMicros(db, clientId, plan.periodStart).then(usdMicrosToPence),
-    periodAllowancePence(db, clientId, plan),
+    aiCreditBalance(db, clientId),
+    topUpAllowancePence(db, clientId, plan.periodStart),
   ]);
-  if (allowancePence <= 0 || usedPence < allowancePence * AI_WARNING_SHARE) return false;
-  const claim = await claimEmailDelivery(AI_WARNING_JOB, `${clientId}:${plan.periodStart.toISOString()}:${allowancePence}`);
+  const percent = percentOfAvailableUsed(usedPence, credit.balancePence);
+  if (usedPence <= 0 || percent < AI_WARNING_SHARE * 100) return false;
+  const claim = await claimEmailDelivery(AI_WARNING_JOB, `${clientId}:${plan.periodStart.toISOString()}:${plan.allowancePence + topUpPence}`);
   if (!claim) return false;
 
   try {
@@ -357,19 +488,18 @@ export async function warnIfAllowanceNearlyUsed(clientId: number): Promise<boole
        ORDER BY u.id LIMIT 30
     `);
     const company = client?.name ?? "Your business";
-    const percent = Math.min(100, Math.round((usedPence / allowancePence) * 100));
     const price = `${formatPounds(aiTopUpPricePence())} + VAT`;
     const whenOut = plan.kind === "included"
-      ? `When it runs out, AI buttons pause until it starts again, or an owner can agree to a top-up (${price}, added to your ALPS Consultancy invoice) in Settings.`
+      ? `When it runs out, AI buttons pause until next month's is added, or an owner can agree to a top-up (${price}, added to your ALPS Consultancy invoice) in Settings.`
       : await isAiAutoTopUpOn(clientId)
       ? `Automatic top-ups are on, so when it runs out we'll add one (${price}) and email you.`
-      : `When it runs out, AI buttons pause until it starts again, or an owner can buy a top-up (${price}) in Settings.`;
+      : `When it runs out, AI buttons pause until next month's is added, or an owner can buy a top-up (${price}) in Settings.`;
     const lines = [
-      `<strong>${escapeHtml(company)}</strong> has used ${percent}% of this month's ComplyTrack AI allowance. It starts again ${formatResetDate(plan.periodEnd)}.`,
+      `<strong>${escapeHtml(company)}</strong> has used ${percent}% of the ComplyTrack AI allowance it has this month, including any carried over from earlier months. Next month's allowance is added ${formatResetDate(plan.periodEnd)}.`,
       escapeHtml(whenOut),
       "Everything else in ComplyTrack keeps working as normal.",
     ];
-    const subject = `${company}: ${percent}% of this month's AI allowance used`;
+    const subject = `${company}: ${percent}% of your AI allowance used`;
     const url = `${getPublicAppUrl()}/settings#ai`;
     for (const person of people.rows as Array<{ id: number; name: string | null; email: string }>) {
       const name = person.name ?? "";
@@ -418,9 +548,14 @@ export type AiTopUpResult = "paid" | "unknown" | "failed" | "pending" | "no_addo
 
 const formatPounds = (pence: number) => `£${(pence / 100).toFixed(2)}`;
 
+/** When a top-up bought now lapses if unused: with the rest of this period's allowance. */
+function topUpExpiry(plan: Extract<AiPlan, { kind: "addon" | "included" }>): Date {
+  return rolloverExpiry(plan.periodStart, plan.periodEnd);
+}
+
 /**
  * Buy one top-up: charged at once as a one-off invoice, it adds
- * aiTopUpAllowancePence of AI use until the add-on renews. A repeated
+ * aiTopUpAllowancePence of AI use, carried over like the monthly allowance. A repeated
  * requestId never charges again; it returns the first attempt's outcome
  * ("pending" while that is still being charged). "unknown" means Stripe may
  * have taken the payment, so the top-up counts until someone checks.
@@ -434,7 +569,7 @@ export async function buyAiTopUp(input: {
 }): Promise<AiTopUpResult> {
   const log = input.log ?? logger;
   const plan = await getAiPlan(input.clientId);
-  if (plan.kind === "included") return addInvoicedTopUp(input, log);
+  if (plan.kind === "included") return addInvoicedTopUp(input, plan, log);
   if (plan.kind !== "addon") return "no_addon";
   const [client] = await db.select({ stripeCustomerId: clientsTable.stripeCustomerId })
     .from(clientsTable).where(eq(clientsTable.id, input.clientId)).limit(1);
@@ -451,6 +586,7 @@ export async function buyAiTopUp(input: {
     allowancePence: allowance,
     currency: AI_ADDON_CURRENCY,
     status: "pending",
+    expiresAt: topUpExpiry(plan),
   }).onConflictDoNothing().returning({ id: aiTopUpsTable.id });
   if (!row) {
     const [earlier] = await db.select({ status: aiTopUpsTable.status }).from(aiTopUpsTable)
@@ -465,7 +601,7 @@ export async function buyAiTopUp(input: {
       customerId: client.stripeCustomerId,
       amount,
       currency: AI_ADDON_CURRENCY,
-      description: `${AI_ADDON_LABEL} top-up: ${formatPounds(allowance)} more AI use until the add-on renews`,
+      description: `${AI_ADDON_LABEL} top-up: ${formatPounds(allowance)} more AI use (unused, it carries over for up to 12 months)`,
       metadata: { ai_top_up: String(row.id), client_id: String(input.clientId), automatic: String(input.automatic) },
       idempotencyPrefix: `ai-top-up-${input.clientId}-${input.requestId}`,
     });
@@ -489,6 +625,7 @@ export async function buyAiTopUp(input: {
  */
 async function addInvoicedTopUp(
   input: { clientId: number; userId: number | null; requestId: string },
+  plan: Extract<AiPlan, { kind: "included" }>,
   log: Pick<typeof logger, "error">,
 ): Promise<AiTopUpResult> {
   const [row] = await db.insert(aiTopUpsTable).values({
@@ -501,6 +638,7 @@ async function addInvoicedTopUp(
     currency: AI_ADDON_CURRENCY,
     status: "paid",
     settledAt: new Date(),
+    expiresAt: topUpExpiry(plan),
   }).onConflictDoNothing().returning({ id: aiTopUpsTable.id });
   if (!row) {
     const [earlier] = await db.select({ status: aiTopUpsTable.status }).from(aiTopUpsTable)
@@ -536,8 +674,8 @@ async function emailInvoicedTopUp(clientId: number, userId: number | null): Prom
   const price = formatPounds(aiTopUpPricePence());
   const date = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/London" });
   const lines = [
-    `<strong>${escapeHtml(company)}</strong> used this month's included AI allowance, and ${escapeHtml(who)} agreed to a top-up on ${date}.`,
-    `Please add <strong>${price} + VAT</strong> to their next ALPS Consultancy invoice. Their extra ${formatPounds(aiTopUpAllowancePence())} of AI use is already switched on for this month.`,
+    `<strong>${escapeHtml(company)}</strong> used all its included AI allowance, and ${escapeHtml(who)} agreed to a top-up on ${date}.`,
+    `Please add <strong>${price} + VAT</strong> to their next ALPS Consultancy invoice. Their extra ${formatPounds(aiTopUpAllowancePence())} of AI use is already switched on (unused, it carries over for up to 12 months).`,
   ];
   const subject = `${company}: AI top-up agreed, add ${price} + VAT to their invoice`;
   const html = `
@@ -564,8 +702,7 @@ async function autoTopUp(clientId: number, userId: number | null, plan: Extract<
   if (!(await isAiAutoTopUpOn(clientId))) return false;
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${AI_TOP_UP_LOCK_NS}, ${clientId})`);
-    const usedPence = usdMicrosToPence(await spentUsdMicros(tx, clientId, plan.periodStart));
-    if (usedPence < await periodAllowancePence(tx, clientId, plan)) return true;
+    if ((await aiCreditBalance(tx, clientId)).balancePence > 0) return true;
     const result = await tx.execute(sql`
       SELECT count(*)::int AS n,
              max(created_at) FILTER (WHERE status = 'failed') AS last_failed
@@ -609,8 +746,8 @@ async function emailAutoTopUp(clientId: number, kind: "paid" | "failed"): Promis
       subject: `${company}: we topped up your ComplyTrack AI allowance`,
       heading: "AI allowance topped up",
       lines: [
-        `<strong>${escapeHtml(company)}</strong> used this month's AI allowance, so we added a top-up automatically, as set in Settings.`,
-        `It cost <strong>${price}</strong> (plus VAT), charged now, and its AI use lasts until the AI features add-on renews.`,
+        `<strong>${escapeHtml(company)}</strong> used all its AI allowance, including any carried over, so we added a top-up automatically, as set in Settings.`,
+        `It cost <strong>${price}</strong> (plus VAT), charged now. Any of it left unused carries over for up to 12 months.`,
         `There are at most ${aiAutoTopUpLimit()} automatic top-ups a month. You can switch them off in Settings, under AI features.`,
       ],
     }
@@ -618,8 +755,8 @@ async function emailAutoTopUp(clientId: number, kind: "paid" | "failed"): Promis
       subject: `${company}: the automatic AI top-up failed`,
       heading: "We couldn't top up your AI allowance",
       lines: [
-        `<strong>${escapeHtml(company)}</strong> used this month's AI allowance. Automatic top-ups are on, but the ${price} charge didn't go through, so nothing was added and you have not been charged.`,
-        "AI buttons stay off until the add-on renews. Everything else works as normal.",
+        `<strong>${escapeHtml(company)}</strong> used all its AI allowance. Automatic top-ups are on, but the ${price} charge didn't go through, so nothing was added and you have not been charged.`,
+        "AI buttons stay off until next month's allowance is added. Everything else works as normal.",
         "We'll try again after 24 hours. To use AI sooner, check your card and buy a top-up in Settings, under AI features.",
       ],
     };

@@ -31,6 +31,7 @@ const stubs = {
     // Imported by lib/aiAllowance.ts (the AI add-on routes); never read here.
     export const aiUsageTable = { __table: "ai_usage", id: "ai_usage.id" };
     export const aiTopUpsTable = { __table: "ai_top_ups", id: "ai_top_ups.id" };
+    export const aiAllowanceGrantsTable = { __table: "ai_allowance_grants", id: "ai_allowance_grants.id" };
   `,
   drizzle: `
     export const eq = (left, right) => ({ left, right });

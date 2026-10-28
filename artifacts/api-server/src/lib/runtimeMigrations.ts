@@ -6356,7 +6356,8 @@ async function migrateInspectionReports() {
 }
 
 // What each request to Claude cost a business, for the AI add-on's monthly
-// allowance (lib/aiAllowance.ts). Rows older than two years are not needed.
+// allowance (lib/aiAllowance.ts). Rows older than two years are not needed:
+// allowance lapses 12 months after the end of its month.
 async function migrateAiUsage() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "ai_usage" (
@@ -6399,6 +6400,22 @@ async function migrateAiUsage() {
   `);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_ai_top_ups_client_request" ON "ai_top_ups" ("client_id", "request_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_ai_top_ups_client_created" ON "ai_top_ups" ("client_id", "created_at")`);
+  // Unused allowance and top-ups carry over for 12 months (lib/aiAllowance.ts).
+  await db.execute(sql`ALTER TABLE "ai_top_ups" ADD COLUMN IF NOT EXISTS "expires_at" timestamptz`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "ai_allowance_grants" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "period_key" text NOT NULL,
+      "allowance_pence" integer NOT NULL,
+      "starts_at" timestamptz NOT NULL,
+      "expires_at" timestamptz NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "ck_ai_allowance_grants_amount" CHECK ("allowance_pence" >= 0)
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_ai_allowance_grants_client_period" ON "ai_allowance_grants" ("client_id", "period_key")`);
+  await db.execute(sql`DELETE FROM "ai_allowance_grants" WHERE "expires_at" < now() - interval '25 months'`);
 }
 
 // Billing changes ALPS is told about (lib/billingAlerts.ts): one row per new

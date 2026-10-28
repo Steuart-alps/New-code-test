@@ -22,6 +22,7 @@
     "test:register-reading": "bash tests/run-bundled-unit.sh tests/register-reading.ts esm",
     "test:certificate-reading": "bash tests/run-bundled-unit.sh tests/certificate-reading.ts esm",
     "test:ai-pricing": "bash tests/run-bundled-unit.sh tests/ai-pricing.ts esm",
+    "test:ai-credit": "bash tests/run-bundled-unit.sh tests/ai-credit.ts esm",
     "test:ai-addon": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/ai-addon.mjs",
     "test:auth-me-active-client": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/auth-me-active-client.mjs",
     "test:fire-discharge-task-link": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-discharge-task-link.mjs",

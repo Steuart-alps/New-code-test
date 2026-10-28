@@ -39,6 +39,7 @@ import { ReminderTimingsField, parseReminderTimings, type ReminderTimings } from
 import { CHECKOUT_ADDONS, checkoutPerSiteTotal } from "@/lib/addon-catalog";
 import { Progress } from "@/components/ui/progress";
 import type { AiAddonStatus } from "@workspace/api-client-react";
+import { formatMonthsOfAllowance } from "@/components/ai-allowance-note";
 interface DomainRecord {
   record?: string;
   name: string;
@@ -1983,7 +1984,7 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
           <CardTitle className="font-display font-bold text-lg">AI features</CardTitle>
         </div>
         <CardDescription>
-          {included ? "Included free for your business." : `${price}, for the whole business.`} ComplyTrack's AI reads uploaded reports and suggests the actions they ask for, and turns a photo or PDF of an appliance list into PAT register rows. A fair monthly allowance of AI use is included.
+          {included ? "Included free for your business." : `${price}, for the whole business.`} ComplyTrack's AI reads uploaded reports and suggests the actions they ask for, and turns a photo or PDF of an appliance list into PAT register rows. A fair monthly allowance of AI use is included, and anything unused carries over for up to 12 months.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 p-6 text-sm">
@@ -1993,14 +1994,14 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
                 <CheckCircle2 className="w-3.5 h-3.5" /> {isOn ? "Active" : included ? "Included" : "Included in your trial"}
               </span>
-              <span className="text-xs text-muted-foreground">{status.percentUsed}% of {isOn || included ? "this month's" : "your trial"} allowance used</span>
+              <span className="text-xs text-muted-foreground">{status.percentUsed}% of {isOn || included ? "what's available this month" : "your trial allowance"} used</span>
             </div>
             <Progress value={status.percentUsed} aria-label="AI allowance used" />
             {status.usedUp ? (
               <p className="flex items-start gap-1.5 text-amber-800" role="status">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>
-                  This month's AI allowance is used up. AI buttons stay off{renewal ? ` until ${renewal}` : " until the add-on renews"}
+                  The AI allowance is used up, including anything carried over. AI buttons stay off{renewal ? ` until ${renewal}` : " until the add-on renews"}
                   {isOn && status.topUp ? (canAdmin ? ", or until you buy a top-up below" : ", or until an owner buys a top-up") : included ? (canAdmin ? ", or until you agree to a top-up below" : ", or until an owner agrees to a top-up") : ""}; everything else works as normal.
                 </span>
               </p>
@@ -2008,13 +2009,21 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
               <p className="flex items-start gap-1.5 text-amber-800" role="status" data-testid="text-ai-nearly-used">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>
-                  This month's AI allowance is nearly used up{renewal ? `. It starts again on ${renewal}` : ""}.
+                  The AI allowance is nearly used up{renewal ? `. Next month's is added on ${renewal}` : ""}.
                   {isOn && status.topUp ? " You can buy a top-up below if you need more." : included && canAdmin ? " You can agree to a top-up below if you need more." : ""}
                 </span>
               </p>
             ) : renewal ? (
-              <p className="text-xs text-muted-foreground">The allowance starts again on {renewal}.</p>
+              <p className="text-xs text-muted-foreground">Next month's allowance is added on {renewal}.</p>
             ) : null}
+            {(isOn || included) && status.carriedOverPercent > 0 && (
+              <p className="text-xs text-muted-foreground" data-testid="text-ai-carried-over">
+                Includes {formatMonthsOfAllowance(status.carriedOverPercent)} carried over from earlier months, used first.
+                {status.nextLapseAt && status.nextLapsePercent > 0
+                  ? ` ${status.nextLapsePercent >= status.carriedOverPercent ? "It" : `The oldest (${formatMonthsOfAllowance(status.nextLapsePercent)})`} lapses on ${formatUkDate(status.nextLapseAt)} if unused.`
+                  : ""}
+              </p>
+            )}
             {(isOn || included) && status.topUpsThisPeriod > 0 && (
               <p className="text-xs text-muted-foreground" data-testid="text-ai-top-ups">
                 {status.topUpsThisPeriod} top-up{status.topUpsThisPeriod === 1 ? "" : "s"} {included ? "added" : "bought"} this month, included above.
@@ -2049,7 +2058,7 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
             {confirming === "top_up" ? (
               <div className="flex flex-wrap items-center gap-3">
                 <span className="flex-1">
-                  {topUpPrice} is added to your next ALPS Consultancy invoice. It adds more AI use until {renewal ?? "the end of the month"}.
+                  {topUpPrice} is added to your next ALPS Consultancy invoice. It adds more AI use, and anything unused carries over for up to 12 months.
                 </span>
                 <Button size="sm" disabled={busy} onClick={buyTopUp} data-testid="button-confirm-ai-invoiced-top-up">{busy ? "Adding…" : "Agree"}</Button>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setConfirming(null); topUpRequestId.current = null; }}>Not now</Button>
@@ -2066,7 +2075,7 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
           <div className="space-y-3 rounded-lg border p-4">
             {confirming === "top_up" ? (
               <div className="flex flex-wrap items-center gap-3">
-                <span className="flex-1">{topUpPrice} is charged now. It adds more AI use until {renewal ?? "the add-on renews"}.</span>
+                <span className="flex-1">{topUpPrice} is charged now. It adds more AI use, and anything unused carries over for up to 12 months.</span>
                 <Button size="sm" disabled={busy} onClick={buyTopUp} data-testid="button-confirm-ai-top-up">{busy ? "Charging…" : "Confirm and pay"}</Button>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setConfirming(null); topUpRequestId.current = null; }}>Cancel</Button>
               </div>
@@ -2080,7 +2089,7 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
               <div className="space-y-1">
                 <Label htmlFor="ai-auto-top-up" className="font-medium">Top up automatically when the allowance runs out</Label>
                 <p className="text-xs text-muted-foreground">
-                  Off: AI buttons stop until the add-on renews or an owner buys a top-up. On: we charge {topUpPrice} and email the owners each time, at most {status.autoTopUpLimit} times a month.
+                  Off: AI buttons stop until next month's allowance is added or an owner buys a top-up. On: we charge {topUpPrice} and email the owners each time, at most {status.autoTopUpLimit} times a month.
                 </p>
               </div>
               <Switch
@@ -2096,7 +2105,7 @@ function AiAddonCard({ activeClientId, hasSubscription, canAdmin }: { activeClie
         {canAdmin && isOn && (
           confirming === "remove" ? (
             <div className="flex flex-wrap items-center gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-              <span className="flex-1">AI buttons stop at once. There's no refund for the rest of this month or for unused top-ups.</span>
+              <span className="flex-1">AI buttons stop at once. There's no refund for the rest of this month or for unused top-ups. Unused allowance is kept until it lapses, in case you switch AI features back on.</span>
               <Button size="sm" variant="destructive" disabled={busy} onClick={() => change("remove")}>{busy ? "Switching off…" : "Switch off"}</Button>
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(null)}>Cancel</Button>
             </div>

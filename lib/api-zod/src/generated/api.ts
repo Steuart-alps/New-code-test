@@ -1271,6 +1271,10 @@ export const CreateItemCertificateResponse = zod.object({
 export const getCertificateReadingResponseAiPercentUsedMin = 0;
 export const getCertificateReadingResponseAiPercentUsedMax = 100;
 
+export const getCertificateReadingResponseAiCarriedOverPercentMin = 0;
+
+export const getCertificateReadingResponseAiNextLapsePercentMin = 0;
+
 
 
 export const GetCertificateReadingResponse = zod.object({
@@ -1279,10 +1283,13 @@ export const GetCertificateReadingResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
   "plan": zod.enum(['addon', 'trial', 'included', 'none']),
-  "percentUsed": zod.number().min(getCertificateReadingResponseAiPercentUsedMin).max(getCertificateReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
-  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
-  "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
+  "percentUsed": zod.number().min(getCertificateReadingResponseAiPercentUsedMin).max(getCertificateReadingResponseAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getCertificateReadingResponseAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getCertificateReadingResponseAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
   "fixTrack": zod.boolean().describe('Whether the business has FixTrack, where remedial work and quotes live.')
 })
 
@@ -3647,6 +3654,10 @@ export const ImportFireCallPointsResponse = zod.object({
 export const getAiAddonResponseOnePercentUsedMin = 0;
 export const getAiAddonResponseOnePercentUsedMax = 100;
 
+export const getAiAddonResponseOneCarriedOverPercentMin = 0;
+
+export const getAiAddonResponseOneNextLapsePercentMin = 0;
+
 export const getAiAddonResponseTwoTopUpsThisPeriodMin = 0;
 
 export const getAiAddonResponseTwoAutoTopUpLimitMin = 0;
@@ -3657,10 +3668,13 @@ export const GetAiAddonResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
   "plan": zod.enum(['addon', 'trial', 'included', 'none']),
-  "percentUsed": zod.number().min(getAiAddonResponseOnePercentUsedMin).max(getAiAddonResponseOnePercentUsedMax).describe('Share of this period\'s allowance used'),
-  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
-  "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
+  "percentUsed": zod.number().min(getAiAddonResponseOnePercentUsedMin).max(getAiAddonResponseOnePercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getAiAddonResponseOneCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getAiAddonResponseOneNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
   "price": zod.object({
   "unitAmount": zod.number().describe('Monthly price in pence, before VAT'),
   "currency": zod.string()
@@ -3690,6 +3704,10 @@ export const ChangeAiAddonBody = zod.object({
 export const changeAiAddonResponseOnePercentUsedMin = 0;
 export const changeAiAddonResponseOnePercentUsedMax = 100;
 
+export const changeAiAddonResponseOneCarriedOverPercentMin = 0;
+
+export const changeAiAddonResponseOneNextLapsePercentMin = 0;
+
 export const changeAiAddonResponseTwoTopUpsThisPeriodMin = 0;
 
 export const changeAiAddonResponseTwoAutoTopUpLimitMin = 0;
@@ -3700,10 +3718,13 @@ export const ChangeAiAddonResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
   "plan": zod.enum(['addon', 'trial', 'included', 'none']),
-  "percentUsed": zod.number().min(changeAiAddonResponseOnePercentUsedMin).max(changeAiAddonResponseOnePercentUsedMax).describe('Share of this period\'s allowance used'),
-  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
-  "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
+  "percentUsed": zod.number().min(changeAiAddonResponseOnePercentUsedMin).max(changeAiAddonResponseOnePercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(changeAiAddonResponseOneCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(changeAiAddonResponseOneNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").').and(zod.object({
   "price": zod.object({
   "unitAmount": zod.number().describe('Monthly price in pence, before VAT'),
   "currency": zod.string()
@@ -3726,6 +3747,10 @@ export const ChangeAiAddonResponse = zod.object({
 export const getPatRegisterReadingResponseAiPercentUsedMin = 0;
 export const getPatRegisterReadingResponseAiPercentUsedMax = 100;
 
+export const getPatRegisterReadingResponseAiCarriedOverPercentMin = 0;
+
+export const getPatRegisterReadingResponseAiNextLapsePercentMin = 0;
+
 
 
 export const GetPatRegisterReadingResponse = zod.object({
@@ -3736,10 +3761,13 @@ export const GetPatRegisterReadingResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
   "plan": zod.enum(['addon', 'trial', 'included', 'none']),
-  "percentUsed": zod.number().min(getPatRegisterReadingResponseAiPercentUsedMin).max(getPatRegisterReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
-  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
-  "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
+  "percentUsed": zod.number().min(getPatRegisterReadingResponseAiPercentUsedMin).max(getPatRegisterReadingResponseAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getPatRegisterReadingResponseAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getPatRegisterReadingResponseAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
   "sites": zod.array(zod.object({
   "id": zod.number(),
   "name": zod.string()
@@ -3779,6 +3807,10 @@ export const GetImportListReadingParams = zod.object({
 export const getImportListReadingResponseAiPercentUsedMin = 0;
 export const getImportListReadingResponseAiPercentUsedMax = 100;
 
+export const getImportListReadingResponseAiCarriedOverPercentMin = 0;
+
+export const getImportListReadingResponseAiNextLapsePercentMin = 0;
+
 
 
 export const GetImportListReadingResponse = zod.object({
@@ -3789,10 +3821,13 @@ export const GetImportListReadingResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
   "plan": zod.enum(['addon', 'trial', 'included', 'none']),
-  "percentUsed": zod.number().min(getImportListReadingResponseAiPercentUsedMin).max(getImportListReadingResponseAiPercentUsedMax).describe('Share of this period\'s allowance used'),
-  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
-  "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
+  "percentUsed": zod.number().min(getImportListReadingResponseAiPercentUsedMin).max(getImportListReadingResponseAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getImportListReadingResponseAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getImportListReadingResponseAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").'),
   "sites": zod.array(zod.object({
   "id": zod.number(),
   "name": zod.string()
@@ -6938,6 +6973,10 @@ export const RecordCoshhSignOffsResponse = zod.object({
 export const getInspectionReportOptionsResponseReadingAiPercentUsedMin = 0;
 export const getInspectionReportOptionsResponseReadingAiPercentUsedMax = 100;
 
+export const getInspectionReportOptionsResponseReadingAiCarriedOverPercentMin = 0;
+
+export const getInspectionReportOptionsResponseReadingAiNextLapsePercentMin = 0;
+
 
 
 export const GetInspectionReportOptionsResponse = zod.object({
@@ -6967,10 +7006,13 @@ export const GetInspectionReportOptionsResponse = zod.object({
   "configured": zod.boolean().describe('The server has an Anthropic API key, so AI can be offered at all'),
   "active": zod.boolean().describe('The business has the AI add-on (or a trial allowance) now'),
   "plan": zod.enum(['addon', 'trial', 'included', 'none']),
-  "percentUsed": zod.number().min(getInspectionReportOptionsResponseReadingAiPercentUsedMin).max(getInspectionReportOptionsResponseReadingAiPercentUsedMax).describe('Share of this period\'s allowance used'),
-  "resetsAt": zod.date().nullable().describe('When the allowance starts again'),
-  "usedUp": zod.boolean().describe('The allowance is used up for this period')
-}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").')
+  "percentUsed": zod.number().min(getInspectionReportOptionsResponseReadingAiPercentUsedMin).max(getInspectionReportOptionsResponseReadingAiPercentUsedMax).describe('Share of what is available this period, allowance carried over included, that is used'),
+  "resetsAt": zod.date().nullable().describe('When the next month\'s allowance is added'),
+  "usedUp": zod.boolean().describe('Everything available, allowance carried over included, is used up'),
+  "carriedOverPercent": zod.number().min(getInspectionReportOptionsResponseReadingAiCarriedOverPercentMin).describe('Unused allowance carried over from earlier months, as a share of one month\'s allowance (150 = a month and a half)'),
+  "nextLapseAt": zod.date().nullable().describe('When the oldest carried-over allowance lapses if unused'),
+  "nextLapsePercent": zod.number().min(getInspectionReportOptionsResponseReadingAiNextLapsePercentMin).describe('How much lapses then, as a share of one month\'s allowance')
+}).describe('The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups). Unused allowance and top-ups carry over, oldest used first, and lapse 12 months after the end of the month they were for. Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included (\"included\").')
 })
 })
 

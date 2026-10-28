@@ -5,6 +5,7 @@
 type Item = {
   id: string;
   quantity: number;
+  created?: number;
   current_period_start: number;
   current_period_end: number;
   price: { id: string; unit_amount: number; currency: string; metadata: Record<string, string> };
@@ -78,6 +79,7 @@ const fakeStripe = {
           subscription.items.data.push({
             id: `si_${nextItem++}`,
             quantity: change.quantity ?? 1,
+            created: Math.floor(Date.now() / 1000),
             current_period_start: first?.current_period_start ?? subscription.created,
             current_period_end: first?.current_period_end ?? subscription.created + 30 * 86400,
             price: clone(price),
