@@ -13,8 +13,7 @@ import {
 } from "../lib/acknowledgementRegisterPdf";
 import { newBearerToken } from "../lib/bearerTokens";
 import { recordSiteVisibleSql, siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
-import { docCategoryAllowed, docCategoryFilter, docTrackCategoriesFor, KITCHEN_DOCUMENT_CATEGORIES } from "../lib/docTrackScope";
-import { getEntitledServices } from "../lib/services";
+import { docCategoryAllowed, docCategoryFilter, KITCHEN_DOCUMENT_CATEGORIES } from "../lib/docTrackScope";
 import {
   findEligibleRosterMember,
   findSignOffDocument,
@@ -28,14 +27,9 @@ const router = Router();
 const storage = new ObjectStorageService();
 
 // KitchenTrack without DocTrack opens this router for HACCP plans and recipe
-// spec sheets only (lib/docTrackScope.ts). res.locals.docCategories is the
-// account's allowed categories, null meaning all.
-router.use(async (req, res, next) => {
-  const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
-  res.locals.docCategories = docTrackCategoriesFor(await getEntitledServices(clientId));
-  next();
-});
+// spec sheets only: the mount in routes/index.ts sets res.locals.docCategories
+// to the account's allowed categories (middleware/docTrackCategoryScope.ts),
+// null for all.
 
 async function canAccessSite(clientId: number, siteId: number | null | undefined, departmentId: number | null) {
   if (siteId == null) return true;
