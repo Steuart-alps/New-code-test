@@ -1,11 +1,13 @@
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, FileText, Loader2, Plus, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, ExternalLink, FileText, Loader2, Plus, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import {
-  assignFixTrackContractor, createComplianceItem, createItemCertificate, readCertificate,
-  useGetCertificateReading, useListComplianceItems, useListContractors, useListSites,
-  type CertificateDefectCode, type CertificateReading,
+  assignFixTrackContractor, createComplianceItem, createItemCertificate, fileCertificateInboxItem, readCertificate,
+  readCertificateInboxItem, useGetCertificateReading, useListComplianceItems, useListContractors, useListSites,
+  type CertificateDefectCode, type CertificateInboxItem, type CertificateReading,
 } from "@workspace/api-client-react";
+import { useAuth } from "@/context/auth-context";
+import { privateObjectUrl } from "@/lib/media-upload";
 import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
 import { DEFECT_CODE_OPTIONS } from "@/components/certificate-form-dialog";
 import { Button } from "@/components/ui/button";
@@ -102,6 +104,21 @@ function draftFrom(reading: CertificateReading): Draft {
   };
 }
 
+/** A starting point to fill in by hand, for an emailed certificate the AI did not read. */
+function blankReading(inbox: CertificateInboxItem): CertificateReading {
+  return {
+    certificateType: "", name: inbox.fileName?.replace(/\.[a-z0-9]+$/i, "") ?? "Certificate", itemId: inbox.itemId,
+    checkReason: "", newCheck: null, contractorName: inbox.contractorName, issueDate: null, nextInspectionDate: null,
+    nextInspectionSource: null, outcome: "not_stated", summary: "", defects: [], unclear: [],
+  };
+}
+
+function sentBy(inbox: CertificateInboxItem): string {
+  const who = inbox.contractorName ?? inbox.senderName ?? inbox.senderEmail ?? "a contractor";
+  const how = inbox.source === "upload" ? "Uploaded by" : "Emailed by";
+  return `${how} ${who} on ${new Date(inbox.receivedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`;
+}
+
 /**
  * Upload a contractor certificate and let ComplyTrack's AI read it: which
  * check (and so which track) it belongs to, its dates, outcome and defects.
@@ -110,12 +127,16 @@ function draftFrom(reading: CertificateReading): Draft {
  * FixTrack job, and a quote for it can be asked of a contractor in the same
  * step. C3s are recorded on the certificate without a job.
  */
-export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
+export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inbox = null, onFiled }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The check the reader was opened from; the certificate is filed there. */
   itemId?: number | null;
+  /** A certificate emailed or uploaded by a contractor (Certificates to confirm): its file is already held. */
+  inbox?: CertificateInboxItem | null;
+  onFiled?: () => void;
 }) {
+  const { activeClientId } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { uploadFile, isUploading } = useUpload();
@@ -126,23 +147,49 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
   const { data: sites = [] } = useListSites();
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [reading, setReading] = useState<CertificateReading | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const initialReading = inbox ? inbox.reading ?? blankReading(inbox) : null;
+  const [reading, setReading] = useState<CertificateReading | null>(initialReading);
+  const [draft, setDraft] = useState<Draft | null>(initialReading ? draftFrom(initialReading) : null);
+  const [inboxNote, setInboxNote] = useState<string | null>(inbox?.note ?? null);
+  const readByAi = !!inbox?.reading || (!!inbox && reading !== initialReading) || !inbox;
   const [busy, setBusy] = useState<"reading" | "saving" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const ai = status.data?.ai;
   const canRead = !!status.data?.available && !!ai && aiAllowanceState(ai).canUse;
-  const { isDragging, dropZoneProps } = useFileDrop((files) => void read(files[0]!), canRead && busy === null);
+  const { isDragging, dropZoneProps } = useFileDrop((files) => void read(files[0]!), !inbox && canRead && busy === null);
 
   function reset() {
     setFile(null); setReading(null); setDraft(null); setBusy(null); setError(null);
     if (input.current) input.current.value = "";
   }
   function close() {
-    if (busy === "saving") return;
+    if (busy === "saving" || busy === "reading") return;
     reset();
     onOpenChange(false);
+  }
+
+  /** Ask the AI to read an emailed certificate it has not read (no allowance then, or a failed read). */
+  async function readInbox() {
+    if (!inbox) return;
+    setError(null);
+    setBusy("reading");
+    try {
+      const result = await readCertificateInboxItem(inbox.id);
+      setInboxNote(result.note);
+      if (result.reading) {
+        const next = draftFrom(result.reading);
+        const item = items.find((i) => String(i.id) === next.check);
+        if (item?.contractorId && quotable.some((c) => c.id === item.contractorId)) next.quoteContractorId = String(item.contractorId);
+        setReading(result.reading);
+        setDraft(next);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ComplyTrack could not read this certificate");
+    } finally {
+      setBusy(null);
+      void status.refetch();
+    }
   }
   const update = (patch: Partial<Draft>) => setDraft((d) => (d ? { ...d, ...patch } : d));
   const updateDefect = (index: number, patch: Partial<DefectDraft>) =>
@@ -197,7 +244,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
   }
 
   async function save() {
-    if (!draft || !file) return;
+    if (!draft || (!file && !inbox)) return;
     if (!draft.check) return setError("Choose the check this certificate is for");
     if (draft.check === NEW_CHECK && !draft.newTitle.trim()) return setError("Give the new check a title");
     if (!draft.name.trim()) return setError("Give the certificate a name");
@@ -222,13 +269,15 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
         });
         targetId = created.id;
       }
-      const fileUrl = await uploadFile(file);
-      const certificate = await createItemCertificate(targetId, {
+      const notes = [
+        inbox ? `${sentBy(inbox)}.` : null,
+        readByAi && reading?.summary ? `Read by ComplyTrack AI: ${reading.summary}` : null,
+      ].filter(Boolean).join(" ");
+      const details = {
         name: draft.name.trim(),
-        fileUrl,
         issueDate: draft.issueDate ? new Date(`${draft.issueDate}T09:00:00`).toISOString() : null,
         expiryDate: draft.nextInspectionDate ? new Date(`${draft.nextInspectionDate}T09:00:00`).toISOString() : null,
-        notes: reading?.summary ? `Read by ComplyTrack AI: ${reading.summary}` : null,
+        notes: notes || null,
         outcome: draft.outcome,
         defects: draft.defects.map((d) => ({
           code: d.code,
@@ -237,8 +286,11 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
           needsWork: d.needsWork,
         })),
         remedialJob: true,
-        readByAi: true,
-      });
+        readByAi,
+      };
+      const certificate = inbox
+        ? await fileCertificateInboxItem(inbox.id, { itemId: targetId, certificate: details })
+        : await createItemCertificate(targetId, { ...details, fileUrl: await uploadFile(file!) });
       const jobId = certificate.defects?.find((d) => d.fixTrackIssueId != null)?.fixTrackIssueId ?? null;
       let quoteNote = "";
       if (jobId && canQuote && draft.askQuote && draft.quoteContractorId) {
@@ -258,6 +310,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
         description: `${draft.name.trim()}${jobId ? ": remedial work added to FixTrack." : "."}${quoteNote}`,
       });
       reset();
+      onFiled?.();
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The certificate could not be saved");
@@ -270,12 +323,18 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl font-display flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" aria-hidden="true" /> Upload a certificate for AI to read
+            <Sparkles className="w-5 h-5 text-primary" aria-hidden="true" /> {inbox ? "Check and save this certificate" : "Upload a certificate for AI to read"}
           </DialogTitle>
           <DialogDescription>
-            {fixedItem ? `For ${fixedItem.title}. ` : ""}
-            ComplyTrack reads an EICR, gas safety record, fire alarm service or other certificate: the check it is for, the next
-            inspection date and any remedial work. You check everything before it is saved.
+            {inbox ? (
+              <>{sentBy(inbox)}. Check every detail against the certificate before you save it.</>
+            ) : (
+              <>
+                {fixedItem ? `For ${fixedItem.title}. ` : ""}
+                ComplyTrack reads an EICR, gas safety record, fire alarm service or other certificate: the check it is for, the next
+                inspection date and any remedial work. You check everything before it is saved.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -313,9 +372,33 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
           </div>
         )}
 
+        {inbox && (
+          <div className="rounded-lg border p-3 text-sm space-y-2">
+            {inbox.fileUrl && (
+              <a className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline" target="_blank" rel="noreferrer"
+                href={privateObjectUrl(inbox.fileUrl, activeClientId)}>
+                <ExternalLink className="w-4 h-4" aria-hidden="true" /> Open {inbox.fileName ?? "the certificate"}
+              </a>
+            )}
+            {inboxNote && <p className="text-xs text-amber-700">{inboxNote}</p>}
+            {!readByAi && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs text-muted-foreground flex-1 min-w-[12rem]">
+                  {busy === "reading" ? "Reading the certificate… this usually takes under a minute." : "Fill the details in by hand, or let ComplyTrack's AI read it."}
+                </p>
+                <Button type="button" size="sm" variant="outline" disabled={!canRead || busy !== null} onClick={() => void readInbox()}>
+                  {busy === "reading" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" aria-hidden="true" /> : <Sparkles className="w-4 h-4 mr-1" aria-hidden="true" />}
+                  Read with AI
+                </Button>
+              </div>
+            )}
+            {!readByAi && status.data?.available && ai && <AiAllowanceNote ai={ai} />}
+          </div>
+        )}
+
         {draft && reading && (
           <div className="space-y-5 py-1">
-            <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
+            {readByAi && <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
               <p className="flex items-center gap-2 font-medium"><FileText className="w-4 h-4" aria-hidden="true" /> {reading.certificateType || file?.name}</p>
               {reading.summary && <p className="text-muted-foreground">{reading.summary}</p>}
               {reading.contractorName && <p className="text-xs text-muted-foreground">Contractor on the certificate: {reading.contractorName}</p>}
@@ -325,7 +408,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
                   Check these, they were hard to read: {reading.unclear.join("; ")}
                 </p>
               )}
-            </div>
+            </div>}
 
             <div className="space-y-1.5">
               <Label htmlFor="reader-check">Compliance check *</Label>
@@ -508,7 +591,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
           <Button variant="outline" type="button" onClick={close} disabled={busy === "saving"}>Cancel</Button>
           {draft && (
             <>
-              <Button variant="ghost" type="button" onClick={reset} disabled={busy !== null}>Start again</Button>
+              {!inbox && <Button variant="ghost" type="button" onClick={reset} disabled={busy !== null}>Start again</Button>}
               <Button type="button" onClick={() => void save()} disabled={busy !== null}>
                 {busy === "saving" ? (isUploading ? "Uploading…" : "Saving…") : canQuote && draft.askQuote ? "Save and ask for a quote" : "Save certificate"}
               </Button>

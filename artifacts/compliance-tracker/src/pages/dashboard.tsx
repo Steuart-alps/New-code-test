@@ -12,10 +12,11 @@ import { DashboardStartCards } from "@/components/dashboard-start-cards";
 import { useBillingReturn } from "@/lib/billing-return";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
+import { useCertificateInbox } from "@/components/certificate-inbox-card";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
   CheckCircle2, Circle, MinusCircle, SlidersHorizontal,
-  MapPin, UserPlus, Mail, Settings2, MailWarning,
+  MapPin, UserPlus, Mail, Settings2, MailWarning, Inbox,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -486,6 +487,8 @@ export default function Dashboard() {
   useBillingReturn();
   const canAdmin = useCanAdmin();
   const canManageContractorEmails = canAdmin || useIsMaintenanceManager();
+  const certificateInbox = useCertificateInbox(canAdmin);
+  const certificatesToConfirm = certificateInbox.data?.items.filter((item) => item.status !== "reading").length ?? 0;
   const hasStandaloneDailytrackAm = hasService("dailytrack_am");
   const hasStandaloneDailytrackPm = hasService("dailytrack_pm");
   const hasKitchentrack = hasService("kitchentrack");
@@ -628,6 +631,26 @@ export default function Dashboard() {
             notificationEmail={notificationEmail}
             hasModules={services === "all" || (Array.isArray(services) && services.length > 0)}
           />
+        )}
+
+        {canAdmin && certificatesToConfirm > 0 && (
+          <Link
+            href="/external-checks"
+            className="flex items-center justify-between gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 transition-colors hover:bg-emerald-100/50"
+          >
+            <div className="flex items-center gap-3 text-emerald-800">
+              <Inbox className="h-5 w-5" />
+              <div>
+                <p className="font-semibold text-sm">Certificates to confirm</p>
+                <p className="text-xs text-emerald-700/80">
+                  {certificatesToConfirm} certificate{certificatesToConfirm === 1 ? "" : "s"} or message{certificatesToConfirm === 1 ? "" : "s"} from contractors {certificatesToConfirm === 1 ? "is" : "are"} waiting for you to check.
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1 text-sm font-medium text-emerald-700">
+              Check <ArrowRight className="h-4 w-4" />
+            </div>
+          </Link>
         )}
 
         {canManageContractorEmails && pendingEmailsCount !== null && pendingEmailsCount > 0 && (

@@ -2319,6 +2319,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateInspectionReports();
     await migrateAiUsage();
     await migrateBillingAlerts();
+    await migrateCertificateInbox();
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
@@ -6419,4 +6420,80 @@ async function migrateBillingAlerts() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_billing_alerts_created" ON "billing_alerts" ("created_at")`);
+}
+
+// Certificates emailed to a business's certificate address or uploaded by a
+// contractor through their "Upload certificate" link (lib/certificateInbox.ts).
+// Mirrors lib/db/src/schema/certificate-inbox.ts.
+async function migrateCertificateInbox() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_inbox_addresses" (
+      "client_id" integer PRIMARY KEY REFERENCES "clients"("id") ON DELETE CASCADE,
+      "local_part" text NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_inbox_addresses_local_part" ON "certificate_inbox_addresses" ("local_part")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_inbox_emails" (
+      "id" serial PRIMARY KEY,
+      "provider_email_id" text NOT NULL,
+      "client_id" integer REFERENCES "clients"("id") ON DELETE CASCADE,
+      "from_address" text NOT NULL,
+      "subject" text,
+      "status" text NOT NULL DEFAULT 'pending',
+      "attempts" integer NOT NULL DEFAULT 0,
+      "last_error" text,
+      "received_at" timestamptz NOT NULL DEFAULT now(),
+      "processed_at" timestamptz,
+      CONSTRAINT "ck_certificate_inbox_emails_status" CHECK ("status" IN ('pending', 'done', 'failed', 'ignored'))
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_inbox_emails_provider" ON "certificate_inbox_emails" ("provider_email_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_inbox_emails_status" ON "certificate_inbox_emails" ("status", "received_at")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_upload_links" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "item_id" integer NOT NULL REFERENCES "compliance_items"("id") ON DELETE CASCADE,
+      "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+      "token_hash" text NOT NULL,
+      "uploads" integer NOT NULL DEFAULT 0,
+      "expires_at" timestamptz NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_upload_links_token" ON "certificate_upload_links" ("token_hash")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_upload_links_item" ON "certificate_upload_links" ("client_id", "item_id")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_inbox_items" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "source" text NOT NULL,
+      "status" text NOT NULL,
+      "email_id" integer REFERENCES "certificate_inbox_emails"("id") ON DELETE SET NULL,
+      "upload_link_id" integer REFERENCES "certificate_upload_links"("id") ON DELETE SET NULL,
+      "external_ref" text NOT NULL,
+      "sender_email" text,
+      "sender_name" text,
+      "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+      "item_id" integer REFERENCES "compliance_items"("id") ON DELETE SET NULL,
+      "subject" text,
+      "message_text" text,
+      "file_name" text,
+      "content_type" text,
+      "object_path" text,
+      "byte_size" integer,
+      "reading" jsonb,
+      "reading_error" text,
+      "certificate_id" integer REFERENCES "certificates"("id") ON DELETE SET NULL,
+      "handled_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "handled_at" timestamptz,
+      "received_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "ck_certificate_inbox_items_source" CHECK ("source" IN ('email', 'upload')),
+      CONSTRAINT "ck_certificate_inbox_items_status" CHECK ("status" IN ('reading', 'ready', 'held', 'message', 'filed', 'dismissed'))
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_inbox_items_ref" ON "certificate_inbox_items" ("client_id", "external_ref")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_inbox_items_client_status" ON "certificate_inbox_items" ("client_id", "status")`);
 }

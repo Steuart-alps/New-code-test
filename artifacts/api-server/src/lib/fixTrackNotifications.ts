@@ -74,6 +74,7 @@ async function dispatchContractorEmail(opts: Parameters<typeof sendEmail>[0]): P
       icsAttachment: opts.icsAttachment,
       icsFilename: opts.icsFilename,
       idempotencyKey: opts.idempotencyKey,
+      ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
     })}\n`);
     return;
   }

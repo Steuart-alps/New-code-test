@@ -1453,6 +1453,63 @@ export interface CertificateReading {
   unclear: string[];
 }
 
+export type CertificateInboxItemSource = typeof CertificateInboxItemSource[keyof typeof CertificateInboxItemSource];
+
+
+export const CertificateInboxItemSource = {
+  email: 'email',
+  upload: 'upload',
+} as const;
+
+/**
+ * reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached.
+ */
+export type CertificateInboxItemStatus = typeof CertificateInboxItemStatus[keyof typeof CertificateInboxItemStatus];
+
+
+export const CertificateInboxItemStatus = {
+  reading: 'reading',
+  ready: 'ready',
+  held: 'held',
+  message: 'message',
+} as const;
+
+export interface CertificateInboxItem {
+  id: number;
+  source: CertificateInboxItemSource;
+  /** reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached. */
+  status: CertificateInboxItemStatus;
+  senderEmail: string | null;
+  senderName: string | null;
+  contractorId: number | null;
+  contractorName: string | null;
+  /** The check the link was for, or the one the AI matched */
+  itemId: number | null;
+  itemTitle: string | null;
+  subject: string | null;
+  messageText: string | null;
+  fileName: string | null;
+  contentType: string | null;
+  fileUrl: string | null;
+  byteSize: number | null;
+  reading: CertificateReading | null;
+  /** Why it was held, why the AI could not read it, or what was wrong with the attachment. */
+  note: string | null;
+  receivedAt: string;
+}
+
+export interface CertificateInbox {
+  /** Where to email certificates; null until emailed certificates are switched on. */
+  address: string | null;
+  items: CertificateInboxItem[];
+}
+
+export interface FileCertificateInboxItemRequest {
+  /** The compliance check to save it to */
+  itemId: number;
+  certificate: CreateItemCertificateRequest;
+}
+
 /**
  * Defects are added through the certificate's defects endpoint.
  */
