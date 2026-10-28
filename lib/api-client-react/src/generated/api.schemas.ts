@@ -1465,6 +1465,104 @@ export interface CertificateReading {
   unclear: string[];
 }
 
+export type ContractorSignInSiteAsbestosStatus = typeof ContractorSignInSiteAsbestosStatus[keyof typeof ContractorSignInSiteAsbestosStatus];
+
+
+export const ContractorSignInSiteAsbestosStatus = {
+  register: 'register',
+  none_expected: 'none_expected',
+  missing: 'missing',
+} as const;
+
+export interface ContractorSignInSite {
+  siteId: number;
+  siteName: string;
+  enabled: boolean;
+  /** The site's sign-in link; null until sign-in is first turned on */
+  link: string | null;
+  fireProcedure: string | null;
+  /** FireTrack's evacuation arrangements for the site, to copy from */
+  fireTrackEvacuation: string | null;
+  asbestosStatus: ContractorSignInSiteAsbestosStatus;
+  asbestosEntryCount: number;
+  onSiteCount: number;
+}
+
+export interface ContractorSignInSites {
+  /** Whether the caller can change the set-up (Owners and Managers) */
+  canManage: boolean;
+  /** A visit still open after this many hours counts as not signed out */
+  onSiteHours: number;
+  sites: ContractorSignInSite[];
+}
+
+export interface UpdateContractorSignInSiteRequest {
+  enabled?: boolean;
+  /** @maxLength 10000 */
+  fireProcedure?: string | null;
+}
+
+export interface EmailContractorSignInLinkRequest {
+  contractorId: number;
+}
+
+export interface ContractorSignInLinkEmailed {
+  sentTo: string;
+}
+
+export type ContractorSignInVisitAsbestosStatus = typeof ContractorSignInVisitAsbestosStatus[keyof typeof ContractorSignInVisitAsbestosStatus];
+
+
+export const ContractorSignInVisitAsbestosStatus = {
+  register: 'register',
+  none_expected: 'none_expected',
+  missing: 'missing',
+} as const;
+
+export type ContractorSignInVisitStatus = typeof ContractorSignInVisitStatus[keyof typeof ContractorSignInVisitStatus];
+
+
+export const ContractorSignInVisitStatus = {
+  on_site: 'on_site',
+  signed_out: 'signed_out',
+  did_not_sign_out: 'did_not_sign_out',
+} as const;
+
+export interface ContractorSignInVisit {
+  id: number;
+  siteId: number | null;
+  siteName: string;
+  /** The Contractors list entry with the same email address, if any */
+  contractorId: number | null;
+  name: string;
+  company: string;
+  phone: string | null;
+  email: string | null;
+  visitReason: string | null;
+  /** False when the site had no fire procedure to read */
+  fireAcknowledged: boolean;
+  asbestosStatus: ContractorSignInVisitAsbestosStatus;
+  signedInAt: string;
+  signedOutAt: string | null;
+  /** Who signed them out, when it was not the contractor */
+  signedOutByName: string | null;
+  status: ContractorSignInVisitStatus;
+}
+
+/**
+ * The asbestos information the contractor was shown
+ */
+export type ContractorSignInVisitDetailAsbestosSnapshot = { [key: string]: unknown };
+
+export type ContractorSignInVisitDetail = ContractorSignInVisit & ({
+  /** The fire procedure the contractor confirmed reading */
+  fireProcedureText: string | null;
+  /** The asbestos information the contractor was shown */
+  asbestosSnapshot: ContractorSignInVisitDetailAsbestosSnapshot;
+  /** PNG data URL */
+  signature: string;
+});
+
 export type CertificateInboxItemSource = typeof CertificateInboxItemSource[keyof typeof CertificateInboxItemSource];
 
 
@@ -4734,6 +4832,14 @@ export const ListPublicLinkAccessActionType = {
 
 export type ListAssigneesParams = {
 siteId?: number;
+};
+
+export type ListContractorSignInsParams = {
+siteId?: number;
+/**
+ * How many days back (default 30, at most 366)
+ */
+days?: number;
 };
 
 export type ListComplianceItemsParams = {

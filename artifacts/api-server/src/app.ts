@@ -45,7 +45,7 @@ app.use(
       req(req) {
         const requestPath = req.url?.split("?")[0] ?? "";
         const redactedPath = requestPath.replace(
-          /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public|privacy-intake|privacy-request)\/)[^/]+/g,
+          /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public|privacy-intake|privacy-request|site-sign-in)\/)[^/]+/g,
           "$1[redacted]",
         );
         return {
@@ -277,6 +277,8 @@ app.use("/api/imports/pat-appliances/read", express.json({ limit: "12mb" }));
 app.use("/api/certificates/read", express.json({ limit: "21mb" }));
 // A contractor's certificate upload arrives as base64 (10 MB at most before encoding).
 app.use("/api/certificate-upload", express.json({ limit: "14mb" }));
+// A contractor's drawn signature arrives as a PNG data URL when they sign in at a site.
+app.use("/api/site-sign-in", express.json({ limit: "1mb" }));
 app.use("/api/imports", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

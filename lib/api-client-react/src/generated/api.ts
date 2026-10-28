@@ -51,6 +51,11 @@ import type {
   ComplianceItem,
   ConfirmInspectionReportActions201,
   Contractor,
+  ContractorSignInLinkEmailed,
+  ContractorSignInSite,
+  ContractorSignInSites,
+  ContractorSignInVisit,
+  ContractorSignInVisitDetail,
   ContractorVisitsResponse,
   CoshhAssessment,
   CoshhAssessmentInput,
@@ -81,6 +86,7 @@ import type {
   DailyTrackHistory,
   DashboardStats,
   DisablePrivacyIntakeLinkParams,
+  EmailContractorSignInLinkRequest,
   EquipmentItem,
   EquipmentItemRequest,
   EquipmentLabelRef,
@@ -174,6 +180,7 @@ import type {
   ListAssigneesParams,
   ListAuditLogParams,
   ListComplianceItemsParams,
+  ListContractorSignInsParams,
   ListCoshhAssessmentsParams,
   ListCoshhChecksParams,
   ListCoshhSignOffs200,
@@ -252,6 +259,7 @@ import type {
   UpdateCategoryRequest,
   UpdateCertificateDefectRequest,
   UpdateComplianceItemRequest,
+  UpdateContractorSignInSiteRequest,
   UpdateEquipmentItemRequest,
   UpdateFeedbackReportParams,
   UpdateFireCallPointRequest,
@@ -4100,6 +4108,608 @@ export const useDismissCertificateInboxItem = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDismissCertificateInboxItemMutationOptions(options));
+    }
+
+export const getListContractorSignInSitesUrl = () => {
+
+
+
+
+  return `/api/contractor-sign-in/sites`
+}
+
+/**
+ * @summary Contractor sign-in set-up and who is on site, for each site the caller can see (not Viewers)
+ */
+export const listContractorSignInSites = async ( options?: RequestInit): Promise<ContractorSignInSites> => {
+
+  return customFetch<ContractorSignInSites>(getListContractorSignInSitesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListContractorSignInSitesQueryKey = () => {
+    return [
+    `/api/contractor-sign-in/sites`
+    ] as const;
+    }
+
+
+export const getListContractorSignInSitesQueryOptions = <TData = Awaited<ReturnType<typeof listContractorSignInSites>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorSignInSites>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListContractorSignInSitesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listContractorSignInSites>>> = ({ signal }) => listContractorSignInSites({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listContractorSignInSites>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListContractorSignInSitesQueryResult = NonNullable<Awaited<ReturnType<typeof listContractorSignInSites>>>
+export type ListContractorSignInSitesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Contractor sign-in set-up and who is on site, for each site the caller can see (not Viewers)
+ */
+
+export function useListContractorSignInSites<TData = Awaited<ReturnType<typeof listContractorSignInSites>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorSignInSites>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListContractorSignInSitesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateContractorSignInSiteUrl = (siteId: number,) => {
+
+
+
+
+  return `/api/contractor-sign-in/sites/${siteId}`
+}
+
+/**
+ * The first save creates the site's sign-in link. The fire procedure is what contractors read and confirm before signing in.
+ * @summary Turn contractor sign-in on or off for a site and set its fire procedure (Owners and Managers)
+ */
+export const updateContractorSignInSite = async (siteId: number,
+    updateContractorSignInSiteRequest: UpdateContractorSignInSiteRequest, options?: RequestInit): Promise<ContractorSignInSite> => {
+
+  return customFetch<ContractorSignInSite>(getUpdateContractorSignInSiteUrl(siteId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateContractorSignInSiteRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateContractorSignInSiteMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateContractorSignInSite>>, TError,{siteId: number;data: BodyType<UpdateContractorSignInSiteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateContractorSignInSite>>, TError,{siteId: number;data: BodyType<UpdateContractorSignInSiteRequest>}, TContext> => {
+
+const mutationKey = ['updateContractorSignInSite'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateContractorSignInSite>>, {siteId: number;data: BodyType<UpdateContractorSignInSiteRequest>}> = (props) => {
+          const {siteId,data} = props ?? {};
+
+          return  updateContractorSignInSite(siteId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateContractorSignInSiteMutationResult = NonNullable<Awaited<ReturnType<typeof updateContractorSignInSite>>>
+    export type UpdateContractorSignInSiteMutationBody = BodyType<UpdateContractorSignInSiteRequest>
+    export type UpdateContractorSignInSiteMutationError = ErrorType<void>
+
+    /**
+ * @summary Turn contractor sign-in on or off for a site and set its fire procedure (Owners and Managers)
+ */
+export const useUpdateContractorSignInSite = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateContractorSignInSite>>, TError,{siteId: number;data: BodyType<UpdateContractorSignInSiteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateContractorSignInSite>>,
+        TError,
+        {siteId: number;data: BodyType<UpdateContractorSignInSiteRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateContractorSignInSiteMutationOptions(options));
+    }
+
+export const getResetContractorSignInLinkUrl = (siteId: number,) => {
+
+
+
+
+  return `/api/contractor-sign-in/sites/${siteId}/reset-link`
+}
+
+/**
+ * @summary Give a site a new sign-in link; the old link and its posters stop working
+ */
+export const resetContractorSignInLink = async (siteId: number, options?: RequestInit): Promise<ContractorSignInSite> => {
+
+  return customFetch<ContractorSignInSite>(getResetContractorSignInLinkUrl(siteId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getResetContractorSignInLinkMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetContractorSignInLink>>, TError,{siteId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resetContractorSignInLink>>, TError,{siteId: number}, TContext> => {
+
+const mutationKey = ['resetContractorSignInLink'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resetContractorSignInLink>>, {siteId: number}> = (props) => {
+          const {siteId} = props ?? {};
+
+          return  resetContractorSignInLink(siteId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResetContractorSignInLinkMutationResult = NonNullable<Awaited<ReturnType<typeof resetContractorSignInLink>>>
+
+    export type ResetContractorSignInLinkMutationError = ErrorType<void>
+
+    /**
+ * @summary Give a site a new sign-in link; the old link and its posters stop working
+ */
+export const useResetContractorSignInLink = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetContractorSignInLink>>, TError,{siteId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resetContractorSignInLink>>,
+        TError,
+        {siteId: number},
+        TContext
+      > => {
+      return useMutation(getResetContractorSignInLinkMutationOptions(options));
+    }
+
+export const getGetContractorSignInPosterUrl = (siteId: number,) => {
+
+
+
+
+  return `/api/contractor-sign-in/sites/${siteId}/poster`
+}
+
+/**
+ * @summary An A4 PDF poster with the site's sign-in QR code, for reception
+ */
+export const getContractorSignInPoster = async (siteId: number, options?: RequestInit): Promise<Blob> => {
+
+  return customFetch<Blob>(getGetContractorSignInPosterUrl(siteId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetContractorSignInPosterQueryKey = (siteId: number,) => {
+    return [
+    `/api/contractor-sign-in/sites/${siteId}/poster`
+    ] as const;
+    }
+
+
+export const getGetContractorSignInPosterQueryOptions = <TData = Awaited<ReturnType<typeof getContractorSignInPoster>>, TError = ErrorType<void>>(siteId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContractorSignInPoster>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetContractorSignInPosterQueryKey(siteId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getContractorSignInPoster>>> = ({ signal }) => getContractorSignInPoster(siteId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: siteId !== null && siteId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getContractorSignInPoster>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetContractorSignInPosterQueryResult = NonNullable<Awaited<ReturnType<typeof getContractorSignInPoster>>>
+export type GetContractorSignInPosterQueryError = ErrorType<void>
+
+
+/**
+ * @summary An A4 PDF poster with the site's sign-in QR code, for reception
+ */
+
+export function useGetContractorSignInPoster<TData = Awaited<ReturnType<typeof getContractorSignInPoster>>, TError = ErrorType<void>>(
+ siteId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContractorSignInPoster>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetContractorSignInPosterQueryOptions(siteId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getEmailContractorSignInLinkUrl = (siteId: number,) => {
+
+
+
+
+  return `/api/contractor-sign-in/sites/${siteId}/email-link`
+}
+
+/**
+ * @summary Email the site's sign-in link to a contractor on the Contractors list
+ */
+export const emailContractorSignInLink = async (siteId: number,
+    emailContractorSignInLinkRequest: EmailContractorSignInLinkRequest, options?: RequestInit): Promise<ContractorSignInLinkEmailed> => {
+
+  return customFetch<ContractorSignInLinkEmailed>(getEmailContractorSignInLinkUrl(siteId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(emailContractorSignInLinkRequest)
+  }
+);}
+
+
+
+
+
+export const getEmailContractorSignInLinkMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof emailContractorSignInLink>>, TError,{siteId: number;data: BodyType<EmailContractorSignInLinkRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof emailContractorSignInLink>>, TError,{siteId: number;data: BodyType<EmailContractorSignInLinkRequest>}, TContext> => {
+
+const mutationKey = ['emailContractorSignInLink'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof emailContractorSignInLink>>, {siteId: number;data: BodyType<EmailContractorSignInLinkRequest>}> = (props) => {
+          const {siteId,data} = props ?? {};
+
+          return  emailContractorSignInLink(siteId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EmailContractorSignInLinkMutationResult = NonNullable<Awaited<ReturnType<typeof emailContractorSignInLink>>>
+    export type EmailContractorSignInLinkMutationBody = BodyType<EmailContractorSignInLinkRequest>
+    export type EmailContractorSignInLinkMutationError = ErrorType<void>
+
+    /**
+ * @summary Email the site's sign-in link to a contractor on the Contractors list
+ */
+export const useEmailContractorSignInLink = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof emailContractorSignInLink>>, TError,{siteId: number;data: BodyType<EmailContractorSignInLinkRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof emailContractorSignInLink>>,
+        TError,
+        {siteId: number;data: BodyType<EmailContractorSignInLinkRequest>},
+        TContext
+      > => {
+      return useMutation(getEmailContractorSignInLinkMutationOptions(options));
+    }
+
+export const getListContractorSignInsUrl = (params?: ListContractorSignInsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/contractor-sign-in/visits?${stringifiedParams}` : `/api/contractor-sign-in/visits`
+}
+
+/**
+ * @summary Contractor visits at the caller's sites, newest first; anyone still on site is always included
+ */
+export const listContractorSignIns = async (params?: ListContractorSignInsParams, options?: RequestInit): Promise<ContractorSignInVisit[]> => {
+
+  return customFetch<ContractorSignInVisit[]>(getListContractorSignInsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListContractorSignInsQueryKey = (params?: ListContractorSignInsParams,) => {
+    return [
+    `/api/contractor-sign-in/visits`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListContractorSignInsQueryOptions = <TData = Awaited<ReturnType<typeof listContractorSignIns>>, TError = ErrorType<void>>(params?: ListContractorSignInsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorSignIns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListContractorSignInsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listContractorSignIns>>> = ({ signal }) => listContractorSignIns(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listContractorSignIns>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListContractorSignInsQueryResult = NonNullable<Awaited<ReturnType<typeof listContractorSignIns>>>
+export type ListContractorSignInsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Contractor visits at the caller's sites, newest first; anyone still on site is always included
+ */
+
+export function useListContractorSignIns<TData = Awaited<ReturnType<typeof listContractorSignIns>>, TError = ErrorType<void>>(
+ params?: ListContractorSignInsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContractorSignIns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListContractorSignInsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetContractorSignInUrl = (id: number,) => {
+
+
+
+
+  return `/api/contractor-sign-in/visits/${id}`
+}
+
+/**
+ * @summary One visit with what the contractor read and their signature
+ */
+export const getContractorSignIn = async (id: number, options?: RequestInit): Promise<ContractorSignInVisitDetail> => {
+
+  return customFetch<ContractorSignInVisitDetail>(getGetContractorSignInUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetContractorSignInQueryKey = (id: number,) => {
+    return [
+    `/api/contractor-sign-in/visits/${id}`
+    ] as const;
+    }
+
+
+export const getGetContractorSignInQueryOptions = <TData = Awaited<ReturnType<typeof getContractorSignIn>>, TError = ErrorType<void>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContractorSignIn>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetContractorSignInQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getContractorSignIn>>> = ({ signal }) => getContractorSignIn(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getContractorSignIn>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetContractorSignInQueryResult = NonNullable<Awaited<ReturnType<typeof getContractorSignIn>>>
+export type GetContractorSignInQueryError = ErrorType<void>
+
+
+/**
+ * @summary One visit with what the contractor read and their signature
+ */
+
+export function useGetContractorSignIn<TData = Awaited<ReturnType<typeof getContractorSignIn>>, TError = ErrorType<void>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getContractorSignIn>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetContractorSignInQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSignOutContractorUrl = (id: number,) => {
+
+
+
+
+  return `/api/contractor-sign-in/visits/${id}/sign-out`
+}
+
+/**
+ * @summary Sign a contractor out for them (e.g. at the fire roll call)
+ */
+export const signOutContractor = async (id: number, options?: RequestInit): Promise<ContractorSignInVisit> => {
+
+  return customFetch<ContractorSignInVisit>(getSignOutContractorUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getSignOutContractorMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signOutContractor>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signOutContractor>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['signOutContractor'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signOutContractor>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  signOutContractor(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignOutContractorMutationResult = NonNullable<Awaited<ReturnType<typeof signOutContractor>>>
+
+    export type SignOutContractorMutationError = ErrorType<void>
+
+    /**
+ * @summary Sign a contractor out for them (e.g. at the fire roll call)
+ */
+export const useSignOutContractor = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signOutContractor>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signOutContractor>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getSignOutContractorMutationOptions(options));
     }
 
 export const getUpdateItemCertificateUrl = (itemId: number,

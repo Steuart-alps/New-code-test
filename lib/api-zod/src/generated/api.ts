@@ -1569,6 +1569,186 @@ export const DismissCertificateInboxItemResponse = zod.object({
 
 
 /**
+ * @summary Contractor sign-in set-up and who is on site, for each site the caller can see (not Viewers)
+ */
+export const ListContractorSignInSitesResponse = zod.object({
+  "canManage": zod.boolean().describe('Whether the caller can change the set-up (Owners and Managers)'),
+  "onSiteHours": zod.number().describe('A visit still open after this many hours counts as not signed out'),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "enabled": zod.boolean(),
+  "link": zod.string().nullable().describe('The site\'s sign-in link; null until sign-in is first turned on'),
+  "fireProcedure": zod.string().nullable(),
+  "fireTrackEvacuation": zod.string().nullable().describe('FireTrack\'s evacuation arrangements for the site, to copy from'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "asbestosEntryCount": zod.number(),
+  "onSiteCount": zod.number()
+}))
+})
+
+
+/**
+ * The first save creates the site's sign-in link. The fire procedure is what contractors read and confirm before signing in.
+ * @summary Turn contractor sign-in on or off for a site and set its fire procedure (Owners and Managers)
+ */
+export const UpdateContractorSignInSiteParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const updateContractorSignInSiteBodyFireProcedureMax = 10000;
+
+
+
+export const UpdateContractorSignInSiteBody = zod.object({
+  "enabled": zod.boolean().optional(),
+  "fireProcedure": zod.string().max(updateContractorSignInSiteBodyFireProcedureMax).nullish()
+})
+
+export const UpdateContractorSignInSiteResponse = zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "enabled": zod.boolean(),
+  "link": zod.string().nullable().describe('The site\'s sign-in link; null until sign-in is first turned on'),
+  "fireProcedure": zod.string().nullable(),
+  "fireTrackEvacuation": zod.string().nullable().describe('FireTrack\'s evacuation arrangements for the site, to copy from'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "asbestosEntryCount": zod.number(),
+  "onSiteCount": zod.number()
+})
+
+
+/**
+ * @summary Give a site a new sign-in link; the old link and its posters stop working
+ */
+export const ResetContractorSignInLinkParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const ResetContractorSignInLinkResponse = zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "enabled": zod.boolean(),
+  "link": zod.string().nullable().describe('The site\'s sign-in link; null until sign-in is first turned on'),
+  "fireProcedure": zod.string().nullable(),
+  "fireTrackEvacuation": zod.string().nullable().describe('FireTrack\'s evacuation arrangements for the site, to copy from'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "asbestosEntryCount": zod.number(),
+  "onSiteCount": zod.number()
+})
+
+
+/**
+ * @summary An A4 PDF poster with the site's sign-in QR code, for reception
+ */
+export const GetContractorSignInPosterParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetContractorSignInPosterResponse = zod.unknown()
+
+
+/**
+ * @summary Email the site's sign-in link to a contractor on the Contractors list
+ */
+export const EmailContractorSignInLinkParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const EmailContractorSignInLinkBody = zod.object({
+  "contractorId": zod.number()
+})
+
+export const EmailContractorSignInLinkResponse = zod.object({
+  "sentTo": zod.string()
+})
+
+
+/**
+ * @summary Contractor visits at the caller's sites, newest first; anyone still on site is always included
+ */
+export const ListContractorSignInsQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "days": zod.coerce.number().optional().describe('How many days back (default 30, at most 366)')
+})
+
+export const ListContractorSignInsResponseItem = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable().describe('The Contractors list entry with the same email address, if any'),
+  "name": zod.string(),
+  "company": zod.string(),
+  "phone": zod.string().nullable(),
+  "email": zod.string().nullable(),
+  "visitReason": zod.string().nullable(),
+  "fireAcknowledged": zod.boolean().describe('False when the site had no fire procedure to read'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "signedInAt": zod.date(),
+  "signedOutAt": zod.date().nullable(),
+  "signedOutByName": zod.string().nullable().describe('Who signed them out, when it was not the contractor'),
+  "status": zod.enum(['on_site', 'signed_out', 'did_not_sign_out'])
+})
+export const ListContractorSignInsResponse = zod.array(ListContractorSignInsResponseItem)
+
+
+/**
+ * @summary One visit with what the contractor read and their signature
+ */
+export const GetContractorSignInParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetContractorSignInResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable().describe('The Contractors list entry with the same email address, if any'),
+  "name": zod.string(),
+  "company": zod.string(),
+  "phone": zod.string().nullable(),
+  "email": zod.string().nullable(),
+  "visitReason": zod.string().nullable(),
+  "fireAcknowledged": zod.boolean().describe('False when the site had no fire procedure to read'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "signedInAt": zod.date(),
+  "signedOutAt": zod.date().nullable(),
+  "signedOutByName": zod.string().nullable().describe('Who signed them out, when it was not the contractor'),
+  "status": zod.enum(['on_site', 'signed_out', 'did_not_sign_out'])
+}).and(zod.object({
+  "fireProcedureText": zod.string().nullable().describe('The fire procedure the contractor confirmed reading'),
+  "asbestosSnapshot": zod.record(zod.string(), zod.unknown()).describe('The asbestos information the contractor was shown'),
+  "signature": zod.string().describe('PNG data URL')
+}))
+
+
+/**
+ * @summary Sign a contractor out for them (e.g. at the fire roll call)
+ */
+export const SignOutContractorParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SignOutContractorResponse = zod.object({
+  "id": zod.number(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string(),
+  "contractorId": zod.number().nullable().describe('The Contractors list entry with the same email address, if any'),
+  "name": zod.string(),
+  "company": zod.string(),
+  "phone": zod.string().nullable(),
+  "email": zod.string().nullable(),
+  "visitReason": zod.string().nullable(),
+  "fireAcknowledged": zod.boolean().describe('False when the site had no fire procedure to read'),
+  "asbestosStatus": zod.enum(['register', 'none_expected', 'missing']),
+  "signedInAt": zod.date(),
+  "signedOutAt": zod.date().nullable(),
+  "signedOutByName": zod.string().nullable().describe('Who signed them out, when it was not the contractor'),
+  "status": zod.enum(['on_site', 'signed_out', 'did_not_sign_out'])
+})
+
+
+/**
  * @summary Update a compliance item's certificate
  */
 export const UpdateItemCertificateParams = zod.object({

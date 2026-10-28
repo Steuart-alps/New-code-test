@@ -382,6 +382,9 @@ jobs:
       - name: Certificates emailed or uploaded by contractors wait to be confirmed (production schema base)
         run: pnpm --filter @workspace/api-server run test:certificate-inbox
 
+      - name: Contractor sign-in on arrival, fire procedure and asbestos register (production schema base)
+        run: pnpm --filter @workspace/api-server run test:contractor-sign-in
+
       - name: Equipment list and QR label tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:equipment-labels
 

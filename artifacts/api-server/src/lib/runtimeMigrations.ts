@@ -2320,6 +2320,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateAiUsage();
     await migrateBillingAlerts();
     await migrateCertificateInbox();
+    await migrateContractorSignIn();
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
@@ -6513,4 +6514,49 @@ async function migrateCertificateInbox() {
   `);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_certificate_inbox_items_ref" ON "certificate_inbox_items" ("client_id", "external_ref")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_certificate_inbox_items_client_status" ON "certificate_inbox_items" ("client_id", "status")`);
+}
+
+// Contractor sign-in on arrival (routes/contractor-sign-in.ts).
+// Mirrors lib/db/src/schema/contractor-sign-in.ts.
+async function migrateContractorSignIn() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "contractor_sign_in_sites" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "link_token" text NOT NULL,
+      "enabled" boolean NOT NULL DEFAULT true,
+      "fire_procedure" text,
+      "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "updated_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_in_sites_site" ON "contractor_sign_in_sites" ("site_id")`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_in_sites_link_token" ON "contractor_sign_in_sites" ("link_token")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "contractor_sign_ins" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "site_name" text NOT NULL,
+      "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+      "visitor_name" text NOT NULL,
+      "company" text NOT NULL,
+      "phone" text,
+      "email" text,
+      "visit_reason" text,
+      "fire_procedure_text" text,
+      "asbestos_status" text NOT NULL,
+      "asbestos_snapshot" jsonb NOT NULL DEFAULT '{}'::jsonb,
+      "signature" text NOT NULL,
+      "signed_in_at" timestamptz NOT NULL DEFAULT now(),
+      "signed_out_at" timestamptz,
+      "signed_out_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "sign_out_token_hash" text NOT NULL,
+      CONSTRAINT "ck_contractor_sign_ins_asbestos_status" CHECK ("asbestos_status" IN ('register', 'none_expected', 'missing'))
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_contractor_sign_ins_site_time" ON "contractor_sign_ins" ("client_id", "site_id", "signed_in_at")`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_ins_sign_out_token" ON "contractor_sign_ins" ("sign_out_token_hash")`);
 }

@@ -58,6 +58,7 @@ import inspectionPackRouter from "./inspection-pack";
 import calendarRouter from "./calendar";
 import privacyGovernanceRouter from "./privacy-governance";
 import privacyIntakePublicRouter from "./privacy-intake-public";
+import contractorSignInRouter, { siteSignInPublicRouter } from "./contractor-sign-in";
 import dashboardSummaryRouter from "./dashboard-summary";
 import dashboardTodayRouter from "./dashboard-today";
 import complianceHubRouter from "./compliance-hub";
@@ -113,6 +114,8 @@ router.use("/certificate-upload", publicLinkRateLimits, certificateUploadPublicR
 router.use("/sign-off", publicLinkRateLimits, signOffRouter);
 // Public privacy rights-request form (token-protected).
 router.use("/privacy-intake", publicLinkRateLimits, privacyIntakePublicRouter);
+// Contractor sign-in link for a site (token-protected; QR poster at reception).
+router.use("/site-sign-in", publicLinkRateLimits, siteSignInPublicRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
@@ -179,6 +182,8 @@ router.use("/registers", requireAuth, registersRouter);
 // KitchenTrack ingredients, menus and allergen chart sign-offs (gated inside).
 router.use("/registers", requireAuth, allergenRecipesRouter);
 router.use("/coshh-track", requireAuth, requireService("coshhtrack"), coshhTrackRouter);
+// Contractor sign-in on arrival: set-up, who is on site, past visits.
+router.use("/contractor-sign-in", contractorSignInRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
 router.use(exportRouter);
