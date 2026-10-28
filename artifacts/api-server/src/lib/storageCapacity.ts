@@ -13,9 +13,11 @@ import { sql } from "drizzle-orm";
 // replace that module for routes/storage.ts).
 
 export const GIB = 1024 ** 3;
+// Every plan includes 10 GiB (Steuart, 2026-10-27; was 1 GiB). Every
+// subscription carries a core or bundle item, so this covers all of them.
 const DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE: Record<string, number> = {
-  core: 1,
-  bundle: 1,
+  core: 10,
+  bundle: 10,
 };
 
 type SubscriptionItemLike = {

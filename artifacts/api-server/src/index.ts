@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { runMigrations } from "stripe-replit-sync";
 import { getStripeCredentialSource, getStripeSync } from "./lib/stripeClient";
 import cron from "node-cron";
+import { runBillingDigest } from "./lib/billingAlerts";
 import { runReminderJob } from "./routes/notifications";
 import { runRuntimeMigrations } from "./lib/runtimeMigrations";
 import { reconcileAllSubscriptionQuantities, type QuantityCorrection } from "./lib/billing";
@@ -334,6 +335,11 @@ function startScheduler() {
   // trial has just ended without a subscription (daily at 08:15).
   schedule("15 8 * * *", "trial-reminders", runTrialReminders, { daily: true });
   logger.info("Trial reminder scheduler started (daily at 08:15)");
+
+  // ALPS's weekly billing digest (ADMIN_EMAIL): new, cancelled, net change,
+  // cancellation reasons and the most used modules. Mondays at 08:00.
+  schedule("0 8 * * 1", "billing-digest", logged("Weekly billing digest job complete", () => runBillingDigest()));
+  logger.info("Weekly billing digest scheduler started (Mondays at 08:00)");
 
   // Email a business's managers once when its stored files pass the storage
   // warning level set in Settings (daily at 08:10, from the usage ledger).

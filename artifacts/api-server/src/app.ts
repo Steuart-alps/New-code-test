@@ -222,7 +222,8 @@ app.post(
 
     // Best-effort follow-up once the synced tables are updated: local plan
     // status, retention-clock reset on resubscription, cancellation and
-    // failed-payment emails. Never throws — the 200 has already been sent.
+    // failed-payment emails, and billing changes for ALPS's digest. Never
+    // throws — the 200 has already been sent.
     WebhookHandlers.afterSync(event).catch((err) => logger.warn({ err }, "Stripe webhook follow-up failed"));
   }
 );
@@ -230,6 +231,8 @@ app.post(
 // Register CSV imports send up to 1,000 rows, and a PAT register photo or PDF
 // is sent as base64 (8 MB file at most); every other route keeps the default limit.
 app.use("/api/imports/pat-appliances/read", express.json({ limit: "12mb" }));
+// A certificate read by ComplyTrack's AI arrives as base64 (15 MB at most before encoding).
+app.use("/api/certificates/read", express.json({ limit: "21mb" }));
 app.use("/api/imports", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

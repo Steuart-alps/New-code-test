@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { CertificateOutcome } from './certificateOutcome';
-import type { CreateCertificateDefectRequest } from './createCertificateDefectRequest';
+import type { CreateItemCertificateDefectRequest } from './createItemCertificateDefectRequest';
 
 export interface CreateItemCertificateRequest {
   name: string;
@@ -16,5 +16,9 @@ export interface CreateItemCertificateRequest {
   notes?: string | null;
   outcome?: CertificateOutcome;
   /** @maxItems 100 */
-  defects?: CreateCertificateDefectRequest[];
+  defects?: CreateItemCertificateDefectRequest[];
+  /** The defects that need work share one FixTrack job (so one quote request covers them) and the others open no job. Without it each defect opens its own job. */
+  remedialJob?: boolean;
+  /** The details were read by ComplyTrack's AI and checked by the person saving them. */
+  readByAi?: boolean;
 }

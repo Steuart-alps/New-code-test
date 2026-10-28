@@ -59,6 +59,11 @@ try {
   assert.equal(lib.storageWarningThresholdBytes(undefined), 5 * GIB);
   assert.equal(lib.storageWarningThresholdBytes("not a number"), 5 * GIB);
   assert.equal(lib.storageWarningThresholdBytes(String(2 * GIB)), 2 * GIB);
+  // With a paid limit the email goes at 80% of it, or earlier if the owner chose a lower level.
+  assert.equal(lib.storageWarningLevelBytes(undefined, null), 5 * GIB);
+  assert.equal(lib.storageWarningLevelBytes(undefined, 10 * GIB), 8 * GIB);
+  assert.equal(lib.storageWarningLevelBytes(String(2 * GIB), 10 * GIB), 2 * GIB);
+  assert.equal(lib.storageWarningLevelBytes(String(9 * GIB), 10 * GIB), 8 * GIB);
 
   // Business text is escaped in the HTML and kept as written in the text.
   const preview = lib.buildStorageWarningEmail({

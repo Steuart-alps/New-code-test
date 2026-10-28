@@ -165,7 +165,8 @@ async function pricingBoundaries({ user, clientId }) {
     if (usedBytes > 0) t.putObject(`${prefix}stored.bin`, { size: usedBytes, owner: String(clientId) });
     for (const name of PRICING_ENV) delete process.env[name];
     // The arithmetic below is worked at $0.015/GiB; the default has its own check.
-    Object.assign(process.env, { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.015", ...env });
+    // and with 1 GiB included (the default allowance has its own check).
+    Object.assign(process.env, { STORAGE_PROVIDER_USD_PER_GIB_MONTH: "0.015", STORAGE_INCLUDED_GIB_BY_SERVICE: JSON.stringify({ core: 1, bundle: 1 }), ...env });
     // Usage totals come from a reconciled snapshot (storageUsageSnapshot.ts);
     // the bucket was changed directly, so make this view reconcile it again.
     await query("DELETE FROM storage_usage_snapshots WHERE client_id = $1", [clientId]);
@@ -191,6 +192,8 @@ async function pricingBoundaries({ user, clientId }) {
   same("zero usage: used bytes", [zero.usedBytes, zero.objectCount], [0, 0]);
   nothingDue("zero usage", zero.estimatedCost, 0);
   same("zero usage: core plan includes exactly 1 GiB", zero.estimatedCost?.includedStorageBytes, GIB);
+  same("default allowance: every plan includes 10 GiB",
+    (await usage(0, { STORAGE_INCLUDED_GIB_BY_SERVICE: "" })).estimatedCost?.includedStorageBytes, 10 * GIB);
   same("zero usage: USD, 20% default markup", [zero.estimatedCost?.currency, zero.estimatedCost?.markupPercent], ["USD", 20]);
 
   nothingDue("1 GB (decimal) is inside the 1 GiB allowance", await cost(1_000_000_000), 0);
@@ -506,7 +509,7 @@ async function downloadsDisplayedNotBilled(tenantA, pricing, month) {
   const after = await pricing.user("GET", "/storage/usage");
   same("heavy traffic is displayed", after.data?.monthlyDownloadBytes - before.data?.monthlyDownloadBytes, 500 * GIB);
   same("estimate is identical with or without 500 GiB of downloads", after.data?.estimatedCost, before.data?.estimatedCost);
-  same("downloads add nothing to the total", [after.data?.estimatedCost?.downloadMinorUnits, after.data?.estimatedCost?.totalMinorUnits], [0, 312]); // 100 GiB at the $0.026 default + 20%
+  same("downloads add nothing to the total", [after.data?.estimatedCost?.downloadMinorUnits, after.data?.estimatedCost?.totalMinorUnits], [0, 284]); // 91 GiB over the 10 GiB default allowance, at the $0.026 default + 20%
 
   t.clearObjects(prefix);
   await query("DELETE FROM storage_usage_snapshots WHERE client_id = $1", [pricing.clientId]);
@@ -524,7 +527,7 @@ async function storageLimit({ user, clientId }) {
   const mails = async () => (await readFile(capture, "utf8").catch(() => "")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const customer = `cus_storage_limit_${clientId}`;
   await query("UPDATE clients SET stripe_customer_id = $1 WHERE id = $2", [customer, clientId]);
-  t.setTestSubscription(customer, ["core"]); // 1 GiB included
+  t.setTestSubscription(customer, ["core"]); // 10 GiB included by default
   const setUsage = async (bytes) => {
     await query("DELETE FROM storage_usage_objects WHERE client_id = $1", [clientId]);
     if (bytes > 0) {
@@ -546,18 +549,18 @@ async function storageLimit({ user, clientId }) {
 
   try {
     // Under capacity: uploads work and nothing is recorded.
-    await setUsage(GIB / 2);
+    await setUsage(5 * GIB);
     t.clearStorageCapacityCache(clientId);
     same("under capacity: upload link issued", (await upload()).status, 200);
     same("under capacity: status ok", (await status())?.state, "ok");
 
-    await setUsage(Math.ceil(GIB * 0.85));
+    await setUsage(Math.ceil(10 * GIB * 0.85));
     const nearly = await status();
-    same("85% of capacity: nearly full, with figures for the owner", [nearly?.state, nearly?.capacityBytes, nearly?.canManage], ["nearly_full", GIB, true]);
+    same("85% of capacity: nearly full, with figures for the owner", [nearly?.state, nearly?.capacityBytes, nearly?.canManage], ["nearly_full", 10 * GIB, true]);
     same("nearly full: uploads still work", (await upload()).status, 200);
 
     // Full, automatic top-up off (the default): uploads stop with a clear message.
-    await setUsage(GIB + 1);
+    await setUsage(10 * GIB + 1);
     const refused = await upload();
     same("full: upload refused with 409", refused.status, 409);
     same("full: STORAGE_FULL code", refused.data?.code, "STORAGE_FULL");
@@ -617,13 +620,13 @@ async function storageLimit({ user, clientId }) {
     check("top-up emailed", await waitFor(async () => (await events()).some((e) => e.kind === "topped_up" && e.emailed)));
     check("top-up email names the amount and monthly cost",
       (await mails()).some((mail) => /added 10 GB/.test(mail.subject) && /£1 a month/.test(mail.text)));
-    same("after top-up: capacity 11 GiB", (await status())?.capacityBytes, 11 * GIB);
+    same("after top-up: capacity 20 GiB", (await status())?.capacityBytes, 20 * GIB);
     same("next upload needs no further top-up", ((await upload()).status, buys.length), 3);
 
     // Far over capacity: one top-up buys enough 10 GB steps to make room.
-    await setUsage(35 * GIB);
+    await setUsage(45 * GIB);
     same("far over: upload allowed after top-up", (await upload()).status, 200);
-    same("far over: bought 30 GB in one go (35 GiB used, 11 GiB capacity)", buys.at(-1)?.gib, 30);
+    same("far over: bought 30 GB in one go (45 GiB used, 20 GiB capacity)", buys.at(-1)?.gib, 30);
     t.setTestStorageGib(customer, 0);
 
     // Switching top-up off again: uploads stop at the limit.
@@ -641,7 +644,7 @@ async function storageLimit({ user, clientId }) {
     // No live subscription (e.g. a trial): not limited, uploads allowed.
     t.setTestSubscription(customer, null);
     t.clearStorageCapacityCache(clientId);
-    await setUsage(50 * GIB);
+    await setUsage(80 * GIB);
     same("no subscription: not limited", (await status())?.state, "not_limited");
     same("no subscription: upload allowed", (await upload()).status, 200);
   } finally {

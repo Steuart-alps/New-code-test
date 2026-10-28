@@ -34,7 +34,8 @@ import {
   LayoutGrid,
   CalendarDays,
   QrCode,
-  FileSearch
+  FileSearch,
+  BarChart3
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -76,7 +77,7 @@ export function isNavGroupInitiallyOpen(
  * reports. Sections a role can't use are dropped, so Staff and Viewers start
  * at Compliance.
  */
-export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin }: { isConsultant: boolean; canAdmin: boolean; canManageUsers?: boolean }): NavGroup[] {
+export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin, isPlatformOperator = false }: { isConsultant: boolean; canAdmin: boolean; canManageUsers?: boolean; isPlatformOperator?: boolean }): NavGroup[] {
   const groups: NavGroup[] = [
     {
       id: "core",
@@ -212,6 +213,10 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
   }
   if (isConsultant) {
     group("admin").items.push({ href: "/clients", label: "Clients", icon: Building2 });
+  }
+  if (isPlatformOperator) {
+    // ALPS's subscriptions, cancellations and module use across every business.
+    group("admin").items.push({ href: "/business-dashboard", label: "Business dashboard", icon: BarChart3 });
   }
   if (canAdmin) {
     group("admin").items.push(

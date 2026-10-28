@@ -55,6 +55,7 @@ interface Issue {
   emailSentAt?: string | null;
   contractorVisitDate?: string | null;
   contractorCompletedAt?: string | null;
+  quote?: { id: number; status: string; pricePence: number; notes: string | null; submittedAt: string | null } | null;
   mediaUrls: string[];
   siteId?: number | null;
   siteName?: string | null;
@@ -182,8 +183,9 @@ function StatusTimeline({ issue }: { issue: Issue }) {
 function ContractorJobCard({ issue, canAssign, onAssign }: { issue: Issue; canAssign: boolean; onAssign: () => void }) {
   const day = (value: string) => format(new Date(value), "d MMM yyyy");
   const jobSent = issue.emailRequestStatus === "sent" && issue.emailRequestMode !== "quote";
+  const quoteSent = issue.emailRequestStatus === "sent" && issue.emailRequestMode === "quote";
   const waitingApproval = issue.emailRequestStatus === "pending" || issue.emailRequestStatus === "approved";
-  if (!jobSent && !waitingApproval && !canAssign) return null;
+  if (!jobSent && !quoteSent && !waitingApproval && !canAssign) return null;
 
   return (
     <div className="bg-card border rounded-2xl p-5 shadow-sm space-y-3" data-testid="card-contractor-job">
@@ -214,6 +216,18 @@ function ContractorJobCard({ issue, canAssign, onAssign }: { issue: Issue; canAs
               <CheckCircle2 className="w-3.5 h-3.5" /> Contractor marked it done on {day(issue.contractorCompletedAt)}
             </li>
           )}
+        </ul>
+      ) : quoteSent ? (
+        <ul className="text-sm space-y-1.5">
+          <li>
+            Quote asked of <span className="font-medium">{issue.contractorName ?? "a contractor"}</span>
+            {issue.emailSentAt && <span className="text-muted-foreground"> · emailed {day(issue.emailSentAt)}</span>}
+          </li>
+          <li className="text-muted-foreground">
+            {issue.quote?.pricePence != null
+              ? <>Quote received: <span className="font-medium text-foreground">£{(issue.quote.pricePence / 100).toFixed(2)}</span>. Accept or decline it on the FixTrack list.</>
+              : "Waiting for their price. Assign the job once you are happy with it."}
+          </li>
         </ul>
       ) : waitingApproval ? (
         <p className="text-sm text-muted-foreground">

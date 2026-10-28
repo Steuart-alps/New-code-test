@@ -15,7 +15,7 @@ import {
   storageUsageSnapshotIsStale,
 } from "../lib/storageUsageSnapshot";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
-import { ensureUploadCapacity, isStorageAutoTopUpOn, readStorageCapacity, storageLimitState, STORAGE_NEARLY_FULL_RATIO } from "../lib/storageLimit";
+import { ensureUploadCapacity, isStorageAutoTopUpOn, readStorageCapacity, storageLimitState } from "../lib/storageLimit";
 import { ObjectPermission } from "../lib/objectAcl";
 import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable } from "@workspace/db/schema";
@@ -33,7 +33,7 @@ import {
   renewingStorageGib,
   stillPaidReducedGib,
 } from "../lib/storageCapacity";
-import { storageWarningThresholdBytes } from "../lib/storageWarningEmails";
+import { storageWarningLevelBytes } from "../lib/storageWarningEmails";
 import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
@@ -193,18 +193,14 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
       req.log.warn({ err, clientId }, "Storage capacity unavailable; not showing the limit");
       return null;
     });
-    // The Settings level; the email goes at it or at 80% of the paid
-    // storage, whichever is lower (storageWarningEmails.ts).
-    const warningThresholdBytes = storageWarningThresholdBytes(thresholdSetting?.value);
-    const emailLevelBytes = capacityBytes === null
-      ? warningThresholdBytes
-      : Math.min(warningThresholdBytes, Math.floor(capacityBytes * STORAGE_NEARLY_FULL_RATIO));
+    // The level the warning email goes at (storageWarningEmails.ts).
+    const warningThresholdBytes = storageWarningLevelBytes(thresholdSetting?.value, capacityBytes);
 
     res.json(GetStorageUsageResponse.parse({
       usedBytes,
       objectCount,
       warningThresholdBytes,
-      warning: usedBytes >= emailLevelBytes,
+      warning: usedBytes >= warningThresholdBytes,
       monthlyDownloadBytes,
       monthlyDownloadTrackingAvailable: true,
       month,
