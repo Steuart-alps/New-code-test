@@ -561,7 +561,44 @@ export const GetBusinessDashboardResponse = zod.object({
   "totals": zod.object({
   "paying": zod.number(),
   "onTrial": zod.number()
-})
+}),
+  "ai": zod.object({
+  "months": zod.array(zod.object({
+  "addonPence": zod.number().describe('The AI add-on paid through Stripe'),
+  "topUpPence": zod.number().describe('Top-ups paid through Stripe'),
+  "invoicedTopUpPence": zod.number().describe('Top-ups a free business agreed to'),
+  "incomePence": zod.number(),
+  "costPence": zod.number().describe('What Claude charged'),
+  "marginPence": zod.number(),
+  "requests": zod.number()
+}).and(zod.object({
+  "month": zod.string().describe('YYYY-MM (UTC)')
+}))),
+  "businesses": zod.array(zod.object({
+  "addonPence": zod.number().describe('The AI add-on paid through Stripe'),
+  "topUpPence": zod.number().describe('Top-ups paid through Stripe'),
+  "invoicedTopUpPence": zod.number().describe('Top-ups a free business agreed to'),
+  "incomePence": zod.number(),
+  "costPence": zod.number().describe('What Claude charged'),
+  "marginPence": zod.number(),
+  "requests": zod.number()
+}).and(zod.object({
+  "clientId": zod.number().nullable(),
+  "businessName": zod.string(),
+  "free": zod.boolean().describe('A free business (no trial end); ALPS pays for its allowance')
+}))),
+  "totals": zod.object({
+  "addonPence": zod.number().describe('The AI add-on paid through Stripe'),
+  "topUpPence": zod.number().describe('Top-ups paid through Stripe'),
+  "invoicedTopUpPence": zod.number().describe('Top-ups a free business agreed to'),
+  "incomePence": zod.number(),
+  "costPence": zod.number().describe('What Claude charged'),
+  "marginPence": zod.number(),
+  "requests": zod.number()
+}),
+  "usdToGbp": zod.number(),
+  "addonIncomeAvailable": zod.boolean().describe('False when paid Stripe invoices could not be read')
+}).nullish().describe('AI income against what Claude cost, in pence before VAT; null when it could not be read')
 })
 
 

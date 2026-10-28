@@ -11,6 +11,7 @@ import { sql } from "drizzle-orm";
 import { escapeHtml, sendSystemEmail } from "../lib/email";
 import { checkStorageAddonPrice } from "../lib/storagePricing";
 import { getBillingSummary } from "../lib/billingAlerts";
+import { getAiFinance } from "../lib/aiFinance";
 
 const router = Router();
 
@@ -312,7 +313,14 @@ router.get("/admin/business-dashboard", requireAuth, requireConsultant, requireP
     return void res.status(400).json({ error: "Choose at most three years" });
   }
   try {
-    res.json(await getBillingSummary({ from, to }));
+    const [summary, ai] = await Promise.all([
+      getBillingSummary({ from, to }),
+      getAiFinance({ from, to }).catch((err) => {
+        logger.error({ err }, "AI income and cost could not be read for the business dashboard");
+        return null;
+      }),
+    ]);
+    res.json({ ...summary, ai });
   } catch (err) {
     logger.error({ err }, "Business dashboard could not be read");
     res.status(503).json({ error: "The business dashboard is unavailable" });

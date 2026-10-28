@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { BusinessDashboard, BusinessDashboardChange } from "@workspace/api-client-react";
+import type { BusinessDashboard, BusinessDashboardAi, BusinessDashboardAiAmounts, BusinessDashboardChange } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
 import { useAuth } from "@/context/auth-context";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
@@ -98,6 +98,93 @@ function ChangeList({ rows, empty }: { rows: BusinessDashboardChange[]; empty: s
         </li>
       ))}
     </ul>
+  );
+}
+
+const monthName = (month: string) =>
+  new Date(`${month}-15T12:00:00Z`).toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" });
+const marginShare = (row: BusinessDashboardAiAmounts) =>
+  row.incomePence > 0 ? `${Math.round((row.marginPence / row.incomePence) * 100)}% of income` : row.costPence > 0 ? "no AI income" : "nothing yet";
+const marginTone = (pence: number) => (pence > 0 ? "text-green-600" : pence < 0 ? "text-red-600" : "");
+
+function IncomeCostBars({ row, max }: { row: BusinessDashboardAiAmounts; max: number }) {
+  return (
+    <div className="space-y-1 min-w-[4rem]">
+      <div className="h-2.5 rounded bg-green-600" style={{ width: `${(row.incomePence / max) * 100}%`, minWidth: row.incomePence ? "4px" : 0 }} title={`Income ${money(row.incomePence)}`} />
+      <div className="h-2.5 rounded bg-red-600" style={{ width: `${(row.costPence / max) * 100}%`, minWidth: row.costPence ? "4px" : 0 }} title={`Cost ${money(row.costPence)}`} />
+    </div>
+  );
+}
+
+function AiFinanceSection({ ai }: { ai: BusinessDashboardAi }) {
+  const t = ai.totals;
+  const monthMax = Math.max(1, ...ai.months.map(m => Math.max(m.incomePence, m.costPence)));
+  const topUps = t.topUpPence + t.invoicedTopUpPence;
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-bold text-lg">AI income and cost</h2>
+        <p className="text-sm text-muted-foreground">
+          What businesses paid for AI (the £15 add-on and £6 top-ups) against what Claude actually charged for their requests, before VAT.
+          Free businesses pay nothing for their allowance, so they show the cost only. Claude bills in dollars; the cost uses $1 = £{ai.usdToGbp.toFixed(2)}.
+        </p>
+      </div>
+      {!ai.addonIncomeAvailable && (
+        <p className="text-sm text-amber-700">Stripe payments could not be read, so the add-on income is missing. Top-ups and cost are complete.</p>
+      )}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="AI income" value={money(t.incomePence)} note={`${money(t.addonPence)} add-on, ${money(topUps)} top-ups`} tone={t.incomePence > 0 ? "good" : "neutral"} />
+        <StatCard label="Claude cost" value={money(t.costPence)} note={`${t.requests} request${t.requests === 1 ? "" : "s"} to Claude`} tone={t.costPence > 0 ? "bad" : "neutral"} />
+        <StatCard label="AI margin" value={signedMoney(t.marginPence)} note={marginShare(t)} tone={t.marginPence > 0 ? "good" : t.marginPence < 0 ? "bad" : "neutral"} />
+        <StatCard
+          label="Businesses using AI"
+          value={String(ai.businesses.filter(b => b.requests > 0).length)}
+          note={`${ai.businesses.filter(b => b.addonPence > 0).length} paid for the add-on in these dates`}
+        />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Section title="By month" hint="Green is income, red is Claude cost. A month cut by your dates shows only the days chosen.">
+          <div className="space-y-2">
+            {ai.months.map(m => (
+              <div key={m.month} className="grid grid-cols-[5rem_1fr_auto] items-center gap-3 text-sm">
+                <span className="text-muted-foreground">{monthName(m.month)}</span>
+                <IncomeCostBars row={m} max={monthMax} />
+                <span className="tabular-nums whitespace-nowrap text-right">
+                  {money(m.incomePence)} − {money(m.costPence)} = <span className={`font-bold ${marginTone(m.marginPence)}`}>{signedMoney(m.marginPence)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </Section>
+        <Section title={`By business (${ai.businesses.length})`} hint="Highest Claude cost first. Top-ups for a free business are invoiced by ALPS.">
+          {ai.businesses.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No AI income or use in these dates.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {ai.businesses.map(b => (
+                <li key={`${b.clientId ?? "x"}-${b.businessName}`} className="py-2 text-sm">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="font-semibold truncate" title={b.businessName}>
+                      {b.businessName}
+                      {b.free && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">Free</span>}
+                    </span>
+                    <span className={`font-bold tabular-nums whitespace-nowrap ${marginTone(b.marginPence)}`}>{signedMoney(b.marginPence)}</span>
+                  </div>
+                  <p className="text-muted-foreground">
+                    {[
+                      b.addonPence ? `add-on ${money(b.addonPence)}` : null,
+                      b.topUpPence ? `top-ups ${money(b.topUpPence)}` : null,
+                      b.invoicedTopUpPence ? `top-ups invoiced by ALPS ${money(b.invoicedTopUpPence)}` : null,
+                      `Claude ${money(b.costPence)} for ${b.requests} request${b.requests === 1 ? "" : "s"}`,
+                    ].filter(Boolean).join(" · ")}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      </div>
+    </div>
   );
 }
 
@@ -249,6 +336,12 @@ export default function BusinessDashboardPage() {
                 )}
               </Section>
             </div>
+
+            {data.ai ? (
+              <AiFinanceSection ai={data.ai} />
+            ) : (
+              <p className="text-sm text-muted-foreground">AI income and cost could not be read just now.</p>
+            )}
           </>
         )}
       </div>
