@@ -6,7 +6,7 @@ import { generateSecret, generateToken, verifyToken, keyUri } from "../lib/totp"
 import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
-import { requireAuth, isPlatformOperator } from "../middleware/requireAuth";
+import { requireAuth, isPlatformOperator, getClientId } from "../middleware/requireAuth";
 import {
   configureProductionLoginRateLimitStore,
   forgotPasswordEmailRateLimit,
@@ -673,12 +673,16 @@ router.get("/auth/me", async (req, res) => {
     client = rows[0] ?? null;
   }
 
+  // Modules and billing lock follow the business being viewed: a consultant
+  // passes ?clientId= for the business they have open (checked by
+  // enforceClientAccess), otherwise it is their own business.
+  const accessClientId = getClientId(req);
   let billingLocked = false;
   let services: "all" | string[] = "all";
-  if (user.clientId != null) {
+  if (accessClientId != null) {
     try {
-      billingLocked = await isClientBillingLocked(user.clientId);
-      services = await getEntitledServices(user.clientId);
+      billingLocked = await isClientBillingLocked(accessClientId);
+      services = await getEntitledServices(accessClientId);
     } catch {
       // Fail open — never block /me on a billing check.
     }

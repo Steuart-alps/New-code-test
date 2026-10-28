@@ -277,6 +277,9 @@ jobs:
       - name: AI features add-on and allowance (production schema base)
         run: pnpm --filter @workspace/api-server run test:ai-addon
 
+      - name: Modules of the business a consultant has open (production schema base)
+        run: pnpm --filter @workspace/api-server run test:auth-me-active-client
+
       - name: Checklist results and FixTrack job tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:checklist-results-fixtrack
 
