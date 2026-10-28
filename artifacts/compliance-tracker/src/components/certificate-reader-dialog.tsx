@@ -25,6 +25,7 @@ const MAX_READ_BYTES = 15 * 1024 * 1024;
 /** Codes that are remedial work by default; C3s never are (Steuart, 2026-10-27). */
 const WORK_CODES = new Set<string>(["C1", "C2", "FI", "ID", "AR"]);
 const NEW_CHECK = "new";
+const NEW_CONTRACTOR = "new";
 
 const selectClass = "w-full h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
@@ -77,6 +78,7 @@ interface Draft {
   defects: DefectDraft[];
   askQuote: boolean;
   quoteContractorId: string;
+  newContractor: { company: string; name: string; email: string };
   checked: boolean;
 }
 
@@ -95,6 +97,7 @@ function draftFrom(reading: CertificateReading): Draft {
     })),
     askQuote: true,
     quoteContractorId: "",
+    newContractor: { company: reading.contractorName ?? "", name: "", email: "" },
     checked: false,
   };
 }
@@ -150,6 +153,9 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
   const quotable = contractors.filter((c) => !!c.email);
   const workCount = draft?.defects.filter((d) => d.needsWork && d.description.trim()).length ?? 0;
   const canQuote = !!status.data?.fixTrack && workCount > 0;
+  const addingContractor = draft?.quoteContractorId === NEW_CONTRACTOR;
+  const updateContractor = (patch: Partial<Draft["newContractor"]>) =>
+    setDraft((d) => (d ? { ...d, newContractor: { ...d.newContractor, ...patch } } : d));
 
   async function read(selected: File) {
     reset();
@@ -172,6 +178,8 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
         const match = quotable.find((c) => [c.company, c.name].some((n) => n && (n.toLowerCase().includes(named) || named.includes(n.toLowerCase()))));
         if (match) next.quoteContractorId = String(match.id);
       }
+      // No one to pick yet: start on adding the contractor named on the certificate.
+      if (!next.quoteContractorId && !quotable.length) next.quoteContractorId = NEW_CONTRACTOR;
       setReading(result);
       setDraft(next);
     } catch (err) {
@@ -195,6 +203,10 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
     if (!draft.name.trim()) return setError("Give the certificate a name");
     if (draft.defects.some((d) => !d.description.trim())) return setError("Describe each defect, or remove the empty row");
     if (canQuote && draft.askQuote && !draft.quoteContractorId) return setError("Choose who to ask for a quote, or untick \"Ask for a quote\"");
+    if (canQuote && draft.askQuote && addingContractor) {
+      if (!draft.newContractor.company.trim() && !draft.newContractor.name.trim()) return setError("Give the contractor's company or contact name, or untick \"Ask for a quote\"");
+      if (!/^\S+@\S+\.\S+$/.test(draft.newContractor.email.trim())) return setError("Give the contractor's email address so the quote request can be sent");
+    }
     if (!draft.checked) return setError("Tick to confirm you have checked the details against the certificate");
     setError(null);
     setBusy("saving");
@@ -206,7 +218,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
           title: draft.newTitle.trim(),
           siteId: draft.newSiteId ? Number(draft.newSiteId) : null,
           frequencyMonths: Number.isInteger(frequency) && frequency >= 1 && frequency <= 120 ? frequency : null,
-          contractorId: draft.quoteContractorId ? Number(draft.quoteContractorId) : null,
+          contractorId: draft.quoteContractorId && !addingContractor ? Number(draft.quoteContractorId) : null,
         });
         targetId = created.id;
       }
@@ -231,7 +243,10 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
       let quoteNote = "";
       if (jobId && canQuote && draft.askQuote && draft.quoteContractorId) {
         try {
-          const sent = await assignFixTrackContractor(jobId, { contractorId: Number(draft.quoteContractorId), mode: "quote" });
+          const { company, name, email } = draft.newContractor;
+          const sent = await assignFixTrackContractor(jobId, addingContractor
+            ? { newContractor: { name: name.trim() || company.trim(), company: name.trim() ? company.trim() || null : null, email: email.trim() }, mode: "quote" }
+            : { contractorId: Number(draft.quoteContractorId), mode: "quote" });
           quoteNote = ` ${sent.message}.`;
         } catch (err) {
           quoteNote = ` The quote request was not sent (${err instanceof Error ? err.message : "please try again"}); ask for it from the job in FixTrack.`;
@@ -441,7 +456,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
                       Ask for a quote
                     </label>
                     {draft.askQuote && (
-                      quotable.length ? (
+                      <>
                         <select aria-label="Contractor to ask for a quote" className={selectClass} value={draft.quoteContractorId}
                           onChange={(e) => update({ quoteContractorId: e.target.value })}>
                           <option value="" disabled>Choose a contractor</option>
@@ -450,10 +465,29 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null }: {
                               {c.company ? `${c.company} (${c.name})` : c.name}{c.id === chosenItem?.contractorId ? " · this check's contractor" : ""}
                             </option>
                           ))}
+                          <option value={NEW_CONTRACTOR}>+ Add a new contractor</option>
                         </select>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">Add a contractor with an email address on the Contractors page, then ask for a quote from the job in FixTrack.</p>
-                      )
+                        {addingContractor && (
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <div className="space-y-1">
+                              <Label htmlFor="reader-contractor-company" className="text-xs">Company</Label>
+                              <Input id="reader-contractor-company" value={draft.newContractor.company} maxLength={200}
+                                onChange={(e) => updateContractor({ company: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="reader-contractor-name" className="text-xs">Contact name (optional)</Label>
+                              <Input id="reader-contractor-name" value={draft.newContractor.name} maxLength={200}
+                                onChange={(e) => updateContractor({ name: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="reader-contractor-email" className="text-xs">Email</Label>
+                              <Input id="reader-contractor-email" type="email" value={draft.newContractor.email} maxLength={320}
+                                onChange={(e) => updateContractor({ email: e.target.value })} />
+                            </div>
+                            <p className="text-xs text-muted-foreground sm:col-span-3">They are added to your Contractors list when the quote request is sent.</p>
+                          </div>
+                        )}
+                      </>
                     )}
                     <p className="text-xs text-muted-foreground">The email lists every remedial item and has a link for the contractor to send their price. Nothing is assigned until you accept a quote.</p>
                   </>
