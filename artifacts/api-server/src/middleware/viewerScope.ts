@@ -31,6 +31,7 @@ const TOKEN_LINK_PREFIXES = [
   "/fix-track/action/",
   "/fix-track/quotes/public/",
   "/notifications/public/schedule/",
+  "/certificate-upload/",
   "/sign-off/",
 ];
 

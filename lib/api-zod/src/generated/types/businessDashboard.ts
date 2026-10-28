@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { BusinessDashboardAi } from './businessDashboardAi';
 import type { BusinessDashboardChange } from './businessDashboardChange';
 import type { BusinessDashboardModulesItem } from './businessDashboardModulesItem';
 import type { BusinessDashboardReasonsItem } from './businessDashboardReasonsItem';
@@ -28,4 +29,6 @@ export interface BusinessDashboard {
   modules: BusinessDashboardModulesItem[];
   weeks: BusinessDashboardWeeksItem[];
   totals: BusinessDashboardTotals;
+  /** AI income against what Claude cost, in pence before VAT; null when it could not be read */
+  ai?: BusinessDashboardAi | null;
 }

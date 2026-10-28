@@ -94,7 +94,7 @@ export function isDamagedTokenPayload(err: unknown): err is TokenPayloadError {
   return err instanceof TokenPayloadError && err.reason !== "unknown_key";
 }
 
-export type QueuedTokenPayload = Partial<Record<"booked" | "completed" | "quote" | "portal", string>>;
+export type QueuedTokenPayload = Partial<Record<"booked" | "completed" | "quote" | "portal" | "certUpload", string>>;
 
 const BEARER_TOKEN = /^[A-Za-z0-9-]{32,128}$/;
 const PORTAL_URL = /^https?:\/\/[^\s"'<>$`\\]{1,2000}\/contractor-portal\/[A-Za-z0-9-]{32,128}$/;
@@ -106,6 +106,8 @@ const PAYLOAD_FIELDS: Record<keyof QueuedTokenPayload, RegExp> = {
   completed: BEARER_TOKEN,
   quote: BEARER_TOKEN,
   portal: PORTAL_VALUE,
+  // A contractor's "Upload certificate" link (lib/certificateInbox.ts).
+  certUpload: BEARER_TOKEN,
 };
 
 /** Accept only the credential fields the queue uses, each in its exact form. */

@@ -98,3 +98,4 @@
 - [Training matrix identity](training-matrix-identity.md) — certificates link to roster by staff_roster_id; legacy name-only rows match only one unambiguous in-scope roster member, else reported as unmatched.
 - [Browser CSV formula safety](csv-formula-safety.md) — browser-built CSVs use compliance-tracker src/lib/csv.ts csvCell; it also neutralises leading tab/CR, which the api-server csvCell copies do not yet.
 - [AI kept to ComplyTrack work](ai-scope.md) — every Claude call does one fixed job: aiScopeRules + quoted labels + structured output with wrong_file; future chatbot must refuse off-topic questions.
+- [AI model and effort per feature](ai-models.md) — aiModels.ts: lists on Haiku (low), PAT and certificates on Sonnet (low), reports on Opus (medium); Haiku has no server-side fallback, lists retry once on Sonnet.

@@ -47,6 +47,41 @@ export type BusinessDashboardTotals = {
   onTrial: number;
 };
 
+export interface BusinessDashboardAiAmounts {
+  /** The AI add-on paid through Stripe */
+  addonPence: number;
+  /** Top-ups paid through Stripe */
+  topUpPence: number;
+  /** Top-ups a free business agreed to */
+  invoicedTopUpPence: number;
+  incomePence: number;
+  /** What Claude charged */
+  costPence: number;
+  marginPence: number;
+  requests: number;
+}
+
+export type BusinessDashboardAiMonthsItem = BusinessDashboardAiAmounts & {
+  /** YYYY-MM (UTC) */
+  month: string;
+};
+
+export type BusinessDashboardAiBusinessesItem = BusinessDashboardAiAmounts & ({
+  clientId: number | null;
+  businessName: string;
+  /** A free business (no trial end); ALPS pays for its allowance */
+  free: boolean;
+});
+
+export interface BusinessDashboardAi {
+  months: BusinessDashboardAiMonthsItem[];
+  businesses: BusinessDashboardAiBusinessesItem[];
+  totals: BusinessDashboardAiAmounts;
+  usdToGbp: number;
+  /** False when paid Stripe invoices could not be read */
+  addonIncomeAvailable: boolean;
+}
+
 export interface BusinessDashboard {
   from: string;
   to: string;
@@ -63,6 +98,8 @@ export interface BusinessDashboard {
   modules: BusinessDashboardModulesItem[];
   weeks: BusinessDashboardWeeksItem[];
   totals: BusinessDashboardTotals;
+  /** AI income against what Claude cost, in pence before VAT; null when it could not be read */
+  ai?: BusinessDashboardAi | null;
 }
 
 /**
@@ -1426,6 +1463,63 @@ export interface CertificateReading {
   defects: CertificateReadingDefect[];
   /** Things that could not be read with confidence. */
   unclear: string[];
+}
+
+export type CertificateInboxItemSource = typeof CertificateInboxItemSource[keyof typeof CertificateInboxItemSource];
+
+
+export const CertificateInboxItemSource = {
+  email: 'email',
+  upload: 'upload',
+} as const;
+
+/**
+ * reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached.
+ */
+export type CertificateInboxItemStatus = typeof CertificateInboxItemStatus[keyof typeof CertificateInboxItemStatus];
+
+
+export const CertificateInboxItemStatus = {
+  reading: 'reading',
+  ready: 'ready',
+  held: 'held',
+  message: 'message',
+} as const;
+
+export interface CertificateInboxItem {
+  id: number;
+  source: CertificateInboxItemSource;
+  /** reading = the AI is reading it; ready = waiting to be checked; held = from a sender the business does not know (not read until accepted); message = an email with no certificate attached. */
+  status: CertificateInboxItemStatus;
+  senderEmail: string | null;
+  senderName: string | null;
+  contractorId: number | null;
+  contractorName: string | null;
+  /** The check the link was for, or the one the AI matched */
+  itemId: number | null;
+  itemTitle: string | null;
+  subject: string | null;
+  messageText: string | null;
+  fileName: string | null;
+  contentType: string | null;
+  fileUrl: string | null;
+  byteSize: number | null;
+  reading: CertificateReading | null;
+  /** Why it was held, why the AI could not read it, or what was wrong with the attachment. */
+  note: string | null;
+  receivedAt: string;
+}
+
+export interface CertificateInbox {
+  /** Where to email certificates; null until emailed certificates are switched on. */
+  address: string | null;
+  items: CertificateInboxItem[];
+}
+
+export interface FileCertificateInboxItemRequest {
+  /** The compliance check to save it to */
+  itemId: number;
+  certificate: CreateItemCertificateRequest;
 }
 
 /**

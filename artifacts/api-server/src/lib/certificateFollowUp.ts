@@ -31,6 +31,10 @@ import { sql } from "drizzle-orm";
 import { loadResponsibilityContext, responsibleForCertificate, type ResponsibilityContext } from "./dueItems";
 import { escapeHtml, parseEmailList } from "./email";
 import { dispatchStoredContractorEmail } from "./fixTrackNotifications";
+import { encryptTokenPayload, newBearerToken } from "./bearerTokens";
+import {
+  CERTIFICATE_UPLOAD_PLACEHOLDER, certificateReplyToFor, certificateUploadBlock, certificateUploadUrl, issueCertificateUploadLink,
+} from "./certificateInbox";
 import { logger } from "./logger";
 
 export const FOLLOW_UP_AFTER_DAYS = 14;
@@ -130,12 +134,22 @@ export async function getVisitsAwaitingCertificate(
   }));
 }
 
-function contractorFollowUpEmail(visit: VisitAwaitingCertificate, companyName: string, replyTo: string | null) {
+function contractorFollowUpEmail(
+  visit: VisitAwaitingCertificate, companyName: string, sendTo: string | null, certificateAddress: string | null,
+) {
   const when = longDate(visit.visitDay);
   const where = visit.siteName ? ` at ${visit.siteName}` : "";
-  const sendTo = replyTo
-    ? `Please email it to <a href="mailto:${escapeHtml(replyTo)}">${escapeHtml(replyTo)}</a>.`
-    : "Please reply with it attached.";
+  // The upload link and (when the business has one) its certificate address;
+  // otherwise the person responsible, as before.
+  const request = certificateUploadBlock({ uploadUrl: certificateUploadUrl(), address: certificateAddress, heading: "Send us the certificate" });
+  const sendToLine = certificateAddress
+    ? "You can also reply to this email with it attached."
+    : sendTo
+    ? `Or email it to <a href="mailto:${escapeHtml(sendTo)}">${escapeHtml(sendTo)}</a>.`
+    : "Or reply with it attached.";
+  const sendToText = certificateAddress
+    ? "You can also reply to this email with it attached."
+    : sendTo ? `Or email it to ${sendTo}.` : "Or reply with it attached.";
   const html = `
     <h2 style="color:#1e293b;margin:0 0 16px;">Certificate needed</h2>
     <p>Dear ${escapeHtml(visit.contractorName)},</p>
@@ -143,7 +157,9 @@ function contractorFollowUpEmail(visit: VisitAwaitingCertificate, companyName: s
     <div style="background:#f1f5f9;border-left:4px solid #3b82f6;padding:16px;margin:16px 0;">
       <strong style="color:#1e293b;">${escapeHtml(visit.title)}</strong>
     </div>
-    <p>We haven't received the certificate or report for this visit yet. ${sendTo}</p>
+    <p>We haven't received the certificate or report for this visit yet.</p>
+    ${request.html}
+    <p>${sendToLine}</p>
     <p>If it is waiting for your invoice to be paid, please let us know so we can sort that out.</p>
     <p>If the visit didn't go ahead, please let us know so we can rearrange it.</p>
     <p>Best regards,<br><strong>${escapeHtml(companyName)}</strong></p>
@@ -152,7 +168,8 @@ function contractorFollowUpEmail(visit: VisitAwaitingCertificate, companyName: s
     "Certificate needed", "",
     `Dear ${visit.contractorName},`, "",
     `Thank you for your visit${where} on ${when} for: ${visit.title}`, "",
-    `We haven't received the certificate or report for this visit yet. ${replyTo ? `Please email it to ${replyTo}.` : "Please reply with it attached."}`, "",
+    "We haven't received the certificate or report for this visit yet.", "",
+    request.text, sendToText, "",
     "If it is waiting for your invoice to be paid, please let us know so we can sort that out.", "",
     "If the visit didn't go ahead, please let us know so we can rearrange it.", "",
     "Best regards,", companyName,
@@ -205,6 +222,8 @@ async function followUpBusiness(
 ): Promise<void> {
   const [settings, ctx] = await Promise.all([clientSettings(clientId), loadResponsibilityContext(clientId)]);
   const companyName = settings["companyName"] ?? "ComplyTrack";
+  // Replies to a chase go to the business's certificate address, when it has one.
+  const certificateAddress = await certificateReplyToFor(clientId);
   // One follow-up per chase (the idempotency key ends in the visit day and
   // chase number), recorded as it is sent. A check holds one active queue
   // row at a time, so while a reminder for the same check is waiting for
@@ -214,7 +233,13 @@ async function followUpBusiness(
     const chase = chasesOwed(visit.visitDay, today);
     const key = `certificate-followup-${clientId}-${visit.itemId}-${visit.visitDay}-${chase}`;
     const addresses = certificateAddresses(ctx, visit, settings["maintenanceEmail"]);
-    const email = contractorFollowUpEmail(visit, companyName, addresses[0] ?? null);
+    const email = contractorFollowUpEmail(visit, companyName, addresses[0] ?? null, certificateAddress);
+    const uploadToken = newBearerToken();
+    const sendable = {
+      subject: email.subject,
+      html: email.html.split(CERTIFICATE_UPLOAD_PLACEHOLDER).join(uploadToken),
+      text: email.text.split(CERTIFICATE_UPLOAD_PLACEHOLDER).join(uploadToken),
+    };
     const cc = addresses.filter((address) => address !== visit.contractorEmail!.toLowerCase());
     const claimed = await db.transaction(async (tx) => {
       // An earlier follow-up still waiting for approval is replaced by this one.
@@ -223,23 +248,28 @@ async function followUpBusiness(
         WHERE client_id = ${clientId} AND entity_type = 'compliance' AND entity_id = ${visit.itemId}
           AND email_type = ${CERTIFICATE_FOLLOW_UP_EMAIL_TYPE} AND status = 'pending' AND idempotency_key <> ${key}
       `);
-      return rowsOf<{ id: number }>(await tx.execute(sql`
+      const queued = rowsOf<{ id: number }>(await tx.execute(sql`
         INSERT INTO contractor_email_queue
           (client_id, entity_type, entity_id, department_id, contractor_id, email_type, mode, status, approved_at,
-           to_email, subject, body_html, body_text, cc_json, email_preview_json, idempotency_key)
+           to_email, subject, body_html, body_text, cc_json, email_preview_json, encrypted_token_payload, idempotency_key)
         VALUES (${clientId}, 'compliance', ${visit.itemId}, ${visit.siteDepartmentId ?? visit.departmentId},
           ${visit.contractorId}, ${CERTIFICATE_FOLLOW_UP_EMAIL_TYPE}, 'assign', 'sending', now(), ${visit.contractorEmail},
           ${email.subject}, ${email.html}, ${email.text}, ${JSON.stringify(cc)}::jsonb,
-          ${JSON.stringify({ subject: email.subject, html: email.html, text: email.text })}::jsonb, ${key})
+          ${JSON.stringify({ subject: email.subject, html: email.html, text: email.text })}::jsonb,
+          ${encryptTokenPayload({ certUpload: uploadToken })}, ${key})
         ON CONFLICT DO NOTHING
         RETURNING id
       `))[0];
+      if (queued) {
+        await issueCertificateUploadLink(tx, { clientId, itemId: visit.itemId, contractorId: visit.contractorId }, uploadToken);
+      }
+      return queued;
     });
     if (!claimed) continue;
     try {
       await send({
-        to: visit.contractorEmail, subject: email.subject, html: email.html, text: email.text,
-        cc: cc.length ? cc : undefined, clientId, idempotencyKey: key,
+        to: visit.contractorEmail, subject: sendable.subject, html: sendable.html, text: sendable.text,
+        cc: cc.length ? cc : undefined, clientId, idempotencyKey: key, replyTo: certificateAddress ?? undefined,
       });
       await db.execute(sql`UPDATE contractor_email_queue SET status = 'sent', sent_at = now(), updated_at = now()
         WHERE id = ${claimed.id} AND status = 'sending'`);

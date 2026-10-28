@@ -13,6 +13,9 @@ import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./mid
 import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
 import { WebhookHandlers } from "./lib/webhookHandlers";
+import {
+  certificateInboxDomain, inboundWebhookSecret, processInboundEmail, recordInboundEmail, verifyInboundWebhook,
+} from "./lib/certificateInbox";
 import { Sentry, isErrorReportingEnabled } from "./lib/sentry";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 import { csrfProtection } from "./middleware/csrf";
@@ -228,11 +231,52 @@ app.post(
   }
 );
 
+// Emails received for certificate addresses (lib/certificateInbox.ts). Resend
+// signs each delivery; the email is recorded and answered at once, and its
+// attachments are fetched afterwards. Off (404) until the inbox domain and
+// webhook secret are set.
+app.post(
+  "/api/inbound/certificate-email",
+  express.raw({ type: "*/*", limit: "1mb" }),
+  async (req, res) => {
+    const secret = inboundWebhookSecret();
+    if (!secret || !certificateInboxDomain()) return void res.status(404).json({ error: "Not found" });
+    const payload = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+    const header = (name: string) => {
+      const value = req.headers[name];
+      return Array.isArray(value) ? value[0] : value;
+    };
+    const signed = verifyInboundWebhook(payload, {
+      id: header("svix-id"), timestamp: header("svix-timestamp"), signature: header("svix-signature"),
+    }, secret);
+    if (!signed) return void res.status(401).json({ error: "Invalid signature" });
+    let event: unknown;
+    try {
+      event = JSON.parse(payload);
+    } catch {
+      return void res.status(400).json({ error: "Invalid JSON" });
+    }
+    let emailRowId: number | null;
+    try {
+      emailRowId = await recordInboundEmail(event as Parameters<typeof recordInboundEmail>[0]);
+    } catch (err) {
+      logger.error({ err }, "Received certificate email could not be recorded");
+      return void res.status(500).json({ error: "Could not record the email" });
+    }
+    res.status(200).json({ received: true });
+    if (emailRowId !== null) {
+      processInboundEmail(emailRowId).catch((err) => logger.error({ err, emailRowId }, "Received certificate email failed"));
+    }
+  },
+);
+
 // Register CSV imports send up to 1,000 rows, and a PAT register photo or PDF
 // is sent as base64 (8 MB file at most); every other route keeps the default limit.
 app.use("/api/imports/pat-appliances/read", express.json({ limit: "12mb" }));
 // A certificate read by ComplyTrack's AI arrives as base64 (15 MB at most before encoding).
 app.use("/api/certificates/read", express.json({ limit: "21mb" }));
+// A contractor's certificate upload arrives as base64 (10 MB at most before encoding).
+app.use("/api/certificate-upload", express.json({ limit: "14mb" }));
 app.use("/api/imports", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

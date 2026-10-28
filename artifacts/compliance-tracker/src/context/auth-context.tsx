@@ -104,6 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [activeClientId, setActiveClientIdState] = useState<number | null>(null);
   const activeClientIdRef = useRef<number | null>(null);
+  // The business `services` and `billingLocked` were loaded for. A consultant
+  // can open another business, which has its own modules and billing.
+  const accessClientIdRef = useRef<number | null>(null);
   const userRef = useRef<AuthUser | null>(null);
   userRef.current = user;
   const queryClient = useQueryClient();
@@ -132,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setClient(null);
     setServices(null);
+    accessClientIdRef.current = null;
     activeClientIdRef.current = null;
     setActiveClientIdState(null);
     writeStoredActiveClient(null, null);
@@ -260,17 +264,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /** /auth/me, asking for the modules of the business that is open. */
+  function meUrl(clientId: number | null): string {
+    return clientId === null ? "/auth/me" : `/auth/me?clientId=${clientId}`;
+  }
+
+  /**
+   * Reloads the modules and billing lock for the business now open, so a
+   * consultant who opens a free or differently-paid business sees its
+   * modules rather than their own business's.
+   */
+  async function refreshAccess(clientId: number) {
+    try {
+      const res = await apiFetch(meUrl(clientId));
+      if (!res.ok || activeClientIdRef.current !== clientId) return;
+      const data = await res.json();
+      if (activeClientIdRef.current !== clientId) return;
+      accessClientIdRef.current = clientId;
+      setServices(data.services ?? null);
+      setBillingLocked(Boolean(data.billingLocked));
+    } catch {
+      // Keep what is showing; the next refresh tries again.
+    }
+  }
+
+  useEffect(() => {
+    if (!user || activeClientId === null || activeClientId === accessClientIdRef.current) return;
+    void refreshAccess(activeClientId);
+  }, [user?.id, activeClientId]);
+
   async function refresh() {
     try {
-      const res = await apiFetch("/auth/me");
+      let requested = activeClientIdRef.current;
+      let res = await apiFetch(meUrl(requested));
+      if (res.status === 403 && requested !== null) {
+        // That business can no longer be opened: go back to the home one.
+        setActiveClientId(null);
+        requested = null;
+        res = await apiFetch(meUrl(null));
+      }
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
         setClient(data.client);
-        setServices(data.services ?? null);
+        // Skip the modules if another business was opened meanwhile; its own
+        // load (refreshAccess) sets them.
+        const servedFor = requested ?? data.client?.id ?? null;
+        if (activeClientIdRef.current === null || activeClientIdRef.current === servedFor) {
+          accessClientIdRef.current = servedFor;
+          setServices(data.services ?? null);
+          setBillingLocked(Boolean(data.billingLocked));
+        }
         setNeedsTwoFactorSetup(Boolean(data.requires2faSetup));
         setTwoFactorRequired(data.twoFactorRequired !== false);
-        setBillingLocked(Boolean(data.billingLocked));
         userRef.current = data.user;
         if (activeClientIdRef.current === null) {
           const restored = data.user?.role === "consultant"
@@ -331,6 +377,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
     setClient(data.client);
     setServices(data.services ?? null);
+    accessClientIdRef.current = data.client?.id ?? null;
     setBillingLocked(Boolean(data.billingLocked));
     setActiveClientId(data.client?.id ?? null);
     setNeedsTwoFactorSetup(false);

@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { usageFromMessage, type AiCallUsage } from "./aiPricing";
+import { aiEffortFor, aiModelFor, serverSideFallbackParams } from "./aiModels";
 import { aiScopeRules, promptLabel, WRONG_FILE_PROPERTY } from "./aiScope";
 import { addMonthsUtc } from "./complianceCompletion";
 import { fileContentBlock, ReportReadingError, type UnreadableFileWording } from "./reportReading";
@@ -18,14 +19,14 @@ import { fileContentBlock, ReportReadingError, type UnreadableFileWording } from
  * (and ID / AR on gas) become remedial work; C3s are recorded but are not.
  */
 
-export const CERTIFICATE_READING_DEFAULT_MODEL = "claude-sonnet-5-5";
 /** Largest file sent to Claude. Photos are shrunk in the browser first. */
 export const CERTIFICATE_READING_MAX_BYTES = 15 * 1024 * 1024;
 /** Most checks described to Claude; a business rarely has more. */
 const MAX_CHECKS = 400;
 
+/** Claude Sonnet 5.5 at low effort by default (lib/aiModels.ts). */
 export function certificateReadingModel(): string {
-  return process.env.CERTIFICATE_READING_MODEL?.trim() || CERTIFICATE_READING_DEFAULT_MODEL;
+  return aiModelFor("certificate_reading");
 }
 
 export const CERTIFICATE_FILE_WORDING: UnreadableFileWording = {
@@ -228,10 +229,9 @@ export async function readCertificate(input: CertificateReadingInput, beforeSend
   const message = await client.beta.messages.stream({
     model,
     max_tokens: 32000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...serverSideFallbackParams(model),
     system: SYSTEM_PROMPT,
-    output_config: { effort: "medium", format: { type: "json_schema", schema: outputSchema(checkIds) } },
+    output_config: { effort: aiEffortFor("certificate_reading"), format: { type: "json_schema", schema: outputSchema(checkIds) } },
     messages: [{
       role: "user",
       content: [content, { type: "text", text: `${context}\n\nRead this certificate.` }],

@@ -3,8 +3,9 @@ import { z } from "zod";
 import { PAT_APPLIANCE_TYPES } from "@workspace/db/schema";
 import { CSV_IMPORT_COLUMNS, CSV_IMPORT_MAX_ROWS } from "./csvImport";
 import { usageFromMessage, type AiCallUsage } from "./aiPricing";
+import { aiEffortFor, aiModelFor, serverSideFallbackParams } from "./aiModels";
 import { aiScopeRules, promptLabel, WRONG_FILE_PROPERTY } from "./aiScope";
-import { fileContentBlock, ReportReadingError, reportReadingModel, type UnreadableFileWording } from "./reportReading";
+import { fileContentBlock, ReportReadingError, type UnreadableFileWording } from "./reportReading";
 
 /**
  * Reads a business's existing list of electrical appliances (a photo of a
@@ -130,14 +131,13 @@ export async function readApplianceList(input: RegisterReadingInput, beforeSendi
   ].join("\n");
 
   const client = new Anthropic();
-  const model = reportReadingModel();
+  const model = aiModelFor("register_reading");
   const message = await client.beta.messages.stream({
     model,
     max_tokens: 64000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...serverSideFallbackParams(model),
     system: SYSTEM_PROMPT,
-    output_config: { effort: "medium", format: { type: "json_schema", schema: outputSchema(siteIds) } },
+    output_config: { effort: aiEffortFor("register_reading"), format: { type: "json_schema", schema: outputSchema(siteIds) } },
     messages: [{
       role: "user",
       content: [content, { type: "text", text: `${context}\n\nList the appliances in this file.` }],

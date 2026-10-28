@@ -78,6 +78,15 @@ if [ -n "${FRESH_SCHEMA_UPGRADE_FIXTURE:-}" ]; then
   suite_browser+=(FRESH_SCHEMA_UPGRADE_FIXTURE="$FRESH_SCHEMA_UPGRADE_FIXTURE")
   schema_base="older populated schema ($FRESH_SCHEMA_UPGRADE_FIXTURE), then runtime migrations"
 fi
+# FRESH_SCHEMA_CERTIFICATE_INBOX=1 switches on emailed certificates for the
+# server and the suite: a test-only address domain and a synthetic webhook
+# signing secret (no Resend key, so nothing is ever fetched from the provider).
+if [ "${FRESH_SCHEMA_CERTIFICATE_INBOX:-}" = "1" ]; then
+  inbox_env=(CERTIFICATE_INBOX_DOMAIN=certs.test.local
+    RESEND_INBOUND_WEBHOOK_SECRET="whsec_$(printf 'disposable-certificate-inbox-test-only' | base64)")
+  server_policy+=("${inbox_env[@]}")
+  suite_browser+=("${inbox_env[@]}")
+fi
 if [ "${FRESH_SCHEMA_BROWSER_POLICY:-}" = "1" ]; then
   server_policy+=(ENFORCE_CSRF=1 ENFORCE_MANDATORY_2FA=1 PUBLIC_APP_URL="http://127.0.0.1:$port")
   suite_browser+=(FRESH_SCHEMA_BROWSER_POLICY=1)

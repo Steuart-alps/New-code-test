@@ -60,7 +60,7 @@ const claude = createServer((req, res) => {
     claudeRequests++;
     if (claudeDelayMs) await new Promise((resolve) => setTimeout(resolve, claudeDelayMs));
     const events = [
-      ["message_start", { type: "message_start", message: { id: "msg_test", type: "message", role: "assistant", model: "claude-opus-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1800, output_tokens: 1 } } }],
+      ["message_start", { type: "message_start", message: { id: "msg_test", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1800, output_tokens: 1 } } }],
       ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }],
       ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: claudeReply } }],
       ["content_block_stop", { type: "content_block_stop", index: 0 }],
@@ -73,15 +73,16 @@ const claude = createServer((req, res) => {
   });
 });
 await new Promise((resolve) => claude.listen(0, "127.0.0.1", resolve));
-// 1,800 input and 900 output tokens on Claude Opus 5.5 ($4 / $20 per million).
-const READ_COST_MICROS = 1800 * 4 + 900 * 20;
+// 1,800 input and 900 output tokens on Claude Sonnet 5.5 ($2 / $10 per million),
+// which reads PAT registers (src/lib/aiModels.ts).
+const READ_COST_MICROS = 1800 * 2 + 900 * 10;
 
 process.env.SESSION_SECRET ||= "ai-addon-test-only-not-a-real-secret";
 process.env.LOG_LEVEL ||= "error";
 process.env.ANTHROPIC_API_KEY = "test-key-not-real";
 process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${claude.address().port}`;
 process.env.REGISTER_READING_MONTHLY_LIMIT = "0";
-for (const name of ["AI_ADDON_PRICE_ID", "AI_MONTHLY_ALLOWANCE_PENCE", "AI_TRIAL_ALLOWANCE_PENCE", "AI_USD_TO_GBP", "REPORT_READING_MODEL", "AI_TOP_UP_PRICE_PENCE", "AI_TOP_UP_ALLOWANCE_PENCE", "AI_AUTO_TOP_UP_LIMIT"]) delete process.env[name];
+for (const name of ["AI_ADDON_PRICE_ID", "AI_MONTHLY_ALLOWANCE_PENCE", "AI_TRIAL_ALLOWANCE_PENCE", "AI_USD_TO_GBP", "REPORT_READING_MODEL", "REGISTER_READING_MODEL", "REGISTER_READING_EFFORT", "AI_TOP_UP_PRICE_PENCE", "AI_TOP_UP_ALLOWANCE_PENCE", "AI_AUTO_TOP_UP_LIMIT"]) delete process.env[name];
 
 function session(base) {
   let cookie = "";
@@ -185,7 +186,7 @@ async function main(base) {
   same("reading works with the add-on", [read.status, read.data?.rows?.length], [200, 1]);
   same("ledger row from the tokens Claude reported",
     await usageRows(clientId),
-    [{ feature: "register_reading", status: "done", model: "claude-opus-5-5", input_tokens: 1800, output_tokens: 900, cost: READ_COST_MICROS }]);
+    [{ feature: "register_reading", status: "done", model: "claude-sonnet-5-5", input_tokens: 1800, output_tokens: 900, cost: READ_COST_MICROS }]);
   const afterOne = (await user("GET", "/billing/ai")).data;
   same("a 2p reading is under 1% of £10", [afterOne?.percentUsed, afterOne?.usedUp, afterOne?.resetsAt], [0, false, new Date(periodEnd * 1000).toISOString()]);
 

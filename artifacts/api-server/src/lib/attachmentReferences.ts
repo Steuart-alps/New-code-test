@@ -29,6 +29,7 @@ export const TENANT_ATTACHMENT_REFERENCE_SOURCES = [
   "fix_track_issues.completion_document_path",
   "fix_track_action_tokens.completion_object_path",
   "track_actions.media_urls",
+  "certificate_inbox_items.object_path",
 ] as const;
 
 type SqlExecutor = {
@@ -82,6 +83,7 @@ export async function listTenantAttachmentObjectPaths(
         FROM track_actions action
         CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(action.media_urls, '[]'::jsonb)) media(object_path)
         WHERE action.client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM certificate_inbox_items WHERE client_id = ${tenantId}
     ) attachments
     WHERE object_path LIKE '/objects/%'
   `);
@@ -153,6 +155,7 @@ export async function hasTenantAttachmentReference(
         CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(action.media_urls, '[]'::jsonb)) media(object_path)
         WHERE action.client_id = ${tenantId} AND media.object_path = ${objectPath}
       )
+      OR EXISTS (SELECT 1 FROM certificate_inbox_items WHERE client_id = ${tenantId} AND object_path = ${objectPath})
     ) AS referenced
   `);
   return Boolean((result.rows?.[0] as { referenced?: boolean } | undefined)?.referenced);

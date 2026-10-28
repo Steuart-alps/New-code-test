@@ -1,10 +1,10 @@
-import { Router, type IRouter, type Request } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
 import {
-  certificatesTable, certificateDefectsTable, contractorsTable, complianceItemsTable, sitesTable, categoriesTable,
+  certificatesTable, certificateDefectsTable, contractorsTable, complianceItemsTable,
 } from "@workspace/db/schema";
-import { eq, and, or, isNull, inArray } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import {
   ListCertificatesParams,
   CreateCertificateParams,
@@ -15,11 +15,10 @@ import { z } from "zod";
 import {
   requireAuth, requireClientAdmin, canAccessClient, denyViewers, getActiveDepartmentId, getClientId,
 } from "../middleware/requireAuth";
-import { sitesTableVisibleTo } from "../lib/departmentSites";
-import { CONTRACTOR_VISIT_TYPES } from "../lib/contractorVisits";
 import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
 import { ReportReadingError, UnreadableReportError, reportReadingConfigured } from "../lib/reportReading";
 import { CERTIFICATE_READING_MAX_BYTES, readCertificate, type CertificateCheckChoice } from "../lib/certificateReading";
+import { certificateCheckChoicesFor } from "../lib/certificateCheckChoices";
 import { appendAuditEvent } from "../lib/audit";
 import { getAccountToday } from "../lib/accountClock";
 import { getEntitledServices, isEntitled } from "../lib/services";
@@ -217,13 +216,34 @@ async function addDefects(req: Request, item: Item, cert: Cert, defects: ItemDef
 }
 
 router.post("/items/:itemId/certificates", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
-  const itemId = Number(req.params.itemId);
-  const parsed = CreateItemCertificateBody.safeParse(req.body);
-  if (!parsed.success) return void res.status(400).json({ error: "Invalid certificate", details: parsed.error.flatten() });
+  const view = await saveItemCertificate(req, res, Number(req.params.itemId), req.body);
+  if (view) res.status(201).json(view);
+});
+
+/**
+ * Save a certificate (and its defects) on a compliance check. Responds itself
+ * and returns null when the request is refused. A certificate from the
+ * certificate inbox (lib/certificateInbox.ts) passes its stored file, which
+ * the business already owns, instead of a fresh upload.
+ */
+export async function saveItemCertificate(
+  req: Request, res: Response, itemId: number, input: unknown,
+  inbox?: { clientId: number; itemId: number; objectPath: string | null; release(): Promise<void> },
+) {
+  // The inbox's claim on its certificate is released before the refusal is sent.
+  const refuse = async (status: number, body: Record<string, unknown>) => {
+    await inbox?.release();
+    res.status(status).json(body);
+    return null;
+  };
+  const parsed = CreateItemCertificateBody.safeParse(input);
+  if (!parsed.success) return refuse(400, { error: "Invalid certificate", details: parsed.error.flatten() });
   const item = await assertItemAccess(req, itemId);
-  if (!item) return void res.status(404).json({ error: "Compliance item not found" });
+  // A certificate from the inbox is only ever filed in its own business.
+  if (!item || (inbox && item.clientId !== inbox.clientId)) return refuse(404, { error: "Compliance item not found" });
   const { defects = [], remedialJob = false, readByAi = false, ...body } = parsed.data;
-  if (body.fileUrl && !await secureCertificateFile(req, res, body.fileUrl, item.clientId)) return;
+  if (inbox) body.fileUrl = inbox.objectPath;
+  else if (body.fileUrl && !await secureCertificateFile(req, res, body.fileUrl, item.clientId)) return null;
   const [cert] = await db.insert(certificatesTable)
     .values({ ...body, outcome: body.outcome ?? "not_stated", itemId, contractorId: null })
     .returning();
@@ -236,11 +256,12 @@ router.post("/items/:itemId/certificates", requireAuth, denyViewers, requireClie
       certificateId: cert!.id,
       defects: defects.map((d, i) => ({ ...d, fixTrackIssueId: created[i]?.fixTrackIssueId ?? null })),
       ...(readByAi ? { readByAi: true } : {}),
+      ...(inbox ? { certificateInboxItemId: inbox.itemId } : {}),
     },
   });
   const [view] = await withDefects(item.clientId, [cert!]);
-  res.status(201).json(view);
-});
+  return view!;
+}
 
 router.put("/items/:itemId/certificates/:id", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
   const itemId = Number(req.params.itemId);
@@ -381,33 +402,8 @@ const certificateReadBody = z.object({
 }).strict();
 
 /** The checks the person can file a certificate against, described for Claude. */
-async function certificateCheckChoices(req: Request, clientId: number): Promise<CertificateCheckChoice[]> {
-  const conditions = [eq(complianceItemsTable.clientId, clientId)];
-  const deptId = getActiveDepartmentId(req);
-  if (deptId !== null) {
-    const allowedSites = db.select({ id: sitesTable.id }).from(sitesTable)
-      .where(and(eq(sitesTable.clientId, clientId), sitesTableVisibleTo(deptId)));
-    conditions.push(or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites))!);
-  }
-  const rows = await db.select({
-    id: complianceItemsTable.id, title: complianceItemsTable.title, frequencyMonths: complianceItemsTable.frequencyMonths,
-    siteName: sitesTable.name, siteAddress: sitesTable.address, categoryName: categoriesTable.name, contractorName: contractorsTable.name,
-  }).from(complianceItemsTable)
-    .leftJoin(sitesTable, and(eq(sitesTable.id, complianceItemsTable.siteId), eq(sitesTable.clientId, clientId)))
-    .leftJoin(categoriesTable, and(eq(categoriesTable.id, complianceItemsTable.categoryId), eq(categoriesTable.clientId, clientId)))
-    .leftJoin(contractorsTable, and(eq(contractorsTable.id, complianceItemsTable.contractorId), eq(contractorsTable.clientId, clientId)))
-    .where(and(...conditions))
-    .orderBy(complianceItemsTable.title, complianceItemsTable.id);
-  const trackOf = new Map(CONTRACTOR_VISIT_TYPES.map((type) => [type.title.trim().toLowerCase(), type.trackLabel]));
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    track: trackOf.get(row.title.trim().toLowerCase()) ?? row.categoryName ?? null,
-    siteName: row.siteName ?? null,
-    siteAddress: row.siteAddress ?? null,
-    contractorName: row.contractorName ?? null,
-    frequencyMonths: row.frequencyMonths ?? null,
-  }));
+function certificateCheckChoices(req: Request, clientId: number): Promise<CertificateCheckChoice[]> {
+  return certificateCheckChoicesFor(clientId, getActiveDepartmentId(req));
 }
 
 router.get("/certificates/reading", requireAuth, requireClientAdmin, async (req, res) => {

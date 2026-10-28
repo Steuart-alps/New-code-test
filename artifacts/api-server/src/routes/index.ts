@@ -44,6 +44,7 @@ import checkRemindersRouter from "./check-reminders";
 import w3wRouter from "./w3w";
 import fixTrackPublicRouter, { fixTrackQuoteRouter } from "./fix-track-public";
 import contractorPortalRouter from "./contractor-portal";
+import certificateInboxRouter, { certificateUploadPublicRouter } from "./certificate-inbox";
 import incidentsRouter from "./incidents";
 import patTrackRouter from "./pat-track";
 import pestTrackRouter from "./pest-track";
@@ -106,6 +107,8 @@ router.use("/fix-track/action", publicLinkRateLimits, fixTrackPublicRouter);
 router.use("/fix-track/quotes/public", publicLinkRateLimits, fixTrackQuoteRouter);
 // Contractor visit-scheduling links (token-protected).
 router.use("/notifications/public/schedule", publicLinkRateLimits, notificationsPublicRouter);
+// Public "Upload certificate" link in contractor emails (token-protected).
+router.use("/certificate-upload", publicLinkRateLimits, certificateUploadPublicRouter);
 // Staff document sign-off link (token-protected).
 router.use("/sign-off", publicLinkRateLimits, signOffRouter);
 // Public privacy rights-request form (token-protected).
@@ -121,6 +124,7 @@ router.use(complianceItemsRouter);
 router.use(contractorsRouter);
 router.use(contractorVisitsRouter);
 router.use(certificatesRouter);
+router.use(certificateInboxRouter);
 router.use(settingsRouter);
 router.use(privacyGovernanceRouter);
 router.use(notificationsRouter);

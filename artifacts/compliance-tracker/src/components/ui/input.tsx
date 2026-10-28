@@ -6,10 +6,13 @@ import { DictationButton, dictationSupported, useMergedRef } from "@/components/
 type InputProps = React.ComponentProps<"input"> & {
   /** Show the microphone button for speaking instead of typing (default off). */
   dictation?: boolean
+  /** Select the whole value when the box is entered, so typing replaces a pre-filled default. */
+  selectOnFocus?: boolean
 }
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, dictation = false, ...props }, ref) => {
+  ({ className, type, dictation = false, selectOnFocus = false, onFocus, onMouseDown, onMouseUp, ...props }, ref) => {
+    const clickToFocus = React.useRef(false)
     const [innerRef, setRef] = useMergedRef(ref)
     const withMic = dictation && dictationSupported && (type === undefined || type === "text" || type === "search")
     const field = (
@@ -21,6 +24,21 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           withMic && "pr-10"
         )}
         ref={setRef}
+        onFocus={(event) => {
+          onFocus?.(event)
+          if (selectOnFocus) event.currentTarget.select()
+        }}
+        onMouseDown={(event) => {
+          onMouseDown?.(event)
+          clickToFocus.current = selectOnFocus && document.activeElement !== event.currentTarget
+        }}
+        onMouseUp={(event) => {
+          onMouseUp?.(event)
+          // Some browsers (Safari) place the caret when the click that
+          // focused the box ends, undoing the selection; a later click edits.
+          if (clickToFocus.current) event.preventDefault()
+          clickToFocus.current = false
+        }}
         {...props}
       />
     )

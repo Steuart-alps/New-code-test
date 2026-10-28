@@ -413,8 +413,13 @@ router.post("/imports/pat-appliances", requireAuth, denyViewers, requirePatImpor
 // REGISTER_READING_MONTHLY_LIMIT lists read a month, counted in app_settings
 // as "YYYY-MM:count" so a new month starts again at nought.
 const REGISTER_READS_SETTING = "patRegisterReads";
-/** Held against the AI allowance while a list is read; a few photographed pages cost about this. */
-const REGISTER_READING_ESTIMATE_PENCE = 30;
+/**
+ * Held against the AI allowance while a list is read; a few photographed pages
+ * cost about this (PAT registers on Claude Sonnet 5.5, other lists on Claude
+ * Haiku 5.5, lib/aiModels.ts). The real cost replaces it once Claude answers.
+ */
+const REGISTER_READING_ESTIMATE_PENCE = 15;
+const LIST_READING_ESTIMATE_PENCE = 2;
 class RegisterReadLimitError extends Error {}
 
 async function importableSites(clientId: number, departmentId: number | null) {
@@ -567,8 +572,8 @@ router.post("/imports/list-reading/:kind/read", requireAuth, denyViewers, requir
     // limit or the AI allowance (lib/aiAllowance.ts).
     const result = await readList({ kind, bytes, mimeType: parsed.data.mimeType, fileName: parsed.data.fileName, sites, siteId, trades }, async () => {
       aiUseId = await claimAiUse({
-        clientId, userId: req.currentUser?.id ?? null, feature: "register_reading",
-        estimatePence: REGISTER_READING_ESTIMATE_PENCE, instead: "Upload a spreadsheet instead.",
+        clientId, userId: req.currentUser?.id ?? null, feature: "list_reading",
+        estimatePence: LIST_READING_ESTIMATE_PENCE, instead: "Upload a spreadsheet instead.",
       });
       if (!await claimRegisterRead(clientId, month, limit)) {
         throw new RegisterReadLimitError(`This business has had ${limit} lists read this month, the most allowed. Upload a spreadsheet instead, or ask ALPS.`);
