@@ -39,6 +39,7 @@ Wednesday 28 October.
 | 20 | Send site safety information to contractors before their visit | After launch | None | Contractor sign-in work (in its own thread) |
 | 21 | White-labelling for resellers (for example insurance brokers) | After launch | Possibly small extra email and web address costs per partner | Your answers on billing and what partners see |
 | 22 | Let Owners choose the AI model and effort for each AI feature | After launch | Depends on the choices made; capped | AI features live first |
+| 23 | Contractor sign-in on site and logging their own test results | After launch (you chose this on 28 October) | None | Your "go" in its own thread |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -754,10 +755,9 @@ them the site information they need before they arrive:
 - The manager chooses which documents go to which kind of contractor (for
   example the asbestos register always goes to builders and electricians).
 
-**Links to other work.** This joins up with the contractor sign-in and
-one-track access being planned in the thread "Temporary contractor access to
-log tests": the contractor reads the site information, signs in on arrival,
-logs their test, and signs out.
+**Links to other work.** This joins up with contractor sign-in and test
+logging (item 23): the contractor reads the site information, signs in on
+arrival, logs their test, and signs out.
 
 **Cost:** none. No extra hosting.
 
@@ -841,6 +841,25 @@ setting, or should it be included?
 
 ---
 
+## 23. Contractor sign-in and logging their own test results
+
+**When:** after launch. You chose this in the thread "Temporary contractor
+access to log tests", which will build it when you say go.
+
+1. **Sign in on arrival.** The contractor signs in on their phone, confirms
+   they have read the site's fire evacuation procedure and asbestos register
+   (sent before the visit, item 20), and ticks a sign-off box. They sign out
+   when they leave, so they appear on the fire roll call while on site.
+2. **Log their own results.** A time-limited link lets the contractor record
+   PATrack pass and fail results directly, sign them off, and upload their own
+   certificate. They see only that one job, nothing else in the business, and
+   the link stops working when the visit ends.
+3. **Later:** the same for hot tubs, bikes and then every track.
+
+**Cost:** no extra hosting.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -891,6 +910,7 @@ work:
 | Reorder the side menu | None |
 | Bar opening and closing checks | None |
 | Site safety information to contractors | None |
+| Contractor sign-in and test logging | None |
 | Choose AI model and effort | Depends on choices; stronger settings cost more per use, capped by spending limits |
 | White-labelling for resellers | Little or none for hosting; possibly a small cost per partner web address and email address |
 | FireTrack sound level meter | None |
