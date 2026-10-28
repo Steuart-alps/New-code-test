@@ -16,7 +16,10 @@ import { chromium } from "@playwright/test";
 //   - a drill cannot be saved until it says whether night staff took part;
 //   - history shows the call point and night staff answers;
 //   - managers add call points with a location under Template, Call points,
-//     change their order with the arrows, and upload a list.
+//     change their order with the arrows, and upload a list;
+//   - a consultant whose own business has only core opens a free business
+//     (every module included): FireTrack opens there instead of asking to
+//     enable it, because the modules come from /auth/me?clientId=<open one>.
 // The /api/fire-safety fixture mirrors artifacts/api-server/src/routes/fire-safety.ts.
 // FIRE_TRACK_SCREENSHOTS=<dir> saves screenshots of each step.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -61,6 +64,8 @@ const localDate = (offsetDays = 0) => {
 };
 const TODAY = localDate(0);
 const CLIENT_ID = 23;
+const HOME_CLIENT_ID = 5;
+let asConsultant = false;
 const SITE = { id: 1, name: "Harbour Hotel" };
 
 // ─── Stateful /api/fire-safety fixture ───────────────────────────────────────
@@ -108,11 +113,20 @@ async function routeApi(route) {
   if (method === "GET") {
     switch (path) {
       case "/api/auth/csrf-token": return json(route, { token: "fire-track-csrf" });
-      case "/api/auth/me": return json(route, {
+      case "/api/auth/me": if (asConsultant) {
+        // Their own business (HOME_CLIENT_ID) has core only; CLIENT_ID is free.
+        const open = url.searchParams.get("clientId");
+        return json(route, {
+          user: { id: 8, email: "consultant@example.test", name: "ALPS Consultant", role: "consultant", clientId: HOME_CLIENT_ID, departmentId: null, active: true, totpEnabled: true },
+          billingLocked: false, client: { id: HOME_CLIENT_ID, name: "ALPS Consultancy", slug: "alps", logoUrl: null, primaryColor: "#2F7C8C", active: true },
+          services: open === String(CLIENT_ID) ? "all" : ["core"],
+        });
+      } else return json(route, {
         user: { id: 7, email: "manager@example.test", name: "Duty Manager", role: "client_admin", clientId: CLIENT_ID, departmentId: null, active: true, totpEnabled: true },
         billingLocked: false, client: { id: CLIENT_ID, name: "Harbour Hotel Group", slug: "harbour", logoUrl: null, primaryColor: "#2F7C8C", active: true },
         services: ["firetrack"],
       });
+      case `/api/clients/${CLIENT_ID}`: return json(route, { id: CLIENT_ID, name: "Harbour Hotel Group" });
       case "/api/billing/cancellation-status": return json(route, { accessEndsAt: null });
       case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
       case "/api/managed-by": return json(route, null);
@@ -409,6 +423,30 @@ try {
   assert.equal(walkPost.path, "/api/imports/fire-call-points");
   assert.deepEqual(walkPost.body, { headers: ["Call point", "Location"], rows: [["CP6", "By the lift lobby"], ["CP8", "Back stairs, first floor"]], siteId: 1, preview: false });
   console.log("ok - walking round and speaking makes the call point list in the order spoken");
+
+  // ── A consultant opens a free business from their core-only one ────────
+  asConsultant = true;
+  const openConsultantPage = async (openClientId) => {
+    const consultantContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "en-GB", timezoneId: "Europe/London" });
+    if (openClientId !== null) {
+      await consultantContext.addInitScript(value => sessionStorage.setItem("complytrack:activeClient", value), JSON.stringify({ userId: 8, clientId: openClientId }));
+    }
+    const consultantPage = await consultantContext.newPage();
+    consultantPage.setDefaultTimeout(20000);
+    consultantPage.on("pageerror", error => pageErrors.push(error.message));
+    await consultantPage.route("**/api/**", routeApi);
+    await consultantPage.goto(`${baseUrl}/tests/fire-track-harness.html`, { waitUntil: "domcontentloaded" });
+    return consultantPage;
+  };
+  const homePage = await openConsultantPage(null);
+  await homePage.getByRole("button", { name: "Enable FireTrack" }).waitFor();
+  await homePage.context().close();
+  const freePage = await openConsultantPage(CLIENT_ID);
+  await freePage.getByText("Monthly emergency lighting flick test").first().waitFor();
+  assert.equal(await freePage.getByRole("button", { name: "Enable FireTrack" }).count(), 0, "FireTrack is open in the free business");
+  await shot(freePage, "10-consultant-free-business");
+  await freePage.context().close();
+  console.log("ok - a consultant sees FireTrack in a free business though their own has only core");
 
   assert.deepEqual(pageErrors, []);
   assert.deepEqual([...new Set(unexpectedRequests)], [], "every request is in the fixture");
