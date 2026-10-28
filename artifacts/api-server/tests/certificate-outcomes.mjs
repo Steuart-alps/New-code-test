@@ -7,6 +7,8 @@
 //    check needing action (list, detail, stats, calendar, inspection pack).
 //  - Defects open FixTrack jobs with the right priority and target date,
 //    scoped to the check's own business.
+//  - With remedialJob (the AI certificate reader) the work shares one job and
+//    C3s open none.
 //  - Resolving the C1/C2 jobs, or adding a newer satisfactory certificate,
 //    clears the needs-action state; deleting a certificate recalculates.
 //  - Completion takes the date done: a past date sets the next due date, a
@@ -262,6 +264,76 @@ async function dueDateRules(owner) {
     arIssue?.priority === "high" && /^Gas AR: /.test(arIssue?.title ?? ""), JSON.stringify(arIssue));
 }
 
+// The AI certificate reader saves with remedialJob: the work that needs doing
+// shares one FixTrack job (so one quote covers it); C3s and advice open none.
+async function remedialJob(owner) {
+  const today = londonToday();
+  const item = await owner("POST", "/compliance-items", { title: "Electrical Installation Condition Report (EICR)", frequencyMonths: 60 });
+  const itemId = item.data?.id;
+  const cert = await owner("POST", `/items/${itemId}/certificates`, {
+    name: "EICR 2026 (read by AI)", issueDate: `${today}T09:00:00.000Z`, expiryDate: `${plusMonths(today, 60)}T00:00:00.000Z`,
+    outcome: "unsatisfactory", remedialJob: true, readByAi: true,
+    defects: [
+      { code: "C2", description: "No RCD protection to socket circuits", location: "DB1" },
+      { code: "C1", description: "Exposed live conductors", location: "Kitchen" },
+      { code: "FI", description: "Circuit 7 could not be traced" },
+      { code: "C3", description: "No surge protection" },
+      { code: "other", description: "Replace damaged accessory", needsWork: true },
+      { code: "other", description: "Consider upgrading consumer unit", needsWork: false },
+      { code: "C3", description: "Labels missing", needsWork: true },
+    ],
+  });
+  check("remedial job: certificate saved with seven defects", cert.status === 201 && cert.data?.defects?.length === 7, JSON.stringify(cert.data));
+  const byText = Object.fromEntries((cert.data?.defects ?? []).map((d) => [d.description, d]));
+  const jobId = byText["Exposed live conductors"]?.fixTrackIssueId;
+  check("remedial job: C1, C2, FI and the work item share one job",
+    Number.isInteger(jobId) && ["No RCD protection to socket circuits", "Circuit 7 could not be traced", "Replace damaged accessory", "Labels missing"]
+      .every((text) => byText[text]?.fixTrackIssueId === jobId), JSON.stringify(cert.data?.defects));
+  check("remedial job: C3 and advice open no job",
+    byText["No surge protection"]?.fixTrackIssueId === null && byText["Consider upgrading consumer unit"]?.fixTrackIssueId === null);
+  const job = (await owner("GET", `/fix-track/issues/${jobId}`)).data;
+  check("remedial job: urgent (from the C1), due today, titled with the codes",
+    job?.priority === "urgent" && String(job?.targetDate ?? job?.target_date).slice(0, 10) === today
+      && job?.title === "EICR remedial work: 1 × C1, 1 × C2, 1 × FI, 1 × C3, 1 × other", JSON.stringify(job));
+  check("remedial job: the description lists each item",
+    /1\. C2 \(Potentially dangerous\): No RCD protection to socket circuits \(DB1\)/.test(job?.description ?? "")
+      && /Replace damaged accessory/.test(job?.description ?? "") && !/No surge protection/.test(job?.description ?? ""), job?.description);
+  let detail = await owner("GET", `/compliance-items/${itemId}`);
+  check("remedial job: the check needs action with three open blocking defects",
+    detail.data?.needsAction === true && detail.data?.openDefectCount === 3, JSON.stringify(detail.data));
+  const audit = await owner("GET", `/audit-events?entityType=compliance_item&entityId=${itemId}`);
+  check("remedial job: the audit trail notes it was read by AI",
+    (audit.data ?? []).some((e) => e.action === "certificate_added" && e.metadata?.readByAi === true), JSON.stringify(audit.data).slice(0, 300));
+  const resolved = await resolveIssue(owner, jobId);
+  detail = await owner("GET", `/compliance-items/${itemId}`);
+  check("remedial job: resolving the one job clears the check's remedial work",
+    resolved.status === 200 && detail.data?.openDefectCount === 0 && detail.data?.needsAction === false, JSON.stringify(detail.data));
+
+  const clean = await owner("POST", `/items/${itemId}/certificates`, {
+    name: "EICR re-test", outcome: "satisfactory", remedialJob: true,
+    defects: [{ code: "C3", description: "Minor improvement" }],
+  });
+  check("remedial job: only C3s means no job at all",
+    clean.status === 201 && clean.data?.defects?.[0]?.fixTrackIssueId === null, JSON.stringify(clean.data));
+}
+
+// Without an Anthropic key the AI certificate reader says it is off; viewers never reach it.
+async function readerRoutes(owner, viewer) {
+  if (process.env.ANTHROPIC_API_KEY) return console.log("SKIP: ANTHROPIC_API_KEY is set; reader-off checks not run");
+  const status = await owner("GET", "/certificates/reading");
+  check("reader: status says reading is off and reports FixTrack and the AI allowance",
+    status.status === 200 && status.data?.available === false && typeof status.data?.fixTrack === "boolean" && typeof status.data?.ai?.active === "boolean",
+    JSON.stringify(status.data));
+  const body = { fileName: "eicr.pdf", mimeType: "application/pdf", data: Buffer.from("%PDF-1.4\n").toString("base64") };
+  const off = await owner("POST", "/certificates/read", body);
+  check("reader: reading is refused with a plain message while off",
+    off.status === 503 && off.data?.code === "CERTIFICATE_READING_UNAVAILABLE", JSON.stringify(off.data));
+  if (viewer) {
+    check("reader: a viewer cannot see the status", (await viewer("GET", "/certificates/reading")).status === 403);
+    check("reader: a viewer cannot send a certificate to be read", (await viewer("POST", "/certificates/read", body)).status === 403);
+  }
+}
+
 async function datedCompletion(owner, viewer) {
   const today = londonToday();
   const item = await owner("POST", "/compliance-items", { title: "Fire Alarm Maintenance", frequencyMonths: 6 });
@@ -335,6 +407,8 @@ async function main() {
 
   await outcomesAndDefects(owner, other);
   await dueDateRules(owner);
+  await remedialJob(owner);
+  await readerRoutes(owner, viewer);
   await datedCompletion(owner, viewer);
   await starterIntervals();
 

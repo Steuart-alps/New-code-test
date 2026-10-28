@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, BookOpen, CheckCircle2, ExternalLink, Plus, ShieldCheck, UserRoundCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { fetchWithOverrideReason, withCsrfToken } from "@/lib/api";
+import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
 type Appointment = { area: string; person: string; evidence?: string | null };
 type Profile = {
@@ -65,6 +66,7 @@ export default function ComplianceHubPage() {
   const canEdit = user?.role !== "client_viewer";
   const { toast } = useToast();
   const [profile, setProfile] = useState<Profile>(emptyProfile);
+  const newRow = useFocusNewRow();
   const [guidance, setGuidance] = useState<Guidance[]>([]);
   const [guidanceReviewedAt, setGuidanceReviewedAt] = useState("");
   const [gaps, setGaps] = useState<ComplianceGap[]>([]);
@@ -231,7 +233,7 @@ export default function ComplianceHubPage() {
               <div className="space-y-2"><Label>Next review date</Label><Input type="date" disabled={!canAdmin} value={profile.nextReviewDate} onChange={e => setProfile({ ...profile, nextReviewDate: e.target.value })} /></div>
               <div className="space-y-2"><Label>HACCP system review</Label><Select disabled={!canAdmin} value={profile.haccpSystemReviewed ? "reviewed" : "not-reviewed"} onValueChange={v => setProfile({ ...profile, haccpSystemReviewed: v === "reviewed" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="not-reviewed">Not yet confirmed</SelectItem><SelectItem value="reviewed">Reviewed for this operation</SelectItem></SelectContent></Select></div>
               <div className="space-y-2 md:col-span-2"><Label>Water written-scheme reference (where water systems, pools or spas apply)</Label><Input disabled={!canAdmin} value={profile.waterWrittenSchemeReference ?? ""} onChange={e => setProfile({ ...profile, waterWrittenSchemeReference: e.target.value })} placeholder="Document title, revision and storage reference" /><p className="text-xs text-muted-foreground">Record the current risk-assessed written scheme; its controls and monitoring frequencies must not be assumed from generic defaults.</p></div>
-              <div className="md:col-span-2 space-y-3 pt-2">
+              <div ref={newRow.ref} className="md:col-span-2 space-y-3 pt-2">
                 <div><Label>Competent-person appointments</Label><p className="text-xs text-muted-foreground mt-1">Record the person and evidence of appointment/competence for specialist risk areas. This is not a substitute for checking qualifications.</p></div>
                 {profile.competentAppointments.map((appointment, index) => <div key={index} className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
                   <Input disabled={!canAdmin} value={appointment.area} placeholder="Area (e.g. Legionella)" onChange={e => setProfile({ ...profile, competentAppointments: profile.competentAppointments.map((a, i) => i === index ? { ...a, area: e.target.value } : a) })} />
@@ -239,7 +241,7 @@ export default function ComplianceHubPage() {
                   <Input disabled={!canAdmin} value={appointment.evidence ?? ""} placeholder="Evidence reference" onChange={e => setProfile({ ...profile, competentAppointments: profile.competentAppointments.map((a, i) => i === index ? { ...a, evidence: e.target.value } : a) })} />
                   {canAdmin && <Button variant="ghost" onClick={() => setProfile({ ...profile, competentAppointments: profile.competentAppointments.filter((_, i) => i !== index) })}>Remove</Button>}
                 </div>)}
-                {canAdmin && <Button variant="outline" size="sm" onClick={() => setProfile({ ...profile, competentAppointments: [...profile.competentAppointments, { area: "", person: "", evidence: "" }] })}><Plus className="mr-1 h-4 w-4" />Add appointment</Button>}
+                {canAdmin && <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setProfile({ ...profile, competentAppointments: [...profile.competentAppointments, { area: "", person: "", evidence: "" }] }); }}><Plus className="mr-1 h-4 w-4" />Add appointment</Button>}
               </div>
               {canAdmin && <div className="md:col-span-2"><Button disabled={savingProfile} onClick={saveProfile}>{savingProfile ? "Saving…" : "Save accountability profile"}</Button></div>}
             </CardContent>

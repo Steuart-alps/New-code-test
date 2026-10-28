@@ -186,6 +186,41 @@ async function main() {
   issue = (await owner("GET", `/fix-track/issues/${legacyIssue}`)).data;
   check("no visit date is invented", issue?.status === "in_progress" && issue?.contractorVisitDate == null, JSON.stringify(issue));
 
+  // A manager can ask for a quote the same way (the AI certificate reader does)
+  const quoteIssue = await newIssue(owner, "EICR remedial work: 1 × C2");
+  const before = (await outboxLines()).length;
+  const quoted = await owner("POST", `/fix-track/issues/${quoteIssue}/assign-contractor`, { contractorId: plumber.data.id, mode: "quote" });
+  check("manager asks for a quote and it is emailed", quoted.status === 200 && quoted.data?.message === "Quote request emailed to Pat Plumber",
+    `${quoted.status}: ${JSON.stringify(quoted.data)}`);
+  sent = await outboxLines();
+  check("one quote email with a link to send the price and no job links",
+    sent.length === before + 1 && sent.at(-1)?.to === "pat-plumber@test.local"
+      && /\/contractor-quote\/[A-Za-z0-9-]{32,}/.test(sent.at(-1)?.html ?? "") && actionTokens(sent.at(-1)?.html).length === 0,
+    JSON.stringify(sent.at(-1)?.subject));
+  issue = (await owner("GET", `/fix-track/issues/${quoteIssue}`)).data;
+  check("issue shows the quote request as sent", issue?.emailRequestMode === "quote" && issue?.emailRequestStatus === "sent"
+    && issue?.notes?.some((n) => n.note?.startsWith("Quote asked of contractor Pat Plumber")), JSON.stringify(issue));
+  check("staff cannot ask for a quote directly",
+    (await staff("POST", `/fix-track/issues/${quoteIssue}/assign-contractor`, { contractorId: plumber.data.id, mode: "quote" })).status === 403);
+  check("an unknown mode is refused",
+    (await owner("POST", `/fix-track/issues/${quoteIssue}/assign-contractor`, { contractorId: plumber.data.id, mode: "bribe" })).status === 400);
+  check("the job can follow the quote without confirming a replacement",
+    (await owner("POST", `/fix-track/issues/${quoteIssue}/assign-contractor`, { contractorId: plumber.data.id })).status === 200);
+  sent = await outboxLines();
+
+  // A quote can go to a contractor added in the same step (the certificate reader with no contractors yet)
+  const newQuoteIssue = await newIssue(owner, "EICR remedial work: 1 × C1");
+  const newQuote = await owner("POST", `/fix-track/issues/${newQuoteIssue}/assign-contractor`, {
+    newContractor: { name: "Sands Electrical", company: "Sands Electrical", email: "sands@test.local" }, mode: "quote",
+  });
+  check("a quote can be asked of a contractor added in the same step",
+    newQuote.status === 200 && newQuote.data?.message === "Quote request emailed to Sands Electrical", `${newQuote.status}: ${JSON.stringify(newQuote.data)}`);
+  sent = await outboxLines();
+  check("the new contractor gets the quote email", sent.at(-1)?.to === "sands@test.local"
+    && /\/contractor-quote\/[A-Za-z0-9-]{32,}/.test(sent.at(-1)?.html ?? ""), JSON.stringify(sent.at(-1)?.to));
+  check("and is saved to the Contractors list",
+    (await owner("GET", "/contractors")).data?.some?.((c) => c.email === "sands@test.local"));
+
   // Staff still go through approval
   const staffIssue = await newIssue(owner, "Flickering light");
   check("owner sets a contractor on the staff issue",

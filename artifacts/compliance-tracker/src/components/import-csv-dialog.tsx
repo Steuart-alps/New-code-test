@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Camera, Download, FileSpreadsheet, Loader2, Sparkles, Upload, X } from "lucide-react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
@@ -8,8 +8,7 @@ import { API_BASE, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
 import { downloadCsvAsExcel, downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
 import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
-import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
-import type { AiStatus } from "@workspace/api-client-react";
+import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -71,50 +70,6 @@ const ACTION_STYLE: Record<RowAction, { label: string; className: string }> = {
   error: { label: "Error", className: "bg-rose-50 text-rose-800 border-rose-200" },
 };
 
-interface RegisterReading { available: boolean; monthlyLimit: number; usedThisMonth: number; ai: AiStatus; sites: Array<{ id: number; name: string }> }
-
-/** File types ComplyTrack can read a PAT register list from (spreadsheets go the usual way). */
-const READABLE_LIST = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp,.pdf,.docx,.txt";
-const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-function listMimeType(file: File): string {
-  if (file.type) return file.type;
-  const ext = file.name.split(".").pop()?.toLowerCase();
-  return ext === "pdf" ? "application/pdf" : ext === "docx" ? DOCX_TYPE : ext === "txt" ? "text/plain"
-    : ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "";
-}
-
-/**
- * A phone photo can be 5-10 MB; Claude reads a list just as well at 2,000
- * pixels, so photos are shrunk to a JPEG of that size before upload.
- */
-async function shrinkPhoto(file: File, mimeType: string): Promise<{ blob: Blob; mimeType: string }> {
-  if (!/^image\/(jpeg|png|webp)$/.test(mimeType) || typeof createImageBitmap !== "function") return { blob: file, mimeType };
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
-    if (scale === 1 && file.size <= 1_500_000) { bitmap.close(); return { blob: file, mimeType }; }
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
-    return blob ? { blob, mimeType: "image/jpeg" } : { blob: file, mimeType };
-  } catch {
-    return { blob: file, mimeType };
-  }
-}
-
-function toBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
-    reader.onerror = () => reject(new Error("The file could not be read"));
-    reader.readAsDataURL(blob);
-  });
-}
-
 export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }: {
   type: ImportCsvType; open: boolean; onOpenChange: (open: boolean) => void; onImported?: () => void;
   /** FireTrack call points: the site for rows whose Site cell is blank. */
@@ -125,22 +80,10 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
   const clientApiFetch = useActiveClientApi();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const listInput = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  // PATTrack only: a photo or document read by ComplyTrack instead of a spreadsheet.
-  const [listSiteId, setListSiteId] = useState("");
-  const [readFromList, setReadFromList] = useState<{ count: number; unclear: number } | null>(null);
-  const readingQuery = useQuery({
-    queryKey: ["imports", "pat-appliances", "reading", activeClientId],
-    enabled: open && type === "pat-appliances",
-    queryFn: async () => {
-      const response = await clientApiFetch("/imports/pat-appliances/reading");
-      if (!response.ok) throw new Error(await getApiErrorMessage(response, "Could not check reading"));
-      return response.json() as Promise<RegisterReading>;
-    },
-  });
-  const reading = readingQuery.data?.available ? readingQuery.data : null;
-  const readsLeft = reading && reading.monthlyLimit > 0 ? Math.max(0, reading.monthlyLimit - reading.usedThisMonth) : null;
+  // A photo or document read by ComplyTrack instead of a spreadsheet (AI add-on).
+  const reading = useListReading(type, open, siteId);
+  const [readFromList, setReadFromList] = useState<ListReadResult | null>(null);
   const [sheet, setSheet] = useState<{ headers: string[]; rows: string[][] } | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,7 +91,6 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
 
   function reset() {
     setFile(null); setSheet(null); setResult(null); setError(null); setBusy(null); setReadFromList(null);
-    if (listInput.current) listInput.current.value = "";
   }
   function close() {
     if (busy === "import") return;
@@ -181,13 +123,13 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
     }
   }
 
-  /** A picked or dropped file: spreadsheets are imported; on PATTrack a photo or document is read instead. */
+  /** A picked or dropped file: spreadsheets are imported; with the AI add-on a photo or PDF is read instead. */
   function dropped(selected: File) {
     if (isSpreadsheetFile(selected)) return void choose(selected);
-    if (reading && listMimeType(selected) && aiAllowanceState(reading.ai).canUse && readsLeft !== 0) return void readList(selected);
+    if (reading.canRead && isPhotoOrPdf(selected)) return void readList(selected);
     reset();
-    setError(reading
-      ? "That isn't an Excel or CSV file. For a photo, PDF or Word list, use \"Choose a photo or document\" below."
+    setError(reading.status
+      ? "That isn't an Excel or CSV file. For a photo or PDF of a list, use \"Choose or drag in a photo or document\" below."
       : "That isn't an Excel or CSV file. Save it from Excel as .xlsx and try again.");
   }
 
@@ -196,17 +138,10 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
     setFile(selected);
     setBusy("reading-list");
     try {
-      const shrunk = await shrinkPhoto(selected, listMimeType(selected));
-      const response = await clientApiFetch("/imports/pat-appliances/read", {
-        method: "POST",
-        body: JSON.stringify({ fileName: selected.name, mimeType: shrunk.mimeType, data: await toBase64(shrunk.blob), siteId: listSiteId ? Number(listSiteId) : null }),
-      });
-      const body = await response.json().catch(() => null) as { headers?: string[]; rows?: string[][]; unclear?: number; error?: string } | null;
-      void readingQuery.refetch();
-      if (!response.ok || !body?.headers || !body.rows) throw new Error(body?.error ?? "ComplyTrack could not read this list");
-      const data = { headers: body.headers, rows: body.rows };
+      const read = await reading.read(selected);
+      const data = { headers: read.headers, rows: read.rows };
       setSheet(data);
-      setReadFromList({ count: data.rows.length, unclear: body.unclear ?? 0 });
+      setReadFromList(read);
       setBusy("preview");
       await send(data, true);
     } catch (err) {
@@ -219,7 +154,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
   /** The rows ComplyTrack read, as a spreadsheet the person can correct and upload. */
   function downloadReadRows() {
     if (!sheet) return;
-    downloadExcel("pat-register-read-from-list.xlsx", "Appliances", [sheet.headers, ...sheet.rows]);
+    downloadExcel(`${config.template.replace(/-template$/, "")}-read-from-list.xlsx`, config.noun[0].toUpperCase() + config.noun.slice(1), [sheet.headers, ...sheet.rows]);
   }
 
   async function confirm() {
@@ -283,31 +218,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
           {!file ? (
             <>
               <SpreadsheetDropZone onFile={dropped} testId={`input-${type}-file`} />
-              {reading && (
-                <div className="space-y-2 rounded-lg border p-3" data-testid="pat-register-reading">
-                  <p className="flex items-center gap-1.5 text-sm font-medium"><Sparkles className="h-4 w-4 text-primary" /> Only have a paper list, photo or PDF?</p>
-                  <p className="text-xs text-muted-foreground">
-                    Take a photo of the list (one page at a time), or upload a scan, PDF or Word file. ComplyTrack reads it and fills in the rows below for you to check. Nothing is saved until you click Import. The file is sent to Anthropic, our AI provider, to read; it isn't used to train their AI or kept by ComplyTrack.
-                    {readsLeft !== null && reading.ai.active && ` ${readsLeft} of ${reading.monthlyLimit} readings left this month.`}
-                  </p>
-                  {reading.sites.length > 0 && (
-                    <label className="block text-xs">
-                      <span className="font-medium">Which site is this list for?</span>
-                      <select className="mt-1 flex h-9 w-full rounded-sm border border-input bg-background px-2 text-sm" value={listSiteId}
-                        onChange={event => setListSiteId(event.target.value)} data-testid="select-pat-register-list-site">
-                        <option value="">More than one site, or not sure</option>
-                        {reading.sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
-                      </select>
-                    </label>
-                  )}
-                  <input ref={listInput} type="file" accept={READABLE_LIST} className="hidden" data-testid="input-pat-register-list-file"
-                    onChange={event => { const selected = event.target.files?.[0]; if (selected) void readList(selected); }} />
-                  <Button type="button" variant="outline" size="sm" disabled={readsLeft === 0 || !aiAllowanceState(reading.ai).canUse} onClick={() => listInput.current?.click()} data-testid="button-read-pat-register-list">
-                    <Camera className="mr-1 h-4 w-4" /> Choose a photo or document
-                  </Button>
-                  <div><AiAllowanceNote ai={reading.ai} /></div>
-                </div>
-              )}
+              <ListReadingPanel reading={reading} kind={type} noun={config.noun} onFile={selected => void readList(selected)} />
             </>
           ) : (
             <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-3">
@@ -327,18 +238,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
 
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
-          {readFromList && (
-            <div className="space-y-1 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900" data-testid="pat-register-read-note">
-              <p>
-                ComplyTrack read {readFromList.count} appliance{readFromList.count === 1 ? "" : "s"} from your list. Check every row against the original before importing.
-                {readFromList.unclear > 0 && ` ${readFromList.unclear} ${readFromList.unclear === 1 ? "line was" : "lines were"} hard to read; ${readFromList.unclear === 1 ? "its" : "their"} notes start with "Check".`}
-              </p>
-              <p>To correct anything, download the rows as a spreadsheet, fix them and upload the spreadsheet instead.</p>
-              <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={downloadReadRows} data-testid="button-download-pat-register-read-rows">
-                <Download className="mr-1 h-3.5 w-3.5" /> Download as a spreadsheet
-              </Button>
-            </div>
-          )}
+          {readFromList && <ListReadNote result={readFromList} noun={config.noun} one={config.one} kind={type} onDownload={downloadReadRows} />}
 
           {summary && (
             <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/30 p-3 sm:grid-cols-4" data-testid="import-summary">

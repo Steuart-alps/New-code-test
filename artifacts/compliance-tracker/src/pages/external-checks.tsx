@@ -9,6 +9,7 @@ import { StatusBadge, PriorityBadge, NeedsActionBadge } from "@/components/badge
 import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
 import { CompleteCheckDialog } from "@/components/complete-check-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
+import { CertificateReaderButton } from "@/components/certificate-reader-dialog";
 import { format } from "date-fns";
 import { Plus, Briefcase, Mail, Send, Calendar, X, Building2, Sparkles } from "lucide-react";
 import { apiFetch } from "@/lib/api";
@@ -201,6 +202,9 @@ export default function ExternalChecksPage() {
               <Send className="w-4 h-4 mr-2 text-indigo-500" />
               {triggerReminders.isPending ? "Sending..." : "Send Reminders"}
             </Button>
+          )}
+          {canAdmin && (
+            <CertificateReaderButton className="flex-1 sm:flex-none shadow-sm bg-card" />
           )}
           {canAdmin && (
             <Button

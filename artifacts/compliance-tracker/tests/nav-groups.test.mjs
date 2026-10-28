@@ -26,6 +26,9 @@ assert.ok(adminItems.includes("Staff Roster"), "Admin should see Staff Roster");
 assert.ok(adminItems.includes("Sites"), "Admin should see Sites");
 assert.ok(adminItems.includes("Feedback inbox"), "Admin should see the feedback inbox");
 assert.ok(adminItems.includes("Categories"), "Admin should see Categories");
+assert.ok(!adminItems.includes("Business dashboard"), "Only platform operators see the business dashboard");
+assert.ok(flattenGroups(getNavGroups({ isConsultant: true, canAdmin: true, isPlatformOperator: true })).includes("Business dashboard"),
+  "Platform operators see the business dashboard");
 
 // Non-admin user
 const userGroups = getNavGroups({ isConsultant: false, canAdmin: false });

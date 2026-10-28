@@ -19,6 +19,7 @@
     "test:compliance-hub-profile-browser": "node tests/compliance-hub-profile-browser.test.mjs",
     "test:client-scope": "node tests/client-scope.test.mjs",
     "test:pat-legacy-register-browser": "node tests/pat-legacy-register-browser.test.mjs",
+    "test:focus-new-row-browser": "node tests/focus-new-row-browser.test.mjs",
     "test:pat-failure-location": "node tests/pat-failure-location.test.mjs",
     "test:pat-replacement-identity": "node tests/pat-replacement-identity.test.mjs",
     "test:contractor-approvals": "node tests/contractor-approvals.test.mjs",

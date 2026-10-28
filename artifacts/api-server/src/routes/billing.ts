@@ -155,10 +155,15 @@ router.get("/config", requireAuth, async (req, res) => {
     let subscribed = false;
     let perSiteRate = perSite?.unitAmount ?? 0;
     let selectedServices: string[] = [];
+    // A business created by a platform operator has no trial end: every
+    // module is free with no end date (e.g. included in an ALPS consultancy
+    // contract), so Settings says so instead of offering checkout.
+    let complimentary = false;
     if (clientId) {
       entitled = await getEntitledServices(clientId);
       const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
       selectedServices = Array.isArray(client?.selectedServices) ? client.selectedServices : [];
+      complimentary = Boolean(client) && client!.trialEndsAt === null;
       if (client?.stripeCustomerId) {
         try {
           const live = await findLiveSubscription(client.stripeCustomerId);
@@ -189,6 +194,8 @@ router.get("/config", requireAuth, async (req, res) => {
         }
       }
     }
+    // A paid subscription on such a business is shown as a subscription.
+    if (subscribed) complimentary = false;
     const monthlyTotal = perSiteRate * billableQuantity;
 
     // Same read-only price check that add-on activation enforces, so Settings
@@ -242,6 +249,7 @@ router.get("/config", requireAuth, async (req, res) => {
       cancelledAt,
       dataDeletionScheduledAt,
       dataDeletedAt,
+      complimentary,
       // Checkout and add-ons are unavailable while Stripe is unconfigured or
       // its catalogue unverified; a lapsed trial keeps access meanwhile.
       billingAvailable: Boolean(publishableKey) && isBillingActivationAllowed(),
@@ -731,10 +739,14 @@ async function aiAddonStatus(clientId: number) {
     price: price ? { unitAmount: price.unitAmount, currency: price.currency } : null,
     // Buying needs Stripe ready and the price to exist.
     purchasable: Boolean(price) && billingReady,
-    topUp: plan.kind === "addon" && billingReady
+    // An included allowance (free business): an owner agrees to a top-up,
+    // which ALPS adds to their consultancy invoice, so Stripe is not needed.
+    topUp: plan.kind === "included"
+      ? { amount: aiTopUpPricePence(), allowance: aiTopUpAllowancePence(), currency: "gbp" }
+      : plan.kind === "addon" && billingReady
       ? { amount: aiTopUpPricePence(), allowance: aiTopUpAllowancePence(), currency: "gbp" }
       : null,
-    topUpsThisPeriod: plan.kind === "addon" ? await countAiTopUps(clientId, plan.periodStart) : 0,
+    topUpsThisPeriod: plan.kind === "addon" || plan.kind === "included" ? await countAiTopUps(clientId, plan.periodStart) : 0,
     autoTopUp,
     autoTopUpLimit: aiAutoTopUpLimit(),
   };
@@ -773,6 +785,17 @@ router.post("/ai", requireAuth, requireRole("consultant", "client_admin"), async
   const { action } = change;
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "clientId required" });
+
+  // A free business's included allowance: the owner agrees to a top-up and
+  // ALPS adds it to their consultancy invoice; no card or Stripe involved.
+  if (change.action === "top_up") {
+    invalidateAiPlan(clientId);
+    if ((await getAiPlan(clientId)).kind === "included") {
+      const outcome = await buyAiTopUp({ clientId, userId: req.currentUser?.id ?? null, requestId: change.requestId, automatic: false, log: req.log });
+      if (outcome !== "paid") return res.status(409).json({ error: "That top-up was not added. Please refresh and try again." });
+      return res.json(await aiAddonStatus(clientId));
+    }
+  }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client?.stripeCustomerId) return res.status(400).json({ error: "Subscribe to ComplyTrack first, then add AI features." });

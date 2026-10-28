@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { CertificateFormDialog } from "@/components/certificate-form-dialog";
+import { CertificateReaderButton } from "@/components/certificate-reader-dialog";
 import { StatusBadge, PriorityBadge, ExpiryBadge, NeedsActionBadge, needsActionLabel } from "@/components/badges";
 import { CheckStatusWithCertificate } from "@/components/certificates-outstanding-card";
 import { CompleteCheckDialog } from "@/components/complete-check-dialog";
@@ -321,9 +322,12 @@ export default function ItemDetailPage() {
                   Documentation for this compliance check — upload the certificate that proves this requirement.
                 </p>
               </div>
-              <Button size="sm" onClick={() => { setEditingCert(null); setCertIssueDate(null); setCertOpen(true); }} className="shadow-sm">
-                <Plus className="w-4 h-4 mr-1.5" /> Upload
-              </Button>
+              <div className="flex flex-wrap justify-end gap-2">
+                {canAdmin && <CertificateReaderButton itemId={item.id} size="sm" label="Read with AI" className="shadow-sm" />}
+                <Button size="sm" onClick={() => { setEditingCert(null); setCertIssueDate(null); setCertOpen(true); }} className="shadow-sm">
+                  <Plus className="w-4 h-4 mr-1.5" /> Upload
+                </Button>
+              </div>
             </div>
             {certificates.length === 0 ? (
               <div className="p-8 text-center text-muted-foreground">

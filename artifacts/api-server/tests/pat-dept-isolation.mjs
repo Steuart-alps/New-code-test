@@ -66,6 +66,16 @@ async function main() {
   const betaTemplate = await admin("POST", "/pat-track/equipment-templates", { siteId: betaSite.data.id, name: "Beta template" });
   const alphaRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, templateId: alphaTemplate.data.id, name: "Alpha room" });
   const betaRoom = await admin("POST", "/pat-track/rooms", { siteId: betaSite.data.id, templateId: betaTemplate.data.id, name: "Beta room" });
+
+  // A room template carries an area type, and a save that leaves it out keeps it.
+  const guestTemplate = await admin("POST", "/pat-track/equipment-templates", { siteId: alphaSite.data.id, name: "Guest room template", areaType: " Guest room " });
+  expectStatus("create template with area type", guestTemplate, [200, 201]);
+  check("template stores area type", guestTemplate.data?.area_type === "Guest room", JSON.stringify(guestTemplate.data?.area_type));
+  const renamedGuest = await admin("PUT", `/pat-track/equipment-templates/${guestTemplate.data?.id}`, { siteId: alphaSite.data.id, name: "Guest room template (renamed)" });
+  check("save without area type keeps it", renamedGuest.data?.area_type === "Guest room", JSON.stringify(renamedGuest.data?.area_type));
+  const clearedGuest = await admin("PUT", `/pat-track/equipment-templates/${guestTemplate.data?.id}`, { siteId: alphaSite.data.id, name: "Guest room template", areaType: null });
+  check("area type can be cleared", clearedGuest.data?.area_type === null, JSON.stringify(clearedGuest.data?.area_type));
+  expectStatus("delete area type template", await admin("DELETE", `/pat-track/equipment-templates/${guestTemplate.data?.id}`), [200]);
   const certificateBody = (siteId, roomId, ref) => ({
     siteId, roomIds: [roomId], visitDate: fixtureDate, certificateRef: ref,
   });

@@ -13,6 +13,7 @@ import { Users, Plus, Pencil, Trash2, Loader2, Search, UserCheck, UserX, Upload,
 import { cn } from "@/lib/utils";
 import { downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
 import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
+import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
 import { printHtmlDocument } from "@/lib/download";
 
 interface StaffMember {
@@ -171,7 +172,11 @@ interface ParsedStaff {
 /** Staff rows from an Excel or CSV file, a Word table or a text list. */
 async function parseExcel(file: File): Promise<ParsedStaff[]> {
   const { headers, rows } = await readSpreadsheet(file);
+  return parseStaffTable(headers, rows);
+}
 
+/** Staff rows from a header row and its rows (a spreadsheet, or a list ComplyTrack read). */
+function parseStaffTable(headers: string[], rows: string[][]): ParsedStaff[] {
   // Normalise header names
   const normalise = (k: string) => k.toLowerCase().replace(/[\s_-]/g, "");
   const keys = headers.map(normalise);
@@ -217,18 +222,23 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
   const [siteId, setSiteId] = useState("none");
   const [importing, setImporting] = useState(false);
   const [parsing, setParsing] = useState(false);
+  // A photo or document of the roster read by ComplyTrack (AI add-on).
+  const reading = useListReading("staff-roster", open);
+  const [readFromList, setReadFromList] = useState<ListReadResult | null>(null);
   const [reconciliation, setReconciliation] = useState<{ total: number; created: number; updated: number; reactivated: number; unchanged: number; deactivated: number; matchedByEmail: number; matchedByName: number } | null>(null);
 
   function reset() {
     setText(""); setExcelFile(null); setPreview([]);
-    setSiteId("none"); setMode("excel"); setReconciliation(null);
+    setSiteId("none"); setMode("excel"); setReconciliation(null); setReadFromList(null);
   }
 
   async function handleFileChange(file: File) {
     if (!isSpreadsheetFile(file)) {
+      if (reading.canRead && isPhotoOrPdf(file)) return void handleListFile(file);
       toast({ title: "That isn't a spreadsheet", description: "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
       return;
     }
+    setReadFromList(null);
     setExcelFile(file);
     setParsing(true);
     try {
@@ -237,6 +247,24 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
       setReconciliation(null);
     } catch (err) {
       toast({ title: "Could not read file", description: err instanceof Error && err.message ? err.message : "Make sure it is an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
+      setExcelFile(null);
+    } finally {
+      setParsing(false);
+    }
+  }
+
+  async function handleListFile(file: File) {
+    setExcelFile(file);
+    setPreview([]);
+    setReadFromList(null);
+    setReconciliation(null);
+    setParsing(true);
+    try {
+      const read = await reading.read(file);
+      setPreview(parseStaffTable(read.headers, read.rows));
+      setReadFromList(read);
+    } catch (err) {
+      toast({ title: "Could not read the list", description: err instanceof Error && err.message ? err.message : "Try again, or upload a spreadsheet.", variant: "destructive" });
       setExcelFile(null);
     } finally {
       setParsing(false);
@@ -308,23 +336,31 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
                 <Download className="mr-1 h-3.5 w-3.5" /> Download the Excel template
               </Button>
               {!excelFile ? (
-                <SpreadsheetDropZone onFile={handleFileChange} testId="input-staff-roster-file" />
+                <>
+                  <SpreadsheetDropZone onFile={handleFileChange} testId="input-staff-roster-file" />
+                  <ListReadingPanel reading={reading} kind="staff-roster" noun="staff" onFile={file => void handleListFile(file)} />
+                </>
               ) : (
                 <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/20">
                   <FileSpreadsheet className="w-5 h-5 text-green-600 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{excelFile.name}</p>
                     {parsing ? (
-                      <p className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Reading…</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {readFromList === null && !isSpreadsheetFile(excelFile) ? "Reading your list… this can take a minute" : "Reading…"}</p>
                     ) : (
                       <p className="text-xs text-muted-foreground">{preview.length} staff member{preview.length === 1 ? "" : "s"} found</p>
                     )}
                   </div>
-                  <button onClick={() => { setExcelFile(null); setPreview([]); }}
+                  <button onClick={() => { setExcelFile(null); setPreview([]); setReadFromList(null); }}
                     className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
+              )}
+
+              {readFromList && (
+                <ListReadNote result={readFromList} noun="staff" one="member of staff" kind="staff-roster"
+                  onDownload={() => downloadExcel("staff-roster-read-from-list.xlsx", "Staff", [readFromList.headers, ...readFromList.rows])} />
               )}
 
               {/* Preview table */}

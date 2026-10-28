@@ -142,6 +142,9 @@ jobs:
       - name: Storage add-on price check test
         run: pnpm --filter @workspace/api-server run test:storage-price-check
 
+      - name: ALPS discount covers tracks only
+        run: pnpm --filter @workspace/api-server run test:alps-discount-coupon
+
       - name: Calendar invite fixture test
         run: pnpm --filter @workspace/api-server run test:calendar-invite-compatibility
 
@@ -265,6 +268,9 @@ jobs:
       - name: Reading PAT register lists with Claude (stand-in API, no key)
         run: pnpm --filter @workspace/api-server run test:register-reading
 
+      - name: Reading certificates with Claude (stand-in API, no key)
+        run: pnpm --filter @workspace/api-server run test:certificate-reading
+
       - name: Pricing AI requests (pure)
         run: pnpm --filter @workspace/api-server run test:ai-pricing
 
@@ -309,6 +315,11 @@ jobs:
       # Warning job and banner against synced Stripe rows in the current API shape.
       - name: Cancellation warning tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:cancellation-warnings:fresh
+
+      # ALPS billing alerts: new subscriptions and cancellations emailed once,
+      # plan changes recorded, and the Monday digest.
+      - name: Billing alert tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:billing-alerts
 
       # Reviewed account deletion: no purge before approval, the 30-day wait or
       # with a legal hold; only the tenant's ACL-owned files; durable outcome.

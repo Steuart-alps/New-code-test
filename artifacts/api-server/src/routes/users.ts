@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
-import { usersTable, userRoleEnum, departmentsTable, userDepartmentsTable, staffMembersTable, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
+import { usersTable, userRoleEnum, clientsTable, departmentsTable, userDepartmentsTable, staffMembersTable, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
 import { eq, and, inArray, isNull, desc, gt, sql } from "drizzle-orm";
 import { hashPassword, getUserWithClientByEmail } from "../lib/auth";
 import { requireAuth, requireClientAdmin, requireRole, requireUserManager, canAccessClient } from "../middleware/requireAuth";
@@ -27,13 +27,74 @@ const CreateUserBody = z.object({
   active: z.boolean().default(true),
 });
 
+/** What the invited person is told they can do, by role. */
+const INVITE_ROLE_SUMMARY: Record<string, string> = {
+  consultant: "You can see every business you look after on ComplyTrack.",
+  client_admin: "You have full control of the business: billing, users, sites, departments, settings and every record.",
+  client_manager: "You look after your departments: you add and remove Staff and Viewers there, see and record everything there, and run FixTrack and contractor emails.",
+  maintenance_manager: "You look after your departments as a Manager, plus every FixTrack job and the contractor emails.",
+  client_staff: "You record the checks and logs for your department.",
+  client_viewer: "You see your own training records and sign them off.",
+};
+
+function inviteRoleName(user: InvitedUser): string {
+  switch (user.role) {
+    case "consultant": return "Consultant";
+    case "client_admin": return "Owner";
+    case "client_manager": return user.isMaintenanceManager ? "Maintenance manager" : "Manager";
+    case "client_staff": return "Staff";
+    case "client_viewer": return "Viewer";
+    default: return user.role;
+  }
+}
+
+type InvitedUser = {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+  clientId: number | null;
+  departmentId: number | null;
+  allDepartments: boolean;
+  isMaintenanceManager: boolean;
+};
+
+/**
+ * The business, role and departments named in an invitation, so the person
+ * (and anyone they forward it to) can see at once whether it was set up
+ * right. A failed lookup leaves the details out rather than stopping the email.
+ */
+async function inviteDetails(user: InvitedUser) {
+  try {
+    const [client] = user.clientId != null
+      ? await db.select({ name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.id, user.clientId))
+      : [];
+    let departments: string | null = null;
+    if (user.role === "client_manager" && user.allDepartments) {
+      departments = "all departments";
+    } else if (user.role !== "consultant" && user.role !== "client_admin") {
+      const [withIds] = await withDepartmentIds([user]);
+      const rows = withIds.departmentIds.length
+        ? await db.select({ id: departmentsTable.id, name: departmentsTable.name }).from(departmentsTable).where(inArray(departmentsTable.id, withIds.departmentIds))
+        : [];
+      const names = withIds.departmentIds.map((id) => rows.find((row) => row.id === id)?.name).filter((name): name is string => !!name);
+      if (names.length) departments = names.join(", ");
+    }
+    return { business: client?.name ?? null, departments };
+  } catch {
+    return { business: null, departments: null };
+  }
+}
+
 /**
  * Mint a password-reset token for a freshly-created user and email them an
  * "invitation" link that reuses the forgot/reset-password token machinery.
  * Existing unused reset/setup links are superseded before the new link is sent.
+ * The email names who added them, the business, their role and departments.
  */
 async function sendInviteEmail(
-  user: { id: number; email: string; name: string },
+  user: InvitedUser,
+  invitedBy: string | null,
   log?: { error: (o: unknown, m?: string) => void },
 ): Promise<boolean> {
   let tokenId: number | null = null;
@@ -68,6 +129,16 @@ async function sendInviteEmail(
     const appUrl = getPublicAppUrl();
     const setupUrl = `${appUrl}/reset-password?token=${token}`;
     const safeName = escapeHtml(user.name);
+    const { business, departments } = await inviteDetails(user);
+    const roleName = inviteRoleName(user);
+    const roleSummary = INVITE_ROLE_SUMMARY[user.role === "client_manager" && user.isMaintenanceManager ? "maintenance_manager" : user.role] ?? "";
+    const who = invitedBy?.trim() || "An administrator";
+    const where = business ? ` to ${business}` : "";
+    const added = `${who} has added you${where} on ComplyTrack.`;
+    const htmlAdded = `${escapeHtml(who)} has added you${business ? ` to <strong>${escapeHtml(business)}</strong>` : ""} on ComplyTrack.`;
+    const roleLine = `Your role: ${roleName}${departments ? ` (${departments})` : ""}`;
+    const htmlRoleLine = `<strong>Your role:</strong> ${escapeHtml(roleName)}${departments ? ` (${escapeHtml(departments)})` : ""}`;
+    const fix = `If your role isn't right, ask ${invitedBy?.trim() || "whoever added you"} to change it in User Management.`;
 
     await sendSystemEmail({
       to: user.email,
@@ -76,17 +147,19 @@ async function sendInviteEmail(
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #1e293b;">You've been invited to ComplyTrack</h2>
           <p>Hi ${safeName},</p>
-          <p>An administrator has created a ComplyTrack account for you. Click the button below to set your password and get started. This link will expire in <strong>24 hours</strong>.</p>
+          <p>${htmlAdded}</p>
+          <p style="background: #f1f5f9; border-radius: 6px; padding: 12px 16px;">${htmlRoleLine}${roleSummary ? `<br>${escapeHtml(roleSummary)}` : ""}</p>
+          <p>Click the button below to set your password and get started. This link will expire in <strong>24 hours</strong>.</p>
           <p style="margin: 24px 0;">
             <a href="${setupUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Set Your Password</a>
           </p>
           <p>Or copy and paste this link into your browser:</p>
           <p style="word-break: break-all; color: #2563eb;">${setupUrl}</p>
-          <p>If you weren't expecting this invitation, you can safely ignore this email.</p>
+          <p>${escapeHtml(fix)} If you weren't expecting this invitation, you can safely ignore this email.</p>
           <p>Best regards,<br><strong>ComplyTrack</strong></p>
         </div>
       `,
-      text: `Hi ${user.name},\n\nAn administrator has created a ComplyTrack account for you. Use the link below to set your password (expires in 24 hours):\n\n${setupUrl}\n\nIf you weren't expecting this invitation, you can safely ignore this email.\n\nBest regards,\nComplyTrack`,
+      text: `Hi ${user.name},\n\n${added}\n\n${roleLine}${roleSummary ? `\n${roleSummary}` : ""}\n\nUse the link below to set your password (expires in 24 hours):\n\n${setupUrl}\n\n${fix} If you weren't expecting this invitation, you can safely ignore this email.\n\nBest regards,\nComplyTrack`,
     });
   } catch (err) {
     log?.error({ err }, "Failed to send invite email");
@@ -429,7 +502,7 @@ router.post("/users", requireAuth, requireUserManager, async (req, res) => {
   // The account stands either way; when the invitation can't be delivered the
   // admin is told and can resend it from User Management.
   const inviteEmail = invite
-    ? (await sendInviteEmail(rows[0], req.log) ? "sent" : "failed")
+    ? (await sendInviteEmail(rows[0], req.currentUser?.name ?? null, req.log) ? "sent" : "failed")
     : null;
 
   const [created] = await withDepartmentIds(rows);
@@ -469,7 +542,7 @@ router.post("/users/:id/resend-invite", requireAuth, requireUserManager, async (
   const target = await setupLinkTarget(req, res, "resent");
   if (!target) return;
 
-  const sent = await sendInviteEmail(target, req.log);
+  const sent = await sendInviteEmail(target, req.currentUser?.name ?? null, req.log);
   if (!sent) {
     res.status(502).json({ error: "Unable to send the password setup link. Please try again." });
     return;

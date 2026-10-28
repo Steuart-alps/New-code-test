@@ -1622,13 +1622,16 @@ const assignContractorBody = z.object({
   targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   // Confirms replacing a job that was already emailed to a contractor.
   replace: z.boolean().optional(),
+  // "quote" asks the contractor for a quote instead of giving them the job.
+  mode: z.enum(["assign", "quote"]).optional(),
 }).refine((body) => (body.contractorId != null) !== (body.newContractor != null), {
   message: "Choose a contractor or add a new one",
 });
 
-// Manager: give the job to a contractor and email it to them straight away.
-// The manager choosing the contractor here is the approval, so the email does
-// not wait in Contractor Approvals (staff still use request-send).
+// Manager: give the job to a contractor and email it to them straight away,
+// or (mode "quote") email them a quote request for it. The manager choosing
+// the contractor here is the approval, so the email does not wait in
+// Contractor Approvals (staff still use request-send).
 router.post("/issues/:id/assign-contractor", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -1642,6 +1645,7 @@ router.post("/issues/:id/assign-contractor", requireAuth, denyViewers, async (re
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid data" });
   }
   const body = parsed.data;
+  const mode = body.mode ?? "assign";
 
   const conditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
   const deptId = getActiveDepartmentId(req);
@@ -1714,11 +1718,13 @@ router.post("/issues/:id/assign-contractor", requireAuth, denyViewers, async (re
   }
   await db.insert(fixTrackIssueActivityTable).values({
     clientId, issueId: id, eventType: "note",
-    note: `Assigned to contractor ${contractor.name} by ${req.currentUser?.name ?? "a manager"}`,
+    note: mode === "quote"
+      ? `Quote asked of contractor ${contractor.name} by ${req.currentUser?.name ?? "a manager"}`
+      : `Assigned to contractor ${contractor.name} by ${req.currentUser?.name ?? "a manager"}`,
     createdBy: req.currentUser?.id ?? null,
   });
 
-  const queued = await queueContractorEmail(req, clientId, id, "assign", alreadySent);
+  const queued = await queueContractorEmail(req, clientId, id, mode, alreadySent);
   if (queued.status !== 200 || !queued.queueId) {
     return res.status(queued.status === 200 ? 409 : queued.status).json(queued.status === 200
       ? { error: "The job email could not be prepared; try again" }
@@ -1727,7 +1733,7 @@ router.post("/issues/:id/assign-contractor", requireAuth, denyViewers, async (re
   await approveAndSendQueued(req, res, clientId, queued.queueId, {
     contractorId: contractor.id,
     contractorName: contractor.name,
-    message: `Job emailed to ${contractor.name}`,
+    message: mode === "quote" ? `Quote request emailed to ${contractor.name}` : `Job emailed to ${contractor.name}`,
   });
 });
 

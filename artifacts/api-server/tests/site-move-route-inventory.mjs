@@ -37,6 +37,7 @@ const INVENTORY = {
   "compliance-items.ts PATCH /compliance-items/:id/status": notAMove("status-only; checks the item's stored site"),
   "compliance-items.ts PUT /compliance-items/:id": adminOnly("compliance item editor"),
   "contractor-visits.ts PUT /contractor-visits": adminOnly("chooses the contractor reminded about a visit at a site"),
+  "csv-imports.ts POST /imports/list-reading/:kind/read": notAMove("siteId only tells the AI reader which site a list is for; nothing is stored"),
   "daily-checklists.ts POST /daily-checklists/:siteId/:date/:type": notAMove("site is addressed in the path and access-checked"),
   "daily-checklists.ts POST /daily-checklists/:siteId/:date/pm/sign-off": notAMove("site is addressed in the path and access-checked"),
   "coshh-track.ts PUT /assessments/:id": siteMove("COSHH assessment"),

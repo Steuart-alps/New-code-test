@@ -5,6 +5,66 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export interface BusinessDashboardChange {
+  businessName: string;
+  summary: string;
+  /** Monthly amount before VAT gained, lost or changed */
+  monthlyPence: number;
+  /**
+     * Cancellation reason key
+     * @nullable
+     */
+  reason: string | null;
+  at: string;
+}
+
+export type BusinessDashboardTrialsItem = {
+  businessName: string;
+  at: string;
+};
+
+export type BusinessDashboardReasonsItem = {
+  reason: string;
+  label: string;
+  count: number;
+};
+
+export type BusinessDashboardModulesItem = {
+  module: string;
+  changes: number;
+  businesses: number;
+};
+
+export type BusinessDashboardWeeksItem = {
+  weekStart: string;
+  newCount: number;
+  cancelledCount: number;
+  netPence: number;
+};
+
+export type BusinessDashboardTotals = {
+  paying: number;
+  onTrial: number;
+};
+
+export interface BusinessDashboard {
+  from: string;
+  to: string;
+  newSubscriptions: BusinessDashboardChange[];
+  cancellations: BusinessDashboardChange[];
+  planChanges: BusinessDashboardChange[];
+  trials: BusinessDashboardTrialsItem[];
+  gainedPence: number;
+  lostPence: number;
+  planChangePence: number;
+  netPence: number;
+  netBusinesses: number;
+  reasons: BusinessDashboardReasonsItem[];
+  modules: BusinessDashboardModulesItem[];
+  weeks: BusinessDashboardWeeksItem[];
+  totals: BusinessDashboardTotals;
+}
+
 /**
  * One of the 14 allergens in Schedule 1 of the Food Information Regulations 2014
  */
@@ -473,6 +533,17 @@ export interface FixTrackMediaDeleteRequest {
   objectPath: string;
 }
 
+/**
+ * "quote" emails a quote request instead of giving the contractor the job. Left out means "assign".
+ */
+export type FixTrackAssignContractorRequestMode = typeof FixTrackAssignContractorRequestMode[keyof typeof FixTrackAssignContractorRequestMode];
+
+
+export const FixTrackAssignContractorRequestMode = {
+  assign: 'assign',
+  quote: 'quote',
+} as const;
+
 export interface FixTrackNewContractor {
   /**
      * @minLength 1
@@ -500,6 +571,8 @@ export interface FixTrackAssignContractorRequest {
   targetDate?: string | null;
   /** Confirms replacing a job already emailed to a contractor. */
   replace?: boolean;
+  /** "quote" emails a quote request instead of giving the contractor the job. Left out means "assign". */
+  mode?: FixTrackAssignContractorRequestMode;
 }
 
 export interface FixTrackAssignContractorResult {
@@ -1218,6 +1291,19 @@ export interface UpdateCertificateDefectRequest {
   resolved: boolean;
 }
 
+export interface CreateItemCertificateDefectRequest {
+  code: CertificateDefectCode;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  description: string;
+  /** @maxLength 300 */
+  location?: string | null;
+  /** With remedialJob, whether it goes into the remedial job. Left out, C1, C2, FI, ID and AR do. */
+  needsWork?: boolean;
+}
+
 export interface CreateItemCertificateRequest {
   name: string;
   fileUrl?: string | null;
@@ -1226,7 +1312,108 @@ export interface CreateItemCertificateRequest {
   notes?: string | null;
   outcome?: CertificateOutcome;
   /** @maxItems 100 */
-  defects?: CreateCertificateDefectRequest[];
+  defects?: CreateItemCertificateDefectRequest[];
+  /** The defects that need work share one FixTrack job (so one quote request covers them) and the others open no job. Without it each defect opens its own job. */
+  remedialJob?: boolean;
+  /** The details were read by ComplyTrack's AI and checked by the person saving them. */
+  readByAi?: boolean;
+}
+
+export type AiStatusPlan = typeof AiStatusPlan[keyof typeof AiStatusPlan];
+
+
+export const AiStatusPlan = {
+  addon: 'addon',
+  trial: 'trial',
+  included: 'included',
+  none: 'none',
+} as const;
+
+/**
+ * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable. A business with no trial end (every module free, set up by ALPS) has the monthly allowance included ("included").
+ */
+export interface AiStatus {
+  /** The server has an Anthropic API key, so AI can be offered at all */
+  configured: boolean;
+  /** The business has the AI add-on (or a trial allowance) now */
+  active: boolean;
+  plan: AiStatusPlan;
+  /**
+     * Share of this period's allowance used
+     * @minimum 0
+     * @maximum 100
+     */
+  percentUsed: number;
+  /** When the allowance starts again */
+  resetsAt: string | null;
+  /** The allowance is used up for this period */
+  usedUp: boolean;
+}
+
+export interface CertificateReadingStatus {
+  /** False until the server has an Anthropic API key. */
+  available: boolean;
+  ai: AiStatus;
+  /** Whether the business has FixTrack, where remedial work and quotes live. */
+  fixTrack: boolean;
+}
+
+export interface CertificateReadRequest {
+  /** @maxLength 255 */
+  fileName: string;
+  /** application/pdf, image/jpeg, image/png, image/webp, image/gif, .docx or text/plain */
+  mimeType: string;
+  /** The file as base64 (15 MB at most before encoding) */
+  data: string;
+  /** The check the certificate is for, when the person opened the reader from one */
+  itemId?: number | null;
+}
+
+export interface CertificateReadingDefect {
+  code: CertificateDefectCode;
+  description: string;
+  location: string | null;
+  /** The item or observation number on the certificate */
+  reference: string | null;
+  /** Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are. */
+  needsWork: boolean;
+}
+
+export interface CertificateReadingNewCheck {
+  title: string;
+  frequencyMonths: number | null;
+}
+
+/**
+ * "certificate" when it states the date; "repeat" when worked out from the check's repeat interval.
+ */
+export type CertificateReadingNextInspectionSource = typeof CertificateReadingNextInspectionSource[keyof typeof CertificateReadingNextInspectionSource] | null;
+
+
+export const CertificateReadingNextInspectionSource = {
+  certificate: 'certificate',
+  repeat: 'repeat',
+} as const;
+
+export interface CertificateReading {
+  certificateType: string;
+  /** A name to file the certificate under */
+  name: string;
+  /** The check it is for; null when none fits */
+  itemId: number | null;
+  checkReason: string;
+  /** When no check fits, the check to create for it. */
+  newCheck: CertificateReadingNewCheck | null;
+  contractorName: string | null;
+  issueDate: string | null;
+  nextInspectionDate: string | null;
+  /** "certificate" when it states the date; "repeat" when worked out from the check's repeat interval. */
+  nextInspectionSource: CertificateReadingNextInspectionSource;
+  outcome: CertificateOutcome;
+  summary: string;
+  defects: CertificateReadingDefect[];
+  /** Things that could not be read with confidence. */
+  unclear: string[];
 }
 
 /**
@@ -2055,7 +2242,7 @@ export const AppSettingsStorageAutoTopUp = {
 } as const;
 
 /**
- * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays).
+ * How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly.
  */
 export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequency[keyof typeof AppSettingsOwnerUpdateFrequency] | null;
 
@@ -2063,6 +2250,7 @@ export type AppSettingsOwnerUpdateFrequency = typeof AppSettingsOwnerUpdateFrequ
 export const AppSettingsOwnerUpdateFrequency = {
   weekly: 'weekly',
   daily: 'daily',
+  monthly: 'monthly',
 } as const;
 
 export interface AppSettings {
@@ -2080,7 +2268,7 @@ export interface AppSettings {
   storageWarningThresholdBytes?: string | null;
   /** "true" adds 10 GB of storage automatically when the paid storage is full; otherwise new uploads stop there. */
   storageAutoTopUp?: AppSettingsStorageAutoTopUp;
-  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays). */
+  /** How often Owners get the update email listing what is overdue, due and expiring. Unset means weekly (Mondays); monthly is the first Monday of each month, and Managers then still get theirs weekly. */
   ownerUpdateFrequency?: AppSettingsOwnerUpdateFrequency;
   /** JSON object keyed by reminder type (track module, "tasks", "contractors", "train"), each {"daysBefore": number|"next_week"|null, "overdueEvery": number}: how many days before the due or expiry date the personal reminder email lists it (null = off; "next_week" = in a Friday email of what is due the following week) and how often it repeats once overdue (0 = only the day after). Types left out use the defaults: 1 day before (30 for training, the contractor lead time for contractor documents) and every 7 days when overdue. */
   reminderTimings?: string | null;
@@ -2454,36 +2642,6 @@ export type PatRegisterReadingStatusSitesItem = {
   name: string;
 };
 
-export type AiStatusPlan = typeof AiStatusPlan[keyof typeof AiStatusPlan];
-
-
-export const AiStatusPlan = {
-  addon: 'addon',
-  trial: 'trial',
-  none: 'none',
-} as const;
-
-/**
- * The AI features add-on for this business: £15 a month, which includes a monthly allowance of AI use (plus any top-ups bought this period). Without it, AI buttons are unavailable.
- */
-export interface AiStatus {
-  /** The server has an Anthropic API key, so AI can be offered at all */
-  configured: boolean;
-  /** The business has the AI add-on (or a trial allowance) now */
-  active: boolean;
-  plan: AiStatusPlan;
-  /**
-     * Share of this period's allowance used
-     * @minimum 0
-     * @maximum 100
-     */
-  percentUsed: number;
-  /** When the allowance starts again */
-  resetsAt: string | null;
-  /** The allowance is used up for this period */
-  usedUp: boolean;
-}
-
 export interface PatRegisterReadingStatus {
   available: boolean;
   /** Readings a business may have each month; 0 means no limit */
@@ -2509,6 +2667,15 @@ export interface PatRegisterReadResult {
   rows: string[][];
   /** Rows that were hard to read; their Notes start with "Check:" */
   unclear: number;
+}
+
+export interface ImportListReadResult {
+  headers: string[];
+  rows: string[][];
+  /** Rows that were hard to read */
+  unclear: number;
+  /** File row numbers (the header row is row 1) of the rows that were hard to read; where the import has a Notes column, their Notes start with "Check:" */
+  unclearRows: number[];
 }
 
 export interface FireCallPointImportRequest {
@@ -4161,10 +4328,10 @@ export type AiAddonStatusPrice = {
 } | null;
 
 /**
- * The top-up an owner can buy now; null unless the add-on is on and billing is ready
+ * The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan "included") the owner agrees to it and ALPS adds the price to their consultancy invoice.
  */
 export type AiAddonStatusTopUp = {
-  /** Price in pence, before VAT, charged at once */
+  /** Price in pence, before VAT, charged at once (or invoiced by ALPS on an included allowance) */
   amount: number;
   /** AI use it adds, in pence, until the add-on renews */
   allowance: number;
@@ -4175,7 +4342,7 @@ export type AiAddonStatus = AiStatus & {
   price: AiAddonStatusPrice;
   /** The add-on can be bought now (Stripe ready and the price exists) */
   purchasable: boolean;
-  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready */
+  /** The top-up an owner can buy now; null unless the add-on is on and billing is ready. On an included allowance (plan "included") the owner agrees to it and ALPS adds the price to their consultancy invoice. */
   topUp: AiAddonStatusTopUp;
   /**
      * Top-ups paid for since the add-on last renewed
@@ -4410,6 +4577,11 @@ export const ListAuditLogModule = {
   doc: 'doc',
   incidents: 'incidents',
 } as const;
+
+export type GetBusinessDashboardParams = {
+from?: string;
+to?: string;
+};
 
 export type ListPublicLinkAccessParams = {
 linkType?: ListPublicLinkAccessLinkType;

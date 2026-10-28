@@ -38,9 +38,13 @@ import type {
   Assignee,
   AuditLogEntry,
   BikeTrackConfig,
+  BusinessDashboard,
   Category,
   Certificate,
   CertificateDefect,
+  CertificateReadRequest,
+  CertificateReading,
+  CertificateReadingStatus,
   CertificatesOutstandingResponse,
   ComplianceItem,
   ConfirmInspectionReportActions201,
@@ -104,6 +108,7 @@ import type {
   FoodSafetyMonthlySummary,
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
+  GetBusinessDashboardParams,
   GetCoshhTrackStatusParams,
   GetDailyTrackHistoryParams,
   GetFeedbackScreenshotParams,
@@ -146,6 +151,7 @@ import type {
   HotTubConfigUpdate,
   ImportExtinguisherPoints200,
   ImportExtinguisherPointsBody,
+  ImportListReadResult,
   IncidentConfig,
   InspectionReport,
   InspectionReportDetail,
@@ -1537,6 +1543,91 @@ export function useListAuditLog<TData = Awaited<ReturnType<typeof listAuditLog>>
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListAuditLogQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetBusinessDashboardUrl = (params?: GetBusinessDashboardParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/business-dashboard?${stringifiedParams}` : `/api/admin/business-dashboard`
+}
+
+/**
+ * The figures of ALPS's Monday billing digest for any dates (inclusive, UTC days). Without dates, the last 7 days. At most three years.
+ * @summary New subscriptions, cancellations, plan changes, trials and module activity between two dates (platform operators only)
+ */
+export const getBusinessDashboard = async (params?: GetBusinessDashboardParams, options?: RequestInit): Promise<BusinessDashboard> => {
+
+  return customFetch<BusinessDashboard>(getGetBusinessDashboardUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBusinessDashboardQueryKey = (params?: GetBusinessDashboardParams,) => {
+    return [
+    `/api/admin/business-dashboard`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetBusinessDashboardQueryOptions = <TData = Awaited<ReturnType<typeof getBusinessDashboard>>, TError = ErrorType<void>>(params?: GetBusinessDashboardParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBusinessDashboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBusinessDashboardQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBusinessDashboard>>> = ({ signal }) => getBusinessDashboard(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBusinessDashboard>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetBusinessDashboardQueryResult = NonNullable<Awaited<ReturnType<typeof getBusinessDashboard>>>
+export type GetBusinessDashboardQueryError = ErrorType<void>
+
+
+/**
+ * @summary New subscriptions, cancellations, plan changes, trials and module activity between two dates (platform operators only)
+ */
+
+export function useGetBusinessDashboard<TData = Awaited<ReturnType<typeof getBusinessDashboard>>, TError = ErrorType<void>>(
+ params?: GetBusinessDashboardParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBusinessDashboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetBusinessDashboardQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -3493,6 +3584,155 @@ export const useCreateItemCertificate = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateItemCertificateMutationOptions(options));
+    }
+
+export const getGetCertificateReadingUrl = () => {
+
+
+
+
+  return `/api/certificates/reading`
+}
+
+/**
+ * @summary Whether ComplyTrack can read an uploaded certificate, and the AI allowance (owners and ALPS)
+ */
+export const getCertificateReading = async ( options?: RequestInit): Promise<CertificateReadingStatus> => {
+
+  return customFetch<CertificateReadingStatus>(getGetCertificateReadingUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCertificateReadingQueryKey = () => {
+    return [
+    `/api/certificates/reading`
+    ] as const;
+    }
+
+
+export const getGetCertificateReadingQueryOptions = <TData = Awaited<ReturnType<typeof getCertificateReading>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCertificateReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCertificateReadingQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCertificateReading>>> = ({ signal }) => getCertificateReading({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCertificateReading>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCertificateReadingQueryResult = NonNullable<Awaited<ReturnType<typeof getCertificateReading>>>
+export type GetCertificateReadingQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Whether ComplyTrack can read an uploaded certificate, and the AI allowance (owners and ALPS)
+ */
+
+export function useGetCertificateReading<TData = Awaited<ReturnType<typeof getCertificateReading>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCertificateReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCertificateReadingQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReadCertificateUrl = () => {
+
+
+
+
+  return `/api/certificates/read`
+}
+
+/**
+ * Claude reads the certificate (an EICR, gas safety record, fire alarm service certificate and so on) and says which compliance check it is for, its issue and next inspection dates, its outcome and its defects. Nothing is saved: the person checks the reading and saves it with POST /items/{itemId}/certificates (remedialJob true). The file is not stored here. Off until the server has an Anthropic API key; it uses the AI features add-on's allowance.
+ * @summary Read a certificate with AI (owners and ALPS)
+ */
+export const readCertificate = async (certificateReadRequest: CertificateReadRequest, options?: RequestInit): Promise<CertificateReading> => {
+
+  return customFetch<CertificateReading>(getReadCertificateUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(certificateReadRequest)
+  }
+);}
+
+
+
+
+
+export const getReadCertificateMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readCertificate>>, TError,{data: BodyType<CertificateReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readCertificate>>, TError,{data: BodyType<CertificateReadRequest>}, TContext> => {
+
+const mutationKey = ['readCertificate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readCertificate>>, {data: BodyType<CertificateReadRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  readCertificate(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReadCertificateMutationResult = NonNullable<Awaited<ReturnType<typeof readCertificate>>>
+    export type ReadCertificateMutationBody = BodyType<CertificateReadRequest>
+    export type ReadCertificateMutationError = ErrorType<void>
+
+    /**
+ * @summary Read a certificate with AI (owners and ALPS)
+ */
+export const useReadCertificate = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readCertificate>>, TError,{data: BodyType<CertificateReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof readCertificate>>,
+        TError,
+        {data: BodyType<CertificateReadRequest>},
+        TContext
+      > => {
+      return useMutation(getReadCertificateMutationOptions(options));
     }
 
 export const getUpdateItemCertificateUrl = (itemId: number,
@@ -7138,6 +7378,156 @@ export const useReadPatRegisterList = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReadPatRegisterListMutationOptions(options));
+    }
+
+export const getGetImportListReadingUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+
+
+
+
+  return `/api/imports/list-reading/${kind}`
+}
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
+ */
+export const getImportListReading = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: RequestInit): Promise<PatRegisterReadingStatus> => {
+
+  return customFetch<PatRegisterReadingStatus>(getGetImportListReadingUrl(kind),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportListReadingQueryKey = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+    return [
+    `/api/imports/list-reading/${kind}`
+    ] as const;
+    }
+
+
+export const getGetImportListReadingQueryOptions = <TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportListReadingQueryKey(kind);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportListReading>>> = ({ signal }) => getImportListReading(kind, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: kind !== null && kind !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetImportListReadingQueryResult = NonNullable<Awaited<ReturnType<typeof getImportListReading>>>
+export type GetImportListReadingQueryError = ErrorType<void>
+
+
+/**
+ * @summary Whether ComplyTrack can read a photo or document list for an import, and this month's use
+ */
+
+export function useGetImportListReading<TData = Awaited<ReturnType<typeof getImportListReading>>, TError = ErrorType<void>>(
+ kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster', options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getImportListReading>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetImportListReadingQueryOptions(kind,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReadImportListUrl = (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',) => {
+
+
+
+
+  return `/api/imports/list-reading/${kind}/read`
+}
+
+/**
+ * Claude reads the file and returns rows in the import's own columns (RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster). Nothing is saved: the browser sends the rows through the import's usual preview. The file is not stored. Off until the server has an Anthropic API key; readings share the business's monthly number with the PAT register reading.
+ * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
+ */
+export const readImportList = async (kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster',
+    patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<ImportListReadResult> => {
+
+  return customFetch<ImportListReadResult>(getReadImportListUrl(kind),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(patRegisterReadRequest)
+  }
+);}
+
+
+
+
+
+export const getReadImportListMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext> => {
+
+const mutationKey = ['readImportList'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readImportList>>, {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}> = (props) => {
+          const {kind,data} = props ?? {};
+
+          return  readImportList(kind,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReadImportListMutationResult = NonNullable<Awaited<ReturnType<typeof readImportList>>>
+    export type ReadImportListMutationBody = BodyType<PatRegisterReadRequest>
+    export type ReadImportListMutationError = ErrorType<void>
+
+    /**
+ * @summary Read a photo, scan, PDF or Word list into rows for an import (owners and consultants)
+ */
+export const useReadImportList = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readImportList>>, TError,{kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof readImportList>>,
+        TError,
+        {kind: 'room-track-rooms' | 'contractors' | 'fire-call-points' | 'greentrack-equipment' | 'staff-roster';data: BodyType<PatRegisterReadRequest>},
+        TContext
+      > => {
+      return useMutation(getReadImportListMutationOptions(options));
     }
 
 export const getUpdateFireCallPointUrl = (id: number,) => {

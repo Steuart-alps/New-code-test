@@ -4,7 +4,7 @@ import { clientsTable } from "./clients";
 import { usersTable } from "./users";
 
 /** What a row is for. Each AI feature that sends work to Claude has its own name. */
-export const aiUsageFeatureEnum = ["report_reading", "register_reading"] as const;
+export const aiUsageFeatureEnum = ["report_reading", "register_reading", "certificate_reading"] as const;
 export type AiUsageFeature = (typeof aiUsageFeatureEnum)[number];
 
 /**

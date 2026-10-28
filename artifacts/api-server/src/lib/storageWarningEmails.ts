@@ -45,6 +45,18 @@ export function storageWarningThresholdBytes(settingValue: string | null | undef
     : DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES;
 }
 
+/**
+ * The level the warning email goes at: 80% of the paid storage, or the level
+ * set in Settings if the owner chose a lower one. Without a paid limit, the
+ * Settings level (default 5 GB).
+ */
+export function storageWarningLevelBytes(settingValue: string | null | undefined, capacityBytes: number | null): number {
+  if (capacityBytes === null) return storageWarningThresholdBytes(settingValue);
+  const nearlyFull = Math.max(1, Math.floor(capacityBytes * STORAGE_NEARLY_FULL_RATIO));
+  const chosen = Number(settingValue);
+  return Number.isSafeInteger(chosen) && chosen > 0 ? Math.min(chosen, nearlyFull) : nearlyFull;
+}
+
 export function buildStorageWarningEmail(opts: {
   recipientName: string;
   companyName: string;
@@ -140,15 +152,12 @@ async function readUsageByClient(
   const rows: UsageRow[] = [];
   for (const row of result.rows as Array<Record<string, unknown>>) {
     const clientId = Number(row.id);
-    const configured = storageWarningThresholdBytes(row.threshold as string | null);
     const capacityBytes = await capacityBytesOf(clientId);
     rows.push({
       clientId,
       name: String(row.name),
       usedBytes: Number(row.used_bytes),
-      thresholdBytes: capacityBytes === null
-        ? configured
-        : Math.min(configured, Math.floor(capacityBytes * STORAGE_NEARLY_FULL_RATIO)),
+      thresholdBytes: storageWarningLevelBytes(row.threshold as string | null, capacityBytes),
       capacityBytes,
       autoTopUp: capacityBytes === null ? false : await isStorageAutoTopUpOn(clientId),
     });

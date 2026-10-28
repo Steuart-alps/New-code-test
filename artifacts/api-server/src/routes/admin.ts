@@ -10,6 +10,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { escapeHtml, sendSystemEmail } from "../lib/email";
 import { checkStorageAddonPrice } from "../lib/storagePricing";
+import { getBillingSummary } from "../lib/billingAlerts";
 
 const router = Router();
 
@@ -281,6 +282,41 @@ router.get("/admin/storage-price-check", requireAuth, requireConsultant, require
   const result = await checkStorageAddonPrice({ maxAgeMs: 0 });
   const status = result.status === "ok" ? 200 : result.status === "not_configured" ? 404 : 503;
   res.status(status).json(result);
+});
+
+// Business dashboard: new subscriptions, cancellations (with reasons), plan
+// changes, new free trials and module activity between two dates (inclusive,
+// UTC days; default the last 7 days), and the current paying and trial totals.
+// The same figures as ALPS's Monday billing digest. Read-only.
+// Platform operators only (PLATFORM_ADMIN_EMAILS).
+// GET /api/admin/business-dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD
+const DASHBOARD_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const DASHBOARD_MAX_DAYS = 3 * 366;
+router.get("/admin/business-dashboard", requireAuth, requireConsultant, requirePlatformOperator, async (req, res) => {
+  const day = (value: unknown): Date | null | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || !DASHBOARD_DAY.test(value)) return null;
+    const date = new Date(`${value}T00:00:00Z`);
+    return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? null : date;
+  };
+  const fromDay = day(req.query.from);
+  const toDay = day(req.query.to);
+  if (fromDay === null || toDay === null) {
+    return void res.status(400).json({ error: "Dates must be YYYY-MM-DD" });
+  }
+  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const to = new Date((toDay ?? today).getTime() + 86_400_000);
+  const from = fromDay ?? new Date(to.getTime() - 7 * 86_400_000);
+  if (from >= to) return void res.status(400).json({ error: "The start date must be on or before the end date" });
+  if (to.getTime() - from.getTime() > DASHBOARD_MAX_DAYS * 86_400_000) {
+    return void res.status(400).json({ error: "Choose at most three years" });
+  }
+  try {
+    res.json(await getBillingSummary({ from, to }));
+  } catch (err) {
+    logger.error({ err }, "Business dashboard could not be read");
+    res.status(503).json({ error: "The business dashboard is unavailable" });
+  }
 });
 
 // Sends one deliberate error report to Sentry and returns Sentry's answer
