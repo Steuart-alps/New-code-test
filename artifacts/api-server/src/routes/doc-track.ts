@@ -13,6 +13,7 @@ import {
 } from "../lib/acknowledgementRegisterPdf";
 import { newBearerToken } from "../lib/bearerTokens";
 import { recordSiteVisibleSql, siteVisibleSql, siteVisibleToDepartment } from "../lib/departmentSites";
+import { docCategoryAllowed, docCategoryFilter, KITCHEN_DOCUMENT_CATEGORIES } from "../lib/docTrackScope";
 import {
   findEligibleRosterMember,
   findSignOffDocument,
@@ -25,18 +26,25 @@ import {
 const router = Router();
 const storage = new ObjectStorageService();
 
+// KitchenTrack without DocTrack opens this router for HACCP plans and recipe
+// spec sheets only: the mount in routes/index.ts sets res.locals.docCategories
+// to the account's allowed categories (middleware/docTrackCategoryScope.ts),
+// null for all.
+
 async function canAccessSite(clientId: number, siteId: number | null | undefined, departmentId: number | null) {
   if (siteId == null) return true;
   const result = await db.execute(sql`SELECT id, department_id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1`);
   const site = (result.rows ?? [])[0] as any;
   return !!site && await siteVisibleToDepartment({ id: site.id, departmentId: site.department_id }, departmentId);
 }
-async function canAccessDocument(clientId: number, documentId: number, departmentId: number | null) {
+async function canAccessDocument(clientId: number, documentId: number, departmentId: number | null, categories: readonly string[] | null) {
   const result = await db.execute(sql`
     SELECT d.id, d.site_id, d.department, s.department_id,
       (SELECT name FROM departments WHERE id = ${departmentId ?? 0}) AS caller_department
     FROM doc_track_documents d LEFT JOIN sites s ON s.id = d.site_id
-    WHERE d.id = ${documentId} AND d.client_id = ${clientId} LIMIT 1
+    WHERE d.id = ${documentId} AND d.client_id = ${clientId}
+      ${docCategoryFilter(sql`d.category`, categories)}
+    LIMIT 1
   `);
   const doc = (result.rows ?? [])[0] as any;
   if (!doc) return false;
@@ -46,7 +54,7 @@ async function canAccessDocument(clientId: number, documentId: number, departmen
   return siteAllowed && documentAllowed;
 }
 
-export const CATEGORIES = ["risk_assessment", "sop", "handbook", "policy", "procedure", "other"] as const;
+export const CATEGORIES = ["risk_assessment", "sop", "handbook", "policy", "procedure", "other", ...KITCHEN_DOCUMENT_CATEGORIES] as const;
 
 const docCreate = z.object({
   title: z.string().min(1).max(500),
@@ -128,6 +136,7 @@ router.get("/documents", requireAuth, async (req, res) => {
          AND (d.site_id IS NULL OR sr.site_id = d.site_id)
     ) ack_status ON d.requires_acknowledgement = true
     WHERE d.client_id = ${clientId}
+      ${docCategoryFilter(sql`d.category`, res.locals.docCategories)}
       ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR ${siteVisibleSql(sql`d.site_id`, sql`s.department_id`, getActiveDepartmentId(req)!)})
         AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
     ORDER BY d.created_at DESC
@@ -155,6 +164,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
 
   const { title, category, description, fileName, fileSize, mimeType, objectPath, siteId, uploadedBy, requiresAcknowledgement, annualAcknowledgement, department } = parsed.data;
   const createdBy = req.currentUser?.id ?? null;
+  if (!docCategoryAllowed(category, res.locals.docCategories)) return res.status(403).json({ error: "This document type needs DocTrack", code: "SERVICE_NOT_ENABLED", service: "doctrack" });
   if (!await canAccessSite(clientId, siteId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Site not accessible" });
 
   // Tag the uploaded object with a tenant-scoped ACL so the private object
@@ -222,7 +232,8 @@ router.patch("/documents/:id", requireAuth, denyViewers, async (req, res) => {
 
   const parsed = docUpdate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
-  if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req), res.locals.docCategories)) return res.status(404).json({ error: "Not found" });
+  if (parsed.data.category !== undefined && !docCategoryAllowed(parsed.data.category, res.locals.docCategories)) return res.status(403).json({ error: "This document type needs DocTrack", code: "SERVICE_NOT_ENABLED", service: "doctrack" });
   if (parsed.data.siteId !== undefined && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Site not accessible" });
 
   const { title, category, description, siteId, requiresAcknowledgement, annualAcknowledgement, department } = parsed.data;
@@ -265,7 +276,7 @@ router.delete("/documents/:id", requireAuth, denyViewers, async (req, res) => {
 
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-  if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req), res.locals.docCategories)) return res.status(404).json({ error: "Not found" });
 
   await db.execute(sql`
     DELETE FROM doc_track_documents
@@ -284,7 +295,7 @@ router.get("/documents/:id/acknowledgements", requireAuth, async (req, res) => {
   if (isNaN(docId)) return res.status(400).json({ error: "Invalid id" });
 
   // Verify document belongs to this client
-  if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req), res.locals.docCategories)) return res.status(404).json({ error: "Not found" });
 
   // ?sinceId=<ack id> lets an open dialog poll for new or renewed rows without
   // re-downloading every drawn signature. The two-minute overlap covers rows
@@ -326,7 +337,7 @@ router.get("/documents/:id/acknowledgements/export", requireAuth, requireClientA
 
   const docId = parseInt(req.params.id as string);
   if (isNaN(docId)) return res.status(400).json({ error: "Invalid id" });
-  if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req))) {
+  if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req), res.locals.docCategories)) {
     return res.status(404).json({ error: "Not found" });
   }
 
@@ -438,22 +449,23 @@ router.get("/acknowledgements/my", requireAuth, async (req, res) => {
   const departmentId = getActiveDepartmentId(req);
   res.json({
     rosterLinked: true,
-    ...await getMyDocuments(clientId, matches[0], departmentId !== null
+    ...await getMyDocuments(clientId, matches[0], sql`${docCategoryFilter(sql`d.category`, res.locals.docCategories)} ${departmentId !== null
       ? sql`AND (d.site_id IS NULL OR ${siteVisibleSql(sql`d.site_id`, sql`s.department_id`, departmentId)})
         AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${departmentId}))`
-      : sql``),
+      : sql``}`),
   });
 });
 
 // ── Outstanding acknowledgements overview (managers) ────────────────────────
 // For every document that requires acknowledgement, list the roster staff who
 // have NOT yet acknowledged it.
-async function getAcknowledgementOverview(clientId: number, departmentId: number | null) {
+async function getAcknowledgementOverview(clientId: number, departmentId: number | null, categories: readonly string[] | null) {
   const docsResult = await db.execute(sql`
     SELECT d.id, d.title, d.category, d.department, d.site_id, s.name AS site_name, d.created_at
     FROM doc_track_documents d
     LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = d.client_id
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
+      ${docCategoryFilter(sql`d.category`, categories)}
       ${departmentId !== null ? sql`AND (d.site_id IS NULL OR ${siteVisibleSql(sql`d.site_id`, sql`s.department_id`, departmentId)})
         AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${departmentId}))` : sql``}
     ORDER BY d.title ASC
@@ -556,7 +568,7 @@ router.get("/acknowledgements/export", requireAuth, requireClientAdmin, async (r
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const documents = await getAcknowledgementOverview(clientId, getActiveDepartmentId(req));
+  const documents = await getAcknowledgementOverview(clientId, getActiveDepartmentId(req), res.locals.docCategories);
   const formatDate = (date: Date) => date.toLocaleDateString("en-GB", {
     day: "2-digit", month: "short", year: "numeric",
   });
@@ -579,7 +591,7 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const documents = await getAcknowledgementOverview(clientId, getActiveDepartmentId(req));
+  const documents = await getAcknowledgementOverview(clientId, getActiveDepartmentId(req), res.locals.docCategories);
   res.json({
     documents: documents.map(({ dateRange: _dateRange, registerRows: _registerRows, ...document }) => document),
   });
@@ -618,7 +630,7 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
   // Verify document belongs to this client
   const doc = await findSignOffDocument(clientId, docId);
   if (!doc) return res.status(404).json({ error: "Not found" });
-  if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req), res.locals.docCategories)) return res.status(404).json({ error: "Not found" });
   if (!doc.requires_acknowledgement) return res.status(400).json({ error: "This document does not require acknowledgement" });
 
   const user = req.currentUser!;
@@ -754,7 +766,7 @@ router.get("/documents/:id/download-url", requireAuth, async (req, res) => {
   `);
   const row = (result.rows ?? [])[0] as any;
   if (!row) return res.status(404).json({ error: "Not found" });
-  if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req), res.locals.docCategories)) return res.status(404).json({ error: "Not found" });
 
   return sendDocumentDownloadUrl(req, res, clientId, { id, ...row });
 });

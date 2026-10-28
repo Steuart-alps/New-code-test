@@ -22,6 +22,7 @@ import legionellaRouter from "./legionella";
 import safeTrackRouter from "./safe-track";
 import fixTrackRouter from "./fix-track";
 import docTrackRouter from "./doc-track";
+import { docTrackCategoryScope } from "../middleware/docTrackCategoryScope";
 import trainTrackRouter from "./train-track";
 import hotTubRouter from "./hot-tub";
 import treeTrackRouter from "./tree-track";
@@ -148,7 +149,8 @@ router.use("/fix-track", requireAuth, (req, res, next) => {
 }, fixTrackRouter);
 router.use(staffRosterRouter);
 // safetrack and doctrack are now the same module; either key grants access.
-router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack"), docTrackRouter);
+// KitchenTrack alone opens it for HACCP plans and recipe spec sheets only.
+router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack", "kitchentrack"), docTrackCategoryScope, docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
 router.use("/hot-tub", requireAuth, requireService("hottubtrack"), hotTubRouter);
 router.use("/tree-track", requireAuth, requireService("treetrack"), treeTrackRouter);

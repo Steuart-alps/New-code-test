@@ -39,6 +39,8 @@ const CAT_LABEL: Record<string, string> = {
   policy: "Policy",
   procedure: "Procedure",
   other: "Document",
+  haccp: "HACCP plan",
+  recipe_spec: "Recipe spec sheet",
 };
 
 function fileIcon(mimeType: string) {

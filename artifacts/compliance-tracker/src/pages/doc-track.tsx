@@ -61,7 +61,7 @@ interface Site {
   name: string;
 }
 
-type Category = "risk_assessment" | "sop" | "handbook" | "policy" | "procedure" | "other";
+type Category = "risk_assessment" | "sop" | "handbook" | "policy" | "procedure" | "other" | "haccp" | "recipe_spec";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -73,7 +73,28 @@ const CATEGORY_TABS = [
   { key: "policy",          label: "Policies" },
   { key: "procedure",       label: "Procedures" },
   { key: "other",           label: "Other" },
+  { key: "haccp",           label: "HACCP" },
+  { key: "recipe_spec",     label: "Recipe specs" },
 ] as const;
+
+// KitchenTrack shows only its HACCP plans and recipe spec sheets.
+const KITCHEN_CATEGORY_TABS = [
+  { key: "all",         label: "All" },
+  { key: "haccp",       label: "HACCP plans" },
+  { key: "recipe_spec", label: "Recipe spec sheets" },
+] as const;
+const KITCHEN_CATEGORIES: Category[] = ["haccp", "recipe_spec"];
+
+const UPLOAD_CATEGORY_LABELS: Record<Category, string> = {
+  risk_assessment: "Risk Assessment (including COSHH)",
+  sop: "SOP (Standard Operating Procedure)",
+  handbook: "Staff Handbook",
+  policy: "Policy",
+  procedure: "Procedure",
+  other: "Other",
+  haccp: "HACCP plan",
+  recipe_spec: "Recipe spec sheet",
+};
 
 const CATEGORY_META: Record<string, { label: string; color: string; bg: string }> = {
   risk_assessment: { label: "Risk Assessment", color: "text-red-700",    bg: "bg-red-50 border-red-200" },
@@ -82,6 +103,8 @@ const CATEGORY_META: Record<string, { label: string; color: string; bg: string }
   policy:          { label: "Policy",          color: "text-purple-700", bg: "bg-purple-50 border-purple-200" },
   procedure:       { label: "Procedure",       color: "text-teal-700",   bg: "bg-teal-50 border-teal-200" },
   other:           { label: "Other",           color: "text-gray-600",   bg: "bg-gray-100 border-gray-200" },
+  haccp:           { label: "HACCP plan",      color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200" },
+  recipe_spec:     { label: "Recipe spec sheet", color: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
 };
 
 const ACCEPTED_TYPES = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.avi,.mkv,.webm";
@@ -264,12 +287,14 @@ function UploadDialog({
   onUploaded,
   sites,
   existingDepts,
+  categories,
 }: {
   open: boolean;
   onClose: () => void;
   onUploaded: () => void;
   sites: Site[];
   existingDepts: string[];
+  categories: Category[];
 }) {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -277,7 +302,7 @@ function UploadDialog({
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<Category>("risk_assessment");
+  const [category, setCategory] = useState<Category>(categories[0]);
   const [description, setDescription] = useState("");
   const [siteId, setSiteId] = useState<string>("none");
   const [department, setDepartment] = useState("");
@@ -294,7 +319,7 @@ function UploadDialog({
   function reset() {
     setFile(null);
     setTitle("");
-    setCategory("risk_assessment");
+    setCategory(categories[0]);
     setDescription("");
     setSiteId("none");
     setDepartment("");
@@ -459,12 +484,7 @@ function UploadDialog({
             <Select value={category} onValueChange={v => changeCategory(v as Category)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="risk_assessment">Risk Assessment (including COSHH)</SelectItem>
-                <SelectItem value="sop">SOP (Standard Operating Procedure)</SelectItem>
-                <SelectItem value="handbook">Staff Handbook</SelectItem>
-                <SelectItem value="policy">Policy</SelectItem>
-                <SelectItem value="procedure">Procedure</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                {categories.map(c => <SelectItem key={c} value={c}>{UPLOAD_CATEGORY_LABELS[c]}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -519,8 +539,8 @@ function UploadDialog({
             <div className="flex-1">
               <Label htmlFor="requires-ack" className="cursor-pointer">Staff must read and sign</Label>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Adds a task in TrainTrack for every member of staff {department.trim() ? <>in <strong>{department.trim()}</strong></> : "in the business"}
-                {siteId !== "none" ? " at this site" : ""}. Each signature is saved in their training record, and anyone still to sign is listed in the Monday email.
+                Asks every member of staff on the Staff Roster {department.trim() ? <>in <strong>{department.trim()}</strong></> : "in the business"}
+                {siteId !== "none" ? " at this site" : ""} to read and sign it. Each signature is saved in their training record, and anyone still to sign is listed in the Monday email.
               </p>
               {requiresAcknowledgement && roster && (
                 <p className={cn("text-xs mt-1", signers.length ? "text-foreground" : "text-amber-700")} data-testid="upload-signers">
@@ -569,7 +589,22 @@ function UploadDialog({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+const DOC_TRACK_CATEGORIES: Category[] = ["risk_assessment", "sop", "handbook", "policy", "procedure", "other", "haccp", "recipe_spec"];
+
 export default function DocTrackPage() {
+  return (
+    <AppLayout title="DocTrack">
+      <DocTrackLibrary />
+    </AppLayout>
+  );
+}
+
+/**
+ * The document library with staff read-and-sign. `kitchen` shows only
+ * KitchenTrack's HACCP plans and recipe spec sheets, without the DocTrack
+ * heading, audit log or link history.
+ */
+export function DocTrackLibrary({ kitchen = false }: { kitchen?: boolean }) {
   const { activeClientId, user } = useAuth();
   const { toast } = useToast();
 
@@ -599,11 +634,14 @@ export default function DocTrackPage() {
     setLoading(true);
     try {
       const res = await apiFetch("/doc-track/documents");
-      if (res.ok) setDocs(await res.json());
+      if (res.ok) {
+        const rows: Doc[] = await res.json();
+        setDocs(kitchen ? rows.filter(d => KITCHEN_CATEGORIES.includes(d.category)) : rows);
+      }
     } finally {
       setLoading(false);
     }
-  }, [activeClientId]);
+  }, [activeClientId, kitchen]);
 
   useEffect(() => {
     if (!activeClientId) return;
@@ -704,11 +742,17 @@ export default function DocTrackPage() {
     return acc;
   }, {});
 
+  const categoryTabs = kitchen ? KITCHEN_CATEGORY_TABS : CATEGORY_TABS;
+
   return (
-    <AppLayout title="DocTrack">
+    <>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
+        {kitchen ? (
+          <p className="text-sm text-muted-foreground max-w-xl">
+            Upload your HACCP plan and recipe spec sheets. Staff on the Staff Roster are asked to read and sign each one, and every signature is saved in their training record.
+          </p>
+        ) : <div>
           <div className="flex items-center gap-2 mb-1">
             <div className="p-2 bg-cyan-50 rounded-lg">
               <FolderOpen className="w-5 h-5 text-cyan-600" />
@@ -718,7 +762,7 @@ export default function DocTrackPage() {
           <p className="text-sm text-muted-foreground">
             Document library — risk assessments, SOPs, policies &amp; more
           </p>
-        </div>
+        </div>}
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
           {isManager && (
             <Button variant="outline" onClick={() => setOutstandingOpen(true)} className="gap-1.5">
@@ -757,8 +801,8 @@ export default function DocTrackPage() {
           >
             <BookOpen className="w-4 h-4" /> My Documents
           </button>
-          {isManager && <button type="button" data-testid="tab-doc-audit" onClick={() => setPageView("audit")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
-          {isManager && <button type="button" data-testid="tab-doc-link-access" onClick={() => setPageView("link-access")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "link-access" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Sign-off link access</button>}
+          {isManager && !kitchen && <button type="button" data-testid="tab-doc-audit" onClick={() => setPageView("audit")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
+          {isManager && !kitchen && <button type="button" data-testid="tab-doc-link-access" onClick={() => setPageView("link-access")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "link-access" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Sign-off link access</button>}
       </div>
       {isManager && pageView === "audit" && <AuditLog module="doc" />}
       {isManager && pageView === "link-access" && <PublicLinkAccessHistory linkType="sign_off" />}
@@ -841,7 +885,7 @@ export default function DocTrackPage() {
           <div className="flex flex-col sm:flex-row gap-3 mb-6">
             {/* Category tabs */}
             <div className="flex overflow-x-auto gap-1 pb-1 flex-shrink-0">
-              {CATEGORY_TABS.map(tab => (
+              {categoryTabs.map(tab => (
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
@@ -893,7 +937,7 @@ export default function DocTrackPage() {
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
                   {docs.length === 0
-                    ? "Upload your first risk assessment, SOP, or policy to get started."
+                    ? kitchen ? "Upload your HACCP plan or a recipe spec sheet to get started." : "Upload your first risk assessment, SOP, or policy to get started."
                     : "Try a different category or clear the search."}
                 </p>
               </div>
@@ -927,6 +971,7 @@ export default function DocTrackPage() {
         onUploaded={load}
         sites={sites}
         existingDepts={existingDepts}
+        categories={kitchen ? KITCHEN_CATEGORIES : DOC_TRACK_CATEGORIES}
       />
 
       {/* Acknowledgements dialog */}
@@ -935,7 +980,8 @@ export default function DocTrackPage() {
       )}
 
       {/* Outstanding acknowledgements overview */}
-      <OutstandingDialog open={outstandingOpen} onClose={() => setOutstandingOpen(false)} canExport={isManager} />
+      <OutstandingDialog open={outstandingOpen} onClose={() => setOutstandingOpen(false)} canExport={isManager}
+        categories={kitchen ? KITCHEN_CATEGORIES : null} />
 
       {/* Delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
@@ -959,7 +1005,7 @@ export default function DocTrackPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </AppLayout>
+    </>
   );
 }
 
@@ -976,7 +1022,11 @@ interface OutstandingDoc {
   acknowledged: { name: string; acknowledgedAt: string | null; signed: boolean }[];
 }
 
-function OutstandingDialog({ open, onClose, canExport }: { open: boolean; onClose: () => void; canExport: boolean }) {
+function OutstandingDialog({ open, onClose, canExport, categories = null }: {
+  open: boolean; onClose: () => void; canExport: boolean;
+  /** Only documents in these categories (KitchenTrack); null for all. */
+  categories?: Category[] | null;
+}) {
   const { activeClientId } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -991,9 +1041,9 @@ function OutstandingDialog({ open, onClose, canExport }: { open: boolean; onClos
     setView("outstanding");
     apiFetch(`/doc-track/acknowledgements/outstanding${clientScope}`)
       .then(r => (r.ok ? r.json() : { documents: [] }))
-      .then(d => setDocs(d.documents ?? []))
+      .then(d => setDocs(((d.documents ?? []) as OutstandingDoc[]).filter(doc => !categories || categories.includes(doc.category as Category))))
       .finally(() => setLoading(false));
-  }, [open, clientScope]);
+  }, [open, clientScope, categories]);
 
   async function handleExportCombinedRegister() {
     setExporting(true);
