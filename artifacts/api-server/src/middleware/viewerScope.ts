@@ -33,6 +33,7 @@ const TOKEN_LINK_PREFIXES = [
   "/notifications/public/schedule/",
   "/certificate-upload/",
   "/sign-off/",
+  "/site-sign-in/",
 ];
 
 export function viewerMayUse(method: string, path: string): boolean {

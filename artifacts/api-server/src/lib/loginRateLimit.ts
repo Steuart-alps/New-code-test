@@ -432,6 +432,30 @@ export const privacyIntakeLinkSubmitRateLimit = makeLoginRateLimit({
   requireStore: true,
 });
 
+/**
+ * Contractor sign-ins at a site (the public site sign-in link). A reception
+ * tablet signs everyone in from one address, so the per-address limit allows
+ * a busy morning; each site's link is capped separately.
+ */
+export const siteSignInSubmitRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 60,
+  namespace: "site-sign-in-ip",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
+export const siteSignInLinkSubmitRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 200,
+  namespace: "site-sign-in-link",
+  key: (req) => `token:${digestBearerToken(String(req.params.token ?? ""))}`,
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
 /** Test-only helper: reset all counters. */
 export function _resetLoginRateLimit() {
   failures.clear();

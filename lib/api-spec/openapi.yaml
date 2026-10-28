@@ -1189,6 +1189,196 @@ paths:
         "404":
           description: Not a waiting certificate of this business
 
+  /contractor-sign-in/sites:
+    get:
+      operationId: listContractorSignInSites
+      tags: [contractors]
+      summary: Contractor sign-in set-up and who is on site, for each site the caller can see (not Viewers)
+      responses:
+        "200":
+          description: The caller's sites
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorSignInSites"
+
+  /contractor-sign-in/sites/{siteId}:
+    put:
+      operationId: updateContractorSignInSite
+      tags: [contractors]
+      summary: Turn contractor sign-in on or off for a site and set its fire procedure (Owners and Managers)
+      description: >-
+        The first save creates the site's sign-in link. The fire procedure is
+        what contractors read and confirm before signing in.
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateContractorSignInSiteRequest"
+      responses:
+        "200":
+          description: The site's set-up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorSignInSite"
+        "403":
+          description: Only Owners and Managers can change contractor sign-in
+        "404":
+          description: Not one of the caller's sites
+
+  /contractor-sign-in/sites/{siteId}/reset-link:
+    post:
+      operationId: resetContractorSignInLink
+      tags: [contractors]
+      summary: Give a site a new sign-in link; the old link and its posters stop working
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The site's set-up with its new link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorSignInSite"
+        "404":
+          description: Not one of the caller's sites, or sign-in was never turned on
+
+  /contractor-sign-in/sites/{siteId}/poster:
+    get:
+      operationId: getContractorSignInPoster
+      tags: [contractors]
+      summary: An A4 PDF poster with the site's sign-in QR code, for reception
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The poster
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Not one of the caller's sites, or sign-in is off
+
+  /contractor-sign-in/sites/{siteId}/email-link:
+    post:
+      operationId: emailContractorSignInLink
+      tags: [contractors]
+      summary: Email the site's sign-in link to a contractor on the Contractors list
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailContractorSignInLinkRequest"
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorSignInLinkEmailed"
+        "400":
+          description: Not a contractor of this business, or they have no email address
+        "404":
+          description: Not one of the caller's sites, or sign-in is off
+        "502":
+          description: The email could not be sent
+
+  /contractor-sign-in/visits:
+    get:
+      operationId: listContractorSignIns
+      tags: [contractors]
+      summary: Contractor visits at the caller's sites, newest first; anyone still on site is always included
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: days
+          in: query
+          required: false
+          description: How many days back (default 30, at most 366)
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Visits
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractorSignInVisit"
+        "404":
+          description: Not one of the caller's sites
+
+  /contractor-sign-in/visits/{id}:
+    get:
+      operationId: getContractorSignIn
+      tags: [contractors]
+      summary: One visit with what the contractor read and their signature
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The visit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorSignInVisitDetail"
+        "404":
+          description: Not a visit at one of the caller's sites
+
+  /contractor-sign-in/visits/{id}/sign-out:
+    post:
+      operationId: signOutContractor
+      tags: [contractors]
+      summary: Sign a contractor out for them (e.g. at the fire roll call)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The visit, signed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorSignInVisit"
+        "404":
+          description: Not a visit at one of the caller's sites
+
   /items/{itemId}/certificates/{id}:
     put:
       operationId: updateItemCertificate
@@ -7228,6 +7418,84 @@ components:
           items: { type: string }
           description: Things that could not be read with confidence.
       required: [certificateType, name, itemId, checkReason, newCheck, contractorName, issueDate, nextInspectionDate, nextInspectionSource, outcome, summary, defects, unclear]
+
+    ContractorSignInSites:
+      type: object
+      properties:
+        canManage: { type: boolean, description: "Whether the caller can change the set-up (Owners and Managers)" }
+        onSiteHours: { type: integer, description: "A visit still open after this many hours counts as not signed out" }
+        sites:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractorSignInSite"
+      required: [canManage, onSiteHours, sites]
+
+    ContractorSignInSite:
+      type: object
+      properties:
+        siteId: { type: integer }
+        siteName: { type: string }
+        enabled: { type: boolean }
+        link: { type: string, nullable: true, description: "The site's sign-in link; null until sign-in is first turned on" }
+        fireProcedure: { type: string, nullable: true }
+        fireTrackEvacuation: { type: string, nullable: true, description: "FireTrack's evacuation arrangements for the site, to copy from" }
+        asbestosStatus: { type: string, enum: [register, none_expected, missing] }
+        asbestosEntryCount: { type: integer }
+        onSiteCount: { type: integer }
+      required: [siteId, siteName, enabled, link, fireProcedure, fireTrackEvacuation, asbestosStatus, asbestosEntryCount, onSiteCount]
+
+    UpdateContractorSignInSiteRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled: { type: boolean }
+        fireProcedure: { type: string, nullable: true, maxLength: 10000 }
+
+    EmailContractorSignInLinkRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        contractorId: { type: integer }
+      required: [contractorId]
+
+    ContractorSignInLinkEmailed:
+      type: object
+      properties:
+        sentTo: { type: string }
+      required: [sentTo]
+
+    ContractorSignInVisit:
+      type: object
+      properties:
+        id: { type: integer }
+        siteId: { type: integer, nullable: true }
+        siteName: { type: string }
+        contractorId: { type: integer, nullable: true, description: "The Contractors list entry with the same email address, if any" }
+        name: { type: string }
+        company: { type: string }
+        phone: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        visitReason: { type: string, nullable: true }
+        fireAcknowledged: { type: boolean, description: "False when the site had no fire procedure to read" }
+        asbestosStatus: { type: string, enum: [register, none_expected, missing] }
+        signedInAt: { type: string, format: date-time }
+        signedOutAt: { type: string, format: date-time, nullable: true }
+        signedOutByName: { type: string, nullable: true, description: "Who signed them out, when it was not the contractor" }
+        status: { type: string, enum: [on_site, signed_out, did_not_sign_out] }
+      required: [id, siteId, siteName, contractorId, name, company, phone, email, visitReason, fireAcknowledged, asbestosStatus, signedInAt, signedOutAt, signedOutByName, status]
+
+    ContractorSignInVisitDetail:
+      allOf:
+        - $ref: "#/components/schemas/ContractorSignInVisit"
+        - type: object
+          properties:
+            fireProcedureText: { type: string, nullable: true, description: "The fire procedure the contractor confirmed reading" }
+            asbestosSnapshot:
+              type: object
+              additionalProperties: true
+              description: The asbestos information the contractor was shown
+            signature: { type: string, description: "PNG data URL" }
+          required: [fireProcedureText, asbestosSnapshot, signature]
 
     CertificateInbox:
       type: object

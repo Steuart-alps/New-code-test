@@ -67,6 +67,10 @@ const EXCEPTIONS = {
   "privacy-intake-public.ts POST /:token": linkToken("public privacy rights request", /\bresolveForm\(req\)/),
   "notifications.ts POST /:token [notificationsPublicRouter]": linkToken("contractor visit scheduling", /\bscheduleTokenDigest\(req\.params\.token\)/),
   "certificate-inbox.ts POST /:token [certificateUploadPublicRouter]": linkToken("contractor certificate upload", /\bfindCertificateUploadLink\(req\.params\.token\)/),
+  "contractor-sign-in.ts POST /:token/sign-in [siteSignInPublicRouter]": linkToken("contractor signs in at a site", /\bresolveLink\(req\)/),
+  // findOwnVisit resolves the site link and then the visit by its sign-out key's digest.
+  "contractor-sign-in.ts POST /:token/visit [siteSignInPublicRouter]": linkToken("contractor checks own visit", /\bfindOwnVisit\(req, res\)/),
+  "contractor-sign-in.ts POST /:token/sign-out [siteSignInPublicRouter]": linkToken("contractor signs out", /\bfindOwnVisit\(req, res\)/),
   "staff-roster.ts POST /staff/:id/set-pin": kioskToken("PIN enrollment", /\benrollmentRateLimit\b/, /\breq\.body\?\.enrollment_token\b/, /\bdigestBearerToken\(parsedToken\.data\)/),
   "staff-roster.ts POST /staff/verify-pin": kioskToken("kiosk PIN check", /\bkioskClient\(req\.header\("x-kiosk-token"\)\)/),
   "staff-roster.ts POST /staff/kiosk-action": kioskToken("one kiosk action", /token_hash=\$\{digestBearerToken\(parsed\.data\.capability\)\}/),

@@ -53,6 +53,10 @@ const EXCLUDED = {
   "GET /api/sign-off/:token/documents": tokenLink,
   "GET /api/sign-off/:token/documents/:docId/download": tokenLink,
   "POST /api/sign-off/:token/acknowledge": tokenLink,
+  "GET /api/site-sign-in/:token": tokenLink,
+  "POST /api/site-sign-in/:token/sign-in": tokenLink,
+  "POST /api/site-sign-in/:token/visit": tokenLink,
+  "POST /api/site-sign-in/:token/sign-out": tokenLink,
 };
 
 // Same method and path declared in two files. Express runs the first; the
