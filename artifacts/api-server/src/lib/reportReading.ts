@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { strFromU8, unzipSync } from "fflate";
 import { z } from "zod";
 import { usageFromMessage, type AiCallUsage } from "./aiPricing";
+import { aiEffortFor, aiModelFor, serverSideFallbackParams } from "./aiModels";
 import { aiScopeRules, promptLabel, WRONG_FILE_PROPERTY } from "./aiScope";
 
 /**
@@ -11,7 +12,6 @@ import { aiScopeRules, promptLabel, WRONG_FILE_PROPERTY } from "./aiScope";
  * the feature reports itself unavailable and people type the actions in.
  */
 
-export const REPORT_READING_DEFAULT_MODEL = "claude-opus-5-5";
 /** Largest file sent to Claude. Bigger reports can still be uploaded and typed in. */
 export const REPORT_READING_MAX_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -21,8 +21,9 @@ export function reportReadingConfigured(): boolean {
   return !!process.env.ANTHROPIC_API_KEY?.trim();
 }
 
+/** Claude Opus 5.5 at medium effort by default (lib/aiModels.ts). */
 export function reportReadingModel(): string {
-  return process.env.REPORT_READING_MODEL?.trim() || REPORT_READING_DEFAULT_MODEL;
+  return aiModelFor("report_reading");
 }
 
 /** Reports a business may have read in one calendar month (fair use; 0 = no limit). */
@@ -230,10 +231,9 @@ export async function readReportForActions(input: ReportReadingInput): Promise<R
   const message = await client.beta.messages.stream({
     model,
     max_tokens: 32000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...serverSideFallbackParams(model),
     system: SYSTEM_PROMPT,
-    output_config: { effort: "medium", format: { type: "json_schema", schema: outputSchema(moduleKeys, siteIds) } },
+    output_config: { effort: aiEffortFor("report_reading"), format: { type: "json_schema", schema: outputSchema(moduleKeys, siteIds) } },
     messages: [{
       role: "user",
       content: [content, { type: "text", text: `${context}\n\nList the actions this report requires.` }],

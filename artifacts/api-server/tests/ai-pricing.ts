@@ -1,7 +1,8 @@
 // Pure tests for pricing a request to Claude (src/lib/aiPricing.ts), which the
 // AI add-on's £15 allowance is counted in.
 import assert from "node:assert/strict";
-import { aiCostUsdMicros, usageFromMessage, type AiCallUsage } from "../src/lib/aiPricing";
+import { aiCostUsdMicros, combinedUsage, usageFromMessage, type AiCallUsage } from "../src/lib/aiPricing";
+import { AI_MODEL_SETTINGS } from "../src/lib/aiModels";
 
 const base: AiCallUsage = {
   requestedModel: "claude-opus-5-5",
@@ -23,6 +24,24 @@ assert.equal(aiCostUsdMicros({ ...base, inputTokens: 1, outputTokens: 0, model: 
 assert.equal(aiCostUsdMicros({ ...base, inputTokens: 1000, model: "claude-sonnet-5-5" }), 4000);
 assert.equal(aiCostUsdMicros({ ...base, inputTokens: 1000, model: "claude-fable-5-1" }), 10_000);
 assert.equal(aiCostUsdMicros({ ...base, inputTokens: 1000, model: "claude-new-model", requestedModel: "claude-new-model" }), 10_000);
+
+// Sonnet 5.5 cache reads are 20 cents per million tokens.
+assert.equal(aiCostUsdMicros({ ...base, model: "claude-sonnet-5-5", requestedModel: "claude-sonnet-5-5", cacheReadTokens: 1000 }), 200);
+
+// A declined Haiku list tried again on Sonnet counts both requests at Sonnet's rates.
+const sonnet = { ...base, model: "claude-sonnet-5-5", requestedModel: "claude-sonnet-5-5" };
+const both = combinedUsage({ ...sonnet, inputTokens: 1000, outputTokens: 100 }, { ...base, model: "claude-haiku-5-5", requestedModel: "claude-haiku-5-5", inputTokens: 500, outputTokens: 50 });
+assert.equal(both.requestedModel, "claude-sonnet-5-5");
+assert.equal(aiCostUsdMicros(both), 1500 * 2 + 150 * 10);
+
+// Every feature's default model has a price, so none falls back to the dearest rates.
+for (const [feature, setting] of Object.entries(AI_MODEL_SETTINGS)) {
+  assert.notEqual(
+    aiCostUsdMicros({ ...base, model: setting.model, requestedModel: setting.model, inputTokens: 1_000_000 }),
+    10_000_000,
+    `${feature}'s model ${setting.model} is priced`,
+  );
+}
 
 // Haiku is dearer once the prompt passes 100,000 tokens.
 const haiku = { ...base, model: "claude-haiku-5-5", requestedModel: "claude-haiku-5-5" };
