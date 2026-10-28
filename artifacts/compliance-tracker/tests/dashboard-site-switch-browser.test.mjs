@@ -121,7 +121,11 @@ function summaryFor(scope) {
       status: missing.length === 0 ? "ok" : branch === "am" ? "overdue" : "attention",
       health: missing.length === 0 ? "clear" : "action_required",
       badge: branch === "am" ? e.amBadge : e.pmBadge,
-      items: missing.map((name) => ({ label: name, detail: `${branch.toUpperCase()} checklist not submitted today`, path })),
+      items: missing.map((name) => ({
+        label: name,
+        detail: `${branch.toUpperCase()} checklist not submitted today`,
+        path: `${path}?siteId=${SITES.find((s) => s.name === name).id}`,
+      })),
     };
   };
   return {
@@ -134,6 +138,9 @@ function summaryFor(scope) {
       expectedPmPairs: sites.length,
       completedPmPairs: sites.filter((s) => DONE[s.id].pm).length,
       completedSitePairs: sites.filter((s) => DONE[s.id].am && DONE[s.id].pm).length,
+      outstanding: sites
+        .filter((s) => !DONE[s.id].am || !DONE[s.id].pm)
+        .map((s) => ({ siteId: s.id, siteName: s.name, am: !DONE[s.id].am, pm: !DONE[s.id].pm })),
     },
   };
 }
@@ -360,6 +367,27 @@ async function main() {
       await retry.respond();
       await settle(page);
       await expectShowing(page, "22", "after the old retry answered");
+      await page.close();
+    });
+
+    await test("each checklist still to do links to that site's checklist", async () => {
+      const { page, api } = await open();
+      const links = await strip(page).getByRole("link", { name: /^Open .* (AM|PM) checklist$/ })
+        .evaluateAll((els) => els.map((el) => [el.getAttribute("aria-label"), el.getAttribute("href")]));
+      assert.deepEqual(links, [
+        ["Open Harbour Kitchen PM checklist", "/daily-track-pm?siteId=11"],
+        ["Open Hilltop Cafe AM checklist", "/daily-track-am?siteId=22"],
+        ["Open Riverside Deli AM checklist", "/daily-track-am?siteId=33"],
+        ["Open Riverside Deli PM checklist", "/daily-track-pm?siteId=33"],
+      ]);
+      await pickSite(page, "Harbour Kitchen");
+      await (await api.nextSummary("11")).respond();
+      await expectShowing(page, "11", "Harbour loaded");
+      assert.deepEqual(
+        await strip(page).getByRole("link", { name: /checklist$/ }).evaluateAll((els) => els.map((el) => el.getAttribute("href"))),
+        ["/daily-track-pm?siteId=11"],
+        "only Harbour's PM checklist is still to do",
+      );
       await page.close();
     });
 

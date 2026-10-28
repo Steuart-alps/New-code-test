@@ -386,7 +386,8 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
     for (const site of sites) {
       for (const requirement of requirements) {
         const current = state.get(`${site.id}:${requirement}`);
-        const path = requirement.endsWith("_opening") ? "/daily-track-am" : "/daily-track-pm";
+        // Open the checklist for this site, not the page's "No site filter" slot.
+        const path = `${requirement.endsWith("_opening") ? "/daily-track-am" : "/daily-track-pm"}?siteId=${site.id}`;
         const label = CHECKLIST_NAMES[requirement];
         if (current?.submitted) {
           push(current.failed

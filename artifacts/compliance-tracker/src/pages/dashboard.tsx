@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, type ReactNode } from "react";
 import { AppLayout } from "@/components/layout";
 import { SayItButton } from "@/components/say-it-button";
 import { useListSites } from "@workspace/api-client-react";
@@ -62,7 +62,12 @@ interface ChecklistTotals {
   expectedPmPairs: number;
   completedPmPairs: number;
   completedSitePairs: number;
+  /** Sites with a checklist still to submit today; `am` / `pm` true = still to do. */
+  outstanding?: Array<{ siteId: number; siteName: string; am: boolean; pm: boolean }>;
 }
+
+/** Most sites listed under "Still to do today"; the rest are on the full status page. */
+const MAX_OUTSTANDING_SITES = 6;
 
 // ── Status styling ─────────────────────────────────────────────────────────────
 
@@ -373,11 +378,25 @@ function SetupChecklist({
 
 // ── DailyTrack snapshot card ──────────────────────────────────────────────────
 
+/** A checklist still to do today: opens that site's checklist ready to fill in. */
+function ChecklistLink({ href, label, children }: { href: string; label: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      className="flex cursor-pointer items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:border-amber-400 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+    >
+      {children} <ArrowRight className="w-3 h-3" />
+    </Link>
+  );
+}
+
 function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals | null; loading: boolean }) {
   if (!totals && !loading) return null;
   const requiredPairs = (totals?.expectedAmPairs ?? 0) + (totals?.expectedPmPairs ?? 0);
   const completedPairs = (totals?.completedAmPairs ?? 0) + (totals?.completedPmPairs ?? 0);
   const allDone = Boolean(totals && totals.available && requiredPairs > 0 && completedPairs === requiredPairs);
+  const outstanding = totals?.outstanding ?? [];
   const dateLabel = totals
     ? new Date(`${totals.date}T12:00:00`).toLocaleDateString("en-GB", {
         weekday: "short",
@@ -427,6 +446,33 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
           </span>
         )}
       </div>
+      {!loading && totals?.available && outstanding.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs font-medium text-muted-foreground mb-1.5">Still to do today</p>
+          <ul className="space-y-1.5">
+            {outstanding.slice(0, MAX_OUTSTANDING_SITES).map((site) => (
+              <li key={site.siteId} className="flex items-center gap-2 flex-wrap">
+                <span className="min-w-0 flex-1 truncate text-sm">{site.siteName}</span>
+                {site.am && (
+                  <ChecklistLink href={`/daily-track-am?siteId=${site.siteId}`} label={`Open ${site.siteName} AM checklist`}>
+                    AM checklist
+                  </ChecklistLink>
+                )}
+                {site.pm && (
+                  <ChecklistLink href={`/daily-track-pm?siteId=${site.siteId}`} label={`Open ${site.siteName} PM checklist`}>
+                    PM checklist
+                  </ChecklistLink>
+                )}
+              </li>
+            ))}
+          </ul>
+          {outstanding.length > MAX_OUTSTANDING_SITES && (
+            <p className="text-xs text-muted-foreground mt-1.5">
+              and {outstanding.length - MAX_OUTSTANDING_SITES} more {outstanding.length - MAX_OUTSTANDING_SITES === 1 ? "site" : "sites"}
+            </p>
+          )}
+        </div>
+      )}
       {!loading && (
         <div className="mt-3 flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
           {totals?.expectedAmPairs ? (
