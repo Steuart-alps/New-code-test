@@ -11,6 +11,7 @@ import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
+import { docCategoryFilter } from "./docTrackScope";
 import { sendEmail, getPublicAppUrl, renderEmailLayout } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 import { getNotificationEmails } from "./getNotificationEmails";
@@ -28,10 +29,11 @@ function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export async function getOutstandingAckSummary(clientId: number): Promise<OutstandingDocSummary[]> {
+export async function getOutstandingAckSummary(clientId: number, categories: readonly string[] | null = null): Promise<OutstandingDocSummary[]> {
   const docsResult = await db.execute(sql`
     SELECT id, title, department, site_id FROM doc_track_documents
     WHERE client_id = ${clientId} AND requires_acknowledgement = true
+      ${docCategoryFilter(sql`category`, categories)}
     ORDER BY title ASC
   `);
   const docs = (docsResult.rows ?? []) as any[];

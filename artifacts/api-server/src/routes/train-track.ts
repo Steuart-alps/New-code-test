@@ -89,6 +89,9 @@ export const DOCUMENT_TYPES = [
   "policy",
   "procedure",
   "other",
+  // KitchenTrack's HACCP plans and recipe spec sheets (DocTrack sign-offs).
+  "haccp",
+  "recipe_spec",
 ] as const;
 
 const signatureField = z.string().max(500000).nullable().optional(); // base64 PNG

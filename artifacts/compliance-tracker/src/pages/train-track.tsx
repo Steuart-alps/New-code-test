@@ -120,6 +120,8 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   policy: "Policy",
   procedure: "Procedure",
   other: "Other",
+  haccp: "HACCP plan",
+  recipe_spec: "Recipe spec sheet",
 };
 
 const STATUS_CFG = {

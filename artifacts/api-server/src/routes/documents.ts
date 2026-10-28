@@ -18,8 +18,9 @@ import { createDownloadMeter } from "../lib/downloadUsage";
 const router = Router();
 const storage = new ObjectStorageService();
 
-// Optional document types. KitchenTrack keeps HACCP plans and recipe spec
-// sheets here; a document without a type is a general business document.
+// Optional document types; a document without a type is a general business
+// document. (KitchenTrack's HACCP plans and recipe spec sheets live in
+// DocTrack so staff can read and sign them: lib/docTrackScope.ts.)
 export const DOCUMENT_CATEGORIES = ["haccp", "recipe_spec"] as const;
 const categorySchema = z.enum(DOCUMENT_CATEGORIES);
 

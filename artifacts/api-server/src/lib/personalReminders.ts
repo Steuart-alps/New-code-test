@@ -85,6 +85,7 @@ import { logger } from "./logger";
 import { sendPushToUsers } from "./pushNotifications";
 import { getOutstandingSafeTrackAcknowledgements, getOutstandingSafeTrackStaffReminders } from "./safeTrackAckReminders";
 import { getEntitledServices, isEntitled } from "./services";
+import { docCategoryFilter, docTrackCategoriesFor } from "./docTrackScope";
 import { localHourIn } from "./trackReminders";
 import { collectOutstandingTraining, type StaffTraining } from "./trainingOutstanding";
 import { candidateCanSeeSite } from "./trackOwners";
@@ -487,7 +488,7 @@ function ownerUpdateHasContent(update: OwnerUpdate): boolean {
 // ── Data ─────────────────────────────────────────────────────────────────────
 
 /** DocTrack documents each staff member (with a roster email) still has to sign. */
-async function docTrackSignOffs(clientId: number): Promise<Array<{ email: string; title: string }>> {
+async function docTrackSignOffs(clientId: number, categories: readonly string[] | null): Promise<Array<{ email: string; title: string }>> {
   return rowsOf<{ email: string; title: string }>(await db.execute(sql`
     SELECT lower(trim(staff.email)) AS email, d.title
     FROM doc_track_documents d
@@ -496,6 +497,7 @@ async function docTrackSignOffs(clientId: number): Promise<Array<{ email: string
      AND (d.department IS NULL OR staff.department = d.department)
      AND (d.site_id IS NULL OR staff.site_id = d.site_id)
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
+      ${docCategoryFilter(sql`d.category`, categories)}
       AND NULLIF(trim(staff.email), '') IS NOT NULL
       -- Signed, and not since expired (annual documents) or removed from TrainTrack.
       AND NOT EXISTS (
@@ -659,14 +661,19 @@ export async function runPersonalRemindersForClient(
     }
   }
 
-  // Documents to sign, by staff roster email.
-  const signs = isEntitled(services, "safetrack") || isEntitled(services, "doctrack");
+  // Documents to sign, by staff roster email. KitchenTrack alone signs its
+  // HACCP plans and recipe spec sheets, which live in DocTrack.
+  const docCategories = docTrackCategoriesFor(services);
+  const fullDocs = docCategories === null;
+  const signs = docCategories === null || docCategories.length > 0;
   if (signs) {
     try {
-      for (const staff of await getOutstandingSafeTrackStaffReminders(clientId)) {
-        recipientFor(staff.email).sections.signOffs.push(...staff.documents);
+      if (fullDocs) {
+        for (const staff of await getOutstandingSafeTrackStaffReminders(clientId)) {
+          recipientFor(staff.email).sections.signOffs.push(...staff.documents);
+        }
       }
-      for (const row of await docTrackSignOffs(clientId)) {
+      for (const row of await docTrackSignOffs(clientId, docCategories)) {
         recipientFor(row.email).sections.signOffs.push({ title: row.title, docType: "DocTrack document", siteName: null });
       }
     } catch (err) {
@@ -685,8 +692,8 @@ export async function runPersonalRemindersForClient(
       schedule ? readActivity(schedule.since) : Promise.resolve([] as ActivityRow[]),
       managerSchedule && managerSchedule.since !== schedule?.since ? readActivity(managerSchedule.since) : Promise.resolve(null),
       signs ? Promise.all([
-        getOutstandingSafeTrackAcknowledgements(clientId),
-        getOutstandingAckSummary(clientId),
+        fullDocs ? getOutstandingSafeTrackAcknowledgements(clientId) : Promise.resolve([]),
+        getOutstandingAckSummary(clientId, docCategories),
       ]).then(([safe, doc]) => [
         ...safe.map((row) => ({ title: row.title, docType: row.docType, outstanding: row.outstandingCount })),
         ...doc.map((row) => ({ title: row.title, docType: "DocTrack document", outstanding: row.outstanding.length })),

@@ -40,7 +40,7 @@ import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2, FileText } from "lucide-react";
-import { DocumentLibrary, type DocumentCategory } from "@/components/document-library";
+import { DocTrackLibrary } from "./doc-track";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { cn } from "@/lib/utils";
@@ -2288,11 +2288,6 @@ const TABS: { id: ActiveTab; label: string; icon: any; description: string }[] =
   { id: "documents", label: "HACCP & Recipes",      icon: FileText,      description: "HACCP plans and recipe spec sheets" },
 ];
 
-const KITCHEN_DOCUMENT_CATEGORIES: DocumentCategory[] = [
-  { value: "haccp", label: "HACCP plan" },
-  { value: "recipe_spec", label: "Recipe spec sheet" },
-];
-
 export default function KitchenPage() {
   const { hasService } = useAuth();
   const canAdmin = useCanAdmin();
@@ -2433,8 +2428,7 @@ export default function KitchenPage() {
         {activeTab === "weekly"   && <WeeklyReviewTab />}
         {activeTab === "probe"    && <ProbeCheckTab defaultProbeNamesJson={foodSafetyConfig?.food_probe_names} />}
         {activeTab === "cleaning" && <CleaningScheduleTab />}
-        {activeTab === "documents" && <DocumentLibrary categories={KITCHEN_DOCUMENT_CATEGORIES}
-          emptyText="Upload your HACCP plan and recipe spec sheets so the whole kitchen team can find them." />}
+        {activeTab === "documents" && <DocTrackLibrary kitchen />}
       </div>
     </AppLayout>
   );

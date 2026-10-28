@@ -148,7 +148,8 @@ router.use("/fix-track", requireAuth, (req, res, next) => {
 }, fixTrackRouter);
 router.use(staffRosterRouter);
 // safetrack and doctrack are now the same module; either key grants access.
-router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack"), docTrackRouter);
+// KitchenTrack alone opens it for HACCP plans and recipe spec sheets only.
+router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack", "kitchentrack"), docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
 router.use("/hot-tub", requireAuth, requireService("hottubtrack"), hotTubRouter);
 router.use("/tree-track", requireAuth, requireService("treetrack"), treeTrackRouter);

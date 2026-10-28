@@ -27,13 +27,13 @@ const fitter = await ok(owner.request("POST", "/staff-roster", { name: "Fran Che
 await ok(owner.request("POST", "/staff-roster", { name: "Lee Leaver", siteId: siteA.id, department: "Kitchen", active: false }), 201, "inactive roster");
 
 // Uploading needs file storage; the document rows are the prerequisite here.
-async function addDocument(clientId, { title, siteId = null, department = null, requiresAck = true, annual = false }) {
+async function addDocument(clientId, { title, siteId = null, department = null, requiresAck = true, annual = false, category = "risk_assessment" }) {
   const result = await pool.query(
     `INSERT INTO doc_track_documents
        (client_id, site_id, title, category, file_name, mime_type, object_path, requires_acknowledgement, annual_acknowledgement, department)
-     VALUES ($1, $2, $3, 'risk_assessment', 'document.pdf', 'application/pdf', $4, $5, $6, $7)
+     VALUES ($1, $2, $3, $8, 'document.pdf', 'application/pdf', $4, $5, $6, $7)
      RETURNING id`,
-    [clientId, siteId, title, `/objects/uploads/tenant-${clientId}/${title.replace(/\W+/g, "-")}`, requiresAck, annual, department],
+    [clientId, siteId, title, `/objects/uploads/tenant-${clientId}/${title.replace(/\W+/g, "-")}`, requiresAck, annual, department, category],
   );
   return result.rows[0].id;
 }
@@ -112,6 +112,34 @@ mine = await ok(cookViewer.request("GET", "/train-track/my-documents"), 200, "af
 assert.deepEqual(mine.pending.map((d) => d.id), [everyoneDoc], "expired: sign again");
 mine = await ok(cookViewer.request("POST", `/train-track/my-documents/${everyoneDoc}/sign`, { signature }), 200, "viewer signs again");
 assert.deepEqual(mine.pending, []);
+
+// ── KitchenTrack: a HACCP plan the kitchen staff must read and sign ─────────
+// Staff on the roster without a login are signed off by a manager.
+const haccpDoc = await addDocument(owner.clientId, { title: "HACCP plan", department: "Kitchen", category: "haccp" });
+const listed = await ok(owner.request("GET", "/doc-track/documents"), 200, "library");
+assert.equal(listed.find((d) => d.id === haccpDoc)?.category, "haccp", "HACCP plan is in the library");
+await ok(owner.request("PATCH", `/doc-track/documents/${haccpDoc}`, { category: "recipe_spec" }), 200, "recipe spec sheet is a category");
+await ok(owner.request("PATCH", `/doc-track/documents/${haccpDoc}`, { category: "haccp" }), 200, "back to HACCP plan");
+overview = await overviewFor(owner, "overview with the HACCP plan");
+assert.deepEqual(overview.find((d) => d.id === haccpDoc).outstanding.map((m) => m.id).sort(), [cook.id, fitter.id].sort(),
+  "every active kitchen member of staff must sign");
+await ok(owner.request("POST", `/doc-track/documents/${haccpDoc}/acknowledge`, {
+  acknowledgements: [{ staffRosterId: fitter.id, staffName: "Fran Chef", signature: "Fran Chef" }],
+}), 201, "manager signs for a roster member");
+const haccpRecord = await pool.query(
+  "SELECT document_type FROM train_track_records WHERE client_id = $1 AND staff_roster_id = $2 AND document_title = 'HACCP plan'",
+  [owner.clientId, fitter.id],
+);
+assert.equal(haccpRecord.rows[0]?.document_type, "haccp", "the sign-off is in their training record as a HACCP plan");
+overview = await overviewFor(owner, "overview after the HACCP sign-off");
+assert.deepEqual(overview.find((d) => d.id === haccpDoc).outstanding.map((m) => m.id), [cook.id]);
+
+// Without DocTrack or KitchenTrack (trial over, no subscription) the library is closed.
+await pool.query("UPDATE clients SET trial_ends_at = now() - interval '1 day', stripe_customer_id = $2 WHERE id = $1",
+  [foreign.clientId, `cus_doc_sign_offs_${foreign.clientId}`]);
+const closed = await foreign.request("GET", "/doc-track/documents");
+assert.equal(closed.status, 403, "no DocTrack or KitchenTrack");
+assert.equal(closed.data?.code, "SERVICE_NOT_ENABLED");
 
 // Left the business: nothing to sign.
 await ok(owner.request("PATCH", `/staff-roster/${cook.id}`, { active: false }), 200, "cook leaves");

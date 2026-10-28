@@ -239,6 +239,9 @@ jobs:
       - name: Document read-and-sign tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:doc-sign-offs
 
+      - name: DocTrack categories by service (KitchenTrack HACCP and recipe sheets)
+        run: pnpm --filter @workspace/api-server run test:doc-track-scope
+
       # Older, populated databases (Replit-era table layouts) must keep every
       # record through the runtime migrations, readable through today's routes.
       - name: Upgrade-path fixture tests
