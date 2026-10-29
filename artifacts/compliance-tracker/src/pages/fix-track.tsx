@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import {
   Lock, Plus, Pencil, Trash2, Search, Wrench, AlertTriangle, CheckCircle2,
   Clock, Loader2, ImagePlus, X, ImageOff, Send, UserCog, BarChart3, LayoutGrid,
@@ -667,6 +667,7 @@ export default function FixTrackPage() {
   const [savingAlertSettings, setSavingAlertSettings] = useState(false);
 
   const [, setLocation] = useLocation();
+  const linkSearch = useSearch();
 
   useEffect(() => {
     if (!dialogOpen || editing) return;
@@ -741,7 +742,8 @@ export default function FixTrackPage() {
     setDialogOpen(true);
   }
 
-  // "Report a fault" on a scanned QR label: a new report naming the item.
+  // "Report a fault" on a scanned QR label, or "Report it in FixTrack" in
+  // Say it (which can be opened on this page too): a new report naming the item.
   useEffect(() => {
     const link = takeLinkParams(["report", "title", "location", "siteId"] as const);
     if (link?.report !== "1" || !hasFixtrack) return;
@@ -751,7 +753,7 @@ export default function FixTrackPage() {
       location: link.location?.slice(0, 300),
       ...(Number.isSafeInteger(siteId) && siteId > 0 ? { siteId } : {}),
     });
-  }, []);
+  }, [linkSearch]);
 
   function openEdit(issue: Issue) {
     setEditing(issue);

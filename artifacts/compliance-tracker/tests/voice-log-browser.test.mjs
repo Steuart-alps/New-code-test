@@ -15,7 +15,10 @@ import { chromium } from "@playwright/test";
 //     outlet temperatures to /legionella, each with the words heard;
 //   - a failed kitchen reading needs the action taken; an alarm test needs
 //     Pass or Fail tapped; several matching outlets are shown to tap;
-//   - a refused save says why and keeps the card; viewers never see the button.
+//   - a refused save says why and keeps the card; viewers never see the button;
+//   - on any track page a spoken problem becomes an action on that track
+//     (POST /track-actions), or opens a filled-in FixTrack report;
+//   - words Safari heard but never finalised are kept when listening stops.
 // VOICE_LOG_SCREENSHOTS=<dir> saves screenshots.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const freePort = async () => {
@@ -68,6 +71,13 @@ function installFakeRecognition() {
     recogniser.results.push(Object.assign([{ transcript: text }], { isFinal: true }));
     recogniser.onresult?.({ resultIndex: recogniser.results.length - 1, results: recogniser.results });
   };
+  // Safari can stop listening without ever marking the words final.
+  window.__speakInterim = (text) => {
+    const recogniser = window.__recognisers.filter(r => r.active).at(-1);
+    if (!recogniser) throw new Error("nothing is listening");
+    recogniser.results.push(Object.assign([{ transcript: text }], { isFinal: false }));
+    recogniser.onresult?.({ resultIndex: recogniser.results.length - 1, results: recogniser.results });
+  };
 }
 
 const json = (route, data, code = 200) => route.fulfill({ status: code, contentType: "application/json", body: JSON.stringify(data) });
@@ -78,7 +88,7 @@ const KITCHEN_RULES = {
   sousVide: { min: 75, max: null }, coolingMinutes: 90, cookingHoldSeconds: null, sousVideHoldMinutes: null, items: { cooking: [], sousVide: [] },
 };
 
-function apiFixture({ role = "client_staff", coldReadingRefusal = null } = {}) {
+function apiFixture({ role = "client_staff", coldReadingRefusal = null, services = ["kitchentrack", "firetrack", "legionellatrack"] } = {}) {
   const posts = [];
   const handler = async (route) => {
     const request = route.request(), url = new URL(request.url()), method = request.method(), path = url.pathname;
@@ -88,7 +98,7 @@ function apiFixture({ role = "client_staff", coldReadingRefusal = null } = {}) {
         case "/api/auth/me": return json(route, {
           user: { id: 7, email: "chef@example.test", name: "Sam Chef", role, clientId: 23, departmentId: null, active: true, totpEnabled: true },
           billingLocked: false, client: { id: 23, name: "Harbour Hotel Group", slug: "harbour", logoUrl: null, primaryColor: "#2F7C8C", active: true },
-          services: ["kitchentrack", "firetrack", "legionellatrack"],
+          services,
         });
         case "/api/sites": return json(route, SITES);
         case "/api/food-safety/config":
@@ -276,6 +286,74 @@ async function checkRefusedSave() {
   await context.close();
 }
 
+async function checkActions() {
+  const context = await browser.newContext({ locale: "en-GB", viewport: { width: 390, height: 844 } });
+  const api = apiFixture({ services: ["kitchentrack", "firetrack", "legionellatrack", "aquatrack", "fixtrack"] });
+  await context.route("**/api/**", api.handler);
+  await context.addInitScript(installFakeRecognition);
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", error => pageErrors.push(error.message));
+  await page.goto(`${baseUrl}/tests/voice-log-harness.html`, { waitUntil: "domcontentloaded" });
+  await page.getByTestId("say-it-button").waitFor();
+  // As if on AquaTrack's page.
+  await page.evaluate(() => window.history.replaceState(null, "", "/aqua-track"));
+  const dialog = await openSayIt(page);
+  await dialog.getByText("pool gate latch is broken, urgent", { exact: false }).waitFor();
+  const save = dialog.getByTestId("voice-log-save");
+  const card = dialog.getByTestId("voice-log-card");
+
+  // A spoken problem becomes an action on the page's track.
+  await sayAndWaitForCard(page, dialog, "the gate latch on the pool fence is broken, urgent");
+  await card.getByText("AquaTrack (water tests) · action to follow up").waitFor();
+  assert.equal(await card.locator("#voice-log-action-title").inputValue(), "The gate latch on the pool fence is broken");
+  assert.equal(await card.getByTestId("voice-log-severity-urgent").getAttribute("aria-pressed"), "true");
+  await shot(page, "5-pool-action");
+  assert.equal(api.posts.length, 0, "nothing is saved from voice alone");
+  await save.click();
+  await dialog.getByTestId("voice-log-saved").getByText("AquaTrack (water tests) action: The gate latch on the pool fence is broken (urgent)").waitFor();
+  assert.deepEqual(api.posts.at(-1), {
+    path: "/api/track-actions",
+    body: {
+      module: "pool", title: "The gate latch on the pool fence is broken", severity: "urgent", siteId: 1,
+      instruction: 'Raised by voice: "the gate latch on the pool fence is broken, urgent"',
+    },
+  });
+
+  // Readings still work on any page, and can be turned into an action.
+  await sayAndWaitForCard(page, dialog, "fridge 2 is 4 degrees");
+  await card.getByText("KitchenTrack · fridge and freezer reading").waitFor();
+  await card.getByTestId("voice-log-raise-action").click();
+  await card.getByText("AquaTrack (water tests) · action to follow up").waitFor();
+  await card.getByTestId("voice-log-severity-monitor").click();
+  await card.locator("#voice-log-action-track").click();
+  await page.getByRole("option", { name: "FireTrack" }).click();
+  await card.locator("#voice-log-action-title").fill("Fridge 2 runs warm in the afternoon");
+  await save.click();
+  await dialog.getByTestId("voice-log-saved").getByText("FireTrack action: Fridge 2 runs warm in the afternoon (monitor)").waitFor();
+  assert.deepEqual([api.posts.at(-1).body.module, api.posts.at(-1).body.severity], ["fire", "monitor"]);
+
+  // Words Safari never finalised are kept when listening is stopped.
+  await dialog.getByTestId("voice-log-mic").click();
+  await page.waitForFunction(() => window.__listeningCount() === 1);
+  await page.evaluate(() => window.__speakInterim("the weather is lovely"));
+  await dialog.getByTestId("voice-log-mic").click();
+  await page.waitForFunction(() => document.getElementById("voice-log-heard")?.value === "the weather is lovely");
+
+  // Not a reading and not a problem: the person chooses.
+  await dialog.getByTestId("voice-log-unknown").waitFor();
+  assert.equal(await save.isDisabled(), true);
+  await dialog.getByTestId("voice-log-raise-action").waitFor();
+  await dialog.getByTestId("voice-log-fixtrack").click();
+  await dialog.waitFor({ state: "detached" });
+  assert.equal(new URL(page.url()).pathname, "/fix-track");
+  assert.deepEqual(Object.fromEntries(new URL(page.url()).searchParams), { report: "1", title: "The weather is lovely", siteId: "1" });
+
+  assert.equal(api.posts.length, 2);
+  assert.deepEqual(pageErrors, []);
+  await context.close();
+}
+
 async function checkViewer() {
   const context = await browser.newContext({ locale: "en-GB" });
   const api = apiFixture({ role: "client_viewer" });
@@ -293,6 +371,7 @@ try {
   browser = await chromium.launch({ executablePath: chromiumPath() });
   await checkSayIt();
   await checkRefusedSave();
+  await checkActions();
   await checkViewer();
   console.log("voice-log browser tests passed");
 } finally {

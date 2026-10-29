@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Flame, Loader2, Mic, Snowflake, Square, Thermometer, Droplets, XCircle } from "lucide-react";
+import { useLocation } from "wouter";
+import { CheckCircle2, ClipboardList, Flame, Loader2, Mic, Snowflake, Square, Thermometer, Droplets, Wrench, XCircle } from "lucide-react";
 import {
   assessKitchenTemperatures, kitchenFailureValue, kitchenHoldRequirement, parseKitchenTemperatureRules,
   temperatureRangeLabel, useListSites, type KitchenTemperatureRules,
@@ -21,6 +22,9 @@ import {
   defaultColdSlot, limitsLabel, localDate, localTimestamp, readSpokenReading, withinLimits,
   type CallPointOption, type KitchenCoreSection, type OutletOption, type VoiceCatalogue, type VoiceReading,
 } from "@/lib/voice-log";
+import {
+  actionTracks, guessTrack, looksLikeProblem, readSpokenAction, sayItTrack, type ActionSeverity, type SayItTrack,
+} from "@/lib/voice-actions";
 import { cn } from "@/lib/utils";
 
 type Outlet = OutletOption & { siteId: number | null; checkTypeForOutlet: string };
@@ -38,7 +42,10 @@ type Draft =
   | { kind: "kitchen_core"; section: KitchenCoreSection; item: string; temperature: string; hold: string; action: string }
   | { kind: "fire_alarm"; callPointId: number | null; result: "pass" | "fail" | null; notes: string }
   | { kind: "water_outlet"; outletId: number | null; temperature: string; notes: string }
+  | { kind: "track_action"; module: string; title: string; severity: ActionSeverity }
   | { kind: "unknown"; reason: string };
+
+const SEVERITY_LABEL: Record<ActionSeverity, string> = { monitor: "Monitor", action_required: "Action required", urgent: "Urgent" };
 
 const SECTION_LABEL: Record<KitchenCoreSection, string> = {
   hotTemperature: "Cooking", reheating: "Reheating", hotHolding: "Hot holding",
@@ -84,6 +91,23 @@ function draftFrom(reading: VoiceReading): Draft {
   }
 }
 
+/** A spoken problem as an action: on this page's track, else the track the
+ *  words point to, else the only track there is (or the person chooses). */
+function actionDraft(heard: string, tracks: SayItTrack[], pageTrack: string | null | undefined): Draft {
+  const { title, severity } = readSpokenAction(heard);
+  const onPage = tracks.find((track) => track.key === pageTrack)?.key;
+  const module = onPage ?? guessTrack(heard, tracks) ?? (tracks.length === 1 ? tracks[0].key : "");
+  return { kind: "track_action", module, title, severity };
+}
+
+/** A problem said with no reading ("fridge 2 door seal is broken") is
+ *  raised as an action rather than logged as a reading with no value. */
+function soundsLikeAction(reading: VoiceReading, heard: string): boolean {
+  if (!looksLikeProblem(heard)) return false;
+  if (reading.kind === "unknown") return true;
+  return (reading.kind === "cold_unit" || reading.kind === "water_outlet" || reading.kind === "kitchen_core") && reading.temperature === null;
+}
+
 const isNumber = (value: string) => /^-?\d+(?:\.\d+)?$/.test(value.trim());
 const outletLabel = (o: { name: string; location?: string | null }) => o.name + (o.location ? ` — ${o.location}` : "");
 
@@ -93,18 +117,23 @@ const outletLabel = (o: { name: string; location?: string | null }) => o.name + 
  * the person taps Save. Saved readings go into the normal records, marked as
  * spoken, and failures follow each track's usual rules.
  */
-export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
+export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
   open: boolean;
   onClose: () => void;
   defaultSiteId?: number | null;
+  /** The track of the page Say it was opened on (track_actions.module). */
+  pageTrack?: string | null;
 }) {
   const { user, hasService } = useAuth();
+  const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: sites = [] } = useListSites();
   const hasKitchen = hasService("kitchentrack");
   const hasFire = hasService("firetrack");
   const hasWater = hasService("legionellatrack");
+  const tracks = useMemo(() => actionTracks(hasService, user?.role), [hasService, user?.role]);
+  const hasFixTrack = hasService("fixtrack") && user?.role !== "client_viewer";
 
   const [siteId, setSiteId] = useState<number | null>(null);
   const [heard, setHeard] = useState("");
@@ -166,8 +195,17 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
     if (!catalogue || !heard.trim()) { setReading(null); setDraft(null); return; }
     const next = readSpokenReading(heard, catalogue);
     setReading(next);
-    setDraft(draftFrom(next));
+    setDraft(tracks.length && soundsLikeAction(next, heard) ? actionDraft(heard, tracks, pageTrack) : draftFrom(next));
   }, [heard, catalogue]);
+  const raiseAsAction = () => { if (heard.trim()) setDraft(actionDraft(heard, tracks, pageTrack)); };
+  const reportInFixTrack = () => {
+    const title = draft?.kind === "track_action" ? draft.title : readSpokenAction(heard).title;
+    const params = new URLSearchParams({ report: "1", title: title.slice(0, 200) });
+    if (siteId !== null) params.set("siteId", String(siteId));
+    stop();
+    onClose();
+    setLocation(`/fix-track?${params}`);
+  };
 
   const { listening, interim, toggle, stop } = useDictation((spoken) => {
     setHeard(spoken.trim());
@@ -247,6 +285,10 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
       if (draft.outletId === null) return "Choose the outlet.";
       if (!isNumber(draft.temperature)) return "Enter the temperature.";
     }
+    if (draft.kind === "track_action") {
+      if (!draft.module) return "Choose the track.";
+      if (!draft.title.trim()) return "Say or type what needs doing.";
+    }
     return null;
   })();
 
@@ -307,6 +349,15 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
           }),
         });
         summary = `Legionella: ${outlet.name} ${draft.temperature}°C`;
+      } else if (draft.kind === "track_action") {
+        res = await apiFetch("/track-actions", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            module: draft.module, title: draft.title.trim(), severity: draft.severity, siteId,
+            instruction: `Raised by voice: "${spoken}"`,
+          }),
+        });
+        summary = `${sayItTrack(draft.module)?.label ?? "Track"} action: ${draft.title.trim()}`;
       }
       if (!res) return;
       if (!res.ok) {
@@ -314,20 +365,23 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
         return;
       }
       const result = check.pass === false ? "fail" : "pass";
-      setSaved((list) => [`${summary}${draft.kind === "fire_alarm" ? "" : ` (${result})`}`, ...list]);
+      const outcome = draft.kind === "fire_alarm" ? "" : draft.kind === "track_action" ? ` (${SEVERITY_LABEL[draft.severity].toLowerCase()})` : ` (${result})`;
+      setSaved((list) => [`${summary}${outcome}`, ...list]);
       toast({ title: "Saved", description: summary });
       queryClient.invalidateQueries({
         predicate: (query) => typeof query.queryKey[0] === "string"
           && /\/(food-safety|fire-safety|legionella|dashboard|track-actions|compliance)/.test(query.queryKey[0]),
       });
       queryClient.invalidateQueries({ queryKey: ["voice-log-catalogue"] });
+      if (draft.kind === "track_action") window.dispatchEvent(new Event("track-actions-changed"));
       setHeard("");
     } finally {
       setSaving(false);
     }
   }
 
-  const noTracks = !hasKitchen && !hasFire && !hasWater;
+  const noTracks = !hasKitchen && !hasFire && !hasWater && !tracks.length;
+  const examples = sayItExamples({ hasKitchen, hasFire, hasWater, pageTrack, actionTrack: tracks.find((t) => t.key === pageTrack) ?? (tracks.length ? tracks[0] : undefined) });
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !saving) { stop(); onClose(); } }}>
@@ -336,13 +390,13 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
           <DialogTitle>Say it</DialogTitle>
           <DialogDescription>
             {dictationSupported
-              ? "Tap the microphone and say one reading, for example \"fridge 1 is 4 degrees\", \"chicken core temp 78\", \"testing call point 1\" or \"hot tap ladies toilet 55 degrees\". Check the card, then tap Save."
-              : "This browser can't listen, so type the reading instead, for example \"fridge 1 is 4 degrees\". Check the card, then tap Save."}
+              ? `Tap the microphone and say one thing, for example ${examples}. Check the card, then tap Save.`
+              : `This browser can't listen, so type it instead, for example ${examples}. Check the card, then tap Save.`}
           </DialogDescription>
         </DialogHeader>
 
         {noTracks ? (
-          <p className="text-sm text-muted-foreground">Say it works with KitchenTrack, FireTrack and Legionella. None of them is switched on for this business.</p>
+          <p className="text-sm text-muted-foreground">Say it works with the tracks your business uses. None is switched on yet.</p>
         ) : (
           <div className="space-y-4">
             {sites.length > 1 && (
@@ -369,7 +423,7 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
               <Label htmlFor="voice-log-heard">What was heard</Label>
               <Input id="voice-log-heard" value={heard} disabled={needsSite} maxLength={500}
                 onChange={(event) => setHeard(event.target.value)}
-                placeholder={needsSite ? "Choose the site first" : "fridge 1 is 4 degrees"} />
+                placeholder={needsSite ? "Choose the site first" : examples.split(", ")[0].replace(/"/g, "")} />
               {listening && <p aria-live="polite" className="text-xs italic text-muted-foreground">{interim || "Listening…"}</p>}
               {heard && <p className="text-xs text-muted-foreground">Misheard? Fix the words here, or change the card below.</p>}
             </div>
@@ -382,7 +436,9 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
             )}
 
             {draft && reading && catalogue && (
-              <ReadingCard draft={draft} reading={reading} catalogue={catalogue} check={check} update={update} />
+              <ReadingCard draft={draft} reading={reading} catalogue={catalogue} check={check} update={update}
+                tracks={tracks} onRaiseAction={tracks.length ? raiseAsAction : undefined}
+                onFixTrack={hasFixTrack ? reportInFixTrack : undefined} />
             )}
 
             {saved.length > 0 && (
@@ -414,20 +470,99 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
   );
 }
 
+/** What to suggest saying: readings for the page's track, or for every
+ *  reading track on pages without one, then something to raise as an action. */
+function sayItExamples({ hasKitchen, hasFire, hasWater, pageTrack, actionTrack }: {
+  hasKitchen: boolean; hasFire: boolean; hasWater: boolean; pageTrack?: string | null; actionTrack?: SayItTrack;
+}): string {
+  const readings: string[] = [];
+  const all = !pageTrack;
+  if (hasKitchen && (all || pageTrack === "kitchen")) readings.push("\"fridge 1 is 4 degrees\"", "\"chicken core temp 78\"");
+  if (hasFire && (all || pageTrack === "fire")) readings.push("\"testing call point 1\"");
+  if (hasWater && (all || pageTrack === "legionella")) readings.push("\"hot tap ladies toilet 55 degrees\"");
+  const action = actionTrack ? `"${actionTrack.example}"` : null;
+  const list = [...readings, ...(action ? [action] : [])];
+  if (!list.length) return "\"fridge 1 is 4 degrees\"";
+  return list.length === 1 ? list[0] : `${list.slice(0, -1).join(", ")} or ${list.at(-1)}`;
+}
+
 function pick(limits: Limits | undefined, key: "min" | "max"): Limits {
   return limits && limits[key] != null ? { [key]: limits[key] } : {};
 }
 
 /** The card to check before saving: track, item, reading, pass or fail. */
-function ReadingCard({ draft, reading, catalogue, check, update }: {
+function ReadingCard({ draft, reading, catalogue, check, update, tracks, onRaiseAction, onFixTrack }: {
   draft: Draft;
   reading: VoiceReading;
   catalogue: Catalogue;
   check: { pass: boolean | null; limit: string; problem?: string; holdRequired?: { unit: string; limit: number } | null };
   update: (patch: Partial<Draft>) => void;
+  tracks: SayItTrack[];
+  onRaiseAction?: () => void;
+  onFixTrack?: () => void;
 }) {
   if (draft.kind === "unknown") {
-    return <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="voice-log-unknown">{draft.reason}</p>;
+    return (
+      <div className="space-y-2">
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="voice-log-unknown">{draft.reason}</p>
+        {(onRaiseAction || onFixTrack) && (
+          <div className="flex flex-wrap gap-2">
+            {onRaiseAction && (
+              <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={onRaiseAction} data-testid="voice-log-raise-action">
+                <ClipboardList className="h-4 w-4" />Raise it as an action
+              </Button>
+            )}
+            {onFixTrack && (
+              <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={onFixTrack} data-testid="voice-log-fixtrack">
+                <Wrench className="h-4 w-4" />Report it in FixTrack
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (draft.kind === "track_action") {
+    return (
+      <div className="space-y-3 rounded-lg border bg-muted/30 p-3" data-testid="voice-log-card">
+        <p className="flex items-center gap-2 text-sm font-semibold"><ClipboardList className="h-4 w-4" />
+          {sayItTrack(draft.module)?.label ?? "Track"} · action to follow up
+        </p>
+        <div className="space-y-1.5">
+          <Label htmlFor="voice-log-action-title">What needs doing</Label>
+          <Input id="voice-log-action-title" value={draft.title} maxLength={500} onChange={(e) => update({ title: e.target.value })} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="voice-log-action-track">Track</Label>
+            <Select value={draft.module} onValueChange={(module) => update({ module })}>
+              <SelectTrigger id="voice-log-action-track" data-testid="voice-log-action-track"><SelectValue placeholder="Choose the track" /></SelectTrigger>
+              <SelectContent>
+                {tracks.map((track) => <SelectItem key={track.key} value={track.key}>{track.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>How urgent</Label>
+            <div className="flex gap-1">
+              {(Object.keys(SEVERITY_LABEL) as ActionSeverity[]).map((severity) => (
+                <Button key={severity} type="button" size="sm" className="flex-1 px-1.5 text-xs"
+                  variant={draft.severity === severity ? (severity === "urgent" ? "destructive" : "default") : "outline"}
+                  aria-pressed={draft.severity === severity} onClick={() => update({ severity })} data-testid={`voice-log-severity-${severity}`}>
+                  {severity === "action_required" ? "Action" : SEVERITY_LABEL[severity]}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">It's added to the track's actions list for someone to sign off, marked as raised by voice.</p>
+        {onFixTrack && (
+          <button type="button" className="text-xs font-medium underline underline-offset-2" onClick={onFixTrack} data-testid="voice-log-fixtrack">
+            Needs a repair? Report it in FixTrack instead
+          </button>
+        )}
+      </div>
+    );
   }
   const track = draft.kind === "fire_alarm" ? "FireTrack · weekly alarm test"
     : draft.kind === "water_outlet" ? "Legionella · outlet temperature"
@@ -547,6 +682,12 @@ function ReadingCard({ draft, reading, catalogue, check, update }: {
       )}
       {check.pass === false && draft.kind === "water_outlet" && (
         <p className="text-xs text-muted-foreground">A failed reading opens an action automatically, as it does when logged from the outlet list.</p>
+      )}
+      {onRaiseAction && (
+        <button type="button" className="text-xs font-medium text-muted-foreground underline underline-offset-2" onClick={onRaiseAction}
+          data-testid="voice-log-raise-action">
+          Not a reading? Raise it as an action instead
+        </button>
       )}
     </div>
   );

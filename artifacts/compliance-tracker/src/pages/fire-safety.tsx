@@ -26,7 +26,7 @@ import {
   FireCallPoint,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { SayItButton } from "@/components/say-it-button";
+import { useSayItSite } from "@/components/say-it-button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -1545,6 +1545,7 @@ export default function FireSafetyPage() {
 
   const [filterType, setFilterType] = useState<AnyCheckType | "">("");
   const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
+  useSayItSite(filterSite);
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<AnyCheckType | undefined>(undefined);
   const [scanPreset, setScanPreset] = useState<{ siteId?: number; callPointId?: number; location?: string }>();
@@ -1651,7 +1652,6 @@ export default function FireSafetyPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {canEdit && <SayItButton siteId={filterSite} />}
             {canAdmin && <FireConfigDialog siteId={filterSite} />}
             {canEdit && <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={value => { setRecordOpen(value); if (!value) setScanPreset(undefined); }} defaultCheckType={quickCheckType} preset={scanPreset} />}
           </div>
