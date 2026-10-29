@@ -9,4 +9,6 @@
 export interface GreenTrackConfig {
   green_show_fuel?: string;
   green_default_operators?: string;
+  /** The site new machines and the Daily checks tab start on ("" for none) */
+  green_default_site_id?: string;
 }

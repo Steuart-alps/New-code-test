@@ -4827,7 +4827,8 @@ export const UpdateBikeTrackConfigResponse = zod.object({
  */
 export const GetGreenTrackConfigResponse = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 
@@ -4836,12 +4837,14 @@ export const GetGreenTrackConfigResponse = zod.object({
  */
 export const UpdateGreenTrackConfigBody = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 export const UpdateGreenTrackConfigResponse = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 
@@ -5232,7 +5235,8 @@ export const CreateGreenTrackProductBody = zod.object({
   "supplier": zod.string().nullish(),
   "reorderLevel": zod.number().nullish(),
   "notes": zod.string().nullish(),
-  "active": zod.boolean().optional()
+  "active": zod.boolean().optional(),
+  "openingStock": zod.number().nullish().describe('Only when adding a product. The amount in stock now, saved as a stock count dated today.')
 })
 
 export const CreateGreenTrackProductResponse = zod.object({
@@ -5272,7 +5276,8 @@ export const UpdateGreenTrackProductBody = zod.object({
   "supplier": zod.string().nullish(),
   "reorderLevel": zod.number().nullish(),
   "notes": zod.string().nullish(),
-  "active": zod.boolean().optional()
+  "active": zod.boolean().optional(),
+  "openingStock": zod.number().nullish().describe('Only when adding a product. The amount in stock now, saved as a stock count dated today.')
 })
 
 export const UpdateGreenTrackProductResponse = zod.object({
@@ -5335,7 +5340,7 @@ export const GetGreenTrackProductHistoryResponse = zod.object({
 }),
   "entries": zod.array(zod.object({
   "key": zod.string(),
-  "kind": zod.enum(['delivery', 'count', 'write_off', 'application']),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use', 'application']),
   "productId": zod.number(),
   "date": zod.date(),
   "change": zod.number(),
@@ -5367,8 +5372,8 @@ export const ListGreenTrackStockMovementsResponseItem = zod.object({
   "productName": zod.string(),
   "unit": zod.string(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
   "countedQuantity": zod.number().nullish(),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -5386,8 +5391,8 @@ export const ListGreenTrackStockMovementsResponse = zod.array(ListGreenTrackStoc
 export const CreateGreenTrackStockMovementBody = zod.object({
   "productId": zod.number(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().optional().describe('Delivered or written-off quantity (above 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().optional().describe('Delivered, written-off or used quantity (above 0). \"use\" is refused for pesticides, whose use goes in a spraying record.'),
   "countedQuantity": zod.number().optional().describe('The quantity counted, for a stock count'),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -5403,8 +5408,8 @@ export const CreateGreenTrackStockMovementResponse = zod.object({
   "productName": zod.string(),
   "unit": zod.string(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
   "countedQuantity": zod.number().nullish(),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -5440,8 +5445,8 @@ export const UpdateGreenTrackStockMovementResponse = zod.object({
   "productName": zod.string(),
   "unit": zod.string(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
   "countedQuantity": zod.number().nullish(),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),

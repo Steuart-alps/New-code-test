@@ -2,6 +2,8 @@
 export const MACHINE_TYPES = [
   "ride_on_cylinder",
   "ride_on_rotary",
+  "greens_mower_ride_on",
+  "greens_mower_hand",
   "ride_on",
   "pedestrian",
   "fairway_mower",
