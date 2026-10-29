@@ -41,6 +41,7 @@ Wednesday 28 October.
 | 22 | Let Owners choose the AI model and effort for each AI feature | After launch | Depends on the choices made; capped | AI features live first |
 | 23 | Contractor sign-in on site and logging their own test results | After launch (you chose this on 28 October) | None | Your "go" in its own thread |
 | 24 | Let Owners choose how often urgent alerts are sent | After launch | None | Nothing; urgent alerts stay same-day for now |
+| 25 | Link TrainTrack to outside training providers | After launch | None for hosting; some providers may charge for a link | Which providers your clients use |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -883,6 +884,39 @@ whatever the setting, and the setting page would say so plainly.
 
 ---
 
+## 25. Link TrainTrack to outside training providers
+
+**When:** after launch. Asked for on 29 October.
+
+When a staff member finishes a course with an outside training provider (an
+online course, a food hygiene or first aid course, a manual handling session),
+the completion and certificate land in their TrainTrack record automatically,
+with the expiry date and a reminder before it runs out. No more typing the
+course in or uploading the certificate by hand.
+
+**Three ways in, best first:**
+
+1. **A direct link** to providers that let other software read completed
+   courses. Fully automatic, but each provider has to be connected one by one,
+   and some charge for this.
+2. **Forwarding the certificate email.** Each business gets its own
+   TrainTrack email address; forward the "you passed" email or certificate to
+   it and it is matched to the person and course. This works with any provider.
+3. **Reading the certificate** using certificate scanning (item 2): upload or
+   photograph it and the course, person, date and expiry are filled in for a
+   manager to confirm.
+
+Whichever way, a manager confirms a new record before it counts, and it then
+shows on the training matrix and in reminders as usual.
+
+**Cost:** none for hosting. Reading certificates costs pennies each (item 2).
+Some providers may charge for a direct link.
+
+**Question for you:** which training providers do your clients mostly use?
+That decides which direct links are worth building first.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -935,6 +969,7 @@ work:
 | Site safety information to contractors | None |
 | Contractor sign-in and test logging | None |
 | Choose how often urgent alerts are sent | None |
+| TrainTrack links to training providers | None for hosting; pennies per certificate read; some providers may charge |
 | Choose AI model and effort | Depends on choices; stronger settings cost more per use, capped by spending limits |
 | White-labelling for resellers | Little or none for hosting; possibly a small cost per partner web address and email address |
 | FireTrack sound level meter | None |
