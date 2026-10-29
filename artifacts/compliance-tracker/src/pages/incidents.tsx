@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -40,6 +40,7 @@ import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { StringListEditor } from "@/components/string-list-editor";
 import { sortByLabel } from "@/lib/sort-options";
+import { takeLinkParams } from "@/lib/deep-link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -418,7 +419,7 @@ export default function IncidentsPage() {
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
 
-  const { data: incidentConfig } = useGetIncidentConfig();
+  const { data: incidentConfig, isFetched: incidentConfigLoaded } = useGetIncidentConfig();
   const { data: formOptions } = useFormOptions();
   const incidentTypeOptions = pickOptions(formOptions, "incident_types");
   const severityOptions: readonly string[] = SEVERITIES;
@@ -584,6 +585,16 @@ ${rows.map(r => `<tr>
     setFormSection("details");
     setShowDialog(true);
   }
+
+  // The "Report an accident or incident" QR label opens a new report, once
+  // the incident settings (the default reporter) have loaded.
+  const reportFromLink = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (reportFromLink.current === null) reportFromLink.current = takeLinkParams(["report"] as const)?.report === "1";
+    if (!reportFromLink.current || !hasIncidentTrack || !incidentConfigLoaded) return;
+    reportFromLink.current = false;
+    openAdd();
+  }, [hasIncidentTrack, incidentConfigLoaded]);
 
   function openEdit(r: Incident) {
     setEditItem(r);

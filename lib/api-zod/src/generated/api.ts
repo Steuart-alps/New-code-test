@@ -6901,7 +6901,7 @@ export const ListEquipmentLabelsQueryParams = zod.object({
 })
 
 export const ListEquipmentLabelsResponseItem = zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
   "ref": zod.string(),
   "track": zod.string(),
   "name": zod.string(),
@@ -6919,8 +6919,8 @@ export const ListEquipmentLabelsResponse = zod.array(ListEquipmentLabelsResponse
  */
 export const PrintEquipmentLabelSheetBody = zod.object({
   "items": zod.array(zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
-  "ref": zod.string().describe('The record\'s id, or \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer.')
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string().describe('The record\'s id, \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer, or \"<point>:<siteId or 0>\" for a track\'s checks at a site.')
 })),
   "size": zod.enum(['standard', 'large']).optional()
 })
@@ -6932,12 +6932,12 @@ export const PrintEquipmentLabelSheetResponse = zod.unknown()
  * @summary Replace a lost or damaged label; the old code stops working
  */
 export const ReplaceEquipmentLabelBody = zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
-  "ref": zod.string().describe('The record\'s id, or \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer.')
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string().describe('The record\'s id, \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer, or \"<point>:<siteId or 0>\" for a track\'s checks at a site.')
 })
 
 export const ReplaceEquipmentLabelResponse = zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
   "ref": zod.string(),
   "track": zod.string(),
   "name": zod.string(),
@@ -6959,7 +6959,7 @@ export const ScanEquipmentLabelParams = zod.object({
 export const ScanEquipmentLabelResponse = zod.object({
   "code": zod.string(),
   "clientId": zod.number(),
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
   "track": zod.string(),
   "name": zod.string(),
   "detail": zod.string().nullable(),
