@@ -9,6 +9,7 @@ import {
   isReloadingForNewRelease,
   reloadForNewRelease,
 } from "./lib/new-release-reload";
+import { installStrayFileDropGuard } from "./hooks/use-file-drop";
 
 // Initialise Sentry before the React tree mounts so all component errors and
 // navigation events are captured from the first render. SENTRY_DSN is read at
@@ -18,6 +19,10 @@ initErrorReports();
 // A tab left open across a release reloads itself when it asks for a page file
 // the release removed, instead of showing the error page.
 installNewReleaseReload();
+
+// A photo dropped beside an upload box goes into the box (or a message says
+// where to drop it) instead of the browser leaving the app to open the file.
+installStrayFileDropGuard();
 
 // ── Global React error boundary ────────────────────────────────────────────
 // Catches unhandled rendering errors anywhere in the tree and shows a friendly
