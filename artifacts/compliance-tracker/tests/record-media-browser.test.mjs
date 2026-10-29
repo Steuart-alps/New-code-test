@@ -209,7 +209,7 @@ async function main() {
       await chooseFiles(form, [photoFile]);
       await form.getByRole("button", { name: "Record Check" }).click();
       await page.getByText("Photos and videos weren't added", { exact: true }).waitFor();
-      await page.getByText(/The record was saved\. Add them again from its photo box\./).waitFor();
+      await page.getByText(/The record was saved\. Add them again from its photo box\./).first().waitFor();
       await page.getByTestId("saved-record").waitFor();
       await page.close();
     });
