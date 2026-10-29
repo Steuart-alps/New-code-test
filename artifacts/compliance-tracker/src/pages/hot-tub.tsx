@@ -35,6 +35,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { sortByLabel } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -818,6 +819,7 @@ export default function HotTubPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{r.performedBy ?? <span className="opacity-40">—</span>}</td>
                     <td className="px-4 py-3 hidden sm:table-cell">
+                      <RecordSignedBy recordType="hot_tub_check" recordId={r.id} compact className="mb-1" />
                       <CheckPhotoUploader entityType="hot_tub_check" entityId={r.id} compact />
                     </td>
                     <td className="px-4 py-3">

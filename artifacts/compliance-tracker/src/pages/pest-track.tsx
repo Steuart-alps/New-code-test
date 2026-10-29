@@ -35,6 +35,7 @@ import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { sortByLabel } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -850,6 +851,7 @@ export default function PestTrackPage() {
                             ) : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="px-2 py-3">
+                            <RecordSignedBy recordType="pest_visit" recordId={v.id} compact className="mb-1" />
                             <CheckPhotoUploader entityType="pest_visit" entityId={v.id} compact />
                           </td>
                           <td className="px-4 py-3">

@@ -64,6 +64,7 @@ import {
   dailyManagerSignoffsTable,
 } from "@workspace/db/schema";
 import { requireAuth, getClientId, requireRole } from "../middleware/requireAuth";
+import { strokesToSvgPath } from "../lib/recordSignatures";
 
 const router = Router();
 router.use(kitchenInspectionExport);
@@ -848,6 +849,13 @@ router.get(
 
         // ── Staff roster ──────────────────────────────────────────────────────
         await out.csv("staff-roster/staff.csv", async () => (await db.execute(sql`SELECT id, client_id, site_id, name, job_title, department, email, phone, start_date, active, notes, created_at, updated_at FROM staff_roster WHERE client_id = ${cid} ORDER BY name ASC`)).rows);
+
+        // ── Drawn signatures on recorded checks ───────────────────────────────
+        // One row per signature; svg_path draws it in a 600 x 200 box.
+        await out.csv("signatures/record-signatures.csv", async () => (await db.execute(sql`
+          SELECT id, record_type, record_id, site_id, user_id, signer_name, signed_at, strokes
+          FROM record_signatures WHERE client_id = ${cid} AND record_id IS NOT NULL ORDER BY signed_at, id
+        `)).rows.map(({ strokes, ...row }: any) => ({ ...row, svg_path: strokesToSvgPath(Array.isArray(strokes) ? strokes : []) })));
 
         // Privacy governance contains the customer's own operational records,
         // rights-request evidence and timers. Keep it in the tenant export so

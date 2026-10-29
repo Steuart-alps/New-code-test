@@ -67,6 +67,7 @@ import {
   DrillAttendanceCard, DrillStaffPicker, DrillTimingFields, EMPTY_EVACUATION, evacuationFromSeconds, evacuationIsBlank,
   formatEvacuation, parseEvacuation, type EvacuationValue,
 } from "@/components/fire-drill";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -1897,6 +1898,7 @@ export default function FireSafetyPage() {
                           <div className="text-xs text-muted-foreground space-y-0.5">
                             <div><span className="font-medium">Date:</span> {format(new Date(check.checkDate), "dd/MM/yyyy")}</div>
                             {check.performedBy && <div><span className="font-medium">Performed by:</span> {check.performedBy}</div>}
+                            <RecordSignedBy recordType="fire_safety_check" recordId={check.id} className="pt-1" />
                             {check.callPoint && <div><span className="font-medium">Call point:</span> {check.callPoint}</div>}
                             {check.location && <div><span className="font-medium">{check.checkType === "alarm" && !check.callPoint ? "Location / Call Point" : "Location"}:</span> {check.location}</div>}
                             {check.soundLevelDb != null && (

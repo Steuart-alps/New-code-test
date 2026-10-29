@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { sortByLabel } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -586,6 +587,7 @@ export default function TreeTrackPage() {
                       ) : <span className="text-muted-foreground opacity-40">—</span>}
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell">
+                      <RecordSignedBy recordType="tree_inspection" recordId={r.id} compact className="mb-1" />
                       <CheckPhotoUploader entityType="tree_inspection" entityId={r.id} compact />
                     </td>
                     <td className="px-4 py-3">

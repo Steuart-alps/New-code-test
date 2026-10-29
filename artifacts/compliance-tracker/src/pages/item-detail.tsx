@@ -25,6 +25,7 @@ import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
 import { LoadError } from "@/components/load-error";
 import { format } from "date-fns";
+import { RecordSignedBy } from "@/components/record-signature";
 import {
   ArrowLeft, Pencil, Trash2, FileText, Plus, ExternalLink,
   Briefcase, MapPin, Calendar, Clock, ClipboardList, Mail, User, Repeat,
@@ -429,6 +430,7 @@ export default function ItemDetailPage() {
                 <div>
                   <p className="text-xs text-emerald-700">{item.status === "completed" ? "Completed" : "Last completed"}</p>
                   <p className="font-medium">{fmt(item.completedAt)}</p>
+                  <RecordSignedBy recordType="compliance_item_completion" recordId={item.id} latest className="mt-1" />
                 </div>
               )}
             </div>

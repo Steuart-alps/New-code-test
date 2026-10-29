@@ -103,16 +103,34 @@ export function useRecordSignatures(recordType: SignedRecordType, recordId: numb
 }
 
 /**
- * Who signed a recorded check, when, and their drawn signature. Shows nothing
- * for records saved before signatures were asked for.
+ * Who signed a recorded check, when, and their drawn signature. `compact` is
+ * for table cells: the drawing alone, with the name and time as its tooltip.
+ * `latest` shows only the newest, for records signed each time they are done.
+ * Shows nothing for records saved before signatures were asked for.
  */
-export function RecordSignedBy({ recordType, recordId, className }: {
+export function RecordSignedBy({ recordType, recordId, compact = false, latest = false, className }: {
   recordType: SignedRecordType;
   recordId: number | null | undefined;
+  compact?: boolean;
+  latest?: boolean;
   className?: string;
 }) {
-  const { data } = useRecordSignatures(recordType, recordId);
-  if (!data || data.length === 0) return null;
+  const { data: all } = useRecordSignatures(recordType, recordId);
+  if (!all || all.length === 0) return null;
+  const data = latest ? all.slice(-1) : all;
+  const describe = (signature: RecordSignature) =>
+    `Signed by ${signature.signerName} on ${format(new Date(signature.signedAt), "d MMM yyyy 'at' HH:mm")}`;
+  if (compact) {
+    return (
+      <span className={cn("inline-flex gap-1", className)} data-testid="record-signed-by">
+        {data.map(signature => (
+          <span key={`${signature.signedAt}-${signature.signerName}`} title={describe(signature)}>
+            <SignatureImage strokes={signature.strokes} label={describe(signature)} className="h-7" />
+          </span>
+        ))}
+      </span>
+    );
+  }
   return (
     <div className={cn("flex flex-wrap gap-3", className)} data-testid="record-signed-by">
       {data.map(signature => (
