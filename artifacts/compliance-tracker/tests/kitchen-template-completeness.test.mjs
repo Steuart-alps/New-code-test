@@ -241,8 +241,8 @@ try {
   );
   assert.match(
     foodSafetySource,
-    /const \[selectedSiteId, setSelectedSiteId\] = useState<number \| null>\(null\);/,
-    "FoodSafety must keep an explicit organisation/site scope",
+    /const selectedSiteId = siteFilter \?\? null;/,
+    "FoodSafety must keep an explicit organisation/site scope (null = organisation, starting on the working site)",
   );
 
   assert.match(
