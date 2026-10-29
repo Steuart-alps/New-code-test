@@ -39,6 +39,7 @@ import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -867,7 +868,7 @@ function BikeFormDialog({
             <Select value={type} onValueChange={setType}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {typeOpts.map(k => (
+                {sortByLabel(typeOpts, k => BIKE_TYPES[k] ?? k).map(k => (
                   <SelectItem key={k} value={k}>{BIKE_TYPES[k] ?? k}</SelectItem>
                 ))}
               </SelectContent>
@@ -992,7 +993,7 @@ function LogServiceDialog({
               <Select value={bikeId} onValueChange={setBikeId}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select a bike…" /></SelectTrigger>
                 <SelectContent>
-                  {activeBikes.map(b => (
+                  {sortByLabel(activeBikes, b => b.ref).map(b => (
                     <SelectItem key={b.id} value={String(b.id)}>
                       {b.ref}{b.name ? ` — ${b.name}` : ""}
                     </SelectItem>
@@ -1012,9 +1013,9 @@ function LogServiceDialog({
               <Select value={serviceType} onValueChange={setServiceType}>
                 <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="adhoc">Ad-hoc / Repair</SelectItem>
                   <SelectItem value="annual">Annual</SelectItem>
                   <SelectItem value="interim">Interim (6-month)</SelectItem>
-                  <SelectItem value="adhoc">Ad-hoc / Repair</SelectItem>
                 </SelectContent>
               </Select>
             </div>

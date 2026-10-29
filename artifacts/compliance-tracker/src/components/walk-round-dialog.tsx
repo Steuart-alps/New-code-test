@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { dictationSupported } from "@/components/dictation-button";
 import { useDictation } from "@/hooks/use-dictation";
 import { nameWalkRoundItems, readWalkRound, type WalkRoundKind, type WalkRoundOutletType } from "@/lib/walk-round";
+import { sortByLabel } from "@/lib/sort-options";
 
 const MAX_POINTS = 200;
 
@@ -154,7 +155,7 @@ export function WalkRoundDialog({
                           <SelectValue placeholder="Choose what kind of outlet" />
                         </SelectTrigger>
                         <SelectContent>
-                          {OUTLET_CHOICES.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                          {sortByLabel(OUTLET_CHOICES, ([, label]) => label).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     )}

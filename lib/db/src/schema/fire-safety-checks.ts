@@ -55,6 +55,11 @@ export const fireSafetyChecksTable = pgTable("fire_safety_checks", {
   callPoint: text("call_point"),
   // Fire drills: "included", "not_included" or "no_night_staff".
   nightStaff: text("night_staff"),
+  // Fire drills: the time the alarm was raised ("HH:MM", the business's local
+  // time) and how long everyone took to get out, in seconds. Staff present
+  // are in fire_drill_attendance.
+  drillTime: text("drill_time"),
+  evacuationSeconds: integer("evacuation_seconds"),
   // Weekly alarm tests, optional: the sound level heard, in dB; how it was
   // taken ("meter", read off a sound meter, or "phone", a rough reading from
   // the phone's microphone); and whether it was taken at a bedhead (75 dB
@@ -82,3 +87,28 @@ export const fireSafetyChecksTable = pgTable("fire_safety_checks", {
 ]);
 
 export type FireSafetyCheck = typeof fireSafetyChecksTable.$inferSelect;
+
+/**
+ * Staff ticked as present at a fire drill, from the staff roster. The name is
+ * copied so a later rename or removal from the roster never changes the
+ * record. A roster member's latest drill shows who has not taken part in one
+ * recently (FireTrack and TrainTrack).
+ */
+export const fireDrillAttendanceTable = pgTable("fire_drill_attendance", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id")
+    .notNull()
+    .references(() => clientsTable.id, { onDelete: "cascade" }),
+  fireCheckId: integer("fire_check_id")
+    .notNull()
+    .references(() => fireSafetyChecksTable.id, { onDelete: "cascade" }),
+  staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
+  staffName: text("staff_name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("IDX_fire_drill_attendance_check").on(table.fireCheckId),
+  index("IDX_fire_drill_attendance_client_staff").on(table.clientId, table.staffRosterId),
+  uniqueIndex("UQ_fire_drill_attendance_check_staff").on(table.fireCheckId, table.staffRosterId),
+]);
+
+export type FireDrillAttendance = typeof fireDrillAttendanceTable.$inferSelect;

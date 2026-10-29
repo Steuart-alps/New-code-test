@@ -20,6 +20,10 @@ import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompleti
 import { getPickedModules } from "./setup";
 import { siteVisibleSql, visibleSiteIdsSql } from "../lib/departmentSites";
 import { greenCurrentHoursLateral } from "../lib/greenHours";
+import {
+  GREENKEEPING_CHECKLIST_NAMES, GREENKEEPING_CHECKLIST_TYPES, getGreenkeepingShedDay, getPreStartDay, greenDailyChecksPath,
+  greenkeepingShedSites,
+} from "../lib/greenkeepingChecks";
 
 const router = Router();
 
@@ -173,7 +177,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     try {
       const [row] = rows(await db.execute(sql`
         SELECT
-          ${exists("daily_checklists", sql`AND submitted_at IS NOT NULL`)}
+          ${exists("daily_checklists", sql`AND submitted_at IS NOT NULL AND checklist_type NOT LIKE 'greenkeeping%'`)}
             OR ${exists("daily_checklist_submissions", sql`AND submitted_at IS NOT NULL`)} AS daily,
           ${exists("food_safety_records", sql`AND submitted_at IS NOT NULL`)} AS kitchen,
           ${exists("fire_safety_checks")} AS fire,
@@ -1203,30 +1207,51 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             )
           ORDER BY m.name
         `;
-        const [machines, checkedTodayRows, overdueService, overdueServiceCountRows, overdueExaminations, untestedSprayerRows] = await Promise.all([
-          // Machines with no pre-use check today
-          db.execute(sql`
-            SELECT m.id, m.name, m.type FROM green_machines m
-            WHERE m.client_id = ${clientId} AND m.active = true ${siteClause}
-            ORDER BY m.name
-          `),
-          db.execute(sql`
-            SELECT DISTINCT c.machine_id FROM green_pre_use_checks c
-            JOIN green_machines m ON m.id = c.machine_id
-            WHERE c.client_id = ${clientId} AND c.check_date = ${today} ${siteClause}
-          `),
+        const [machines, overdueService, overdueServiceCountRows, overdueExaminations, untestedSprayerRows] = await Promise.all([
+          // Today's pre-start check or "not in use" mark for every machine
+          getPreStartDay(clientId, today, siteId != null ? [siteId] : accessibleSiteIds),
           // Machines with overdue service
           db.execute(sql`SELECT m.id, m.name, s.next_service_date, s.next_service_hours, h.hours ${overdueServiceFrom} ORDER BY s.next_service_date ASC NULLS LAST LIMIT 10`),
           db.execute(sql`SELECT count(*)::int AS overdue ${overdueServiceFrom}`),
           db.execute(overdueExamination),
           db.execute(untestedSprayers),
         ]);
-        const checkedTodayIds = new Set(rows(checkedTodayRows).map((r: any) => r.machine_id));
-        const uncheckedToday = rows(machines).filter((m: any) => !checkedTodayIds.has(m.id));
+        // A machine marked "not in use" today needs no pre-start check.
+        const uncheckedToday = machines.filter((m) => m.status === "todo" && (siteId == null || m.siteId === siteId));
 
         const overdueServiceCount = Number(rows(overdueServiceCountRows)[0]?.overdue ?? 0);
         const uncheckedCount = uncheckedToday.length;
-        const totalMachines = rows(machines).length;
+        const totalMachines = machines.filter((m) => siteId == null || m.siteId === siteId).length;
+
+        // Greenkeeping shed opening / closing checks, at the sites that do them.
+        const shedSiteIds = allSites.length
+          ? await greenkeepingShedSites(clientId, today, allSites.map((site) => site.id))
+          : new Set<number>();
+        const shedSites = allSites.filter((site) => shedSiteIds.has(site.id));
+        const shedDays = await getGreenkeepingShedDay(clientId, today, shedSites.map((site) => site.id));
+        const shedItems: TrackItem[] = [];
+        for (const site of shedSites) {
+          for (const type of GREENKEEPING_CHECKLIST_TYPES) {
+            const state = shedDays.get(site.id)?.[type];
+            if (state?.submitted && !state.failed) continue;
+            shedItems.push({
+              label: site.name,
+              detail: state?.submitted ? `${GREENKEEPING_CHECKLIST_NAMES[type]} submitted with a failed item` : `${GREENKEEPING_CHECKLIST_NAMES[type]} not done today`,
+              path: greenDailyChecksPath(site.id),
+            });
+          }
+        }
+        const shedOutstanding = shedItems.length;
+        const dailyItems = [
+          ...shedItems,
+          ...uncheckedToday.slice(0, 10).map((m) => ({
+            label: m.name, detail: `${m.type ?? "Machine"} — no pre-start check today (or mark it not in use)`, path: greenDailyChecksPath(m.siteId),
+          })),
+        ];
+        const dailyBadge = [
+          shedOutstanding > 0 ? `${plural(shedOutstanding, "shed checklist")} to do` : null,
+          uncheckedCount > 0 ? `${plural(uncheckedCount, "machine")} not checked today` : null,
+        ].filter(Boolean).join(", ");
 
         const isNsts = (m: any) => m.inspection_type === NSTS_TEST_INSPECTION_TYPE;
         const overdueExaminationCount = rows(overdueExaminations).filter((m: any) => !isNsts(m)).length;
@@ -1257,16 +1282,15 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           for (const m of overdueFirstTests.slice(0, 10)) {
             items.push({ label: m.name, detail: `NSTS test overdue since ${m.nsts.dueDate} (never tested)`, path: "/green-track" });
           }
-        } else if (uncheckedCount > 0 && totalMachines > 0) {
+          items.push(...dailyItems);
+        } else if (dailyBadge) {
           status = "attention";
-          badge = `${plural(uncheckedCount, "machine")} not checked today`;
-          for (const m of uncheckedToday.slice(0, 10)) {
-            items.push({ label: m.name, detail: `${m.type ?? "Machine"} — no pre-use check today`, path: "/green-track" });
-          }
-        } else if (totalMachines === 0) {
+          badge = dailyBadge;
+          items.push(...dailyItems);
+        } else if (totalMachines === 0 && shedSites.length === 0) {
           status = "no_data"; badge = "No machines registered";
         } else {
-          status = "ok"; badge = "All machines checked";
+          status = "ok"; badge = totalMachines > 0 ? "All machines checked" : "Shed checks done";
         }
       } catch (error) {
         ({ status, badge } = unavailable("green", error));

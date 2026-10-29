@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { format, parseISO, isValid } from "date-fns";
 import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -233,7 +234,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
             <Select value={form.inspectionType} onValueChange={v => setForm(f => ({ ...f, inspectionType: v }))}>
               <SelectTrigger id="inspection-type" className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {formInspectionTypes.map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
+                {sortByLabel(formInspectionTypes, typeLabel).map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -544,7 +545,7 @@ ${sorted.map(r => `<tr>
             <SelectTrigger className="rounded-sm h-8 text-xs w-40"><SelectValue placeholder="All types" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
-              {inspectionTypes.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t] ?? t}</SelectItem>)}
+              {sortByLabel(inspectionTypes, t => TYPE_LABELS[t] ?? t).map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t] ?? t}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>

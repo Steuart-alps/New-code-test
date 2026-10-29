@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
 import { Download, FileSearch, Loader2, Plus, Sparkles, Trash2, Upload } from "lucide-react";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { sortByLabel } from "@/lib/sort-options";
 
 type Draft = InspectionReportDraftAction & { key: string };
 type Severity = InspectionReportDraftAction["severity"];
@@ -171,7 +172,7 @@ function UploadDialog({ open, onClose, options, onUploaded }: {
               <Label htmlFor="report-type">Type of report</Label>
               <Select value={reportType} onValueChange={(value) => setReportType(value as InspectionReportType)}>
                 <SelectTrigger id="report-type"><SelectValue /></SelectTrigger>
-                <SelectContent>{options.reportTypes.map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}</SelectContent>
+                <SelectContent>{sortByLabel(options.reportTypes, (type) => type.label).map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
@@ -249,7 +250,7 @@ function DraftRow({ action, index, options, onChange, onRemove }: {
           <Label htmlFor={`${id}-track`}>Track</Label>
           <Select value={action.module} onValueChange={(value) => set({ module: value })}>
             <SelectTrigger id={`${id}-track`}><SelectValue /></SelectTrigger>
-            <SelectContent>{options.modules.map((module) => <SelectItem key={module.key} value={module.key}>{module.label}</SelectItem>)}</SelectContent>
+            <SelectContent>{sortByLabel(options.modules, (module) => module.label).map((module) => <SelectItem key={module.key} value={module.key}>{module.label}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div className="space-y-1.5">

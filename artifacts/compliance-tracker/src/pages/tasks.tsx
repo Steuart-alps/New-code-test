@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { MODULE_INFO, formatDay, localToday, moduleLabel, onboardingRequest } from "@/lib/onboarding";
 import { TaskItem, describeRecurrence, useTaskClientId, type TaskList, type TaskRow } from "@/components/task-item";
+import { sortByLabel } from "@/lib/sort-options";
 
 type Assignee = { id: number; name: string; role: string };
 type Draft = {
@@ -205,7 +206,7 @@ export default function TasksPage() {
                 <Label htmlFor="task-module">Link to a module (optional)</Label>
                 <select id="task-module" className={selectClass} value={draft.module} onChange={(e) => setDraft({ ...draft, module: e.target.value })}>
                   <option value="">No link</option>
-                  {moduleOptions.map(([key, info]) => <option key={key} value={key}>{info.label}</option>)}
+                  {sortByLabel(moduleOptions, ([, info]) => info.label).map(([key, info]) => <option key={key} value={key}>{info.label}</option>)}
                 </select>
                 <p className="text-xs text-muted-foreground">Staff get a link straight to that module to record the check.</p>
               </div>

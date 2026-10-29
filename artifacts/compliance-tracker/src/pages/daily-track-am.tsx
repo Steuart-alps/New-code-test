@@ -22,9 +22,9 @@ import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface ChecklistItem { label: string; checked: boolean; notes?: string; section?: string; result?: ChecklistResult; }
+export interface ChecklistItem { label: string; checked: boolean; notes?: string; section?: string; result?: ChecklistResult; }
 
-interface Checklist {
+export interface Checklist {
   id: number;
   checklistType: string;
   checkDate: string;
@@ -153,6 +153,7 @@ const CHECKLIST_LABELS: Record<string, string> = {
 
 export function ChecklistCard({
   type, siteId, siteName, date, existing, onSaved, canAdmin, draft,
+  endpoint = "/daily-track-am", label, defaultItems, icon,
 }: {
   type: string;
   siteId: number | null;
@@ -162,7 +163,14 @@ export function ChecklistCard({
   onSaved: () => void;
   canAdmin: boolean;
   draft?: ChecklistDraftSlot<ChecklistItem>;
+  /** Where the checklist is saved; GreenTrack's shed checks use their own. */
+  endpoint?: string;
+  label?: string;
+  defaultItems?: ChecklistItem[];
+  icon?: typeof Building2;
 }) {
+  const builtIn = defaultItems ?? TEMPLATES[type] ?? [];
+  const title = label ?? CHECKLIST_LABELS[type] ?? type;
   const [templateItems, setTemplateItems] = useState<ChecklistItem[] | null>(null);
   const [templateLoading, setTemplateLoading] = useState(true);
   const [showEditor, setShowEditor] = useState(false);
@@ -185,7 +193,7 @@ export function ChecklistCard({
 
   const effectiveDefault = templateItems
     ? templateItems.map(i => ({ ...i, checked: false }))
-    : (TEMPLATES[type] ?? []);
+    : builtIn;
 
   const { user } = useAuth();
   const { toast } = useToast();
@@ -235,8 +243,8 @@ export function ChecklistCard({
     const failedTitle = submit ? "Checklist not submitted" : "Draft not saved";
     try {
       const res = existing
-        ? await apiFetch(`/daily-track-am/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
-        : await apiFetch(`/daily-track-am`, { method: "POST", body: JSON.stringify(payload) });
+        ? await apiFetch(`${endpoint}/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) });
       if (!res.ok) {
         // Keep the user's ticks; only a 409 (already submitted elsewhere)
         // reloads, to show the stored submitted copy.
@@ -255,7 +263,7 @@ export function ChecklistCard({
 
   const progress = checklistProgress(items);
   const hint = submitHint(progress);
-  const Icon = type === "kitchen_opening" ? UtensilsCrossed : Building2;
+  const Icon = icon ?? (type === "kitchen_opening" ? UtensilsCrossed : Building2);
 
   return (
     <>
@@ -263,7 +271,7 @@ export function ChecklistCard({
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Icon className="w-4 h-4 text-primary opacity-80" />
-            <h3 className="font-bold font-display">{CHECKLIST_LABELS[type]}</h3>
+            <h3 className="font-bold font-display">{title}</h3>
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && !submitted && (
@@ -353,10 +361,10 @@ export function ChecklistCard({
           open={showEditor}
           onOpenChange={setShowEditor}
           type={type}
-          typeLabel={CHECKLIST_LABELS[type] ?? type}
+          typeLabel={title}
           siteId={siteId}
           siteName={siteName}
-          defaultItems={TEMPLATES[type] ?? []}
+          defaultItems={builtIn}
           onSaved={(newItems: TemplateItem[]) => {
             const ci = newItems.map(i => ({ ...i, checked: false })) as ChecklistItem[];
             setTemplateItems(ci);

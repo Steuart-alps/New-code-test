@@ -24,6 +24,7 @@ import {
   useUpdateFireCallPoint,
   useOrderFireCallPoints,
   FireCallPoint,
+  getGetFireDrillAttendanceQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { SayItButton } from "@/components/say-it-button";
@@ -62,6 +63,11 @@ import { SOUND_LEVEL_MIN_DB } from "@/lib/fire-sound-level";
 import { StringListEditor } from "@/components/string-list-editor";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
+import { sortByLabel } from "@/lib/sort-options";
+import {
+  DrillAttendanceCard, DrillStaffPicker, DrillTimingFields, EMPTY_EVACUATION, evacuationFromSeconds, evacuationIsBlank,
+  formatEvacuation, parseEvacuation, type EvacuationValue,
+} from "@/components/fire-drill";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -116,10 +122,18 @@ function frequencyLabel(days: number): string {
 
 type NightStaff = "included" | "not_included" | "no_night_staff";
 
+// Button labels: the question is "Night staff included?".
+const NIGHT_STAFF_OPTIONS: Record<NightStaff, string> = {
+  included: "Yes",
+  not_included: "No",
+  no_night_staff: "N/A",
+};
+
+// History wording, after "Night staff included:".
 const NIGHT_STAFF_LABELS: Record<NightStaff, string> = {
-  included: "Night staff took part",
-  not_included: "Night staff did not take part",
-  no_night_staff: "No night staff at this site",
+  included: "Yes",
+  not_included: "No",
+  no_night_staff: "N/A (no night staff at this site)",
 };
 
 function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | null; onChange: (v: NightStaff) => void; optional?: boolean }) {
@@ -127,11 +141,11 @@ function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | n
     <div className="space-y-2 border border-border rounded-sm p-3 bg-muted/20">
       <div className="flex items-center gap-2">
         <Moon className="w-4 h-4 text-primary flex-shrink-0" />
-        <p className="text-sm font-medium">Night staff {optional && <span className="text-muted-foreground text-xs font-normal">optional</span>}</p>
+        <p className="text-sm font-medium">Night staff included? {optional && <span className="text-muted-foreground text-xs font-normal">optional</span>}</p>
       </div>
       <p className="text-xs text-muted-foreground">Drills are due at least every 6 months and should include night staff.</p>
-      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Night staff">
-        {(Object.keys(NIGHT_STAFF_LABELS) as NightStaff[]).map(option => (
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Night staff included">
+        {(Object.keys(NIGHT_STAFF_OPTIONS) as NightStaff[]).map(option => (
           <button key={option} type="button" role="radio" aria-checked={value === option} onClick={() => onChange(option)}
             data-testid={`night-staff-${option}`}
             className={cn(
@@ -140,7 +154,7 @@ function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | n
                 ? option === "not_included" ? "bg-amber-500 border-amber-500 text-white" : "bg-primary border-primary text-primary-foreground"
                 : "bg-background text-muted-foreground border-border hover:border-primary/50",
             )}>
-            {NIGHT_STAFF_LABELS[option]}
+            {NIGHT_STAFF_OPTIONS[option]}
           </button>
         ))}
       </div>
@@ -149,9 +163,16 @@ function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | n
           Plan the next drill so night staff take part.
         </p>
       )}
+      {value === "no_night_staff" && (
+        <p className="text-xs text-muted-foreground">N/A: this site has no night staff.</p>
+      )}
     </div>
   );
 }
+
+// Drill notes are required: what needs to improve, or that nothing does.
+const DRILL_NOTES_LABEL = "Improvements required / notes";
+const DRILL_NOTES_PLACEHOLDER = "e.g. Fire door on the first floor was slow to close; everyone used the nearest exit";
 
 // ── Emergency lighting ────────────────────────────────────────────────────────
 
@@ -871,7 +892,7 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
                <Label>UK nation</Label>
                <Select value={profile.ukNation || "none"} disabled={!siteId} onValueChange={value => setProfile(current => ({ ...current, ukNation: value === "none" ? "" : value }))}>
                  <SelectTrigger><SelectValue placeholder="Select nation" /></SelectTrigger>
-                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem></SelectContent>
+                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem></SelectContent>
                </Select>
              </div>
            </TabsContent>
@@ -992,6 +1013,10 @@ function RecordCheckDialog({
   // Weekly alarm test: the call point used. Drills: whether night staff took part.
   const [callPointChoice, setCallPointChoice] = useState<{ callPointId: number | null; callPoint: string }>({ callPointId: null, callPoint: "" });
   const [nightStaff, setNightStaff] = useState<NightStaff | null>(null);
+  // Drills: the time of the drill, how long the evacuation took and who was there.
+  const [drillTime, setDrillTime] = useState("");
+  const [evacuation, setEvacuation] = useState<EvacuationValue>(EMPTY_EVACUATION);
+  const [staffPresentIds, setStaffPresentIds] = useState<number[]>([]);
   const [soundLevel, setSoundLevel] = useState<SoundLevelValue>(EMPTY_SOUND_LEVEL);
   // A call point near a sleeping area sets the 75 dB bedhead limit.
   const chooseCallPoint = (value: { callPointId: number | null; callPoint: string; sleepingArea?: boolean }) => {
@@ -1088,12 +1113,16 @@ function RecordCheckDialog({
     setCheckDate(todayIso()); setResult("pass"); setLocation(""); setPerformedBy(user?.name ?? ""); setNotes("");
     setRoutes([]); setPanelStatus("normal"); setFaultsFound(""); setZonesTested(""); setActionsTaken("");
     setCallPointChoice({ callPointId: null, callPoint: "" }); setNightStaff(null); setSoundLevel(EMPTY_SOUND_LEVEL);
+    setDrillTime(""); setEvacuation(EMPTY_EVACUATION); setStaffPresentIds([]);
   }
 
   const missing = checkType === "alarm" && !callPointChoice.callPointId && !callPointChoice.callPoint.trim()
     ? "Choose the call point tested"
     : checkType === "alarm" && soundLevel.db.trim() && parseSoundLevel(soundLevel.db) === null ? "Enter a sound level between 20 and 140 dB"
-    : checkType === "fire_drill" && !nightStaff ? "Say whether night staff took part" : null;
+    : checkType === "fire_drill" && !drillTime ? "Give the time of the drill"
+    : checkType === "fire_drill" && parseEvacuation(evacuation) === null ? "Give the time taken to evacuate"
+    : checkType === "fire_drill" && !nightStaff ? "Say whether night staff were included (Yes, No or N/A)"
+    : checkType === "fire_drill" && !notes.trim() ? "Write the improvements required, or notes" : null;
 
   const handleSubmit = async () => {
     const data: CreateFireSafetyCheckRequest & { staffRosterId?: number | null } = {
@@ -1110,7 +1139,9 @@ function RecordCheckDialog({
         callPoint: callPointChoice.callPointId ? null : callPointChoice.callPoint.trim(),
         ...soundLevelRequest(soundLevel),
       } : {}),
-      ...(checkType === "fire_drill" ? { nightStaff } : {}),
+      ...(checkType === "fire_drill" ? {
+        nightStaff, drillTime, evacuationSeconds: parseEvacuation(evacuation), staffPresentIds,
+      } : {}),
     };
     createCheck.mutate(
       { data },
@@ -1119,6 +1150,7 @@ function RecordCheckDialog({
           queryClient.invalidateQueries({ queryKey: getListFireSafetyChecksQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetFireSafetyStatusQueryKey() });
           queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
+          queryClient.invalidateQueries({ queryKey: getGetFireDrillAttendanceQueryKey().slice(0, 1) });
           toast({ title: "Check recorded", description: "Fire safety check saved." });
           reset(); setOpen(false);
         },
@@ -1150,7 +1182,7 @@ function RecordCheckDialog({
                 {CHECK_TYPE_GROUPS.map(g => (
                   <div key={g.label}>
                     <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
-                    {g.types.map(k => (
+                    {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => (
                       <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>
                     ))}
                   </div>
@@ -1165,7 +1197,7 @@ function RecordCheckDialog({
               <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} className="rounded-sm" />
             </div>
             <div className="space-y-1.5">
-              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} optional />
+              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} siteId={selectedSite} includeRoster={false} optional />
             </div>
           </div>
 
@@ -1193,7 +1225,13 @@ function RecordCheckDialog({
           {checkType === "emergency_lights" && <FlickTestGuide />}
           <LinkedTaskGuide checkType={checkType} />
 
-          {checkType === "fire_drill" && <NightStaffPicker value={nightStaff} onChange={setNightStaff} />}
+          {checkType === "fire_drill" && (
+            <>
+              <DrillTimingFields drillTime={drillTime} onDrillTimeChange={setDrillTime} evacuation={evacuation} onEvacuationChange={setEvacuation} />
+              <NightStaffPicker value={nightStaff} onChange={setNightStaff} />
+              <DrillStaffPicker siteId={selectedSite} value={staffPresentIds} onChange={setStaffPresentIds} />
+            </>
+          )}
 
           {/* ── Fire walk ─────────────────────────────────────────────────── */}
           {checkType === "fire_walk" && (
@@ -1280,10 +1318,18 @@ function RecordCheckDialog({
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <Label>{checkType === "fire_walk" || checkType === "alarm_panel" ? "Additional notes" : "Notes"} <span className="text-muted-foreground text-xs">optional</span></Label>
-            <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm" />
-          </div>
+          {checkType === "fire_drill" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="drill-notes">{DRILL_NOTES_LABEL}</Label>
+              <Textarea id="drill-notes" value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="rounded-sm"
+                placeholder={DRILL_NOTES_PLACEHOLDER} data-testid="input-drill-notes" />
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>{checkType === "fire_walk" || checkType === "alarm_panel" ? "Additional notes" : "Notes"} <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm" />
+            </div>
+          )}
         </div>
         <DialogFooter className="items-center">
           {missing && <p className="text-xs text-muted-foreground sm:mr-auto">{missing}</p>}
@@ -1335,6 +1381,16 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
   // answer can be changed but not removed.
   const [callPointChoice, setCallPointChoice] = useState({ callPointId: check.callPointId ?? null, callPoint: check.callPoint ?? "" });
   const [nightStaff, setNightStaff] = useState<NightStaff | null>((check.nightStaff as NightStaff | null) ?? null);
+  const [drillTime, setDrillTime] = useState(check.drillTime ?? "");
+  const [evacuation, setEvacuation] = useState<EvacuationValue>(evacuationFromSeconds(check.evacuationSeconds));
+  const recordedStaff = useMemo(() => check.staffPresent ?? [], [check.staffPresent]);
+  const [staffPresentIds, setStaffPresentIds] = useState<number[]>(
+    recordedStaff.flatMap(person => person.staffRosterId != null ? [person.staffRosterId] : []));
+  const drillIncomplete = isDrill && (
+    (!!check.drillTime && !drillTime)
+    || (!evacuationIsBlank(evacuation) && parseEvacuation(evacuation) === null)
+    || (check.evacuationSeconds != null && evacuationIsBlank(evacuation))
+    || (!!check.notes?.trim() && !notes.trim()));
   const [soundLevel, setSoundLevel] = useState<SoundLevelValue>(check.soundLevelDb == null ? EMPTY_SOUND_LEVEL : {
     db: String(check.soundLevelDb), method: check.soundLevelMethod === "phone" ? "phone" : "meter", bedhead: !!check.soundLevelBedhead,
   });
@@ -1382,7 +1438,9 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
             callPoint: callPointChoice.callPointId ? null : callPointChoice.callPoint.trim() || null,
             ...soundLevelRequest(soundLevel),
           } : {}),
-          ...(isDrill ? { nightStaff } : {}),
+          ...(isDrill ? {
+            nightStaff, drillTime: drillTime || null, evacuationSeconds: parseEvacuation(evacuation), staffPresentIds,
+          } : {}),
         } as any,
       },
       {
@@ -1390,6 +1448,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
           queryClient.invalidateQueries({ queryKey: getListFireSafetyChecksQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetFireSafetyStatusQueryKey() });
           queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
+          queryClient.invalidateQueries({ queryKey: getGetFireDrillAttendanceQueryKey().slice(0, 1) });
           toast({ title: "Check updated" }); setOpen(false);
         },
         onError: (error: any) => {
@@ -1417,7 +1476,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
               <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} className="rounded-sm" />
             </div>
             <div className="space-y-1.5">
-              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} />
+              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} siteId={selectedSite} includeRoster={false} />
             </div>
           </div>
 
@@ -1441,7 +1500,14 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
           )}
           {isAlarm && <SoundLevelField value={soundLevel} onChange={setSoundLevel} />}
 
-          {isDrill && <NightStaffPicker value={nightStaff} onChange={setNightStaff} optional={!check.nightStaff} />}
+          {isDrill && (
+            <>
+              <DrillTimingFields drillTime={drillTime} onDrillTimeChange={setDrillTime} evacuation={evacuation} onEvacuationChange={setEvacuation}
+                optional={!check.drillTime && check.evacuationSeconds == null} />
+              <NightStaffPicker value={nightStaff} onChange={setNightStaff} optional={!check.nightStaff} />
+              <DrillStaffPicker siteId={selectedSite} value={staffPresentIds} onChange={setStaffPresentIds} recorded={recordedStaff} />
+            </>
+          )}
 
           {isFireWalk && (
             <div className="space-y-3 border border-border rounded-sm p-3 bg-muted/20">
@@ -1525,15 +1591,16 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
           )}
 
           <div className="space-y-1.5">
-            <Label>{isFireWalk || isPanel ? "Additional notes" : "Notes"}</Label>
-            <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm" />
+            <Label>{isDrill ? DRILL_NOTES_LABEL : isFireWalk || isPanel ? "Additional notes" : "Notes"}</Label>
+            <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={isDrill ? 3 : 2} className="rounded-sm"
+              placeholder={isDrill ? DRILL_NOTES_PLACEHOLDER : undefined} />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={updateCheck.isPending || soundLevelInvalid
             || (isAlarm && !!check.callPoint && !callPointChoice.callPointId && !callPointChoice.callPoint.trim())
-            || (isDrill && !!check.nightStaff && !nightStaff)}>
+            || (isDrill && !!check.nightStaff && !nightStaff) || drillIncomplete}>
             {updateCheck.isPending ? "Saving…" : "Update"}
           </Button>
         </DialogFooter>
@@ -1751,6 +1818,7 @@ export default function FireSafetyPage() {
         )}
 
         <CallPointRotationCard siteId={filterSite} sites={sites} enabled={hasFiretrack} />
+        {hasFiretrack && canEdit && <DrillAttendanceCard siteId={filterSite} />}
 
         {/* Filters */}
         <Card>
@@ -1771,7 +1839,7 @@ export default function FireSafetyPage() {
                     {CHECK_TYPE_GROUPS.map(g => (
                       <div key={g.label}>
                         <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
-                        {g.types.map(k => <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>)}
+                        {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>)}
                       </div>
                     ))}
                   </SelectContent>
@@ -1848,7 +1916,18 @@ export default function FireSafetyPage() {
                             )}
                             {check.nightStaff && (
                               <div className={cn(check.nightStaff === "not_included" && "text-amber-700")}>
-                                <span className="font-medium">Night staff:</span> {NIGHT_STAFF_LABELS[check.nightStaff as NightStaff] ?? check.nightStaff}
+                                <span className="font-medium">Night staff included:</span> {NIGHT_STAFF_LABELS[check.nightStaff as NightStaff] ?? check.nightStaff}
+                              </div>
+                            )}
+                            {check.drillTime && (
+                              <div><span className="font-medium">Time of drill:</span> {check.drillTime}</div>
+                            )}
+                            {check.evacuationSeconds != null && (
+                              <div><span className="font-medium">Time taken to evacuate:</span> {formatEvacuation(check.evacuationSeconds)}</div>
+                            )}
+                            {check.checkType === "fire_drill" && (check.staffPresent?.length ?? 0) > 0 && (
+                              <div data-testid={`drill-staff-present-${check.id}`}>
+                                <span className="font-medium">Staff present ({check.staffPresent!.length}):</span> {check.staffPresent!.map(person => person.name).join(", ")}
                               </div>
                             )}
                           </div>
@@ -1857,7 +1936,7 @@ export default function FireSafetyPage() {
                           {structured?._type === "alarm_panel" && <AlarmPanelDisplay data={structured as AlarmPanelNotes} />}
                           {/* Plain notes fallback */}
                           {!structured && check.notes && (
-                            <div className="text-xs text-muted-foreground"><span className="font-medium">Notes:</span> {check.notes}</div>
+                            <div className="text-xs text-muted-foreground"><span className="font-medium">{check.checkType === "fire_drill" ? `${DRILL_NOTES_LABEL}:` : "Notes:"}</span> {check.notes}</div>
                           )}
                           <CheckPhotoUploader entityType="fire_safety_check" entityId={check.id} compact />
                         </div>

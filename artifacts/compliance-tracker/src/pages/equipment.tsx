@@ -26,6 +26,7 @@ import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
 import { Archive, ChevronDown, ChevronUp, Download, Flame, Loader2, Pencil, Plus, QrCode, RefreshCw, RotateCcw, Search } from "lucide-react";
+import { sortByLabel } from "@/lib/sort-options";
 
 const TYPE_LABELS: Record<EquipmentType, string> = {
   cold_water_tank: "Cold water storage tank",
@@ -191,7 +192,7 @@ function ItemDialog({ item, sites, defaultSite, open, onOpenChange, onSaved }: {
             <Select value={form.type} onValueChange={value => update("type", value as EquipmentType)}>
               <SelectTrigger aria-label="Equipment type"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {(Object.keys(TYPE_LABELS) as EquipmentType[]).map(type => <SelectItem key={type} value={type}>{TYPE_LABELS[type]}</SelectItem>)}
+                {sortByLabel(Object.keys(TYPE_LABELS) as EquipmentType[], type => TYPE_LABELS[type]).map(type => <SelectItem key={type} value={type}>{TYPE_LABELS[type]}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
