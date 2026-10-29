@@ -11,8 +11,9 @@
 //    picking a site after filling them in;
 //  - a page's "All sites" filter starts on the user's working site: their
 //    department's site; for a Manager over several sites, the one they pick
-//    in the top bar (one of theirs only); for an Owner, the one they pick
-//    there, else All sites.
+//    in the top bar (one of theirs only); for an Owner or Consultant, the one
+//    they pick there, else the first site. All sites can still be chosen on
+//    each page.
 //
 // The real page is mounted by tests/browser/daily-checklist-site.harness.tsx
 // and built with the app's React and Tailwind setup. API requests are
@@ -283,7 +284,11 @@ async function main() {
     });
 
     await test("RoomTrack: room checks survive narrowing to a site", async () => {
-      const { page } = await open("?page=room-track", {}, null, (p) => p.getByRole("heading", { name: "201" }));
+      const { page } = await open("?page=room-track", {}, null, (p) => p.getByRole("heading", { name: "101" }));
+      assert.equal(await page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "Clubhouse", "starts on the first site");
+      await page.getByRole("combobox", { name: "Filter rooms by site" }).click();
+      await page.getByRole("option", { name: "All sites" }).click();
+      await page.getByRole("heading", { name: "201" }).waitFor();
       const room = page.locator(".border-l-4", { has: page.getByRole("heading", { name: "201" }) });
       await room.getByRole("button", { name: "Clean" }).click();
       await room.getByRole("textbox", { name: "Notes" }).fill("Kettle missing");
@@ -298,7 +303,7 @@ async function main() {
       await page.close();
     });
 
-    await test("site filters start on the user's own site, except for an Owner", async () => {
+    await test("site filters start on the user's own site, an Owner or Consultant on the first site", async () => {
       const staff = await open("?page=room-track&dept=11", {}, null, (p) => p.getByRole("heading", { name: "201" }));
       assert.equal(await staff.page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "Pro Shop");
       await staff.page.getByRole("heading", { name: "101" }).waitFor({ state: "detached" });
@@ -306,9 +311,12 @@ async function main() {
       await staff.page.getByRole("option", { name: "All sites" }).click();
       await staff.page.getByRole("heading", { name: "101" }).waitFor();
       await staff.page.close();
-      const owner = await open("?page=room-track&dept=11&role=client_admin", {}, null, (p) => p.getByRole("heading", { name: "101" }));
-      assert.equal(await owner.page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "All sites");
-      await owner.page.close();
+      for (const role of ["client_admin", "consultant"]) {
+        const owner = await open(`?page=room-track&dept=11&role=${role}`, {}, null, (p) => p.getByRole("heading", { name: "101" }));
+        assert.equal(await owner.page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "Clubhouse", role);
+        assert.equal(await workingSite(owner.page).textContent(), "Clubhouse", role);
+        await owner.page.close();
+      }
     });
 
     await test("a Manager over several sites starts on their department's site and can switch between theirs", async () => {
@@ -328,13 +336,15 @@ async function main() {
     await test("an Owner picks a site in the top bar, then every page starts on it", async () => {
       const context = await browser.newContext();
       const first = await open("?page=room-track&role=client_admin", {}, context, (p) => p.getByRole("heading", { name: "101" }));
-      assert.equal(await first.page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "All sites");
-      assert.equal(await workingSite(first.page).textContent(), "Choose your site");
+      assert.equal(await workingSite(first.page).textContent(), "Clubhouse");
       await workingSite(first.page).click();
-      await first.page.getByRole("option", { name: "Clubhouse" }).click();
+      assert.deepEqual(await first.page.getByRole("option").allTextContents(), ["Clubhouse", "Pro Shop", "Halfway House"]);
+      await first.page.getByRole("option", { name: "Pro Shop" }).click();
+      await first.page.getByRole("heading", { name: "201" }).waitFor();
+      assert.equal(await first.page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "Pro Shop");
       await first.page.close();
       const later = await open("?page=daily-am&role=client_admin", {}, context);
-      assert.equal(await siteSelect(later.page).textContent(), "Clubhouse");
+      assert.equal(await siteSelect(later.page).textContent(), "Pro Shop");
       await later.page.close();
       await context.close();
     });

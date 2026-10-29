@@ -172,8 +172,10 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId, pageTrack }: {
     setSiteId(defaultSiteId ?? workingSiteId ?? (sites.length === 1 ? sites[0].id : null));
   }, [open]);
   useEffect(() => {
-    if (open && siteId === null && sites.length === 1) setSiteId(sites[0].id);
-  }, [open, sites, siteId]);
+    if (!open || siteId !== null) return;
+    if (workingSiteId) setSiteId(workingSiteId);
+    else if (sites.length === 1) setSiteId(sites[0].id);
+  }, [open, sites, siteId, workingSiteId]);
 
   const needsSite = sites.length > 1 && siteId === null;
   const siteQuery = siteId === null ? "" : `?siteId=${siteId}`;

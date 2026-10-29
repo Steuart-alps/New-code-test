@@ -584,7 +584,7 @@ export default function Dashboard() {
   const { data: sites = [] } = useListSites();
   const [teamCount, setTeamCount] = useState(0);
   const [notificationEmail, setNotificationEmail] = useState("");
-  const [siteId, setSiteId] = useSiteFilter("all");
+  const [siteId, setSiteId, siteReady] = useSiteFilter("all");
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
   const [checklistTotals, setChecklistTotals] = useState<ChecklistTotals | null>(null);
   const [checklistLoading, setChecklistLoading] = useState(false);
@@ -651,10 +651,11 @@ export default function Dashboard() {
   }, [siteId]);
 
   useEffect(() => {
+    if (!siteReady) return;
     const controller = new AbortController();
     load(controller.signal);
     return () => controller.abort();
-  }, [load, reloadKey]);
+  }, [load, reloadKey, siteReady]);
 
   const enabledTracks   = tracks.filter((t) => t.enabled && !t.otherModule);
   const otherTracks     = tracks.filter((t) => t.enabled && t.otherModule);

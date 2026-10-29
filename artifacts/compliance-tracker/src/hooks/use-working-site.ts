@@ -47,9 +47,10 @@ function subscribe(listener: () => void) {
  *   after; the one picked in the header (or on a checklist page) is kept,
  *   otherwise the site of the department they're working in.
  * - Owners, Consultants and Managers of every department: the site picked in
- *   the header; until one is picked, none (All sites).
+ *   the header; until one is picked, the first site.
  *
- * A department that spans every site (no site of its own) gives no default.
+ * Only a business with no sites gives no working site; page filters still
+ * offer "All sites".
  */
 export function useWorkingSite() {
   const { user, activeClientId } = useAuth();
@@ -81,10 +82,13 @@ export function useWorkingSite() {
     : sites.filter(site => ownSiteIds.has(site.id));
   const isMine = (id: number | null) => id != null && mySites.some(site => site.id === id);
 
+  // Everyone works at a site: the one picked in the top bar, else their own
+  // department's, else the first of their sites (an Owner or Consultant
+  // included, until they pick one).
   let siteId: number | null = null;
   if (isMine(stored)) siteId = stored;
   else if (!everySite && isMine(siteOf(user?.departmentId))) siteId = siteOf(user?.departmentId);
-  else if (mySites.length === 1) siteId = mySites[0].id;
+  else if (mySites.length > 0) siteId = mySites[0].id;
 
   return {
     siteId,
@@ -92,10 +96,6 @@ export function useWorkingSite() {
     ready: !sitesLoading && !(needDepartments && departments.isLoading),
     /** The sites this user works across (every site for an Owner). */
     sites: mySites,
-    /** An Owner, Consultant or all-departments Manager: may work across All sites. */
-    everySite,
-    /** One of those hasn't picked a site yet. */
-    needsChoice: everySite && siteId == null && sites.length > 1,
     setSiteId: (id: number | null) => writeStored(key, id),
   };
 }
@@ -110,10 +110,12 @@ export function useWorkingSiteId(): number | null {
  * useWorkingSite), or on `allValue` ("All sites") when they have none. Once
  * the user picks a value on the page it stays while they're on it.
  */
-export function useSiteFilter<T extends string>(allValue: T): [string, (value: string) => void] {
-  const workingSiteId = useWorkingSiteId();
+export function useSiteFilter<T extends string>(allValue: T): [string, (value: string) => void, boolean] {
+  const { siteId: workingSiteId, ready } = useWorkingSite();
   const [chosen, setChosen] = useState<string | null>(null);
-  return [chosen ?? (workingSiteId ? String(workingSiteId) : allValue), setChosen];
+  // The third value is false until the working site is known, for a page
+  // that would rather not load All sites first.
+  return [chosen ?? (workingSiteId ? String(workingSiteId) : allValue), setChosen, chosen != null || ready];
 }
 
 /** useSiteFilter for pages that keep the filter as a site id (undefined = all sites). */

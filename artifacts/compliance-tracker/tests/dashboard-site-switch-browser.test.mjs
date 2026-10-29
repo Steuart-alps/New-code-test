@@ -254,15 +254,21 @@ async function main() {
   const base = `http://127.0.0.1:${server.address().port}/tests/browser/dashboard.html`;
   const executablePath = process.env.CHROMIUM_PATH ?? ["/opt/pw-browsers/chromium"].find((p) => existsSync(p));
   const browser = await chromium.launch({ executablePath });
-  /** Opens the dashboard and lets the first (all sites) summary load. */
+  /**
+   * Opens the dashboard, which starts on the first site (an Owner's working
+   * site until they pick one), then switches to All sites and lets it load.
+   */
   const open = async (extra) => {
     const page = await browser.newPage();
     page.setDefaultTimeout(5_000);
     if (process.env.DEBUG_BROWSER) page.on("console", (m) => console.log("[browser]", m.type(), m.text()));
     const api = mockApi(page, extra);
     await page.goto(base);
+    await (await api.nextSummary("11")).respond();
+    await expectShowing(page, "11", "first load");
+    await pickSite(page, "All sites");
     await (await api.nextSummary("all")).respond();
-    await expectShowing(page, "all", "first load");
+    await expectShowing(page, "all", "All sites");
     return { page, api };
   };
   try {
