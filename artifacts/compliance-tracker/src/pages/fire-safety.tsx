@@ -62,6 +62,7 @@ import { SOUND_LEVEL_MIN_DB } from "@/lib/fire-sound-level";
 import { StringListEditor } from "@/components/string-list-editor";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -88,17 +89,25 @@ const CHECK_TYPE_LABELS: Record<AnyCheckType, string> = {
 const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
   {
     label: "Regular checks",
-    types: ["alarm", "alarm_panel", "emergency_lights", "extinguishers", "fire_doors"],
+    types: ["alarm", "emergency_lights", "extinguishers", "fire_doors"],
   },
   {
     label: "Walkthroughs & drills",
     types: ["fire_walk", "fire_drill"],
   },
-  {
-    label: "Contractor services & annual tests",
-    types: ["alarm_service", "extinguisher_service", "emergency_lights_annual"],
-  },
 ];
+
+/**
+ * Checks no longer recorded here (the server's RETIRED_FIRE_CHECK_TYPES): the
+ * alarm panel is on the premises opening and closing checks, and the
+ * contractor services are their compliance checks, shown on this page by
+ * TrackContractorChecks. Older records still show in the history and can be
+ * filtered.
+ */
+const RETIRED_CHECK_GROUP: { label: string; types: AnyCheckType[] } = {
+  label: "No longer recorded here",
+  types: ["alarm_panel", "alarm_service", "extinguisher_service", "emergency_lights_annual"],
+};
 
 /** How often, in words, for the status cards. */
 function frequencyLabel(days: number): string {
@@ -162,36 +171,6 @@ function FlickTestGuide() {
       <p>
         <span className="font-medium text-foreground">Monthly 5 minute flick test.</span> Switch the emergency lighting
         to test for 5 minutes and check every fitting lights. Record Fail and note which fittings if any do not.
-      </p>
-    </div>
-  );
-}
-
-/** Contractor jobs that are also ComplyTrack tasks, and the task each one completes. */
-const LINKED_TASK_GUIDES: Partial<Record<AnyCheckType, { testId: string; heading: string; who: string; task: string }>> = {
-  emergency_lights_annual: {
-    testId: "discharge-test-guide", heading: "Annual 3-hour discharge test.",
-    who: "emergency lighting contractor, who certifies it", task: "Emergency Light Maintenance",
-  },
-  alarm_service: {
-    testId: "alarm-service-guide", heading: "6-monthly fire alarm service.",
-    who: "fire alarm contractor (BS 5839)", task: "Fire Alarm Maintenance",
-  },
-  extinguisher_service: {
-    testId: "extinguisher-service-guide", heading: "Annual fire extinguisher service.",
-    who: "extinguisher contractor (BS 5306-3)", task: "Fire Extinguishers Maintenance",
-  },
-};
-
-function LinkedTaskGuide({ checkType }: { checkType: AnyCheckType }) {
-  const guide = LINKED_TASK_GUIDES[checkType];
-  if (!guide) return null;
-  return (
-    <div className="flex gap-2 border border-border rounded-sm p-3 bg-muted/20 text-xs text-muted-foreground" data-testid={guide.testId}>
-      <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
-      <p>
-        <span className="font-medium text-foreground">{guide.heading}</span> Usually done by your {guide.who}.
-        A pass here also completes the "{guide.task}" task in ComplyTrack, and completing that task records it here.
       </p>
     </div>
   );
@@ -714,8 +693,7 @@ function parseJsonRecord(raw: string | undefined | null, fallback: Record<string
 
 const DEFAULT_FIRE_FREQUENCIES: Record<string, number> = {
   alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90,
-  fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365,
-  alarm_service: 180, extinguisher_service: 365,
+  fire_drill: 180, fire_walk: 7,
 };
 
 type FireProfileState = {
@@ -927,7 +905,7 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
 
           <TabsContent value="zones" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
             <p className="text-xs text-muted-foreground">
-              List your alarm panel zones. They'll be pre-filled in the "Zones tested" field on alarm panel checks.
+              List your alarm panel zones, for reference (the panel itself is checked on the premises opening and closing checks).
             </p>
             <StringListEditor items={alarmZones} onChange={setAlarmZones} placeholder='e.g. "Zone 1 — Ground floor"' />
           </TabsContent>
@@ -1184,7 +1162,6 @@ function RecordCheckDialog({
           )}
 
           {checkType === "emergency_lights" && <FlickTestGuide />}
-          <LinkedTaskGuide checkType={checkType} />
 
           {checkType === "fire_drill" && <NightStaffPicker value={nightStaff} onChange={setNightStaff} />}
 
@@ -1613,7 +1590,7 @@ export default function FireSafetyPage() {
               <div>
                 <h2 className="text-2xl font-display font-bold text-foreground mb-2">FireTrack</h2>
                 <p className="text-muted-foreground mb-1">
-                  Digital fire safety logbook — record checks, fire walks, and alarm panel inspections.
+                  Digital fire safety logbook — record checks, fire walks, drills and contractor services.
                 </p>
                 <p className="font-medium text-primary">£10 per site per month</p>
               </div>
@@ -1648,7 +1625,7 @@ export default function FireSafetyPage() {
               <Flame className="w-6 h-6 text-primary" />
             </div>
             <p className="text-sm text-muted-foreground">
-              Fire safety logbook: weekly alarm tests by call point, monthly emergency lighting, 6-monthly drills, fire walks and panel checks
+              Fire safety logbook: weekly alarm tests by call point, monthly emergency lighting, 6-monthly drills and fire walks, with your contractor services
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1743,6 +1720,8 @@ export default function FireSafetyPage() {
           </div>
         )}
 
+        {hasFiretrack && <TrackContractorChecks module="fire" siteId={filterSite} />}
+
         <CallPointRotationCard siteId={filterSite} sites={sites} enabled={hasFiretrack} />
 
         {/* Filters */}
@@ -1761,7 +1740,7 @@ export default function FireSafetyPage() {
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="All types" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All types</SelectItem>
-                    {CHECK_TYPE_GROUPS.map(g => (
+                    {[...CHECK_TYPE_GROUPS, RETIRED_CHECK_GROUP].map(g => (
                       <div key={g.label}>
                         <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
                         {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>)}

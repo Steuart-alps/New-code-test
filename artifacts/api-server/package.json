@@ -25,7 +25,7 @@
     "test:ai-credit": "bash tests/run-bundled-unit.sh tests/ai-credit.ts esm",
     "test:ai-addon": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/ai-addon.mjs",
     "test:auth-me-active-client": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/auth-me-active-client.mjs",
-    "test:fire-discharge-task-link": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-discharge-task-link.mjs",
+    "test:fire-retired-checks": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-retired-checks.mjs",
     "test:track-task-links": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-task-links.mjs",
     "test:track-due-dates": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-due-dates.mjs",
     "test:contractor-visits": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/contractor-visits.mjs",

@@ -7,10 +7,9 @@ import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { appendAuditEvent } from "../lib/audit";
 import { siteVisibleToDepartment, sitesTableVisibleTo } from "../lib/departmentSites";
-import { completeLinkedTasksFromCheck } from "../lib/trackTaskLink";
 import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
-import { FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, effectiveFireFrequencies, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
+import { ACTIVE_FIRE_CHECK_TYPES, FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, RETIRED_FIRE_CHECK_TYPES, effectiveFireFrequencies, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
 import { callPointLabel, callPointRotation } from "../lib/fireCallPointRotation";
 import { SOUND_LEVEL_METHODS } from "../lib/fireSoundLevel";
@@ -220,7 +219,7 @@ router.get("/status", requireAuth, async (req, res) => {
   );
   if (statuses.length === 0) {
     // No site is visible to this user, so nothing has been recorded for them.
-    return res.json(CHECK_TYPES.map(checkType => ({
+    return res.json(ACTIVE_FIRE_CHECK_TYPES.map(checkType => ({
       checkType, frequencyDays: FREQUENCY_DAYS[checkType], lastDate: null, lastResult: null, dueDate: null,
       status: "never" as const, siteId: null, siteName: null, siteCount: 0, sitesAffected: 0,
     })));
@@ -236,6 +235,15 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
+  // Older records of a retired check stay editable, but no new ones are made.
+  if (RETIRED_FIRE_CHECK_TYPES.includes(data.checkType)) {
+    return res.status(400).json({
+      error: data.checkType === "alarm_panel"
+        ? "The alarm panel is now checked on the premises opening and closing checks."
+        : "Contractor services are now recorded on their compliance check (Compliance Checks), which FireTrack shows.",
+      code: "FIRE_CHECK_TYPE_RETIRED",
+    });
+  }
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -283,9 +291,6 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   }
 
   await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: inserted });
-  // A passed annual discharge test or alarm/extinguisher service also
-  // completes its ComplyTrack task.
-  await completeLinkedTasksFromCheck(req, "fire", inserted);
   res.status(201).json(inserted);
 });
 
@@ -338,7 +343,6 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
 
   if (!updated) return res.status(404).json({ error: "Not found" });
   await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: id, action: "updated", before: existing, after: updated });
-  await completeLinkedTasksFromCheck(req, "fire", updated);
   res.json(updated);
 });
 

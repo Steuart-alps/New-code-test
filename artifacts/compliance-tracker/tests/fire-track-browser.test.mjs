@@ -11,8 +11,11 @@ import { chromium } from "@playwright/test";
 //     the one tested last), sends the one chosen, and cannot be saved without
 //     a call point; the page shows the next one and any not tested this round;
 //   - the emergency lighting test explains the 5 minute flick test;
-//   - the annual discharge test and the contractor services say they are kept
-//     in step with their ComplyTrack tasks;
+//   - the contractor services (fire alarm and extinguisher services, annual
+//     3-hour emergency lighting test) show red/amber/green from their
+//     compliance checks, each opening the check; they and the alarm panel
+//     check are no longer offered or shown as due here, but an older alarm
+//     panel record stays in the history and its type can still be filtered;
 //   - a drill cannot be saved until it says whether night staff took part;
 //   - history shows the call point and night staff answers;
 //   - managers add call points with a location under Template, Call points,
@@ -70,7 +73,8 @@ const SITE = { id: 1, name: "Harbour Hotel" };
 
 // ─── Stateful /api/fire-safety fixture ───────────────────────────────────────
 
-const FREQUENCIES = { alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_panel: 7, emergency_lights_annual: 365, alarm_service: 180, extinguisher_service: 365 };
+// The server's ACTIVE_FIRE_CHECK_TYPES (alarm_panel and emergency_lights_annual are retired).
+const FREQUENCIES = { alarm: 7, emergency_lights: 30, extinguishers: 7, fire_doors: 90, fire_drill: 180, fire_walk: 7, alarm_service: 180, extinguisher_service: 365 };
 const callPoints = [
   { id: 11, siteId: 1, name: "CP1 – Reception", location: null, sortOrder: 1, sleepingArea: true, archivedAt: null, lastTestedDate: localDate(-7) },
   { id: 12, siteId: 1, name: "CP2 – Kitchen", location: null, sortOrder: 2, archivedAt: null, lastTestedDate: null },
@@ -102,9 +106,44 @@ const checks = [
     location: null, notes: null, performedBy: "Duty Manager", callPointId: null, callPoint: null, nightStaff: "not_included",
     createdAt: "2026-07-08T09:00:00.000Z", updatedAt: "2026-07-08T09:00:00.000Z",
   },
+  {
+    id: 403, clientId: CLIENT_ID, siteId: 1, checkType: "alarm_panel", checkDate: localDate(-40), result: "pass",
+    location: null, performedBy: "Duty Manager", callPointId: null, callPoint: null, nightStaff: null,
+    notes: JSON.stringify({ _type: "alarm_panel", panelStatus: "normal", faultsFound: "", zonesTested: "", actionsTaken: "", freeNotes: "" }),
+    createdAt: "2026-09-19T09:00:00.000Z", updatedAt: "2026-09-19T09:00:00.000Z",
+  },
 ];
 const posts = [];
 const unexpectedRequests = [];
+
+// Contractor visit types (artifacts/api-server/src/lib/contractorVisits.ts)
+// and their compliance checks: one with a certificate outstanding (red), one
+// due within 30 days (amber), one done in house (green), one not set up.
+const CONTRACTOR_TYPES = [
+  { key: "fire:alarm_service", module: "fire", trackLabel: "FireTrack", title: "Fire Alarm Maintenance", label: "Fire alarm service (6-monthly)", description: "", dueFrom: "check" },
+  { key: "fire:extinguisher_service", module: "fire", trackLabel: "FireTrack", title: "Fire Extinguishers Maintenance", label: "Fire extinguisher service (annual)", description: "", dueFrom: "check" },
+  { key: "fire:emergency_lights_annual", module: "fire", trackLabel: "FireTrack", title: "Emergency Light Maintenance", label: "Emergency lighting 3-hour test (annual)", description: "", dueFrom: "check" },
+  { key: "fire:risk_assessment", module: "fire", trackLabel: "FireTrack", title: "Fire Risk Assessment Review", label: "Fire risk assessment review", description: "", dueFrom: "later" },
+  { key: "pest:visit", module: "pest", trackLabel: "PestTrack", title: "Pest Control Visit", label: "Routine pest control visit", description: "", dueFrom: "track" },
+];
+const complianceItem = (id, title, fields) => ({
+  id, title, status: "pending", priority: "high", siteId: 1, siteName: SITE.name, categoryId: null, categoryName: null, categoryColor: null,
+  contractorId: null, contractorName: null, contractorEmail: null, assignedTo: null, assigneeUserId: null, dueDate: null,
+  leadTimeDays: 14, frequencyMonths: 12, notificationSentAt: null, completedAt: null, completedInHouseBy: null, notes: null,
+  needsAction: false, needsActionReason: null, openDefectCount: 0, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+  ...fields,
+});
+const COMPLIANCE_ITEMS = [
+  complianceItem(61, "Fire Alarm Maintenance", {
+    frequencyMonths: 6, contractorId: 3, contractorName: "Alarm Co", completedAt: `${localDate(-20)}T00:00:00.000Z`,
+    dueDate: `${localDate(160)}T00:00:00.000Z`, needsAction: true, needsActionReason: "certificate_outstanding",
+  }),
+  complianceItem(62, " fire extinguishers maintenance ", { siteId: null, siteName: null, dueDate: `${localDate(12)}T00:00:00.000Z` }),
+  complianceItem(63, "Emergency Light Maintenance", {
+    completedAt: `${localDate(-40)}T00:00:00.000Z`, completedInHouseBy: "Sam Patel", dueDate: `${localDate(325)}T00:00:00.000Z`,
+  }),
+  complianceItem(64, "Gas Boilers — Annual Service", { dueDate: `${localDate(-5)}T00:00:00.000Z` }),
+];
 
 const json = (route, data, code = 200) => route.fulfill({ status: code, contentType: "application/json", body: JSON.stringify(data) });
 async function routeApi(route) {
@@ -140,6 +179,10 @@ async function routeApi(route) {
       case "/api/track-actions/templates/matching":
       case "/api/track-evidence":
       case "/api/track-evidence/requirements": return json(route, []);
+      // FireTrack's contractor services are their compliance checks
+      // (components/track-contractor-checks.tsx).
+      case "/api/contractor-visits": return json(route, { types: CONTRACTOR_TYPES, visits: [] });
+      case "/api/compliance-items": return json(route, COMPLIANCE_ITEMS);
       case "/api/fire-safety/config": return json(route, {
         fire_escape_routes: "", fire_alarm_zones: "", fire_extinguisher_points: "", fire_show_drill: "true",
         fire_default_performer: "", fire_frequency_days: JSON.stringify(FREQUENCIES), controlProfile: null,
@@ -309,26 +352,42 @@ try {
   await dialog.getByRole("button", { name: "Cancel" }).click();
   console.log("ok - the emergency lighting test explains the 5 minute flick test");
 
-  // ── Annual 3-hour discharge test, kept in step with ComplyTrack ──────────
-  dialog = await openRecordDialog(page, "Annual 3-hour emergency lighting discharge test");
-  await dialog.getByTestId("discharge-test-guide").waitFor();
-  assert.match(await dialog.getByTestId("discharge-test-guide").innerText(), /Emergency Light Maintenance/);
-  await shot(page, "6-discharge-test");
-  await dialog.getByRole("button", { name: "Cancel" }).click();
-  console.log("ok - the annual discharge test says it is kept in step with the ComplyTrack task");
-
-  // ── Contractor services, kept in step with ComplyTrack ───────────────────
-  for (const [label, testId, task] of [
-    ["6-monthly fire alarm service", "alarm-service-guide", /Fire Alarm Maintenance/],
-    ["Annual fire extinguisher service", "extinguisher-service-guide", /Fire Extinguishers Maintenance/],
-  ]) {
-    dialog = await openRecordDialog(page, label);
-    await dialog.getByTestId(testId).waitFor();
-    assert.match(await dialog.getByTestId(testId).innerText(), task);
-    if (testId === "alarm-service-guide") await shot(page, "7-alarm-service");
-    await dialog.getByRole("button", { name: "Cancel" }).click();
+  // ── Retired checks: not offered, not due, older records kept ─────────────
+  dialog = await openRecordDialog(page);
+  await dialog.getByRole("combobox").first().click();
+  await page.getByRole("option", { name: "Weekly fire alarm test" }).waitFor();
+  assert.equal(await page.getByRole("option", { name: "Alarm panel check" }).count(), 0, "the alarm panel is on the opening and closing checks");
+  for (const name of ["Annual 3-hour emergency lighting discharge test", "6-monthly fire alarm service", "Annual fire extinguisher service"]) {
+    assert.equal(await page.getByRole("option", { name }).count(), 0, `${name} is its compliance check`);
   }
-  console.log("ok - the fire alarm and extinguisher services say they are kept in step with their ComplyTrack tasks");
+  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  const statusText = await page.locator("body").innerText();
+  assert.match(statusText, /Alarm panel check/, "the older alarm panel record stays in the history");
+  await page.getByText("Filter History").waitFor();
+  await page.getByRole("combobox").filter({ hasText: "All types" }).click();
+  await page.getByText("No longer recorded here").waitFor();
+  await page.getByRole("option", { name: "Alarm panel check" }).waitFor();
+  await page.keyboard.press("Escape");
+  console.log("ok - the alarm panel check and the contractor services are no longer offered or due; older records stay in the history");
+
+  // ── Contractor services: the compliance checks' own status ───────────────
+  const contractorCard = page.getByTestId("track-contractor-checks-fire");
+  await contractorCard.waitFor();
+  const contractorRows = contractorCard.getByTestId("contractor-check-row");
+  assert.equal(await contractorRows.count(), 4, "one row per fire contractor check, none for other tracks or other checks");
+  const rowFor = (label) => contractorRows.filter({ hasText: label });
+  assert.equal(await rowFor("Fire alarm service").getAttribute("data-rag"), "red");
+  assert.match(await rowFor("Fire alarm service").innerText(), /Certificate outstanding[\s\S]*Contractor: Alarm Co/);
+  assert.equal(await rowFor("Fire alarm service").getAttribute("href"), "/items/61");
+  assert.equal(await rowFor("Fire extinguisher service").getAttribute("data-rag"), "amber", "a business-wide check counts at the site");
+  assert.equal(await rowFor("Emergency lighting 3-hour test").getAttribute("data-rag"), "green");
+  assert.match(await rowFor("Emergency lighting 3-hour test").innerText(), /in house by Sam Patel/);
+  assert.equal(await rowFor("Fire risk assessment review").getAttribute("data-rag"), "grey");
+  assert.match(await rowFor("Fire risk assessment review").innerText(), /Not set up yet/);
+  await contractorCard.scrollIntoViewIfNeeded();
+  await shot(page, "7-contractor-checks");
+  console.log("ok - FireTrack shows its contractor services red, amber or green from their compliance checks, each opening the check");
 
   // ── Drill: night staff answer required ───────────────────────────────────
   dialog = await openRecordDialog(page, "Fire drill (6-monthly, with night staff)");
