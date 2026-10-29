@@ -14,6 +14,10 @@ export interface TestBusinessDeletionRequest {
   confirmName: string;
 }
 
+export interface SetupTeamAloneResult {
+  aloneAt: string;
+}
+
 export interface TestBusinessDeletionResult {
   ok: boolean;
   rowsDeleted: number;
@@ -4696,6 +4700,10 @@ export interface CreateInspectionReportRequest {
   objectPath: string;
   fileName: string;
 }
+
+export type ConfirmSetupTeamAloneParams = {
+clientId?: number;
+};
 
 export type ListFeedbackReportsParams = {
 clientId?: number;

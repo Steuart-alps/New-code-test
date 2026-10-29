@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { sortByLabel } from "@/lib/sort-options";
 
 /**
  * "Assigned to" for an action, FixTrack issue or compliance check: a person
@@ -68,7 +69,7 @@ export function AssigneeField({ id, siteId, value, onChange, disabled }: {
         <SelectTrigger id={id}><SelectValue placeholder="Not assigned" /></SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>Not assigned</SelectItem>
-          {people.map((person) => <SelectItem key={person.id} value={String(person.id)}>{person.name}</SelectItem>)}
+          {sortByLabel(people, (person) => person.name).map((person) => <SelectItem key={person.id} value={String(person.id)}>{person.name}</SelectItem>)}
           {value.assigneeUserId != null && !picked && (
             <SelectItem value={String(value.assigneeUserId)}>{value.name || "Former member"}</SelectItem>
           )}

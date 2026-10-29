@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { parseSignupPlan, registrationPlanFields } from "@/lib/signup-plan";
+import { BUSINESS_TYPE_OPTIONS } from "@/lib/onboarding";
 import alpsLogo from "@/assets/alps-logo.png";
 import { copyrightNotice } from "@/lib/copyright";
 
@@ -157,17 +158,7 @@ export default function SignupPage() {
                     className="w-full h-12 pl-4 pr-10 bg-[#F7F2E4]/50 border border-border/50 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary rounded-none text-[#1A1A1A]"
                   >
                     <option value="">Select your business type…</option>
-                    <option value="hotel_accommodation">Hotel / Accommodation</option>
-                    <option value="holiday_park_campsite">Holiday Park / Campsite</option>
-                    <option value="leisure_sports_centre">Leisure / Sports Centre</option>
-                    <option value="restaurant_cafe_pub">Restaurant / Café / Pub</option>
-                    <option value="care_home_healthcare">Care Home / Healthcare</option>
-                    <option value="nursery_school">Nursery / School</option>
-                    <option value="offices_commercial">Offices / Commercial</option>
-                    <option value="retail">Retail</option>
-                    <option value="pest_control">Pest Control</option>
-                    <option value="golf_club">Golf Club</option>
-                    <option value="other">Other</option>
+                    {BUSINESS_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 </div>

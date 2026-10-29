@@ -54,6 +54,7 @@ import { getApiErrorMessage } from "@/lib/api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -210,7 +211,7 @@ const MACHINE_TYPE_LABELS: Record<string, string> = {
   other:             "Other",
 };
 
-const MACHINE_TYPES = Object.keys(MACHINE_TYPE_LABELS);
+const MACHINE_TYPES = sortByLabel(Object.keys(MACHINE_TYPE_LABELS), t => MACHINE_TYPE_LABELS[t]);
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   scheduled:  "Scheduled service",
@@ -542,7 +543,7 @@ function MachineDialog({
                   <SelectTrigger className="mt-1 rounded-sm" data-testid="select-sprayer-category"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="_none">— Not a pesticide sprayer / not set —</SelectItem>
-                    {Object.entries(NSTS_SPRAYER_CATEGORIES).map(([key, c]) => (
+                    {sortByLabel(Object.entries(NSTS_SPRAYER_CATEGORIES), ([, c]) => c.label).map(([key, c]) => (
                       <SelectItem key={key} value={key}>{c.label} · {nstsIntervalText(key)}</SelectItem>
                     ))}
                   </SelectContent>
@@ -967,7 +968,7 @@ function PreUseDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.filter(m => m.active).map(m => (
+                {sortByLabel(machines.filter(m => m.active), m => m.name).map(m => (
                   <SelectItem key={m.id} value={String(m.id)}>
                     {m.name} <span className="opacity-50">({MACHINE_TYPE_LABELS[m.type] ?? m.type})</span>
                   </SelectItem>
@@ -1122,7 +1123,7 @@ function ServiceDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.map(m => (
+                {sortByLabel(machines, m => m.name).map(m => (
                   <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -1139,7 +1140,7 @@ function ServiceDialog({
               <Select value={form.serviceType} onValueChange={v => setForm(f => ({ ...f, serviceType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(SERVICE_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(SERVICE_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
@@ -1278,7 +1279,7 @@ function DefectDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.map(m => (
+                {sortByLabel(machines, m => m.name).map(m => (
                   <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -1465,7 +1466,7 @@ function PuwerDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+                {sortByLabel(machines, m => m.name).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -1485,7 +1486,7 @@ function PuwerDialog({
               <Select value={form.inspectionType} onValueChange={v => setForm(f => ({ ...f, inspectionType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm" data-testid="select-inspection-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(PUWER_INSPECTION_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(PUWER_INSPECTION_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
@@ -1722,7 +1723,7 @@ function HourReadingDialog({
               onValueChange={v => { setLowerWarning(null); setForm(f => ({ ...f, machineId: v === "_none" ? "" : v })); }}>
               <SelectTrigger className="mt-1 rounded-sm" data-testid="select-hours-machine"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.filter(m => m.active).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+                {sortByLabel(machines.filter(m => m.active), m => m.name).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
               </SelectContent>
             </Select>
             {!reading && last?.currentHours != null && (
@@ -1968,7 +1969,7 @@ function FuelLogDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.filter(m => m.active).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+                {sortByLabel(machines.filter(m => m.active), m => m.name).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -1983,7 +1984,7 @@ function FuelLogDialog({
               <Select value={form.fuelType} onValueChange={v => setForm(f => ({ ...f, fuelType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(FUEL_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(FUEL_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
@@ -2354,7 +2355,7 @@ export default function GreenTrackPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_all">All machines</SelectItem>
-                  {machines.map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+                  {sortByLabel(machines, m => m.name).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             )}
