@@ -1,17 +1,18 @@
 // Shared labels and helpers for the setup wizard (/setup) and staff tasks (/tasks).
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 
+// Kept in A to Z order by label, with "Other" last.
 export const BUSINESS_TYPE_OPTIONS = [
-  { value: "hotel_accommodation", label: "Hotel / Accommodation" },
-  { value: "holiday_park_campsite", label: "Holiday Park / Campsite" },
-  { value: "leisure_sports_centre", label: "Leisure / Sports Centre" },
-  { value: "restaurant_cafe_pub", label: "Restaurant / Café / Pub" },
   { value: "care_home_healthcare", label: "Care Home / Healthcare" },
+  { value: "golf_club", label: "Golf Club" },
+  { value: "holiday_park_campsite", label: "Holiday Park / Campsite" },
+  { value: "hotel_accommodation", label: "Hotel / Accommodation" },
+  { value: "leisure_sports_centre", label: "Leisure / Sports Centre" },
   { value: "nursery_school", label: "Nursery / School" },
   { value: "offices_commercial", label: "Offices / Commercial" },
-  { value: "retail", label: "Retail" },
   { value: "pest_control", label: "Pest Control" },
-  { value: "golf_club", label: "Golf Club" },
+  { value: "restaurant_cafe_pub", label: "Restaurant / Café / Pub" },
+  { value: "retail", label: "Retail" },
   { value: "other", label: "Other" },
 ] as const;
 
