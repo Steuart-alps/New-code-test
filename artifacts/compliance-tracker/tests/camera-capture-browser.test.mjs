@@ -60,6 +60,7 @@ const launchOptions = {
 // Playwright's WebKit has no fake camera, so there a moving canvas stands in
 // for one (and the microphone is missing, so clips are video only).
 function canvasCamera() {
+  if (!navigator.mediaDevices) Object.defineProperty(navigator, "mediaDevices", { value: {}, configurable: true });
   navigator.mediaDevices.getUserMedia = async (constraints) => {
     if (!constraints?.video) throw new DOMException("No microphone", "NotFoundError");
     const canvas = document.createElement("canvas");
@@ -80,6 +81,7 @@ async function open({ initScript } = {}) {
   if (browserName === "webkit") await context.addInitScript(canvasCamera);
   if (initScript) await context.addInitScript(initScript);
   const page = await context.newPage();
+  currentPage = page;
   page.setDefaultTimeout(15_000);
   page.on("filechooser", () => {});
   await page.goto(`${baseUrl}/tests/file-drop-harness.html`, { waitUntil: "domcontentloaded" });
@@ -95,8 +97,24 @@ const header = (page) => page.evaluate(async () => {
   return { hex: [...bytes.slice(0, 4)].map(b => b.toString(16).padStart(2, "0")).join(""), ascii: String.fromCharCode(...bytes.slice(4, 8)), size: window.__raw.first[0].size };
 });
 
+let currentPage = null;
 async function test(name, run) {
-  try { await run(); console.log(`ok - ${name}`); } catch (error) { console.error(`not ok - ${name}`); throw error; }
+  try {
+    await run();
+    console.log(`ok - ${name}`);
+  } catch (error) {
+    console.error(`not ok - ${name}`);
+    // What the page showed, to tell a browser without a camera from a bug.
+    if (currentPage && !currentPage.isClosed()) {
+      console.error(await currentPage.evaluate(() => JSON.stringify({
+        dialog: document.querySelector("[data-testid='camera-dialog']")?.textContent ?? null,
+        mediaDevices: !!navigator.mediaDevices?.getUserMedia,
+        secure: window.isSecureContext,
+        coarse: window.matchMedia("(pointer: coarse)").matches,
+      })).catch(() => "page state unavailable"));
+    }
+    throw error;
+  }
 }
 
 try {

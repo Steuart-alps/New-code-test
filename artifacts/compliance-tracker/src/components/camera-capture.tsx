@@ -76,7 +76,7 @@ function CameraDialog({ open, video, onClose, onShot, onChooseFile }: {
     navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: false,
-    }).then(async (media) => {
+    }).then((media) => {
       if (cancelled) { media.getTracks().forEach((track) => track.stop()); return; }
       stream.current = media;
       // A laptop's camera faces the user, so show it like a mirror. The
@@ -84,9 +84,11 @@ function CameraDialog({ open, video, onClose, onShot, onChooseFile }: {
       setMirrored(media.getVideoTracks()[0]?.getSettings().facingMode !== "environment");
       if (preview.current) {
         preview.current.srcObject = media;
-        await preview.current.play().catch(() => {});
+        // Not awaited: some browsers only settle play() once the video is
+        // shown. The camera counts as live once the first frame's size is
+        // known (onLoadedMetadata below), so a photo always has a picture.
+        void preview.current.play().catch(() => {});
       }
-      setStage("live");
     }).catch((error) => {
       if (cancelled) return;
       setProblem(cameraProblem(error));
@@ -177,6 +179,7 @@ function CameraDialog({ open, video, onClose, onShot, onChooseFile }: {
         </DialogHeader>
         <div className="relative overflow-hidden rounded-md bg-black aspect-video">
           <video ref={preview} muted playsInline aria-label="Camera"
+            onLoadedMetadata={() => setStage((current) => current === "starting" ? "live" : current)}
             className={`h-full w-full object-contain ${mirrored ? "-scale-x-100" : ""} ${stage === "review" || stage === "error" ? "hidden" : ""}`} />
           {stage === "starting" && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-white/80">
