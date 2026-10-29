@@ -219,6 +219,14 @@ Plan: `plans/reminders-to-the-right-person.md` in the project files.
   (#159), and "Speak a list" for COSHH.
 - The smoke test to run is `mobile/iphone-smoke-test.md` in the project files.
 
+**Voice shortcuts without opening the app first** (asked for on 29 October).
+Saying something like "open fairway mower 1 opening check" to Siri or Google
+Assistant would open that item's check straight away. The website can't do
+this; the phone apps can, using Siri Shortcuts on iPhone and Google Assistant
+shortcuts on Android. Each shortcut opens the same check page the item's QR
+label opens. Until then, the no-app route is to point the phone camera at the
+item's QR label.
+
 **Cost:** Apple Developer £79 a year; Google Play $25 once. No extra hosting.
 
 ---
