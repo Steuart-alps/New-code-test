@@ -2,9 +2,9 @@
 // (DEFAULT_FIXTRACK_TRADES in api-server lib/formOptions.ts); a business can
 // customise the list, and its own entries are shown as typed.
 
-export type TradeGroup = "Building and services" | "Fire safety" | "Security" | "Other";
+export type TradeGroup = "Building and services" | "Fire safety" | "Security" | "Specialist services" | "Other";
 
-export const TRADE_GROUPS: readonly TradeGroup[] = ["Building and services", "Fire safety", "Security", "Other"];
+export const TRADE_GROUPS: readonly TradeGroup[] = ["Building and services", "Fire safety", "Security", "Specialist services", "Other"];
 
 export const TRADE_OPTIONS: readonly { value: string; label: string; group: TradeGroup }[] = [
   { value: "electrical",    label: "Electrical", group: "Building and services" },
@@ -37,6 +37,15 @@ export const TRADE_OPTIONS: readonly { value: string; label: string; group: Trad
   { value: "intruder_alarm", label: "Intruder Alarm", group: "Security" },
   { value: "cctv",           label: "CCTV", group: "Security" },
   { value: "access_control", label: "Access Control", group: "Security" },
+  { value: "legionella_water_hygiene", label: "Legionella / Water Hygiene", group: "Specialist services" },
+  { value: "pest_control",             label: "Pest Control", group: "Specialist services" },
+  { value: "pat_testing",              label: "PAT Testing", group: "Specialist services" },
+  { value: "loler_puwer_inspection",   label: "LOLER / PUWER Inspection", group: "Specialist services" },
+  { value: "lev_testing",              label: "LEV Testing", group: "Specialist services" },
+  { value: "asbestos",                 label: "Asbestos", group: "Specialist services" },
+  { value: "tree_surgeon_arborist",    label: "Tree Surgeon / Arborist", group: "Specialist services" },
+  { value: "pool_spa_maintenance",     label: "Pool / Spa Maintenance", group: "Specialist services" },
+  { value: "waste_collection",         label: "Waste Collection", group: "Specialist services" },
 ];
 
 const byValue = new Map(TRADE_OPTIONS.map(option => [option.value, option]));
@@ -51,4 +60,9 @@ export function tradeLabel(value: string): string {
 
 export function tradeGroup(value: string): TradeGroup {
   return byValue.get(value)?.group ?? "Other";
+}
+
+/** Gas work (kitchen, fires, heating), which needs Gas Safe registration. */
+export function isGasTrade(value: string): boolean {
+  return value.startsWith("gas_") || value === "gas" || /\bgas\b/i.test(tradeLabel(value));
 }

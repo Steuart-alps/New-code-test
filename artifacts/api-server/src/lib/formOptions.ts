@@ -30,6 +30,9 @@ export const DEFAULT_FIXTRACK_TRADES = [
   "fire_stopping", "kitchen_extract_cleaning", "fire_risk_assessor",
   // Security trades (October 2026).
   "intruder_alarm", "cctv", "access_control",
+  // Specialist services (October 2026), linked to the tracks' contractor visits.
+  "legionella_water_hygiene", "pest_control", "pat_testing", "loler_puwer_inspection",
+  "lev_testing", "asbestos", "tree_surgeon_arborist", "pool_spa_maintenance", "waste_collection",
   "it_comms",
   "safety_hazard", "cleaning", "general",
 ] as const;
@@ -117,6 +120,8 @@ export const DEFAULTS_ADDED_LATER: Partial<Record<string, readonly string[]>> = 
     "dry_wet_risers", "fire_doors", "fire_shutters_curtains", "fire_dampers",
     "fire_stopping", "kitchen_extract_cleaning", "fire_risk_assessor",
     "intruder_alarm", "cctv", "access_control",
+    "legionella_water_hygiene", "pest_control", "pat_testing", "loler_puwer_inspection",
+    "lev_testing", "asbestos", "tree_surgeon_arborist", "pool_spa_maintenance", "waste_collection",
   ],
 };
 

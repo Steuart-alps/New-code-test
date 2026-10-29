@@ -138,7 +138,8 @@ try {
   const types = (await visits()).types;
   assert.deepEqual(types.find(type => type.key === 'fire:sprinkler_service').trades, ['sprinkler_systems']);
   assert.deepEqual(types.find(type => type.key === 'fire:alarm_service').trades, ['fire_alarm']);
-  assert.deepEqual(types.find(type => type.key === 'pest:visit').trades, []);
+  assert.deepEqual(types.find(type => type.key === 'pest:visit').trades, ['pest_control']);
+  assert.deepEqual(types.find(type => type.key === 'bike:service').trades, []);
   console.log('ok - fire and security services keep their own date and suggest a trade');
 
   // ── FireTrack: the service date comes from the FireTrack log ───────────────

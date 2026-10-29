@@ -14,9 +14,10 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Contractor } from "@workspace/api-client-react";
-import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
+import { useFormOptions, useFormOptionsApi, pickOptions } from "@/hooks/use-form-options";
+import { useAuth } from "@/context/auth-context";
 import { FormOptionsEditor } from "@/components/form-options-editor";
-import { TRADE_GROUPS, tradeGroup, tradeLabel } from "@/lib/contractor-trades";
+import { TRADE_GROUPS, isGasTrade, tradeGroup, tradeLabel } from "@/lib/contractor-trades";
 
 // ── Form schema ───────────────────────────────────────────────────────────────
 
@@ -104,6 +105,42 @@ export function ContractorFormDialog({
       dbsIssueDate: "", dbsType: "", dbsExpiryDate: "",
     },
   });
+
+  // Gas Safe details only matter for gas work; they stay shown while either
+  // box holds a value so saved details are never hidden.
+  const showGasSafe = trades.some(isGasTrade)
+    || !!form.watch("gasSafeNumber")?.trim() || !!form.watch("gasSafeRegistration")?.trim();
+
+  // Owners (and ALPS consultants) can add a trade the list lacks without
+  // leaving the form; it joins the business's trade list and is ticked here.
+  const { user } = useAuth();
+  const canAddTrade = user?.role === "client_admin" || user?.role === "consultant";
+  const callFormOptions = useFormOptionsApi();
+  const [newTrade, setNewTrade] = useState("");
+  const [addingTrade, setAddingTrade] = useState(false);
+  async function addOwnTrade() {
+    const typed = newTrade.trim();
+    if (!typed) return;
+    const existing = [...effectiveTradeValues, ...retiredTrades].find(value =>
+      value.toLowerCase() === typed.toLowerCase() || tradeLabel(value).toLowerCase() === typed.toLowerCase());
+    if (existing && effectiveTradeValues.includes(existing)) {
+      setTrades(prev => prev.includes(existing) ? prev : [...prev, existing]);
+      setNewTrade("");
+      return;
+    }
+    setAddingTrade(true);
+    try {
+      const value = existing ?? typed;
+      await callFormOptions("/fixtrack_trades", { method: "PUT", body: JSON.stringify({ items: [...effectiveTradeValues, value] }) });
+      await qc.invalidateQueries({ queryKey: ["form-options"] });
+      setTrades(prev => prev.includes(value) ? prev : [...prev, value]);
+      setNewTrade("");
+    } catch (e: any) {
+      toast({ title: "Could not add the trade", description: e.message, variant: "destructive" });
+    } finally {
+      setAddingTrade(false);
+    }
+  }
 
   useEffect(() => {
     if (contractor) {
@@ -224,62 +261,6 @@ export function ContractorFormDialog({
             </div>
           </div>
 
-          {/* Compliance Details */}
-          <div className="space-y-2.5 pt-2 border-t border-border/50">
-            <div>
-              <Label>Compliance Details</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Record registration and check details so expiries can be flagged for review.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2 sm:col-span-1 space-y-1.5">
-                <Label htmlFor="gasSafeNumber">Gas Safe Number</Label>
-                <Input id="gasSafeNumber" maxLength={30} placeholder="e.g. 123456" {...form.register("gasSafeNumber")} />
-                {form.formState.errors.gasSafeNumber && (
-                  <p className="text-xs text-destructive">{form.formState.errors.gasSafeNumber.message}</p>
-                )}
-              </div>
-
-              <div className="col-span-2 sm:col-span-1 space-y-1.5">
-                <Label htmlFor="gasSafeRegistration">Gas Safe Registration</Label>
-                <Input id="gasSafeRegistration" placeholder="e.g. 556677" {...form.register("gasSafeRegistration")} />
-              </div>
-
-              <div className="col-span-2 sm:col-span-1 space-y-1.5">
-                <Label htmlFor="publicLiabilityExpiry">Insurance Renewal Date</Label>
-                <p className="text-xs text-muted-foreground">Covers all policies (PL, PI, etc.)</p>
-                <Input type="date" id="publicLiabilityExpiry" {...form.register("publicLiabilityExpiry")} />
-              </div>
-
-              <div className="col-span-2 sm:col-span-1 space-y-1.5">
-                <Label htmlFor="dbsType">DBS / PVG Check Type</Label>
-                 <Select value={form.watch("dbsType") || ""} onValueChange={v => {
-                   form.setValue("dbsType", v);
-                   if (v === "None") {
-                     form.setValue("dbsIssueDate", "");
-                     form.setValue("dbsExpiryDate", "");
-                   }
-                 }}>
-                   <SelectTrigger id="dbsType" className="rounded-sm"><SelectValue placeholder="Not set" /></SelectTrigger>
-                  <SelectContent>
-                    {DBS_TYPE_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="col-span-2 sm:col-span-1 space-y-1.5">
-                <Label htmlFor="dbsIssueDate">DBS / PVG Issue Date</Label>
-                <Input type="date" id="dbsIssueDate" {...form.register("dbsIssueDate")} />
-              </div>
-
-              <div className="col-span-2 sm:col-span-1 space-y-1.5">
-                <Label htmlFor="dbsExpiryDate">DBS / PVG Expiry Date</Label>
-                <Input type="date" id="dbsExpiryDate" {...form.register("dbsExpiryDate")} />
-              </div>
-            </div>
-          </div>
-
           {/* Trades / specialisms */}
           <div className="space-y-2.5">
             <div className="flex items-start justify-between gap-2">
@@ -335,7 +316,84 @@ export function ContractorFormDialog({
                 {trades.length} trade{trades.length !== 1 ? "s" : ""} selected
               </p>
             )}
+            {canAddTrade ? (
+              <div className="flex gap-2">
+                <Input
+                  value={newTrade}
+                  onChange={event => setNewTrade(event.target.value)}
+                  onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addOwnTrade(); } }}
+                  maxLength={60}
+                  placeholder="Not listed? Add your own trade"
+                  aria-label="Add your own trade"
+                  className="h-9"
+                />
+                <Button type="button" variant="outline" size="sm" className="h-9" onClick={addOwnTrade} disabled={!newTrade.trim() || addingTrade}>
+                  Add
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Not listed? An Owner can add a trade with Customise trades.</p>
+            )}
           </div>
+
+          {/* Compliance Details */}
+          <div className="space-y-2.5 pt-2 border-t border-border/50">
+            <div>
+              <Label>Compliance Details</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Record registration and check details so expiries can be flagged for review.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              {showGasSafe && (<>
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="gasSafeNumber">Gas Safe Number</Label>
+                <Input id="gasSafeNumber" maxLength={30} placeholder="e.g. 123456" {...form.register("gasSafeNumber")} />
+                {form.formState.errors.gasSafeNumber && (
+                  <p className="text-xs text-destructive">{form.formState.errors.gasSafeNumber.message}</p>
+                )}
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="gasSafeRegistration">Gas Safe Registration</Label>
+                <Input id="gasSafeRegistration" placeholder="e.g. 556677" {...form.register("gasSafeRegistration")} />
+              </div>
+              </>)}
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="publicLiabilityExpiry">Insurance Renewal Date</Label>
+                <p className="text-xs text-muted-foreground">Covers all policies (PL, PI, etc.)</p>
+                <Input type="date" id="publicLiabilityExpiry" {...form.register("publicLiabilityExpiry")} />
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="dbsType">DBS / PVG Check Type</Label>
+                 <Select value={form.watch("dbsType") || ""} onValueChange={v => {
+                   form.setValue("dbsType", v);
+                   if (v === "None") {
+                     form.setValue("dbsIssueDate", "");
+                     form.setValue("dbsExpiryDate", "");
+                   }
+                 }}>
+                   <SelectTrigger id="dbsType" className="rounded-sm"><SelectValue placeholder="Not set" /></SelectTrigger>
+                  <SelectContent>
+                    {DBS_TYPE_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="dbsIssueDate">DBS / PVG Issue Date</Label>
+                <Input type="date" id="dbsIssueDate" {...form.register("dbsIssueDate")} />
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="dbsExpiryDate">DBS / PVG Expiry Date</Label>
+                <Input type="date" id="dbsExpiryDate" {...form.register("dbsExpiryDate")} />
+              </div>
+            </div>
+          </div>
+
         </form>
 
         <DialogFooter>

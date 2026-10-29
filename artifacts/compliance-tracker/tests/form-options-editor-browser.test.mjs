@@ -58,6 +58,8 @@ const DEFAULT_TRADES = [
   "dry_wet_risers", "fire_doors", "fire_shutters_curtains", "fire_dampers",
   "fire_stopping", "kitchen_extract_cleaning", "fire_risk_assessor",
   "intruder_alarm", "cctv", "access_control",
+  "legionella_water_hygiene", "pest_control", "pat_testing", "loler_puwer_inspection",
+  "lev_testing", "asbestos", "tree_surgeon_arborist", "pool_spa_maintenance", "waste_collection",
   "it_comms",
   "safety_hazard", "cleaning", "general",
 ];
@@ -413,15 +415,15 @@ try {
   await openEditor(page, MAX_OPTIONS);
   state = await editorState(page);
   assert.deepEqual(state.disabled.map(row => row.label), ["Gas Fireplace"]);
-  await dialogOf(page).getByRole("button", { name: "Disable Custom trade 20" }).click();
+  await dialogOf(page).getByRole("button", { name: "Disable Custom trade 05" }).click();
   await enableButton(page, "Gas Fireplace").click();
   state = await editorState(page);
   assert.equal(state.active.length, MAX_OPTIONS);
-  assert.deepEqual(state.disabled.map(row => row.label), ["Custom trade 20"]);
+  assert.deepEqual(state.disabled.map(row => row.label), ["Custom trade 05"]);
   body = await save(page);
   assert.equal(body.items.length, MAX_OPTIONS);
-  assert.ok(body.items.includes("gas_fireplace") && !body.items.includes("Custom trade 20"));
-  assert.deepEqual(stored.disabled, ["Custom trade 20"], "the server keeps the newly disabled custom value");
+  assert.ok(body.items.includes("gas_fireplace") && !body.items.includes("Custom trade 05"));
+  assert.deepEqual(stored.disabled, ["Custom trade 05"], "the server keeps the newly disabled custom value");
   checks.push("the 50 active option limit holds for Add, Enter, Enable and Save");
 
   assert.ok(putBodies.every(put => Array.isArray(put.items) && put.items.length <= MAX_OPTIONS),
