@@ -870,7 +870,7 @@ export const DeleteSiteResponse = zod.void()
 
 
 /**
- * Each visit type the business's tracks cover, at each site the user can see: when the track says it is next due, and the compliance check (with its contractor) that drives the contractor reminder.
+ * Each visit type the business's tracks cover, at each site the user can see: when the track says it is next due, and the compliance check (with its contractor) that drives the contractor reminder. Also the compliance check register's other checks. Each row says whether it has been marked "No contractor needed".
  * @summary Contractor visits kept on the tracks, per site, with the contractor reminded
  */
 export const ListContractorVisitsResponse = zod.object({
@@ -894,8 +894,21 @@ export const ListContractorVisitsResponse = zod.object({
   "status": zod.string().nullable(),
   "contractorId": zod.number().nullable(),
   "contractorName": zod.string().nullable(),
-  "reminderSentAt": zod.date().nullable()
-}))
+  "reminderSentAt": zod.date().nullable(),
+  "notNeeded": zod.boolean().describe('Marked \"No contractor needed\" (never true while a contractor is chosen)')
+})),
+  "checks": zod.array(zod.object({
+  "checkId": zod.number(),
+  "title": zod.string(),
+  "siteId": zod.number().nullable().describe('Null for a business-wide check'),
+  "siteName": zod.string().nullable(),
+  "dueDate": zod.date().nullable(),
+  "status": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "reminderSentAt": zod.date().nullable(),
+  "notNeeded": zod.boolean().describe('Marked \"No contractor needed\" (never true while a contractor is chosen)')
+})).describe('The compliance check register\'s other checks (gas safety, EICR...), not finished one-offs, business-wide or at a site the user can see\n')
 })
 
 
@@ -906,10 +919,28 @@ export const SetContractorVisitBody = zod.object({
   "visitKey": zod.string(),
   "siteId": zod.number(),
   "contractorId": zod.number().nullable(),
-  "dueDate": zod.date().nullish().describe('Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)')
+  "dueDate": zod.date().nullish().describe('Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)'),
+  "notNeeded": zod.boolean().optional().describe('True marks the visit as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.')
 })
 
 export const SetContractorVisitResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Choose the contractor reminded about a compliance check, or mark it as needing none
+ */
+export const SetContractorRegisterCheckParams = zod.object({
+  "checkId": zod.coerce.number()
+})
+
+export const SetContractorRegisterCheckBody = zod.object({
+  "contractorId": zod.number().nullable(),
+  "notNeeded": zod.boolean().optional().describe('True marks the check as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.')
+})
+
+export const SetContractorRegisterCheckResponse = zod.object({
   "ok": zod.boolean()
 })
 
@@ -3680,6 +3711,11 @@ export const ListFireSafetyChecksQueryParams = zod.object({
   "siteId": zod.coerce.number().optional()
 })
 
+export const listFireSafetyChecksResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const listFireSafetyChecksResponseEvacuationSecondsMax = 86400;
+
+
+
 export const ListFireSafetyChecksResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
@@ -3693,6 +3729,12 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(listFireSafetyChecksResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(listFireSafetyChecksResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresent": zod.array(zod.object({
+  "staffRosterId": zod.number().nullable().describe('Null when the roster entry has since been deleted.'),
+  "name": zod.string()
+})).optional().describe('Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
@@ -3705,6 +3747,13 @@ export const ListFireSafetyChecksResponse = zod.array(ListFireSafetyChecksRespon
 /**
  * @summary Record a fire safety check
  */
+export const createFireSafetyCheckBodyDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createFireSafetyCheckBodyEvacuationSecondsMax = 86400;
+
+export const createFireSafetyCheckBodyStaffPresentIdsMax = 2000;
+
+
+
 export const CreateFireSafetyCheckBody = zod.object({
   "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
   "checkDate": zod.string(),
@@ -3716,10 +3765,18 @@ export const CreateFireSafetyCheckBody = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(createFireSafetyCheckBodyDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(createFireSafetyCheckBodyEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresentIds": zod.array(zod.number()).max(createFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
+
+export const createFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createFireSafetyCheckResponseEvacuationSecondsMax = 86400;
+
+
 
 export const CreateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
@@ -3734,6 +3791,12 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(createFireSafetyCheckResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(createFireSafetyCheckResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresent": zod.array(zod.object({
+  "staffRosterId": zod.number().nullable().describe('Null when the roster entry has since been deleted.'),
+  "name": zod.string()
+})).optional().describe('Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
@@ -3762,6 +3825,26 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   "sitesAffected": zod.number().optional().describe('How many of those sites are overdue or have never recorded the check.')
 })
 export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponseItem)
+
+
+/**
+ * @summary Active roster staff with the latest fire drill each took part in
+ */
+export const GetFireDrillAttendanceQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Staff at this site and staff with no site. Omit for every visible member.')
+})
+
+export const GetFireDrillAttendanceResponse = zod.object({
+  "periodMonths": zod.number().describe('Everyone should take part in a drill at least once in this many months.'),
+  "staff": zod.array(zod.object({
+  "staffRosterId": zod.number(),
+  "name": zod.string(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "lastDrillDate": zod.string().nullable().describe('The latest fire drill they were ticked present at.'),
+  "due": zod.boolean().describe('True when they have not taken part in a fire drill within periodMonths.')
+}))
+})
 
 
 /**
@@ -4121,6 +4204,13 @@ export const UpdateFireSafetyCheckParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateFireSafetyCheckBodyDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateFireSafetyCheckBodyEvacuationSecondsMax = 86400;
+
+export const updateFireSafetyCheckBodyStaffPresentIdsMax = 2000;
+
+
+
 export const UpdateFireSafetyCheckBody = zod.object({
   "checkDate": zod.string().optional(),
   "result": zod.enum(['pass', 'fail']).optional(),
@@ -4131,10 +4221,18 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(updateFireSafetyCheckBodyDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(updateFireSafetyCheckBodyEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresentIds": zod.array(zod.number()).max(updateFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
 })
+
+export const updateFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateFireSafetyCheckResponseEvacuationSecondsMax = 86400;
+
+
 
 export const UpdateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
@@ -4149,6 +4247,12 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "callPointId": zod.number().nullish().describe('Weekly alarm tests. A call point from the site\'s list.'),
   "callPoint": zod.string().nullish().describe('Weekly alarm tests. The call point tested (copied from the list, or typed when the site has none).'),
   "nightStaff": zod.enum(['included', 'not_included', 'no_night_staff']).nullish().describe('Fire drills. Whether night staff took part.'),
+  "drillTime": zod.string().regex(updateFireSafetyCheckResponseDrillTimeRegExp).nullish().describe('Fire drills. The time of the drill (HH:MM, the business\'s local time). Required on new drills.'),
+  "evacuationSeconds": zod.number().min(1).max(updateFireSafetyCheckResponseEvacuationSecondsMax).nullish().describe('Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.'),
+  "staffPresent": zod.array(zod.object({
+  "staffRosterId": zod.number().nullable().describe('Null when the roster entry has since been deleted.'),
+  "name": zod.string()
+})).optional().describe('Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),

@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { API_BASE, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
 import { downloadCsvAsExcel, downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
-import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
+import { SpreadsheetDropZone, isSpreadsheetFile, usePastedFile } from "@/components/spreadsheet-drop-zone";
 import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -88,6 +88,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"reading" | "reading-list" | "preview" | "import" | null>(null);
+  usePastedFile(open && busy === null && !result?.committed, selected => dropped(selected));
 
   function reset() {
     setFile(null); setSheet(null); setResult(null); setError(null); setBusy(null); setReadFromList(null);
@@ -123,14 +124,16 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
     }
   }
 
-  /** A picked or dropped file: spreadsheets are imported; with the AI add-on a photo or PDF is read instead. */
+  /** A picked, dropped or pasted file: spreadsheets are imported; with the AI add-on a photo, screenshot or PDF is read instead. */
   function dropped(selected: File) {
     if (isSpreadsheetFile(selected)) return void choose(selected);
     if (reading.canRead && isPhotoOrPdf(selected)) return void readList(selected);
     reset();
-    setError(reading.status
-      ? "That isn't an Excel or CSV file. For a photo or PDF of a list, use \"Choose or drag in a photo or document\" below."
-      : "That isn't an Excel or CSV file. Save it from Excel as .xlsx and try again.");
+    setError(!isPhotoOrPdf(selected)
+      ? "That isn't a spreadsheet. Save it from Excel as .xlsx (or as CSV) and try again."
+      : reading.status
+        ? "Reading a photo, screenshot or PDF of a list needs the AI features add-on; see the box below. Or upload the list as an Excel spreadsheet."
+        : "A photo, screenshot or PDF can't be imported here. Upload the list as an Excel spreadsheet (or CSV) instead.");
   }
 
   async function readList(selected: File) {
@@ -196,7 +199,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> {config.title}</DialogTitle>
           <DialogDescription>
-            Upload an Excel spreadsheet (a CSV file works too). Nothing changes until you have checked the preview and confirmed.
+            Upload an Excel spreadsheet (a CSV file works too){reading.canRead ? ", or a photo, screenshot or PDF of your list for AI to read" : ""}. Nothing changes until you have checked the preview and confirmed.
           </DialogDescription>
         </DialogHeader>
 
@@ -217,8 +220,8 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
 
           {!file ? (
             <>
-              <SpreadsheetDropZone onFile={dropped} testId={`input-${type}-file`} />
-              <ListReadingPanel reading={reading} kind={type} noun={config.noun} onFile={selected => void readList(selected)} />
+              <SpreadsheetDropZone onFile={dropped} aiReading={reading.canRead} testId={`input-${type}-file`} />
+              <ListReadingPanel reading={reading} kind={type} noun={config.noun} onFile={selected => void readList(selected)} onSpreadsheet={selected => void choose(selected)} />
             </>
           ) : (
             <div className="flex items-center gap-3 rounded-lg border bg-muted/20 p-3">

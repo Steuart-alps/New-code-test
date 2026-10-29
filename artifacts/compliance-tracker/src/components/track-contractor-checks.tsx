@@ -11,6 +11,7 @@ import { formatDay } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 
 interface VisitType { key: string; module: string; title: string; label: string }
+interface Visit { visitKey: string; siteId: number; notNeeded?: boolean }
 
 type Rag = "red" | "amber" | "green" | "grey";
 
@@ -47,7 +48,7 @@ function describe(item: ComplianceItem, now: number): { rag: Rag; text: string }
 export function TrackContractorChecks({ module, siteId }: { module: string; siteId?: number }) {
   const { activeClientId } = useAuth();
   const clientApiFetch = useActiveClientApi();
-  const { data: visitData, isError: visitsError } = useQuery<{ types: VisitType[] }>({
+  const { data: visitData, isError: visitsError } = useQuery<{ types: VisitType[]; visits: Visit[] }>({
     queryKey: ["contractor-visits", activeClientId],
     queryFn: async () => {
       const response = await clientApiFetch("/contractor-visits");
@@ -71,8 +72,15 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
   const rows = types.flatMap((type) => {
     const checks = items.filter((item) => normalise(item.title) === normalise(type.title)
       && (siteId === undefined || item.siteId == null || item.siteId === siteId));
-    if (!checks.length) return [{ type, item: null as ComplianceItem | null }];
-    return checks.map((item) => ({ type, item }));
+    if (!checks.length) {
+      // Marked "No contractor needed" on the Contractors page (at this site,
+      // or at every site when none is chosen).
+      const visits = (visitData?.visits ?? []).filter((visit) => visit.visitKey === type.key
+        && (siteId === undefined || visit.siteId === siteId));
+      const notNeeded = visits.length > 0 && visits.every((visit) => visit.notNeeded);
+      return [{ type, item: null as ComplianceItem | null, notNeeded }];
+    }
+    return checks.map((item) => ({ type, item, notNeeded: false }));
   });
 
   return (
@@ -87,7 +95,7 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
         </div>
       </div>
       <ul className="space-y-2">
-        {rows.map(({ type, item }) => {
+        {rows.map(({ type, item, notNeeded }) => {
           if (!item) {
             const style = RAG_STYLES.grey;
             return (
@@ -95,9 +103,9 @@ export function TrackContractorChecks({ module, siteId }: { module: string; site
                 data-testid="contractor-check-row" data-rag="grey">
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{type.label}</p>
-                  <p className={cn("text-xs", style.word)}>Not set up yet</p>
+                  <p className={cn("text-xs", style.word)}>{notNeeded ? "No contractor needed" : "Not set up yet"}</p>
                 </div>
-                <Link href="/contractors" className="text-xs text-primary font-medium hover:underline">Set it up →</Link>
+                {!notNeeded && <Link href="/contractors" className="text-xs text-primary font-medium hover:underline">Set it up →</Link>}
               </li>
             );
           }

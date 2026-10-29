@@ -16,8 +16,11 @@ import { chromium } from "@playwright/test";
 //     compliance checks, each opening the check; they and the alarm panel
 //     check are no longer offered or shown as due here, but an older alarm
 //     panel record stays in the history and its type can still be filtered;
-//   - a drill cannot be saved until it says whether night staff took part;
-//   - history shows the call point and night staff answers;
+//   - a drill cannot be saved until it gives the time of the drill, the time
+//     taken to evacuate, "Night staff included?" (Yes / No / N/A) and the
+//     improvements required; it sends the roster staff ticked as present;
+//   - history shows the call point and drill details, and a card lists roster
+//     staff not in a drill in the last 12 months;
 //   - managers add call points with a location under Template, Call points,
 //     change their order with the arrows, and upload a list;
 //   - a consultant whose own business has only core opens a free business
@@ -94,16 +97,24 @@ function withRotation(point) {
     notTestedThisRound: !point.archivedAt && (daysAgo === null || daysAgo > roundDays),
   };
 }
+// Staff roster for ticking who was present at a drill (Cat has no site).
+const roster = [
+  { id: 31, name: "Ann Able", site_id: 1, site_name: "Harbour Hotel", active: true },
+  { id: 32, name: "Bob Brown", site_id: 1, site_name: "Harbour Hotel", active: true },
+  { id: 33, name: "Cat Cole", site_id: null, site_name: null, active: true },
+];
 let nextId = 500;
 const checks = [
   {
     id: 401, clientId: CLIENT_ID, siteId: 1, checkType: "alarm", checkDate: localDate(-7), result: "pass",
     location: null, notes: null, performedBy: "Duty Manager", callPointId: 11, callPoint: "CP1 – Reception", nightStaff: null,
+    drillTime: null, evacuationSeconds: null, staffPresent: [],
     createdAt: "2026-10-09T09:00:00.000Z", updatedAt: "2026-10-09T09:00:00.000Z",
   },
   {
     id: 402, clientId: CLIENT_ID, siteId: 1, checkType: "fire_drill", checkDate: localDate(-100), result: "pass",
-    location: null, notes: null, performedBy: "Duty Manager", callPointId: null, callPoint: null, nightStaff: "not_included",
+    location: null, notes: "Kitchen exit sign needs replacing", performedBy: "Duty Manager", callPointId: null, callPoint: null, nightStaff: "not_included",
+    drillTime: "10:15", evacuationSeconds: 185, staffPresent: [{ staffRosterId: 31, name: "Ann Able" }],
     createdAt: "2026-07-08T09:00:00.000Z", updatedAt: "2026-07-08T09:00:00.000Z",
   },
   {
@@ -118,7 +129,8 @@ const unexpectedRequests = [];
 
 // Contractor visit types (artifacts/api-server/src/lib/contractorVisits.ts)
 // and their compliance checks: one with a certificate outstanding (red), one
-// due within 30 days (amber), one done in house (green), one not set up.
+// due within 30 days (amber), one done in house (green), one with no check
+// that is marked "No contractor needed".
 const CONTRACTOR_TYPES = [
   { key: "fire:alarm_service", module: "fire", trackLabel: "FireTrack", title: "Fire Alarm Maintenance", label: "Fire alarm service (6-monthly)", description: "", dueFrom: "check" },
   { key: "fire:extinguisher_service", module: "fire", trackLabel: "FireTrack", title: "Fire Extinguishers Maintenance", label: "Fire extinguisher service (annual)", description: "", dueFrom: "check" },
@@ -169,11 +181,22 @@ async function routeApi(route) {
       case "/api/billing/cancellation-status": return json(route, { accessEndsAt: null });
       case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
       case "/api/managed-by": return json(route, null);
+      // Setup is finished, so the "Add your team first" gate stays out of the way.
+      case "/api/setup/state": return json(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
       case "/api/sites": return json(route, [SITE]);
+      case "/api/staff-roster": return json(route, roster);
+      // Mirrors lib/fireDrillAttendance.ts: latest drill each person was ticked at.
+      case "/api/fire-safety/drill-attendance": return json(route, {
+        periodMonths: 12,
+        staff: roster.map(person => {
+          const dates = checks.filter(c => c.checkType === "fire_drill" && c.staffPresent.some(p => p.staffRosterId === person.id)).map(c => c.checkDate).sort();
+          const lastDrillDate = dates.at(-1) ?? null;
+          return { staffRosterId: person.id, name: person.name, siteId: person.site_id, siteName: person.site_name, lastDrillDate, due: !lastDrillDate || lastDrillDate <= localDate(-365) };
+        }),
+      });
       case "/api/storage/status": return json(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
       case "/api/photos":
       case "/api/photos/requirements":
-      case "/api/staff-roster":
       case "/api/audit-log":
       case "/api/track-actions":
       case "/api/track-actions/templates/matching":
@@ -181,7 +204,10 @@ async function routeApi(route) {
       case "/api/track-evidence/requirements": return json(route, []);
       // FireTrack's contractor services are their compliance checks
       // (components/track-contractor-checks.tsx).
-      case "/api/contractor-visits": return json(route, { types: CONTRACTOR_TYPES, visits: [] });
+      case "/api/contractor-visits": return json(route, {
+        types: CONTRACTOR_TYPES,
+        visits: CONTRACTOR_TYPES.map(type => ({ visitKey: type.key, siteId: SITE.id, notNeeded: type.key === "fire:risk_assessment" })),
+      });
       case "/api/compliance-items": return json(route, COMPLIANCE_ITEMS);
       case "/api/fire-safety/config": return json(route, {
         fire_escape_routes: "", fire_alarm_zones: "", fire_extinguisher_points: "", fire_show_drill: "true",
@@ -217,6 +243,10 @@ async function routeApi(route) {
       callPointId: body.checkType === "alarm" ? body.callPointId ?? null : null,
       callPoint: body.checkType === "alarm" ? point?.name ?? body.callPoint ?? null : null,
       nightStaff: body.checkType === "fire_drill" ? body.nightStaff ?? null : null,
+      drillTime: body.checkType === "fire_drill" ? body.drillTime ?? null : null,
+      evacuationSeconds: body.checkType === "fire_drill" ? body.evacuationSeconds ?? null : null,
+      staffPresent: body.checkType === "fire_drill"
+        ? roster.filter(p => (body.staffPresentIds ?? []).includes(p.id)).map(p => ({ staffRosterId: p.id, name: p.name })) : [],
       soundLevelDb: body.checkType === "alarm" ? body.soundLevelDb ?? null : null,
       soundLevelMethod: body.checkType === "alarm" ? body.soundLevelMethod ?? null : null,
       soundLevelBedhead: body.checkType === "alarm" ? body.soundLevelBedhead ?? null : null,
@@ -289,14 +319,27 @@ try {
   assert.match(cardText, /Fire drill \(6-monthly, with night staff\)[\s\S]*?At least every 6 months/);
   // ── History shows call points and night staff ────────────────────────────
   assert.match(cardText, /Call point: CP1 – Reception/);
-  assert.match(cardText, /Night staff: Night staff did not take part/);
+  assert.match(cardText, /Night staff included: No/);
+  assert.match(cardText, /Time of drill: 10:15/);
+  assert.match(cardText, /Time taken to evacuate: 3 min 5 s/);
+  assert.match(cardText, /Staff present \(1\): Ann Able/);
+  assert.match(cardText, /Improvements required \/ notes: Kitchen exit sign needs replacing/);
+  const drillCard = page.getByTestId("drill-attendance-card");
+  await drillCard.waitFor();
+  assert.match(await drillCard.innerText(), /2 of 3 staff have not taken part in a fire drill in the last 12 months/);
+  assert.match(await drillCard.innerText(), /Bob Brown[\s\S]*Never[\s\S]*Cat Cole[\s\S]*Never/);
+  assert.doesNotMatch(await drillCard.innerText(), /Ann Able/, "Ann was at the drill 100 days ago");
+  await drillCard.scrollIntoViewIfNeeded();
+  await shot(page, "1b-staff-fire-drills");
+  await page.getByText("Time taken to evacuate: 3 min 5 s").scrollIntoViewIfNeeded();
+  await shot(page, "1c-drill-history");
   // ── The rotation card names the next call point and any behind ─────────
   const rotationCard = page.getByTestId("call-point-rotation");
   await rotationCard.waitFor();
   assert.match(await rotationCard.innerText(), /Next to test: CP2 – Kitchen \(not tested yet\)/);
   assert.doesNotMatch(await rotationCard.innerText(), /Every call point has been tested/, "CP2 has never been tested");
   await shot(page, "1-status-and-history");
-  console.log("ok - status cards say weekly, monthly and at least every 6 months; history shows call point and night staff");
+  console.log("ok - status cards say weekly, monthly and at least every 6 months; history shows call point and drill details; the drill card lists staff not in a drill");
 
   // ── Weekly alarm test: the next call point in turn is suggested ──────────
   let dialog = await openRecordDialog(page);
@@ -384,7 +427,7 @@ try {
   assert.equal(await rowFor("Emergency lighting 3-hour test").getAttribute("data-rag"), "green");
   assert.match(await rowFor("Emergency lighting 3-hour test").innerText(), /in house by Sam Patel/);
   assert.equal(await rowFor("Fire risk assessment review").getAttribute("data-rag"), "grey");
-  assert.match(await rowFor("Fire risk assessment review").innerText(), /Not set up yet/);
+  assert.match(await rowFor("Fire risk assessment review").innerText(), /No contractor needed/, "as marked on the Contractors page");
   await contractorCard.scrollIntoViewIfNeeded();
   await shot(page, "7-contractor-checks");
   console.log("ok - FireTrack shows its contractor services red, amber or green from their compliance checks, each opening the check");
@@ -392,17 +435,48 @@ try {
   // ── Drill: night staff answer required ───────────────────────────────────
   dialog = await openRecordDialog(page, "Fire drill (6-monthly, with night staff)");
   const save = dialog.getByRole("button", { name: "Record Check" });
-  assert.equal(await save.isDisabled(), true, "a drill cannot be saved without the night staff answer");
-  await dialog.getByText("Say whether night staff took part").waitFor();
+  assert.equal(await save.isDisabled(), true, "a drill cannot be saved without its details");
+  await dialog.getByText("Give the time of the drill").waitFor();
+  await dialog.getByTestId("input-drill-time").fill("14:30");
+  await dialog.getByText("Give the time taken to evacuate").waitFor();
+  await dialog.getByTestId("input-evacuation-minutes").fill("2");
+  await dialog.getByTestId("input-evacuation-seconds").fill("75");
+  await dialog.getByText("Enter minutes, and seconds from 0 to 59.").waitFor();
+  await dialog.getByTestId("input-evacuation-seconds").fill("35");
+  await dialog.getByText("Say whether night staff were included (Yes, No or N/A)").waitFor();
+  await dialog.getByText("Night staff included?").waitFor();
+  assert.deepEqual(
+    await dialog.getByRole("radiogroup", { name: "Night staff included" }).getByRole("radio").allInnerTexts(),
+    ["Yes", "No", "N/A"]);
+  await dialog.getByTestId("night-staff-no_night_staff").click();
+  await dialog.getByText("N/A: this site has no night staff.").waitFor();
   await dialog.getByTestId("night-staff-not_included").click();
   await dialog.getByText("Plan the next drill so night staff take part.").waitFor();
   await shot(page, "4-drill-night-staff");
   await dialog.getByTestId("night-staff-included").click();
+  await dialog.getByText("Write the improvements required, or notes").waitFor();
+  assert.equal(await save.isDisabled(), true, "the improvements required / notes box is required on a drill");
+  // The one site is chosen, so its staff and staff with no site are listed.
+  const picker = dialog.getByTestId("drill-staff-picker");
+  assert.match(await picker.innerText(), /Ann Able[\s\S]*Bob Brown[\s\S]*Cat Cole/);
+  await picker.getByText("0 of 3 ticked").waitFor();
+  await dialog.getByTestId("drill-staff-31").click();
+  await dialog.getByTestId("drill-staff-32").click();
+  await picker.getByText("2 of 3 ticked").waitFor();
+  await dialog.getByLabel("Improvements required / notes").fill("Fire door on the first floor slow to close");
+  await shot(page, "4b-drill-details");
+  assert.equal(await save.isDisabled(), false);
   await save.click();
   await dialog.waitFor({ state: "hidden" });
-  assert.equal(posts.at(-1).body.nightStaff, "included");
-  assert.equal(posts.at(-1).body.checkType, "fire_drill");
-  console.log("ok - a drill must say whether night staff took part");
+  const sent = posts.at(-1).body;
+  assert.equal(sent.checkType, "fire_drill");
+  assert.equal(sent.nightStaff, "included");
+  assert.equal(sent.drillTime, "14:30");
+  assert.equal(sent.evacuationSeconds, 155);
+  assert.deepEqual(sent.staffPresentIds, [31, 32]);
+  assert.equal(sent.notes, "Fire door on the first floor slow to close");
+  await page.getByTestId("drill-attendance-card").getByText("1 of 3 staff has not taken part").waitFor();
+  console.log("ok - a drill records its time, evacuation time, night staff (Yes, No or N/A), staff present and the improvements required");
 
   // ── Without a list, the call point is typed in and required ──────────────
   callPoints.splice(0, callPoints.length);

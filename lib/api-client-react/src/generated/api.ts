@@ -105,6 +105,7 @@ import type {
   FireCallPoint,
   FireCallPointImportRequest,
   FireCallPointImportResult,
+  FireDrillAttendance,
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
@@ -122,6 +123,7 @@ import type {
   GetCoshhTrackStatusParams,
   GetDailyTrackHistoryParams,
   GetFeedbackScreenshotParams,
+  GetFireDrillAttendanceParams,
   GetFireSafetyConfigParams,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
@@ -254,6 +256,7 @@ import type {
   SavePrivacyProgramParams,
   SendRemindersResponse,
   SetActiveDepartment200,
+  SetContractorRegisterCheckRequest,
   SetContractorVisitRequest,
   SetPrivacyIntakeAssigneeParams,
   SetupTeamAloneResult,
@@ -2733,7 +2736,7 @@ export const getListContractorVisitsUrl = () => {
 }
 
 /**
- * Each visit type the business's tracks cover, at each site the user can see: when the track says it is next due, and the compliance check (with its contractor) that drives the contractor reminder.
+ * Each visit type the business's tracks cover, at each site the user can see: when the track says it is next due, and the compliance check (with its contractor) that drives the contractor reminder. Also the compliance check register's other checks. Each row says whether it has been marked "No contractor needed".
  * @summary Contractor visits kept on the tracks, per site, with the contractor reminded
  */
 export const listContractorVisits = async ( options?: RequestInit): Promise<ContractorVisitsResponse> => {
@@ -2871,6 +2874,78 @@ export const useSetContractorVisit = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSetContractorVisitMutationOptions(options));
+    }
+
+export const getSetContractorRegisterCheckUrl = (checkId: number,) => {
+
+
+
+
+  return `/api/contractor-visits/checks/${checkId}`
+}
+
+/**
+ * @summary Choose the contractor reminded about a compliance check, or mark it as needing none
+ */
+export const setContractorRegisterCheck = async (checkId: number,
+    setContractorRegisterCheckRequest: SetContractorRegisterCheckRequest, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getSetContractorRegisterCheckUrl(checkId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setContractorRegisterCheckRequest)
+  }
+);}
+
+
+
+
+
+export const getSetContractorRegisterCheckMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setContractorRegisterCheck>>, TError,{checkId: number;data: BodyType<SetContractorRegisterCheckRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setContractorRegisterCheck>>, TError,{checkId: number;data: BodyType<SetContractorRegisterCheckRequest>}, TContext> => {
+
+const mutationKey = ['setContractorRegisterCheck'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setContractorRegisterCheck>>, {checkId: number;data: BodyType<SetContractorRegisterCheckRequest>}> = (props) => {
+          const {checkId,data} = props ?? {};
+
+          return  setContractorRegisterCheck(checkId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetContractorRegisterCheckMutationResult = NonNullable<Awaited<ReturnType<typeof setContractorRegisterCheck>>>
+    export type SetContractorRegisterCheckMutationBody = BodyType<SetContractorRegisterCheckRequest>
+    export type SetContractorRegisterCheckMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Choose the contractor reminded about a compliance check, or mark it as needing none
+ */
+export const useSetContractorRegisterCheck = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setContractorRegisterCheck>>, TError,{checkId: number;data: BodyType<SetContractorRegisterCheckRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setContractorRegisterCheck>>,
+        TError,
+        {checkId: number;data: BodyType<SetContractorRegisterCheckRequest>},
+        TContext
+      > => {
+      return useMutation(getSetContractorRegisterCheckMutationOptions(options));
     }
 
 export const getListCertificatesOutstandingUrl = () => {
@@ -7839,6 +7914,90 @@ export function useGetFireSafetyStatus<TData = Awaited<ReturnType<typeof getFire
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFireSafetyStatusQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFireDrillAttendanceUrl = (params?: GetFireDrillAttendanceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fire-safety/drill-attendance?${stringifiedParams}` : `/api/fire-safety/drill-attendance`
+}
+
+/**
+ * @summary Active roster staff with the latest fire drill each took part in
+ */
+export const getFireDrillAttendance = async (params?: GetFireDrillAttendanceParams, options?: RequestInit): Promise<FireDrillAttendance> => {
+
+  return customFetch<FireDrillAttendance>(getGetFireDrillAttendanceUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFireDrillAttendanceQueryKey = (params?: GetFireDrillAttendanceParams,) => {
+    return [
+    `/api/fire-safety/drill-attendance`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFireDrillAttendanceQueryOptions = <TData = Awaited<ReturnType<typeof getFireDrillAttendance>>, TError = ErrorType<void>>(params?: GetFireDrillAttendanceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireDrillAttendance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFireDrillAttendanceQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFireDrillAttendance>>> = ({ signal }) => getFireDrillAttendance(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFireDrillAttendance>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFireDrillAttendanceQueryResult = NonNullable<Awaited<ReturnType<typeof getFireDrillAttendance>>>
+export type GetFireDrillAttendanceQueryError = ErrorType<void>
+
+
+/**
+ * @summary Active roster staff with the latest fire drill each took part in
+ */
+
+export function useGetFireDrillAttendance<TData = Awaited<ReturnType<typeof getFireDrillAttendance>>, TError = ErrorType<void>>(
+ params?: GetFireDrillAttendanceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireDrillAttendance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFireDrillAttendanceQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -2321,6 +2321,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateBillingAlerts();
     await migrateCertificateInbox();
     await migrateContractorSignIn();
+    await migrateContractorVisitNotNeeded();
     await migrateGreenkeepingDailyChecks();
     await addFireAlarmPanelToSavedPremisesChecks();
 
@@ -6249,6 +6250,24 @@ async function migrateFireCallPoints() {
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_db" real`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_method" text`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_bedhead" boolean`);
+  // Oct 2026: fire drills record the time of the drill, how long the
+  // evacuation took and which roster staff were present. Older drills stay
+  // blank. Mirrors lib/db/src/schema/fire-safety-checks.ts.
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "drill_time" text`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "evacuation_seconds" integer`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fire_drill_attendance" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "fire_check_id" integer NOT NULL REFERENCES "fire_safety_checks"("id") ON DELETE CASCADE,
+      "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "staff_name" text NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_check" ON "fire_drill_attendance" ("fire_check_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_client_staff" ON "fire_drill_attendance" ("client_id", "staff_roster_id")`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_fire_drill_attendance_check_staff" ON "fire_drill_attendance" ("fire_check_id", "staff_roster_id")`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks
@@ -6567,6 +6586,29 @@ async function migrateContractorSignIn() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_contractor_sign_ins_site_time" ON "contractor_sign_ins" ("client_id", "site_id", "signed_in_at")`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_ins_sign_out_token" ON "contractor_sign_ins" ("sign_out_token_hash")`);
+}
+
+/** Inspections marked "No contractor needed" on the Contractors page (lib/contractorVisits.ts). */
+async function migrateContractorVisitNotNeeded() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "contractor_visit_not_needed" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "visit_key" text NOT NULL,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "compliance_item_id" integer REFERENCES "compliance_items"("id") ON DELETE CASCADE,
+      "marked_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_visit_not_needed_visit"
+      ON "contractor_visit_not_needed" ("client_id", "visit_key", "site_id") WHERE "compliance_item_id" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_visit_not_needed_check"
+      ON "contractor_visit_not_needed" ("compliance_item_id") WHERE "compliance_item_id" IS NOT NULL
+  `);
 }
 
 // Greenkeeping daily checks (lib/greenkeepingChecks.ts): which department does
