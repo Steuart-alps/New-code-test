@@ -1312,6 +1312,10 @@ export interface Site {
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+  /** Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation. */
+  sleepingAccommodation?: boolean | null;
+  /** A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists. */
+  nightPorter?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1322,6 +1326,10 @@ export interface CreateSiteRequest {
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+  /** Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation. */
+  sleepingAccommodation?: boolean | null;
+  /** A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists. */
+  nightPorter?: boolean | null;
 }
 
 export interface UpdateSiteRequest {
@@ -1330,6 +1338,10 @@ export interface UpdateSiteRequest {
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+  /** Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation. */
+  sleepingAccommodation?: boolean | null;
+  /** A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists. */
+  nightPorter?: boolean | null;
 }
 
 export type ContractorVisitTypeDueFrom = typeof ContractorVisitTypeDueFrom[keyof typeof ContractorVisitTypeDueFrom];
@@ -2888,6 +2900,9 @@ export interface RequestUploadUrlResponse {
   objectPath: string;
 }
 
+/**
+ * "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "night_walk" is a night porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
+ */
 export type FireCheckType = typeof FireCheckType[keyof typeof FireCheckType];
 
 
@@ -2902,6 +2917,7 @@ export const FireCheckType = {
   emergency_lights_annual: 'emergency_lights_annual',
   alarm_service: 'alarm_service',
   extinguisher_service: 'extinguisher_service',
+  night_walk: 'night_walk',
 } as const;
 
 export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof FireSafetyCheckResult];
@@ -2933,6 +2949,18 @@ export type FireSafetyCheckSoundLevelMethod = typeof FireSafetyCheckSoundLevelMe
 export const FireSafetyCheckSoundLevelMethod = {
   meter: 'meter',
   phone: 'phone',
+} as const;
+
+/**
+ * Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
+ */
+export type FireSafetyCheckWalkTime = typeof FireSafetyCheckWalkTime[keyof typeof FireSafetyCheckWalkTime] | null;
+
+
+export const FireSafetyCheckWalkTime = {
+  '22:00': '22:00',
+  '02:00': '02:00',
+  '06:00': '06:00',
 } as const;
 
 export interface FireDrillAttendee {
@@ -2976,6 +3004,8 @@ export interface FireSafetyCheck {
   soundLevelMethod?: FireSafetyCheckSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+  /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
+  walkTime?: FireSafetyCheckWalkTime;
   createdAt: string;
   updatedAt: string;
 }
@@ -3009,6 +3039,18 @@ export type CreateFireSafetyCheckRequestSoundLevelMethod = typeof CreateFireSafe
 export const CreateFireSafetyCheckRequestSoundLevelMethod = {
   meter: 'meter',
   phone: 'phone',
+} as const;
+
+/**
+ * Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
+ */
+export type CreateFireSafetyCheckRequestWalkTime = typeof CreateFireSafetyCheckRequestWalkTime[keyof typeof CreateFireSafetyCheckRequestWalkTime] | null;
+
+
+export const CreateFireSafetyCheckRequestWalkTime = {
+  '22:00': '22:00',
+  '02:00': '02:00',
+  '06:00': '06:00',
 } as const;
 
 export interface CreateFireSafetyCheckRequest {
@@ -3047,6 +3089,8 @@ export interface CreateFireSafetyCheckRequest {
   soundLevelMethod?: CreateFireSafetyCheckRequestSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+  /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
+  walkTime?: CreateFireSafetyCheckRequestWalkTime;
 }
 
 export type UpdateFireSafetyCheckRequestResult = typeof UpdateFireSafetyCheckRequestResult[keyof typeof UpdateFireSafetyCheckRequestResult];
@@ -3078,6 +3122,18 @@ export type UpdateFireSafetyCheckRequestSoundLevelMethod = typeof UpdateFireSafe
 export const UpdateFireSafetyCheckRequestSoundLevelMethod = {
   meter: 'meter',
   phone: 'phone',
+} as const;
+
+/**
+ * Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
+ */
+export type UpdateFireSafetyCheckRequestWalkTime = typeof UpdateFireSafetyCheckRequestWalkTime[keyof typeof UpdateFireSafetyCheckRequestWalkTime] | null;
+
+
+export const UpdateFireSafetyCheckRequestWalkTime = {
+  '22:00': '22:00',
+  '02:00': '02:00',
+  '06:00': '06:00',
 } as const;
 
 export interface UpdateFireSafetyCheckRequest {
@@ -3115,6 +3171,90 @@ export interface UpdateFireSafetyCheckRequest {
   soundLevelMethod?: UpdateFireSafetyCheckRequestSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+  /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
+  walkTime?: UpdateFireSafetyCheckRequestWalkTime;
+}
+
+export interface FireEscapeRoute {
+  /**
+     * e.g. "Final fire exit door route 1" or "Escape stairway 2".
+     * @maxLength 200
+     */
+  name: string;
+  /**
+     * Where it leads, or the assembly point (optional).
+     * @maxLength 200
+     */
+  location?: string | null;
+}
+
+export interface FireEscapeRouteList {
+  siteId: number | null;
+  routes: FireEscapeRoute[];
+  /** True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site. */
+  shared: boolean;
+}
+
+export interface UpdateFireEscapeRoutesRequest {
+  /** @maxItems 100 */
+  routes: FireEscapeRoute[];
+}
+
+export type NightFireWalkTime = typeof NightFireWalkTime[keyof typeof NightFireWalkTime];
+
+
+export const NightFireWalkTime = {
+  '22:00': '22:00',
+  '02:00': '02:00',
+  '06:00': '06:00',
+} as const;
+
+/**
+ * done or failed once recorded (failed = something found); due from its time until an hour after; missed after that; upcoming before its time; not_needed before the site had a night porter.
+ */
+export type NightFireWalkStatus = typeof NightFireWalkStatus[keyof typeof NightFireWalkStatus];
+
+
+export const NightFireWalkStatus = {
+  done: 'done',
+  failed: 'failed',
+  due: 'due',
+  missed: 'missed',
+  upcoming: 'upcoming',
+  not_needed: 'not_needed',
+} as const;
+
+export interface NightFireWalk {
+  /** The calendar day the walk falls on (YYYY-MM-DD). */
+  date: string;
+  time: NightFireWalkTime;
+  /** done or failed once recorded (failed = something found); due from its time until an hour after; missed after that; upcoming before its time; not_needed before the site had a night porter. */
+  status: NightFireWalkStatus;
+  checkId: number | null;
+  performedBy: string | null;
+}
+
+export interface NightFireWalkNight {
+  /** The evening the night starts (YYYY-MM-DD); its 02:00 and 06:00 walks fall on the next day. */
+  nightOf: string;
+  walks: NightFireWalk[];
+}
+
+export interface NightFireWalkSite {
+  siteId: number;
+  siteName: string;
+  /** Tonight (or the night now ending) first, then the six nights before. */
+  nights: NightFireWalkNight[];
+  /** Walks missed over the nights listed. */
+  missedCount: number;
+}
+
+export interface NightFireWalks {
+  walkTimes: string[];
+  /** A walk counts as missed this many minutes after its time. */
+  graceMinutes: number;
+  /** Sites with a night porter that the caller can see. */
+  sites: NightFireWalkSite[];
 }
 
 export interface FireDrillStaffStatus {
@@ -5299,6 +5439,24 @@ export type GetFireSafetyStatusParams = {
 /**
  * Use the site's checks and its risk-assessed frequencies.
  */
+siteId?: number;
+};
+
+export type GetFireEscapeRoutesParams = {
+/**
+ * The site. Omit for a business with no sites.
+ */
+siteId?: number;
+};
+
+export type UpdateFireEscapeRoutesParams = {
+/**
+ * The site. Omit for a business with no sites.
+ */
+siteId?: number;
+};
+
+export type GetNightFireWalksParams = {
 siteId?: number;
 };
 

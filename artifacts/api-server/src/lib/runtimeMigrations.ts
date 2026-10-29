@@ -6269,6 +6269,14 @@ async function migrateFireCallPoints() {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_check" ON "fire_drill_attendance" ("fire_check_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_client_staff" ON "fire_drill_attendance" ("client_id", "staff_roster_id")`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_fire_drill_attendance_check_staff" ON "fire_drill_attendance" ("fire_check_id", "staff_roster_id")`);
+  // Oct 2026: whether each site has sleeping accommodation and a night porter
+  // (blank until answered), and night fire walks' walk time (22:00, 02:00
+  // or 06:00). Mirrors
+  // lib/db/src/schema/sites.ts and fire-safety-checks.ts.
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "sleeping_accommodation" boolean`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter" boolean`);
+  await db.execute(sql`ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "night_porter_since" timestamp`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "walk_time" text`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks
