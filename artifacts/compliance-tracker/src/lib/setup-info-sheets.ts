@@ -138,7 +138,7 @@ export function siteCountsTab(context: InfoSheetContext = {}): InfoSheetTab {
   const sites = context.sites?.length ? context.sites : ["Site 1", "Site 2", "Site 3"];
   return {
     name: "Counts per site",
-    about: "How many of each there is at each site, so every track can be set up in one go. Put 0 where there are none. Add a column for each extra site.",
+    about: "How many of each there is at each site, so every track can be set up in one go. Put 0 where there are none. Add a column for each extra site. Uploaded in Upload your lists, fridges, freezers, hot tubs, bikes, showers and call points are added as Fridge 1, Fridge 2 and so on (a track's own named list wins).",
     headers: ["Track", "Item", ...sites, "Notes"],
     rows: SITE_COUNT_ITEMS.filter((row) => !row.module || !modules || modules.has(row.module))
       .map((row) => [row.track, row.item, ...sites.map(() => ""), ""]),
@@ -230,8 +230,8 @@ const SHEETS: InfoSheet[] = [
     about: "Fridges and freezers, probes, cleaning schedule and allergen information.",
     tabs: [
       {
-        name: "Fridges and freezers", about: "Every unit you take a temperature from, including hot holding.",
-        headers: ["Name", "Type (fridge, freezer, display, hot hold)", "Site", "Location"],
+        name: "Fridges and freezers", about: "Every fridge and freezer you take a temperature from, named as on its label. Upload the workbook in Upload your lists and KitchenTrack uses this list for each site.",
+        headers: ["Name", "Type (fridge or freezer)", "Site", "Location"],
         rows: [["Fridge 1", "Fridge", "Main building", "Main kitchen"]],
       },
       {
@@ -462,8 +462,8 @@ const SHEETS: InfoSheet[] = [
     tabs: [
       {
         name: "Bikes", about: "One line per bike.",
-        headers: ["Reference", "Name", "Type (adult, child, e-bike, tandem)", "Site", "Last serviced (dd/mm/yyyy)", "Notes"],
-        rows: [["B01", "Blue Raleigh", "Adult", "Main building", "", ""]],
+        headers: ["Reference", "Name", "Type (road, mountain, hybrid, e-bike, kids, cargo, other)", "Site", "Last serviced (dd/mm/yyyy)", "Notes"],
+        rows: [["B01", "Blue Raleigh", "Hybrid", "Main building", "", ""]],
       },
     ],
   },

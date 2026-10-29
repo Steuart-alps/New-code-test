@@ -8,12 +8,14 @@ import { AiAllowanceNote } from "@/components/ai-allowance-note";
 import { READABLE_LIST, isPhotoOrPdf, listFileBody, useListReading } from "@/components/ai-list-reader";
 import { MachineImportDialog } from "@/pages/green-track";
 import { RosterImportDialog } from "@/components/roster-import-dialog";
+import { TrackSetupDialog } from "@/components/track-setup-dialog";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
 import { LIST_KINDS, WORKBOOK_TABS, availableListKinds, guessListKind, guessListKindFromName, type ListKind } from "@/lib/list-kinds";
 import { readSpreadsheet, spreadsheetTabNames } from "@/lib/spreadsheet";
+import { TRACK_SETUP_TABS } from "@/lib/track-setup";
 import { cn } from "@/lib/utils";
 
 /**
@@ -32,6 +34,8 @@ interface Item {
   state: ItemState;
   /** How the kind was found, or why it wasn't. */
   note: string;
+  /** A setup workbook's track lists or counts (fridges, outlets, hot tubs…), added through TrackSetupDialog. */
+  setup?: boolean;
 }
 
 const CSV_IMPORTS: Partial<Record<ListKind, ImportCsvType>> = {
@@ -72,6 +76,16 @@ export function UploadLists() {
         // list is the tab named for it, which its import reads too.
         const tabs = await spreadsheetTabNames(file);
         const workbookKind = kinds.find(candidate => tabs.some(tab => tab.trim().toLowerCase() === WORKBOOK_TABS[candidate].toLowerCase()));
+        // Fridges, outlets, hot tubs, bikes or "Counts per site": the tracks
+        // are set up from the workbook too (alongside any list it has).
+        const setupTabs = tabs.filter(tab => TRACK_SETUP_TABS[tab.trim().toLowerCase()]);
+        if (setupTabs.length && !workbookKind) {
+          update(item.id, { setup: true, state: "ready", note: `Sets up your tracks from: ${setupTabs.join(", ")}` });
+          return;
+        }
+        if (setupTabs.length) {
+          setItems(list => [...list, { id: nextId.current++, file, kind: null, state: "ready", setup: true, note: `Sets up your tracks from: ${setupTabs.join(", ")}` }]);
+        }
         const sheet = await readSpreadsheet(file, workbookKind ? { sheet: WORKBOOK_TABS[workbookKind] } : {});
         const kind = workbookKind ?? guessListKind(sheet.headers, file.name, kinds);
         update(item.id, kind
@@ -193,7 +207,11 @@ export function UploadLists() {
                 </div>
                 <div className="flex items-center gap-2">
                   {item.state === "done" ? (
-                    <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-700"><CheckCircle2 className="h-4 w-4" /> {item.kind ? LIST_KINDS[item.kind].label : "Imported"}</span>
+                    <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-700"><CheckCircle2 className="h-4 w-4" /> {item.setup ? "Tracks set up" : item.kind ? LIST_KINDS[item.kind].label : "Imported"}</span>
+                  ) : item.setup ? (
+                    <Button type="button" size="sm" onClick={() => setOpenId(item.id)} data-testid={`button-upload-list-setup-${item.id}`}>
+                      Check and add
+                    </Button>
                   ) : item.state !== "error" && item.state !== "sorting" && (
                     <>
                       <select aria-label={`Which list is ${item.file.name}?`} data-testid={`select-upload-list-kind-${item.id}`}
@@ -220,7 +238,11 @@ export function UploadLists() {
         )}
       </div>
 
-      {open?.kind && CSV_IMPORTS[open.kind] && (
+      {open?.setup && (
+        <TrackSetupDialog key={open.id} open file={open.file} sites={sites.data ?? []}
+          onClose={close} onDone={() => update(open.id, { state: "done", note: "Added to your tracks" })} />
+      )}
+      {!open?.setup && open?.kind && CSV_IMPORTS[open.kind] && (
         <ImportCsvDialog key={open.id} type={CSV_IMPORTS[open.kind]!} open initialFile={open.file}
           onOpenChange={value => { if (!value) close(); }} onImported={() => done(open.id)} />
       )}

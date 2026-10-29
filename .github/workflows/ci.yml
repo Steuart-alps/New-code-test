@@ -130,6 +130,9 @@ jobs:
       - name: Setup "What we need from you" workbooks match the import templates
         run: pnpm --filter @workspace/compliance-tracker run test:setup-info-sheets
 
+      - name: Tracks set up from a setup workbook (counts and named lists)
+        run: pnpm --filter @workspace/compliance-tracker run test:track-setup
+
       - name: Reload after a new release test
         run: pnpm --filter @workspace/compliance-tracker run test:new-release-reload
 
