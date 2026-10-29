@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { API_BASE } from "@/lib/api";
 import { downloadFile } from "@/lib/download";
 import { useListSites } from "@workspace/api-client-react";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -857,6 +858,7 @@ export default function CleaningScheduleTab() {
                   <p className="text-sm text-emerald-700 flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
                     Signed off{log?.submitted_at ? ` on ${format(parseISO(log.submitted_at), "d MMM yyyy 'at' HH:mm")}` : ""}
+                    {log?.id && <RecordSignedBy recordType="kitchen_cleaning_log" recordId={log.id} compact className="ml-2" />}
                   </p>
                 )}
               </CardContent>

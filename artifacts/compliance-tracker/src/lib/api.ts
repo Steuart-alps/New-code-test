@@ -4,8 +4,11 @@ import {
   isReplayableBody,
   OVERRIDE_REASON_HEADER,
   overrideReasonMessage,
+  RECORD_SIGNATURE_HEADER,
   setCsrfTokenProvider,
+  signatureRequiredInfo,
   type OverrideReasonHandler,
+  type RecordSignatureHandler,
 } from "@workspace/api-client-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -115,36 +118,64 @@ export function setApiFetchOverrideReasonHandler(handler: OverrideReasonHandler 
   overrideReasonHandler = handler;
 }
 
+let recordSignatureHandler: RecordSignatureHandler | null = null;
+
+/** Mirrors the generated client's setRecordSignatureHandler for hand-written fetches. */
+export function setApiFetchRecordSignatureHandler(handler: RecordSignatureHandler | null): void {
+  recordSignatureHandler = handler;
+}
+
 /**
  * `fetch` for hand-written mutations of track records. When the API answers
- * 423 OVERRIDE_REASON_REQUIRED (an owner changing a record older than its
- * correction window), asks for a reason through the registered handler and
- * resends the same request once with it. If the user cancels, or the request
- * cannot be resent, the original 423 response is returned unchanged.
+ * 428 SIGNATURE_REQUIRED (a recorded check must be signed), asks for a drawn
+ * signature; when it answers 423 OVERRIDE_REASON_REQUIRED (an owner changing a
+ * record older than its correction window), asks for a reason. Each is asked
+ * at most once through the registered handlers, and the same request is sent
+ * again with the answer. If the user cancels, or the request cannot be resent,
+ * the last response is returned unchanged.
  */
 export async function fetchWithOverrideReason(url: string, init: RequestInit = {}): Promise<Response> {
-  const res = await fetch(url, init);
+  let res = await fetch(url, init);
   const method = (init.method ?? "GET").toUpperCase();
-  if (
-    res.status !== 423 ||
-    !["POST", "PUT", "PATCH", "DELETE"].includes(method) ||
-    !overrideReasonHandler ||
-    !isReplayableBody(init.body)
-  ) {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(method) || !isReplayableBody(init.body)) return res;
+  let headers = new Headers(init.headers);
+  let askedSignature = false;
+  let askedReason = false;
+  for (;;) {
+    if (res.status === 428 && !askedSignature && recordSignatureHandler) {
+      askedSignature = true;
+      const info = signatureRequiredInfo(await res.clone().json().catch(() => null));
+      if (!info) return res;
+      let token: string | null = null;
+      try {
+        token = (await recordSignatureHandler({ method, url, ...info }))?.trim() || null;
+      } catch {
+        token = null;
+      }
+      if (!token) return res;
+      headers = new Headers(headers);
+      headers.set(RECORD_SIGNATURE_HEADER, token);
+      res = await fetch(url, { ...init, headers });
+      continue;
+    }
+    if (res.status === 423 && !askedReason && overrideReasonHandler) {
+      askedReason = true;
+      const message = overrideReasonMessage(await res.clone().json().catch(() => null));
+      if (!message) return res;
+      let reason: string | null = null;
+      try {
+        reason = (await overrideReasonHandler({ method, url, message }))?.trim() || null;
+      } catch {
+        reason = null;
+      }
+      if (!reason) return res;
+      headers = new Headers(headers);
+      headers.set(OVERRIDE_REASON_HEADER, encodeURIComponent(reason));
+      res = await fetch(url, { ...init, headers });
+      continue;
+    }
     return res;
   }
-  const message = overrideReasonMessage(await res.clone().json().catch(() => null));
-  if (!message) return res;
-  let reason: string | null = null;
-  try {
-    reason = (await overrideReasonHandler({ method, url, message }))?.trim() || null;
-  } catch {
-    reason = null;
-  }
-  if (!reason) return res;
-  const headers = new Headers(init.headers);
-  headers.set(OVERRIDE_REASON_HEADER, encodeURIComponent(reason));
-  return fetch(url, { ...init, headers });
 }
 
 /**

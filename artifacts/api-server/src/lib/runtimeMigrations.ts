@@ -2323,6 +2323,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateContractorSignIn();
     await migrateContractorVisitNotNeeded();
     await migrateGreenkeepingDailyChecks();
+    await migrateRecordSignatures();
     await addFireAlarmPanelToSavedPremisesChecks();
 
     // ---- A compliance check done in house by a competent person (Oct 2026) ----
@@ -6586,6 +6587,29 @@ async function migrateContractorSignIn() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_contractor_sign_ins_site_time" ON "contractor_sign_ins" ("client_id", "site_id", "signed_in_at")`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_ins_sign_out_token" ON "contractor_sign_ins" ("sign_out_token_hash")`);
+}
+
+// Drawn signatures on recorded checks (lib/recordSignatures.ts).
+// Mirrors lib/db/src/schema/record-signatures.ts.
+async function migrateRecordSignatures() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "record_signatures" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "token" text NOT NULL,
+      "user_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "signer_name" text NOT NULL,
+      "strokes" jsonb NOT NULL,
+      "record_type" text,
+      "record_id" integer,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "claimed_at" timestamptz,
+      "signed_at" timestamptz
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_record_signatures_token" ON "record_signatures" ("token")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_record_signatures_record" ON "record_signatures" ("client_id", "record_type", "record_id")`);
 }
 
 /** Inspections marked "No contractor needed" on the Contractors page (lib/contractorVisits.ts). */

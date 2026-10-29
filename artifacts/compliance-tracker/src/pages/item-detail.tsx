@@ -25,6 +25,7 @@ import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
 import { LoadError } from "@/components/load-error";
 import { format } from "date-fns";
+import { RecordSignedBy } from "@/components/record-signature";
 import {
   ArrowLeft, Pencil, Trash2, FileText, Plus, ExternalLink,
   Briefcase, MapPin, Calendar, Clock, ClipboardList, Mail, User, Repeat,
@@ -432,6 +433,7 @@ export default function ItemDetailPage() {
                   {item.completedInHouseBy && (
                     <p className="text-xs text-muted-foreground" data-testid="completed-in-house-by">Done in house by {item.completedInHouseBy}</p>
                   )}
+                  <RecordSignedBy recordType="compliance_item_completion" recordId={item.id} latest className="mt-1" />
                 </div>
               )}
             </div>

@@ -116,6 +116,46 @@ export function setOverrideReasonHandler(handler: OverrideReasonHandler | null):
   _overrideReasonHandler = handler;
 }
 
+export type RecordSignatureRequest = {
+  method: string;
+  url: string;
+  /** The server's explanation, suitable for showing to the user. */
+  message: string;
+  /** The name of the login that will sign, when the server gave it. */
+  signedBy: string | null;
+};
+
+/** Resolves to the token of the stored signature, or null when the user cancelled. */
+export type RecordSignatureHandler = (info: RecordSignatureRequest) => Promise<string | null>;
+
+let _recordSignatureHandler: RecordSignatureHandler | null = null;
+
+/** Header carrying the token of the drawn signature for a recorded check. */
+export const RECORD_SIGNATURE_HEADER = "X-Record-Signature";
+/** Error code the API sends (HTTP 428) when saving a check needs a signature. */
+export const SIGNATURE_REQUIRED_CODE = "SIGNATURE_REQUIRED";
+
+/**
+ * Register a handler that asks the user to sign a check they are saving. When
+ * a mutation is answered 428 with code SIGNATURE_REQUIRED, the handler is
+ * called; a returned token retries the same request once with the
+ * `X-Record-Signature` header, while null leaves the original 428 error in
+ * place. Pass `null` to clear.
+ */
+export function setRecordSignatureHandler(handler: RecordSignatureHandler | null): void {
+  _recordSignatureHandler = handler;
+}
+
+/** The server's message and signer when an error body asks for a signature, else null. */
+export function signatureRequiredInfo(data: unknown): { message: string; signedBy: string | null } | null {
+  if (!data || typeof data !== "object") return null;
+  if ((data as Record<string, unknown>).code !== SIGNATURE_REQUIRED_CODE) return null;
+  return {
+    message: getStringField(data, "error") ?? "Sign to save this record.",
+    signedBy: getStringField(data, "signedBy") ?? null,
+  };
+}
+
 /** Whether a request body can be sent a second time unchanged. */
 export function isReplayableBody(body: unknown): boolean {
   if (body == null || typeof body === "string") return true;
@@ -545,29 +585,51 @@ export async function customFetch<T = unknown>(
 
   let response = await fetch(input, { ...init, method, headers, credentials: "include" });
 
-  // An owner changing a record past its correction window must give a
-  // reason: ask once, then resend the same request with it.
-  if (
-    response.status === 423 &&
-    UNSAFE_METHODS.has(method) &&
-    _overrideReasonHandler !== null &&
-    !isRequest(input) &&
-    isReplayableBody(init.body)
-  ) {
-    const lockedData = await parseErrorBody(response, method);
-    const message = overrideReasonMessage(lockedData);
-    let reason: string | null = null;
-    if (message) {
-      try {
-        reason = (await _overrideReasonHandler({ method, url: requestInfo.url, message }))?.trim() || null;
-      } catch {
-        reason = null;
+  // Saving a recorded check needs the user's drawn signature, and an owner
+  // changing a record past its correction window must give a reason. Ask for
+  // each at most once, then resend the same request with what was given.
+  const canResend = UNSAFE_METHODS.has(method) && !isRequest(input) && isReplayableBody(init.body);
+  let retryHeaders = headers;
+  let askedSignature = false;
+  let askedReason = false;
+  for (;;) {
+    if (response.status === 428 && canResend && !askedSignature && _recordSignatureHandler !== null) {
+      askedSignature = true;
+      const unsignedData = await parseErrorBody(response, method);
+      const info = signatureRequiredInfo(unsignedData);
+      let token: string | null = null;
+      if (info) {
+        try {
+          token = (await _recordSignatureHandler({ method, url: requestInfo.url, ...info }))?.trim() || null;
+        } catch {
+          token = null;
+        }
       }
+      if (!token) throw new ApiError(response, unsignedData, requestInfo);
+      retryHeaders = new Headers(retryHeaders);
+      retryHeaders.set(RECORD_SIGNATURE_HEADER, token);
+      response = await fetch(input, { ...init, method, headers: retryHeaders, credentials: "include" });
+      continue;
     }
-    if (!reason) throw new ApiError(response, lockedData, requestInfo);
-    const retryHeaders = new Headers(headers);
-    retryHeaders.set(OVERRIDE_REASON_HEADER, encodeURIComponent(reason));
-    response = await fetch(input, { ...init, method, headers: retryHeaders, credentials: "include" });
+    if (response.status === 423 && canResend && !askedReason && _overrideReasonHandler !== null) {
+      askedReason = true;
+      const lockedData = await parseErrorBody(response, method);
+      const message = overrideReasonMessage(lockedData);
+      let reason: string | null = null;
+      if (message) {
+        try {
+          reason = (await _overrideReasonHandler({ method, url: requestInfo.url, message }))?.trim() || null;
+        } catch {
+          reason = null;
+        }
+      }
+      if (!reason) throw new ApiError(response, lockedData, requestInfo);
+      retryHeaders = new Headers(retryHeaders);
+      retryHeaders.set(OVERRIDE_REASON_HEADER, encodeURIComponent(reason));
+      response = await fetch(input, { ...init, method, headers: retryHeaders, credentials: "include" });
+      continue;
+    }
+    break;
   }
 
   if (!response.ok) {

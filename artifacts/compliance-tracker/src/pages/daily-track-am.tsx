@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sunrise, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, Settings2 } from "lucide-react";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -327,6 +328,7 @@ export function ChecklistCard({
         )}
         {existing?.id && (
           <div className="border-t mt-3 pt-3">
+            <RecordSignedBy recordType="daily_checklist" recordId={existing.id} className="mb-2" />
             <CheckPhotoUploader entityType="daily_checklist" entityId={existing.id} compact />
           </div>
         )}

@@ -117,7 +117,7 @@ const freshSchema = new Set([
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
   "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
-  "test:owner-late-edit-reason",
+  "test:owner-late-edit-reason", "test:record-signatures",
   "test:kitchen-cleaning-export", "test:pat-register-access", "test:green-nsts", "test:green-hours", "test:green-spraying", "test:allergen-recipes", "test:safe-track-induction-browser", "test:equipment-qr-browser", "test:daily-track-month-history:pushed", "test:approved-account-deletion", "test:deletion-reminder", "test:export-parts", "test:cancelled-storage-class", "test:today-by-department", "test:equipment-labels",
   "test:storage-metering", "test:storage-usage-snapshot", "test:storage-capacity-reduction", "test:storage-warning-emails",
   "test:content-filter",
