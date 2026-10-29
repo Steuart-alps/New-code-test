@@ -123,7 +123,8 @@ function MyTasksTodayCard() {
           : outstanding.length === 0 ? <p className="text-sm text-emerald-700">All done for today.</p>
             : (
               <ul className="space-y-2">
-                {outstanding.slice(0, 5).map((t) => <TaskItem key={`${t.id}:${t.occurrenceDate}`} task={t} onDone={complete} busy={busyId === t.id} />)}
+                {outstanding.slice(0, 5).map((t) => <TaskItem key={`${t.id}:${t.occurrenceDate}`} task={t} onDone={complete} busy={busyId === t.id}
+                  clientId={clientId} onAnswered={() => void queryClient.invalidateQueries({ queryKey: ["tasks"] })} />)}
                 {outstanding.length > 5 && <li><Link href="/tasks" className="text-xs text-primary hover:underline">and {outstanding.length - 5} more on the Tasks page</Link></li>}
               </ul>
             )}

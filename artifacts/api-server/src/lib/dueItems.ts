@@ -38,6 +38,7 @@ import {
 import { entitledVisitTypes, linkedVisitChecks, trackDueDates } from "./contractorVisits";
 import { logger } from "./logger";
 import { getEntitledServices, isEntitled, type Entitlements } from "./services";
+import { isRosterCheck, rosterCheckOccurrence } from "./rosterChecks";
 import { occursOn } from "./taskSchedule";
 import { getTrackModule } from "./trackModules";
 import { candidateCanSeeSite, hasExplicitOwner, loadOwnerContext, resolveOwnersFromContext, type OwnerContext } from "./trackOwners";
@@ -248,6 +249,9 @@ export async function collectDueItems(clientId: number, today: string, now: Date
           const date = addCalendarDays(today, offset);
           if (occursOn({ recurrence: task.recurrence, startsOn }, date) && !done.has(`${task.id}:${date}`)) dates.push(date);
         }
+        // The monthly roster check stays open (overdue) all month until answered.
+        const month = isRosterCheck(task) ? rosterCheckOccurrence({ startsOn }, today) : null;
+        if (month && !done.has(`${task.id}:${month}`) && !dates.includes(month)) dates.unshift(month);
       }
       const role = task.assignee_role === "client_staff" || task.assignee_role === "managers" ? task.assignee_role : undefined;
       for (const date of dates) {

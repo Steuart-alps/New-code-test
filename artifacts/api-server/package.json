@@ -15,6 +15,7 @@
     "test:checklist-results-fixtrack": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/checklist-results-fixtrack.mjs",
     "test:owner-late-edit-reason": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/owner-late-edit-reason.mjs",
     "test:departments-under-sites": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/departments-under-sites.mjs",
+    "test:roster-check": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/roster-check.mjs",
     "test:fire-call-points": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-call-points.mjs",
     "test:equipment-labels": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/equipment-labels.mjs",
     "test:inspection-reports": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/inspection-reports.mjs",
