@@ -183,8 +183,10 @@ export function DrillStaffPicker({ siteId, value, onChange, recorded = [] }: {
  */
 export function DrillAttendanceCard({ siteId, trackLink }: { siteId?: number; trackLink?: boolean }) {
   const { data } = useGetFireDrillAttendance(siteId !== undefined ? { siteId } : undefined);
-  if (!data || data.staff.length === 0) return null;
-  const due = data.staff.filter(person => person.due);
+  // Hidden until the roster has staff (or if the answer is not the expected shape).
+  const staff = Array.isArray(data?.staff) ? data.staff : [];
+  if (!data || staff.length === 0) return null;
+  const due = staff.filter(person => person.due);
   return (
     <Card className="rounded-sm" data-testid="drill-attendance-card">
       <CardHeader className="pb-2">
@@ -194,11 +196,11 @@ export function DrillAttendanceCard({ siteId, trackLink }: { siteId?: number; tr
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
         {due.length === 0 ? (
-          <p className="text-emerald-700">All {data.staff.length} staff have taken part in a fire drill in the last {data.periodMonths} months.</p>
+          <p className="text-emerald-700">All {staff.length} staff have taken part in a fire drill in the last {data.periodMonths} months.</p>
         ) : (
           <>
             <p className="text-amber-800">
-              {due.length} of {data.staff.length} staff {due.length === 1 ? "has" : "have"} not taken part in a fire drill in the last {data.periodMonths} months.
+              {due.length} of {staff.length} staff {due.length === 1 ? "has" : "have"} not taken part in a fire drill in the last {data.periodMonths} months.
             </p>
             <ul className="text-xs grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
               {due.map(person => (

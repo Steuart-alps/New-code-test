@@ -617,9 +617,10 @@ ${rows.map(r => `<tr>
 
   // Training matrix CSV — rows = staff, columns = training types, cells = current status.
   function handleDownloadMatrix() {
-    const drillRecords = drillAttendance ? fireDrillMatrixRecords(drillAttendance.staff, drillAttendance.periodMonths) : [];
+    const drillStaff = Array.isArray(drillAttendance?.staff) ? drillAttendance.staff : null;
+    const drillRecords = drillStaff ? fireDrillMatrixRecords(drillStaff, drillAttendance!.periodMonths ?? 12) : [];
     const matrix = buildTrainingMatrix([...certs, ...drillRecords], activeStaff, siteFilter, new Date(),
-      drillAttendance ? [FIRE_DRILL_TRAINING_TYPE] : []);
+      drillStaff ? [FIRE_DRILL_TRAINING_TYPE] : []);
 
     if (matrix.rows.length === 0 || matrix.types.length === 0) {
       toast({
