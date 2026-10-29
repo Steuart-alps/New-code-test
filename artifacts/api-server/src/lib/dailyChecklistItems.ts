@@ -45,10 +45,13 @@ const CHECKLIST_NAMES: Record<string, string> = {
   kitchen_closing: 'Kitchen closing checks',
   premises_opening: 'Premises opening checks',
   premises_closing: 'Premises closing checks',
+  greenkeeping_opening: 'Greenkeeping shed opening checks',
+  greenkeeping_closing: 'Greenkeeping shed closing checks',
 };
 
 function moduleFor(checklistType: string) {
   if (checklistType.startsWith('kitchen_')) return 'kitchen';
+  if (checklistType.startsWith('greenkeeping_')) return 'green';
   return checklistType.endsWith('_opening') ? 'daily_am' : 'daily_pm';
 }
 

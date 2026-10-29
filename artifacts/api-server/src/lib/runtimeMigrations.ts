@@ -2322,6 +2322,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateCertificateInbox();
     await migrateContractorSignIn();
     await migrateContractorVisitNotNeeded();
+    await migrateGreenkeepingDailyChecks();
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
@@ -6585,4 +6586,37 @@ async function migrateContractorVisitNotNeeded() {
     CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_visit_not_needed_check"
       ON "contractor_visit_not_needed" ("compliance_item_id") WHERE "compliance_item_id" IS NOT NULL
   `);
+}
+
+// Greenkeeping daily checks (lib/greenkeepingChecks.ts): which department does
+// a site's checklists of an area (mirrors lib/db/src/schema/daily-checklists.ts),
+// and machines marked "not in use" for a day's pre-start checks.
+async function migrateGreenkeepingDailyChecks() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "daily_checklist_teams" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "area" text NOT NULL,
+      "department_id" integer NOT NULL REFERENCES "departments"("id") ON DELETE CASCADE,
+      "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "updated_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "ck_daily_checklist_teams_area" CHECK ("area" IN ('greenkeeping', 'kitchen', 'premises'))
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_daily_checklist_teams_site_area" ON "daily_checklist_teams" ("site_id", "area")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "green_machine_not_in_use" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "machine_id" integer NOT NULL REFERENCES "green_machines"("id") ON DELETE CASCADE,
+      "check_date" date NOT NULL,
+      "reason" text,
+      "marked_by_name" text,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_green_machine_not_in_use_machine_date" ON "green_machine_not_in_use" ("machine_id", "check_date")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_green_machine_not_in_use_client_date" ON "green_machine_not_in_use" ("client_id", "check_date")`);
 }

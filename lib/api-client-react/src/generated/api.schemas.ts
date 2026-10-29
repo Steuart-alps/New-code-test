@@ -1127,6 +1127,135 @@ export interface GreenTrackCertificateDownload {
   fileName?: string | null;
 }
 
+export type GreenShedChecklistType = typeof GreenShedChecklistType[keyof typeof GreenShedChecklistType];
+
+
+export const GreenShedChecklistType = {
+  greenkeeping_opening: 'greenkeeping_opening',
+  greenkeeping_closing: 'greenkeeping_closing',
+} as const;
+
+export type GreenShedChecklistItemResult = typeof GreenShedChecklistItemResult[keyof typeof GreenShedChecklistItemResult];
+
+
+export const GreenShedChecklistItemResult = {
+  pass: 'pass',
+  fail: 'fail',
+  na: 'na',
+} as const;
+
+export interface GreenShedChecklistItem {
+  label: string;
+  checked: boolean;
+  notes?: string;
+  section?: string;
+  result?: GreenShedChecklistItemResult;
+}
+
+export interface GreenShedChecklist {
+  id: number;
+  clientId: number;
+  siteId?: number | null;
+  checklistType: GreenShedChecklistType;
+  checkDate: string;
+  items: GreenShedChecklistItem[];
+  completedBy?: string | null;
+  staffRosterId?: number | null;
+  managerNote?: string | null;
+  submittedAt?: string | null;
+  [key: string]: unknown;
+ }
+
+export interface GreenShedChecklistInput {
+  siteId?: number | null;
+  checklistType: GreenShedChecklistType;
+  checkDate: string;
+  items?: GreenShedChecklistItem[];
+  completedBy?: string | null;
+  staffRosterId?: number | null;
+  managerNote?: string | null;
+  /** Set to submit; every item must be answered and failed items need a note */
+  submittedAt?: string | null;
+}
+
+export interface GreenShedChecklistUpdate {
+  items?: GreenShedChecklistItem[];
+  completedBy?: string | null;
+  staffRosterId?: number | null;
+  managerNote?: string | null;
+  submittedAt?: string | null;
+}
+
+export interface GreenShedTeamDepartment {
+  id: number;
+  name: string;
+}
+
+export interface GreenShedTeam {
+  siteId: number;
+  departmentId: number | null;
+  departmentName: string | null;
+  /** False when the department was matched by "green" in its name */
+  chosen: boolean;
+  departments: GreenShedTeamDepartment[];
+}
+
+export interface GreenShedTeamInput {
+  siteId: number;
+  departmentId: number | null;
+}
+
+export type GreenPreStartMachineStatus = typeof GreenPreStartMachineStatus[keyof typeof GreenPreStartMachineStatus];
+
+
+export const GreenPreStartMachineStatus = {
+  checked: 'checked',
+  failed: 'failed',
+  not_in_use: 'not_in_use',
+  todo: 'todo',
+} as const;
+
+export interface GreenPreStartMachine {
+  machineId: number;
+  name: string;
+  type: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  status: GreenPreStartMachineStatus;
+  checkId: number | null;
+  checkedBy: string | null;
+  notInUseId: number | null;
+  notInUseReason: string | null;
+  markedBy: string | null;
+}
+
+export interface GreenPreStartDay {
+  date: string;
+  machines: GreenPreStartMachine[];
+  total: number;
+  checked: number;
+  failed: number;
+  notInUse: number;
+  todo: number;
+}
+
+export interface GreenMachineNotInUseInput {
+  machineId: number;
+  checkDate: string;
+  reason?: string | null;
+}
+
+/**
+ * The stored mark (database column names)
+ */
+export interface GreenMachineNotInUseRow {
+  id?: number;
+  machine_id?: number;
+  check_date?: string;
+  reason?: string | null;
+  [key: string]: unknown;
+ }
+
 export interface ErrorResponse {
   error: string;
 }
@@ -5066,6 +5195,27 @@ siteId: number;
 export type ListGreenTrackHourReadingsParams = {
 machineId?: number;
 limit?: number;
+};
+
+export type ListGreenTrackShedChecksParams = {
+siteId?: number;
+date?: string;
+type?: GreenShedChecklistType;
+};
+
+export type GetGreenTrackShedTeamParams = {
+siteId: number;
+};
+
+export type GetGreenTrackPreStartDayParams = {
+/**
+ * Defaults to the business's today
+ */
+date?: string;
+/**
+ * Machines at this site and machines with no site
+ */
+siteId?: number;
 };
 
 export type ListGreenTrackStockMovementsParams = {
