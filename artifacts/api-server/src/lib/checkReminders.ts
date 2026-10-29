@@ -37,6 +37,23 @@ export const FIRE_CHECK_TYPES = [
 ] as const;
 export type FireCheckType = (typeof FIRE_CHECK_TYPES)[number];
 
+/**
+ * Check types FireTrack no longer records (Oct 2026), because another check
+ * already covers them: the alarm panel is looked at on every premises opening
+ * and closing check, and the contractor services (the 6-monthly fire alarm
+ * service, the annual extinguisher service and the annual 3-hour emergency
+ * lighting test) are their compliance checks, which FireTrack shows with the
+ * checks' own status. Older records stay in the log and can still be edited;
+ * they are never due, overdue or reminded about.
+ */
+export const RETIRED_FIRE_CHECK_TYPES: readonly FireCheckType[] = [
+  "alarm_panel", "alarm_service", "extinguisher_service", "emergency_lights_annual",
+];
+
+/** The check types FireTrack records and keeps due dates for. */
+export const ACTIVE_FIRE_CHECK_TYPES: readonly FireCheckType[] =
+  FIRE_CHECK_TYPES.filter(type => !RETIRED_FIRE_CHECK_TYPES.includes(type));
+
 /** Default check frequencies, in days. */
 export const FIRE_FREQUENCY_DAYS: Record<FireCheckType, number> = {
   alarm: 7, emergency_lights: 30, extinguishers: 7,
@@ -276,16 +293,6 @@ async function fireSiteStatusesFor(
   for (const row of (latestRows.rows ?? []) as (Latest & { site_id: number | null; check_type: string })[]) {
     latest.set(`${row.site_id == null ? "none" : Number(row.site_id)}:${row.check_type}`, row);
   }
-  // A completed ComplyTrack task that mirrors a FireTrack check (the annual
-  // emergency lighting discharge test, the fire alarm and extinguisher
-  // services) counts as a passed check on its date, so completions from
-  // before the two were linked still show.
-  for (const [key, completedOn] of await linkedTaskCompletions(clientId, "fire")) {
-    const recorded = latest.get(key);
-    if (!recorded || String(recorded.check_date).slice(0, 10) < completedOn) {
-      latest.set(key, { id: 0, check_date: completedOn, result: "pass" });
-    }
-  }
   const frequencySetting = ((settingRows.rows ?? [])[0] as { value?: unknown } | undefined)?.value;
   const profiles = new Map<number, unknown>(
     ((profileRows.rows ?? []) as { site_id: number; profile: unknown }[]).map(row => [Number(row.site_id), row.profile]),
@@ -295,7 +302,7 @@ async function fireSiteStatusesFor(
   const statuses: FireSiteStatus[] = [];
   for (const unit of units) {
     const frequencies = effectiveFireFrequencies(frequencySetting, unit.id == null ? null : profiles.get(unit.id));
-    for (const checkType of FIRE_CHECK_TYPES) {
+    for (const checkType of ACTIVE_FIRE_CHECK_TYPES) {
       const own = unit.id == null ? undefined : latest.get(`${unit.id}:${checkType}`);
       const unassigned = latest.get(`none:${checkType}`);
       // The escape route sign-off is only for sites with sleeping
@@ -339,7 +346,7 @@ const fireSeverity = (row: FireSiteStatus) =>
  * how many sites are not up to date.
  */
 export function worstFireStatusByType(statuses: FireSiteStatus[]) {
-  return FIRE_CHECK_TYPES.flatMap(checkType => {
+  return ACTIVE_FIRE_CHECK_TYPES.flatMap(checkType => {
     const rows = statuses.filter(row => row.checkType === checkType);
     if (!rows.length) return [];
     const worst = rows.reduce((current, row) => {

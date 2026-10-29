@@ -4,6 +4,7 @@ import {
   dictationErrorMessage,
   dictationLanguage,
   getSpeechRecognition,
+  listensContinuously,
   type SpeechRecognitionLike,
 } from "@/lib/dictation";
 
@@ -19,6 +20,8 @@ export function useDictation(onText: (text: string) => void) {
   const [interim, setInterim] = useState("");
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const stopThisRef = useRef<(() => void) | null>(null);
+  // Words heard but not yet final: Safari can stop without finalising them.
+  const pendingRef = useRef("");
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
 
@@ -33,9 +36,10 @@ export function useDictation(onText: (text: string) => void) {
 
     const recognition = new Recognition();
     recognition.lang = dictationLanguage();
-    // Chrome on Android repeats earlier words in continuous mode, so there it
-    // listens to one phrase per tap.
-    recognition.continuous = !/Android/i.test(navigator.userAgent);
+    // Chrome on Android and Safari (on iPhone, iPad and Mac) repeat earlier
+    // words in continuous mode, so there it listens to one phrase per tap.
+    recognition.continuous = listensContinuously(navigator.userAgent, navigator.maxTouchPoints);
+    pendingRef.current = "";
     recognition.interimResults = true;
     recognition.onresult = (event) => {
       let pending = "";
@@ -45,6 +49,7 @@ export function useDictation(onText: (text: string) => void) {
         if (result.isFinal) onTextRef.current(transcript);
         else pending += transcript;
       }
+      pendingRef.current = pending.trim();
       setInterim(pending.trim());
     };
     recognition.onerror = (event) => {
@@ -52,10 +57,14 @@ export function useDictation(onText: (text: string) => void) {
       if (message) toast({ title: "Dictation stopped", description: message, variant: "destructive" });
     };
     recognition.onend = () => {
+      const unfinished = pendingRef.current;
+      pendingRef.current = "";
       recognitionRef.current = null;
       if (stopActive === stopThis) stopActive = null;
       setListening(false);
       setInterim("");
+      // Keep words Safari heard but stopped before finalising.
+      if (unfinished) onTextRef.current(unfinished);
     };
     const stopThis = () => recognition.stop();
     stopThisRef.current = stopThis;

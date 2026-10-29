@@ -34,6 +34,8 @@ type SetupState = {
  * value, so it would save as blank); `resetKey` remounts the box to empty it.
  */
 type Choice = { ticked: boolean; date: string; partial?: boolean; resetKey?: number };
+/** A check the business adds itself under a starter heading ("Add check"). */
+type CustomCheck = { key: number; category: string; title: string; every: string; unit: "months" | "years"; lastDone: string };
 /** A department sits under one site; `siteId` null means it spans every site. */
 type Department = { id: number; name: string; siteId: number | null; siteName?: string | null; clientId: number };
 
@@ -82,6 +84,7 @@ export default function SetupPage() {
   const [picked, setPicked] = useState<string[]>([]);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [removeUnticked, setRemoveUnticked] = useState(false);
+  const [customChecks, setCustomChecks] = useState<CustomCheck[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [deptSiteId, setDeptSiteId] = useState<number | null>(null);
   const [deptInput, setDeptInput] = useState("");
@@ -247,21 +250,35 @@ export default function SetupPage() {
 
   const saveModules = () => run(async () => { await post("/setup/modules", { modules: picked }, "PUT"); });
 
+  const addCustomCheck = (category: string) =>
+    setCustomChecks((all) => [...all, { key: Math.max(0, ...all.map((c) => c.key)) + 1, category, title: "", every: "12", unit: "months", lastDone: "" }]);
+  const updateCustomCheck = (key: number, change: Partial<CustomCheck>) =>
+    setCustomChecks((all) => all.map((c) => c.key === key ? { ...c, ...change } : c));
+  /** Months between checks, or null when the number is missing or out of range. */
+  const customMonths = (c: CustomCheck) => {
+    const n = Number(c.every);
+    const months = c.unit === "years" ? n * 12 : n;
+    return Number.isInteger(months) && months >= 1 && months <= 120 ? months : null;
+  };
+  const customIncomplete = customChecks.some((c) => !c.title.trim() || customMonths(c) == null);
+
   const saveChecks = () => run(async () => {
     const checks = (state?.starterChecks ?? []).filter((c) => choices[c.title]?.ticked && c.state !== "customised").map((c) => {
       const date = choices[c.title]?.date || null;
       return c.frequencyMonths ? { title: c.title, lastDone: date } : { title: c.title, nextDue: date };
     });
-    const result = await post("/setup/starter-checks", { siteId, checks, removeUnticked }) as { updated: number; created: number; kept: number; removed: number };
+    const custom = customChecks.map((c) => ({ category: c.category, title: c.title.trim(), frequencyMonths: customMonths(c)!, lastDone: c.lastDone || null }));
+    const result = await post("/setup/starter-checks", { siteId, checks, removeUnticked, custom }) as { updated: number; created: number; kept: number; removed: number };
     // Ticked checks already on the list with no date are "kept", but they are
     // still on the list, so count them rather than report "0 set up".
     const onList = result.updated + result.created + result.kept;
-    const dated = checks.filter((c) => c.lastDone || c.nextDue).length;
+    const dated = checks.filter((c) => c.lastDone || c.nextDue).length + custom.filter((c) => c.lastDone).length;
     toast({
       title: "Starter checks saved",
       description: `${onList} check${onList === 1 ? "" : "s"} on your list${result.removed ? `, ${result.removed} removed` : ""}.`
-        + (dated < checks.length ? " Checks left without a date can be dated later from Compliance Checks." : ""),
+        + (dated < checks.length + custom.length ? " Checks left without a date can be dated later from Compliance Checks." : ""),
     });
+    setCustomChecks([]);
     void queryClient.invalidateQueries();
   });
 
@@ -638,7 +655,42 @@ export default function SetupPage() {
                             </li>
                           );
                         })}
+                        {customChecks.filter((c) => c.category === category).map((c) => {
+                          const id = `custom-${c.key}`;
+                          return (
+                            <li key={c.key} className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
+                              <div className="flex items-center gap-2">
+                                <Label htmlFor={`${id}-title`} className="sr-only">Check name</Label>
+                                <Input id={`${id}-title`} className="h-8 text-sm" placeholder="Check name, e.g. Mini digger — Thorough Examination" value={c.title} autoFocus
+                                  onChange={(e) => updateCustomCheck(c.key, { title: e.target.value })} />
+                                <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" aria-label="Remove this check"
+                                  onClick={() => setCustomChecks((all) => all.filter((x) => x.key !== c.key))}>
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Label htmlFor={`${id}-every`} className="text-xs font-normal text-muted-foreground">Repeats every</Label>
+                                <Input id={`${id}-every`} type="number" min={1} max={c.unit === "years" ? 10 : 120} step={1} className="h-8 w-20 text-sm" value={c.every}
+                                  onChange={(e) => updateCustomCheck(c.key, { every: e.target.value })} />
+                                <select aria-label="Months or years" className="h-8 rounded-md border border-input bg-background px-2 text-sm" value={c.unit}
+                                  onChange={(e) => updateCustomCheck(c.key, { unit: e.target.value as CustomCheck["unit"] })}>
+                                  <option value="months">months</option>
+                                  <option value="years">years</option>
+                                </select>
+                                <Label htmlFor={`${id}-date`} className="text-xs font-normal text-muted-foreground ml-2">Last done</Label>
+                                <Input id={`${id}-date`} type="date" className="h-8 w-auto text-sm" value={c.lastDone} max={localToday()}
+                                  onChange={(e) => updateCustomCheck(c.key, { lastDone: e.target.value })} />
+                              </div>
+                              {customMonths(c) == null
+                                ? <p className="text-xs text-destructive">Enter a whole number between 1 month and 10 years.</p>
+                                : !c.lastDone && <p className="text-xs text-muted-foreground">Leave the date blank if you are not sure.</p>}
+                            </li>
+                          );
+                        })}
                       </ul>
+                      <Button type="button" variant="ghost" size="sm" className="mt-1.5 h-8 px-2 text-primary" onClick={() => addCustomCheck(category)}>
+                        <Plus className="w-4 h-4 mr-1" /> Add check
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -656,7 +708,8 @@ export default function SetupPage() {
                   </div>
                 )}
                 {siteId == null && <p className="text-xs text-muted-foreground">Add a site first to attach these checks to it; otherwise they apply to the whole business.</p>}
-                <StepActions busy={busy} onSave={saveChecks} onSkip={() => setStep(6)} saveLabel="Save checks" />
+                {customIncomplete && <p className="text-xs text-destructive">Give each added check a name and how often it repeats, or remove it.</p>}
+                <StepActions busy={busy} onSave={saveChecks} onSkip={() => setStep(6)} saveLabel="Save checks" disabled={customIncomplete} />
               </>
             )}
 

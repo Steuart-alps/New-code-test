@@ -49,6 +49,7 @@ import { eraseClientStorageObjects } from "./lib/clientStorageErasure";
 import { runCancelledStorageClassJob } from "./lib/cancelledClientStorage";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runPersonalReminderJob } from "./lib/personalReminders";
+import { ensureRosterCheckTasks } from "./lib/rosterChecks";
 import { runUrgentAlertJob } from "./lib/urgentAlerts";
 import { runNightFireWalkChaseJob } from "./lib/nightFireWalks";
 import { runTrackReminderJob } from "./lib/trackReminders";
@@ -286,6 +287,13 @@ function startScheduler() {
   void runMonitoredJob("analytics-retention-purge", runAnalyticsRetentionPurge);
   schedule("20 3 * * *", "analytics-retention-purge", runAnalyticsRetentionPurge, { daily: true });
   logger.info("Analytics retention purge scheduler started (daily at 03:20)");
+
+  // The monthly staff roster check for every site of a business with a
+  // roster: at boot, then nightly at 03:40 for new sites and new rosters.
+  const rosterChecks = logged("Roster check tasks created", ensureRosterCheckTasks, (result) => result.created === 0 && result.errors === 0);
+  void runMonitoredJob("roster-check-tasks", rosterChecks);
+  schedule("40 3 * * *", "roster-check-tasks", rosterChecks, { daily: true });
+  logger.info("Roster check task scheduler started (daily at 03:40)");
 
   // Reminders to the person responsible (a "due tomorrow" email) and the
   // Owner update (Mondays, or daily). Urgent items go out the same day below. Hourly; each business is handled at its

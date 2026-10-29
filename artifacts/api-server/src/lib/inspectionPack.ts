@@ -7,6 +7,7 @@ import { riddorDeadline, ukToday, type RiddorDeadlineState } from "./riddor";
 import { addCalendarDays, addCalendarMonths, siteScopeSql, type SiteAccessScope } from "./siteAccessScope";
 import { actionStateLabel, itemActionStates } from "./certificateOutcomes";
 import { SOUND_LEVEL_MIN_DB, soundLevelLowText } from "./fireSoundLevel";
+import { RETIRED_FIRE_CHECK_TYPES } from "./checkReminders";
 
 /**
  * Data for the one-click inspection pack (GET /reports/inspection-pack): a
@@ -328,12 +329,17 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
     const sleepingAnswer = sleeping.find(row => Number(row.id) === siteId)?.sleeping_accommodation;
     for (const key of Object.keys(FIRE_TYPES)) {
       const last = latest.find(row => Number(row.site_id) === siteId && row.check_type === key);
-      const applies = key !== "fire_walk" || sleepingAnswer === true || (sleepingAnswer == null && Boolean(last));
+      // A retired check (now covered elsewhere) is never due.
+      const retired = (RETIRED_FIRE_CHECK_TYPES as readonly string[]).includes(key);
+      const applies = !retired && (key !== "fire_walk" || sleepingAnswer === true || (sleepingAnswer == null && Boolean(last)));
       state.set(`${siteId}:${key}`, { lastDone: text(last?.last_done), frequency: applies ? frequencies[key] : null });
     }
   }
   const siteNames = new Map(scope.sites.map(site => [site.id, site.name]));
-  const labels = Object.fromEntries(Object.entries(FIRE_TYPES).map(([key, value]) => [key, value.label]));
+  // Retired checks are listed only for a period with records of them.
+  const labels = Object.fromEntries(Object.entries(FIRE_TYPES)
+    .filter(([key]) => !(RETIRED_FIRE_CHECK_TYPES as readonly string[]).includes(key) || counts.some(row => row.check_type === key))
+    .map(([key, value]) => [key, value.label]));
   const result = checkTypeRows(labels, siteNames, counts, state, siteIds, today, totalDays);
   const exceptions = failures.map(row => ({
     date: row.check_date, siteName: text(row.site_name),

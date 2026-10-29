@@ -46,7 +46,7 @@ export const STARTER: StarterCategory[] = [
     checks: [
       { title: "Fire Risk Assessment Review", description: "Review the fire risk assessment regularly and whenever there is a significant change to the premises, work or people at risk (Regulatory Reform (Fire Safety) Order 2005 in England and Wales; Fire (Scotland) Act 2005 in Scotland). Annual review is common practice; agree the interval with your fire risk assessor.", priority: "critical", leadTimeDays: 30, frequencyMonths: 12 },
       { title: "Fire Alarm Maintenance", description: "Six-monthly servicing of the fire alarm system by a competent contractor (BS 5839).", priority: "high", leadTimeDays: 21, frequencyMonths: 6 },
-      { title: "Emergency Light Maintenance", description: "Annual three-hour duration test and certification of emergency lighting (BS 5266).", priority: "high", leadTimeDays: 14, frequencyMonths: 12 },
+      { title: "Emergency Light Maintenance", description: "Annual three-hour duration test and certification of emergency lighting (BS 5266), by a contractor or in house by a competent person.", priority: "high", leadTimeDays: 14, frequencyMonths: 12 },
       { title: "AOV — Automatic Opening Vents Service", description: "Annual service and test of automatic opening vent / smoke ventilation systems.", priority: "high", leadTimeDays: 21, frequencyMonths: 12 },
       { title: "Fire Extinguishers Maintenance", description: "Annual service of all portable fire extinguishers (BS 5306-3).", priority: "high", leadTimeDays: 21, frequencyMonths: 12 },
       { title: "Private Fire Hydrant Inspection", description: "Annual inspection and flow test of any privately owned fire hydrants on site.", priority: "high", leadTimeDays: 30, frequencyMonths: 12 },
@@ -96,6 +96,7 @@ export const STARTER: StarterCategory[] = [
       { title: "Goods Lift — Thorough Examination", description: "Twelve-monthly thorough examination of goods lifts under LOLER 1998.", priority: "high", leadTimeDays: 30, frequencyMonths: 12 },
       { title: "Vehicle Lift — Thorough Examination", description: "Six-monthly thorough examination of vehicle lifts under LOLER 1998.", priority: "high", leadTimeDays: 30, frequencyMonths: 6 },
       { title: "Fork Lift Truck — Thorough Examination", description: "Twelve-monthly thorough examination of fork lift trucks under LOLER 1998.", priority: "high", leadTimeDays: 30, frequencyMonths: 12 },
+      { title: "Front Loader — Thorough Examination", description: "Twelve-monthly thorough examination of tractor, telehandler and loader front loaders used for lifting under LOLER 1998. Attachments used for lifting (pallet forks, bale spikes and handlers) are examined at least every six months, and so is the loader if it is ever used to lift people.", priority: "high", leadTimeDays: 30, frequencyMonths: 12 },
       { title: "Vehicle Stands — Thorough Examination", description: "Twelve-monthly thorough examination of axle / vehicle support stands under LOLER 1998.", priority: "high", leadTimeDays: 30, frequencyMonths: 12 },
     ],
   },

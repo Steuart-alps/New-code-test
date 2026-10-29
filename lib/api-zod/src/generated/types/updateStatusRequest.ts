@@ -14,4 +14,9 @@ export interface UpdateStatusRequest {
      * @pattern ^\d{4}-\d{2}-\d{2}$
      */
   completedAt?: string | null;
+  /**
+     * Only with status completed. The competent person who did the check in house instead of a contractor; no contractor certificate is then due for this completion. Leave out (or null) for a contractor.
+     * @maxLength 200
+     */
+  completedInHouseBy?: string | null;
 }
