@@ -11,6 +11,7 @@
 // Storage is the dedicated test bucket, or — only with --in-process-fake — an
 // in-process fake of the storage client, which is NOT the real round trip.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
 import { chromium } from "@playwright/test";
 import { createBucketInspector } from "../../api-server/tests/photo-roundtrip-bucket.mjs";
@@ -122,7 +123,7 @@ try {
   assert.ok(navigation?.ok(), `incidents page: ${navigation?.status()}`);
   const row = pageA.getByRole("row").filter({ hasText: tenantA.involvedName });
   await row.waitFor({ state: "visible" });
-  const input = row.locator('input[type="file"]');
+  const input = row.locator('input[type="file"]:not([capture])');
   assert.equal(await input.count(), 1, "the incident row renders the real photo uploader");
 
   // ── 1. Valid photo: presign → browser PUT (CORS) → attach/finalize → list ──
@@ -268,6 +269,25 @@ try {
   await row.waitFor({ state: "visible" });
   await row.getByRole("button", { name: "Add photo" }).waitFor({ state: "visible" });
   assert.equal(await row.getByRole("button", { name: /^View photo/ }).count(), 0, "the deleted photo stays gone after reload");
+
+  // ── 7. A record takes a short video too ──────────────────────────────────
+  const videoAttach = pageA.waitForResponse(response =>
+    response.request().method() === "POST" && new URL(response.url()).pathname === "/api/photos");
+  await input.setInputFiles({
+    name: "incident-video.mp4", mimeType: "video/mp4",
+    buffer: readFileSync(new URL("./fixtures/fixtrack-video/issue-video.mp4", import.meta.url)),
+  });
+  const videoResponse = await videoAttach;
+  assert.equal(videoResponse.status(), 201, "an MP4 is verified and attached to the incident");
+  const video = await videoResponse.json();
+  assert.match(video.object_path, /\.mp4$/, "the video is finalised under a video key");
+  await waitForToast(pageA, "Video added");
+  await row.getByRole("button", { name: "View video 1 of 1" }).waitFor({ state: "visible" });
+  assert.equal(await row.locator("video").count(), 1, "the incident row shows the video as a video");
+  await row.getByRole("button", { name: "Remove video 1 of 1" }).click();
+  await waitForToast(pageA, "Video removed");
+  await row.getByRole("button", { name: "View video 1 of 1" }).waitFor({ state: "detached" });
+  assert.deepEqual(await inspector.list(), [], "deleting the video removes its object");
 
   if (fakeStorage) {
     const received = await inspector.storageRequests();

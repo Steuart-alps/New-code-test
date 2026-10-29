@@ -199,7 +199,7 @@ try {
   const originalTransaction = db.transaction;
   const proto = ObjectStorageService.prototype;
   const originals = {
-    finalizeVerifiedTenantUpload: proto.finalizeVerifiedTenantUpload,
+    finalizeVerifiedIssueMediaUpload: proto.finalizeVerifiedIssueMediaUpload,
     discardTenantUpload: proto.discardTenantUpload,
     deleteTenantObject: proto.deleteTenantObject,
   };
@@ -214,8 +214,8 @@ try {
 
     const save = handler("post", "/");
     let calls = [];
-    proto.finalizeVerifiedTenantUpload = async function(objectPath, tenantId, allowed) {
-      calls.push(["finalize", objectPath, tenantId, [...allowed]]);
+    proto.finalizeVerifiedIssueMediaUpload = async function(objectPath, tenantId) {
+      calls.push(["finalize", objectPath, tenantId]);
       return { objectPath: "/objects/finalized/tenant-7/immutable", contentType: "image/png" };
     };
     proto.discardTenantUpload = async () => {};
@@ -225,7 +225,9 @@ try {
       objectPath: "/objects/uploads/tenant-7/staging",
     } });
     assert.equal(response.status, 201);
-    assert.deepEqual(calls, [["finalize", "/objects/uploads/tenant-7/staging", 7, ["image/jpeg", "image/png"]]], "generation-bound immutable finalisation is used");
+    // Records take photos and short videos: images are decoded, videos
+    // signature-checked, both copied from a pinned generation.
+    assert.deepEqual(calls, [["finalize", "/objects/uploads/tenant-7/staging", 7]], "generation-bound immutable media finalisation is used");
 
     response = await invoke(save, { body: {
       entityType: "green_defect", entityId: 1,
@@ -233,13 +235,13 @@ try {
     } });
     assert.equal(response.status, 403, "foreign tenant staging path rejected before verification");
 
-    proto.finalizeVerifiedTenantUpload = async () => { throw new ObjectGenerationError(); };
+    proto.finalizeVerifiedIssueMediaUpload = async () => { throw new ObjectGenerationError(); };
     response = await invoke(save, { body: {
       entityType: "swim_session", entityId: 1,
       objectPath: "/objects/uploads/tenant-7/swapped",
     } });
     assert.equal(response.status, 409, "generation swap is rejected");
-    proto.finalizeVerifiedTenantUpload = async () => { throw new ObjectNotFoundError(); };
+    proto.finalizeVerifiedIssueMediaUpload = async () => { throw new ObjectNotFoundError(); };
     response = await invoke(save, { body: {
       entityType: "green_service", entityId: 1,
       objectPath: "/objects/uploads/tenant-7/missing",
