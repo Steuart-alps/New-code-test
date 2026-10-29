@@ -23,7 +23,11 @@ type SetupState = {
   modules?: { available: string[]; picked: string[] }; starterChecks?: StarterCheck[];
   complimentary?: boolean;
 };
-type Choice = { ticked: boolean; date: string };
+/**
+ * `partial` marks a date box with an unfinished date (the browser reports no
+ * value, so it would save as blank); `resetKey` remounts the box to empty it.
+ */
+type Choice = { ticked: boolean; date: string; partial?: boolean; resetKey?: number };
 /** A department sits under one site; `siteId` null means it spans every site. */
 type Department = { id: number; name: string; siteId: number | null };
 
@@ -191,8 +195,16 @@ export default function SetupPage() {
       const date = choices[c.title]?.date || null;
       return c.frequencyMonths ? { title: c.title, lastDone: date } : { title: c.title, nextDue: date };
     });
-    const result = await post("/setup/starter-checks", { siteId, checks, removeUnticked }) as { updated: number; created: number; removed: number };
-    toast({ title: "Starter checks saved", description: `${result.updated + result.created} set up${result.removed ? `, ${result.removed} removed` : ""}.` });
+    const result = await post("/setup/starter-checks", { siteId, checks, removeUnticked }) as { updated: number; created: number; kept: number; removed: number };
+    // Ticked checks already on the list with no date are "kept", but they are
+    // still on the list, so count them rather than report "0 set up".
+    const onList = result.updated + result.created + result.kept;
+    const dated = checks.filter((c) => c.lastDone || c.nextDue).length;
+    toast({
+      title: "Starter checks saved",
+      description: `${onList} check${onList === 1 ? "" : "s"} on your list${result.removed ? `, ${result.removed} removed` : ""}.`
+        + (dated < checks.length ? " Checks left without a date can be dated later from Compliance Checks." : ""),
+    });
     void queryClient.invalidateQueries();
   });
 
@@ -465,11 +477,28 @@ export default function SetupPage() {
                                   <Label htmlFor={`${id}-date`} className="text-xs font-normal text-muted-foreground">
                                     {c.frequencyMonths ? "Last done" : "Next due"}
                                   </Label>
-                                  <Input id={`${id}-date`} type="date" className="h-8 w-auto text-sm" value={choice.date}
+                                  <Input key={choice.resetKey ?? 0} id={`${id}-date`} type="date" className="h-8 w-auto text-sm" value={choice.date}
                                     max={c.frequencyMonths ? localToday() : undefined}
-                                    onChange={(e) => setChoices((all) => ({ ...all, [c.title]: { ...choice, date: e.target.value } }))} />
+                                    onChange={(e) => {
+                                      const date = e.target.value;
+                                      setChoices((all) => ({ ...all, [c.title]: { ...(all[c.title] ?? choice), date, partial: !date && e.target.validity.badInput } }));
+                                    }}
+                                    onBlur={(e) => {
+                                      const partial = e.currentTarget.validity.badInput;
+                                      setChoices((all) => ({ ...all, [c.title]: { ...(all[c.title] ?? choice), partial } }));
+                                    }} />
                                   {choice.date && <span className="text-xs text-muted-foreground">{formatDay(choice.date)}</span>}
-                                  {!choice.date && <span className="text-xs text-muted-foreground">Leave blank if you are not sure</span>}
+                                  {choice.date || choice.partial ? (
+                                    <button type="button" className="text-xs text-primary hover:underline"
+                                      onClick={() => setChoices((all) => ({ ...all, [c.title]: { ...(all[c.title] ?? choice), date: "", partial: false, resetKey: (all[c.title]?.resetKey ?? 0) + 1 } }))}>
+                                      Clear date (not sure)
+                                    </button>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">Leave blank if you are not sure</span>
+                                  )}
+                                  {choice.partial && !choice.date && (
+                                    <span className="basis-full text-xs text-amber-700">This date is not finished, so it will be saved blank. Finish it or clear it.</span>
+                                  )}
                                 </div>
                               )}
                             </li>
