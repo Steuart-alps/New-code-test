@@ -22,6 +22,32 @@ export const ConfirmSetupTeamAloneResponse = zod.object({
 
 
 /**
+ * The getting-started page's offer. Emails ALPS (ADMIN_EMAIL) with the business, the person asking and their notes; ALPS agrees the price and invoices it, so nothing is charged here. One request per business: asking again returns the first request and sends no second email. Owners and consultants only; consultants pass the business as clientId.
+ * @summary Ask ALPS to enter the business's initial data (setup service)
+ */
+export const RequestSetupAssistQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const requestSetupAssistBodyPhoneMax = 40;
+
+export const requestSetupAssistBodyNotesMax = 2000;
+
+
+
+export const RequestSetupAssistBody = zod.object({
+  "phone": zod.string().max(requestSetupAssistBodyPhoneMax).optional().describe('Best number for ALPS to call'),
+  "notes": zod.string().max(requestSetupAssistBodyNotesMax).optional().describe('Anything ALPS should know, such as how many sites or where their lists are kept')
+})
+
+export const RequestSetupAssistResponse = zod.object({
+  "requestedAt": zod.date(),
+  "requestedBy": zod.string(),
+  "emailed": zod.boolean().describe('False when the request had already been sent earlier')
+})
+
+
+/**
  * Deletes the business's records and stored files at once, keeping the audit trail and a record of the deletion. Refused for the operator's own business and for any business with a subscription, a payment, an AI top-up or a legal hold. The business's name must be typed to confirm.
  * @summary Permanently delete a test business that never paid (platform operators)
  */
@@ -1648,6 +1674,38 @@ export const DismissCertificateInboxItemParams = zod.object({
 export const DismissCertificateInboxItemResponse = zod.object({
   "ok": zod.boolean()
 })
+
+
+/**
+ * Returns a one-use token. The web app sends the save again with the token in the X-Record-Signature header after the API answered it with 428 SIGNATURE_REQUIRED; the signature is then linked to the saved record. Unused signatures are removed after a day.
+ * @summary Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+ */
+export const CreateRecordSignatureBody = zod.object({
+  "strokes": zod.array(zod.array(zod.number())).describe('Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box')
+})
+
+export const CreateRecordSignatureResponse = zod.object({
+  "token": zod.string(),
+  "expiresInMinutes": zod.number()
+})
+
+
+/**
+ * @summary Signatures on recorded checks of one type, for history lists
+ */
+export const ListRecordSignaturesQueryParams = zod.object({
+  "recordType": zod.coerce.string(),
+  "ids": zod.coerce.string().describe('Up to 200 record ids, comma separated')
+})
+
+export const ListRecordSignaturesResponseItem = zod.object({
+  "recordType": zod.string(),
+  "recordId": zod.number(),
+  "signerName": zod.string().describe('The name of the login that signed'),
+  "signedAt": zod.date(),
+  "strokes": zod.array(zod.array(zod.number()))
+})
+export const ListRecordSignaturesResponse = zod.array(ListRecordSignaturesResponseItem)
 
 
 /**
@@ -3754,7 +3812,6 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
-  "signature": zod.string().nullish().describe('Night fire walks. The drawn signature of the person who walked (a PNG data URL). Required on new night walks.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3788,8 +3845,7 @@ export const CreateFireSafetyCheckBody = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
-  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
-  "signature": zod.string().nullish().describe('Night fire walks. The drawn signature of the person who walked (a PNG data URL). Required on new night walks.')
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
 
 export const createFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -3820,7 +3876,6 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
-  "signature": zod.string().nullish().describe('Night fire walks. The drawn signature of the person who walked (a PNG data URL). Required on new night walks.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -4337,8 +4392,7 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
-  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
-  "signature": zod.string().nullish().describe('Night fire walks. The drawn signature of the person who walked (a PNG data URL). Required on new night walks.')
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
 
 export const updateFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -4369,7 +4423,6 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
   "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
-  "signature": zod.string().nullish().describe('Night fire walks. The drawn signature of the person who walked (a PNG data URL). Required on new night walks.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -4949,7 +5002,8 @@ export const UpdateBikeTrackConfigResponse = zod.object({
  */
 export const GetGreenTrackConfigResponse = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 
@@ -4958,12 +5012,14 @@ export const GetGreenTrackConfigResponse = zod.object({
  */
 export const UpdateGreenTrackConfigBody = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 export const UpdateGreenTrackConfigResponse = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 
@@ -5354,7 +5410,8 @@ export const CreateGreenTrackProductBody = zod.object({
   "supplier": zod.string().nullish(),
   "reorderLevel": zod.number().nullish(),
   "notes": zod.string().nullish(),
-  "active": zod.boolean().optional()
+  "active": zod.boolean().optional(),
+  "openingStock": zod.number().nullish().describe('Only when adding a product. The amount in stock now, saved as a stock count dated today.')
 })
 
 export const CreateGreenTrackProductResponse = zod.object({
@@ -5394,7 +5451,8 @@ export const UpdateGreenTrackProductBody = zod.object({
   "supplier": zod.string().nullish(),
   "reorderLevel": zod.number().nullish(),
   "notes": zod.string().nullish(),
-  "active": zod.boolean().optional()
+  "active": zod.boolean().optional(),
+  "openingStock": zod.number().nullish().describe('Only when adding a product. The amount in stock now, saved as a stock count dated today.')
 })
 
 export const UpdateGreenTrackProductResponse = zod.object({
@@ -5457,7 +5515,7 @@ export const GetGreenTrackProductHistoryResponse = zod.object({
 }),
   "entries": zod.array(zod.object({
   "key": zod.string(),
-  "kind": zod.enum(['delivery', 'count', 'write_off', 'application']),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use', 'application']),
   "productId": zod.number(),
   "date": zod.date(),
   "change": zod.number(),
@@ -5489,8 +5547,8 @@ export const ListGreenTrackStockMovementsResponseItem = zod.object({
   "productName": zod.string(),
   "unit": zod.string(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
   "countedQuantity": zod.number().nullish(),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -5508,8 +5566,8 @@ export const ListGreenTrackStockMovementsResponse = zod.array(ListGreenTrackStoc
 export const CreateGreenTrackStockMovementBody = zod.object({
   "productId": zod.number(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().optional().describe('Delivered or written-off quantity (above 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().optional().describe('Delivered, written-off or used quantity (above 0). \"use\" is refused for pesticides, whose use goes in a spraying record.'),
   "countedQuantity": zod.number().optional().describe('The quantity counted, for a stock count'),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -5525,8 +5583,8 @@ export const CreateGreenTrackStockMovementResponse = zod.object({
   "productName": zod.string(),
   "unit": zod.string(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
   "countedQuantity": zod.number().nullish(),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -5562,8 +5620,8 @@ export const UpdateGreenTrackStockMovementResponse = zod.object({
   "productName": zod.string(),
   "unit": zod.string(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
   "countedQuantity": zod.number().nullish(),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -7023,7 +7081,7 @@ export const ListEquipmentLabelsQueryParams = zod.object({
 })
 
 export const ListEquipmentLabelsResponseItem = zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
   "ref": zod.string(),
   "track": zod.string(),
   "name": zod.string(),
@@ -7041,8 +7099,8 @@ export const ListEquipmentLabelsResponse = zod.array(ListEquipmentLabelsResponse
  */
 export const PrintEquipmentLabelSheetBody = zod.object({
   "items": zod.array(zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
-  "ref": zod.string().describe('The record\'s id, or \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer.')
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string().describe('The record\'s id, \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer, or \"<point>:<siteId or 0>\" for a track\'s checks at a site.')
 })),
   "size": zod.enum(['standard', 'large']).optional()
 })
@@ -7054,12 +7112,12 @@ export const PrintEquipmentLabelSheetResponse = zod.unknown()
  * @summary Replace a lost or damaged label; the old code stops working
  */
 export const ReplaceEquipmentLabelBody = zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
-  "ref": zod.string().describe('The record\'s id, or \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer.')
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string().describe('The record\'s id, \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer, or \"<point>:<siteId or 0>\" for a track\'s checks at a site.')
 })
 
 export const ReplaceEquipmentLabelResponse = zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
   "ref": zod.string(),
   "track": zod.string(),
   "name": zod.string(),
@@ -7081,7 +7139,7 @@ export const ScanEquipmentLabelParams = zod.object({
 export const ScanEquipmentLabelResponse = zod.object({
   "code": zod.string(),
   "clientId": zod.number(),
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
   "track": zod.string(),
   "name": zod.string(),
   "detail": zod.string().nullable(),

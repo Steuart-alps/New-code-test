@@ -72,7 +72,7 @@ import {
 import {
   EscapeRouteListEditor, NIGHT_WALK_TIMES, NightWalksCard, useSiteEscapeRoutes, type NightWalkPreset, type NightWalkTime,
 } from "@/components/fire-night-walks";
-import { SignaturePad } from "@/components/signature-pad";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -1044,7 +1044,6 @@ function RecordCheckDialog({
   // Fire walk and night walk state: the site's listed routes, each answered.
   const [routes, setRoutes] = useState<EscapeRoute[]>([]);
   const [walkTime, setWalkTime] = useState<NightWalkTime | null>(null);
-  const [signature, setSignature] = useState<string | null>(null);
   const isWalk = ROUTE_WALK_TYPES.has(checkType);
   const siteRoutes = useSiteEscapeRoutes(selectedSite, open && isWalk);
   const listedRoutes = siteRoutes.routes.map(r => r.name).join("\n");
@@ -1136,7 +1135,7 @@ function RecordCheckDialog({
     setRoutes([]); setPanelStatus("normal"); setFaultsFound(""); setZonesTested(""); setActionsTaken("");
     setCallPointChoice({ callPointId: null, callPoint: "" }); setNightStaff(null); setSoundLevel(EMPTY_SOUND_LEVEL);
     setDrillTime(""); setEvacuation(EMPTY_EVACUATION); setStaffPresentIds([]);
-    setWalkTime(null); setSignature(null);
+    setWalkTime(null);
   }
 
   const selectedSiteRow = sites?.find(s => s.id === selectedSite);
@@ -1157,7 +1156,6 @@ function RecordCheckDialog({
     : checkType === "night_walk" && !selectedSite ? "Choose the site"
     : checkType === "night_walk" && !walkTime ? "Choose which walk: 22:00, 02:00 or 06:00"
     : checkType === "night_walk" && !performedBy.trim() ? "Say who did the walk"
-    : checkType === "night_walk" && !signature ? "Sign the walk"
     : isWalk && siteRoutes.loading ? "Loading the site's escape routes…" : null;
 
   const handleSubmit = async () => {
@@ -1178,7 +1176,7 @@ function RecordCheckDialog({
       ...(checkType === "fire_drill" ? {
         nightStaff, drillTime, evacuationSeconds: parseEvacuation(evacuation), staffPresentIds,
       } : {}),
-      ...(checkType === "night_walk" ? { walkTime, signature } : {}),
+      ...(checkType === "night_walk" ? { walkTime } : {}),
     };
     createCheck.mutate(
       { data },
@@ -1390,9 +1388,6 @@ function RecordCheckDialog({
             </div>
           )}
 
-          {checkType === "night_walk" && (
-            <SignaturePad value={signature} onChange={setSignature} label="Signature of the person who walked" />
-          )}
         </div>
         <DialogFooter className="items-center">
           {missing && <p className="text-xs text-muted-foreground sm:mr-auto">{missing}</p>}
@@ -1579,7 +1574,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
           )}
 
           {isNightWalk && (
-            <p className="text-sm"><span className="font-medium">Night walk:</span> {check.walkTime ?? "time not recorded"}{check.signature ? " · signed" : ""}</p>
+            <p className="text-sm"><span className="font-medium">Night walk:</span> {check.walkTime ?? "time not recorded"}</p>
           )}
 
           {isRouteWalk && (
@@ -1987,6 +1982,7 @@ export default function FireSafetyPage() {
                             <div><span className="font-medium">Date:</span> {format(new Date(check.checkDate), "dd/MM/yyyy")}</div>
                             {check.performedBy && <div><span className="font-medium">Performed by:</span> {check.performedBy}</div>}
                             {check.walkTime && <div><span className="font-medium">Night walk:</span> {check.walkTime}</div>}
+                            <RecordSignedBy recordType="fire_safety_check" recordId={check.id} className="pt-1" />
                             {check.callPoint && <div><span className="font-medium">Call point:</span> {check.callPoint}</div>}
                             {check.location && <div><span className="font-medium">{check.checkType === "alarm" && !check.callPoint ? "Location / Call Point" : "Location"}:</span> {check.location}</div>}
                             {check.soundLevelDb != null && (
@@ -2017,10 +2013,6 @@ export default function FireSafetyPage() {
                           {structured?._type === "fire_walk" && <FireWalkDisplay data={structured as FireWalkNotes} />}
                           {structured?._type === "alarm_panel" && <AlarmPanelDisplay data={structured as AlarmPanelNotes} />}
                           {/* Plain notes fallback */}
-                          {check.signature && (
-                            <img src={check.signature} alt={`Signature of ${check.performedBy ?? "the person who walked"}`}
-                              className="h-12 w-auto max-w-[12rem] rounded-sm border border-border bg-white" />
-                          )}
                           {!structured && check.notes && (
                             <div className="text-xs text-muted-foreground"><span className="font-medium">{check.checkType === "fire_drill" ? `${DRILL_NOTES_LABEL}:` : "Notes:"}</span> {check.notes}</div>
                           )}

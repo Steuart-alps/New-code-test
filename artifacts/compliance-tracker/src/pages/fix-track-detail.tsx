@@ -18,6 +18,7 @@ import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
 import { MediaGallery } from "@/components/media-gallery";
 import { MEDIA_INPUT_ACCEPT, mediaContentType, mediaFileProblem, privateObjectUrl, putFileWithProgress } from "@/lib/media-upload";
 import { useFileDrop } from "@/hooks/use-file-drop";
+import { useCameraCapture } from "@/components/camera-capture";
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
 
@@ -278,6 +279,7 @@ export default function FixTrackDetailPage() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const mediaDrop = useFileDrop((files) => { void uploadIssueMedia(files); }, canEdit && !mediaUploading);
+  const camera = useCameraCapture((files) => { void uploadIssueMedia(files); }, { video: true, fileInput: () => cameraInputRef.current });
 
   async function deleteMedia(objectPath: string) {
     if (!issue) return;
@@ -625,6 +627,7 @@ export default function FixTrackDetailPage() {
                   data-testid="dropzone-issue-media"
                 >
                   <p className="hidden text-xs text-muted-foreground sm:block">Drag photos or videos here, or use the buttons.</p>
+                  {camera.dialog}
                   <input
                     ref={cameraInputRef}
                     type="file"
@@ -649,7 +652,7 @@ export default function FixTrackDetailPage() {
                       variant="outline"
                       size="sm"
                       disabled={mediaUploading}
-                      onClick={() => cameraInputRef.current?.click()}
+                      onClick={camera.open}
                       data-testid="button-capture-issue-media"
                     >
                       <Camera className="mr-2 h-4 w-4" />

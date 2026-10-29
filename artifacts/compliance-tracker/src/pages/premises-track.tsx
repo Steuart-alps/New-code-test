@@ -31,6 +31,7 @@ import { printHtmlDocument } from "@/lib/download";
 import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { format, parseISO, isValid } from "date-fns";
 import { sortByLabel } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -630,6 +631,7 @@ ${sorted.map(r => `<tr>
                       <td className="px-4 py-3">
                          <p className="text-sm font-medium">{fmt(r.inspectionDate)}</p>
                          {r.inspectedBy && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[120px]">{r.inspectedBy}</p>}
+                         <RecordSignedBy recordType="premises_inspection" recordId={r.id} compact className="mt-1" />
                       </td>
                        <td className="px-4 py-3 text-xs">{TYPE_LABELS[r.inspectionType] ?? r.inspectionType}</td>
                       <td className="px-4 py-3 hidden sm:table-cell text-xs text-muted-foreground">

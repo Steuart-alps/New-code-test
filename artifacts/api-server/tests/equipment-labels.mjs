@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixtures.mjs';
 
-// QR labels on equipment and the equipment list. A label's code opens the
-// item only for someone in its business who can see its site and has its
-// track; every other case gets the same "not available" answer. Fridges and
-// freezers keep their label across a rename. Run:
+// QR labels on equipment, on each track's checks at each site, and the
+// equipment list. A label's code opens the item only for someone in its
+// business who can see its site and has its track; every other case gets the
+// same "not available" answer. Fridges and freezers keep their label across a
+// rename. Run:
 //   FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/equipment-labels.mjs
 
 const today = isoDay();
@@ -201,6 +202,58 @@ try {
     `SELECT action FROM audit_events WHERE client_id = $1 AND entity_type IN ('equipment_item', 'equipment_label') ORDER BY id`, [owner.clientId]);
   assert.ok(audit.length >= 5, 'equipment changes are in the audit trail');
   console.log('ok - archived equipment keeps its history');
+
+  // ── Track points: each track's checks at each site ───────────────────────
+  const pointsA = ok(await owner.request('GET', `/equipment-labels?siteId=${siteA.id}`)).filter(l => l.kind === 'track_point');
+  const point = (key, siteId = siteA.id) => pointsA.find(l => l.ref === `${key}:${siteId}`);
+  for (const [key, track] of [['opening_checks', 'DailyTrack AM'], ['closing_checks', 'DailyTrack PM'], ['kitchen_diary', 'KitchenTrack'],
+    ['greenkeeping_checks', 'GreenTrack'], ['fire_log', 'FireTrack'], ['report_incident', 'IncidentTrack'], ['coshh_register', 'COSHHTrack'],
+    ['asbestos_register', 'Asbestos register']]) {
+    assert.equal(point(key)?.track, track, `${key} can be labelled at the clubhouse`);
+    assert.equal(point(key).siteName, 'Clubhouse');
+  }
+  assert.equal(pointsA.some(l => l.siteId !== siteA.id), false, 'site filter applies to track points');
+  assert.equal(ok(await owner.request('GET', '/equipment-labels?siteId=none')).some(l => l.kind === 'track_point'), false,
+    'a business with sites has no business-wide track points');
+  const pointItems = ['opening_checks', 'kitchen_diary', 'fire_log', 'report_fault'].map(key => ({ kind: 'track_point', ref: point(key).ref }));
+  assert.equal((await owner.request('POST', '/equipment-labels/sheet', { items: pointItems }, 'buffer')).status, 200);
+  assert.equal((await owner.request('POST', '/equipment-labels/sheet', { items: [{ kind: 'track_point', ref: `spaceship:${siteA.id}` }] })).status, 404);
+  assert.equal((await owner.request('POST', '/equipment-labels/sheet', { items: [{ kind: 'track_point', ref: 'opening_checks:999999' }] })).status, 404);
+  assert.equal((await other.request('POST', '/equipment-labels/sheet', { items: pointItems })).status, 404);
+  const printedPoints = ok(await owner.request('GET', `/equipment-labels?siteId=${siteA.id}`)).filter(l => l.kind === 'track_point');
+  const pointCode = key => printedPoints.find(l => l.ref === `${key}:${siteA.id}`).code;
+
+  let opening = ok(await staffA.request('GET', `/equipment-labels/scan/${pointCode('opening_checks')}`));
+  assert.equal(opening.name, 'Opening checks');
+  assert.equal(opening.track, 'DailyTrack AM');
+  assert.equal(opening.siteName, 'Clubhouse');
+  assert.deepEqual(opening.statuses.map(s => s.text), ['Not done yet today']);
+  assert.equal(opening.actions[0].href, `/daily-track-am?siteId=${siteA.id}`);
+  await pool.query(
+    `INSERT INTO daily_checklists (client_id, site_id, checklist_type, check_date, items, submitted_at) VALUES ($1, $2, 'premises_opening', $3, '[]', now())`,
+    [owner.clientId, siteA.id, today]);
+  opening = ok(await staffA.request('GET', `/equipment-labels/scan/${pointCode('opening_checks')}`));
+  assert.deepEqual(opening.statuses.map(s => [s.state, s.text]), [['ok', 'Done today']]);
+
+  const kitchen = ok(await staffA.request('GET', `/equipment-labels/scan/${pointCode('kitchen_diary')}`));
+  assert.equal(kitchen.statuses[0].text, 'Not started yet today');
+  assert.equal(kitchen.actions[0].href, `/kitchen?siteId=${siteA.id}`);
+  const fire = ok(await staffA.request('GET', `/equipment-labels/scan/${pointCode('fire_log')}`));
+  assert.ok(fire.statuses.some(s => s.label === 'Alarm test'), JSON.stringify(fire.statuses));
+  assert.equal(fire.actions[0].href, '/fire-safety');
+  const fault = ok(await staffA.request('GET', `/equipment-labels/scan/${pointCode('report_fault')}`));
+  assert.equal(fault.actions[0].href, `/fix-track?report=1&siteId=${siteA.id}`);
+  assert.equal(fault.actions.filter(a => a.label === 'Report a fault').length, 1, 'the fault label offers one fault report');
+  await notAvailable(courseStaff, pointCode('opening_checks'));
+  await notAvailable(other, pointCode('opening_checks'));
+  assert.notEqual((await viewer.request('GET', `/equipment-labels/scan/${pointCode('opening_checks')}`)).status, 200, 'Viewers see nothing');
+  ok(await owner.request('POST', '/equipment-labels/sheet', { items: pointsA.map(({ kind, ref }) => ({ kind, ref })) }, 'buffer'));
+  for (const label of ok(await owner.request('GET', `/equipment-labels?siteId=${siteA.id}`)).filter(l => l.kind === 'track_point')) {
+    const scanned = ok(await owner.request('GET', `/equipment-labels/scan/${label.code}`));
+    assert.equal(scanned.name, label.name);
+    assert.ok(scanned.actions[0]?.primary && scanned.actions[0].href.startsWith('/'), `${label.ref} opens its track`);
+  }
+  console.log('ok - every track gets labels for its checks at each site, showing whether today\'s checks are done');
 
   console.log('Equipment label tests passed.');
 } finally {

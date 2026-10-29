@@ -83,6 +83,7 @@ import type {
   CreatePATTestRequest,
   CreatePremisesInspectionRequest,
   CreatePrivacyRecordParams,
+  CreateRecordSignatureRequest,
   CreateSiteRequest,
   DailyTrackHistory,
   DashboardStats,
@@ -219,6 +220,7 @@ import type {
   ListPATTestsParams,
   ListPremisesInspectionsParams,
   ListPublicLinkAccessParams,
+  ListRecordSignaturesParams,
   MyCoshhSignOffs,
   MyDocumentSignOffs,
   NightFireWalks,
@@ -251,7 +253,10 @@ import type {
   PublishPrivacyIntakeLinkParams,
   RecordCoshhSignOffs200,
   RecordFoodSafetyColdReadingParams,
+  RecordSignature,
+  RecordSignatureToken,
   RequestFeedbackScreenshotUploadBody,
+  RequestSetupAssistParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
@@ -263,6 +268,8 @@ import type {
   SetContractorRegisterCheckRequest,
   SetContractorVisitRequest,
   SetPrivacyIntakeAssigneeParams,
+  SetupAssistRequestBody,
+  SetupAssistRequestResult,
   SetupTeamAloneResult,
   SignTrainingRecordRequest,
   Site,
@@ -411,6 +418,86 @@ export const useConfirmSetupTeamAlone = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getConfirmSetupTeamAloneMutationOptions(options));
+    }
+
+export const getRequestSetupAssistUrl = (params?: RequestSetupAssistParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/setup/assist-request?${stringifiedParams}` : `/api/setup/assist-request`
+}
+
+/**
+ * The getting-started page's offer. Emails ALPS (ADMIN_EMAIL) with the business, the person asking and their notes; ALPS agrees the price and invoices it, so nothing is charged here. One request per business: asking again returns the first request and sends no second email. Owners and consultants only; consultants pass the business as clientId.
+ * @summary Ask ALPS to enter the business's initial data (setup service)
+ */
+export const requestSetupAssist = async (setupAssistRequestBody?: SetupAssistRequestBody,
+    params?: RequestSetupAssistParams, options?: RequestInit): Promise<SetupAssistRequestResult> => {
+
+  return customFetch<SetupAssistRequestResult>(getRequestSetupAssistUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setupAssistRequestBody)
+  }
+);}
+
+
+
+
+
+export const getRequestSetupAssistMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestSetupAssist>>, TError,{data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestSetupAssist>>, TError,{data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams}, TContext> => {
+
+const mutationKey = ['requestSetupAssist'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestSetupAssist>>, {data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  requestSetupAssist(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestSetupAssistMutationResult = NonNullable<Awaited<ReturnType<typeof requestSetupAssist>>>
+    export type RequestSetupAssistMutationBody = BodyType<SetupAssistRequestBody> | undefined
+    export type RequestSetupAssistMutationError = ErrorType<void>
+
+    /**
+ * @summary Ask ALPS to enter the business's initial data (setup service)
+ */
+export const useRequestSetupAssist = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestSetupAssist>>, TError,{data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestSetupAssist>>,
+        TError,
+        {data?: BodyType<SetupAssistRequestBody>;params?: RequestSetupAssistParams},
+        TContext
+      > => {
+      return useMutation(getRequestSetupAssistMutationOptions(options));
     }
 
 export const getDeleteTestBusinessUrl = (id: number,) => {
@@ -4357,6 +4444,162 @@ export const useDismissCertificateInboxItem = <TError = ErrorType<void>,
       > => {
       return useMutation(getDismissCertificateInboxItemMutationOptions(options));
     }
+
+export const getCreateRecordSignatureUrl = () => {
+
+
+
+
+  return `/api/record-signatures`
+}
+
+/**
+ * Returns a one-use token. The web app sends the save again with the token in the X-Record-Signature header after the API answered it with 428 SIGNATURE_REQUIRED; the signature is then linked to the saved record. Unused signatures are removed after a day.
+ * @summary Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+ */
+export const createRecordSignature = async (createRecordSignatureRequest: CreateRecordSignatureRequest, options?: RequestInit): Promise<RecordSignatureToken> => {
+
+  return customFetch<RecordSignatureToken>(getCreateRecordSignatureUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createRecordSignatureRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateRecordSignatureMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRecordSignature>>, TError,{data: BodyType<CreateRecordSignatureRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createRecordSignature>>, TError,{data: BodyType<CreateRecordSignatureRequest>}, TContext> => {
+
+const mutationKey = ['createRecordSignature'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createRecordSignature>>, {data: BodyType<CreateRecordSignatureRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createRecordSignature(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateRecordSignatureMutationResult = NonNullable<Awaited<ReturnType<typeof createRecordSignature>>>
+    export type CreateRecordSignatureMutationBody = BodyType<CreateRecordSignatureRequest>
+    export type CreateRecordSignatureMutationError = ErrorType<void>
+
+    /**
+ * @summary Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+ */
+export const useCreateRecordSignature = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRecordSignature>>, TError,{data: BodyType<CreateRecordSignatureRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createRecordSignature>>,
+        TError,
+        {data: BodyType<CreateRecordSignatureRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateRecordSignatureMutationOptions(options));
+    }
+
+export const getListRecordSignaturesUrl = (params: ListRecordSignaturesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/record-signatures?${stringifiedParams}` : `/api/record-signatures`
+}
+
+/**
+ * @summary Signatures on recorded checks of one type, for history lists
+ */
+export const listRecordSignatures = async (params: ListRecordSignaturesParams, options?: RequestInit): Promise<RecordSignature[]> => {
+
+  return customFetch<RecordSignature[]>(getListRecordSignaturesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListRecordSignaturesQueryKey = (params?: ListRecordSignaturesParams,) => {
+    return [
+    `/api/record-signatures`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListRecordSignaturesQueryOptions = <TData = Awaited<ReturnType<typeof listRecordSignatures>>, TError = ErrorType<unknown>>(params: ListRecordSignaturesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRecordSignatures>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListRecordSignaturesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRecordSignatures>>> = ({ signal }) => listRecordSignatures(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listRecordSignatures>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListRecordSignaturesQueryResult = NonNullable<Awaited<ReturnType<typeof listRecordSignatures>>>
+export type ListRecordSignaturesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Signatures on recorded checks of one type, for history lists
+ */
+
+export function useListRecordSignatures<TData = Awaited<ReturnType<typeof listRecordSignatures>>, TError = ErrorType<unknown>>(
+ params: ListRecordSignaturesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRecordSignatures>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListRecordSignaturesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getListContractorSignInSitesUrl = () => {
 

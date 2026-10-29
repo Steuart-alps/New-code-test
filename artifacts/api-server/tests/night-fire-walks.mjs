@@ -7,9 +7,9 @@ import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixt
 // Sleeping accommodation and night porter fire walks. Each site answers
 // "Sleeping accommodation?" and "Night porter?". The escape route sign-off is
 // only due at sites with sleeping accommodation and ticks every route the
-// site lists. A night porter site needs three signed night walks (22:00,
-// 02:00, 06:00); missed ones raise one Urgent FireTrack action per site and
-// night the morning after. Run:
+// site lists. A night porter site needs three night walks (22:00, 02:00,
+// 06:00; signed like every FireTrack record); missed ones raise one Urgent
+// FireTrack action per site and night the morning after. Run:
 //   FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/night-fire-walks.mjs
 
 const temp = await mkdtemp(fileURLToPath(new URL('.build-night-fire-walks-', import.meta.url)));
@@ -27,7 +27,6 @@ try {
   await rm(temp, { recursive: true, force: true });
 }
 
-const signature = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const reason = { 'X-Override-Reason': encodeURIComponent('Adding the night log from paper') };
 const walkNotes = (routes, freeNotes = '') => JSON.stringify({ _type: 'fire_walk', routes, freeNotes });
 
@@ -118,10 +117,9 @@ try {
   const allClear = walkNotes(routes.map(route => ({ name: route.name, status: 'clear', note: '' })));
   const walk = {
     checkType: 'night_walk', checkDate: night, result: 'pass', siteId: hotel.data.id, walkTime: '22:00',
-    performedBy: 'Night Porter', signature, notes: allClear,
+    performedBy: 'Night Porter', notes: allClear,
   };
   for (const [change, error] of [
-    [{ signature: null }, 'Sign the night fire walk'],
     [{ walkTime: null }, 'Choose which night walk this is: 22:00, 02:00 or 06:00'],
     [{ siteId: null }, 'Choose the site of the night fire walk'],
     [{ performedBy: '' }, 'Say who did the night fire walk'],
@@ -131,24 +129,21 @@ try {
     assert.equal(refused.data.error, error);
   }
   assert.equal((await owner.request('POST', '/fire-safety', { ...walk, walkTime: '23:00' }, 'json', reason)).status, 400);
-  assert.equal((await owner.request('POST', '/fire-safety', { ...walk, signature: 'not a picture' }, 'json', reason)).status, 400);
   assert.equal((await owner.request('POST', '/fire-safety', { ...walk, notes: undefined }, 'json', reason)).status, 400, 'routes are ticked on night walks too');
   const recorded = await owner.request('POST', '/fire-safety', walk, 'json', reason);
   assert.equal(recorded.status, 201, JSON.stringify(recorded.data));
-  assert.deepEqual([recorded.data.walkTime, recorded.data.signature, recorded.data.result], ['22:00', signature, 'pass']);
+  assert.deepEqual([recorded.data.walkTime, recorded.data.result], ['22:00', 'pass']);
   const twice = await owner.request('POST', '/fire-safety', walk, 'json', reason);
   assert.equal(twice.status, 409, 'each walk of a night is recorded once per site');
   const later = await owner.request('POST', '/fire-safety', { ...walk, checkDate: isoDay(1), walkTime: '22:00' });
   assert.equal(later.status, 400, 'a walk cannot be recorded before its time');
-  const unsigned = await owner.request('PUT', `/fire-safety/${recorded.data.id}`, { signature: null }, 'json', reason);
-  assert.equal(unsigned.status, 400, 'a signature cannot be removed');
   const moved = await owner.request('PUT', `/fire-safety/${recorded.data.id}`, { walkTime: '02:00' }, 'json', reason);
   assert.equal(moved.status, 200, JSON.stringify(moved.data));
   const back = await owner.request('PUT', `/fire-safety/${recorded.data.id}`, { walkTime: '22:00' }, 'json', reason);
   assert.equal(back.status, 200, JSON.stringify(back.data));
   const listed = await owner.request('GET', '/fire-safety?checkType=night_walk');
   assert.deepEqual(listed.data.map(row => row.id), [recorded.data.id]);
-  console.log('ok - night walks are signed, at 22:00, 02:00 or 06:00, once each per site');
+  console.log('ok - night walks are at 22:00, 02:00 or 06:00, by a named person, once each per site');
 
   // ── Tonight and the nights before ──────────────────────────────────────
   await pool.query(`UPDATE sites SET night_porter_since = now() - interval '10 days' WHERE id = $1`, [hotel.data.id]);

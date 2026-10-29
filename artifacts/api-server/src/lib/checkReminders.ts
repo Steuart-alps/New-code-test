@@ -81,7 +81,7 @@ export function effectiveFireFrequencies(raw: unknown, profile: unknown = null):
   return result;
 }
 
-const FIRE_LABELS: Record<string, string> = {
+export const FIRE_LABELS: Record<string, string> = {
   alarm: "Alarm test",
   emergency_lights: "Emergency lighting flick test",
   extinguishers: "Fire extinguisher check",

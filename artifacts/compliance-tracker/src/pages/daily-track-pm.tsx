@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sunset, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, PenLine, Settings2 } from "lucide-react";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -305,6 +306,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
         {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}
         {existing?.id && (
           <div className="border-t mt-3 pt-3">
+            <RecordSignedBy recordType="daily_checklist" recordId={existing.id} className="mb-2" />
             <CheckPhotoUploader entityType="daily_checklist_pm" entityId={existing.id} compact />
           </div>
         )}
@@ -380,6 +382,7 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
           <p>Manager: <span className="font-medium text-foreground">{existing?.managerName}</span></p>
           {existing?.notes && <p className="italic">{existing.notes}</p>}
           <p className="text-xs">Signed off at {new Date(existing!.submittedAt!).toLocaleString()}</p>
+          <RecordSignedBy recordType="daily_manager_signoff" recordId={existing!.id} />
         </div>
       ) : (
         <div className="space-y-3">

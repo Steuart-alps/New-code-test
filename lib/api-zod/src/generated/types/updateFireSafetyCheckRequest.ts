@@ -47,6 +47,4 @@ export interface UpdateFireSafetyCheckRequest {
   soundLevelBedhead?: boolean | null;
   /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
   walkTime?: UpdateFireSafetyCheckRequestWalkTime;
-  /** Night fire walks. The drawn signature of the person who walked (a PNG data URL). Required on new night walks. */
-  signature?: string | null;
 }

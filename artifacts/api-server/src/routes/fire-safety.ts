@@ -32,7 +32,6 @@ const CHECK_TYPES = FIRE_CHECK_TYPES;
 const RECORD_TYPES = [...FIRE_CHECK_TYPES, "night_walk"] as const;
 /** Checks that tick each of the site's escape routes. */
 const ROUTE_WALK_TYPES = new Set<string>(["fire_walk", "night_walk"]);
-const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
 
 // Default check frequencies, in days
 const FREQUENCY_DAYS = FIRE_FREQUENCY_DAYS;
@@ -78,21 +77,21 @@ const createSchema = z.object({
   soundLevelDb: z.number().min(20).max(140).nullable().optional(),
   soundLevelMethod: z.enum(SOUND_LEVEL_METHODS).nullable().optional(),
   soundLevelBedhead: z.boolean().nullable().optional(),
-  // Night fire walks: which of the night's walks, and the walker's signature.
+  // Night fire walks: which of the night's walks. Like every FireTrack
+  // record, the walker signs it on saving (lib/recordSignatures.ts).
   walkTime: z.enum(NIGHT_WALK_TIMES).nullable().optional(),
-  signature: drawnSignature.nullable().optional(),
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
 
 type FireDetails = Pick<FireSafetyCheck,
   "callPointId" | "callPoint" | "nightStaff" | "drillTime" | "evacuationSeconds"
-  | "soundLevelDb" | "soundLevelMethod" | "soundLevelBedhead" | "walkTime" | "signature">;
+  | "soundLevelDb" | "soundLevelMethod" | "soundLevelBedhead" | "walkTime">;
 type FireDetailInput = {
   callPointId?: number | null; callPoint?: string | null; nightStaff?: FireDetails["nightStaff"];
   drillTime?: string | null; evacuationSeconds?: number | null; notes?: string | null;
   soundLevelDb?: number | null; soundLevelMethod?: FireDetails["soundLevelMethod"]; soundLevelBedhead?: boolean | null;
-  walkTime?: string | null; signature?: string | null; performedBy?: string | null;
+  walkTime?: string | null; performedBy?: string | null;
 };
 
 /**
@@ -109,7 +108,7 @@ async function resolveFireDetails(
 ): Promise<FireDetails | { error: string }> {
   const details: FireDetails = {
     callPointId: null, callPoint: null, nightStaff: null, drillTime: null, evacuationSeconds: null,
-    soundLevelDb: null, soundLevelMethod: null, soundLevelBedhead: null, walkTime: null, signature: null,
+    soundLevelDb: null, soundLevelMethod: null, soundLevelBedhead: null, walkTime: null,
   };
   if (checkType === "alarm") {
     let callPointId = existing?.callPointId ?? null;
@@ -159,16 +158,13 @@ async function resolveFireDetails(
   }
   if (checkType === "night_walk") {
     // A night walk is at a site, at one of the night's walk times, in the
-    // name of the person who walked and signed by them.
+    // name of the person who walked.
     if (siteId == null) return { error: "Choose the site of the night fire walk" };
     const walkTime = input.walkTime !== undefined ? input.walkTime : existing?.walkTime ?? null;
     if (!walkTime) return { error: "Choose which night walk this is: 22:00, 02:00 or 06:00" };
     details.walkTime = walkTime;
     const performedBy = input.performedBy !== undefined ? input.performedBy : existing?.performedBy ?? null;
     if (!performedBy?.trim()) return { error: "Say who did the night fire walk" };
-    const signature = input.signature !== undefined ? input.signature : existing?.signature ?? null;
-    if (!signature && (!existing || existing.signature)) return { error: "Sign the night fire walk" };
-    details.signature = signature;
   }
   return details;
 }
@@ -517,12 +513,12 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const {
     callPointId, callPoint, nightStaff, drillTime, evacuationSeconds, staffPresentIds,
-    soundLevelDb, soundLevelMethod, soundLevelBedhead, walkTime, signature, ...changes
+    soundLevelDb, soundLevelMethod, soundLevelBedhead, walkTime, ...changes
   } = parsed.data;
   const siteId = "siteId" in parsed.data ? parsed.data.siteId ?? null : existing.siteId;
   const details = await resolveFireDetails(clientId, existing.checkType, siteId, {
     callPointId, callPoint, nightStaff, drillTime, evacuationSeconds, notes: changes.notes,
-    soundLevelDb, soundLevelMethod, soundLevelBedhead, walkTime, signature,
+    soundLevelDb, soundLevelMethod, soundLevelBedhead, walkTime,
     performedBy: performer ? performer.performedBy : undefined,
   }, existing);
   if ("error" in details) return res.status(400).json({ error: details.error });
