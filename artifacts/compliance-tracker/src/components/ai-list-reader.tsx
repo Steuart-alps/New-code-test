@@ -5,6 +5,7 @@ import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
 import { heicToJpeg } from "@/lib/media-upload";
+import { oldWordPlainText } from "@/lib/word-doc";
 import { AiAllowanceNote, aiAllowanceState } from "@/components/ai-allowance-note";
 import type { AiStatus } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
@@ -32,7 +33,7 @@ const readPath = (kind: ListReadingKind) => kind === "pat-appliances" ? "/import
  * Any photo or screenshot the browser can open is accepted; ones Claude can't
  * take directly (an iPhone HEIC, a TIFF scan) are turned into a JPEG first.
  */
-export const READABLE_LIST = "image/*,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.tif,.tiff,.bmp,.pdf,.docx,.txt";
+export const READABLE_LIST = "image/*,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.tif,.tiff,.bmp,.pdf,.docx,.doc,.txt";
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const IMAGE_EXTENSIONS: Record<string, string> = {
   jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
@@ -119,8 +120,11 @@ export function useListReading(kind: ListReadingKind, enabled: boolean, defaultS
 
   async function read(file: File): Promise<ListReadResult> {
     try {
-      // An iPhone HEIC photo becomes a JPEG where the browser can open it (Safari).
-      const photo = await heicToJpeg(file);
+      // An iPhone HEIC photo becomes a JPEG where the browser can open it
+      // (Safari); an old Word file is sent as its text.
+      const photo = /\.doc$/i.test(file.name) || file.type === "application/msword"
+        ? new File([oldWordPlainText(new Uint8Array(await file.arrayBuffer()))], file.name.replace(/\.doc$/i, ".txt"), { type: "text/plain" })
+        : await heicToJpeg(file);
       const shrunk = await shrinkPhoto(photo, listMimeType(photo));
       const response = await clientApiFetch(readPath(kind), {
         method: "POST",

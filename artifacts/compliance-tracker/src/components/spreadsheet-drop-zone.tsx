@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * File picker filter for imports: Excel first; CSV, an OpenDocument sheet, a
- * Word table or a text list (one record per line) also work. Old .doc files
- * are let through so the reader can say how to save them as .docx.
+ * Word table (.docx or the older .doc) or a text list (one record per line)
+ * also work.
  */
 export const SPREADSHEET_ACCEPT = ".xlsx,.xls,.csv,.ods,.docx,.doc,.txt";
 

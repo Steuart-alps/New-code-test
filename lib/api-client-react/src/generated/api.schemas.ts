@@ -14,6 +14,26 @@ export interface TestBusinessDeletionRequest {
   confirmName: string;
 }
 
+export interface SetupAssistRequestBody {
+  /**
+     * Best number for ALPS to call
+     * @maxLength 40
+     */
+  phone?: string;
+  /**
+     * Anything ALPS should know, such as how many sites or where their lists are kept
+     * @maxLength 2000
+     */
+  notes?: string;
+}
+
+export interface SetupAssistRequestResult {
+  requestedAt: string;
+  requestedBy: string;
+  /** False when the request had already been sent earlier */
+  emailed: boolean;
+}
+
 export interface SetupTeamAloneResult {
   aloneAt: string;
 }
@@ -78,6 +98,8 @@ export interface BusinessDashboardAiAmounts {
   costPence: number;
   marginPence: number;
   requests: number;
+  /** Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin) */
+  lapsedPence: number;
 }
 
 export type BusinessDashboardAiMonthsItem = BusinessDashboardAiAmounts & {
@@ -1871,6 +1893,8 @@ export interface ComplianceItem {
   frequencyMonths?: number | null;
   notificationSentAt?: string | null;
   completedAt?: string | null;
+  /** The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it). */
+  completedInHouseBy?: string | null;
   notes?: string | null;
   /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
   needsAction?: boolean;
@@ -1988,6 +2012,11 @@ export interface UpdateStatusRequest {
      * @pattern ^\d{4}-\d{2}-\d{2}$
      */
   completedAt?: string | null;
+  /**
+     * Only with status completed. The competent person who did the check in house instead of a contractor; no contractor certificate is then due for this completion. Leave out (or null) for a contractor.
+     * @maxLength 200
+     */
+  completedInHouseBy?: string | null;
 }
 
 export interface DashboardStats {
@@ -4926,6 +4955,10 @@ export interface CreateInspectionReportRequest {
 }
 
 export type ConfirmSetupTeamAloneParams = {
+clientId?: number;
+};
+
+export type RequestSetupAssistParams = {
 clientId?: number;
 };
 

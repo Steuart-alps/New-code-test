@@ -3,24 +3,11 @@ import { AlertTriangle, ArrowRight, CalendarClock, Clock } from "lucide-react";
 import { useListComplianceItems, type ComplianceItem } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 import { needsActionLabel } from "@/components/badges";
+import { complianceCheckDueState as dueState, DUE_SOON_DAYS, type ComplianceCheckDueState as DueState } from "@/lib/compliance-check-state";
 
-const DUE_SOON_DAYS = 30;
 const MAX_ROWS = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const STATE_RANK: Record<"action" | "overdue" | "due_soon", number> = { action: 0, overdue: 1, due_soon: 2 };
-
-type DueState = "action" | "overdue" | "due_soon";
-
-function dueState(item: ComplianceItem, now: number): DueState | null {
-  // An unsatisfactory newest certificate or open remedial defects need action
-  // whatever the due date (and even when the check is marked completed).
-  if (item.needsAction) return "action";
-  if (item.status === "completed") return null;
-  const due = item.dueDate ? new Date(item.dueDate).getTime() : null;
-  if (item.status === "overdue" || (due !== null && due < now)) return "overdue";
-  if (due !== null && due <= now + DUE_SOON_DAYS * DAY_MS) return "due_soon";
-  return null;
-}
+const STATE_RANK: Record<DueState, number> = { action: 0, overdue: 1, due_soon: 2 };
 
 function dueLabel(item: ComplianceItem, now: number): string {
   if (item.needsAction) return needsActionLabel(item);

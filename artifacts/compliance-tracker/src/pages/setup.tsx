@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { SETUP_STATE_KEY, type SetupTeam } from "@/components/setup-team-gate";
+import { SetupGettingStarted, type SetupAi, type SetupAssistRequest } from "@/components/setup-getting-started";
 import { departmentLabel } from "@/lib/departments";
 import { roleLabel } from "@/lib/roles";
 import { UserDialog, type RosterEntry, type User as Person } from "@/pages/users";
@@ -25,13 +26,15 @@ type SetupState = {
   needsSetup: boolean; setupCompletedAt: string | null; canManage: boolean; businessType: string | null;
   deferredAt?: string | null; nation?: string | null; sites?: { id: number; name: string }[];
   modules?: { available: string[]; picked: string[] }; starterChecks?: StarterCheck[];
-  complimentary?: boolean; team?: SetupTeam;
+  complimentary?: boolean; team?: SetupTeam; ai?: SetupAi; assistRequest?: SetupAssistRequest | null;
 };
 /**
  * `partial` marks a date box with an unfinished date (the browser reports no
  * value, so it would save as blank); `resetKey` remounts the box to empty it.
  */
 type Choice = { ticked: boolean; date: string; partial?: boolean; resetKey?: number };
+/** A check the business adds itself under a starter heading ("Add check"). */
+type CustomCheck = { key: number; category: string; title: string; every: string; unit: "months" | "years"; lastDone: string };
 /** A department sits under one site; `siteId` null means it spans every site. */
 type Department = { id: number; name: string; siteId: number | null; siteName?: string | null; clientId: number };
 
@@ -51,6 +54,23 @@ const STEPS = [
  * only Owners record for now.
  */
 const TEAM_STEP = 3;
+/** The getting-started page opens setup once per business on this browser; "What you'll need" reopens it. */
+const introSeenKey = (clientId: number | null) => `complytrack:setup-intro-seen:${clientId ?? "own"}`;
+function introSeen(clientId: number | null): boolean {
+  try {
+    return window.localStorage.getItem(introSeenKey(clientId)) === "true";
+  } catch {
+    return false;
+  }
+}
+function markIntroSeen(clientId: number | null) {
+  try {
+    window.localStorage.setItem(introSeenKey(clientId), "true");
+  } catch {
+    // Private windows may block storage; the page just shows again next time.
+  }
+}
+
 /** "12 months (every year)", "60 months (every 5 years)". */
 function intervalLabel(months: number): string {
   if (months % 12 !== 0) return `${months} month${months === 1 ? "" : "s"}`;
@@ -71,6 +91,7 @@ export default function SetupPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   // "Add your team" on a held-back form page opens the wizard at the team step.
   const [step, setStep] = useState(() => new URLSearchParams(search).get("step") === "team" ? TEAM_STEP : 0);
+  const [intro, setIntro] = useState(() => !new URLSearchParams(search).get("step") && !introSeen(clientId));
   const [busy, setBusy] = useState(false);
   const [businessType, setBusinessType] = useState("");
   const [nation, setNation] = useState("");
@@ -80,6 +101,7 @@ export default function SetupPage() {
   const [picked, setPicked] = useState<string[]>([]);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [removeUnticked, setRemoveUnticked] = useState(false);
+  const [customChecks, setCustomChecks] = useState<CustomCheck[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [deptSiteId, setDeptSiteId] = useState<number | null>(null);
   const [deptInput, setDeptInput] = useState("");
@@ -234,21 +256,35 @@ export default function SetupPage() {
 
   const saveModules = () => run(async () => { await post("/setup/modules", { modules: picked }, "PUT"); });
 
+  const addCustomCheck = (category: string) =>
+    setCustomChecks((all) => [...all, { key: Math.max(0, ...all.map((c) => c.key)) + 1, category, title: "", every: "12", unit: "months", lastDone: "" }]);
+  const updateCustomCheck = (key: number, change: Partial<CustomCheck>) =>
+    setCustomChecks((all) => all.map((c) => c.key === key ? { ...c, ...change } : c));
+  /** Months between checks, or null when the number is missing or out of range. */
+  const customMonths = (c: CustomCheck) => {
+    const n = Number(c.every);
+    const months = c.unit === "years" ? n * 12 : n;
+    return Number.isInteger(months) && months >= 1 && months <= 120 ? months : null;
+  };
+  const customIncomplete = customChecks.some((c) => !c.title.trim() || customMonths(c) == null);
+
   const saveChecks = () => run(async () => {
     const checks = (state?.starterChecks ?? []).filter((c) => choices[c.title]?.ticked && c.state !== "customised").map((c) => {
       const date = choices[c.title]?.date || null;
       return c.frequencyMonths ? { title: c.title, lastDone: date } : { title: c.title, nextDue: date };
     });
-    const result = await post("/setup/starter-checks", { siteId, checks, removeUnticked }) as { updated: number; created: number; kept: number; removed: number };
+    const custom = customChecks.map((c) => ({ category: c.category, title: c.title.trim(), frequencyMonths: customMonths(c)!, lastDone: c.lastDone || null }));
+    const result = await post("/setup/starter-checks", { siteId, checks, removeUnticked, custom }) as { updated: number; created: number; kept: number; removed: number };
     // Ticked checks already on the list with no date are "kept", but they are
     // still on the list, so count them rather than report "0 set up".
     const onList = result.updated + result.created + result.kept;
-    const dated = checks.filter((c) => c.lastDone || c.nextDue).length;
+    const dated = checks.filter((c) => c.lastDone || c.nextDue).length + custom.filter((c) => c.lastDone).length;
     toast({
       title: "Starter checks saved",
       description: `${onList} check${onList === 1 ? "" : "s"} on your list${result.removed ? `, ${result.removed} removed` : ""}.`
-        + (dated < checks.length ? " Checks left without a date can be dated later from Compliance Checks." : ""),
+        + (dated < checks.length + custom.length ? " Checks left without a date can be dated later from Compliance Checks." : ""),
     });
+    setCustomChecks([]);
     void queryClient.invalidateQueries();
   });
 
@@ -256,6 +292,25 @@ export default function SetupPage() {
     await post("/setup/defer", {});
     navigate("/dashboard");
   }, false);
+
+  const startSetup = () => {
+    markIntroSeen(clientId);
+    setIntro(false);
+  };
+
+  async function requestAssist(details: { phone: string; notes: string }) {
+    try {
+      const result = await post("/setup/assist-request", {
+        ...(details.phone ? { phone: details.phone } : {}),
+        ...(details.notes ? { notes: details.notes } : {}),
+      }) as SetupAssistRequest;
+      setState((current) => current ? { ...current, assistRequest: { requestedAt: result.requestedAt, requestedBy: result.requestedBy } } : current);
+      toast({ title: "Request sent to ALPS", description: "We'll be in touch to agree the price and how to send your lists." });
+    } catch (err) {
+      toast({ title: "Request not sent", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      throw err;
+    }
+  }
 
   const confirmOwnersOnly = () => run(async () => {
     await post("/setup/team-alone", {});
@@ -292,7 +347,10 @@ export default function SetupPage() {
             <h1 className="text-2xl font-bold tracking-tight">Set up your account</h1>
             <p className="text-sm text-muted-foreground mt-1">A few quick questions so your dashboard shows what applies to you. You can skip most steps, but your team comes before any checklists or forms.</p>
           </div>
-          <Button variant="outline" size="sm" onClick={finishLater} disabled={busy}>Finish later</Button>
+          <div className="flex items-center gap-2">
+            {!intro && <Button variant="ghost" size="sm" onClick={() => setIntro(true)}>What you'll need</Button>}
+            <Button variant="outline" size="sm" onClick={finishLater} disabled={busy}>Finish later</Button>
+          </div>
         </div>
 
         <ol className="grid grid-cols-7 gap-1" aria-label="Setup steps">
@@ -300,9 +358,9 @@ export default function SetupPage() {
             const locked = i > TEAM_STEP && !teamReady;
             return (
             <li key={label}>
-              <button type="button" onClick={() => setStep(locked ? TEAM_STEP : i)} aria-current={i === step ? "step" : undefined}
+              <button type="button" onClick={() => { setStep(locked ? TEAM_STEP : i); if (intro) startSetup(); }} aria-current={!intro && i === step ? "step" : undefined}
                 title={locked ? "Add your team first" : undefined}
-                className={`w-full flex flex-col items-center gap-1 rounded-md p-1.5 text-[11px] leading-tight ${i === step ? "bg-primary/10 text-primary font-semibold" : i < step ? "text-foreground" : "text-muted-foreground"}`}>
+                className={`w-full flex flex-col items-center gap-1 rounded-md p-1.5 text-[11px] leading-tight ${!intro && i === step ? "bg-primary/10 text-primary font-semibold" : i < step ? "text-foreground" : "text-muted-foreground"}`}>
                 {locked ? <Lock className="w-4 h-4" aria-label="Locked until your team is added" /> : <Icon className="w-4 h-4" />}
                 <span className="hidden sm:block text-center">{label}</span>
               </button>
@@ -310,12 +368,23 @@ export default function SetupPage() {
             );
           })}
         </ol>
-        <p className="sm:hidden text-sm font-medium">Step {step + 1} of {STEPS.length}: {STEPS[step].label}</p>
+        {!intro && <p className="sm:hidden text-sm font-medium">Step {step + 1} of {STEPS.length}: {STEPS[step].label}</p>}
 
         {loadError && <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{loadError}</div>}
         {!state && !loadError && <div className="h-40 rounded-xl bg-muted animate-pulse" />}
 
-        {state && (
+        {state && intro && (
+          <SetupGettingStarted
+            ai={state.ai}
+            assistRequest={state.assistRequest ?? null}
+            canRequestAssist={user?.role === "client_admin"}
+            onRequestAssist={requestAssist}
+            onStart={startSetup}
+            started={(state.sites?.length ?? 0) > 0}
+          />
+        )}
+
+        {state && !intro && (
           <section className="rounded-xl border bg-card p-5 shadow-sm space-y-5">
             {step === 0 && (
               <>
@@ -622,7 +691,42 @@ export default function SetupPage() {
                             </li>
                           );
                         })}
+                        {customChecks.filter((c) => c.category === category).map((c) => {
+                          const id = `custom-${c.key}`;
+                          return (
+                            <li key={c.key} className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
+                              <div className="flex items-center gap-2">
+                                <Label htmlFor={`${id}-title`} className="sr-only">Check name</Label>
+                                <Input id={`${id}-title`} className="h-8 text-sm" placeholder="Check name, e.g. Mini digger — Thorough Examination" value={c.title} autoFocus
+                                  onChange={(e) => updateCustomCheck(c.key, { title: e.target.value })} />
+                                <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" aria-label="Remove this check"
+                                  onClick={() => setCustomChecks((all) => all.filter((x) => x.key !== c.key))}>
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Label htmlFor={`${id}-every`} className="text-xs font-normal text-muted-foreground">Repeats every</Label>
+                                <Input id={`${id}-every`} type="number" min={1} max={c.unit === "years" ? 10 : 120} step={1} className="h-8 w-20 text-sm" value={c.every}
+                                  onChange={(e) => updateCustomCheck(c.key, { every: e.target.value })} />
+                                <select aria-label="Months or years" className="h-8 rounded-md border border-input bg-background px-2 text-sm" value={c.unit}
+                                  onChange={(e) => updateCustomCheck(c.key, { unit: e.target.value as CustomCheck["unit"] })}>
+                                  <option value="months">months</option>
+                                  <option value="years">years</option>
+                                </select>
+                                <Label htmlFor={`${id}-date`} className="text-xs font-normal text-muted-foreground ml-2">Last done</Label>
+                                <Input id={`${id}-date`} type="date" className="h-8 w-auto text-sm" value={c.lastDone} max={localToday()}
+                                  onChange={(e) => updateCustomCheck(c.key, { lastDone: e.target.value })} />
+                              </div>
+                              {customMonths(c) == null
+                                ? <p className="text-xs text-destructive">Enter a whole number between 1 month and 10 years.</p>
+                                : !c.lastDone && <p className="text-xs text-muted-foreground">Leave the date blank if you are not sure.</p>}
+                            </li>
+                          );
+                        })}
                       </ul>
+                      <Button type="button" variant="ghost" size="sm" className="mt-1.5 h-8 px-2 text-primary" onClick={() => addCustomCheck(category)}>
+                        <Plus className="w-4 h-4 mr-1" /> Add check
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -640,7 +744,8 @@ export default function SetupPage() {
                   </div>
                 )}
                 {siteId == null && <p className="text-xs text-muted-foreground">Add a site first to attach these checks to it; otherwise they apply to the whole business.</p>}
-                <StepActions busy={busy} onSave={saveChecks} onSkip={() => setStep(6)} saveLabel="Save checks" />
+                {customIncomplete && <p className="text-xs text-destructive">Give each added check a name and how often it repeats, or remove it.</p>}
+                <StepActions busy={busy} onSave={saveChecks} onSkip={() => setStep(6)} saveLabel="Save checks" disabled={customIncomplete} />
               </>
             )}
 

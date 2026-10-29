@@ -18,4 +18,6 @@ export interface BusinessDashboardAiAmounts {
   costPence: number;
   marginPence: number;
   requests: number;
+  /** Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin) */
+  lapsedPence: number;
 }

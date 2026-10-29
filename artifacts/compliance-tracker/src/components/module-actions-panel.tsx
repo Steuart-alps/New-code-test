@@ -136,6 +136,12 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   }, [activeClientId, moduleKey, toast]);
 
   useEffect(() => { void loadActions(); }, [loadActions]);
+  // Actions raised elsewhere on the page, such as by Say it.
+  useEffect(() => {
+    const refresh = () => { void loadActions(true); };
+    window.addEventListener("track-actions-changed", refresh);
+    return () => window.removeEventListener("track-actions-changed", refresh);
+  }, [loadActions]);
   useEffect(() => {
     if (moduleKey !== "kitchen") return;
     const refresh = () => { void loadActions(true); };

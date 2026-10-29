@@ -35,6 +35,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
+import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -272,7 +273,7 @@ export default function HotTubPage() {
     enabled: !!activeClientId,
   });
 
-  const { data: hotTubs = [], refetch: refetchTubs } = useQuery<HotTub[]>({
+  const { data: hotTubs = [], refetch: refetchTubs, isLoading: tubsLoading } = useQuery<HotTub[]>({
     queryKey: ["hot-tubs", activeClientId],
     queryFn: () => apiFetch("/hot-tub/tubs"),
     enabled: !!activeClientId && hasHotTub,
@@ -410,6 +411,25 @@ export default function HotTubPage() {
     setStaffRosterId(null);
     setShowDialog(true);
   }, [scanTubId, hotTubs]);
+
+  // A water test said to Say it ("hot tub 2, pH 7.4, chlorine 4, 38 degrees").
+  useSayItFill(["tub-test"], fill => {
+    const active = hotTubs.filter(t => t.active);
+    const tub = matchSpokenItem(fill.item, active.map(t => ({ ...t, aliases: [t.description] }))) ?? (active.length === 1 ? active[0] : null);
+    const number = (key: string) => (typeof fill.values[key] === "number" ? String(fill.values[key]) : "");
+    if (tub) setFilterTub(String(tub.id));
+    setEditItem(null);
+    setForm({
+      ...emptyForm(), performedBy: user?.name ?? "", checkType: "water_chemistry",
+      hotTubId: tub ? String(tub.id) : "",
+      siteId: tub?.siteId ? String(tub.siteId) : fill.siteId ? String(fill.siteId) : "",
+      phValue: number("ph"), sanitiserLevel: number("sanitiser"), temperature: number("temperature"),
+      notes: withSpokenNote("", fill.text),
+    });
+    setStaffRosterId(null);
+    setShowDialog(true);
+    if (!tub && hotTubs.length > 1) toast({ title: "Choose the tub", description: fill.item ? `"${fill.item}" didn't match one tub, so pick it in the form.` : "Pick the tub in the form." });
+  }, !tubsLoading);
 
   function openEdit(r: HotTubCheck) {
     setEditItem(r);

@@ -11,11 +11,12 @@ import { useToast } from "@/hooks/use-toast";
 import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { MODULE_INFO, formatDay, localToday, moduleLabel, onboardingRequest } from "@/lib/onboarding";
 import { TaskItem, describeRecurrence, useTaskClientId, type TaskList, type TaskRow } from "@/components/task-item";
+import { RosterCheckButton, isRosterCheck, rosterCheckMonth } from "@/components/roster-check";
 import { sortByLabel } from "@/lib/sort-options";
 
 type Assignee = { id: number; name: string; role: string };
 type Draft = {
-  id?: number; title: string; instruction: string; module: string; siteId: string;
+  id?: number; title: string; instruction: string; module: string; siteId: string; siteName?: string | null;
   assignee: string; recurrence: TaskRow["recurrence"]; startsOn: string;
 };
 
@@ -181,35 +182,41 @@ export default function TasksPage() {
                   {(assignees.data ?? []).map((a) => <option key={a.id} value={`user:${a.id}`}>{a.name}</option>)}
                 </select>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="task-site">Site</Label>
-                <select id="task-site" className={selectClass} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })}>
-                  <option value="">All sites</option>
-                  {(sites.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="task-recurrence">Repeats</Label>
-                <select id="task-recurrence" className={selectClass} value={draft.recurrence} onChange={(e) => setDraft({ ...draft, recurrence: e.target.value as Draft["recurrence"] })}>
-                  <option value="once">Does not repeat</option>
-                  <option value="daily">Every day</option>
-                  <option value="weekly">Every week</option>
-                  <option value="monthly">Every month</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="task-date">{draft.recurrence === "once" ? "Due date" : "Starting"}</Label>
-                <Input id="task-date" type="date" value={draft.startsOn} onChange={(e) => setDraft({ ...draft, startsOn: e.target.value })} />
-                {draft.recurrence !== "once" && draft.startsOn && <p className="text-xs text-muted-foreground">{describeRecurrence({ recurrence: draft.recurrence, startsOn: draft.startsOn })}, from {formatDay(draft.startsOn)}</p>}
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="task-module">Link to a module (optional)</Label>
-                <select id="task-module" className={selectClass} value={draft.module} onChange={(e) => setDraft({ ...draft, module: e.target.value })}>
-                  <option value="">No link</option>
-                  {sortByLabel(moduleOptions, ([, info]) => info.label).map(([key, info]) => <option key={key} value={key}>{info.label}</option>)}
-                </select>
-                <p className="text-xs text-muted-foreground">Staff get a link straight to that module to record the check.</p>
-              </div>
+              {isRosterCheck(draft) ? (
+                <p className="text-sm text-muted-foreground self-end">
+                  {draft.siteName ? `${draft.siteName}: ` : ""}the staff roster check is set up by ComplyTrack for every site, every month from the 1st. Choose who answers it.
+                </p>
+              ) : (<>
+                <div className="space-y-1.5">
+                  <Label htmlFor="task-site">Site</Label>
+                  <select id="task-site" className={selectClass} value={draft.siteId} onChange={(e) => setDraft({ ...draft, siteId: e.target.value })}>
+                    <option value="">All sites</option>
+                    {(sites.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="task-recurrence">Repeats</Label>
+                  <select id="task-recurrence" className={selectClass} value={draft.recurrence} onChange={(e) => setDraft({ ...draft, recurrence: e.target.value as Draft["recurrence"] })}>
+                    <option value="once">Does not repeat</option>
+                    <option value="daily">Every day</option>
+                    <option value="weekly">Every week</option>
+                    <option value="monthly">Every month</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="task-date">{draft.recurrence === "once" ? "Due date" : "Starting"}</Label>
+                  <Input id="task-date" type="date" value={draft.startsOn} onChange={(e) => setDraft({ ...draft, startsOn: e.target.value })} />
+                  {draft.recurrence !== "once" && draft.startsOn && <p className="text-xs text-muted-foreground">{describeRecurrence({ recurrence: draft.recurrence, startsOn: draft.startsOn })}, from {formatDay(draft.startsOn)}</p>}
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="task-module">Link to a module (optional)</Label>
+                  <select id="task-module" className={selectClass} value={draft.module} onChange={(e) => setDraft({ ...draft, module: e.target.value })}>
+                    <option value="">No link</option>
+                    {sortByLabel(moduleOptions, ([, info]) => info.label).map(([key, info]) => <option key={key} value={key}>{info.label}</option>)}
+                  </select>
+                  <p className="text-xs text-muted-foreground">Staff get a link straight to that module to record the check.</p>
+                </div>
+              </>)}
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setDraft(null)} disabled={saving}>Cancel</Button>
@@ -225,7 +232,8 @@ export default function TasksPage() {
             </p>
             {mine.error && <ErrorNote error={mine.error} />}
             <ul className="space-y-2">
-              {myTasks.map((t) => <TaskItem key={`${t.id}:${t.occurrenceDate}`} task={t} onDone={complete} onUndo={undo} busy={busyId === t.id} />)}
+              {myTasks.map((t) => <TaskItem key={`${t.id}:${t.occurrenceDate}`} task={t} onDone={complete} onUndo={undo} busy={busyId === t.id}
+                clientId={clientId} onAnswered={() => void refresh()} />)}
             </ul>
           </section>
         )}
@@ -254,10 +262,12 @@ export default function TasksPage() {
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium">{t.title}{!t.active && <span className="ml-2 text-xs font-normal text-muted-foreground">Archived</span>}</p>
                       <p className="text-xs text-muted-foreground">
-                        {[assigneeLabel(t), t.siteName ?? "All sites", describeRecurrence(t), moduleLabel(t.module)].filter(Boolean).join(" · ")}
+                        {[assigneeLabel(t), t.siteName ?? "All sites", describeRecurrence(t), isRosterCheck(t) ? null : moduleLabel(t.module)].filter(Boolean).join(" · ")}
                       </p>
                       <p className="text-xs mt-0.5">
-                        {t.completion ? <span className="text-emerald-700">{t.completion.automatic ? `${t.completion.note ?? "Done automatically"} (${t.completion.completedByName})` : `Done by ${t.completion.completedByName}`}</span>
+                        {t.completion && isRosterCheck(t) ? <span className="text-emerald-700">{rosterCheckMonth(t.occurrenceDate)}: {t.completion.note ?? "Answered"} ({t.completion.completedByName})</span>
+                          : t.completion ? <span className="text-emerald-700">{t.completion.automatic ? `${t.completion.note ?? "Done automatically"} (${t.completion.completedByName})` : `Done by ${t.completion.completedByName}`}</span>
+                          : t.overdue && isRosterCheck(t) ? <span className="text-rose-700">{rosterCheckMonth(t.occurrenceDate)}: not answered yet</span>
                           : t.overdue ? <span className="text-rose-700">Overdue</span>
                             : t.dueOnDate ? <span className="text-amber-700">Due today</span>
                               : <span className="text-muted-foreground">Not due today</span>}
@@ -265,14 +275,16 @@ export default function TasksPage() {
                     </div>
                     {t.canManage && !isViewer && (
                       <div className="flex shrink-0 gap-1">
-                        {t.active && !t.completion && (t.dueOnDate || t.overdue) && (
+                        {t.active && !t.completion && (t.dueOnDate || t.overdue) && (isRosterCheck(t) ? (
+                          <RosterCheckButton task={t} clientId={clientId} onAnswered={() => void refresh()} disabled={busyId === t.id} />
+                        ) : (
                           <Button size="sm" variant="outline" disabled={busyId === t.id} onClick={() => complete(t)}>Mark done</Button>
-                        )}
+                        ))}
                         {t.completion && t.canUndo && (
                           <Button size="sm" variant="ghost" disabled={busyId === t.id} onClick={() => undo(t)}>Undo</Button>
                         )}
                         <Button size="icon" variant="ghost" aria-label={`Edit ${t.title}`} onClick={() => setDraft({
-                          id: t.id, title: t.title, instruction: t.instruction ?? "", module: t.module ?? "", siteId: t.siteId ? String(t.siteId) : "",
+                          id: t.id, title: t.title, instruction: t.instruction ?? "", module: t.module ?? "", siteId: t.siteId ? String(t.siteId) : "", siteName: t.siteName,
                           assignee: t.assigneeUserId ? `user:${t.assigneeUserId}` : `role:${t.assigneeRole ?? "client_staff"}`,
                           recurrence: t.recurrence, startsOn: t.startsOn,
                         })}><Pencil className="w-4 h-4" /></Button>

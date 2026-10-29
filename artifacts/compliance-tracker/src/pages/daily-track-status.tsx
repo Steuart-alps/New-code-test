@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { scrollPageToTop } from "@/lib/page-scroll";
 import { useAuth } from "@/context/auth-context";
 import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -551,7 +552,7 @@ export default function DailyTrackStatusPage() {
       )}
 
       {sites.length > 0 && (
-        <MonthOverview sites={sites} onPickDay={d => { setDate(d); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
+        <MonthOverview sites={sites} onPickDay={d => { setDate(d); scrollPageToTop(); }} />
       )}
     </AppLayout>
   );

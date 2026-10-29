@@ -38,6 +38,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
+import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { sortedEntries } from "@/lib/sort-options";
 
@@ -275,10 +276,12 @@ function PoolConfigDialog({ onChanged }: { onChanged: () => void }) {
 }
 
 function PoolRecordDialog({
-  siteId, onSaved, existing, open: controlledOpen, onOpenChange: controlledOnOpenChange, defaultCheckType,
+  siteId, onSaved, existing, open: controlledOpen, onOpenChange: controlledOnOpenChange, defaultCheckType, spoken,
 }: {
   siteId?: number; onSaved: () => void; existing?: PoolCheck;
   open?: boolean; onOpenChange?: (v: boolean) => void; defaultCheckType?: string;
+  /** Readings said to Say it, filled in when the dialog opens. */
+  spoken?: SayItFill | null;
 }) {
   const isEdit = !!existing;
   const { user } = useAuth();
@@ -312,6 +315,17 @@ function PoolRecordDialog({
   const { data: config } = useGetPoolTrackConfig();
 
   useEffect(() => { if (!open || isEdit || !config) return; if (!performedBy && config.pool_default_performer) setPerformedBy(config.pool_default_performer); }, [open]);
+  useEffect(() => {
+    if (!open || isEdit || !spoken) return;
+    const v = spoken.values;
+    const text = (key: string) => (typeof v[key] === "number" ? String(v[key]) : "");
+    setPh(text("ph")); setFreeChlor(text("freeChlorine")); setCombChlor(text("combinedChlorine"));
+    setWaterTemp(text("waterTemp")); setAirTemp(text("airTemp"));
+    if (typeof v.turbidity === "string") setTurbidity(v.turbidity);
+    if (spoken.siteId) setSelectedSite(spoken.siteId);
+    setCheckDate(todayIso()); setCheckTime(nowTime()); setOverrideResult(null);
+    setNotes(withSpokenNote("", spoken.text));
+  }, [open, spoken]);
 
   const parsedPh = ph ? parseFloat(ph) : null;
   const parsedFree = freeChlor ? parseFloat(freeChlor) : null;
@@ -562,7 +576,7 @@ function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boole
   );
 }
 
-function SurveillanceDialog({ open, onClose, check, sites, onSaved }: { open: boolean; onClose: () => void; check?: SurveillanceCheck | null; sites: { id: number; name: string }[]; onSaved: () => void; }) {
+function SurveillanceDialog({ open, onClose, check, sites, onSaved, spoken }: { open: boolean; onClose: () => void; check?: SurveillanceCheck | null; sites: { id: number; name: string }[]; onSaved: () => void; spoken?: SayItFill | null; }) {
   const { toast } = useToast();
   const today = todayIso();
   const now = nowTime();
@@ -572,7 +586,13 @@ function SurveillanceDialog({ open, onClose, check, sites, onSaved }: { open: bo
   const [saving, setSaving] = useState(false);
   // Staged before the record exists, so a required-photo rule can be met (the API refuses a create without them).
   const photoEvidence = useNewRecordPhotoEvidence("swim_surveillance_check", open && !check);
-  const reset = () => setForm(check ? { siteId: check.siteId ? String(check.siteId) : "", checkDate: check.checkDate, checkTime: check.checkTime ?? "", batherCount: check.batherCount != null ? String(check.batherCount) : "", scanCompleted: check.scanCompleted, observations: check.observations ?? "", checkedBy: check.checkedBy ?? "" } : blank);
+  const fromVoice = (fill: SayItFill) => ({
+    ...blank, siteId: fill.siteId ? String(fill.siteId) : "",
+    batherCount: typeof fill.values.batherCount === "number" ? String(fill.values.batherCount) : "",
+    scanCompleted: fill.values.scanCompleted !== false,
+    observations: withSpokenNote(typeof fill.values.observations === "string" ? fill.values.observations : "", fill.text),
+  });
+  const reset = () => setForm(check ? { siteId: check.siteId ? String(check.siteId) : "", checkDate: check.checkDate, checkTime: check.checkTime ?? "", batherCount: check.batherCount != null ? String(check.batherCount) : "", scanCompleted: check.scanCompleted, observations: check.observations ?? "", checkedBy: check.checkedBy ?? "" } : spoken ? fromVoice(spoken) : blank);
   const handleSave = async () => {
     if (!check && (!photoEvidence.ready || photoEvidence.uploading)) return;
     if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
@@ -748,6 +768,9 @@ export default function AquaTrackPage() {
   const [filterSite, setFilterSite] = useSiteFilterId();
   const [poolRecordOpen, setPoolRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<string | undefined>();
+  // A water test or surveillance check said to Say it.
+  const [spokenTest, setSpokenTest] = useState<SayItFill | null>(null);
+  const [spokenSurveillance, setSpokenSurveillance] = useState<SayItFill | null>(null);
   const [poolChecks, setPoolChecks] = useState<PoolCheck[]>([]);
   const [poolStatus, setPoolStatus] = useState<any[]>([]);
   const poolRequestSequence = useRef(0);
@@ -787,6 +810,19 @@ export default function AquaTrackPage() {
   const [editSession, setEditSession] = useState<SwimSession | null>(null);
   const [surveillanceDialog, setSurveillanceDialog] = useState(false);
   const [editSurveillance, setEditSurveillance] = useState<SurveillanceCheck | null>(null);
+  useSayItFill(["pool-test", "swim-surveillance"], fill => {
+    if (fill.form === "pool-test") {
+      setActiveTab("water-quality");
+      setQuickCheckType(typeof fill.values.checkType === "string" ? fill.values.checkType : "routine");
+      setSpokenTest(fill);
+      setPoolRecordOpen(true);
+    } else {
+      setActiveTab("surveillance");
+      setEditSurveillance(null);
+      setSpokenSurveillance(fill);
+      setSurveillanceDialog(true);
+    }
+  });
   const [firstAidDialog, setFirstAidDialog] = useState(false);
   const [editFirstAid, setEditFirstAid] = useState<FirstAidCheck | null>(null);
   const [incidentDialog, setIncidentDialog] = useState(false);
@@ -876,7 +912,7 @@ export default function AquaTrackPage() {
             {activeTab === "water-quality" && (
               <>
                 {canAdmin && <PoolConfigDialog onChanged={fetchPoolData} />}
-                <PoolRecordDialog siteId={filterSite} onSaved={fetchPoolData} open={poolRecordOpen} onOpenChange={setPoolRecordOpen} defaultCheckType={quickCheckType} />
+                <PoolRecordDialog siteId={filterSite} onSaved={fetchPoolData} open={poolRecordOpen} onOpenChange={open => { setPoolRecordOpen(open); if (!open) setSpokenTest(null); }} defaultCheckType={quickCheckType} spoken={spokenTest} />
               </>
             )}
             {activeTab === "sessions" && (
@@ -1329,7 +1365,7 @@ export default function AquaTrackPage() {
 
       {/* ── Swim dialogs ─────────────────────────────────────────────────────── */}
       <SessionDialog open={sessionDialog} onClose={() => { setSessionDialog(false); setEditSession(null); }} session={editSession} sites={sites as any[]} onSaved={invalidateSwim} />
-      <SurveillanceDialog open={surveillanceDialog} onClose={() => { setSurveillanceDialog(false); setEditSurveillance(null); }} check={editSurveillance} sites={sites as any[]} onSaved={invalidateSwim} />
+      <SurveillanceDialog open={surveillanceDialog} onClose={() => { setSurveillanceDialog(false); setEditSurveillance(null); setSpokenSurveillance(null); }} check={editSurveillance} sites={sites as any[]} onSaved={invalidateSwim} spoken={spokenSurveillance} />
       <FirstAidDialog open={firstAidDialog} onClose={() => { setFirstAidDialog(false); setEditFirstAid(null); }} check={editFirstAid} sites={sites as any[]} onSaved={invalidateSwim} />
       <IncidentDialog open={incidentDialog} onClose={() => { setIncidentDialog(false); setEditIncident(null); }} incident={editIncident} sites={sites as any[]} onSaved={invalidateSwim} />
 

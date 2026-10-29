@@ -1,5 +1,4 @@
 import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
-import { SayItButton } from "@/components/say-it-button";
 import { FoodJurisdictionOptions, KitchenGuidanceNote } from "@/components/kitchen-temperature-guidance";
 import { assessKitchenTemperatures, isFoodJurisdiction, kitchenFailureValue, kitchenHoldRequirement, kitchenTemperatureGuidance, parseKitchenTemperatureRules, type FoodJurisdiction, type KitchenTemperatureFailure } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -7,6 +6,7 @@ import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { takeLinkParams } from "@/lib/deep-link";
 import { ChecklistItemRow } from "@/components/checklist-item-row";
 import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
+import { scrollPageToTop } from "@/lib/page-scroll";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import {
@@ -41,6 +41,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2, FileText } from "lucide-react";
 import { DocTrackLibrary } from "./doc-track";
+import { HaccpReviewCard } from "@/components/haccp-review-card";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { cn } from "@/lib/utils";
@@ -1936,7 +1937,7 @@ export function DailyDiaryTab() {
       {/* Monthly completeness calendar */}
       <FoodSafetyCompletenessCalendar
         siteId={selectedSiteId}
-        onPickDay={(d) => { changeScope({ date: d, siteId: selectedSiteId }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+        onPickDay={(d) => { changeScope({ date: d, siteId: selectedSiteId }); scrollPageToTop(); }}
       />
     </div>
   );
@@ -2313,7 +2314,7 @@ const TABS: { id: ActiveTab; label: string; icon: any; description: string }[] =
   { id: "weekly",   label: "Weekly Review",         icon: ClipboardList, description: "Combined CookSafe house rules + management review" },
   { id: "probe",    label: "Probe Check",           icon: Thermometer,   description: "Monthly probe thermometer calibration record" },
   { id: "cleaning", label: "Cleaning Schedule",     icon: Sparkles,      description: "Daily, weekly and monthly cleaning task schedule and sign-off" },
-  { id: "documents", label: "HACCP & Recipes",      icon: FileText,      description: "HACCP plans and recipe spec sheets" },
+  { id: "documents", label: "HACCP & Recipes",      icon: FileText,      description: "Yearly HACCP review, HACCP plans and recipe spec sheets" },
 ];
 
 export default function KitchenPage() {
@@ -2390,7 +2391,6 @@ export default function KitchenPage() {
             <p className="text-sm text-muted-foreground">{activeTabMeta.description}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <SayItButton />
             <Link href="/food-safety" className="text-sm font-medium text-primary underline underline-offset-2">Inspection register &amp; diary calendar</Link>
             <Link href="/allergens">
               <Button variant="outline" size="sm" className="gap-1.5">Allergen records</Button>
@@ -2456,7 +2456,7 @@ export default function KitchenPage() {
         {activeTab === "weekly"   && <WeeklyReviewTab />}
         {activeTab === "probe"    && <ProbeCheckTab defaultProbeNamesJson={foodSafetyConfig?.food_probe_names} />}
         {activeTab === "cleaning" && <CleaningScheduleTab />}
-        {activeTab === "documents" && <DocTrackLibrary kitchen />}
+        {activeTab === "documents" && <div className="space-y-6"><HaccpReviewCard /><DocTrackLibrary kitchen /></div>}
       </div>
     </AppLayout>
   );
