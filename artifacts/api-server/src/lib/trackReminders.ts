@@ -16,6 +16,9 @@
  *   11:00  today's AM (opening) checklist not submitted, per site.
  *   21:00  today's PM (closing) checklist and today's KitchenTrack diary not
  *          submitted, per site.
+ * A kitchen or premises checklist given to a team (lib/dailyChecklistTeams.ts)
+ * is chased on its own, and goes to that team's Managers (to the track's
+ * owner when the team has none).
  * Daily checklists and the kitchen diary are only chased at sites that have
  * used them in the last 30 days, or once an owner has been set for the track,
  * so a business trialling every module is not reminded about tracks it does
@@ -26,13 +29,15 @@ import { sql } from "drizzle-orm";
 import { addCalendarDays, getAccountTimezone, localDateIn } from "./accountClock";
 import { getCheckAlerts, type CheckAlert } from "./checkReminders";
 import { getCoshhDueItems, type CoshhDueItem } from "./coshhTrack";
-import { getDailyChecklistCompletionBySite, submittedDailyChecklists } from "./dailyChecklistCompletion";
+import { getDailyChecklistDayBySite, submittedDailyChecklists } from "./dailyChecklistCompletion";
+import { DAILY_CHECKLIST_TYPES } from "./dailyChecklistEntitlements";
+import { areaOfChecklistType, loadDailyChecklistTeams, teamKey } from "./dailyChecklistTeams";
 import { logger } from "./logger";
 import { sendPushToUsers } from "./pushNotifications";
 import { getEntitledServices, isEntitled, type Entitlements } from "./services";
 import { getTrackModule, isTrackModuleKey } from "./trackModules";
 import { isClientBillingLocked } from "./trialLock";
-import { hasExplicitOwner, loadOwnerContext, resolveOwnersFromContext, type OwnerContext } from "./trackOwners";
+import { candidateCanSeeSite, hasExplicitOwner, loadOwnerContext, resolveOwnersFromContext, type OwnerContext } from "./trackOwners";
 import { createUserNotifications, purgeOldUserNotifications, type NewUserNotification } from "./userNotifications";
 
 export const TRACK_REMINDER_HOURS = { overdue: 9, am: 11, pm: 21 } as const;
@@ -87,10 +92,11 @@ class ReminderBatch {
   readonly items: NewUserNotification[] = [];
   constructor(private ctx: OwnerContext, private today: string) {}
 
-  /** Queue one notification per resolved owner of the module at the site. */
-  add(input: { module: string; siteId: number | null; kind: string; title: string; body: string; linkPath: string }) {
+  /** Queue one notification per resolved owner of the module at the site, or per given recipient. */
+  add(input: { module: string; siteId: number | null; kind: string; title: string; body: string; linkPath: string; userIds?: number[] }) {
     const scope = input.siteId != null ? `site:${input.siteId}` : `client:${this.ctx.clientId}`;
-    for (const userId of resolveOwnersFromContext(this.ctx, input.module, input.siteId)) {
+    const userIds = input.userIds?.length ? input.userIds : resolveOwnersFromContext(this.ctx, input.module, input.siteId);
+    for (const userId of userIds) {
       this.items.push({
         clientId: this.ctx.clientId,
         userId,
@@ -109,6 +115,19 @@ class ReminderBatch {
 const entitledTo = (services: Entitlements, module: string) =>
   getTrackModule(module)?.services.some((key) => isEntitled(services, key)) ?? false;
 
+/**
+ * The Managers who look after a department at a site: client_manager users
+ * whose own or extra departments include it and who can see the site. A
+ * Manager over every department is left to the track owner.
+ */
+function teamManagers(ctx: OwnerContext, departmentId: number, siteId: number): number[] {
+  return [...ctx.eligible.values()]
+    .filter((candidate) => candidate.role === "client_manager" && candidate.allDepartments !== true)
+    .filter((candidate) => candidate.departmentId === departmentId || (candidate.extraDepartmentIds ?? []).includes(departmentId))
+    .filter((candidate) => candidateCanSeeSite(candidate, ctx.siteDepartments.get(siteId), siteId))
+    .map((candidate) => candidate.id);
+}
+
 async function dailyChecklistReminders(
   batch: ReminderBatch, ctx: OwnerContext, clientId: number, sites: Site[], today: string, period: "am" | "pm",
 ): Promise<void> {
@@ -123,18 +142,40 @@ async function dailyChecklistReminders(
   const inUse = new Set(rowsOf<{ site_id: number; used: unknown }>(recent)
     .filter((row) => row.used === true || row.used === "true")
     .map((row) => Number(row.site_id)));
-  const candidates = sites.filter((site) => inUse.has(site.id) || hasExplicitOwner(ctx, module, site.id));
+  // Giving a checklist to a team says the site uses it.
+  const teams = await loadDailyChecklistTeams(clientId, sites.map((site) => site.id));
+  const hasTeam = (siteId: number) => DAILY_CHECKLIST_TYPES[period]
+    .some((type) => teams.has(teamKey(siteId, areaOfChecklistType(type))));
+  const candidates = sites.filter((site) => inUse.has(site.id) || hasExplicitOwner(ctx, module, site.id) || hasTeam(site.id));
   if (candidates.length === 0) return;
-  const completion = await getDailyChecklistCompletionBySite(clientId, today, candidates.map((site) => site.id));
+  const days = await getDailyChecklistDayBySite(clientId, today, candidates.map((site) => site.id));
   const label = period === "am" ? "AM" : "PM";
   const description = period === "am" ? "opening (AM)" : "closing (PM)";
+  const word = period === "am" ? "opening" : "closing";
+  const linkPath = getTrackModule(module)!.path;
   for (const site of candidates) {
-    if (completion.get(site.id)?.[period]) continue;
+    const day = days.get(site.id);
+    if (!day || day[period]) continue;
+    const outstanding = day.teamOutstanding.filter((item) => (DAILY_CHECKLIST_TYPES[period] as readonly string[]).includes(item.type));
+    if (outstanding.length > 0) {
+      // Each team hears only about its own checklist.
+      for (const { type, team } of outstanding) {
+        const area = areaOfChecklistType(type);
+        batch.add({
+          module, siteId: site.id, kind: `${module}_${type}`,
+          title: `${team.departmentName} ${word} checklist not done — ${site.name}`,
+          body: `Today's ${area} ${word} checklist for ${site.name} (${team.departmentName}) hasn't been submitted yet.`,
+          linkPath: `${linkPath}?siteId=${site.id}`,
+          userIds: teamManagers(ctx, team.departmentId, site.id),
+        });
+      }
+      continue;
+    }
     batch.add({
       module, siteId: site.id, kind: module,
       title: `${label} checklist not done — ${site.name}`,
       body: `Today's ${description} checklist for ${site.name} hasn't been submitted yet.`,
-      linkPath: getTrackModule(module)!.path,
+      linkPath,
     });
   }
 }

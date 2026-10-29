@@ -6,7 +6,9 @@
  * What counts (all on the business's local calendar day):
  *  - Whole site: the daily checklists and manager sign-off the client's
  *    services expect at every site (dailyTrackRequirements), web and phone.
- *    A submitted checklist with a failed item counts as failed.
+ *    A submitted checklist with a failed item counts as failed. A kitchen or
+ *    premises checklist given to a team (lib/dailyChecklistTeams.ts) goes to
+ *    that department instead.
  *  - A department: checks saved today by its staff (the department recorded
  *    on the record, never the author's current one), failed when the result
  *    is a fail; tasks due today assigned to one of its people; and compliance
@@ -27,6 +29,7 @@ import { getEntitledServices } from "./services";
 import { getAccountTimezone, localDateIn, addCalendarDays, zonedDateTimeToUtc } from "./accountClock";
 import { occursOn } from "./taskSchedule";
 import { submittedDailyChecklists } from "./dailyChecklistCompletion";
+import { areaOfChecklistType, loadDailyChecklistTeams, teamKey } from "./dailyChecklistTeams";
 import { certificateOutstandingItemIds } from "./certificateOutcomes";
 
 export const TODAY_BY_DEPARTMENT_ROLES_SETTING = "todayByDepartmentRoles";
@@ -338,7 +341,7 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
   if (requirements.length > 0) {
     const hasFail = (column: string) => sql.raw(`(jsonb_typeof(${column}) = 'array' AND EXISTS (
       SELECT 1 FROM jsonb_array_elements(${column}) answer WHERE answer->>'result' = 'fail'))`);
-    const [web, phone, signoffs] = await Promise.all([
+    const [web, phone, signoffs, teams] = await Promise.all([
       db.execute(sql`
         SELECT site_id, checklist_type, submitted_at IS NOT NULL AS submitted, ${hasFail("items")} AS failed
         FROM daily_checklists
@@ -355,6 +358,7 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
         WHERE client_id = ${clientId} AND signoff_date = ${today} AND site_id IN (${siteIn})
           AND submitted_at IS NOT NULL
       `),
+      loadDailyChecklistTeams(clientId, siteIds),
     ]);
     type State = { submitted: boolean; failed: boolean; started: boolean };
     const state = new Map<string, State>();
@@ -389,13 +393,17 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
         // Open the checklist for this site, not the page's "No site filter" slot.
         const path = `${requirement.endsWith("_opening") ? "/daily-track-am" : "/daily-track-pm"}?siteId=${site.id}`;
         const label = CHECKLIST_NAMES[requirement];
+        // A checklist given to a team is that team's; the rest are the whole site's.
+        const departmentId = requirement === "signoff"
+          ? null
+          : teams.get(teamKey(site.id, areaOfChecklistType(requirement)))?.departmentId ?? null;
         if (current?.submitted) {
           push(current.failed
-            ? { siteId: site.id, departmentId: null, outcome: "failed", label, detail: "Submitted with a failed item", path }
-            : { siteId: site.id, departmentId: null, outcome: "done" });
+            ? { siteId: site.id, departmentId, outcome: "failed", label, detail: "Submitted with a failed item", path }
+            : { siteId: site.id, departmentId, outcome: "done" });
         } else {
           push({
-            siteId: site.id, departmentId: null, outcome: "todo", label,
+            siteId: site.id, departmentId, outcome: "todo", label,
             detail: current?.started ? "Started, not submitted yet" : "Not submitted yet", path,
           });
         }

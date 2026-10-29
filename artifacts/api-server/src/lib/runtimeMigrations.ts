@@ -2321,6 +2321,7 @@ async function runRuntimeMigrationsOnce() {
     await migrateBillingAlerts();
     await migrateCertificateInbox();
     await migrateContractorSignIn();
+    await migrateDailyChecklistTeams();
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
@@ -6561,4 +6562,22 @@ async function migrateContractorSignIn() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_contractor_sign_ins_site_time" ON "contractor_sign_ins" ("client_id", "site_id", "signed_in_at")`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_contractor_sign_ins_sign_out_token" ON "contractor_sign_ins" ("sign_out_token_hash")`);
+}
+
+// Which department does a site's kitchen or premises checklists
+// (lib/dailyChecklistTeams.ts). Mirrors lib/db/src/schema/daily-checklists.ts.
+async function migrateDailyChecklistTeams() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "daily_checklist_teams" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "area" text NOT NULL,
+      "department_id" integer NOT NULL REFERENCES "departments"("id") ON DELETE CASCADE,
+      "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "updated_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "ck_daily_checklist_teams_area" CHECK ("area" IN ('kitchen', 'premises'))
+    )
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_daily_checklist_teams_site_area" ON "daily_checklist_teams" ("site_id", "area")`);
 }
