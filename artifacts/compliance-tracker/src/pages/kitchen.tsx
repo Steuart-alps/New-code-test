@@ -1011,13 +1011,14 @@ export function DailyDiaryTab() {
 
   // A fridge or freezer's scanned QR label opens today's diary for its site
   // and puts the cursor in that unit's reading (AM before noon, PM after).
+  // The kitchen records label opens today's diary for its site.
   const [scanColdUnit, setScanColdUnit] = useState<string | null>(null);
   useEffect(() => {
     const link = takeLinkParams(["siteId", "coldUnit"] as const);
-    if (!link?.coldUnit) return;
+    if (!link?.coldUnit && !link?.siteId) return;
     const site = Number(link.siteId);
     applyScope({ date: format(new Date(), "yyyy-MM-dd"), siteId: Number.isSafeInteger(site) && site > 0 ? site : null });
-    setScanColdUnit(link.coldUnit.slice(0, 100));
+    if (link.coldUnit) setScanColdUnit(link.coldUnit.slice(0, 100));
   }, []);
   useEffect(() => {
     if (!scanColdUnit || !formReady) return;

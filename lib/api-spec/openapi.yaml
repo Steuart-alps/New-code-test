@@ -11991,7 +11991,7 @@ components:
 
     EquipmentLabelKind:
       type: string
-      enum: [green_machine, pat_appliance, hot_tub, fire_call_point, water_outlet, bike, room, cold_unit, equipment]
+      enum: [green_machine, pat_appliance, hot_tub, fire_call_point, water_outlet, bike, room, cold_unit, equipment, track_point]
 
     EquipmentLinkedCheck:
       type: object
@@ -12123,7 +12123,7 @@ components:
           $ref: "#/components/schemas/EquipmentLabelKind"
         ref:
           type: string
-          description: The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer.
+          description: The record's id, "<siteId or 0>:<unit id>" for a kitchen fridge or freezer, or "<point>:<siteId or 0>" for a track's checks at a site.
       required: [kind, ref]
 
     EquipmentLabelSheetRequest:

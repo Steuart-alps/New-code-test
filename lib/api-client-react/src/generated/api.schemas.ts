@@ -4635,6 +4635,7 @@ export const EquipmentLabelKind = {
   room: 'room',
   cold_unit: 'cold_unit',
   equipment: 'equipment',
+  track_point: 'track_point',
 } as const;
 
 export interface EquipmentLinkedCheck {
@@ -4689,7 +4690,7 @@ export interface UpdateEquipmentItemRequest {
 
 export interface EquipmentLabelRef {
   kind: EquipmentLabelKind;
-  /** The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer. */
+  /** The record's id, "<siteId or 0>:<unit id>" for a kitchen fridge or freezer, or "<point>:<siteId or 0>" for a track's checks at a site. */
   ref: string;
 }
 
