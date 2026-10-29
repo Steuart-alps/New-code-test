@@ -14,6 +14,26 @@ export interface TestBusinessDeletionRequest {
   confirmName: string;
 }
 
+export interface SetupAssistRequestBody {
+  /**
+     * Best number for ALPS to call
+     * @maxLength 40
+     */
+  phone?: string;
+  /**
+     * Anything ALPS should know, such as how many sites or where their lists are kept
+     * @maxLength 2000
+     */
+  notes?: string;
+}
+
+export interface SetupAssistRequestResult {
+  requestedAt: string;
+  requestedBy: string;
+  /** False when the request had already been sent earlier */
+  emailed: boolean;
+}
+
 export interface SetupTeamAloneResult {
   aloneAt: string;
 }
@@ -1640,6 +1660,25 @@ export interface CertificateReading {
   defects: CertificateReadingDefect[];
   /** Things that could not be read with confidence. */
   unclear: string[];
+}
+
+export interface CreateRecordSignatureRequest {
+  /** Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box */
+  strokes: number[][];
+}
+
+export interface RecordSignatureToken {
+  token: string;
+  expiresInMinutes: number;
+}
+
+export interface RecordSignature {
+  recordType: string;
+  recordId: number;
+  /** The name of the login that signed */
+  signerName: string;
+  signedAt: string;
+  strokes: number[][];
 }
 
 export type ContractorSignInSiteAsbestosStatus = typeof ContractorSignInSiteAsbestosStatus[keyof typeof ContractorSignInSiteAsbestosStatus];
@@ -4938,6 +4977,10 @@ export type ConfirmSetupTeamAloneParams = {
 clientId?: number;
 };
 
+export type RequestSetupAssistParams = {
+clientId?: number;
+};
+
 export type ListFeedbackReportsParams = {
 clientId?: number;
 category?: ListFeedbackReportsCategory;
@@ -5088,6 +5131,14 @@ export const ListPublicLinkAccessActionType = {
 
 export type ListAssigneesParams = {
 siteId?: number;
+};
+
+export type ListRecordSignaturesParams = {
+recordType: string;
+/**
+ * Up to 200 record ids, comma separated
+ */
+ids: string;
 };
 
 export type ListContractorSignInsParams = {

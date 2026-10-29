@@ -75,6 +75,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { StringListEditor } from "@/components/string-list-editor";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // CookSafe All-in-One Record field shapes
 type DeliveryRow = {
@@ -1217,7 +1218,7 @@ export function DailyDiaryTab() {
   const handleSubmit = async () => {
     if (!formReady || !validateTemperatures()) return;
     if (!managerSignature.trim()) {
-      toast({ title: "Manager signature required", variant: "destructive" });
+      toast({ title: "Manager name required", variant: "destructive" });
       return;
     }
     const data = buildData(new Date().toISOString());
@@ -1859,7 +1860,7 @@ export function DailyDiaryTab() {
             <CardContent className="p-4">
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label>Manager Name (Signature)</Label>
+                  <Label>Manager name</Label>
                   <Input
                     value={managerSignature}
                     onChange={(e) => setManagerSignature(e.target.value)}
@@ -1882,7 +1883,10 @@ export function DailyDiaryTab() {
 
           {/* Photos */}
           {record?.id && (
-            <CheckPhotoUploader entityType="food_safety_check" entityId={record.id} compact />
+            <>
+              <RecordSignedBy recordType="food_safety_record" recordId={record.id} className="mb-2" />
+              <CheckPhotoUploader entityType="food_safety_check" entityId={record.id} compact />
+            </>
           )}
         </>
       )}
@@ -2154,7 +2158,7 @@ function KitchenChecklistCard({
           </div>
         )}
         {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}
-        {existing?.id && <div className="border-t mt-3 pt-3"><CheckPhotoUploader entityType="daily_checklist" entityId={existing.id} compact /></div>}
+        {existing?.id && <div className="border-t mt-3 pt-3"><RecordSignedBy recordType="daily_checklist" recordId={existing.id} className="mb-2" /><CheckPhotoUploader entityType="daily_checklist" entityId={existing.id} compact /></div>}
       </Card>
 
       {canAdmin && (

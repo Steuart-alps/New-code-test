@@ -46,6 +46,7 @@ import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-di
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -1593,6 +1594,7 @@ export default function LegionellaPage() {
                               <div><span className="font-medium">Notes:</span> {check.notes}</div>
                             )}
                           </div>
+                          <RecordSignedBy recordType="legionella_check" recordId={check.id} />
                           <CheckPhotoUploader entityType="legionella_check" entityId={check.id} compact />
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">

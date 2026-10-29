@@ -41,6 +41,7 @@ import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1648,6 +1649,7 @@ export default function BikeTrackPage() {
                           </Badge>
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell">
+                          <RecordSignedBy recordType="bike_hire" recordId={h.id} compact className="mb-1" /><RecordSignedBy recordType="bike_return" recordId={h.id} compact className="mb-1" />
                           <CheckPhotoUploader entityType="bike_hire" entityId={h.id} compact />
                         </td>
                         <td className="px-4 py-3">
@@ -1816,6 +1818,7 @@ export default function BikeTrackPage() {
                             {s.costPence ? `£${(s.costPence / 100).toFixed(2)}` : "—"}
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
+                            <RecordSignedBy recordType="bike_service" recordId={s.id} compact className="mb-1" />
                             <CheckPhotoUploader entityType="bike_service" entityId={s.id} compact />
                           </td>
                           <td className="px-4 py-3">
