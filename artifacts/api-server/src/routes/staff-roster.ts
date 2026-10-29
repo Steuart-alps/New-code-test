@@ -2,7 +2,8 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId, requireRole } from "../middleware/requireAuth";
+import { requireAuth, getClientId, requireRole, getActiveDepartmentId } from "../middleware/requireAuth";
+import { visibleSiteIdsSql } from "../lib/departmentSites";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { digestBearerToken } from "../lib/bearerTokens";
@@ -52,6 +53,17 @@ async function kioskClient(token: unknown): Promise<number | null> {
   return (result.rows?.[0] as any)?.id ? Number((result.rows as any[])[0].id) : null;
 }
 
+// Who on the roster the signed-in person may see. Owners and consultants (and
+// Managers over every department) see everyone. Anyone else sees the staff at
+// the sites their department can see, plus staff with no site, the same rule
+// as the tracks, so a business's sites stay apart unless an Owner gives
+// someone a department at another site. (Viewers never reach the roster.)
+function rosterScopeSql(req: Request, clientId: number) {
+  const departmentId = getActiveDepartmentId(req);
+  if (departmentId === null) return sql``;
+  return sql`AND (sr.site_id IS NULL OR sr.site_id IN (${visibleSiteIdsSql(clientId, departmentId)}))`;
+}
+
 // PIN roster compatibility API.  These endpoints intentionally use staff_roster
 // rather than a second table, preserving existing document/training references.
 router.get("/staff", requireAuth, async (req, res) => {
@@ -59,12 +71,13 @@ router.get("/staff", requireAuth, async (req, res) => {
   if (!clientId) { res.status(400).json({ error: "No client context" }); return; }
   const includeInactive = req.query.includeInactive === "true";
   const result = await db.execute(sql`
-    SELECT id, client_id, name, role, active, created_at,
-           (pin_hash IS NOT NULL) AS has_pin
-    FROM staff_roster
-    WHERE client_id = ${clientId}
-      ${includeInactive ? sql`` : sql`AND active = true`}
-    ORDER BY name ASC
+    SELECT sr.id, sr.client_id, sr.name, sr.role, sr.active, sr.created_at,
+           (sr.pin_hash IS NOT NULL) AS has_pin
+    FROM staff_roster sr
+    WHERE sr.client_id = ${clientId}
+      ${includeInactive ? sql`` : sql`AND sr.active = true`}
+      ${rosterScopeSql(req, clientId)}
+    ORDER BY sr.name ASC
   `);
   res.json(result.rows ?? []);
 });
@@ -372,6 +385,7 @@ router.get("/staff-roster", requireAuth, async (req, res) => {
     LEFT JOIN sites s ON s.id = sr.site_id AND s.client_id = sr.client_id
     WHERE sr.client_id = ${clientId}
       ${includeInactive !== "true" ? sql`AND sr.active = true` : sql``}
+      ${rosterScopeSql(req, clientId)}
     ORDER BY sr.name ASC
   `);
 
