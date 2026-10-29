@@ -7,6 +7,7 @@ import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { takeLinkParams } from "@/lib/deep-link";
 import { ChecklistItemRow } from "@/components/checklist-item-row";
 import { checklistProgress, submitHint, withResult, itemResult, type ChecklistResult } from "@/lib/checklist-results";
+import { scrollPageToTop } from "@/lib/page-scroll";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import {
@@ -1930,7 +1931,7 @@ export function DailyDiaryTab() {
       {/* Monthly completeness calendar */}
       <FoodSafetyCompletenessCalendar
         siteId={selectedSiteId}
-        onPickDay={(d) => { changeScope({ date: d, siteId: selectedSiteId }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+        onPickDay={(d) => { changeScope({ date: d, siteId: selectedSiteId }); scrollPageToTop(); }}
       />
     </div>
   );

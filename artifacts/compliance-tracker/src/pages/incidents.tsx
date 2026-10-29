@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -34,12 +34,14 @@ import {
 import {
   AlertOctagon, Plus, AlertTriangle, CheckCircle2, Clock,
   Pencil, Lock, Search, Filter, FileWarning,
-  ShieldAlert, UserX, Activity, Settings, Printer, FileText, Download,
+  ShieldAlert, UserX, Activity, Settings, Printer, FileText, Download, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { StringListEditor } from "@/components/string-list-editor";
 import { sortByLabel } from "@/lib/sort-options";
+import { localDate } from "@/lib/voice-log";
+import { useManagedBy } from "@/components/managed-by-badge";
 import { takeLinkParams } from "@/lib/deep-link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -86,6 +88,38 @@ function riddorDeadlineText(category: RiddorCategory, incidentDate: string): str
   reportBy?.setUTCDate(reportBy.getUTCDate() + days);
   const by = reportBy ? ` (by ${reportBy.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })})` : "";
   return `${RIDDOR_NOTIFY_NOW.has(category) ? "Notify the HSE without delay, and report" : "Report"} within ${days} days of the incident${by}.`;
+}
+
+// HSE's "How to make a RIDDOR report" page (online forms and phone line).
+const HSE_RIDDOR_REPORT_URL = "https://www.hse.gov.uk/riddor/report.htm";
+
+/** Link to the HSE RIDDOR reporting page, opening in a new tab. */
+function HseRiddorLink({ className, children = "Report on the HSE RIDDOR website" }: { className?: string; children?: ReactNode }) {
+  return (
+    <a href={HSE_RIDDOR_REPORT_URL} target="_blank" rel="noopener noreferrer"
+      className={cn("inline-flex items-center gap-1 font-medium underline underline-offset-2", className)}
+      data-testid="link-hse-riddor">
+      {children} <ExternalLink className="w-3 h-3" aria-hidden="true" />
+      <span className="sr-only">(opens in a new tab)</span>
+    </a>
+  );
+}
+
+/** "Speak to your adviser first" note with the HSE link, shown wherever RIDDOR is decided. */
+function RiddorAdviserNote({ className }: { className?: string }) {
+  const { data: managedBy } = useManagedBy();
+  const adviser = managedBy?.practiceName
+    ? <>your health and safety adviser at <strong>{managedBy.practiceName}</strong></>
+    : "your health and safety adviser";
+  return (
+    <div className={cn("text-xs space-y-1", className)} data-testid="riddor-adviser-note">
+      <p>
+        Not sure whether this needs reporting? We recommend you speak to {adviser} before
+        you report. They can help you decide and fill in the HSE form.
+      </p>
+      <HseRiddorLink />
+    </div>
+  );
 }
 
 interface Incident {
@@ -358,7 +392,8 @@ const emptyForm = () => ({
   incidentType: "" as string,
   severity: "" as string,
   status: "open" as Status,
-  incidentDate: new Date().toISOString().slice(0, 10),
+  // Today on this device (not UTC, which is yesterday after midnight in summer).
+  incidentDate: localDate(),
   incidentTime: "",
   location: "",
   description: "",
@@ -578,6 +613,8 @@ ${rows.map(r => `<tr>
   function openAdd() {
     setEditItem(null);
     const f = emptyForm();
+    // The person logging it, unless the template names a default reporter.
+    f.reportedBy = user?.name ?? "";
     f.incidentType = incidentTypeOptions[0] ?? "";
     f.severity = severityOptions[0] ?? "";
     if (incidentConfig?.incident_default_reporter) f.reportedBy = incidentConfig.incident_default_reporter;
@@ -827,7 +864,8 @@ ${rows.map(r => `<tr>
             <strong>{riddorOutstanding} RIDDOR-reportable incident{riddorOutstanding !== 1 ? "s have" : " has"} not yet been reported to the HSE.</strong>{" "}
             {riddorOverdue > 0
               ? <><strong>{riddorOverdue} {riddorOverdue === 1 ? "is" : "are"} past the RIDDOR reporting deadline.</strong> Report now.</>
-              : "RIDDOR reports must be submitted within the statutory timeframe."}
+              : "RIDDOR reports must be submitted within the statutory timeframe."}{" "}
+            <HseRiddorLink className="text-rose-900" />
           </span>
         </div>
       )}
@@ -1051,8 +1089,9 @@ ${rows.map(r => `<tr>
         <p>
           Under the Reporting of Injuries, Diseases and Dangerous Occurrences Regulations 2013 you must report certain workplace incidents to the HSE.
           This includes: deaths, specified injuries (fractures, amputations, loss of sight, crush injuries), over-7-day incapacitation, occupational diseases, and dangerous occurrences.
-          Most reports must be submitted within 10 days (15 days for over-7-day injuries). Report online at <span className="font-medium">riddor.hse.gov.uk</span> or by phone on 0345 300 9923.
+          Most reports must be submitted within 10 days (15 days for over-7-day injuries). Report online through the HSE website; deaths and specified injuries can also be reported by phone on 0345 300 9923.
         </p>
+        <RiddorAdviserNote className="mt-2" />
       </div>
 
       {/* Add / Edit dialog */}
@@ -1283,6 +1322,7 @@ ${rows.map(r => `<tr>
                   <p className="text-xs font-semibold text-orange-800 uppercase tracking-wider flex items-center gap-1.5">
                     <ShieldAlert className="w-3.5 h-3.5" /> RIDDOR Reporting
                   </p>
+                  <RiddorAdviserNote className="text-orange-900" />
                   <div className="flex items-start gap-3">
                     <Checkbox id="riddor" checked={form.riddorReportable}
                       onCheckedChange={v => setForm(f => ({
@@ -1344,7 +1384,7 @@ ${rows.map(r => `<tr>
                         <Checkbox id="hseReported" checked={form.reportedToHse}
                           onCheckedChange={v => setForm(f => ({ ...f, reportedToHse: !!v }))}
                           className="mt-0.5" />
-                        <Label htmlFor="hseReported" className="cursor-pointer">Reported to HSE (riddor.hse.gov.uk)</Label>
+                        <Label htmlFor="hseReported" className="cursor-pointer">Reported to HSE</Label>
                       </div>
 
                       {form.reportedToHse && (
@@ -1417,7 +1457,9 @@ ${rows.map(r => `<tr>
                         <div className="flex items-start gap-2 text-xs text-orange-800 bg-orange-100 rounded-sm px-3 py-2">
                           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                           <span>
-                            This incident must be reported to the HSE. Most reports must be submitted within 10 days (15 days for over-7-day injuries). Report at <strong>riddor.hse.gov.uk</strong> or call 0345 300 9923.
+                            This incident must be reported to the HSE. Most reports must be submitted within 10 days (15 days for over-7-day injuries).{" "}
+                            <HseRiddorLink>Report it on the HSE website</HseRiddorLink>{" "}
+                            (deaths and specified injuries can also be phoned in on 0345 300 9923).
                           </span>
                         </div>
                       )}

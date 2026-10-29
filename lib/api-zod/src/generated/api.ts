@@ -1989,6 +1989,7 @@ export const ListComplianceItemsResponseItem = zod.object({
   "frequencyMonths": zod.number().min(1).max(listComplianceItemsResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
@@ -2049,6 +2050,7 @@ export const CreateComplianceItemResponse = zod.object({
   "frequencyMonths": zod.number().min(1).max(createComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
@@ -2090,6 +2092,7 @@ export const GetComplianceItemResponse = zod.object({
   "frequencyMonths": zod.number().min(1).max(getComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
@@ -2151,6 +2154,7 @@ export const UpdateComplianceItemResponse = zod.object({
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
@@ -2178,11 +2182,14 @@ export const UpdateComplianceItemStatusParams = zod.object({
 })
 
 export const updateComplianceItemStatusBodyCompletedAtRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const updateComplianceItemStatusBodyCompletedInHouseByMax = 200;
+
 
 
 export const UpdateComplianceItemStatusBody = zod.object({
   "status": zod.enum(['pending', 'in_progress', 'completed', 'overdue']),
-  "completedAt": zod.string().regex(updateComplianceItemStatusBodyCompletedAtRegExp).nullish().describe('Date the check was done (YYYY-MM-DD), only with status completed. Not in the future in the account\'s timezone; defaults to today. The next due date is counted from it.')
+  "completedAt": zod.string().regex(updateComplianceItemStatusBodyCompletedAtRegExp).nullish().describe('Date the check was done (YYYY-MM-DD), only with status completed. Not in the future in the account\'s timezone; defaults to today. The next due date is counted from it.'),
+  "completedInHouseBy": zod.string().max(updateComplianceItemStatusBodyCompletedInHouseByMax).nullish().describe('Only with status completed. The competent person who did the check in house instead of a contractor; no contractor certificate is then due for this completion. Leave out (or null) for a contractor.')
 })
 
 export const updateComplianceItemStatusResponseFrequencyMonthsMax = 120;
@@ -2210,6 +2217,7 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "frequencyMonths": zod.number().min(1).max(updateComplianceItemStatusResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
+  "completedInHouseBy": zod.string().nullish().describe('The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).'),
   "notes": zod.string().nullish(),
   "needsAction": zod.boolean().optional().describe('The newest certificate is unsatisfactory or has open C1\/C2\/FI\/ID\/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date.\n'),
   "needsActionReason": zod.enum(['unsatisfactory', 'open_defects', 'certificate_outstanding']).nullish(),
