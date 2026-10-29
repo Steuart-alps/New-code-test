@@ -16,19 +16,22 @@ function rowTotal(row: TodayByDepartmentRow) {
 
 function countLabel(row: TodayByDepartmentRow) {
   const total = rowTotal(row);
-  if (total === 0) return "Nothing due or saved today";
+  if (total === 0) return "Nothing to do today";
   return `${row.done}/${total} done`;
 }
 
-/** One stacked bar: done, then failed, then not done yet, to scale. */
+/**
+ * One stacked bar: done, then failed, then not done yet, to scale. A bar
+ * with nothing due today has nothing left to do, so it is all green too.
+ */
 function Bar({ row }: { row: TodayByDepartmentRow }) {
   const total = rowTotal(row);
   const width = (count: number) => `${(count / total) * 100}%`;
   return (
     <span
-      className="flex h-3.5 w-full gap-0.5 overflow-hidden rounded-sm bg-muted"
+      className={cn("flex h-3.5 w-full gap-0.5 overflow-hidden rounded-sm", total === 0 ? "bg-emerald-500" : "bg-muted")}
       role="img"
-      aria-label={total === 0 ? "Nothing due or saved today" : `${row.done} done, ${row.failed} failed, ${row.todo} not done yet`}
+      aria-label={total === 0 ? "Nothing to do today" : `${row.done} done, ${row.failed} failed, ${row.todo} not done yet`}
     >
       {total > 0 && row.done > 0 && <i className="block h-full bg-emerald-500" style={{ width: width(row.done) }} />}
       {total > 0 && row.failed > 0 && <i className="block h-full bg-rose-500" style={{ width: width(row.failed) }} />}
@@ -51,7 +54,7 @@ function NothingOutstanding({ row, siteId }: { row: TodayByDepartmentRow; siteId
   return (
     <div className="space-y-1.5 border-t border-border/60 px-3 py-2 text-sm">
       <p className="text-muted-foreground">
-        {rowTotal(row) === 0 ? "Nothing was due or saved here today." : "Everything due here today is done."}
+        {rowTotal(row) === 0 ? "Nothing was due here today." : "Everything due here today is done."}
       </p>
       <p className="flex flex-wrap gap-x-4 gap-y-1">
         {links.map((link) => (
