@@ -42,7 +42,8 @@ try {
   for (const key of ['pest:visit', 'legionella:cold_tank_clean', 'legionella:calorifier_inspection', 'legionella:tmv_service',
     'legionella:risk_assessment', 'legionella:water_sampling', 'fire:alarm_service', 'fire:risk_assessment',
     'fire:sprinkler_service', 'fire:kitchen_suppression_service', 'fire:aov_service', 'fire:intruder_alarm_service', 'fire:cctv_service',
-    'pat:testing', 'green:service', 'green:examination', 'tree:visual_assessment', 'hot_tub:microbiological_test']) {
+    'pat:testing', 'green:service', 'green:puwer', 'green:loler_6_monthly', 'green:loler', 'green:nsts', 'green:examination', 'bike:service',
+    'coshh:lev_examination', 'tree:visual_assessment', 'hot_tub:microbiological_test']) {
     assert.ok(listed.types.some(type => type.key === key), `${key} is listed`);
     assert.ok(listed.visits.some(v => v.visitKey === key && v.siteId === siteA.id && v.checkId === null));
   }
@@ -166,6 +167,85 @@ try {
   assert.equal((await row('pat:testing', siteB.id)).trackDueDate, null, 'another site has no PAT date');
   console.log('ok - PAT testing, machine servicing and the tree survey are due from their tracks');
 
+  // ── GreenTrack: each kind of statutory inspection is its own line ─────────
+  const loader = await insertId(`INSERT INTO green_machines (client_id, site_id, name) VALUES ($1, $2, 'Loader') RETURNING id`, [owner.clientId, siteA.id]);
+  for (const [machineId, type, next] of [
+    [machine, 'thorough_examination', isoDay(90)], [loader, 'thorough_examination', isoDay(70)],
+    [loader, 'loler_examination', isoDay(30)], [loader, 'loler_examination_6_monthly', isoDay(45)],
+    [machine, 'nsts_test', isoDay(400)], [machine, 'annual_inspection', isoDay(15)],
+  ]) {
+    await pool.query(`INSERT INTO green_puwer_inspections (client_id, machine_id, inspection_date, next_inspection_date, inspection_type)
+      VALUES ($1, $2, $3, $4, $5)`, [owner.clientId, machineId, isoDay(-200), next, type]);
+  }
+  assert.equal((await row('green:puwer', siteA.id)).trackDueDate, isoDay(70), "the first machine's PUWER inspection");
+  assert.equal((await row('green:loler', siteA.id)).trackDueDate, isoDay(30));
+  assert.equal((await row('green:loler_6_monthly', siteA.id)).trackDueDate, isoDay(45), '6-monthly LOLER has its own line');
+  assert.equal((await row('green:nsts', siteA.id)).trackDueDate, isoDay(400));
+  assert.equal((await row('green:examination', siteA.id)).trackDueDate, isoDay(15), 'other inspections share one line');
+  await choose('green:loler', siteA.id, waterCo.id);
+  const loler = await row('green:loler', siteA.id);
+  assert.equal((await check(loler.checkId)).title, 'GreenTrack LOLER Thorough Examination');
+  assert.equal(loler.dueDate, isoDay(30));
+  console.log('ok - GreenTrack PUWER, LOLER (6-monthly and annual), NSTS and other inspections each have their own line and date');
+
+  // ── BikeTrack servicing and COSHHTrack LEV examinations ────────────────────
+  const bike = await insertId(`INSERT INTO bikes (client_id, site_id, ref) VALUES ($1, $2, 'B1') RETURNING id`, [owner.clientId, siteA.id]);
+  await pool.query(`INSERT INTO bike_services (client_id, bike_id, service_date, next_service_date) VALUES ($1, $2, $3, $4)`,
+    [owner.clientId, bike, isoDay(-300), isoDay(25)]);
+  await pool.query(`INSERT INTO coshh_checks (client_id, site_id, check_type, check_date, subject, next_due_date)
+    VALUES ($1, $2, 'lev_examination', $3, 'Workshop extraction', $4)`, [owner.clientId, siteA.id, isoDay(-400), isoDay(35)]);
+  assert.equal((await row('bike:service', siteA.id)).trackDueDate, isoDay(25));
+  assert.equal((await row('coshh:lev_examination', siteA.id)).trackDueDate, isoDay(35));
+  console.log('ok - bike servicing and LEV examinations are due from their tracks');
+
+  // ── No contractor needed ──────────────────────────────────────────────────
+  await choose('green:nsts', siteA.id, null, { notNeeded: true });
+  const nsts = await row('green:nsts', siteA.id);
+  assert.equal(nsts.notNeeded, true);
+  assert.equal(nsts.checkId, null, 'marking it creates no compliance check');
+  assert.equal((await row('green:nsts', siteB.id)).notNeeded, false, 'only at that site');
+  assert.equal((await owner.request('PUT', '/contractor-visits', { visitKey: 'green:puwer', siteId: siteA.id, contractorId: waterCo.id, notNeeded: true })).status, 400);
+  // A visit with a contractor loses it when marked, and a contractor clears the mark.
+  await choose('green:loler', siteA.id, null, { notNeeded: true });
+  const lolerNa = await row('green:loler', siteA.id);
+  assert.equal(lolerNa.notNeeded, true);
+  assert.equal(lolerNa.contractorId, null);
+  assert.equal((await check(loler.checkId)).contractorId, null);
+  await choose('green:loler', siteA.id, waterCo.id);
+  assert.equal((await row('green:loler', siteA.id)).notNeeded, false);
+  assert.equal((await row('green:loler', siteA.id)).contractorId, waterCo.id);
+  // A date typed on a visit keeps the mark.
+  await choose('legionella:water_sampling', siteB.id, null, { notNeeded: true });
+  await choose('legionella:water_sampling', siteB.id, null, { dueDate: isoDay(12) });
+  assert.equal((await row('legionella:water_sampling', siteB.id)).notNeeded, true);
+  assert.equal((await staff.request('PUT', '/contractor-visits', { visitKey: 'green:nsts', siteId: siteB.id, contractorId: null, notNeeded: true })).status, 403);
+  console.log('ok - a visit can be marked no contractor needed, and choosing a contractor clears it');
+
+  // ── The compliance check register's other checks ───────────────────────────
+  const gas = ok(await owner.request('POST', '/compliance-items', {
+    title: 'Gas Safety Certificate', siteId: siteA.id, dueDate: `${isoDay(60)}T00:00:00.000Z`, frequencyMonths: 12,
+  }), 201);
+  const register = async () => (await visits()).checks;
+  const gasRow = (await register()).find(c => c.checkId === gas.id);
+  assert.ok(gasRow, 'a register check is listed');
+  assert.equal(gasRow.siteName, 'Visits site A');
+  assert.equal(gasRow.notNeeded, false);
+  assert.ok(!(await register()).some(c => c.title === 'Pest Control Visit'), "a track visit's check is not listed twice");
+  ok(await owner.request('PUT', `/contractor-visits/checks/${gas.id}`, { contractorId: waterCo.id }));
+  assert.equal((await check(gas.id)).contractorId, waterCo.id);
+  ok(await owner.request('PUT', `/contractor-visits/checks/${gas.id}`, { contractorId: null, notNeeded: true }));
+  const gasNa = (await register()).find(c => c.checkId === gas.id);
+  assert.equal(gasNa.notNeeded, true);
+  assert.equal(gasNa.contractorId, null);
+  assert.equal((await check(gas.id)).contractorId, null);
+  ok(await owner.request('PUT', `/contractor-visits/checks/${gas.id}`, { contractorId: waterCo.id }));
+  assert.equal((await register()).find(c => c.checkId === gas.id).notNeeded, false);
+  const marks = (await pool.query(`SELECT count(*)::int AS n FROM audit_log WHERE client_id = $1 AND table_name = 'contractor_visit_not_needed'`,
+    [owner.clientId])).rows[0].n;
+  assert.ok(marks > 0, 'marking and clearing is in the audit log');
+  assert.equal((await staff.request('PUT', `/contractor-visits/checks/${gas.id}`, { contractorId: null, notNeeded: true })).status, 403);
+  console.log('ok - register checks take a contractor or no contractor needed too');
+
   // ── Only managers choose, and only their own business's contractors ────────
   const other = await createTenant('contractor-visits-other');
   const otherContractor = ok(await other.request('POST', '/contractors', { name: 'Other Co', email: 'other@contractor.test' }), 201);
@@ -173,6 +253,9 @@ try {
   assert.equal((await other.request('PUT', '/contractor-visits', { visitKey: 'pest:visit', siteId: siteA.id, contractorId: otherContractor.id })).status, 400);
   assert.equal((await staff.request('PUT', '/contractor-visits', { visitKey: 'pest:visit', siteId: siteA.id, contractorId: pestCo.id })).status, 403);
   assert.equal((await owner.request('PUT', '/contractor-visits', { visitKey: 'nope', siteId: siteA.id, contractorId: pestCo.id })).status, 400);
+  assert.equal((await other.request('PUT', `/contractor-visits/checks/${gas.id}`, { contractorId: null, notNeeded: true })).status, 404,
+    "another business cannot touch this business's checks");
+  assert.equal((await owner.request('PUT', `/contractor-visits/checks/${gas.id}`, { contractorId: otherContractor.id })).status, 400);
   console.log("ok - only a manager picks the contractor, from the business's own contractors");
 
   // ── A business-wide check counts at a business with one site ───────────────

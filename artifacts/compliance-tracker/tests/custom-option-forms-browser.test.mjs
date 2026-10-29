@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { chromium } from "@playwright/test";
+import { sortByLabel } from "../src/lib/sort-options.ts";
 
 // Browser regression for the record forms that use per-client dropdown lists:
 // the FixTrack contractor trades (src/components/contractor-form-dialog.tsx,
@@ -168,6 +169,8 @@ async function routeApi(route) {
       case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
       case "/api/fix-track/calendar-cancellations": return json(route, []);
       case "/api/managed-by": return json(route, null);
+      // Setup is finished, so the "Add your team first" gate stays out of the way.
+      case "/api/setup/state": return json(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
       case "/api/sites": return json(route, []);
       case "/api/staff-roster": return json(route, []);
       case "/api/compliance-items":
@@ -385,7 +388,7 @@ async function newInspection(page, clientId) {
   assert.equal((await trigger.textContent()).trim(), typeLabel(business.types.active[0]),
     `${clientId}: a new inspection starts on the first active type`);
   const options = await typeOptions(page, dialog);
-  assert.deepEqual(options, business.types.active.map(typeLabel), `${clientId}: a new inspection is offered exactly the active types`);
+  assert.deepEqual(options, sortByLabel(business.types.active.map(typeLabel), label => label), `${clientId}: a new inspection is offered exactly the active types, A to Z`);
   for (const value of [...business.types.disabled, ...foreignValues(clientId, "types")]) {
     assert.ok(!options.some(label => label.startsWith(typeLabel(value))), `${clientId}: "${value}" is not offered for a new inspection`);
   }
@@ -418,8 +421,8 @@ async function editInspection(page, clientId) {
   await page.waitForFunction(label => [...document.querySelectorAll("[role='dialog'] [role='combobox']")]
     .some(el => el.textContent.trim() === label), retiredLabel);
   const options = await typeOptions(page, dialog);
-  assert.deepEqual(options, [...business.types.active.map(typeLabel), retiredLabel],
-    `${clientId}: edit lists the active types plus the record's disabled type`);
+  assert.deepEqual(options, sortByLabel([...business.types.active.map(typeLabel), retiredLabel], label => label),
+    `${clientId}: edit lists the active types plus the record's disabled type, A to Z`);
   for (const value of [...business.types.disabled.filter(t => t !== record.inspectionType), ...foreignValues(clientId, "types")]) {
     assert.ok(!options.some(label => label.startsWith(typeLabel(value))), `${clientId}: "${value}" is not offered when editing`);
   }

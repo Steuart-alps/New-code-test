@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { MyDocumentsView } from "@/components/my-documents-view";
 import { AcknowledgementsDialog, type StaffMember } from "@/components/acknowledgements-dialog";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -484,7 +485,7 @@ function UploadDialog({
             <Select value={category} onValueChange={v => changeCategory(v as Category)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {categories.map(c => <SelectItem key={c} value={c}>{UPLOAD_CATEGORY_LABELS[c]}</SelectItem>)}
+                {sortByLabel(categories, c => UPLOAD_CATEGORY_LABELS[c]).map(c => <SelectItem key={c} value={c}>{UPLOAD_CATEGORY_LABELS[c]}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

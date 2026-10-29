@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Building2, CheckCircle2, ClipboardCheck, LayoutGrid, MapPin, Network, Plus, Sparkles, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Building2, CheckCircle2, ClipboardCheck, LayoutGrid, Lock, MapPin, Network, Plus, Sparkles, UsersRound, X } from "lucide-react";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
+import { SETUP_STATE_KEY, type SetupTeam } from "@/components/setup-team-gate";
+import { departmentLabel } from "@/lib/departments";
+import { roleLabel } from "@/lib/roles";
+import { UserDialog, type RosterEntry, type User as Person } from "@/pages/users";
 import {
   BUSINESS_TYPE_OPTIONS, DEPARTMENT_SUGGESTIONS, FIRST_RECORD_PRIORITY, MODULE_INFO, NATION_OPTIONS, RECOMMENDED_MODULES,
   formatDay, localToday, onboardingRequest,
@@ -21,20 +25,32 @@ type SetupState = {
   needsSetup: boolean; setupCompletedAt: string | null; canManage: boolean; businessType: string | null;
   deferredAt?: string | null; nation?: string | null; sites?: { id: number; name: string }[];
   modules?: { available: string[]; picked: string[] }; starterChecks?: StarterCheck[];
-  complimentary?: boolean;
+  complimentary?: boolean; team?: SetupTeam;
 };
-type Choice = { ticked: boolean; date: string };
+/**
+ * `partial` marks a date box with an unfinished date (the browser reports no
+ * value, so it would save as blank); `resetKey` remounts the box to empty it.
+ */
+type Choice = { ticked: boolean; date: string; partial?: boolean; resetKey?: number };
 /** A department sits under one site; `siteId` null means it spans every site. */
-type Department = { id: number; name: string; siteId: number | null };
+type Department = { id: number; name: string; siteId: number | null; siteName?: string | null; clientId: number };
 
 const STEPS = [
   { label: "Your business", icon: Building2 },
   { label: "Sites", icon: MapPin },
   { label: "Departments", icon: Network },
+  { label: "Your team", icon: UsersRound },
   { label: "Modules", icon: LayoutGrid },
   { label: "Starter checks", icon: ClipboardCheck },
   { label: "First record", icon: Sparkles },
 ];
+/**
+ * People come before modules, checks and the first record: every record
+ * should be in the name of the person who did it, so the steps after this
+ * one stay locked until there is a Manager or Staff login, or the Owner says
+ * only Owners record for now.
+ */
+const TEAM_STEP = 3;
 /** "12 months (every year)", "60 months (every 5 years)". */
 function intervalLabel(months: number): string {
   if (months % 12 !== 0) return `${months} month${months === 1 ? "" : "s"}`;
@@ -48,11 +64,13 @@ export default function SetupPage() {
   const { user, activeClientId, refresh } = useAuth();
   const clientId = user?.role === "consultant" ? activeClientId : null;
   const [, navigate] = useLocation();
+  const search = useSearch();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [state, setState] = useState<SetupState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [step, setStep] = useState(0);
+  // "Add your team" on a held-back form page opens the wizard at the team step.
+  const [step, setStep] = useState(() => new URLSearchParams(search).get("step") === "team" ? TEAM_STEP : 0);
   const [busy, setBusy] = useState(false);
   const [businessType, setBusinessType] = useState("");
   const [nation, setNation] = useState("");
@@ -69,6 +87,10 @@ export default function SetupPage() {
   const [copyDepartments, setCopyDepartments] = useState(true);
   const [departmentsLoaded, setDepartmentsLoaded] = useState(false);
   const [suggestionsOffered, setSuggestionsOffered] = useState(false);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [personOpen, setPersonOpen] = useState(false);
+  const [aloneOpen, setAloneOpen] = useState(false);
 
   async function load() {
     try {
@@ -84,7 +106,27 @@ export default function SetupPage() {
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Could not load setup");
     }
-    await loadDepartments();
+    await Promise.all([loadDepartments(), loadPeople()]);
+  }
+
+  async function loadPeople() {
+    try {
+      const [users, rosterRows] = await Promise.all([
+        onboardingRequest<Person[]>("/users", clientId),
+        onboardingRequest<RosterEntry[]>("/staff-roster", clientId).catch(() => [] as RosterEntry[]),
+      ]);
+      // ALPS consultants look after the business but aren't part of its team.
+      setPeople(users.filter((u) => u.role !== "consultant" || u.id === user?.id));
+      setRoster(rosterRows);
+    } catch {
+      // The team step still lets admins add people.
+    }
+  }
+
+  /** After someone is added or Owners-only is confirmed: refresh the step and unlock form pages. */
+  async function teamChanged() {
+    await load();
+    void queryClient.invalidateQueries({ queryKey: [SETUP_STATE_KEY] });
   }
 
   async function loadDepartments() {
@@ -145,6 +187,12 @@ export default function SetupPage() {
   const businessTypeLabel = BUSINESS_TYPE_OPTIONS.find((o) => o.value === businessType)?.label;
   const showCopyDepartments = sites.length > 1;
 
+  // Steps after the team stay closed until it is done (older servers send no team: open).
+  const teamReady = state?.team?.ready !== false;
+  useEffect(() => {
+    if (!teamReady && step > TEAM_STEP) setStep(TEAM_STEP);
+  }, [teamReady, step]);
+
   // First visit to the step with no departments yet: pre-tick the usual names.
   useEffect(() => {
     if (step !== 2 || !departmentsLoaded || suggestionsOffered) return;
@@ -191,8 +239,16 @@ export default function SetupPage() {
       const date = choices[c.title]?.date || null;
       return c.frequencyMonths ? { title: c.title, lastDone: date } : { title: c.title, nextDue: date };
     });
-    const result = await post("/setup/starter-checks", { siteId, checks, removeUnticked }) as { updated: number; created: number; removed: number };
-    toast({ title: "Starter checks saved", description: `${result.updated + result.created} set up${result.removed ? `, ${result.removed} removed` : ""}.` });
+    const result = await post("/setup/starter-checks", { siteId, checks, removeUnticked }) as { updated: number; created: number; kept: number; removed: number };
+    // Ticked checks already on the list with no date are "kept", but they are
+    // still on the list, so count them rather than report "0 set up".
+    const onList = result.updated + result.created + result.kept;
+    const dated = checks.filter((c) => c.lastDone || c.nextDue).length;
+    toast({
+      title: "Starter checks saved",
+      description: `${onList} check${onList === 1 ? "" : "s"} on your list${result.removed ? `, ${result.removed} removed` : ""}.`
+        + (dated < checks.length ? " Checks left without a date can be dated later from Compliance Checks." : ""),
+    });
     void queryClient.invalidateQueries();
   });
 
@@ -200,6 +256,12 @@ export default function SetupPage() {
     await post("/setup/defer", {});
     navigate("/dashboard");
   }, false);
+
+  const confirmOwnersOnly = () => run(async () => {
+    await post("/setup/team-alone", {});
+    setAloneOpen(false);
+    await teamChanged();
+  });
 
   const finish = (href = "/dashboard") => run(async () => {
     await post("/setup/complete", {});
@@ -228,21 +290,25 @@ export default function SetupPage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Getting started</p>
             <h1 className="text-2xl font-bold tracking-tight">Set up your account</h1>
-            <p className="text-sm text-muted-foreground mt-1">A few quick questions so your dashboard shows what applies to you. You can skip any step.</p>
+            <p className="text-sm text-muted-foreground mt-1">A few quick questions so your dashboard shows what applies to you. You can skip most steps, but your team comes before any checklists or forms.</p>
           </div>
           <Button variant="outline" size="sm" onClick={finishLater} disabled={busy}>Finish later</Button>
         </div>
 
-        <ol className="grid grid-cols-6 gap-1" aria-label="Setup steps">
-          {STEPS.map(({ label, icon: Icon }, i) => (
+        <ol className="grid grid-cols-7 gap-1" aria-label="Setup steps">
+          {STEPS.map(({ label, icon: Icon }, i) => {
+            const locked = i > TEAM_STEP && !teamReady;
+            return (
             <li key={label}>
-              <button type="button" onClick={() => setStep(i)} aria-current={i === step ? "step" : undefined}
+              <button type="button" onClick={() => setStep(locked ? TEAM_STEP : i)} aria-current={i === step ? "step" : undefined}
+                title={locked ? "Add your team first" : undefined}
                 className={`w-full flex flex-col items-center gap-1 rounded-md p-1.5 text-[11px] leading-tight ${i === step ? "bg-primary/10 text-primary font-semibold" : i < step ? "text-foreground" : "text-muted-foreground"}`}>
-                <Icon className="w-4 h-4" />
+                {locked ? <Lock className="w-4 h-4" aria-label="Locked until your team is added" /> : <Icon className="w-4 h-4" />}
                 <span className="hidden sm:block text-center">{label}</span>
               </button>
             </li>
-          ))}
+            );
+          })}
         </ol>
         <p className="sm:hidden text-sm font-medium">Step {step + 1} of {STEPS.length}: {STEPS[step].label}</p>
 
@@ -404,7 +470,71 @@ export default function SetupPage() {
               </>
             )}
 
-            {step === 3 && (
+            {step === TEAM_STEP && (
+              <>
+                <div>
+                  <h2 className="text-lg font-bold">Who will record checks?</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Add the people who will fill in checklists and forms before anything is recorded, so every record is in the name of the person who did it.
+                    Each person gets an email to set their own password.
+                  </p>
+                </div>
+                {people.length > 0 && (
+                  <ul className="space-y-1.5" aria-label="Your team">
+                    {people.map((p) => {
+                      const ids = p.departmentIds ?? (p.departmentId != null ? [p.departmentId] : []);
+                      const where = p.role === "client_admin" || p.role === "consultant" || p.allDepartments ? "All departments"
+                        : ids.map((id) => departmentLabel(departments.find((d) => d.id === id))).filter(Boolean).join(", ") || "No department";
+                      return (
+                        <li key={p.id} className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                          <span className="min-w-0">
+                            <span className="block font-medium truncate">{p.name}{p.id === user?.id ? " (you)" : ""}</span>
+                            <span className="block text-xs text-muted-foreground truncate">{where}</span>
+                          </span>
+                          <span className="shrink-0 rounded-full border bg-background px-2.5 py-0.5 text-xs">{roleLabel(p.role, user?.role === "consultant")}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                <Button variant="outline" onClick={() => setPersonOpen(true)} disabled={busy}>
+                  <Plus className="w-4 h-4 mr-1" /> Add a person
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Staff record checks for their own department. Managers look after one, several or all departments.
+                  Viewers only see and sign their own training. People who never sign in can go on
+                  the <Link href="/staff-roster" className="text-primary hover:underline">Staff roster</Link> for training records.
+                </p>
+                {!teamReady && aloneOpen && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2 text-sm text-amber-950" role="alert">
+                    <p className="flex items-start gap-2 font-medium">
+                      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> Every record will be in an Owner's name
+                    </p>
+                    <p className="text-xs">
+                      Only do this if nobody else will sign in yet. Checks done by other people would then look as if an Owner did them.
+                      You can add people at any time from Users.
+                    </p>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setAloneOpen(false)} disabled={busy}>Back</Button>
+                      <Button size="sm" onClick={confirmOwnersOnly} disabled={busy}>Yes, only Owners record for now</Button>
+                    </div>
+                  </div>
+                )}
+                {!teamReady && !aloneOpen && (
+                  <p className="text-xs text-muted-foreground">Add at least one Manager or Staff member to carry on. Checklists and forms stay closed until you do.</p>
+                )}
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  {!teamReady && !aloneOpen && (
+                    <Button variant="ghost" onClick={() => setAloneOpen(true)} disabled={busy}>Nobody else signs in yet</Button>
+                  )}
+                  <Button onClick={() => setStep(TEAM_STEP + 1)} disabled={busy || !teamReady}>
+                    Continue <ArrowRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {step === 4 && teamReady && (
               <>
                 <div>
                   <h2 className="text-lg font-bold">Which modules do you want to start with?</h2>
@@ -426,11 +556,11 @@ export default function SetupPage() {
                     ))}
                   </div>
                 )}
-                <StepActions busy={busy} onSave={saveModules} onSkip={() => setStep(4)} />
+                <StepActions busy={busy} onSave={saveModules} onSkip={() => setStep(5)} />
               </>
             )}
 
-            {step === 4 && (
+            {step === 5 && teamReady && (
               <>
                 <div>
                   <h2 className="text-lg font-bold">Starter compliance checks</h2>
@@ -465,11 +595,28 @@ export default function SetupPage() {
                                   <Label htmlFor={`${id}-date`} className="text-xs font-normal text-muted-foreground">
                                     {c.frequencyMonths ? "Last done" : "Next due"}
                                   </Label>
-                                  <Input id={`${id}-date`} type="date" className="h-8 w-auto text-sm" value={choice.date}
+                                  <Input key={choice.resetKey ?? 0} id={`${id}-date`} type="date" className="h-8 w-auto text-sm" value={choice.date}
                                     max={c.frequencyMonths ? localToday() : undefined}
-                                    onChange={(e) => setChoices((all) => ({ ...all, [c.title]: { ...choice, date: e.target.value } }))} />
+                                    onChange={(e) => {
+                                      const date = e.target.value;
+                                      setChoices((all) => ({ ...all, [c.title]: { ...(all[c.title] ?? choice), date, partial: !date && e.target.validity.badInput } }));
+                                    }}
+                                    onBlur={(e) => {
+                                      const partial = e.currentTarget.validity.badInput;
+                                      setChoices((all) => ({ ...all, [c.title]: { ...(all[c.title] ?? choice), partial } }));
+                                    }} />
                                   {choice.date && <span className="text-xs text-muted-foreground">{formatDay(choice.date)}</span>}
-                                  {!choice.date && <span className="text-xs text-muted-foreground">Leave blank if you are not sure</span>}
+                                  {choice.date || choice.partial ? (
+                                    <button type="button" className="text-xs text-primary hover:underline"
+                                      onClick={() => setChoices((all) => ({ ...all, [c.title]: { ...(all[c.title] ?? choice), date: "", partial: false, resetKey: (all[c.title]?.resetKey ?? 0) + 1 } }))}>
+                                      Clear date (not sure)
+                                    </button>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">Leave blank if you are not sure</span>
+                                  )}
+                                  {choice.partial && !choice.date && (
+                                    <span className="basis-full text-xs text-amber-700">This date is not finished, so it will be saved blank. Finish it or clear it.</span>
+                                  )}
                                 </div>
                               )}
                             </li>
@@ -493,11 +640,11 @@ export default function SetupPage() {
                   </div>
                 )}
                 {siteId == null && <p className="text-xs text-muted-foreground">Add a site first to attach these checks to it; otherwise they apply to the whole business.</p>}
-                <StepActions busy={busy} onSave={saveChecks} onSkip={() => setStep(5)} saveLabel="Save checks" />
+                <StepActions busy={busy} onSave={saveChecks} onSkip={() => setStep(6)} saveLabel="Save checks" />
               </>
             )}
 
-            {step === 5 && (
+            {step === 6 && teamReady && (
               <>
                 <div>
                   <h2 className="text-lg font-bold">Record your first check</h2>
@@ -523,6 +670,22 @@ export default function SetupPage() {
           </section>
         )}
       </div>
+      <UserDialog
+        open={personOpen}
+        onClose={() => setPersonOpen(false)}
+        onSaved={(notice) => {
+          if (notice) toast({ title: notice.kind === "error" ? "Invite email not sent" : "Person added", description: notice.text, variant: notice.kind === "error" ? "destructive" : undefined });
+          void teamChanged();
+        }}
+        user={null}
+        departments={departments.map((d) => ({ ...d, siteId: d.siteId ?? null }))}
+        roster={roster}
+        clientId={clientId}
+        isConsultant={user?.role === "consultant"}
+        currentUserId={user?.id ?? null}
+        actor={user ? { role: user.role, departmentId: user.departmentId, departmentIds: user.departmentIds, allDepartments: user.allDepartments } : null}
+        defaultRole="client_staff"
+      />
     </AppLayout>
   );
 }

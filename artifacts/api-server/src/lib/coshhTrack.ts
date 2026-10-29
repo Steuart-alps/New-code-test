@@ -21,8 +21,9 @@ export const COSHH_DUE_SOON_DAYS = 30;
 
 /** Suggested months to the next check when none is entered. */
 export const COSHH_DEFAULT_INTERVAL_MONTHS: Record<CoshhCheckType, number> = {
-  // COSHH regulation 9: a thorough examination and test at least every 14 months.
-  lev_examination: 14,
+  // COSHH regulation 9 allows up to 14 months between thorough examinations;
+  // a yearly contractor visit is the usual practice.
+  lev_examination: 12,
   health_surveillance: 12,
   exposure_monitoring: 12,
   staff_briefing: 12,

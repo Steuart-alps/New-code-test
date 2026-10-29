@@ -8,14 +8,17 @@ import { sitesTableVisibleTo } from "../lib/departmentSites";
 import { appendAuditEvent } from "../lib/audit";
 import { supersedeStaleReminderCycles } from "../lib/reminderCycles";
 import {
-  entitledVisitTypes, linkedVisitChecks, syncContractorVisitChecks, trackDueDates,
+  VISIT_CHECK_TITLES, entitledVisitTypes, linkedVisitChecks, notNeededChoices, setNotNeeded, syncContractorVisitChecks,
+  trackDueDates,
 } from "../lib/contractorVisits";
 import { FOLLOW_UP_AFTER_DAYS, LOOK_BACK_DAYS, getVisitsAwaitingCertificate } from "../lib/certificateFollowUp";
 import { getAccountTimezone, localDateIn } from "../lib/accountClock";
 
 /**
  * Contractor visits kept on the tracks, one row per visit type and site, with
- * the contractor who gets the reminder (lib/contractorVisits.ts).
+ * the contractor who gets the reminder (lib/contractorVisits.ts), and the
+ * other checks in the compliance check register (gas safety, EICR...). Each
+ * can instead be marked "No contractor needed".
  */
 const router = Router();
 
@@ -36,7 +39,13 @@ router.get("/contractor-visits", requireAuth, async (req, res) => {
     db.select({ id: contractorsTable.id, name: contractorsTable.name, company: contractorsTable.company, email: contractorsTable.email })
       .from(contractorsTable).where(eq(contractorsTable.clientId, clientId)).orderBy(contractorsTable.name),
   ]);
-  const [due, linked] = await Promise.all([trackDueDates(clientId, types), linkedVisitChecks(clientId, types)]);
+  const [due, linked, notNeeded, register] = await Promise.all([
+    trackDueDates(clientId, types),
+    linkedVisitChecks(clientId, types),
+    notNeededChoices(clientId),
+    db.select().from(complianceItemsTable).where(eq(complianceItemsTable.clientId, clientId))
+      .orderBy(complianceItemsTable.title, complianceItemsTable.id),
+  ]);
   const checkFor = new Map(linked.map((link) => [`${link.type.key}@${link.siteId}`, link.check]));
   const contractorById = new Map(contractors.map((contractor) => [contractor.id, contractor]));
 
@@ -55,13 +64,38 @@ router.get("/contractor-visits", requireAuth, async (req, res) => {
       contractorId: contractor?.id ?? null,
       contractorName: contractor ? [contractor.name, contractor.company].filter(Boolean).join(", ") : null,
       reminderSentAt: check?.notificationSentAt ? new Date(check.notificationSentAt).toISOString() : null,
+      notNeeded: !contractor && notNeeded.visits.has(`${type.key}@${site.id}`),
     };
   }));
+
+  // The register's other checks: not a track visit's, not a finished one-off,
+  // and business-wide or at a site the user can see.
+  const siteName = new Map(sites.map((site) => [site.id, site.name]));
+  const checks = register
+    .filter((check) => !VISIT_CHECK_TITLES.has(check.title.trim().toLowerCase()))
+    .filter((check) => !(check.status === "completed" && check.frequencyMonths == null))
+    .filter((check) => check.siteId == null || siteName.has(check.siteId))
+    .map((check) => {
+      const contractor = check.contractorId != null ? contractorById.get(check.contractorId) : undefined;
+      return {
+        checkId: check.id,
+        title: check.title,
+        siteId: check.siteId,
+        siteName: check.siteId == null ? null : siteName.get(check.siteId)!,
+        dueDate: day(check.dueDate),
+        status: check.status,
+        contractorId: contractor?.id ?? null,
+        contractorName: contractor ? [contractor.name, contractor.company].filter(Boolean).join(", ") : null,
+        reminderSentAt: check.notificationSentAt ? new Date(check.notificationSentAt).toISOString() : null,
+        notNeeded: !contractor && notNeeded.checks.has(check.id),
+      };
+    });
 
   res.json({
     types: types.map(({ key, module, trackLabel, title, label, description, dueFrom, trades }) =>
       ({ key, module, trackLabel, title, label, description, dueFrom, trades: [...(trades ?? [])] })),
     visits,
+    checks,
   });
 });
 
@@ -112,6 +146,9 @@ const VisitBody = z.object({
   /** Only for a visit the track gives no date for: water sampling, or a
    *  site with nothing recorded on the track yet. */
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  /** true: no contractor is needed (contractorId must be null); false clears
+   *  that. Picking a contractor clears it too. */
+  notNeeded: z.boolean().optional(),
 });
 
 /**
@@ -123,7 +160,8 @@ router.put("/contractor-visits", requireAuth, requireClientAdmin, denyViewers, a
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const body = VisitBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
-  const { visitKey, siteId, contractorId } = body.data;
+  const { visitKey, siteId, contractorId, notNeeded } = body.data;
+  if (notNeeded && contractorId != null) return res.status(400).json({ error: "Choose a contractor or no contractor needed, not both" });
 
   const type = (await entitledVisitTypes(clientId)).find((candidate) => candidate.key === visitKey);
   if (!type) return res.status(400).json({ error: "Unknown visit for this business's tracks" });
@@ -170,8 +208,56 @@ router.put("/contractor-visits", requireAuth, requireClientAdmin, denyViewers, a
       after: created, metadata: { contractorVisit: visitKey },
     });
   }
+  if (notNeeded !== undefined || contractorId != null) {
+    await setNotNeeded(clientId, { visitKey, siteId }, notNeeded === true, req.currentUser?.id ?? null);
+  }
   // A new check takes the track's due date straight away.
   await syncContractorVisitChecks(clientId, [visitKey]);
+  res.json({ ok: true });
+});
+
+const CheckBody = z.object({
+  contractorId: z.number().int().positive().nullable(),
+  notNeeded: z.boolean().optional(),
+});
+
+/**
+ * Choose the contractor reminded about a check in the compliance check
+ * register, or mark it as needing none.
+ */
+router.put("/contractor-visits/checks/:checkId", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const checkId = Number(req.params.checkId);
+  if (!Number.isInteger(checkId) || checkId <= 0) return res.status(400).json({ error: "Invalid checkId" });
+  const body = CheckBody.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.flatten() });
+  const { contractorId, notNeeded } = body.data;
+  if (notNeeded && contractorId != null) return res.status(400).json({ error: "Choose a contractor or no contractor needed, not both" });
+
+  const [existing] = await db.select().from(complianceItemsTable)
+    .where(and(eq(complianceItemsTable.id, checkId), eq(complianceItemsTable.clientId, clientId))).limit(1);
+  if (!existing) return res.status(404).json({ error: "Check not found" });
+  if (contractorId != null) {
+    const [contractor] = await db.select({ id: contractorsTable.id }).from(contractorsTable)
+      .where(and(eq(contractorsTable.id, contractorId), eq(contractorsTable.clientId, clientId))).limit(1);
+    if (!contractor) return res.status(400).json({ error: "Invalid contractorId" });
+  }
+  if (existing.contractorId !== contractorId) {
+    let after: typeof existing | undefined;
+    await db.transaction(async (tx) => {
+      [after] = await tx.update(complianceItemsTable).set({ contractorId, updatedAt: new Date() })
+        .where(and(eq(complianceItemsTable.id, existing.id), eq(complianceItemsTable.clientId, clientId))).returning();
+      await supersedeStaleReminderCycles(tx, clientId, existing.id);
+    });
+    await appendAuditEvent(req, {
+      clientId, entityType: "compliance_item", entityId: existing.id, action: "updated",
+      before: existing, after, metadata: { contractorChoice: true },
+    });
+  }
+  if (notNeeded !== undefined || contractorId != null) {
+    await setNotNeeded(clientId, { checkId }, notNeeded === true, req.currentUser?.id ?? null);
+  }
   res.json({ ok: true });
 });
 

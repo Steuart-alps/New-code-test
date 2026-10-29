@@ -41,7 +41,9 @@ try {
   assert.deepEqual(group(fresh, siteA).rows.filter(r => r.kind === 'department').map(r => r.name),
     ['Housekeeping', 'Kitchen', 'Office'], 'site A shows its own departments and the every-site one');
   assert.deepEqual(group(fresh, siteB).rows.filter(r => r.kind === 'department').map(r => r.name), ['Bar', 'Office']);
-  assert.equal(row(group(fresh, siteA), 'Kitchen').done + row(group(fresh, siteA), 'Kitchen').todo, 0);
+  assert.deepEqual(row(group(fresh, siteA), 'Kitchen').items.map(i => i.label), ['Kitchen opening checks', 'Kitchen closing checks'],
+    'the Kitchen has only its opening and closing checks to do');
+  assert.equal(row(group(fresh, siteA), 'Housekeeping').done + row(group(fresh, siteA), 'Housekeeping').todo, 0);
 
   // Today's work. The submitter's department comes from the database trigger.
   await pool.query(
@@ -71,15 +73,22 @@ try {
   const a = group(full, siteA);
   const b = group(full, siteB);
   const wholeA = row(a, 'Whole site');
-  assert.ok(wholeA, 'daily checklists appear under Whole site');
-  assert.equal(wholeA.failed, 1, 'a submitted checklist with a failed item counts as failed');
-  assert.ok(wholeA.items.some(i => i.status === 'failed' && i.label === 'Kitchen opening checks'));
+  assert.ok(wholeA, 'premises checklists appear under Whole site');
   assert.ok(wholeA.todo >= 1, 'checklists not submitted yet are outstanding');
-  assert.equal(wholeA.items[0].status, 'failed', 'failed items are listed first');
+  assert.ok(wholeA.items.every(i => !i.label.startsWith('Kitchen ')), 'kitchen checklists are not under Whole site when there is a Kitchen');
+  // Kitchen opening / closing checks belong to the site's Kitchen department.
+  const kitchenA = row(a, 'Kitchen');
   assert.deepEqual(
-    { done: row(a, 'Kitchen').done, failed: row(a, 'Kitchen').failed, todo: row(a, 'Kitchen').todo },
-    { done: 0, failed: 1, todo: 0 }, 'the failed fire check counts for the submitter\'s department');
-  assert.equal(row(a, 'Kitchen').items[0].path, '/fire-safety');
+    { done: kitchenA.done, failed: kitchenA.failed, todo: kitchenA.todo },
+    { done: 0, failed: 2, todo: 1 }, 'failed fire check + failed kitchen opening; kitchen closing still to do');
+  assert.ok(kitchenA.items.some(i => i.status === 'failed' && i.label === 'Kitchen opening checks'
+    && i.path === `/daily-track-am?siteId=${siteA}`), 'a submitted checklist with a failed item counts as failed');
+  assert.ok(kitchenA.items.some(i => i.status === 'todo' && i.label === 'Kitchen closing checks'
+    && i.path === `/daily-track-pm?siteId=${siteA}`));
+  assert.ok(kitchenA.items.some(i => i.path === '/fire-safety'), 'the failed fire check counts for the submitter\'s department');
+  assert.deepEqual(kitchenA.items.map(i => i.status), ['failed', 'failed', 'todo'], 'failed items are listed first');
+  // Site B has no Kitchen: its kitchen checklists stay under Whole site.
+  assert.ok(row(b, 'Whole site').items.some(i => i.label === 'Kitchen opening checks'));
   assert.deepEqual(
     { done: row(a, 'Housekeeping').done, todo: row(a, 'Housekeeping').todo },
     { done: 1, todo: 1 }, 'a passed check is done; the task due today is outstanding');
@@ -108,7 +117,7 @@ try {
   const maintenanceView = await card(maintenance);
   assert.deepEqual(maintenanceView.groups.map(g => g.siteId), [siteA]);
   assert.deepEqual(maintenanceView.groups[0].rows.filter(r => r.kind === 'department').map(r => r.name), ['Kitchen']);
-  assert.equal(row(maintenanceView.groups[0], 'Kitchen').failed, 1);
+  assert.equal(row(maintenanceView.groups[0], 'Kitchen').failed, 2);
 
   // Staff don't see the card unless the Owner turns them on.
   const hidden = await housekeepingStaff.request('GET', '/dashboard/today-by-department');
