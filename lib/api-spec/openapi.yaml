@@ -7,6 +7,8 @@ servers:
   - url: /api
     description: Base API path
 tags:
+  - name: record-signatures
+    description: Drawn signatures on recorded checks
   - name: billing
     description: Subscription add-ons
   - name: health
@@ -1325,6 +1327,57 @@ paths:
                 $ref: "#/components/schemas/OkResponse"
         "404":
           description: Not a waiting certificate of this business
+
+  /record-signatures:
+    post:
+      operationId: createRecordSignature
+      tags: [record-signatures]
+      summary: Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+      description: >-
+        Returns a one-use token. The web app sends the save again with the
+        token in the X-Record-Signature header after the API answered it with
+        428 SIGNATURE_REQUIRED; the signature is then linked to the saved
+        record. Unused signatures are removed after a day.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRecordSignatureRequest"
+      responses:
+        "201":
+          description: The token to send with the save
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordSignatureToken"
+        "400":
+          description: No usable drawing
+    get:
+      operationId: listRecordSignatures
+      tags: [record-signatures]
+      summary: Signatures on recorded checks of one type, for history lists
+      parameters:
+        - name: recordType
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: ids
+          in: query
+          required: true
+          description: Up to 200 record ids, comma separated
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The signatures, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RecordSignature"
 
   /contractor-sign-in/sites:
     get:
@@ -6877,6 +6930,10 @@ components:
           nullable: true
         active:
           type: boolean
+        openingStock:
+          type: number
+          nullable: true
+          description: Only when adding a product. The amount in stock now, saved as a stock count dated today.
     GreenTrackStockLedgerEntry:
       type: object
       required: [key, kind, productId, date, change, balance]
@@ -6885,7 +6942,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [delivery, count, write_off, application]
+          enum: [delivery, count, write_off, use, application]
         productId:
           type: integer
         date:
@@ -6937,10 +6994,10 @@ components:
           format: date
         kind:
           type: string
-          enum: [delivery, count, write_off]
+          enum: [delivery, count, write_off, use]
         quantity:
           type: number
-          description: Signed change (a write-off is negative; a count is 0)
+          description: Signed change (a write-off or use is negative; a count is 0)
         countedQuantity:
           type: number
           nullable: true
@@ -6973,10 +7030,10 @@ components:
           format: date
         kind:
           type: string
-          enum: [delivery, count, write_off]
+          enum: [delivery, count, write_off, use]
         quantity:
           type: number
-          description: Delivered or written-off quantity (above 0)
+          description: Delivered, written-off or used quantity (above 0). "use" is refused for pesticides, whose use goes in a spraying record.
         countedQuantity:
           type: number
           description: The quantity counted, for a stock count
@@ -8129,6 +8186,38 @@ components:
           items: { type: string }
           description: Things that could not be read with confidence.
       required: [certificateType, name, itemId, checkReason, newCheck, contractorName, issueDate, nextInspectionDate, nextInspectionSource, outcome, summary, defects, unclear]
+
+    CreateRecordSignatureRequest:
+      type: object
+      properties:
+        strokes:
+          type: array
+          description: Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box
+          items:
+            type: array
+            items: { type: integer }
+      required: [strokes]
+
+    RecordSignatureToken:
+      type: object
+      properties:
+        token: { type: string }
+        expiresInMinutes: { type: integer }
+      required: [token, expiresInMinutes]
+
+    RecordSignature:
+      type: object
+      properties:
+        recordType: { type: string }
+        recordId: { type: integer }
+        signerName: { type: string, description: "The name of the login that signed" }
+        signedAt: { type: string, format: date-time }
+        strokes:
+          type: array
+          items:
+            type: array
+            items: { type: integer }
+      required: [recordType, recordId, signerName, signedAt, strokes]
 
     ContractorSignInSites:
       type: object
@@ -10388,6 +10477,9 @@ components:
           type: string
         green_default_operators:
           type: string
+        green_default_site_id:
+          type: string
+          description: The site new machines and the Daily checks tab start on ("" for none)
 
     IncidentConfig:
       type: object
@@ -11899,7 +11991,7 @@ components:
 
     EquipmentLabelKind:
       type: string
-      enum: [green_machine, pat_appliance, hot_tub, fire_call_point, water_outlet, bike, room, cold_unit, equipment]
+      enum: [green_machine, pat_appliance, hot_tub, fire_call_point, water_outlet, bike, room, cold_unit, equipment, track_point]
 
     EquipmentLinkedCheck:
       type: object
@@ -12031,7 +12123,7 @@ components:
           $ref: "#/components/schemas/EquipmentLabelKind"
         ref:
           type: string
-          description: The record's id, or "<siteId or 0>:<unit id>" for a kitchen fridge or freezer.
+          description: The record's id, "<siteId or 0>:<unit id>" for a kitchen fridge or freezer, or "<point>:<siteId or 0>" for a track's checks at a site.
       required: [kind, ref]
 
     EquipmentLabelSheetRequest:

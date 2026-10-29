@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useAuth } from "@/context/auth-context";
 import { useFileDrop } from "@/hooks/use-file-drop";
+import { useCameraCapture } from "@/components/camera-capture";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -219,6 +220,7 @@ export function CheckPhotoUploader({
     }
   };
   const drop = useFileDrop((files) => { void uploadFiles(files); }, !readOnly && !uploading);
+  const camera = useCameraCapture((files) => { void uploadFiles(files); }, { fileInput: () => cameraInputRef.current });
   const dropProps = readOnly ? {} : drop.dropZoneProps;
   const dropHighlight = drop.isDragging && "rounded-sm ring-2 ring-primary ring-offset-2 bg-primary/5";
 
@@ -284,6 +286,7 @@ export function CheckPhotoUploader({
         aria-hidden="true"
         onChange={handleFileChange}
       />
+      {camera.dialog}
     </>
   );
   const status = (
@@ -379,7 +382,7 @@ export function CheckPhotoUploader({
           <button
             type="button"
             disabled={uploading}
-            onClick={() => cameraInputRef.current?.click()}
+            onClick={camera.open}
             className={cn(
               "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border border-border text-xs font-medium cursor-pointer",
               "hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-default",

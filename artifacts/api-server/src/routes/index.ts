@@ -61,6 +61,7 @@ import calendarRouter from "./calendar";
 import privacyGovernanceRouter from "./privacy-governance";
 import privacyIntakePublicRouter from "./privacy-intake-public";
 import contractorSignInRouter, { siteSignInPublicRouter } from "./contractor-sign-in";
+import recordSignaturesRouter from "./record-signatures";
 import dashboardSummaryRouter from "./dashboard-summary";
 import dashboardTodayRouter from "./dashboard-today";
 import complianceHubRouter from "./compliance-hub";
@@ -188,6 +189,7 @@ router.use("/registers", requireAuth, allergenRecipesRouter);
 router.use("/coshh-track", requireAuth, requireService("coshhtrack"), coshhTrackRouter);
 // Contractor sign-in on arrival: set-up, who is on site, past visits.
 router.use("/contractor-sign-in", contractorSignInRouter);
+router.use("/record-signatures", recordSignaturesRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
 router.use(exportRouter);

@@ -39,6 +39,16 @@ const MACHINE_TYPE_ALIASES: Record<string, string> = {
   "walk behind mower": "walk_behind",
   "ride-on cylinder": "ride_on_cylinder",
   "ride-on rotary": "ride_on_rotary",
+  ride_on_greens_mower: "greens_mower_ride_on",
+  triple_greens_mower: "greens_mower_ride_on",
+  triplex_greens_mower: "greens_mower_ride_on",
+  greens_mower_ride_on_mower: "greens_mower_ride_on",
+  hand_greens_mower: "greens_mower_hand",
+  pedestrian_greens_mower: "greens_mower_hand",
+  walk_behind_greens_mower: "greens_mower_hand",
+  greens_mower_pedestrian: "greens_mower_hand",
+  greens_mower_walk_behind: "greens_mower_hand",
+  greens_mower_hand_mower: "greens_mower_hand",
   "fairway": "fairway_mower",
   "utility": "utility_vehicle",
   "sprayer": "sprayer_spreader",
@@ -1349,11 +1359,13 @@ router.get("/status", async (req, res) => {
 const GREEN_CONFIG_KEYS = [
   "green_default_operators", // JSON: string[]
   "green_show_fuel",         // "true"|"false"
+  "green_default_site_id",   // a site id, or "" for none
 ] as const;
 
 const GREEN_DEFAULT_CONFIG = {
   green_default_operators: "",
   green_show_fuel: "true",
+  green_default_site_id: "",
 };
 
 router.get("/config", requireAuth, async (req, res) => {
@@ -1369,10 +1381,17 @@ router.get("/config", requireAuth, async (req, res) => {
   res.json(config);
 });
 
-router.put("/config", requireAuth, denyViewers, async (req, res) => {
+router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const updates = req.body as Record<string, string>;
+  if ("green_default_site_id" in updates) {
+    const siteId = String(updates.green_default_site_id ?? "").trim();
+    if (siteId && !(/^\d+$/.test(siteId) && await siteBelongsToClient(Number(siteId), clientId))) {
+      return res.status(400).json({ error: "The default site must be one of this business's sites" });
+    }
+    updates.green_default_site_id = siteId;
+  }
   for (const key of GREEN_CONFIG_KEYS) {
     if (key in updates) {
       const existing = await db.select({ id: appSettingsTable.clientId }).from(appSettingsTable)

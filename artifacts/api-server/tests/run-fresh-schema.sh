@@ -87,6 +87,11 @@ if [ "${FRESH_SCHEMA_CERTIFICATE_INBOX:-}" = "1" ]; then
   server_policy+=("${inbox_env[@]}")
   suite_browser+=("${inbox_env[@]}")
 fi
+# FRESH_SCHEMA_RECORD_SIGNATURES=1 makes the server ask for a drawn signature on
+# recorded checks, as in production (other suites predate signatures).
+if [ "${FRESH_SCHEMA_RECORD_SIGNATURES:-}" = "1" ]; then
+  server_policy+=(ENFORCE_RECORD_SIGNATURES=1)
+fi
 if [ "${FRESH_SCHEMA_BROWSER_POLICY:-}" = "1" ]; then
   server_policy+=(ENFORCE_CSRF=1 ENFORCE_MANDATORY_2FA=1 PUBLIC_APP_URL="http://127.0.0.1:$port")
   suite_browser+=(FRESH_SCHEMA_BROWSER_POLICY=1)
