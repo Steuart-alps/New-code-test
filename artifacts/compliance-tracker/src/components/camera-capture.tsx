@@ -91,6 +91,7 @@ function CameraDialog({ open, video, onClose, onShot, onChooseFile }: {
       }
     }).catch((error) => {
       if (cancelled) return;
+      console.warn("The camera couldn't be started", error);
       setProblem(cameraProblem(error));
       setStage("error");
     });

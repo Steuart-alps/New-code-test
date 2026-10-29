@@ -60,8 +60,7 @@ const launchOptions = {
 // Playwright's WebKit has no fake camera, so there a moving canvas stands in
 // for one (and the microphone is missing, so clips are video only).
 function canvasCamera() {
-  if (!navigator.mediaDevices) Object.defineProperty(navigator, "mediaDevices", { value: {}, configurable: true });
-  navigator.mediaDevices.getUserMedia = async (constraints) => {
+  const fake = async (constraints) => {
     if (!constraints?.video) throw new DOMException("No microphone", "NotFoundError");
     const canvas = document.createElement("canvas");
     canvas.width = 640;
@@ -71,8 +70,13 @@ function canvasCamera() {
     const draw = () => { context.fillStyle = `hsl(${hue = (hue + 7) % 360} 70% 50%)`; context.fillRect(0, 0, 640, 480); };
     draw();
     setInterval(draw, 40);
+    if (typeof canvas.captureStream !== "function") throw new Error("This browser has no canvas.captureStream");
     return canvas.captureStream(25);
   };
+  // getUserMedia lives on the prototype; replace it there so the page's own
+  // navigator.mediaDevices.getUserMedia uses the stand-in.
+  if (window.MediaDevices) Object.defineProperty(MediaDevices.prototype, "getUserMedia", { value: fake, configurable: true, writable: true });
+  else Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: fake }, configurable: true });
 }
 
 async function open({ initScript } = {}) {
@@ -82,6 +86,7 @@ async function open({ initScript } = {}) {
   if (initScript) await context.addInitScript(initScript);
   const page = await context.newPage();
   currentPage = page;
+  page.on("console", (message) => { if (message.type() === "warning" || message.type() === "error") console.error(`  [browser ${message.type()}] ${message.text()}`); });
   page.setDefaultTimeout(15_000);
   page.on("filechooser", () => {});
   await page.goto(`${baseUrl}/tests/file-drop-harness.html`, { waitUntil: "domcontentloaded" });
