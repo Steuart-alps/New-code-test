@@ -2,6 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { AI_SERVICE_KEY } from "./aiAddonItem";
 import { aiUsdToGbp } from "./aiAllowance";
+import { addMonthsUtc, replayAiCredit, type AiCreditLot } from "./aiCredit";
 import { logger } from "./logger";
 
 /**
@@ -16,6 +17,13 @@ import { logger } from "./logger";
  *   ALPS outside Stripe, so they are shown separately.
  * - Cost: what each request to Claude actually cost (settled ai_usage rows),
  *   converted from dollars at AI_USD_TO_GBP. Requests still running are left out.
+ *
+ * - Lapsed: paid-for AI use (the add-on's monthly allowance and paid top-ups)
+ *   still unused 12 months after the end of its month, which comes back to
+ *   ALPS (Steuart, 2026-10-27). It counts in the month it lapsed, from the
+ *   same oldest-first replay that enforces the allowance (lib/aiCredit.ts),
+ *   and is already part of the margin. A trial's or a free business's own
+ *   allowance was never paid for, so its lapse is not counted.
  *
  * A free business (no trial end) pays nothing for its allowance, so it shows
  * its cost against no add-on income.
@@ -36,6 +44,8 @@ export interface AiFinanceAmounts {
   marginPence: number;
   /** Requests to Claude. */
   requests: number;
+  /** Paid-for AI use that lapsed unused, back to ALPS (already in the margin). */
+  lapsedPence: number;
 }
 
 export interface AiFinanceMonth extends AiFinanceAmounts {
@@ -65,10 +75,14 @@ export interface AiFinanceDependencies {
   /** AI_ADDON_PRICE_ID, when the add-on's price is named by hand. */
   aiPriceId?: string | null;
   usdToGbp?: number;
+  now?: Date;
 }
 
+/** How far back the allowance ledger is read; older rows are pruned at start-up (lib/aiAllowance.ts). */
+const AI_LEDGER_MONTHS = 25;
+
 const empty = (): AiFinanceAmounts => ({
-  addonPence: 0, topUpPence: 0, invoicedTopUpPence: 0, incomePence: 0, costPence: 0, marginPence: 0, requests: 0,
+  addonPence: 0, topUpPence: 0, invoicedTopUpPence: 0, incomePence: 0, costPence: 0, marginPence: 0, requests: 0, lapsedPence: 0,
 });
 
 const monthOf = (value: Date | string) => new Date(value).toISOString().slice(0, 7);
@@ -100,7 +114,7 @@ export async function getAiFinance(range: { from: Date; to: Date }, deps: AiFina
   `)).rows ?? []) as Array<{ id: number; name: string; free: boolean }>;
   for (const row of clientRows) clients.set(Number(row.id), { name: row.name, free: Boolean(row.free) });
 
-  type Entry = { clientId: number | null; name: string | null; at: Date | string; field: "addonPence" | "topUpPence" | "invoicedTopUpPence" | "costPence"; pence: number; requests?: number };
+  type Entry = { clientId: number | null; name: string | null; at: Date | string; field: "addonPence" | "topUpPence" | "invoicedTopUpPence" | "costPence" | "lapsedPence"; pence: number; requests?: number };
   const entries: Entry[] = [];
 
   let addonIncomeAvailable = true;
@@ -179,6 +193,8 @@ export async function getAiFinance(range: { from: Date; to: Date }, deps: AiFina
     });
   }
 
+  entries.push(...await lapsedEntries(execute, range, deps.now ?? new Date(), usdToGbp));
+
   const months = new Map(monthsBetween(range.from, range.to).map((month) => [month, empty()]));
   const businesses = new Map<string, AiFinanceBusiness>();
   const totals = empty();
@@ -207,6 +223,7 @@ export async function getAiFinance(range: { from: Date; to: Date }, deps: AiFina
     amounts.incomePence = amounts.addonPence + amounts.topUpPence + amounts.invoicedTopUpPence;
     amounts.marginPence = Math.round(amounts.incomePence - amounts.costPence);
     amounts.costPence = Math.round(amounts.costPence);
+    amounts.lapsedPence = Math.round(amounts.lapsedPence);
     return amounts;
   };
 
@@ -218,4 +235,64 @@ export async function getAiFinance(range: { from: Date; to: Date }, deps: AiFina
     usdToGbp,
     addonIncomeAvailable,
   };
+}
+
+/**
+ * Paid-for allowance that lapsed in the range (and by now), per business:
+ * each business with such a lot has its ledger replayed as the allowance
+ * check does, and what a paid lot still held when it lapsed is counted.
+ */
+async function lapsedEntries(
+  execute: SqlExecutor,
+  range: { from: Date; to: Date },
+  now: Date,
+  usdToGbp: number,
+): Promise<Array<{ clientId: number; name: null; at: Date; field: "lapsedPence"; pence: number }>> {
+  const until = new Date(Math.min(range.to.getTime(), now.getTime()));
+  if (until <= range.from) return [];
+  const ledgerFrom = addMonthsUtc(now, -AI_LEDGER_MONTHS).toISOString();
+  const fromIso = range.from.toISOString();
+  const untilIso = until.toISOString();
+  const lotRows = ((await execute(sql`
+    WITH lots AS (
+      SELECT client_id, starts_at, expires_at, allowance_pence, period_key LIKE 'addon:%' AS paid
+        FROM ai_allowance_grants
+      UNION ALL
+      SELECT client_id, created_at, coalesce(expires_at, created_at + interval '13 months'), allowance_pence, status = 'paid'
+        FROM ai_top_ups WHERE status IN ('paid', 'unknown')
+    )
+    SELECT * FROM lots
+     WHERE expires_at > ${ledgerFrom}::timestamptz
+       AND client_id IN (
+         SELECT client_id FROM lots
+          WHERE paid AND allowance_pence > 0
+            AND expires_at >= ${fromIso}::timestamptz AND expires_at < ${untilIso}::timestamptz
+       )
+  `)).rows ?? []) as Array<{ client_id: number; starts_at: Date | string; expires_at: Date | string; allowance_pence: number; paid: boolean }>;
+  if (lotRows.length === 0) return [];
+  const clientIds = [...new Set(lotRows.map((row) => Number(row.client_id)))];
+  const useRows = ((await execute(sql`
+    SELECT client_id, created_at, cost_usd_micros FROM ai_usage
+     WHERE created_at >= ${ledgerFrom}::timestamptz
+       AND client_id IN (${sql.join(clientIds.map((id) => sql`${id}`), sql`, `)})
+  `)).rows ?? []) as Array<{ client_id: number; created_at: Date | string; cost_usd_micros: number | string }>;
+
+  const entries: Array<{ clientId: number; name: null; at: Date; field: "lapsedPence"; pence: number }> = [];
+  for (const clientId of clientIds) {
+    const lots: Array<AiCreditLot & { paid: boolean }> = lotRows.filter((row) => Number(row.client_id) === clientId).map((row) => ({
+      startsAt: new Date(row.starts_at),
+      expiresAt: new Date(row.expires_at),
+      pence: Number(row.allowance_pence),
+      paid: Boolean(row.paid),
+    }));
+    const uses = useRows.filter((row) => Number(row.client_id) === clientId).map((row) => ({
+      at: new Date(row.created_at),
+      pence: (Number(row.cost_usd_micros) * usdToGbp) / 10_000,
+    }));
+    for (const lot of replayAiCredit(lots, uses, now).lapsed as Array<AiCreditLot & { paid: boolean; remainingPence: number }>) {
+      if (!lot.paid || lot.expiresAt < range.from || lot.expiresAt >= until) continue;
+      entries.push({ clientId, name: null, at: lot.expiresAt, field: "lapsedPence", pence: lot.remainingPence });
+    }
+  }
+  return entries;
 }

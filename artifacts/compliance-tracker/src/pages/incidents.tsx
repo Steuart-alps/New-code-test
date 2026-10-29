@@ -22,6 +22,8 @@ import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
+import { PickOrTypeSelect, usePeopleAndContractors } from "@/components/pick-or-type-select";
+import { CorrectiveActionUpdate } from "@/components/corrective-action-update";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
@@ -39,6 +41,7 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { StringListEditor } from "@/components/string-list-editor";
+import { useSayItFill } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 import { localDate } from "@/lib/voice-log";
 import { useManagedBy } from "@/components/managed-by-badge";
@@ -450,11 +453,14 @@ export default function IncidentsPage() {
   const [saving, setSaving] = useState(false);
   const [historyIncident, setHistoryIncident] = useState<Incident | null>(null);
   const [actionDraft, setActionDraft] = useState({ title: "", ownerName: "", correctiveAction: "" });
+  const [editingActionId, setEditingActionId] = useState<number | null>(null);
+  const canRecordActions = user?.role !== "client_viewer";
+  const actionOwnerGroups = usePeopleAndContractors(canAdmin && !!historyIncident);
   const [savingAction, setSavingAction] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
 
-  const { data: incidentConfig, isFetched: incidentConfigLoaded } = useGetIncidentConfig();
+  const { data: incidentConfig, isFetched: incidentConfigFetched } = useGetIncidentConfig();
   const { data: formOptions } = useFormOptions();
   const incidentTypeOptions = pickOptions(formOptions, "incident_types");
   const severityOptions: readonly string[] = SEVERITIES;
@@ -610,7 +616,7 @@ ${rows.map(r => `<tr>
 
   // ── Dialog ─────────────────────────────────────────────────────────────────
 
-  function openAdd() {
+  function openAdd(spoken?: Partial<ReturnType<typeof emptyForm>>) {
     setEditItem(null);
     const f = emptyForm();
     // The person logging it, unless the template names a default reporter.
@@ -618,20 +624,30 @@ ${rows.map(r => `<tr>
     f.incidentType = incidentTypeOptions[0] ?? "";
     f.severity = severityOptions[0] ?? "";
     if (incidentConfig?.incident_default_reporter) f.reportedBy = incidentConfig.incident_default_reporter;
-    setForm(f);
+    setForm({ ...f, ...spoken });
     setFormSection("details");
     setShowDialog(true);
   }
+
+  // Say it: what happened and where opens a new incident with them filled in.
+  useSayItFill(["incident"], fill => {
+    const said = (key: string) => (typeof fill.values[key] === "string" ? fill.values[key] as string : "");
+    openAdd({
+      description: said("description") || fill.text.trim(),
+      location: said("location"),
+      ...(fill.siteId ? { siteId: String(fill.siteId) } : {}),
+    });
+  }, incidentConfigFetched);
 
   // The "Report an accident or incident" QR label opens a new report, once
   // the incident settings (the default reporter) have loaded.
   const reportFromLink = useRef<boolean | null>(null);
   useEffect(() => {
     if (reportFromLink.current === null) reportFromLink.current = takeLinkParams(["report"] as const)?.report === "1";
-    if (!reportFromLink.current || !hasIncidentTrack || !incidentConfigLoaded) return;
+    if (!reportFromLink.current || !hasIncidentTrack || !incidentConfigFetched) return;
     reportFromLink.current = false;
     openAdd();
-  }, [hasIncidentTrack, incidentConfigLoaded]);
+  }, [hasIncidentTrack, incidentConfigFetched]);
 
   function openEdit(r: Incident) {
     setEditItem(r);
@@ -850,7 +866,7 @@ ${rows.map(r => `<tr>
             triggerLabel="Customise types"
             labelFor={typeLabel}
           />
-          <Button onClick={openAdd} className="gap-2 rounded-sm">
+          <Button onClick={() => openAdd()} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> Log Incident
           </Button>
         </div>
@@ -985,7 +1001,7 @@ ${rows.map(r => `<tr>
               : "No records match the current filters."}
           </p>
           {incidents.length === 0 && (
-            <Button onClick={openAdd} variant="outline" size="sm" className="mt-4 rounded-sm gap-2">
+            <Button onClick={() => openAdd()} variant="outline" size="sm" className="mt-4 rounded-sm gap-2">
               <Plus className="w-4 h-4" /> Log Incident
             </Button>
           )}
@@ -1527,17 +1543,29 @@ ${rows.map(r => `<tr>
                 <p className="text-muted-foreground">No linked corrective actions yet.</p> :
                 linkedActions.map(action => (
                   <div key={action.id} className="rounded-sm border p-3 space-y-1">
-                    <p className="font-medium">{action.title} · {action.status.replaceAll("_", " ")}</p>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="font-medium">{action.title} · {action.status.replaceAll("_", " ")}</p>
+                      {canRecordActions && action.status !== "verified" && editingActionId !== action.id && (
+                        <Button variant="outline" size="sm" onClick={() => setEditingActionId(action.id)}>Update / verify</Button>
+                      )}
+                    </div>
                     <p>{action.correctiveAction} · Owner: {action.ownerName}</p>
                     {action.evidenceReference && <p>Evidence: {action.evidenceReference}</p>}
                     {action.verifiedAt && <p className="text-emerald-700">Verified closed {fmtDateTime(action.verifiedAt)}{action.verificationNotes ? ` · ${action.verificationNotes}` : ""}</p>}
+                    {editingActionId === action.id && (
+                      <CorrectiveActionUpdate action={action} onCancel={() => setEditingActionId(null)} onSaved={async () => {
+                        setEditingActionId(null);
+                        await qc.invalidateQueries({ queryKey: ["incident-actions", historyIncident?.id, activeClientId] });
+                      }} />
+                    )}
                   </div>
                 ))}
-              <Link href="/compliance-hub"><Button variant="outline" size="sm">Review and verify actions in Compliance Hub</Button></Link>
               {canAdmin && <div className="space-y-2 border-t pt-3">
                 <h4 className="font-bold">Add a linked action</h4>
                 <Input aria-label="Action title" dictation placeholder="Action title" value={actionDraft.title} onChange={e => setActionDraft(d => ({ ...d, title: e.target.value }))} />
-                <Input aria-label="Action owner" placeholder="Action owner" value={actionDraft.ownerName} onChange={e => setActionDraft(d => ({ ...d, ownerName: e.target.value }))} />
+                <PickOrTypeSelect value={actionDraft.ownerName} groups={actionOwnerGroups} placeholder="Action owner"
+                  otherLabel="Someone else (type the name)" typedPlaceholder="Action owner"
+                  onChange={ownerName => setActionDraft(d => ({ ...d, ownerName }))} />
                 <Textarea aria-label="Corrective action" placeholder="Corrective action to complete" value={actionDraft.correctiveAction} onChange={e => setActionDraft(d => ({ ...d, correctiveAction: e.target.value }))} />
                 <Button size="sm" disabled={savingAction} onClick={createIncidentAction}>Link corrective action</Button>
               </div>}

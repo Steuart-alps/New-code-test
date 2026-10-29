@@ -606,7 +606,8 @@ export const GetBusinessDashboardResponse = zod.object({
   "incomePence": zod.number(),
   "costPence": zod.number().describe('What Claude charged'),
   "marginPence": zod.number(),
-  "requests": zod.number()
+  "requests": zod.number(),
+  "lapsedPence": zod.number().describe('Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin)')
 }).and(zod.object({
   "month": zod.string().describe('YYYY-MM (UTC)')
 }))),
@@ -617,7 +618,8 @@ export const GetBusinessDashboardResponse = zod.object({
   "incomePence": zod.number(),
   "costPence": zod.number().describe('What Claude charged'),
   "marginPence": zod.number(),
-  "requests": zod.number()
+  "requests": zod.number(),
+  "lapsedPence": zod.number().describe('Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin)')
 }).and(zod.object({
   "clientId": zod.number().nullable(),
   "businessName": zod.string(),
@@ -630,7 +632,8 @@ export const GetBusinessDashboardResponse = zod.object({
   "incomePence": zod.number(),
   "costPence": zod.number().describe('What Claude charged'),
   "marginPence": zod.number(),
-  "requests": zod.number()
+  "requests": zod.number(),
+  "lapsedPence": zod.number().describe('Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin)')
 }),
   "usdToGbp": zod.number(),
   "addonIncomeAvailable": zod.boolean().describe('False when paid Stripe invoices could not be read')

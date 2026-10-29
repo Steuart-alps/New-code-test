@@ -22,7 +22,7 @@ import {
   useUpdateLegionellaConfig,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { SayItButton } from "@/components/say-it-button";
+import { useSayItSite } from "@/components/say-it-button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -215,9 +215,10 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
     controlLimitsRationale: "", remedialVerificationReference: "", schemeReviewDate: "", ukNation: "",
     temperatureLimits: {},
   });
+  const [schemeFromHub, setSchemeFromHub] = useState(false);
 
   useEffect(() => {
-    if (!config || !open) return;
+    if (!config || !open) return undefined;
     setDefaultPerformer(config.water_default_performer ?? "");
     setNonSentinelOutlets(parseJsonArray<string>(config.water_non_sentinel_outlets));
     const saved = parseJsonRecord(config.water_frequency_days, DEFAULT_LEGIONELLA_FREQUENCIES);
@@ -236,6 +237,23 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
       ukNation: savedProfile.ukNation ?? "",
        temperatureLimits: savedProfile.temperatureLimits ?? (config as any).effectiveTemperatureLimits ?? {},
     });
+    // The written scheme used to be recorded once in Compliance Hub. Offer
+    // that reference for a site that has none yet, so it is not lost.
+    setSchemeFromHub(false);
+    if (siteId && !(savedProfile.writtenControlSchemeReference ?? savedProfile.writtenSchemeReference ?? "").trim()) {
+      let cancelled = false;
+      apiFetch("/compliance-hub/profile")
+        .then(response => response.ok ? response.json() : null)
+        .then(hub => {
+          const reference = typeof hub?.waterWrittenSchemeReference === "string" ? hub.waterWrittenSchemeReference.trim() : "";
+          if (cancelled || !reference) return;
+          setProfile(current => current.writtenControlSchemeReference.trim() ? current : { ...current, writtenControlSchemeReference: reference });
+          setSchemeFromHub(true);
+        })
+        .catch(() => { /* only a starting point */ });
+      return () => { cancelled = true; };
+    }
+    return undefined;
   }, [config, open]);
 
   const handleSave = () => {
@@ -364,6 +382,9 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
                  ) : (
                    <Textarea rows={key === "controlLimitsRationale" ? 3 : 1} value={profile[key]} disabled={!siteId}
                      onChange={e => setProfile(current => ({ ...current, [key]: e.target.value }))} />
+                 )}
+                 {key === "writtenControlSchemeReference" && schemeFromHub && (
+                   <p className="text-xs text-muted-foreground">Brought across from Compliance Hub. Check it is right for this site, then save.</p>
                  )}
                </div>
              ))}
@@ -1237,6 +1258,7 @@ export default function LegionellaPage() {
 
   const [filterType, setFilterType] = useState<LegionellaCheckType | "">("");
   const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
+  useSayItSite(filterSite);
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<LegionellaCheckType | undefined>(undefined);
   const [scanOutletId, setScanOutletId] = useState<number>();
@@ -1354,7 +1376,6 @@ export default function LegionellaPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <SayItButton siteId={filterSite} />
             {canAdmin && <LegionellaConfigDialog siteId={filterSite} />}
             <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={value => { setRecordOpen(value); if (!value) setScanEquipment(undefined); }} defaultCheckType={quickCheckType} preset={scanEquipment} />
           </div>
