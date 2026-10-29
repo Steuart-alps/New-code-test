@@ -18,6 +18,7 @@ import {
   ConfirmDelete, DocumentField, SiteFilter, SiteSelect, addMonthsIso, downloadCsv, downloadRegisterDocument,
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 const BUILT_LABELS = { yes: "Yes", no: "No (built in or after 2000)", unknown: "Not known" } as const;
 const SURVEY_LABELS = { management: "Management survey", refurbishment_demolition: "Refurbishment and demolition survey" } as const;
@@ -110,7 +111,7 @@ export default function AsbestosRegisterPage() {
   const { toast } = useToast();
   const { sites, siteName } = useRegisterSites();
 
-  const [siteFilter, setSiteFilter] = useState("all");
+  const [siteFilter, setSiteFilter] = useSiteFilter("all");
   const [editing, setEditing] = useState<AsbestosRecord | null>(null);
   const [form, setForm] = useState<RecordForm | null>(null);
   const [entryParent, setEntryParent] = useState<AsbestosRecord | null>(null);

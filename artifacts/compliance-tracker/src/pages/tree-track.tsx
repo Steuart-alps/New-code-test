@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -180,7 +181,7 @@ export default function TreeTrackPage() {
   const hasTrees = hasService("treetrack");
 
   const [filterType, setFilterType] = useState<CheckType | "all">("all");
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterSite, setFilterSite] = useSiteFilter("all");
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [editItem, setEditItem] = useState<TreeInspection | null>(null);

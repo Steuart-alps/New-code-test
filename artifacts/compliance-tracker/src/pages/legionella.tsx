@@ -44,6 +44,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { useSiteFilterId } from "@/hooks/use-own-site";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -1235,7 +1236,7 @@ export default function LegionellaPage() {
   const hasLegionellatrack = hasService("legionellatrack");
 
   const [filterType, setFilterType] = useState<LegionellaCheckType | "">("");
-  const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
+  const [filterSite, setFilterSite] = useSiteFilterId();
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<LegionellaCheckType | undefined>(undefined);
   const [scanOutletId, setScanOutletId] = useState<number>();

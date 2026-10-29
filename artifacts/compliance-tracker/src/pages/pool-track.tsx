@@ -31,6 +31,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { useSiteFilterId } from "@/hooks/use-own-site";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -585,7 +586,7 @@ export default function PoolTrackPage() {
   const hasPool = hasService("pooltrack");
 
   const [filterType, setFilterType] = useState("");
-  const [filterSite, setFilterSite] = useState<number | undefined>();
+  const [filterSite, setFilterSite] = useSiteFilterId();
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<string | undefined>(undefined);
   const [checks, setChecks] = useState<PoolCheck[]>([]);

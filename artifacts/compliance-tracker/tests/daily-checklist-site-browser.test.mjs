@@ -8,7 +8,9 @@
 //  - a site whose checklist is already submitted shows it read-only, and the
 //    unsaved answers come back on a site that is still open;
 //  - RoomTrack room checks and KitchenTrack cleaning ticks also survive
-//    picking a site after filling them in.
+//    picking a site after filling them in;
+//  - a page's "All sites" filter starts on the user's own site, except for
+//    an Owner or Consultant.
 //
 // The real page is mounted by tests/browser/daily-checklist-site.harness.tsx
 // and built with the app's React and Tailwind setup. API requests are
@@ -290,6 +292,19 @@ async function main() {
       await page.waitForTimeout(500);
       assert.equal(await room.getByRole("button", { name: "Clean" }).getAttribute("aria-pressed"), "true", "Refresh keeps it too");
       await page.close();
+    });
+
+    await test("site filters start on the user's own site, except for an Owner", async () => {
+      const staff = await open("?page=room-track&dept=11", {}, null, (p) => p.getByRole("heading", { name: "201" }));
+      assert.equal(await staff.page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "Pro Shop");
+      await staff.page.getByRole("heading", { name: "101" }).waitFor({ state: "detached" });
+      await staff.page.getByRole("combobox", { name: "Filter rooms by site" }).click();
+      await staff.page.getByRole("option", { name: "All sites" }).click();
+      await staff.page.getByRole("heading", { name: "101" }).waitFor();
+      await staff.page.close();
+      const owner = await open("?page=room-track&dept=11&role=client_admin", {}, null, (p) => p.getByRole("heading", { name: "101" }));
+      assert.equal(await owner.page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "All sites");
+      await owner.page.close();
     });
 
     await test("KitchenTrack cleaning: ticks survive changing the kitchen", async () => {

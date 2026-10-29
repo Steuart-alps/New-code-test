@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { CheckCircle2, Sun, Moon, ShieldCheck, Printer, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 interface Submission {
   id: number;
@@ -144,7 +145,7 @@ export default function DailyHistoryPage() {
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterSite, setFilterSite] = useSiteFilter("all");
   const [filterType, setFilterType] = useState("all");
   const [filterFrom, setFilterFrom] = useState(() => {
     const d = new Date();

@@ -22,6 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -583,7 +584,7 @@ export default function Dashboard() {
   const { data: sites = [] } = useListSites();
   const [teamCount, setTeamCount] = useState(0);
   const [notificationEmail, setNotificationEmail] = useState("");
-  const [siteId, setSiteId] = useState<string>("all");
+  const [siteId, setSiteId] = useSiteFilter("all");
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
   const [checklistTotals, setChecklistTotals] = useState<ChecklistTotals | null>(null);
   const [checklistLoading, setChecklistLoading] = useState(false);

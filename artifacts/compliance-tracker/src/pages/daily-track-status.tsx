@@ -17,6 +17,7 @@ import {
   monthDayStatuses, parseDailyTrackHistory, siteDayStatuses,
   type DailyTrackHistory, type DailyTrackRequirement, type RecordStatus,
 } from "@/lib/daily-track-month-status";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 // ── History loading ───────────────────────────────────────────────────────────
 
@@ -227,7 +228,9 @@ export function MonthOverview({ sites, onPickDay }: { sites: { id: number; name:
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const lastMonth = shiftMonth(today.slice(0, 7), -1);
   const [month, setMonth] = useState(lastMonth);
-  const [siteId, setSiteId] = useState<"all" | number>("all");
+  const [siteFilter, setSiteFilter] = useSiteFilter("all");
+  const siteId: "all" | number = siteFilter === "all" ? "all" : Number(siteFilter);
+  const setSiteId = (value: "all" | number) => setSiteFilter(String(value));
 
   const [y, m] = month.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();

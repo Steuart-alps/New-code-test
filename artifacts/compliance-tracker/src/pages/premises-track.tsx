@@ -29,6 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { format, parseISO, isValid } from "date-fns";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -301,7 +302,7 @@ export default function PremisesTrackPage() {
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter]     = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [siteFilter, setSiteFilter]     = useState<string>("all");
+  const [siteFilter, setSiteFilter]     = useSiteFilter("all");
   const [fromDate, setFromDate]         = useState("");
   const [toDate, setToDate]             = useState("");
 

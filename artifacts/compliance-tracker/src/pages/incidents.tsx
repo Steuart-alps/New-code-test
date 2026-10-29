@@ -39,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { StringListEditor } from "@/components/string-list-editor";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -403,7 +404,7 @@ export default function IncidentsPage() {
   const [filterStatus, setFilterStatus] = useState<Status | "all">("all");
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterSite, setFilterSite] = useSiteFilter("all");
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [filterRiddor, setFilterRiddor] = useState(false);

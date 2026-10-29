@@ -34,6 +34,7 @@ import { createHotTubLogPdf, HotTubLogPdfError } from "@/lib/hot-tub-log-pdf";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -226,7 +227,7 @@ export default function HotTubPage() {
   const hasHotTub = hasService("hottubtrack");
 
   const [filterType, setFilterType] = useState<CheckType | "all">("all");
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterSite, setFilterSite] = useSiteFilter("all");
   const [filterTub, setFilterTub] = useState("all");
   const [filterFrom, setFilterFrom] = useState(() => defaultDateRange().from);
   const [filterTo, setFilterTo] = useState(() => defaultDateRange().to);

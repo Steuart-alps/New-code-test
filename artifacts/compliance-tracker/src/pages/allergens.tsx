@@ -33,6 +33,7 @@ import {
   type AllergenChart, type AllergenIngredient, type AllergenItem, type AllergenMenu,
 } from "@/lib/allergens";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 interface LineForm {
   ingredientId: string;
@@ -74,7 +75,7 @@ export default function AllergensPage() {
   const { siteName } = useRegisterSites();
 
   const [tab, setTab] = useState("dishes");
-  const [siteFilter, setSiteFilter] = useState("all");
+  const [siteFilter, setSiteFilter] = useSiteFilter("all");
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<AllergenItem | null>(null);
   const [form, setForm] = useState<FormState | null>(null);

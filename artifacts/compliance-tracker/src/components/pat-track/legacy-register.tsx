@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { printHtmlDocument } from "@/lib/download";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 const types = ["Class I", "Class II", "Class III", "Extension Lead", "IT Equipment", "Portable Tool", "Cleaning Equipment", "AV Equipment", "Kitchen Appliance", "Other"];
@@ -128,7 +129,7 @@ function Field({ label, value, set, type = "text", testId }: { label: string; va
 /** `openTestFor`: an appliance whose scanned QR label asked for a new test. */
 export function LegacyPATRegister({ view, openTestFor }: { view: View; openTestFor?: number }) {
   const { user } = useAuth(); const canAdmin = useCanAdmin(); const { toast } = useToast(); const qc = useQueryClient(); const locked = user?.role === "client_viewer";
-  const [search, setSearch] = useState(""); const [registerSiteId, setRegisterSiteId] = useState(""); const [registerStatus, setRegisterStatus] = useState<"all" | "overdue">("all"); const [downloading, setDownloading] = useState(false); const [recordOpen, setRecordOpen] = useState(false); const [testOpen, setTestOpen] = useState(false); const [presetOpen, setPresetOpen] = useState(false); const [editAppliance, setEditAppliance] = useState<Appliance | null>(null); const [editTest, setEditTest] = useState<PATTest | null>(null); const [presetId, setPresetId] = useState<number>(); const [retiring, setRetiring] = useState<number | null>(null);
+  const [search, setSearch] = useState(""); const [registerSiteId, setRegisterSiteId] = useSiteFilter(""); const [registerStatus, setRegisterStatus] = useState<"all" | "overdue">("all"); const [downloading, setDownloading] = useState(false); const [recordOpen, setRecordOpen] = useState(false); const [testOpen, setTestOpen] = useState(false); const [presetOpen, setPresetOpen] = useState(false); const [editAppliance, setEditAppliance] = useState<Appliance | null>(null); const [editTest, setEditTest] = useState<PATTest | null>(null); const [presetId, setPresetId] = useState<number>(); const [retiring, setRetiring] = useState<number | null>(null);
   const appliancesQ = useQuery({ queryKey: ["pat-track","legacy-appliances"], queryFn: () => api<Appliance[]>("/appliances") });
   const testsQ = useQuery({ queryKey: ["pat-track","legacy-tests"], queryFn: () => api<PATTest[]>("/tests") });
   const statusQ = useQuery({ queryKey: ["pat-track","legacy-status"], queryFn: () => api<Status>("/status") });

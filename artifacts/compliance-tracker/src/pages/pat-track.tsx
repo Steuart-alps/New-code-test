@@ -18,6 +18,7 @@ import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { AlertTriangle, CheckCircle2, ClipboardList, FileText, Library, Loader2, Pencil, Plus, Trash2, Wrench, Zap } from "lucide-react";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -110,7 +111,7 @@ function FailureCorrectionDialog({ value, close, saved }: { value: Failure | nul
 }
 
 export default function PATTrackPage() {
-  const qc = useQueryClient(); const { toast } = useToast(); const canEdit = useCanEdit(); const [tab, setTab] = useState("overview"); const [siteId, setSiteId] = useState(""); const [template, setTemplate] = useState<EquipmentTemplate | null | undefined>(); const [room, setRoom] = useState<Room | null | undefined>(); const [certificate, setCertificate] = useState<Certificate | null | undefined>(); const [failure, setFailure] = useState<Failure | null | undefined>(); const [correcting, setCorrecting] = useState<Failure | null>(null); const canAdmin = useCanAdmin(); const [replacementRoom, setReplacementRoom] = useState<Room | null>(null); const [replacement, setReplacement] = useState({ appliance: "", replacementAppliance: "", replacedDate: new Date().toISOString().slice(0, 10), notes: "" }); const [deleting, setDeleting] = useState<{ path: string; title: string; queries: string[] } | null>(null);
+  const qc = useQueryClient(); const { toast } = useToast(); const canEdit = useCanEdit(); const [tab, setTab] = useState("overview"); const [siteId, setSiteId] = useSiteFilter(""); const [template, setTemplate] = useState<EquipmentTemplate | null | undefined>(); const [room, setRoom] = useState<Room | null | undefined>(); const [certificate, setCertificate] = useState<Certificate | null | undefined>(); const [failure, setFailure] = useState<Failure | null | undefined>(); const [correcting, setCorrecting] = useState<Failure | null>(null); const canAdmin = useCanAdmin(); const [replacementRoom, setReplacementRoom] = useState<Room | null>(null); const [replacement, setReplacement] = useState({ appliance: "", replacementAppliance: "", replacedDate: new Date().toISOString().slice(0, 10), notes: "" }); const [deleting, setDeleting] = useState<{ path: string; title: string; queries: string[] } | null>(null);
   // A scanned QR label: open the appliance's register with a new test ready.
   const [scanTestFor, setScanTestFor] = useState<number>();
   useEffect(() => {

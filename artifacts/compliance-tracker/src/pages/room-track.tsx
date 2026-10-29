@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { BedDouble, CheckCircle2, CheckSquare, ClipboardCheck, Loader2, Pencil, Plus, Archive, AlertCircle, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 type CheckValues = { clean: boolean; tidy: boolean; toStandard: boolean };
 
@@ -146,7 +147,7 @@ export default function RoomTrackPage() {
   const { toast } = useToast();
   const { data: sites = [] } = useListSites();
   const [date, setDate] = useState(today);
-  const [siteId, setSiteId] = useState("__all__");
+  const [siteId, setSiteId] = useSiteFilter("__all__");
   const [rooms, setRooms] = useState<Room[]>([]);
   const [checks, setChecks] = useState<RoomCheck[]>([]);
   const [loading, setLoading] = useState(true);

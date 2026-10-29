@@ -8,6 +8,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
 import { formatDay, localToday } from "@/lib/onboarding";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 interface VisitType {
   key: string;
@@ -46,7 +47,7 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
   const clientApiFetch = useActiveClientApi();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [siteFilter, setSiteFilter] = useState(ALL_SITES);
+  const [siteFilter, setSiteFilter] = useSiteFilter(ALL_SITES);
 
   const { data, isLoading, isError } = useQuery<{ types: VisitType[]; visits: Visit[] }>({
     queryKey: ["contractor-visits", activeClientId],

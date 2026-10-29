@@ -21,6 +21,7 @@ import {
   ConfirmDelete, DocumentField, SiteFilter, SiteSelect, addMonthsIso, downloadCsv, downloadRegisterDocument,
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 // COSHHTrack (API: /api/coshh-track/*). Substances come from the COSHH
 // register (/api/registers/coshh), which COSHHTrack shows as its Substances
@@ -218,7 +219,7 @@ export default function CoshhTrackPage() {
     const requested = new URLSearchParams(search).get("tab");
     return requested && TABS.includes(requested) ? requested : "due";
   });
-  const [siteFilter, setSiteFilter] = useState("all");
+  const [siteFilter, setSiteFilter] = useSiteFilter("all");
   const [checkFilter, setCheckFilter] = useState<"all" | CheckType>("all");
   const [showArchived, setShowArchived] = useState(false);
   const [editingAssessment, setEditingAssessment] = useState<Assessment | null>(null);

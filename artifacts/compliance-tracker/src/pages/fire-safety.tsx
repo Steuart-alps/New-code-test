@@ -61,6 +61,7 @@ import {
 import { SOUND_LEVEL_MIN_DB } from "@/lib/fire-sound-level";
 import { StringListEditor } from "@/components/string-list-editor";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { useSiteFilterId } from "@/hooks/use-own-site";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -1544,7 +1545,7 @@ export default function FireSafetyPage() {
   const hasFiretrack = hasService("firetrack");
 
   const [filterType, setFilterType] = useState<AnyCheckType | "">("");
-  const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
+  const [filterSite, setFilterSite] = useSiteFilterId();
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<AnyCheckType | undefined>(undefined);
   const [scanPreset, setScanPreset] = useState<{ siteId?: number; callPointId?: number; location?: string }>();

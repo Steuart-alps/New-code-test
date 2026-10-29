@@ -68,6 +68,7 @@ import { useLocalToday } from "@/hooks/use-local-today";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
 import { CoshhSignOffSection } from "@/components/coshh-sign-offs";
 import { DocumentSignOffSection } from "@/components/document-sign-offs";
+import { useSiteFilter } from "@/hooks/use-own-site";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -267,7 +268,7 @@ export default function TrainTrackPage() {
   const apiFetch = useTrainTrackApi();
 
   const [tab, setTab]           = useState<RecordType | "audit" | "coshh" | "documents">("certificate");
-  const [siteFilter, setSite]   = useState("all");
+  const [siteFilter, setSite]   = useSiteFilter("all");
   const [search, setSearch]     = useState("");
   const [certStatus, setCertStatus] = useState<"all" | CertStatus>("all");
 
