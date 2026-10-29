@@ -219,17 +219,21 @@ function LocationFields({ location, what3words, latitude, longitude, onChange, l
         const latitude = Math.round(pos.coords.latitude * 1e6) / 1e6;
         const longitude = Math.round(pos.coords.longitude * 1e6) / 1e6;
         onChange({ latitude, longitude });
-        // The three words come from what3words' paid service when it is set
-        // up; otherwise the GPS spot is saved and the words are typed in.
+        // The three words are filled in automatically for businesses with the
+        // AI add-on; others save the GPS spot and type the words in.
         let found: string | null = null;
+        let needsAi = false;
         try {
           const res = await sharedApiFetch(`/w3w/convert?lat=${latitude}&lng=${longitude}`);
           if (res.ok) found = ((await res.json()) as { words?: string }).words ?? null;
+          else if (res.status === 403) needsAi = ((await res.json().catch(() => ({}))) as { code?: string }).code === "W3W_NEEDS_AI";
         } catch { /* the GPS spot is saved either way */ }
         if (found) onChange({ what3words: found });
         toast({
           title: "Location saved",
-          description: found ? `///${found}` : "GPS spot saved. Add the what3words address from the what3words app if you have it.",
+          description: found ? `///${found}`
+            : needsAi ? "GPS spot saved. Type the three words from the free what3words app, or add the AI add-on in Settings to fill them in automatically."
+            : "GPS spot saved. Add the what3words address from the what3words app if you have it.",
         });
         setLocating(false);
       },
