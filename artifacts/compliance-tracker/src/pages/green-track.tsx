@@ -40,7 +40,7 @@ import {
   Upload, Download, SprayCan, Package, Mic, Loader2, Sunrise,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
+import { SpreadsheetDropZone, isSpreadsheetFile, usePastedFile } from "@/components/spreadsheet-drop-zone";
 import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
 import { format } from "date-fns";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -750,7 +750,7 @@ function MachineImportDialog({
     if (!file) return;
     if (!isSpreadsheetFile(file)) {
       if (reading.canRead && isPhotoOrPdf(file)) return void handleListFile(file);
-      toast({ title: "That isn't a spreadsheet", description: "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
+      toast({ title: "That isn't a spreadsheet", description: isPhotoOrPdf(file) && reading.status ? "Reading a photo, screenshot or PDF needs the AI features add-on. Or choose an Excel (.xlsx or .xls) or CSV file." : "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
       return;
     }
     let table: string[][];
@@ -769,6 +769,8 @@ function MachineImportDialog({
     setRows(parsed.rows);
     setErrors(parsed.errors);
   };
+
+  usePastedFile(open && !readingList && !importing, file => void handleFile(file));
 
   const handleImport = async () => {
     setImporting(true);
@@ -808,8 +810,8 @@ function MachineImportDialog({
             {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
             {readingList && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> Reading your list… this can take a minute</span>}
           </div>
-          <SpreadsheetDropZone onFile={file => void handleFile(file)} testId="input-machine-roster-file" className="rounded-sm" />
-          <ListReadingPanel reading={reading} kind="greentrack-equipment" noun="machines" disabled={readingList} onFile={file => void handleListFile(file)} />
+          <SpreadsheetDropZone onFile={file => void handleFile(file)} aiReading={reading.canRead && !readingList} testId="input-machine-roster-file" className="rounded-sm" />
+          <ListReadingPanel reading={reading} kind="greentrack-equipment" noun="machines" disabled={readingList} onFile={file => void handleListFile(file)} onSpreadsheet={file => void handleFile(file)} />
           {readFromList && <ListReadNote result={readFromList} noun="machines" one="machine" kind="greentrack-equipment" onDownload={() => void downloadReadRows()} />}
           <p className="text-xs text-muted-foreground">
             Required columns: <strong>name</strong> and <strong>type</strong>. Supported broad types include
