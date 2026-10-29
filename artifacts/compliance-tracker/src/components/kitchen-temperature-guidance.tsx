@@ -1,5 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import { KITCHEN_TEMPERATURE_GUIDANCE, kitchenTemperatureGuidance, type FoodJurisdiction } from "@workspace/api-client-react";
+import { sortByLabel } from "@/lib/sort-options";
 
 const GROUPS = ["United Kingdom", "Other countries"] as const;
 
@@ -7,7 +8,7 @@ const GROUPS = ["United Kingdom", "Other countries"] as const;
 export function FoodJurisdictionOptions() {
   return <>
     {GROUPS.map(group => <optgroup key={group} label={group}>
-      {Object.values(KITCHEN_TEMPERATURE_GUIDANCE).filter(entry => entry.group === group)
+      {sortByLabel(Object.values(KITCHEN_TEMPERATURE_GUIDANCE).filter(entry => entry.group === group), entry => entry.name)
         .map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
     </optgroup>)}
   </>;
