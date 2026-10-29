@@ -36,6 +36,21 @@ function explainUnreadableDrop() {
 }
 
 /**
+ * Whether the browser can actually read a dropped file. Safari can hand over a
+ * photo dragged out of the Photos library that it isn't then allowed to read,
+ * which otherwise fails later as an unexplained upload error.
+ */
+async function canRead(file: File) {
+  if (file.size === 0) return false;
+  try {
+    await file.slice(0, 1).arrayBuffer();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Drag-and-drop for an attach box: spread `dropZoneProps` on the element that
  * should accept files, and show a highlight while `isDragging`. Dropped files
  * go to `onFiles` exactly as if they had been picked, so the box's own type and
@@ -56,11 +71,11 @@ export function useFileDrop(onFiles: (files: File[]) => void, enabled = true) {
     zones.set(id, {
       get enabled() { return latest.current.enabled; },
       deliver(files) {
-        if (!files.some(isHeic)) {
-          latest.current.onFiles(files);
-          return;
-        }
-        void Promise.all(files.map(heicToJpeg)).then((ready) => latest.current.onFiles(ready));
+        void Promise.all(files.map(async (file) => (await canRead(file)) ? heicToJpeg(file) : null)).then((ready) => {
+          const usable = ready.filter((file): file is File => file !== null);
+          if (usable.length < files.length) explainUnreadableDrop();
+          if (usable.length > 0) latest.current.onFiles(usable);
+        });
       },
     });
     return () => { zones.delete(id); };
@@ -135,11 +150,11 @@ export function installStrayFileDropGuard() {
 
   const fromOutside = (event: globalThis.DragEvent) => {
     if (draggingFromPage) return false;
-    const types = Array.from(event.dataTransfer?.types ?? []);
-    if (types.includes("Files")) return true;
-    // A dragged link (or a Photos library file link): leave text boxes alone
-    // so a link can still be dropped into one.
-    return types.includes("text/uri-list") && !isEditable(event.target);
+    if (hasFiles(event.dataTransfer)) return true;
+    // Anything else dragged in from outside (a link, a Photos library file
+    // link, or a type Safari doesn't name): text boxes still take it as text,
+    // everywhere else the page holds it rather than the browser opening it.
+    return !isEditable(event.target);
   };
 
   window.addEventListener("dragover", (event) => {
