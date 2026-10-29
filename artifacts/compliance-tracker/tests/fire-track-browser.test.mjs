@@ -13,6 +13,8 @@ import { chromium } from "@playwright/test";
 //   - the emergency lighting test explains the 5 minute flick test;
 //   - the annual discharge test and the contractor services say they are kept
 //     in step with their ComplyTrack tasks;
+//   - "Performed by" offers the roster and everyone with a login, so a Manager
+//     who is not on the roster can be chosen;
 //   - a drill cannot be saved until it says whether night staff took part;
 //   - history shows the call point and night staff answers;
 //   - managers add call points with a location under Template, Call points,
@@ -105,6 +107,7 @@ const checks = [
 ];
 const posts = [];
 const unexpectedRequests = [];
+const assigneeRequests = [];
 
 const json = (route, data, code = 200) => route.fulfill({ status: code, contentType: "application/json", body: JSON.stringify(data) });
 async function routeApi(route) {
@@ -134,12 +137,23 @@ async function routeApi(route) {
       case "/api/storage/status": return json(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
       case "/api/photos":
       case "/api/photos/requirements":
-      case "/api/staff-roster":
       case "/api/audit-log":
       case "/api/track-actions":
       case "/api/track-actions/templates/matching":
       case "/api/track-evidence":
       case "/api/track-evidence/requirements": return json(route, []);
+      // "Performed by" lists the roster plus everyone with a login (Owners,
+      // Managers, Staff); a login with the same name as a roster entry shows once.
+      case "/api/staff-roster": return json(route, [{ id: 31, name: "Pat Porter", active: true }, { id: 32, name: "Left Last Year", active: false }]);
+      case "/api/assignees":
+        assigneeRequests.push(url.searchParams.get("siteId"));
+        return json(route, [
+          { id: 7, name: "Duty Manager", role: "client_admin" },
+          { id: 9, name: "Leanne Elliot", role: "client_manager" },
+          { id: 10, name: "pat  porter", role: "client_staff" },
+        ]);
+      // A finished setup: the team step (#237) does not hold back the forms.
+      case "/api/setup/state": return json(route, { needsSetup: false, canManage: true });
       case "/api/fire-safety/config": return json(route, {
         fire_escape_routes: "", fire_alarm_zones: "", fire_extinguisher_points: "", fire_show_drill: "true",
         fire_default_performer: "", fire_frequency_days: JSON.stringify(FREQUENCIES), controlProfile: null,
@@ -268,6 +282,17 @@ try {
   await shot(page, "2-alarm-call-point");
   await page.getByRole("option", { name: /CP1 – Reception/ }).click();
 
+  // Performed by: a Manager with a login but no roster entry can be chosen.
+  const performer = dialog.getByTestId("select-performed-by");
+  await page.waitForFunction(() => document.querySelector('[data-testid="select-performed-by"]')?.textContent?.includes("Leanne Elliot"));
+  assert.deepEqual(await performer.locator("option").allInnerTexts(),
+    ["Select a staff member", "Duty Manager", "Leanne Elliot", "Pat Porter", "Other / enter name…"],
+    "roster and logins together, A to Z, each name once, no inactive roster entries");
+  assert.equal(await performer.evaluate(select => select.selectedOptions[0].textContent), "Duty Manager", "starts on the signed-in person");
+  assert.equal(await dialog.getByTestId("input-performed-by-custom").count(), 0);
+  assert.ok(assigneeRequests.includes("1"), "logins are listed for the record's site");
+  await performer.selectOption({ label: "Leanne Elliot" });
+
   // Sound level: CP1 is near a sleeping area, so the 75 dB bedhead limit applies.
   const bedhead = dialog.getByTestId("checkbox-sound-level-bedhead");
   assert.equal(await bedhead.getAttribute("data-state"), "checked", "a sleeping-area call point sets the bedhead limit");
@@ -295,6 +320,8 @@ try {
   assert.equal(alarmPost.body.checkType, "alarm");
   assert.equal(alarmPost.body.callPointId, 11);
   assert.equal(alarmPost.body.siteId, 1, "a one-site business records against its site");
+  assert.equal(alarmPost.body.performedBy, "Leanne Elliot");
+  assert.equal(alarmPost.body.staffRosterId, null, "a login with no roster entry links no roster record");
   assert.deepEqual([alarmPost.body.soundLevelDb, alarmPost.body.soundLevelMethod, alarmPost.body.soundLevelBedhead], [70, "meter", true]);
   const soundLine = page.getByTestId(`sound-level-${checks.at(-1).id}`);
   await soundLine.waitFor();

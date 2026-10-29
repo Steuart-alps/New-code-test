@@ -1158,7 +1158,7 @@ function RecordCheckDialog({
               <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} className="rounded-sm" />
             </div>
             <div className="space-y-1.5">
-              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} optional />
+              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} siteId={selectedSite} optional />
             </div>
           </div>
 
@@ -1410,7 +1410,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
               <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} className="rounded-sm" />
             </div>
             <div className="space-y-1.5">
-              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} />
+              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} siteId={selectedSite} />
             </div>
           </div>
 

@@ -171,6 +171,9 @@ async function routeApi(route) {
       case "/api/managed-by": return json(route, null);
       case "/api/sites": return json(route, []);
       case "/api/staff-roster": return json(route, []);
+      case "/api/assignees": return json(route, []);
+      // A finished setup: the team step (#237) does not hold back the forms.
+      case "/api/setup/state": return json(route, { needsSetup: false, canManage: true });
       case "/api/compliance-items":
       case "/api/categories":
       case "/api/track-actions":

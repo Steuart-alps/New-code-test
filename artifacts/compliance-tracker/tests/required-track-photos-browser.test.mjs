@@ -242,6 +242,9 @@ async function routeApi(route, url) {
   }
   if (pathname === "/api/sites" && method === "GET") return jsonResponse(route, [SITE]);
   if (pathname === "/api/staff-roster" && method === "GET") return jsonResponse(route, []);
+  if (pathname === "/api/assignees" && method === "GET") return jsonResponse(route, []);
+  // A finished setup: the team step (#237) does not hold back the forms.
+  if (pathname === "/api/setup/state" && method === "GET") return jsonResponse(route, { needsSetup: false, canManage: true });
 
   if (pathname === "/api/track-actions" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/track-actions/templates/matching" && method === "GET") return jsonResponse(route, []);
