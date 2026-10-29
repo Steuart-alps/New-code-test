@@ -693,7 +693,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             <EmailVerificationBanner />
             {isTrackPage && !trackGuidanceDismissed && (
               <div className="flex items-center justify-between gap-3 rounded-sm border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-950">
-                <span>Track records support your site-specific controls; review the applicable UK sources, appointments and corrective actions.</span>
+                <span>Track records support your site-specific controls; review the applicable UK sources and competent-person appointments.</span>
                 <div className="flex shrink-0 items-center gap-2">
                   <Link href="/compliance-hub" className="font-semibold underline underline-offset-2">Compliance Hub</Link>
                   <button type="button" onClick={dismissTrackGuidance} aria-label="Dismiss this guidance" title="Don't show again"

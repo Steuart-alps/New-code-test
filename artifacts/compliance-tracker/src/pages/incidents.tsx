@@ -22,6 +22,8 @@ import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
+import { PickOrTypeSelect, usePeopleAndContractors } from "@/components/pick-or-type-select";
+import { CorrectiveActionUpdate } from "@/components/corrective-action-update";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
@@ -414,6 +416,9 @@ export default function IncidentsPage() {
   const [saving, setSaving] = useState(false);
   const [historyIncident, setHistoryIncident] = useState<Incident | null>(null);
   const [actionDraft, setActionDraft] = useState({ title: "", ownerName: "", correctiveAction: "" });
+  const [editingActionId, setEditingActionId] = useState<number | null>(null);
+  const canRecordActions = user?.role !== "client_viewer";
+  const actionOwnerGroups = usePeopleAndContractors(canAdmin);
   const [savingAction, setSavingAction] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
@@ -1474,17 +1479,29 @@ ${rows.map(r => `<tr>
                 <p className="text-muted-foreground">No linked corrective actions yet.</p> :
                 linkedActions.map(action => (
                   <div key={action.id} className="rounded-sm border p-3 space-y-1">
-                    <p className="font-medium">{action.title} · {action.status.replaceAll("_", " ")}</p>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="font-medium">{action.title} · {action.status.replaceAll("_", " ")}</p>
+                      {canRecordActions && action.status !== "verified" && editingActionId !== action.id && (
+                        <Button variant="outline" size="sm" onClick={() => setEditingActionId(action.id)}>Update / verify</Button>
+                      )}
+                    </div>
                     <p>{action.correctiveAction} · Owner: {action.ownerName}</p>
                     {action.evidenceReference && <p>Evidence: {action.evidenceReference}</p>}
                     {action.verifiedAt && <p className="text-emerald-700">Verified closed {fmtDateTime(action.verifiedAt)}{action.verificationNotes ? ` · ${action.verificationNotes}` : ""}</p>}
+                    {editingActionId === action.id && (
+                      <CorrectiveActionUpdate action={action} onCancel={() => setEditingActionId(null)} onSaved={async () => {
+                        setEditingActionId(null);
+                        await qc.invalidateQueries({ queryKey: ["incident-actions", historyIncident?.id, activeClientId] });
+                      }} />
+                    )}
                   </div>
                 ))}
-              <Link href="/compliance-hub"><Button variant="outline" size="sm">Review and verify actions in Compliance Hub</Button></Link>
               {canAdmin && <div className="space-y-2 border-t pt-3">
                 <h4 className="font-bold">Add a linked action</h4>
                 <Input aria-label="Action title" dictation placeholder="Action title" value={actionDraft.title} onChange={e => setActionDraft(d => ({ ...d, title: e.target.value }))} />
-                <Input aria-label="Action owner" placeholder="Action owner" value={actionDraft.ownerName} onChange={e => setActionDraft(d => ({ ...d, ownerName: e.target.value }))} />
+                <PickOrTypeSelect value={actionDraft.ownerName} groups={actionOwnerGroups} placeholder="Action owner"
+                  otherLabel="Someone else (type the name)" typedPlaceholder="Action owner"
+                  onChange={ownerName => setActionDraft(d => ({ ...d, ownerName }))} />
                 <Textarea aria-label="Corrective action" placeholder="Corrective action to complete" value={actionDraft.correctiveAction} onChange={e => setActionDraft(d => ({ ...d, correctiveAction: e.target.value }))} />
                 <Button size="sm" disabled={savingAction} onClick={createIncidentAction}>Link corrective action</Button>
               </div>}
