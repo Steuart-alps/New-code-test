@@ -3,6 +3,7 @@ import { takeLinkParams } from "@/lib/deep-link";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -493,7 +494,8 @@ function MachineDialog({
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
   const isEdit = !!machine;
-  const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: "", active: true, notes: "", sprayerCategory: "", purchaseDate: "" };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: workingSiteId ? String(workingSiteId) : "", active: true, notes: "", sprayerCategory: "", purchaseDate: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
 
@@ -2285,12 +2287,15 @@ export default function GreenTrackPage() {
 
   const { data: greenConfig } = useGetGreenTrackConfig();
   const showFuelTab = greenConfig?.green_show_fuel !== "false";
-  // The Template's default site (where the shed is), else the only site.
+  // The Template's default site (where the shed is), else the site the user
+  // is working at, else the only site.
+  const workingSiteId = useWorkingSiteId();
   const defaultSiteId = useMemo(() => {
     const chosen = Number(greenConfig?.green_default_site_id || 0);
     if (sites.some(site => site.id === chosen)) return chosen;
+    if (workingSiteId && sites.some(site => site.id === workingSiteId)) return workingSiteId;
     return sites.length === 1 ? sites[0].id : null;
-  }, [greenConfig?.green_default_site_id, sites]);
+  }, [greenConfig?.green_default_site_id, sites, workingSiteId]);
 
   const TABS: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: "daily",    label: "Daily checks", icon: Sunrise },

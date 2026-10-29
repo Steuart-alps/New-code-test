@@ -41,6 +41,7 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { StringListEditor } from "@/components/string-list-editor";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { useSayItFill } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 import { localDate } from "@/lib/voice-log";
@@ -443,7 +444,8 @@ export default function IncidentsPage() {
   const [filterStatus, setFilterStatus] = useState<Status | "all">("all");
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterSite, setFilterSite] = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [filterRiddor, setFilterRiddor] = useState(false);
@@ -624,6 +626,7 @@ ${rows.map(r => `<tr>
     f.incidentType = incidentTypeOptions[0] ?? "";
     f.severity = severityOptions[0] ?? "";
     if (incidentConfig?.incident_default_reporter) f.reportedBy = incidentConfig.incident_default_reporter;
+    if (workingSiteId) f.siteId = String(workingSiteId);
     setForm({ ...f, ...spoken });
     setFormSection("details");
     setShowDialog(true);

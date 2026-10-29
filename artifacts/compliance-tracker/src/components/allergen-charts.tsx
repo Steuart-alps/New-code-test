@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAuth, useCanEdit } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { printHtmlDocument } from "@/lib/download";
 import { ConfirmDelete, SiteSelect, ensureOk } from "@/components/register-shared";
 import {
@@ -99,6 +100,8 @@ export function AllergenChartsTab({ charts, menus, dishes, isLoading, error }: {
   const [busy, setBusy] = useState(false);
   const [historyChart, setHistoryChart] = useState<AllergenChart | null>(null);
   const [menuForm, setMenuForm] = useState<{ id: number | null; siteId: string; name: string } | null>(null);
+  // A new menu starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
   const [deleteMenu, setDeleteMenu] = useState<AllergenMenu | null>(null);
 
   async function refresh() {
@@ -182,7 +185,7 @@ export function AllergenChartsTab({ charts, menus, dishes, isLoading, error }: {
 
       <div className="flex justify-end">
         {canEdit && (
-          <Button size="sm" variant="outline" className="rounded-sm h-8 text-xs gap-1.5" onClick={() => setMenuForm({ id: null, siteId: "", name: "" })}>
+          <Button size="sm" variant="outline" className="rounded-sm h-8 text-xs gap-1.5" onClick={() => setMenuForm({ id: null, siteId: workingSiteId ? String(workingSiteId) : "", name: "" })}>
             <Plus className="w-3.5 h-3.5" /> Add menu
           </Button>
         )}

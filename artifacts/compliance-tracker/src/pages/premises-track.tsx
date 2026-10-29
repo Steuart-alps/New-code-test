@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { format, parseISO, isValid } from "date-fns";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortByLabel } from "@/lib/sort-options";
 import { RecordSignedBy } from "@/components/record-signature";
 
@@ -135,6 +136,11 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
   const inspectionTypes = pickOptions(formOptions, "premises_inspection_types");
   const isEdit = !!inspection;
   const [saving, setSaving] = useState(false);
+  // A new inspection starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const formSiteId = inspection
+    ? inspection.siteId == null ? "all" : String(inspection.siteId)
+    : workingSiteId ? String(workingSiteId) : "all";
   // Keep the record's stored type selectable even if it was later removed from
   // the effective list, so editing other fields doesn't force a type change.
   const currentType = inspection?.inspectionType;
@@ -154,7 +160,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
     status:         inspection?.status ?? "open",
      inspectedBy:    inspection?.inspectedBy ?? "",
      staffRosterId:  (inspection as any)?.staffRosterId ?? null,
-    siteId:         inspection?.siteId == null ? "all" : String(inspection.siteId),
+    siteId:         formSiteId,
   }));
 
   useEffect(() => {
@@ -171,7 +177,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
       status: inspection?.status ?? "open",
       inspectedBy: inspection?.inspectedBy ?? "",
       staffRosterId: (inspection as any)?.staffRosterId ?? null,
-      siteId: inspection?.siteId == null ? "all" : String(inspection.siteId),
+      siteId: formSiteId,
       ...(!inspection && spoken ? spoken : {}),
     });
   }, [open, inspection, inspectionTypes, spoken]);
@@ -307,7 +313,7 @@ export default function PremisesTrackPage() {
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter]     = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [siteFilter, setSiteFilter]     = useState<string>("all");
+  const [siteFilter, setSiteFilter]     = useSiteFilter("all");
   const [fromDate, setFromDate]         = useState("");
   const [toDate, setToDate]             = useState("");
 

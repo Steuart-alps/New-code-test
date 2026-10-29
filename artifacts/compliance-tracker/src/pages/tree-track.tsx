@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
@@ -184,7 +185,8 @@ export default function TreeTrackPage() {
   const hasTrees = hasService("treetrack");
 
   const [filterType, setFilterType] = useState<CheckType | "all">("all");
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterSite, setFilterSite] = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [editItem, setEditItem] = useState<TreeInspection | null>(null);
@@ -297,7 +299,7 @@ export default function TreeTrackPage() {
   function openAdd() {
     setEditItem(null);
     setResultChanged(false);
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), siteId: workingSiteId ? String(workingSiteId) : "" });
     setShowDialog(true);
   }
 

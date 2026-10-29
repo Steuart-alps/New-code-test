@@ -72,6 +72,7 @@ import { useLocalToday } from "@/hooks/use-local-today";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
 import { CoshhSignOffSection } from "@/components/coshh-sign-offs";
 import { DocumentSignOffSection } from "@/components/document-sign-offs";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { matchSpokenItem, spokenDate, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 
@@ -275,7 +276,8 @@ export default function TrainTrackPage() {
   const apiFetch = useTrainTrackApi();
 
   const [tab, setTab]           = useState<RecordType | "audit" | "coshh" | "documents">("certificate");
-  const [siteFilter, setSite]   = useState("all");
+  const [siteFilter, setSite]   = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [search, setSearch]     = useState("");
   const [certStatus, setCertStatus] = useState<"all" | CertStatus>("all");
 
@@ -417,9 +419,11 @@ export default function TrainTrackPage() {
 
   function openAdd() {
     setEditRecord(null);
-    setCertForm(emptyCert());
-    setSignoffForm(emptySignoff());
-    setInternalForm(emptyInternal());
+    // A new record starts on the user's working site.
+    const siteId = workingSiteId ? String(workingSiteId) : "";
+    setCertForm({ ...emptyCert(), siteId });
+    setSignoffForm({ ...emptySignoff(), siteId });
+    setInternalForm({ ...emptyInternal(), siteId });
     setShowDialog(true);
   }
 

@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAuth, useCanEdit } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { ConfirmDelete, ensureOk, fmtDate, todayIso, useRegisterSites } from "@/components/register-shared";
 import { AllergenBadges, AllergenChangeLogDialog, AllergenTicks } from "@/components/allergen-parts";
 import {
@@ -48,6 +49,7 @@ export function AllergenIngredientsTab({ ingredients, isLoading, error }: {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { sites, siteName } = useRegisterSites();
+  const workingSiteId = useWorkingSiteId();
 
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<AllergenIngredient | null>(null);
@@ -64,7 +66,8 @@ export function AllergenIngredientsTab({ ingredients, isLoading, error }: {
 
   function openNew() {
     setEditing(null);
-    setForm(emptyForm(user?.name ?? ""));
+    // A new ingredient starts on the user's working site.
+    setForm({ ...emptyForm(user?.name ?? ""), siteId: workingSiteId ? String(workingSiteId) : "all" });
   }
 
   function openEdit(item: AllergenIngredient) {

@@ -22,6 +22,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
 import { Archive, ChevronDown, ChevronUp, Download, Flame, Loader2, Pencil, Plus, QrCode, RefreshCw, RotateCcw, Search } from "lucide-react";
@@ -111,10 +112,13 @@ function ItemDialog({ item, sites, defaultSite, open, onOpenChange, onSaved }: {
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  // A new item starts on the page's site filter, else the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const newSite = defaultSite !== ALL ? defaultSite : workingSiteId ? String(workingSiteId) : NO_SITE;
   const [form, setForm] = useState(() => ({
     name: item?.name ?? "",
     type: (item?.type ?? "other") as EquipmentType,
-    siteId: item ? (item.siteId ? String(item.siteId) : NO_SITE) : (defaultSite === ALL ? NO_SITE : defaultSite),
+    siteId: item ? (item.siteId ? String(item.siteId) : NO_SITE) : newSite,
     location: item?.location ?? "",
     make: item?.make ?? "",
     model: item?.model ?? "",
@@ -252,7 +256,9 @@ function ImportExtinguishersDialog({ sites, defaultSite, open, onOpenChange, onD
   onDone: () => void;
 }) {
   const { toast } = useToast();
-  const [siteId, setSiteId] = useState(defaultSite === ALL ? NO_SITE : defaultSite);
+  // The page's site filter, else the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const [siteId, setSiteId] = useState(defaultSite !== ALL ? defaultSite : workingSiteId ? String(workingSiteId) : NO_SITE);
   const [busy, setBusy] = useState(false);
   const run = async () => {
     setBusy(true);

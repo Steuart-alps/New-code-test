@@ -46,6 +46,10 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useChecklistSite } from "@/hooks/use-checklist-site";
+import { useWorkingSite } from "@/hooks/use-working-site";
+import { ChecklistSiteSelect } from "@/components/checklist-site-select";
+import { carryAnswers, createChecklistDraftStore, hasAnswers, type ChecklistDraftSlot } from "@/lib/checklist-carry";
 import WeeklyReviewTab from "./kitchen-weekly";
 import ProbeCheckTab from "./kitchen-probe";
 import CleaningScheduleTab from "./kitchen-cleaning";
@@ -849,10 +853,13 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
 export function DailyDiaryTab() {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  // Which site's diary we're viewing/filling. null = the legacy client-wide
-  // whole-organisation diary (records with no site), matching the original
-  // single-diary behaviour.
-  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
+  // Which site's diary we're viewing/filling. It starts on the user's working
+  // site; null = the legacy client-wide whole-organisation diary (records with
+  // no site), which is also where a user without a working site starts.
+  const workingSite = useWorkingSite();
+  const [chosenSite, setChosenSite] = useState<{ id: number | null } | null>(null);
+  const selectedSiteId = chosenSite ? chosenSite.id : workingSite.siteId;
+  const setSelectedSiteId = (id: number | null) => setChosenSite({ id });
   const { data: sites } = useListSites();
 
   // The diary is scoped to the selected site: it loads that site's effective
@@ -1324,7 +1331,7 @@ export function DailyDiaryTab() {
         </CardContent>
       </Card>
 
-      {recordLoading || configLoading || !formReady ? (
+      {recordLoading || configLoading || !formReady || (!chosenSite && !workingSite.ready) ? (
         <Card>
           <CardContent className="p-12 flex justify-center">
             <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
@@ -2037,8 +2044,8 @@ const KCL_LABELS: Record<string, string> = { kitchen_opening: "Kitchen Opening",
 const KCL_ENDPOINT: Record<string, string> = { kitchen_opening: "/daily-track-am", kitchen_closing: "/daily-track-pm" };
 
 function KitchenChecklistCard({
-  type, siteId, siteName, date, existing, onSaved, canAdmin,
-}: { type: string; siteId: number | null; siteName?: string; date: string; existing?: KCLRecord; onSaved: () => void; canAdmin: boolean }) {
+  type, siteId, siteName, date, existing, onSaved, canAdmin, draft,
+}: { type: string; siteId: number | null; siteName?: string; date: string; existing?: KCLRecord; onSaved: () => void; canAdmin: boolean; draft?: ChecklistDraftSlot<KCLItem> }) {
   const [templateItems, setTemplateItems] = useState<KCLItem[] | null>(null);
   const [templateLoading, setTemplateLoading] = useState(true);
   const [showEditor, setShowEditor] = useState(false);
@@ -2058,23 +2065,37 @@ function KitchenChecklistCard({
   }, [type, siteId, existing]);
 
   const effectiveDefault = templateItems ? templateItems.map(i => ({ ...i, checked: false })) : (KCL_DEFAULTS[type] ?? []);
-  const [items, setItems] = useState<KCLItem[]>(existing?.items ?? effectiveDefault);
-  const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
-  const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
-  const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
-  const [saving, setSaving] = useState(false);
   const submitted = !!existing?.submittedAt;
+  // Ticks made before the site or date was changed (or before a reload) are
+  // carried onto this card, unless this one is already submitted.
+  const carried = submitted ? undefined : draft?.get();
+  const startItems = () => {
+    const base = existing?.items ?? effectiveDefault;
+    return carried ? carryAnswers(base, carried.items, item => item.label) : base;
+  };
+  const [items, setItems] = useState<KCLItem[]>(startItems);
+  const [completedBy, setCompletedBy] = useState(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+  const [managerNote, setManagerNote] = useState(carried?.managerNote || (existing?.managerNote ?? ""));
+  const [saving, setSaving] = useState(false);
+  const touched = useRef(false);
 
   useEffect(() => {
-    setItems(existing?.items ?? effectiveDefault);
-    setCompletedBy(existing?.completedBy ?? user?.name ?? "");
-    setStaffRosterId((existing as any)?.staffRosterId ?? null);
-    setManagerNote(existing?.managerNote ?? "");
+    setItems(startItems());
+    setCompletedBy(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+    setStaffRosterId(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+    setManagerNote(carried?.managerNote || (existing?.managerNote ?? ""));
   }, [existing, type, templateItems]);
 
-  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
-  const passRemaining = () => { if (submitted) return; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
-  const setNote = (i: number, note: string) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
+  useEffect(() => {
+    if (touched.current && !submitted) draft?.set({ items, completedBy, staffRosterId, managerNote });
+  }, [items, completedBy, staffRosterId, managerNote]);
+
+  const edit = <T,>(set: (value: T) => void) => (value: T) => { touched.current = true; set(value); };
+  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; touched.current = true; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
+  const passRemaining = () => { if (submitted) return; touched.current = true; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
+
+  const setNote = (i: number, note: string) => { if (submitted) return; touched.current = true; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
 
   async function save(submit: boolean) {
     setSaving(true);
@@ -2094,6 +2115,8 @@ function KitchenChecklistCard({
         return;
       }
       toast({ title: submit ? "Checklist submitted" : "Draft saved" });
+      touched.current = false;
+      draft?.set(undefined);
       onSaved();
     } catch {
       toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
@@ -2127,6 +2150,10 @@ function KitchenChecklistCard({
           </div>
         </div>
 
+        {carried && hasAnswers(carried.items) && !touched.current && (
+          <p className="text-xs text-blue-700 mb-3">Your unsaved ticks are filled in below. Save or submit to keep them.</p>
+        )}
+
         {templateLoading && !existing ? (
           <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
         ) : (
@@ -2145,8 +2172,8 @@ function KitchenChecklistCard({
         {!submitted && (
           <div className="space-y-3 border-t pt-3">
             <div className="grid grid-cols-2 gap-3">
-              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={setCompletedBy} onRosterIdChange={setStaffRosterId} />
-              {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
+              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={edit(setCompletedBy)} onRosterIdChange={edit(setStaffRosterId)} />
+              {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => edit(setManagerNote)(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
             </div>
             {progress.remaining > 0 && progress.answered > 0 && (
               <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={passRemaining}>Mark the {progress.remaining} remaining as Pass</Button>
@@ -2157,6 +2184,9 @@ function KitchenChecklistCard({
               <Button size="sm" onClick={() => save(true)} disabled={saving || !progress.ready} className="flex-1">Submit checklist</Button>
             </div>
           </div>
+        )}
+        {submitted && draft?.get() && hasAnswers(draft.get()!.items) && (
+          <p className="text-xs text-amber-700 mb-3">This checklist is already submitted. Your unsaved ticks are kept: choose another site or date to use them.</p>
         )}
         {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}
         {existing?.id && <div className="border-t mt-3 pt-3"><RecordSignedBy recordType="daily_checklist" recordId={existing.id} className="mb-2" /><CheckPhotoUploader entityType="daily_checklist" entityId={existing.id} compact /></div>}
@@ -2185,19 +2215,23 @@ function KitchenChecklistCard({
 function DailyChecksTab() {
   const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
-  const { data: sites = [] } = useListSites();
+  const { sites, siteId: selectedSiteId, setSiteId, ready: siteReady } = useChecklistSite();
   const today = new Date().toISOString().slice(0, 10);
   const _qs = new URLSearchParams(window.location.search);
   const [date, setDate] = useState(_qs.get("date") ?? today);
-  const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
   const [amRows, setAmRows] = useState<KCLRecord[]>([]);
   const [pmRows, setPmRows] = useState<KCLRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  // Unsaved ticks per checklist, kept while the site or date changes.
+  const [drafts] = useState(createChecklistDraftStore);
+  const loadSeq = useRef(0);
 
-  const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
   const selectedSiteName = sites.find(s => s.id === selectedSiteId)?.name;
 
   const load = useCallback(async () => {
+    if (!siteReady) return;
+    // A slower answer for the previous site or date must not replace this one.
+    const seq = ++loadSeq.current;
     setLoading(true);
     const params = new URLSearchParams({ date });
     if (selectedSiteId) params.set("siteId", String(selectedSiteId));
@@ -2205,10 +2239,13 @@ function DailyChecksTab() {
       apiFetch(`/daily-track-am?${params}`),
       apiFetch(`/daily-track-pm?${params}`),
     ]);
-    if (amRes.ok) setAmRows(await amRes.json());
-    if (pmRes.ok) setPmRows(await pmRes.json());
+    const am = amRes.ok ? await amRes.json() : null;
+    const pm = pmRes.ok ? await pmRes.json() : null;
+    if (seq !== loadSeq.current) return;
+    if (am) setAmRows(am);
+    if (pm) setPmRows(pm);
     setLoading(false);
-  }, [date, selectedSiteId, activeClientId]);
+  }, [date, selectedSiteId, siteReady, activeClientId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2225,16 +2262,7 @@ function DailyChecksTab() {
           <Label className="text-xs">Date</Label>
           <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-9" />
         </div>
-        <div className="space-y-1 flex-1 min-w-[180px]">
-          <Label className="text-xs">Site</Label>
-          <Select value={siteId} onValueChange={setSiteId}>
-            <SelectTrigger className="h-9"><SelectValue placeholder="Select site…" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No site filter</SelectItem>
-              {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <ChecklistSiteSelect sites={sites} value={selectedSiteId} onChange={setSiteId} />
         <div className="flex items-end">
           <Button variant="outline" size="sm" onClick={load} className="h-9 gap-1.5">
             <RotateCcw className={cn("w-3.5 h-3.5", loading && "animate-spin")} /> Refresh
@@ -2242,12 +2270,12 @@ function DailyChecksTab() {
         </div>
       </div>
 
-      {loading ? (
+      {loading || !siteReady ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <KitchenChecklistCard type="kitchen_opening" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getAm("kitchen_opening")} onSaved={load} canAdmin={canAdmin} />
-          <KitchenChecklistCard type="kitchen_closing" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getPm("kitchen_closing")} onSaved={load} canAdmin={canAdmin} />
+          <KitchenChecklistCard type="kitchen_opening" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getAm("kitchen_opening")} onSaved={load} canAdmin={canAdmin} draft={drafts.slot("kitchen_opening")} />
+          <KitchenChecklistCard type="kitchen_closing" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getPm("kitchen_closing")} onSaved={load} canAdmin={canAdmin} draft={drafts.slot("kitchen_closing")} />
         </div>
       )}
     </div>

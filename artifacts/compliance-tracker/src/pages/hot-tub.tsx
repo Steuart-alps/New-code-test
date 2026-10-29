@@ -34,6 +34,7 @@ import { createHotTubLogPdf, HotTubLogPdfError } from "@/lib/hot-tub-log-pdf";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
@@ -230,7 +231,8 @@ export default function HotTubPage() {
   const hasHotTub = hasService("hottubtrack");
 
   const [filterType, setFilterType] = useState<CheckType | "all">("all");
-  const [filterSite, setFilterSite] = useState("all");
+  const [filterSite, setFilterSite] = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [filterTub, setFilterTub] = useState("all");
   const [filterFrom, setFilterFrom] = useState(() => defaultDateRange().from);
   const [filterTo, setFilterTo] = useState(() => defaultDateRange().to);
@@ -388,7 +390,7 @@ export default function HotTubPage() {
 
   function openAdd() {
     setEditItem(null);
-    setForm({ ...emptyForm(), performedBy: user?.name ?? "" });
+    setForm({ ...emptyForm(), performedBy: user?.name ?? "", siteId: workingSiteId ? String(workingSiteId) : "" });
     setStaffRosterId(null);
     setShowDialog(true);
   }
@@ -1174,6 +1176,7 @@ function ManageTubsDialog({
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newSiteId, setNewSiteId] = useState("");
+  const workingSiteId = useWorkingSiteId();
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
@@ -1340,7 +1343,7 @@ function ManageTubsDialog({
         </div>
 
         <DialogFooter className="flex-row gap-2 sm:justify-between">
-          <Button variant="outline" className="rounded-sm gap-1.5" onClick={() => setAdding(true)} disabled={adding}>
+          <Button variant="outline" className="rounded-sm gap-1.5" onClick={() => { setNewSiteId(workingSiteId ? String(workingSiteId) : ""); setAdding(true); }} disabled={adding}>
             <Plus className="w-3.5 h-3.5" /> Add Tub
           </Button>
           <Button className="rounded-sm" onClick={onClose}>Done</Button>
