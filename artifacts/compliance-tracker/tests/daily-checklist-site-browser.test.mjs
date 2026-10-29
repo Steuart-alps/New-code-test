@@ -6,7 +6,9 @@
 //  - answers given before the site is changed are kept and saved against the
 //    newly picked site, matched by wording when that site's list differs;
 //  - a site whose checklist is already submitted shows it read-only, and the
-//    unsaved answers come back on a site that is still open.
+//    unsaved answers come back on a site that is still open;
+//  - RoomTrack room checks and KitchenTrack cleaning ticks also survive
+//    picking a site after filling them in.
 //
 // The real page is mounted by tests/browser/daily-checklist-site.harness.tsx
 // and built with the app's React and Tailwind setup. API requests are
@@ -111,6 +113,23 @@ function mockApi(page, { rows = [], sitesDelayMs = 0 } = {}) {
       : [{ label: "Alpha check" }, { label: "Bravo check" }];
     return json(route, 200, { items });
   });
+  page.route(apiPath("/api/room-track/rooms"), async (route) => {
+    const siteId = Number(new URL(route.request().url()).searchParams.get("siteId")) || null;
+    // Slow enough that the page is visibly reloading when the site changes.
+    await new Promise((r) => setTimeout(r, 300));
+    const rooms = [{ id: 1, roomNumber: "101", siteId: 1 }, { id: 2, roomNumber: "201", siteId: 2 }];
+    return json(route, 200, rooms.filter((room) => !siteId || room.siteId === siteId));
+  });
+  page.route(apiPath("/api/room-track/checks"), (route) => json(route, 200, []));
+  page.route(apiPath("/api/kitchen-cleaning/"), async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/tasks")) {
+      return json(route, 200, [{ id: 7, area: "Kitchen", task: "Wipe surfaces", frequency: "daily", method: null, product: null, responsible: null, sort_order: 0 }]);
+    }
+    if (url.pathname.endsWith("/history")) return json(route, 200, []);
+    await new Promise((r) => setTimeout(r, 300));
+    return json(route, 200, null);
+  });
   page.route(apiPath("/api/daily-track-am"), (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -147,13 +166,13 @@ async function main() {
   const base = `http://127.0.0.1:${server.address().port}/tests/browser/daily-checklist-site.html`;
   const executablePath = process.env.CHROMIUM_PATH ?? ["/opt/pw-browsers/chromium"].find((p) => existsSync(p));
   const browser = await chromium.launch({ executablePath });
-  const open = async (query = "", options = {}, context = null) => {
+  const open = async (query = "", options = {}, context = null, ready = (page) => page.getByRole("heading", { name: "Kitchen Opening" })) => {
     const page = await (context ?? browser).newPage();
     page.setDefaultTimeout(5_000);
     if (process.env.DEBUG_BROWSER) page.on("console", (m) => console.log("[browser]", m.type(), m.text()));
     const state = mockApi(page, options);
     await page.goto(base + query);
-    await page.getByRole("heading", { name: "Kitchen Opening" }).waitFor();
+    await ready(page).waitFor();
     return { page, state };
   };
   try {
@@ -255,6 +274,35 @@ async function main() {
       assert.equal(await siteSelect(again.page).textContent(), "Halfway House");
       await again.page.close();
       await context.close();
+    });
+
+    await test("RoomTrack: room checks survive narrowing to a site", async () => {
+      const { page } = await open("?page=room-track", {}, null, (p) => p.getByRole("heading", { name: "201" }));
+      const room = page.locator(".border-l-4", { has: page.getByRole("heading", { name: "201" }) });
+      await room.getByRole("button", { name: "Clean" }).click();
+      await room.getByRole("textbox", { name: "Notes" }).fill("Kettle missing");
+      await page.getByRole("combobox", { name: "Filter rooms by site" }).click();
+      await page.getByRole("option", { name: "Pro Shop" }).click();
+      await page.getByRole("heading", { name: "101" }).waitFor({ state: "detached" });
+      assert.equal(await room.getByRole("button", { name: "Clean" }).getAttribute("aria-pressed"), "true");
+      assert.equal(await room.getByRole("textbox", { name: "Notes" }).inputValue(), "Kettle missing");
+      await page.getByRole("button", { name: "Refresh" }).click();
+      await page.waitForTimeout(500);
+      assert.equal(await room.getByRole("button", { name: "Clean" }).getAttribute("aria-pressed"), "true", "Refresh keeps it too");
+      await page.close();
+    });
+
+    await test("KitchenTrack cleaning: ticks survive changing the kitchen", async () => {
+      const { page } = await open("?page=kitchen-cleaning", {}, null, (p) => p.getByRole("checkbox", { name: "Wipe surfaces" }));
+      await page.getByRole("checkbox", { name: "Wipe surfaces" }).click();
+      await page.getByPlaceholder("Notes (optional)").fill("Used blue cloth");
+      await page.getByRole("combobox", { name: "Kitchen" }).click();
+      await page.getByRole("option", { name: "Pro Shop" }).click();
+      await page.getByRole("checkbox", { name: "Wipe surfaces" }).waitFor();
+      await page.waitForTimeout(500);
+      assert.equal(await page.getByRole("checkbox", { name: "Wipe surfaces" }).getAttribute("aria-checked"), "true");
+      assert.equal(await page.getByPlaceholder("Notes (optional)").inputValue(), "Used blue cloth");
+      await page.close();
     });
   } finally {
     await browser.close();

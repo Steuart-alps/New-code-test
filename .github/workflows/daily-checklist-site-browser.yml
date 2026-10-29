@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "artifacts/compliance-tracker/src/pages/daily-track-am.tsx"
+      - "artifacts/compliance-tracker/src/pages/room-track.tsx"
+      - "artifacts/compliance-tracker/src/pages/kitchen-cleaning.tsx"
       - "artifacts/compliance-tracker/src/hooks/use-checklist-site.ts"
       - "artifacts/compliance-tracker/src/lib/checklist-carry.ts"
       - "artifacts/compliance-tracker/src/components/checklist-site-select.tsx"
@@ -18,6 +20,8 @@ on:
     branches: [main]
     paths:
       - "artifacts/compliance-tracker/src/pages/daily-track-am.tsx"
+      - "artifacts/compliance-tracker/src/pages/room-track.tsx"
+      - "artifacts/compliance-tracker/src/pages/kitchen-cleaning.tsx"
       - "artifacts/compliance-tracker/src/hooks/use-checklist-site.ts"
       - "artifacts/compliance-tracker/src/lib/checklist-carry.ts"
       - "artifacts/compliance-tracker/src/components/checklist-site-select.tsx"
