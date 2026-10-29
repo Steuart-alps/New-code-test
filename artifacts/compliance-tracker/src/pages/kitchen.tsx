@@ -42,6 +42,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2, FileText } from "lucide-react";
 import { DocTrackLibrary } from "./doc-track";
+import { HaccpReviewCard } from "@/components/haccp-review-card";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { cn } from "@/lib/utils";
@@ -2286,7 +2287,7 @@ const TABS: { id: ActiveTab; label: string; icon: any; description: string }[] =
   { id: "weekly",   label: "Weekly Review",         icon: ClipboardList, description: "Combined CookSafe house rules + management review" },
   { id: "probe",    label: "Probe Check",           icon: Thermometer,   description: "Monthly probe thermometer calibration record" },
   { id: "cleaning", label: "Cleaning Schedule",     icon: Sparkles,      description: "Daily, weekly and monthly cleaning task schedule and sign-off" },
-  { id: "documents", label: "HACCP & Recipes",      icon: FileText,      description: "HACCP plans and recipe spec sheets" },
+  { id: "documents", label: "HACCP & Recipes",      icon: FileText,      description: "Yearly HACCP review, HACCP plans and recipe spec sheets" },
 ];
 
 export default function KitchenPage() {
@@ -2429,7 +2430,7 @@ export default function KitchenPage() {
         {activeTab === "weekly"   && <WeeklyReviewTab />}
         {activeTab === "probe"    && <ProbeCheckTab defaultProbeNamesJson={foodSafetyConfig?.food_probe_names} />}
         {activeTab === "cleaning" && <CleaningScheduleTab />}
-        {activeTab === "documents" && <DocTrackLibrary kitchen />}
+        {activeTab === "documents" && <div className="space-y-6"><HaccpReviewCard /><DocTrackLibrary kitchen /></div>}
       </div>
     </AppLayout>
   );

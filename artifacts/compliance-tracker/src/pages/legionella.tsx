@@ -215,9 +215,10 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
     controlLimitsRationale: "", remedialVerificationReference: "", schemeReviewDate: "", ukNation: "",
     temperatureLimits: {},
   });
+  const [schemeFromHub, setSchemeFromHub] = useState(false);
 
   useEffect(() => {
-    if (!config || !open) return;
+    if (!config || !open) return undefined;
     setDefaultPerformer(config.water_default_performer ?? "");
     setNonSentinelOutlets(parseJsonArray<string>(config.water_non_sentinel_outlets));
     const saved = parseJsonRecord(config.water_frequency_days, DEFAULT_LEGIONELLA_FREQUENCIES);
@@ -236,6 +237,23 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
       ukNation: savedProfile.ukNation ?? "",
        temperatureLimits: savedProfile.temperatureLimits ?? (config as any).effectiveTemperatureLimits ?? {},
     });
+    // The written scheme used to be recorded once in Compliance Hub. Offer
+    // that reference for a site that has none yet, so it is not lost.
+    setSchemeFromHub(false);
+    if (siteId && !(savedProfile.writtenControlSchemeReference ?? savedProfile.writtenSchemeReference ?? "").trim()) {
+      let cancelled = false;
+      apiFetch("/compliance-hub/profile")
+        .then(response => response.ok ? response.json() : null)
+        .then(hub => {
+          const reference = typeof hub?.waterWrittenSchemeReference === "string" ? hub.waterWrittenSchemeReference.trim() : "";
+          if (cancelled || !reference) return;
+          setProfile(current => current.writtenControlSchemeReference.trim() ? current : { ...current, writtenControlSchemeReference: reference });
+          setSchemeFromHub(true);
+        })
+        .catch(() => { /* only a starting point */ });
+      return () => { cancelled = true; };
+    }
+    return undefined;
   }, [config, open]);
 
   const handleSave = () => {
@@ -364,6 +382,9 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
                  ) : (
                    <Textarea rows={key === "controlLimitsRationale" ? 3 : 1} value={profile[key]} disabled={!siteId}
                      onChange={e => setProfile(current => ({ ...current, [key]: e.target.value }))} />
+                 )}
+                 {key === "writtenControlSchemeReference" && schemeFromHub && (
+                   <p className="text-xs text-muted-foreground">Brought across from Compliance Hub. Check it is right for this site, then save.</p>
                  )}
                </div>
              ))}
