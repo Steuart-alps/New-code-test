@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { INFO_SHEETS, infoSheetForBusiness, readMeRows, siteCountsTab } from "../src/lib/setup-info-sheets.ts";
 import { CHECKLISTS } from "../src/lib/setup-checklists.ts";
+import { WORKBOOK_TABS } from "../src/lib/list-kinds.ts";
 
 // The setup wizard's "What we need from you" workbooks (src/lib/setup-info-sheets.ts):
 // a tab that says it can be uploaded must carry exactly the headers of that
@@ -34,6 +35,9 @@ for (const [name, path] of [["Appliances", "../src/components/import-csv-dialog.
   ["Staff roster", "../src/components/roster-import-dialog.tsx"], ["Equipment", "../src/pages/green-track.tsx"]]) {
   assert.ok(source(path).includes(`sheet: "${name}"`), `${path} reads the "${name}" tab`);
 }
+
+// "Upload your lists" finds a workbook's list by these tab names.
+assert.deepEqual(Object.values(WORKBOOK_TABS).sort(), Object.keys(expected).sort(), "Upload your lists knows every uploadable tab");
 
 const importable = INFO_SHEETS.flatMap((sheet) => sheet.tabs.filter((tab) => tab.importsInto).map((tab) => ({ sheet, tab })));
 assert.equal(importable.length, 6, "staff roster, contractors, call points, appliances, rooms and GreenTrack equipment can be uploaded");

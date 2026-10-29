@@ -151,6 +151,13 @@ export async function readSpreadsheet(file: File, options: { sheet?: string } = 
   return { headers, rows };
 }
 
+/** The tab names of an Excel workbook (none for CSV, Word or text files). */
+export async function spreadsheetTabNames(file: File): Promise<string[]> {
+  const name = file.name.toLowerCase();
+  if (!/\.(xlsx|xlsm|xls|ods)$/.test(name)) return [];
+  return XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array", bookSheets: true }).SheetNames;
+}
+
 /**
  * Save rows as an .xlsx file. Every cell is stored as text so examples such
  * as "31/03/2027" or "0012" look the same in Excel as they do here.
