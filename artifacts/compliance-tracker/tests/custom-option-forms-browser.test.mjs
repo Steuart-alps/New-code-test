@@ -173,6 +173,7 @@ async function routeApi(route) {
       case "/api/setup/state": return json(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
       case "/api/sites": return json(route, []);
       case "/api/staff-roster": return json(route, []);
+      case "/api/assignees": return json(route, []);
       case "/api/compliance-items":
       case "/api/categories":
       case "/api/track-actions":
