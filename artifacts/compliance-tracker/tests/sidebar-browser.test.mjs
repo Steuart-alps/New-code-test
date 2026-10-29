@@ -98,20 +98,21 @@ try {
   const sectionTrigger = (scope, title) => scope.getByRole("button", { name: title, exact: true });
   const isOpen = (scope, title) => sectionTrigger(scope, title).getAttribute("aria-expanded").then(v => v === "true");
   const openStates = async scope => Object.fromEntries(await Promise.all(
-    ["Home", "Set up", "Compliance", "Safety", "Food & Water", "Operations", "People & Training", "Reporting", "Other", "Administration"]
+    ["Home", "Set up", "Compliance", "Safety", "Food & Water", "Operations", "Greenkeeping", "People & Training", "Reporting", "Other", "Administration"]
       .map(async title => [title, await isOpen(scope, title)])));
 
   // ─── Sections ─────────────────────────────────────────────────────────────
   await load("/account-security");
   assert.deepEqual(await openStates(desktop), {
+    // Greenkeeping starts open only when GreenTrack is unlocked; here it is locked.
     Home: true, "Set up": true, Compliance: true, Safety: false, "Food & Water": false, Operations: false,
-    "People & Training": false, Reporting: false, Other: false, Administration: false,
+    Greenkeeping: false, "People & Training": false, Reporting: false, Other: false, Administration: false,
   }, "Home, Set up and Compliance start open and the rest closed");
 
   // Sections run in the order a business sets up the service.
   const sectionOrder = await desktop.locator("nav button[aria-expanded]").allTextContents();
   assert.deepEqual(sectionOrder.map(t => t.trim()),
-    ["Home", "Set up", "Compliance", "Safety", "Food & Water", "Operations", "People & Training", "Reporting", "Other", "Administration"],
+    ["Home", "Set up", "Compliance", "Safety", "Food & Water", "Operations", "Greenkeeping", "People & Training", "Reporting", "Other", "Administration"],
     "Sections follow the setup order");
 
   // The current page's section opens on load, even over a saved close.
