@@ -1,5 +1,6 @@
 // Register CSV imports and the consultant portfolio. Run through test:csv-imports-portfolio.
-//  - Imports (PAT appliances, RoomTrack rooms, contractors): preview then
+//  - Imports (PAT appliances, RoomTrack rooms, contractors, compliance
+//    checks): preview then
 //    commit, per-row errors block the whole file, natural-key duplicate
 //    detection, site matching by name, blank cells keep existing values.
 //  - Roles: viewers and ordinary staff are refused; a PATTrack department
@@ -235,6 +236,62 @@ async function contractorImports(owner, manager, viewer) {
   check("list sorting: viewer is refused", (await viewer("POST", "/imports/sort-list", list)).status === 403);
 }
 
+async function complianceCheckImports(owner, manager, viewer) {
+  // A business's own checklist as most keep it: a title above the headings, a
+  // Status formula column, an in-house section and contractor names.
+  const sites = (await owner("GET", "/sites")).data ?? [];
+  const main = sites.find((site) => site.name === "Main Building");
+  const existing = await owner("POST", "/compliance-items", { title: "Fire Alarm Maintenance", siteId: main?.id, frequencyMonths: 6, status: "pending", priority: "high" });
+  check("compliance checks: setup existing check", existing.status === 201, `${existing.status} ${JSON.stringify(existing.data)}`);
+  const headings = ["Item", "Time Period", "Last Completed", "Due Date ", "Status", "Contractor ", "Telephone Number ", "Email Address", "Site"];
+  const checklist = (lines, preview = true) => ({ headers: ["Compliance Checklist"], rows: [headings, ...lines], preview });
+  const lines = [
+    ["Fire Alarm Maintenance", "6 monthly", "2026-03-28", "2026-09-28", "-31", "Patel Electrical Ltd", "", "", "Main Building"],
+    ["Heating plant (oil etc)", "Annual", "2026-02-19", "", "", "New Heating Co", "01234 567890", "Heat@Example.co.uk", "Annexe"],
+    ["Boiler gas safety", "Annual", "", "", "", "New Heating Co", "", "heat@example.co.uk", "Annexe"],
+    ["Fire extinguisher checks", "Weekly", "", "", "", "", "", "", ""],
+    ["In-house", "", "", "", "=D9-TODAY()", "", "", "", ""],
+    ["Fire Doors", "Monthly", "", "", "", "", "", "", ""],
+  ];
+  const preview = await owner("POST", "/imports/compliance-checks", checklist(lines));
+  const byRow = Object.fromEntries((preview.data?.rows ?? []).map((row) => [row.row, row]));
+  check("compliance checks: headings found under a title row; Status left out",
+    preview.status === 200 && JSON.stringify(preview.data?.ignoredHeaders) === JSON.stringify(["Status"]), `${preview.status} ${JSON.stringify(preview.data)}`);
+  // Lines 4 and 5 find the business-wide starter checks, which become Annexe's.
+  check("compliance checks: an existing check is updated, matched lines take ComplyTrack's title",
+    byRow[3]?.action === "update" && byRow[4]?.label.includes("Oil Boilers") && byRow[5]?.label.includes("Gas Boilers")
+      && byRow[4]?.reasons.some((reason) => reason.includes("Adds New Heating Co")) && byRow[5]?.reasons.every((reason) => !reason.includes("Adds")),
+    JSON.stringify(preview.data?.rows));
+  check("compliance checks: weekly lines, headings and in-house routines are skipped",
+    byRow[6]?.action === "skip" && byRow[7]?.action === "skip" && byRow[8]?.action === "skip" && preview.data?.summary?.error === 0,
+    JSON.stringify(preview.data?.rows));
+  const future = await owner("POST", "/imports/compliance-checks", checklist([["Asbestos Survey", "10 years", "2099-01-01", "", "", "", "", "", ""]], false));
+  check("compliance checks: a last done date in the future blocks the whole file", future.status === 409 && future.data?.summary?.error === 1, `${future.status} ${JSON.stringify(future.data)}`);
+  check("compliance checks: department manager is refused", (await manager("POST", "/imports/compliance-checks", checklist(lines))).status === 403);
+  check("compliance checks: viewer is refused", (await viewer("POST", "/imports/compliance-checks", checklist(lines, false))).status === 403);
+
+  const committed = await owner("POST", "/imports/compliance-checks", checklist(lines, false));
+  check("compliance checks: commit", committed.status === 200 && committed.data?.committed === true
+    && committed.data?.summary?.create + committed.data?.summary?.update === 3 && committed.data?.summary?.error === 0, `${committed.status} ${JSON.stringify(committed.data)}`);
+  const contractors = (await owner("GET", "/contractors")).data ?? [];
+  const sam = contractors.find((item) => item.email === "sam@example.co.uk");
+  const heating = contractors.filter((item) => item.email === "heat@example.co.uk");
+  check("compliance checks: a contractor with an email is added once for several lines", heating.length === 1 && heating[0].phone === "01234 567890", JSON.stringify(heating));
+  const items = (await owner("GET", "/compliance-items")).data ?? [];
+  const alarm = items.find((item) => item.id === existing.data?.id);
+  check("compliance checks: last done, next due and the contractor (matched by company name) on the existing check",
+    alarm && String(alarm.completedAt).startsWith("2026-03-28") && String(alarm.dueDate).startsWith("2026-09-28") && alarm.contractorId === sam?.id,
+    JSON.stringify(alarm));
+  const oil = items.find((item) => item.title === "Oil Boilers — Annual Service" && item.siteId === sites.find((site) => site.name === "Annexe")?.id);
+  check("compliance checks: the oil boiler check is due its repeat after last done, with the new contractor",
+    oil && oil.frequencyMonths === 12 && String(oil.dueDate).startsWith("2027-02-19") && oil.contractorId === heating[0]?.id && /Heating plant \(oil etc\)/.test(oil.notes ?? ""),
+    JSON.stringify(oil));
+  const again = await owner("POST", "/imports/compliance-checks", checklist(lines));
+  check("compliance checks: uploading the same file again changes nothing",
+    again.data?.summary?.create === 0 && again.data?.summary?.update === 0, JSON.stringify(again.data?.rows));
+  check("compliance checks: template download", (await owner("GET", "/imports/compliance-checks/template")).status === 200);
+}
+
 async function isolation(owner, ownerClientId, other, otherClientId) {
   const foreign = await other("POST", `/imports/contractors?clientId=${ownerClientId}`, {
     headers: ["Contact name", "Email"], rows: [["Intruder", "intruder@example.co.uk"]], preview: false,
@@ -336,6 +393,7 @@ async function main() {
     await patImports(owner, manager, staff, viewer);
     await roomImports(owner, manager, viewer, secondClientId);
     await contractorImports(owner, manager, viewer);
+    await complianceCheckImports(owner, manager, viewer);
     await isolation(owner, a.clientId, b.request, b.clientId);
     await portfolio(owner, a.clientId, secondClientId, admin, viewer);
     await branding(owner, a.clientId, viewer, admin, b.request, otherAdmin);

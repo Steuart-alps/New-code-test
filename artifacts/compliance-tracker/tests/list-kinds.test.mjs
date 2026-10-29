@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { availableListKinds, guessListKind, guessListKindFromName } from "../src/lib/list-kinds.ts";
+import { availableListKinds, guessListKind, guessListKindFromName, guessListKindFromSheet } from "../src/lib/list-kinds.ts";
 
 // How "Upload your lists" sorts a file without AI (src/lib/list-kinds.ts).
 const all = availableListKinds(() => true);
-assert.deepEqual(availableListKinds(key => key === "firetrack"), ["contractors", "fire-call-points", "staff-roster"], "only the business's modules");
+assert.deepEqual(availableListKinds(key => key === "firetrack"), ["contractors", "fire-call-points", "staff-roster", "compliance-checks"], "only the business's modules");
 
 assert.equal(guessListKind(["Payroll ID", "Name", "Job Title", "Department", "Email"], "export.xlsx", all), "staff-roster");
 assert.equal(guessListKind(["Contact name", "Company", "Email", "Phone", "Trades"], "Book1.xlsx", all), "contractors");
@@ -22,4 +22,11 @@ assert.equal(guessListKindFromName("Staff list.jpg", all), "staff-roster");
 assert.equal(guessListKindFromName("Patel invoice.pdf", all), null, "Patel isn't PAT");
 assert.equal(guessListKindFromName("IMG_0042.jpg", all), null);
 assert.equal(guessListKindFromName("green team.jpg", all), null, "two lists match, so AI decides");
+// A compliance checklist with a title above its headings (as many businesses keep it).
+assert.equal(guessListKindFromSheet({
+  headers: ["Compliance Checklist"],
+  rows: [["Item", "Time Period", "Last Completed", "Due Date ", "Status", "Contractor ", "Telephone Number ", "Email Address"], ["Fire Alarm Maintenance", "6 monthly", "2026-09-28", "2027-03-28", "", "Acme Fire", "", ""]],
+}, "Checklist.xlsx", all), "compliance-checks");
+assert.equal(guessListKind(["Check", "Repeat", "Last done", "Next due", "Contractor"], "Book1.xlsx", all), "compliance-checks");
+assert.equal(guessListKindFromName("Compliance checklist.pdf", all), null, "compliance checks are read from spreadsheets only");
 console.log("Upload your lists sorting checks passed.");

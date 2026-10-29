@@ -8956,6 +8956,155 @@ export const useImportFireCallPoints = <TError = ErrorType<void | FireCallPointI
       return useMutation(getImportFireCallPointsMutationOptions(options));
     }
 
+export const getGetComplianceCheckImportTemplateUrl = () => {
+
+
+
+
+  return `/api/imports/compliance-checks/template`
+}
+
+/**
+ * @summary Download the CSV template for importing compliance checks (owners and consultants)
+ */
+export const getComplianceCheckImportTemplate = async ( options?: RequestInit): Promise<string> => {
+
+  return customFetch<string>(getGetComplianceCheckImportTemplateUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetComplianceCheckImportTemplateQueryKey = () => {
+    return [
+    `/api/imports/compliance-checks/template`
+    ] as const;
+    }
+
+
+export const getGetComplianceCheckImportTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetComplianceCheckImportTemplateQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>> = ({ signal }) => getComplianceCheckImportTemplate({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetComplianceCheckImportTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>>
+export type GetComplianceCheckImportTemplateQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Download the CSV template for importing compliance checks (owners and consultants)
+ */
+
+export function useGetComplianceCheckImportTemplate<TData = Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getComplianceCheckImportTemplate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetComplianceCheckImportTemplateQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getImportComplianceChecksUrl = () => {
+
+
+
+
+  return `/api/imports/compliance-checks`
+}
+
+/**
+ * The browser sends the spreadsheet's rows; headings below a title row are found. Each line is matched to ComplyTrack's own check where there is one, then to an existing check with that title at the site. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. siteId is the site for rows whose Site cell is blank.
+ * @summary Preview or import a business's compliance checklist (owners and consultants)
+ */
+export const importComplianceChecks = async (fireCallPointImportRequest: FireCallPointImportRequest, options?: RequestInit): Promise<FireCallPointImportResult> => {
+
+  return customFetch<FireCallPointImportResult>(getImportComplianceChecksUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(fireCallPointImportRequest)
+  }
+);}
+
+
+
+
+
+export const getImportComplianceChecksMutationOptions = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importComplianceChecks>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importComplianceChecks>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext> => {
+
+const mutationKey = ['importComplianceChecks'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importComplianceChecks>>, {data: BodyType<FireCallPointImportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importComplianceChecks(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportComplianceChecksMutationResult = NonNullable<Awaited<ReturnType<typeof importComplianceChecks>>>
+    export type ImportComplianceChecksMutationBody = BodyType<FireCallPointImportRequest>
+    export type ImportComplianceChecksMutationError = ErrorType<void | FireCallPointImportResult>
+
+    /**
+ * @summary Preview or import a business's compliance checklist (owners and consultants)
+ */
+export const useImportComplianceChecks = <TError = ErrorType<void | FireCallPointImportResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importComplianceChecks>>, TError,{data: BodyType<FireCallPointImportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importComplianceChecks>>,
+        TError,
+        {data: BodyType<FireCallPointImportRequest>},
+        TContext
+      > => {
+      return useMutation(getImportComplianceChecksMutationOptions(options));
+    }
+
 export const getGetAiAddonUrl = () => {
 
 

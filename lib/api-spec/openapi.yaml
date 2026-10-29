@@ -2816,6 +2816,53 @@ paths:
               schema:
                 $ref: "#/components/schemas/FireCallPointImportResult"
 
+  /imports/compliance-checks/template:
+    get:
+      operationId: getComplianceCheckImportTemplate
+      tags: [compliance-items]
+      summary: Download the CSV template for importing compliance checks (owners and consultants)
+      responses:
+        "200":
+          description: CSV template
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /imports/compliance-checks:
+    post:
+      operationId: importComplianceChecks
+      tags: [compliance-items]
+      summary: Preview or import a business's compliance checklist (owners and consultants)
+      description: >-
+        The browser sends the spreadsheet's rows; headings below a title row
+        are found. Each line is matched to ComplyTrack's own check where there
+        is one, then to an existing check with that title at the site. With
+        preview true (the default) nothing is written; otherwise every row is
+        written in one go, only when no row has an error. siteId is the site
+        for rows whose Site cell is blank.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireCallPointImportRequest"
+      responses:
+        "200":
+          description: What each row did, or would do
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+        "400":
+          description: The file is missing a required column or has no rows
+        "409":
+          description: Nothing was imported because some rows have errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireCallPointImportResult"
+
   /billing/ai:
     get:
       operationId: getAiAddon

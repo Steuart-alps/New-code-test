@@ -12,6 +12,12 @@ import { ReportReadingError, reportReadingConfigured, UnreadableReportError } fr
 import { readApplianceList, REGISTER_READING_MAX_BYTES, registerReadingMonthlyLimit } from "../lib/registerReading";
 import { isListReadingKind, readList, SORTABLE_LIST_KINDS, sortList, type ListReadingKind, type SortableListKind } from "../lib/listReading";
 import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
+import { categoryForTitle, contractorKey, isInHouseHeading, knownCheckFor, monthsBetween, parseRepeat } from "../lib/complianceCheckImport";
+import { STARTER, STARTER_CHECK_NOTE } from "../lib/seedStarterContent";
+import { CONTRACTOR_VISIT_TYPES, syncContractorVisitChecks } from "../lib/contractorVisits";
+import { supersedeStaleReminderCycles } from "../lib/reminderCycles";
+import { addMonthsToDay } from "../lib/taskSchedule";
+import { logger } from "../lib/logger";
 import {
   CSV_IMPORT_MAX_CELL_LENGTH,
   CSV_IMPORT_MAX_COLUMNS,
@@ -20,6 +26,7 @@ import {
   mapImportRows,
   normaliseHeader,
   normaliseKey,
+  parseImportDate,
   splitListCell,
   type CsvImportType,
   type MappedRow,
@@ -348,6 +355,238 @@ async function planFireCallPoints(
   });
 }
 
+const ukDay = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+
+/** Description, priority and lead time of ComplyTrack's own check with this title. */
+function knownCheckDetails(title: string): { description: string | null; priority: "low" | "medium" | "high" | "critical"; leadTimeDays: number; categoryColor: string | null } {
+  const key = normaliseKey(title);
+  for (const category of STARTER) {
+    const check = category.checks.find((candidate) => normaliseKey(candidate.title) === key);
+    if (check) return { description: check.description, priority: check.priority, leadTimeDays: check.leadTimeDays ?? 30, categoryColor: category.color };
+  }
+  const visit = CONTRACTOR_VISIT_TYPES.find((type) => normaliseKey(type.title) === key);
+  return { description: visit?.description ?? null, priority: "high", leadTimeDays: 30, categoryColor: null };
+}
+
+/**
+ * A business's compliance checklist (lib/complianceCheckImport.ts). Each line
+ * is matched to ComplyTrack's own check where there is one, then to a check
+ * the business already has with that title at the site (or for the whole
+ * business). A match gets the file's repeat, a later last-done date (with the
+ * next due date) and a contractor when it has none; nothing newer in
+ * ComplyTrack is overwritten. Headings, in-house routines and weekly checks
+ * are skipped, with the reason. A contractor not yet on the Contractors page
+ * is added when the line gives an email address (every contractor needs one
+ * for reminders); otherwise their name and phone go in the check's notes.
+ */
+async function planComplianceChecks(
+  tx: Tx, clientId: number, departmentId: number | null, userId: number, defaultSiteId: number | null | undefined, rows: MappedRow[],
+): Promise<PlannedRow[]> {
+  const services = await getEntitledServices(clientId);
+  const today = await getAccountToday(clientId);
+  const resolveSite = await siteResolver(tx, clientId, departmentId);
+  const siteAllowed = await departmentSiteCheck(tx, clientId, departmentId);
+  const siteRows = rowsOf(await tx.execute(sql`SELECT id FROM sites WHERE client_id = ${clientId} ORDER BY id`));
+  // A blank Site cell: the site chosen where the file was uploaded, else the
+  // only site, else the whole business.
+  let blankSite: { siteId: number | null; error?: string };
+  if (defaultSiteId != null) {
+    blankSite = siteRows.some((row) => Number(row.id) === defaultSiteId) && siteAllowed(defaultSiteId)
+      ? { siteId: defaultSiteId } : { siteId: null, error: "The chosen site is not one of this business's sites" };
+  } else {
+    blankSite = { siteId: siteRows.length === 1 ? Number(siteRows[0].id) : null };
+  }
+  const existing = rowsOf(await tx.execute(sql`
+    SELECT id, title, site_id, contractor_id, frequency_months, status, notes,
+           to_char(due_date, 'YYYY-MM-DD') AS due_day, to_char(completed_at, 'YYYY-MM-DD') AS completed_day
+    FROM compliance_items WHERE client_id = ${clientId} ORDER BY id FOR UPDATE
+  `));
+  const contractors = rowsOf(await tx.execute(sql`SELECT id, name, company, email FROM contractors WHERE client_id = ${clientId} ORDER BY id`));
+  const categories = rowsOf(await tx.execute(sql`SELECT id, name FROM categories WHERE client_id = ${clientId} ORDER BY id`));
+  const categoryIds = new Map<string, number>(categories.map((row) => [normaliseKey(row.name), Number(row.id)]));
+  // Contractors added by this file, by email, so several lines share one.
+  const addedContractors = new Map<string, number>();
+  const plannedContractors = new Set<string>();
+  const duplicate = duplicateGuard();
+  // A business-wide check taken by one site's line; another site's line gets its own.
+  const claimed = new Set<number>();
+  let inHouse = false;
+
+  const categoryIdFor = async (t: Tx, name: string, color: string | null) => {
+    const key = normaliseKey(name);
+    const known = categoryIds.get(key);
+    if (known !== undefined) return known;
+    const inserted = rowsOf(await t.execute(sql`
+      INSERT INTO categories (client_id, name, color) VALUES (${clientId}, ${name}, ${color ?? "#6366f1"}) RETURNING id
+    `));
+    const id = Number(inserted[0].id);
+    categoryIds.set(key, id);
+    return id;
+  };
+  type ContractorRef = { id: number } | { email: string; name: string; phone: string | null };
+  const contractorIdFor = async (t: Tx, ref: ContractorRef) => {
+    if ("id" in ref) return ref.id;
+    const known = addedContractors.get(ref.email);
+    if (known !== undefined) return known;
+    const inserted = rowsOf(await t.execute(sql`
+      INSERT INTO contractors (client_id, name, company, email, phone, trades, updated_at)
+      VALUES (${clientId}, ${ref.name}, ${ref.name}, ${ref.email}, ${ref.phone}, '[]'::jsonb, now()) RETURNING id
+    `));
+    const id = Number(inserted[0].id);
+    addedContractors.set(ref.email, id);
+    return id;
+  };
+  const audit = (t: Tx, entityId: number, action: "created" | "updated", before: unknown, after: unknown, row: number) => t.execute(sql`
+    INSERT INTO audit_events (client_id, actor_id, entity_type, entity_id, action, before, after, metadata)
+    VALUES (${clientId}, ${userId}, 'compliance_item', ${entityId}, ${action}, ${before === null ? null : JSON.stringify(before)}::jsonb,
+            ${JSON.stringify(after)}::jsonb, ${JSON.stringify({ spreadsheetImport: { row } })}::jsonb)
+  `);
+
+  return rows.map((input): PlannedRow => {
+    const v = input.values;
+    const title = v.title ?? "";
+    const otherCells = [v.repeat, v.lastDone, v.dueDate, v.contractor, v.phone, v.email, v.site, v.category, v.notes];
+    if (title && !input.errors.length && otherCells.every((value) => !value)) {
+      inHouse = isInHouseHeading(title);
+      return { row: input.row, action: "skip", label: title, reasons: ["A heading or note, not a check"] };
+    }
+    if (inHouse) {
+      return { row: input.row, action: "skip", label: title || `Row ${input.row}`, reasons: ["An in-house routine (under the In-house heading): it is recorded on its track, such as FireTrack or Water Safety, not as a contractor check"] };
+    }
+    const errors = [...input.errors];
+    const reasons: string[] = [];
+    for (const [field, value] of [["Check", v.title], ["Contractor", v.contractor], ["Notes", v.notes]] as const) {
+      if (!value) continue;
+      const check = filterName(value);
+      if (!check.ok) errors.push(`${field}: ${check.message}`);
+    }
+    const repeat = parseRepeat(v.repeat);
+    if (repeat.kind === "under_a_month") {
+      return { row: input.row, action: "skip", label: title, reasons: [`Repeats "${v.repeat}": daily and weekly checks are kept on the track's checklists, not as compliance checks`] };
+    }
+    const lastDone = v.lastDone ? parseImportDate(v.lastDone) : null;
+    const lastDoneText = v.lastDone && !lastDone ? v.lastDone : null;
+    if (lastDone && lastDone > today) errors.push(`Last done ${ukDay(lastDone)} is in the future`);
+    const known = knownCheckFor(title, (service) => isEntitled(services, service as ServiceKey));
+    const months = repeat.kind === "months" ? repeat.months : lastDone && v.dueDate ? monthsBetween(lastDone, v.dueDate) : null;
+    if (known?.inHouseBelowMonths && months && months < known.inHouseBelowMonths) {
+      return { row: input.row, action: "skip", label: title, reasons: [`${known.inHouseHint}; this line repeats every ${months === 1 ? "month" : `${months} months`}`] };
+    }
+    if (!months && v.repeat) reasons.push(`Repeat "${v.repeat}" was not understood: set it on the check`);
+    if (repeat.kind !== "months" && months) reasons.push(`Repeat every ${months} months, from the dates`);
+    const dueDay = v.dueDate ?? (lastDone && months ? addMonthsToDay(lastDone, months) : null);
+    if (dueDay && lastDone && dueDay <= lastDone) errors.push("Next due must be after Last done");
+    const site = v.site ? resolveSite(v.site) : blankSite;
+    if (site.error) errors.push(site.error);
+    const finalTitle = known?.title ?? title;
+    const label = known && normaliseKey(known.title) !== normaliseKey(title) ? `${title} → ${known.title}` : title;
+
+    // The contractor: an existing one by email or name, or one this file adds.
+    let contractor: ContractorRef | null = null;
+    let contractorNote: string | null = null;
+    if (v.contractor || v.email) {
+      const wanted = contractorKey(v.contractor);
+      const matches = v.email
+        ? contractors.filter((row) => normaliseKey(row.email) === v.email)
+        : contractors.filter((row) => wanted && (contractorKey(row.company) === wanted || contractorKey(row.name) === wanted));
+      if (matches.length === 1) contractor = { id: Number(matches[0].id) };
+      else if (matches.length > 1) reasons.push(`More than one contractor is called "${v.contractor}": choose one on the check`);
+      else if (v.email) {
+        contractor = { email: v.email, name: v.contractor ?? v.email, phone: v.phone };
+        if (!plannedContractors.has(v.email)) reasons.push(`Adds ${v.contractor ?? v.email} to your contractors`);
+        plannedContractors.add(v.email);
+      } else {
+        contractorNote = `Contractor: ${v.contractor}${v.phone ? `, ${v.phone}` : ""}`;
+        reasons.push(`${v.contractor} is not one of your contractors yet: put their email address in the file (or add them on the Contractors page) and upload it again to link them`);
+      }
+    }
+    if (errors.length) return { row: input.row, action: "error", label, reasons: errors };
+    const repeated = duplicate(`${site.siteId ?? ""}|${normaliseKey(finalTitle)}`, input.row);
+    if (repeated) return { row: input.row, action: "error", label, reasons: [repeated] };
+
+    const titles = new Set([finalTitle, title, ...(known?.alsoKnownAs ?? [])].map(normaliseKey));
+    const candidates = existing.filter((item) => titles.has(normaliseKey(item.title)));
+    const atSite = candidates.filter((item) => Number(item.site_id ?? 0) === Number(site.siteId ?? 0));
+    const pick = atSite.length || site.siteId === null ? atSite : candidates.filter((item) => item.site_id === null && !claimed.has(Number(item.id)));
+    if (pick.length > 1) {
+      return { row: input.row, action: "error", label, reasons: [`Matches ${pick.length} checks already called "${pick[0].title}"; rename or delete the extra ones first`] };
+    }
+    const match = pick[0];
+    if (match) claimed.add(Number(match.id));
+    const renamedNote = known && normaliseKey(known.title) !== normaliseKey(title) ? `Your spreadsheet called it "${title}".` : null;
+    const lastDoneNote = lastDone ? `Last done ${ukDay(lastDone)}.` : null;
+
+    if (!match) {
+      const details = knownCheckDetails(finalTitle);
+      const categoryName = v.category ?? known?.category ?? categoryForTitle(title);
+      const notes = [
+        "Imported from your compliance spreadsheet.",
+        renamedNote, lastDoneNote, lastDoneText, contractorNote, v.notes,
+      ].filter(Boolean).join("\n");
+      reasons.unshift(dueDay ? `Next due ${ukDay(dueDay)}` : "No date in the file: set the next due date on the check");
+      return {
+        row: input.row, action: "create", label, reasons,
+        write: async (t) => {
+          const categoryId = await categoryIdFor(t, categoryName, details.categoryColor);
+          const contractorId = contractor ? await contractorIdFor(t, contractor) : null;
+          const created = rowsOf(await t.execute(sql`
+            INSERT INTO compliance_items (client_id, site_id, category_id, contractor_id, title, description, status, priority,
+                                          lead_time_days, frequency_months, due_date, completed_at, notes, updated_at)
+            VALUES (${clientId}, ${site.siteId}, ${categoryId}, ${contractorId}, ${finalTitle}, ${details.description}, 'pending',
+                    ${details.priority}, ${details.leadTimeDays}, ${months}, ${dueDay}::date, ${lastDone}::date, ${notes}, now())
+            RETURNING *
+          `))[0];
+          await audit(t, Number(created.id), "created", null, created, input.row);
+        },
+      };
+    }
+
+    const changes: string[] = [];
+    // A business-wide check (a starter check) becomes this site's, as in the setup wizard.
+    const moveToSite = match.site_id === null && site.siteId !== null;
+    if (moveToSite) changes.push("site");
+    const takeDates = !!lastDone && (!match.completed_day || lastDone > match.completed_day);
+    if (lastDone && !takeDates && lastDone < match.completed_day) reasons.push(`ComplyTrack already has a later completion (${ukDay(match.completed_day)}), so its dates are kept`);
+    const nextDue = takeDates ? dueDay ?? undefined : !lastDone && dueDay && !match.due_day && !match.completed_day ? dueDay : undefined;
+    if (months && months !== (match.frequency_months == null ? null : Number(match.frequency_months))) changes.push("repeat");
+    if (takeDates) changes.push("last done");
+    if (nextDue !== undefined && nextDue !== match.due_day) changes.push("next due");
+    const linkContractor = contractor && match.contractor_id == null;
+    if (linkContractor) changes.push("contractor");
+    else if (contractor && "id" in contractor && Number(match.contractor_id) !== contractor.id) reasons.push("Keeps the contractor already chosen on the check");
+    const replaceStarterNote = match.notes === STARTER_CHECK_NOTE;
+    if (!changes.length) {
+      return { row: input.row, action: "skip", label: `${title} → ${match.title}`, reasons: ["Already in ComplyTrack with the same details", ...reasons] };
+    }
+    reasons.unshift(`Updates ${changes.join(", ")}${nextDue ? `; next due ${ukDay(nextDue)}` : ""}`);
+    return {
+      row: input.row, action: "update", label: label === title && normaliseKey(match.title) !== normaliseKey(title) ? `${title} → ${match.title}` : label, reasons,
+      write: async (t) => {
+        const contractorId = linkContractor ? await contractorIdFor(t, contractor!) : null;
+        const before = rowsOf(await t.execute(sql`SELECT * FROM compliance_items WHERE id = ${match.id} AND client_id = ${clientId}`))[0];
+        const dueChanged = nextDue !== undefined && nextDue !== match.due_day;
+        const importedNote = ["Imported from your compliance spreadsheet.", renamedNote, lastDoneNote, lastDoneText, contractorNote, v.notes].filter(Boolean).join("\n");
+        const after = rowsOf(await t.execute(sql`
+          UPDATE compliance_items SET
+            site_id = COALESCE(site_id, ${moveToSite ? site.siteId : null}::integer),
+            frequency_months = COALESCE(${months}::integer, frequency_months),
+            completed_at = CASE WHEN ${takeDates} THEN ${lastDone}::timestamp ELSE completed_at END,
+            due_date = CASE WHEN ${dueChanged} THEN ${nextDue ?? null}::timestamp ELSE due_date END,
+            status = CASE WHEN ${dueChanged || takeDates} AND status <> 'in_progress' THEN 'pending' ELSE status END,
+            notification_sent_at = CASE WHEN ${dueChanged} THEN NULL ELSE notification_sent_at END,
+            contractor_id = COALESCE(contractor_id, ${contractorId}::integer),
+            notes = CASE WHEN ${replaceStarterNote} THEN ${importedNote} ELSE notes END,
+            updated_at = now()
+          WHERE id = ${match.id} AND client_id = ${clientId}
+          RETURNING *
+        `))[0];
+        if (dueChanged) await supersedeStaleReminderCycles(t, clientId, Number(match.id));
+        await audit(t, Number(match.id), "updated", before, after, input.row);
+      },
+    };
+  });
+}
+
 function handleImport(type: CsvImportType): RequestHandler {
   return async (req: Request, res) => {
     const clientId = getClientId(req);
@@ -374,7 +613,9 @@ function handleImport(type: CsvImportType): RequestHandler {
           ? await planRooms(tx, clientId, departmentId, req.currentUser!.id, mapped.rows)
           : type === "fire-call-points"
             ? await planFireCallPoints(tx, clientId, departmentId, req.currentUser!.id, parsed.data.siteId, mapped.rows)
-            : await planContractors(tx, clientId, mapped.rows);
+            : type === "compliance-checks"
+              ? await planComplianceChecks(tx, clientId, departmentId, req.currentUser!.id, parsed.data.siteId, mapped.rows)
+              : await planContractors(tx, clientId, mapped.rows);
       const summary = {
         total: planned.length,
         create: planned.filter((row) => row.action === "create").length,
@@ -387,6 +628,10 @@ function handleImport(type: CsvImportType): RequestHandler {
       return { summary, committed, rows: planned.map(({ row, action, label, reasons }) => ({ row, action, label, reasons })) };
     });
 
+    // Checks the tracks keep (PAT testing, sprayer tests) take the track's due date.
+    if (type === "compliance-checks" && outcome.committed) {
+      await syncContractorVisitChecks(clientId).catch((err) => logger.warn({ err, clientId }, "Track due dates not applied after a compliance check import"));
+    }
     const body = { preview, ignoredHeaders: mapped.ignoredHeaders, ...outcome };
     if (!preview && !outcome.committed) {
       return res.status(409).json({ ...body, error: "Nothing was imported: fix the rows marked as errors and upload the file again" });
@@ -643,6 +888,9 @@ router.post("/imports/sort-list", requireAuth, denyViewers, requireClientAdmin, 
 
 router.get("/imports/room-track-rooms/template", requireAuth, requireClientAdmin, requireService("roomtrack"), sendTemplate("room-track-rooms", "roomtrack-rooms-template.csv"));
 router.post("/imports/room-track-rooms", requireAuth, denyViewers, requireClientAdmin, requireService("roomtrack"), handleImport("room-track-rooms"));
+
+router.get("/imports/compliance-checks/template", requireAuth, requireClientAdmin, sendTemplate("compliance-checks", "compliance-checks-template.csv"));
+router.post("/imports/compliance-checks", requireAuth, denyViewers, requireClientAdmin, handleImport("compliance-checks"));
 
 router.get("/imports/contractors/template", requireAuth, requireClientAdmin, sendTemplate("contractors", "contractors-template.csv"));
 router.post("/imports/contractors", requireAuth, denyViewers, requireClientAdmin, handleImport("contractors"));

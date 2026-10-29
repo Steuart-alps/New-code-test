@@ -4175,6 +4175,44 @@ export const ImportFireCallPointsResponse = zod.object({
 
 
 /**
+ * @summary Download the CSV template for importing compliance checks (owners and consultants)
+ */
+export const GetComplianceCheckImportTemplateResponse = zod.unknown()
+
+
+/**
+ * The browser sends the spreadsheet's rows; headings below a title row are found. Each line is matched to ComplyTrack's own check where there is one, then to an existing check with that title at the site. With preview true (the default) nothing is written; otherwise every row is written in one go, only when no row has an error. siteId is the site for rows whose Site cell is blank.
+ * @summary Preview or import a business's compliance checklist (owners and consultants)
+ */
+export const ImportComplianceChecksBody = zod.object({
+  "headers": zod.array(zod.string()),
+  "rows": zod.array(zod.array(zod.string())),
+  "preview": zod.boolean().optional(),
+  "siteId": zod.number().nullish().describe('The site for rows whose Site cell is blank.')
+})
+
+export const ImportComplianceChecksResponse = zod.object({
+  "preview": zod.boolean(),
+  "committed": zod.boolean(),
+  "summary": zod.object({
+  "total": zod.number(),
+  "create": zod.number(),
+  "update": zod.number(),
+  "skip": zod.number(),
+  "error": zod.number()
+}),
+  "rows": zod.array(zod.object({
+  "row": zod.number(),
+  "action": zod.enum(['create', 'update', 'skip', 'error']),
+  "label": zod.string(),
+  "reasons": zod.array(zod.string())
+})),
+  "ignoredHeaders": zod.array(zod.string()),
+  "error": zod.string().optional()
+})
+
+
+/**
  * @summary The AI features add-on, whether this business has it, and how much of its allowance is used
  */
 export const getAiAddonResponseOnePercentUsedMin = 0;

@@ -10,6 +10,7 @@ import { CheckStatusWithCertificate } from "@/components/certificates-outstandin
 import { CompleteCheckDialog } from "@/components/complete-check-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { CertificateReaderButton } from "@/components/certificate-reader-dialog";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { CertificateInboxCard } from "@/components/certificate-inbox-card";
 import { format } from "date-fns";
 import { Plus, Briefcase, Mail, Send, Calendar, X, Building2, Sparkles } from "lucide-react";
@@ -203,6 +204,10 @@ export default function ExternalChecksPage() {
               <Send className="w-4 h-4 mr-2 text-indigo-500" />
               {triggerReminders.isPending ? "Sending..." : "Send Reminders"}
             </Button>
+          )}
+          {canAdmin && (
+            <ImportCsvButton type="compliance-checks" className="flex-1 sm:flex-none h-10 shadow-sm bg-card"
+              siteId={/^\d+$/.test(siteParam) ? Number(siteParam) : undefined} />
           )}
           {canAdmin && (
             <CertificateReaderButton className="flex-1 sm:flex-none shadow-sm bg-card" />
