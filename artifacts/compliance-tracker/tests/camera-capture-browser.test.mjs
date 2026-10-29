@@ -182,7 +182,12 @@ try {
   await test("a refused camera says why and offers the file picker", async () => {
     const { context, page } = await open({
       initScript: () => {
-        navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+        // On the prototype: WebKit ignores assigning to navigator.mediaDevices.
+        Object.defineProperty(MediaDevices.prototype, "getUserMedia", {
+          value: () => Promise.reject(new DOMException("Permission denied", "NotAllowedError")),
+          configurable: true,
+          writable: true,
+        });
       },
     });
     await takeButton(page).click();
