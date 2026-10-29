@@ -78,7 +78,7 @@ export const CSV_IMPORT_COLUMNS: Record<CsvImportType, CsvImportColumn[]> = {
     { key: "repeat", label: "Repeat", aliases: ["repeat", "repeatevery", "timeperiod", "frequency", "interval", "period", "howoften", "every", "repeatmonths", "frequencymonths"], max: 100, example: "6 monthly" },
     { key: "lastDone", label: "Last done", aliases: ["lastdone", "lastcompleted", "completed", "datecompleted", "datelastcompleted", "lastservice", "lastservicedate", "lastinspection", "lastinspected", "lastchecked", "lastvisit", "lastdate", "done"], max: 200, example: "28/09/2026" },
     { key: "dueDate", label: "Next due", aliases: ["nextdue", "nextduedate", "duedate", "due", "nextdate", "renewaldate", "expirydate", "expiry"], max: 20, kind: "date", example: "28/03/2027" },
-    { key: "contractor", label: "Contractor", aliases: ["contractor", "contractorname", "contractorcompany", "company", "supplier", "provider", "carriedoutby", "engineer"], max: 200, example: "Balance Systems" },
+    { key: "contractor", label: "Contractor", aliases: ["contractor", "contractorname", "contractorcompany", "company", "supplier", "provider", "carriedoutby", "engineer"], max: 200, example: "Acme Fire" },
     { key: "phone", label: "Contractor phone", aliases: ["contractorphone", "telephonenumber", "telephone", "phone", "phonenumber", "tel", "contactnumber", "mobile"], max: 50, example: "" },
     { key: "email", label: "Contractor email", aliases: ["contractoremail", "emailaddress", "email", "mail"], max: 254, kind: "email", example: "" },
     { key: "site", label: "Site", aliases: ["site", "sitename"], max: 200, example: "" },

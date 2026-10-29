@@ -4,7 +4,7 @@
  *
  * Businesses arrive with their own compliance checklist, usually one line per
  * contractor service: "Fire Alarm Maintenance | 6 monthly | 28/09/2026 |
- * 28/03/2027 | Balance Systems". Each line is matched to ComplyTrack's own
+ * 28/03/2027 | Acme Fire". Each line is matched to ComplyTrack's own
  * check where there is one (the starter checks and the checks the tracks show),
  * so it lands on the same record the track, the certificate reader and the
  * reminders already use, instead of a second copy with the business's wording.

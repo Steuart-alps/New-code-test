@@ -113,7 +113,7 @@ assert.ok(contractors.rows[2].errors.some((error) => error.includes("200 charact
   assert.equal(categoryForTitle("LOLER Inspections (front loaders / vehicle lifts)"), "LOLER");
   assert.equal(categoryForTitle("Something else"), "Other");
 
-  assert.equal(contractorKey("Balance Systems Ltd."), contractorKey("balance systems"));
+  assert.equal(contractorKey("Acme Fire Ltd."), contractorKey("acme fire"));
   assert.equal(contractorKey("Smith & Sons Limited"), contractorKey("Smith and Sons"));
   assert.ok(isInHouseHeading("In-house") && isInHouseHeading("In house checks") && !isInHouseHeading("Housekeeping"));
 
@@ -122,7 +122,7 @@ assert.ok(contractors.rows[2].errors.some((error) => error.includes("200 charact
     headers: ["Compliance Checklist"],
     rows: [
       ["Item", "Time Period", "Last Completed", "Due Date ", "Status", "Contractor ", "Telephone Number ", "Email Address"],
-      ["Fire Alarm Maintenance", "6 monthly", "2026-09-28", "2027-03-28", "150", "Balance Systems", "", ""],
+      ["Fire Alarm Maintenance", "6 monthly", "2026-09-28", "2027-03-28", "150", "Acme Fire", "", ""],
       ["", "", "", "", "-1000", "", "", ""],
       ["Emergency Lighting", "Monthly ", "5 minute function test", "", "", "", "", ""],
     ],
@@ -133,7 +133,7 @@ assert.ok(contractors.rows[2].errors.some((error) => error.includes("200 charact
   assert.equal(sheet.rows[0].row, 3);
   assert.equal(sheet.rows[0].values.title, "Fire Alarm Maintenance");
   assert.equal(sheet.rows[0].values.dueDate, "2027-03-28");
-  assert.equal(sheet.rows[0].values.contractor, "Balance Systems");
+  assert.equal(sheet.rows[0].values.contractor, "Acme Fire");
   assert.equal(sheet.rows[1].values.lastDone, "5 minute function test", "Last done text is kept, not an error");
   assert.deepEqual(sheet.rows[1].errors, []);
 }
