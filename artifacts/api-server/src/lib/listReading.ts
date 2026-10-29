@@ -95,7 +95,7 @@ const KINDS: Record<ListReadingKind, ListKind> = {
       SITE,
       NOTES,
     ],
-    guidance: "Return one row per machine or piece of grounds equipment (mowers, tractors, utility vehicles, sprayers, blowers, hand-held power tools). When a line gives a quantity (\"2 x blower\"), return one row per machine and number the names. Type: ride_on_cylinder or ride_on_rotary for ride-on mowers when the cutting type is clear, otherwise ride_on; pedestrian or walk_behind for walk-behind mowers; other when nothing fits.",
+    guidance: "Return one row per machine or piece of grounds equipment (mowers, tractors, utility vehicles, sprayers, blowers, hand-held power tools). When a line gives a quantity (\"2 x blower\"), return one row per machine and number the names. Type: greens_mower_ride_on for ride-on (triple) greens mowers and greens_mower_hand for hand (pedestrian) greens mowers; ride_on_cylinder or ride_on_rotary for other ride-on mowers when the cutting type is clear, otherwise ride_on; pedestrian or walk_behind for walk-behind mowers; other when nothing fits.",
   },
   "staff-roster": {
     noun: "staff",

@@ -7,8 +7,10 @@ import { visibleSiteIdsSql } from "./departmentSites";
 import { effectiveColdUnits } from "./coldUnits";
 import { getAccountToday } from "./accountClock";
 import { approvedFrequencies } from "./waterMonitoringPlan";
-import { getFireSiteStatuses } from "./checkReminders";
+import { FIRE_LABELS, getCheckAlerts, getFireSiteStatuses, type CheckAlert } from "./checkReminders";
 import { greenCurrentHoursLateral, greenServiceHoursState } from "./greenHours";
+import { submittedDailyChecklists } from "./dailyChecklistCompletion";
+import { GREENKEEPING_CHECKLIST_NAMES, GREENKEEPING_CHECKLIST_TYPES, greenDailyChecksPath } from "./greenkeepingChecks";
 
 /**
  * QR labels on equipment. Each label carries a random code; scanning it opens
@@ -28,7 +30,142 @@ export const KIND_INFO: Record<EquipmentLabelKind, { track: string; service: Ser
   room: { track: "RoomTrack", service: "roomtrack" },
   cold_unit: { track: "KitchenTrack", service: "kitchentrack" },
   equipment: { track: "Equipment list", service: null },
+  // Each point has its own track and services (TRACK_POINTS).
+  track_point: { track: "Track checks", service: null },
 };
+
+// ── Track points ─────────────────────────────────────────────────────────────
+
+/**
+ * Labels for a place rather than an item: one track's checks at one site,
+ * stuck where the work happens (the opening checklist by the staff entrance,
+ * the fire log by the alarm panel, the COSHH register on the chemical store
+ * door). Every site gets each point of every track the business has.
+ */
+type TrackPoint = {
+  name: string;
+  track: string;
+  detail: string;
+  /** The business needs any one of these. An empty list means every business. */
+  services: readonly ServiceKey[];
+  action: string;
+  path: (siteId: number | null) => string;
+};
+
+const withSite = (path: string, siteId: number | null) =>
+  siteId === null ? path : `${path}${path.includes("?") ? "&" : "?"}siteId=${siteId}`;
+
+export const TRACK_POINTS = {
+  opening_checks: {
+    name: "Opening checks", track: "DailyTrack AM", detail: "Today's opening checklist",
+    services: ["dailytrack_am", "kitchentrack", "premisestrack"], action: "Open today's opening checks",
+    path: siteId => withSite("/daily-track-am", siteId),
+  },
+  closing_checks: {
+    name: "Closing checks", track: "DailyTrack PM", detail: "Today's closing checklist and sign-off",
+    services: ["dailytrack_pm", "kitchentrack", "premisestrack"], action: "Open today's closing checks",
+    path: siteId => withSite("/daily-track-pm", siteId),
+  },
+  kitchen_diary: {
+    name: "Kitchen daily records", track: "KitchenTrack", detail: "Fridge and freezer readings, cooking, cooling and deliveries",
+    services: ["kitchentrack"], action: "Open today's kitchen records",
+    path: siteId => withSite("/kitchen", siteId),
+  },
+  greenkeeping_checks: {
+    name: "Greenkeeping daily checks", track: "GreenTrack", detail: "Shed opening and closing checks and machine pre-start checks",
+    services: ["greentrack"], action: "Open today's greenkeeping checks",
+    path: greenDailyChecksPath,
+  },
+  fire_log: {
+    name: "Fire safety log", track: "FireTrack", detail: "Alarm tests, emergency lighting, extinguishers, fire doors and drills",
+    services: ["firetrack"], action: "Open the fire log",
+    path: () => "/fire-safety",
+  },
+  water_checks: {
+    name: "Water safety checks", track: "LegionellaTrack", detail: "Outlet temperatures, flushing, tanks and calorifiers",
+    services: ["legionellatrack"], action: "Open the water checks",
+    path: () => "/legionella",
+  },
+  pool_tests: {
+    name: "Pool and spa tests", track: "AquaTrack", detail: "Water tests and opening and closing checks",
+    services: ["aquatrack", "pooltrack", "swimtrack"], action: "Open the pool tests",
+    path: () => "/aqua-track",
+  },
+  hot_tub_checks: {
+    name: "Hot tub checks", track: "TubTrack", detail: "Water tests, temperatures and cleaning",
+    services: ["hottubtrack"], action: "Open the hot tub checks",
+    path: () => "/hot-tub",
+  },
+  report_fault: {
+    name: "Report a fault", track: "FixTrack", detail: "Anything broken, unsafe or needing repair",
+    services: ["fixtrack"], action: "Report a fault",
+    path: siteId => withSite("/fix-track?report=1", siteId),
+  },
+  report_incident: {
+    name: "Report an accident or incident", track: "IncidentTrack", detail: "Accidents, near misses and dangerous occurrences",
+    services: ["incidenttrack"], action: "Report an accident or incident",
+    path: () => "/incidents?report=1",
+  },
+  coshh_register: {
+    name: "COSHH register", track: "COSHHTrack", detail: "Safety data sheets and assessments for the chemicals kept here",
+    services: ["coshhtrack"], action: "Open the COSHH register",
+    path: () => "/coshh-track?tab=substances",
+  },
+  pest_control: {
+    name: "Pest control", track: "PestTrack", detail: "Sightings and contractor visits",
+    services: ["pesttrack"], action: "Open pest control",
+    path: () => "/pest-track",
+  },
+  premises_inspection: {
+    name: "Premises inspection", track: "PremisesTrack", detail: "Building and grounds walk-round",
+    services: ["premisestrack"], action: "Open the premises inspection",
+    path: () => "/premises-track",
+  },
+  room_checks: {
+    name: "Room checks", track: "RoomTrack", detail: "Bedroom and guest room checks",
+    services: ["roomtrack"], action: "Open the room checks",
+    path: () => "/room-track",
+  },
+  tree_inspections: {
+    name: "Tree inspections", track: "TreeTrack", detail: "Tree survey and inspection records",
+    services: ["treetrack"], action: "Open the tree inspections",
+    path: () => "/tree-track",
+  },
+  bike_hire: {
+    name: "Bike hire", track: "BikeTrack", detail: "Hire, return and safety checks",
+    services: ["biketrack"], action: "Open bike hire",
+    path: () => "/bike-track",
+  },
+  pat_register: {
+    name: "PAT register", track: "PATtrack", detail: "Portable appliance tests",
+    services: ["pattrack"], action: "Open the PAT register",
+    path: () => "/pat-track",
+  },
+  documents: {
+    name: "Documents to read and sign", track: "DocTrack", detail: "Policies, risk assessments and safe working procedures",
+    services: ["doctrack"], action: "Open the documents",
+    path: () => "/doc-track",
+  },
+  training: {
+    name: "Training records", track: "TrainTrack", detail: "Courses, inductions and refresher dates",
+    services: ["traintrack"], action: "Open the training records",
+    path: () => "/train-track",
+  },
+  asbestos_register: {
+    name: "Asbestos register", track: "Asbestos register", detail: "Where asbestos is, its condition and who may work near it",
+    services: [], action: "Open the asbestos register",
+    path: () => "/asbestos",
+  },
+} satisfies Record<string, TrackPoint>;
+
+export type TrackPointKey = keyof typeof TRACK_POINTS;
+const TRACK_POINT_KEYS = Object.keys(TRACK_POINTS) as TrackPointKey[];
+const isTrackPoint = (value: string): value is TrackPointKey => Object.hasOwn(TRACK_POINTS, value);
+
+function hasTrackPoint(services: Entitlements, key: TrackPointKey): boolean {
+  const needed: readonly ServiceKey[] = TRACK_POINTS[key].services;
+  return needed.length === 0 || needed.some(service => isEntitled(services, service));
+}
 
 export const EQUIPMENT_TYPE_LABELS: Record<EquipmentType, string> = {
   cold_water_tank: "Cold water storage tank",
@@ -95,7 +232,12 @@ export type LabelTarget = {
   active: boolean;
   /** Extra facts the scan page needs; not sent in lists. */
   extra?: Record<string, unknown>;
+  /** The track named on the label, when it is not the kind's own (track points). */
+  track?: string;
 };
+
+/** The track a label names. */
+export const targetTrack = (target: LabelTarget) => target.track ?? KIND_INFO[target.kind].track;
 
 export type TargetFilter = {
   /** null = every site the caller can see; "none" = records without a site. */
@@ -125,7 +267,7 @@ function idFilter(column: SQL, filter: TargetFilter): SQL {
 
 const joinText = (...parts: Array<string | null | undefined>) => parts.map(p => p?.trim()).filter(Boolean).join(" · ") || null;
 
-async function tableTargets(kind: EquipmentLabelKind, clientId: number, departmentId: number | null, filter: TargetFilter): Promise<LabelTarget[]> {
+async function tableTargets(kind: EquipmentLabelKind, clientId: number, departmentId: number | null, services: Entitlements, filter: TargetFilter): Promise<LabelTarget[]> {
   const scope = (alias: string) => siteScope(sql.raw(`${alias}.site_id`), clientId, departmentId, filter);
   const byId = (alias: string) => idFilter(sql.raw(`${alias}.id`), filter);
   const archived = (activeSql: SQL) => (filter.includeArchived ? sql`true` : activeSql);
@@ -215,6 +357,8 @@ async function tableTargets(kind: EquipmentLabelKind, clientId: number, departme
       }));
     case "cold_unit":
       return coldUnitTargets(clientId, departmentId, filter);
+    case "track_point":
+      return trackPointTargets(clientId, departmentId, services, filter);
   }
 }
 
@@ -222,26 +366,53 @@ export const OUTLET_TYPE_LABELS: Record<string, string> = {
   hot: "Hot outlet", cold: "Cold outlet", calorifier: "Calorifier", tmv: "TMV outlet", little_used: "Little-used outlet",
 };
 
-/** Fridges and freezers, one per site that uses them ("0" for a business without sites). */
-async function coldUnitTargets(clientId: number, departmentId: number | null, filter: TargetFilter): Promise<LabelTarget[]> {
-  const wanted = filter.ref?.match(/^(\d+):([A-Za-z0-9_-]{1,40})$/);
-  if (filter.ref !== undefined && !wanted) return [];
+/**
+ * The sites a per-site label (fridge, track point) can be made for: each site
+ * the caller can see, or one business-wide scope when the business has no sites.
+ */
+async function labelSites(clientId: number, departmentId: number | null, filter: TargetFilter): Promise<Array<{ id: number | null; name: string | null }>> {
   const sites = rowsOf(await db.execute(sql`
     SELECT s.id, s.name FROM sites s
     WHERE s.client_id = ${clientId} AND ${siteScope(sql`s.id`, clientId, departmentId, { ...filter, siteId: filter.siteId === "none" ? null : filter.siteId })}
     ORDER BY s.name, s.id`));
   const hasSites = rowsOf(await db.execute(sql`SELECT 1 FROM sites WHERE client_id = ${clientId} LIMIT 1`)).length > 0;
-  const scopes: Array<{ id: number | null; name: string | null }> = hasSites
+  return hasSites
     ? (filter.siteId === "none" ? [] : sites.map(s => ({ id: Number(s.id), name: s.name as string })))
     : (filter.siteId === null || filter.siteId === "none" ? [{ id: null, name: null }] : []);
+}
+
+/** Fridges and freezers, one per site that uses them ("0" for a business without sites). */
+async function coldUnitTargets(clientId: number, departmentId: number | null, filter: TargetFilter): Promise<LabelTarget[]> {
+  const wanted = filter.ref?.match(/^(\d+):([A-Za-z0-9_-]{1,40})$/);
+  if (filter.ref !== undefined && !wanted) return [];
   const out: LabelTarget[] = [];
-  for (const site of scopes) {
+  for (const site of await labelSites(clientId, departmentId, filter)) {
     if (wanted && Number(wanted[1]) !== (site.id ?? 0)) continue;
     for (const unit of await effectiveColdUnits(clientId, site.id)) {
       if (wanted && unit.id !== wanted[2]) continue;
       out.push({
         kind: "cold_unit", ref: `${site.id ?? 0}:${unit.id}`, name: unit.name, siteId: site.id, siteName: site.name,
         active: true, detail: unit.type === "fridge" ? "Fridge" : "Freezer", extra: { unitType: unit.type },
+      });
+    }
+  }
+  return out;
+}
+
+/** Each track point of the business's tracks, at each site ("0" for a business without sites). */
+async function trackPointTargets(clientId: number, departmentId: number | null, services: Entitlements, filter: TargetFilter): Promise<LabelTarget[]> {
+  const wanted = filter.ref?.match(/^([a-z_]{1,40}):(\d+)$/);
+  if (filter.ref !== undefined && !(wanted && isTrackPoint(wanted[1]))) return [];
+  const points = TRACK_POINT_KEYS.filter(key => (!wanted || key === wanted[1]) && hasTrackPoint(services, key));
+  if (!points.length) return [];
+  const out: LabelTarget[] = [];
+  for (const site of await labelSites(clientId, departmentId, filter)) {
+    if (wanted && Number(wanted[2]) !== (site.id ?? 0)) continue;
+    for (const key of points) {
+      const point: TrackPoint = TRACK_POINTS[key];
+      out.push({
+        kind: "track_point", ref: `${key}:${site.id ?? 0}`, name: point.name, detail: point.detail,
+        siteId: site.id, siteName: site.name, active: true, track: point.track, extra: { point: key },
       });
     }
   }
@@ -257,7 +428,7 @@ export async function listLabelTargets(
   for (const kind of kinds) {
     const service = KIND_INFO[kind].service;
     if (service && !isEntitled(services, service)) continue;
-    out.push(...await tableTargets(kind, clientId, departmentId, filter));
+    out.push(...await tableTargets(kind, clientId, departmentId, services, filter));
   }
   return out;
 }
@@ -661,13 +832,104 @@ export async function buildScanSummary(code: string, clientId: number, target: L
       history.sort((a, b) => b.date.localeCompare(a.date));
       break;
     }
+    case "track_point": {
+      const key = String(target.extra?.point) as TrackPointKey;
+      const point: TrackPoint = TRACK_POINTS[key];
+      statuses.push(...await trackPointStatuses(clientId, key, target, today));
+      actions.push({ label: point.action, href: point.path(target.siteId), primary: true });
+      if (key !== "report_fault") actions.push(...faultAction(target, viewer));
+      break;
+    }
   }
 
   return {
-    code, clientId, kind: target.kind, track: KIND_INFO[target.kind].track,
+    code, clientId, kind: target.kind, track: targetTrack(target),
     name: target.name, detail: target.detail, siteId: target.siteId, siteName: target.siteName, active: target.active,
     statuses, actions, history: history.slice(0, 6),
   };
+}
+
+const ALERT_STATE: Record<CheckAlert["status"], ScanState> = {
+  overdue: "overdue", due_soon: "due_soon", never: "never", action_required: "problem", plan_required: "never",
+};
+
+/** Turns the reminder alerts of one track at one site into scan statuses. */
+function alertStatuses(alerts: CheckAlert[], target: LabelTarget, today: string): ScanStatus[] {
+  const prefix = target.siteName ? `${target.siteName}: ` : null;
+  const out = alerts.map((alert): ScanStatus => {
+    const label = prefix && alert.checkLabel.startsWith(prefix) ? alert.checkLabel.slice(prefix.length) : alert.checkLabel;
+    if (alert.status === "plan_required") return { label, state: "never", text: alert.frequencyLabel };
+    if (alert.status === "action_required") {
+      return { label, state: "problem", text: alert.lastDate ? `Needs follow-up after ${formatDay(isoDay(alert.lastDate)!)}` : "Needs follow-up" };
+    }
+    if (alert.status === "never") return { label, state: "never", text: "Nothing recorded yet" };
+    return dueStatus(label, alert.dueDate, today, alert.lastDate);
+  });
+  return out.length ? out : [{ label: "Checks", state: "ok", text: "Everything is up to date" }];
+}
+
+/** What a track point's scan shows: today's checklist, or the track's checks that are due. */
+async function trackPointStatuses(clientId: number, key: TrackPointKey, target: LabelTarget, today: string): Promise<ScanStatus[]> {
+  const atSite = (column: SQL) => (target.siteId === null ? sql`${column} IS NULL` : sql`${column} = ${target.siteId}`);
+  const scope = target.siteId === null ? {} : { siteId: target.siteId };
+  switch (key) {
+    case "opening_checks":
+    case "closing_checks": {
+      const period = key === "opening_checks" ? "am" : "pm";
+      const [row] = rowsOf(await db.execute(sql`
+        SELECT count(*)::int AS done FROM ${submittedDailyChecklists(clientId, today, today)} c
+        WHERE c.period = ${period} AND ${atSite(sql`c.site_id`)}`));
+      const label = key === "opening_checks" ? "Today's opening checks" : "Today's closing checks";
+      return [row?.done > 0 ? { label, state: "ok", text: "Done today" } : { label, state: "due_soon", text: "Not done yet today" }];
+    }
+    case "kitchen_diary": {
+      const [row] = rowsOf(await db.execute(sql`
+        SELECT submitted_at IS NOT NULL AS submitted FROM food_safety_records
+        WHERE client_id = ${clientId} AND record_date = ${today}::date AND ${atSite(sql`site_id`)}
+        ORDER BY submitted_at DESC NULLS LAST LIMIT 1`));
+      const label = "Today's kitchen records";
+      return [row?.submitted ? { label, state: "ok", text: "Submitted today" }
+        : row ? { label, state: "due_soon", text: "Started, not submitted yet" }
+        : { label, state: "due_soon", text: "Not started yet today" }];
+    }
+    case "greenkeeping_checks": {
+      const done = new Set(rowsOf(await db.execute(sql`
+        SELECT DISTINCT checklist_type FROM daily_checklists
+        WHERE client_id = ${clientId} AND check_date = ${today}::date AND submitted_at IS NOT NULL
+          AND checklist_type IN (${sql.join(GREENKEEPING_CHECKLIST_TYPES.map(t => sql`${t}`), sql`, `)})
+          AND ${atSite(sql`site_id`)}`)).map(r => r.checklist_type as string));
+      return GREENKEEPING_CHECKLIST_TYPES.map((type): ScanStatus => {
+        const label = `Today's ${GREENKEEPING_CHECKLIST_NAMES[type].replace(/^Greenkeeping /, "")}`;
+        return done.has(type) ? { label, state: "ok", text: "Done today" } : { label, state: "due_soon", text: "Not done yet today" };
+      });
+    }
+    case "fire_log": {
+      const rows = (await getFireSiteStatuses(clientId, scope)).filter(row => row.siteId === target.siteId);
+      return rows.map((row): ScanStatus => {
+        const label = FIRE_LABELS[row.checkType] ?? humanise(row.checkType);
+        if (row.lastResult === "fail" || row.lastResult === "action_required") {
+          return { label, state: "problem", text: `Needs follow-up after ${row.lastDate ? formatDay(row.lastDate) : "the last check"}` };
+        }
+        return dueStatus(label, row.dueDate, today, row.lastDate, Math.min(30, Math.max(1, Math.ceil(row.frequencyDays * 0.2))));
+      });
+    }
+    case "water_checks":
+    case "pool_tests":
+    case "hot_tub_checks": {
+      const module = key === "water_checks" ? "legionella" : key === "pool_tests" ? "pool" : "hot_tub";
+      const alerts = (await getCheckAlerts(clientId, scope)).filter(alert => alert.module === module
+        && (alert.siteId === undefined || alert.siteId === target.siteId));
+      return alertStatuses(alerts, target, today);
+    }
+    case "report_fault": {
+      const [row] = rowsOf(await db.execute(sql`
+        SELECT count(*)::int AS open FROM fix_track_issues
+        WHERE client_id = ${clientId} AND status NOT IN ('resolved', 'closed') AND ${atSite(sql`site_id`)}`));
+      return [{ label: "Open faults here", state: row?.open > 0 ? "info" : "ok", text: row?.open > 0 ? `${row.open} being dealt with` : "None open" }];
+    }
+    default:
+      return [];
+  }
 }
 
 const OUTLET_CHECK_TYPES: Record<string, string> = {

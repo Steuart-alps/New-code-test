@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, type ChangeEvent } from "react";
 import { Camera, ImagePlus, X } from "lucide-react";
+import { useCameraCapture } from "@/components/camera-capture";
 import { Button } from "@/components/ui/button";
 import { useFileDrop } from "@/hooks/use-file-drop";
 import { useToast } from "@/hooks/use-toast";
@@ -39,6 +40,7 @@ export function PendingMediaPicker({ files, onChange, disabled = false, label = 
     add(chosen);
   }
   const drop = useFileDrop(add, !disabled);
+  const camera = useCameraCapture(add, { video: true, fileInput: () => cameraRef.current });
 
   return (
     <div
@@ -66,7 +68,7 @@ export function PendingMediaPicker({ files, onChange, disabled = false, label = 
       <input ref={cameraRef} type="file" accept={MEDIA_INPUT_ACCEPT} capture="environment" className="hidden" onChange={picked} />
       <input ref={pickRef} type="file" accept={MEDIA_INPUT_ACCEPT} multiple className="hidden" onChange={picked} />
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => cameraRef.current?.click()}>
+        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={camera.open}>
           <Camera className="mr-1.5 h-4 w-4" />Take photo or video
         </Button>
         <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => pickRef.current?.click()}>
@@ -75,6 +77,7 @@ export function PendingMediaPicker({ files, onChange, disabled = false, label = 
         <span className="hidden text-xs text-muted-foreground sm:inline">or drag them here</span>
       </div>
       {files.length > 0 && <p className="text-xs text-muted-foreground">They upload when you save.</p>}
+      {camera.dialog}
     </div>
   );
 }

@@ -225,7 +225,7 @@ export function UploadLists() {
           onClose={close} onImported={() => done(open.id)} />
       )}
       {open?.kind === "greentrack-equipment" && (
-        <MachineImportDialog key={open.id} open initialFile={open.file} sites={sites.data ?? []}
+        <MachineImportDialog key={open.id} open initialFile={open.file} sites={sites.data ?? []} defaultSiteId={null}
           onClose={close} onImported={() => done(open.id)} />
       )}
     </>

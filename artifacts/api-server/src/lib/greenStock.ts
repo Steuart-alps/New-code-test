@@ -4,15 +4,16 @@ import { sql } from "drizzle-orm";
 /**
  * GreenTrack stock: products (pesticides, fertiliser, top dressing, seed...)
  * whose stock on hand is worked out from their history rather than stored.
- * Deliveries add, write-offs and application records take off, and a stock
- * count sets the figure to what was counted. Entries run in date order; on the
+ * Deliveries add; write-offs, "used" entries and application records take
+ * off; and a stock count sets the figure to what was counted. Entries run in date order; on the
  * same day, in the order they were saved, so a count logged after the day's
  * spraying already includes it.
  */
 
 export const GREEN_PRODUCT_CATEGORIES = ["pesticide", "fertiliser", "top_dressing", "seed", "wetting_agent", "other"] as const;
 export const GREEN_PRODUCT_UNITS = ["L", "kg", "t", "bag", "unit"] as const;
-export const GREEN_STOCK_MOVEMENT_KINDS = ["delivery", "count", "write_off"] as const;
+/** "use" takes off what was used without a spraying record (never for pesticides). */
+export const GREEN_STOCK_MOVEMENT_KINDS = ["delivery", "count", "write_off", "use"] as const;
 export const GREEN_APPLICATION_METHODS = ["spray", "granular", "top_dressing", "other"] as const;
 export const GREEN_APPLICATION_AREAS = [
   "greens", "tees", "fairways", "approaches", "surrounds", "bunkers", "rough", "practice", "other",

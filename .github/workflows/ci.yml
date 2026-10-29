@@ -407,6 +407,9 @@ jobs:
       - name: Contractor sign-in on arrival, fire procedure and asbestos register (production schema base)
         run: pnpm --filter @workspace/api-server run test:contractor-sign-in
 
+      - name: Recorded checks are signed with a drawn signature (production schema base)
+        run: pnpm --filter @workspace/api-server run test:record-signatures
+
       - name: Equipment list and QR label tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:equipment-labels
 

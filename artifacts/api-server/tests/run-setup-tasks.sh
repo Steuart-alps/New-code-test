@@ -19,6 +19,9 @@ trap cleanup EXIT
 
 if ! curl -sf -m 2 "${API_BASE%/api}/readyz" >/dev/null 2>&1; then
   pnpm run build
+  # The setup service request emails ALPS; capture it instead of sending.
+  export ADMIN_EMAIL="${ADMIN_EMAIL:-setup-service@test.local}"
+  export TEST_EMAIL_CAPTURE_PATH="${TEST_EMAIL_CAPTURE_PATH:-$(mktemp)}"
   NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 45); do

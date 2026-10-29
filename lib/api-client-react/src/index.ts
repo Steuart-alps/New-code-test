@@ -33,9 +33,14 @@ export {
   overrideReasonMessage,
   OVERRIDE_REASON_HEADER,
   OVERRIDE_REASON_REQUIRED_CODE,
+  setRecordSignatureHandler,
+  signatureRequiredInfo,
+  RECORD_SIGNATURE_HEADER,
+  SIGNATURE_REQUIRED_CODE,
   callerChoseClientId,
   appendClientId,
 } from "./custom-fetch";
 export type {
   AuthTokenGetter, ApiMutationObserver, CsrfTokenProvider, OverrideReasonHandler, OverrideReasonRequest,
+  RecordSignatureHandler, RecordSignatureRequest,
 } from "./custom-fetch";

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, type ReactNode } from "react";
+import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -45,6 +45,7 @@ import { useSayItFill } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 import { localDate } from "@/lib/voice-log";
 import { useManagedBy } from "@/components/managed-by-badge";
+import { takeLinkParams } from "@/lib/deep-link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -637,6 +638,16 @@ ${rows.map(r => `<tr>
       ...(fill.siteId ? { siteId: String(fill.siteId) } : {}),
     });
   }, incidentConfigFetched);
+
+  // The "Report an accident or incident" QR label opens a new report, once
+  // the incident settings (the default reporter) have loaded.
+  const reportFromLink = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (reportFromLink.current === null) reportFromLink.current = takeLinkParams(["report"] as const)?.report === "1";
+    if (!reportFromLink.current || !hasIncidentTrack || !incidentConfigFetched) return;
+    reportFromLink.current = false;
+    openAdd();
+  }, [hasIncidentTrack, incidentConfigFetched]);
 
   function openEdit(r: Incident) {
     setEditItem(r);

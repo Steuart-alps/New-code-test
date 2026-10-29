@@ -35,6 +35,7 @@
     "test:photo-upload-browser": "node tests/photo-upload-browser.test.mjs",
     "test:photo-uploader-keyboard-browser": "node tests/photo-uploader-keyboard-browser.test.mjs",
     "test:file-drop-browser": "node tests/file-drop-browser.test.mjs",
+    "test:camera-capture-browser": "node tests/camera-capture-browser.test.mjs",
     "test:import-file-types-browser": "node tests/import-file-types-browser.test.mjs",
     "test:feedback-inbox-browser": "node tests/feedback-inbox-browser.test.mjs",
     "test:required-track-photos-browser": "node tests/required-track-photos-browser.test.mjs",

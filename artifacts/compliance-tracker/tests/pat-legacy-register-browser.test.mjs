@@ -93,6 +93,8 @@ try {
     });
     if (url.pathname === "/api/sites") return json(route, [{ id: 4, name: "Harbour Hotel" }]);
     if (url.pathname === "/api/photos") return json(route, []);
+    // No test in this register has a drawn signature yet.
+    if (url.pathname === "/api/record-signatures") return json(route, []);
     if (url.pathname === "/api/pat-track/config") return json(route, { pat_default_tester: "", pat_retest_months: "12", pat_locations: "[]", pat_show_earth_bond: "true", pat_show_insulation: "true" });
     if (url.pathname === "/api/pat-track/status") return json(route, status());
     if (url.pathname === "/api/pat-track/preset-templates") return json(route, {});
