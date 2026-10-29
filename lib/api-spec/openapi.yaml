@@ -6930,6 +6930,10 @@ components:
           nullable: true
         active:
           type: boolean
+        openingStock:
+          type: number
+          nullable: true
+          description: Only when adding a product. The amount in stock now, saved as a stock count dated today.
     GreenTrackStockLedgerEntry:
       type: object
       required: [key, kind, productId, date, change, balance]
@@ -6938,7 +6942,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [delivery, count, write_off, application]
+          enum: [delivery, count, write_off, use, application]
         productId:
           type: integer
         date:
@@ -6990,10 +6994,10 @@ components:
           format: date
         kind:
           type: string
-          enum: [delivery, count, write_off]
+          enum: [delivery, count, write_off, use]
         quantity:
           type: number
-          description: Signed change (a write-off is negative; a count is 0)
+          description: Signed change (a write-off or use is negative; a count is 0)
         countedQuantity:
           type: number
           nullable: true
@@ -7026,10 +7030,10 @@ components:
           format: date
         kind:
           type: string
-          enum: [delivery, count, write_off]
+          enum: [delivery, count, write_off, use]
         quantity:
           type: number
-          description: Delivered or written-off quantity (above 0)
+          description: Delivered, written-off or used quantity (above 0). "use" is refused for pesticides, whose use goes in a spraying record.
         countedQuantity:
           type: number
           description: The quantity counted, for a stock count
@@ -10473,6 +10477,9 @@ components:
           type: string
         green_default_operators:
           type: string
+        green_default_site_id:
+          type: string
+          description: The site new machines and the Daily checks tab start on ("" for none)
 
     IncidentConfig:
       type: object

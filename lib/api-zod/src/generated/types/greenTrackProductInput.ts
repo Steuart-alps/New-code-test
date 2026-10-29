@@ -18,4 +18,6 @@ export interface GreenTrackProductInput {
   reorderLevel?: number | null;
   notes?: string | null;
   active?: boolean;
+  /** Only when adding a product. The amount in stock now, saved as a stock count dated today. */
+  openingStock?: number | null;
 }

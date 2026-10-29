@@ -138,11 +138,20 @@ export function getNavGroups({ isConsultant, canAdmin, canManageUsers = canAdmin
         { href: "/room-track",     label: "RoomTrack",       icon: BedDouble,       serviceKey: "roomtrack" },
         { href: "/tree-track",     label: "TreeTrack",       icon: TreePine,        serviceKey: "treetrack" },
         { href: "/bike-track",     label: "BikeTrack",       icon: Bike,            serviceKey: "biketrack" },
-        { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack" },
         { href: "/pat-track",      label: "PATtrack",        icon: Zap,             serviceKey: "pattrack" },
         { href: "/pest-track",     label: "PestTrack",       icon: Bug,             serviceKey: "pesttrack" },
         { href: "/daily-track-am", label: "DailyTrack AM",   icon: Sunrise,         serviceKeys: ["dailytrack_am", "kitchentrack", "premisestrack"] },
         { href: "/daily-track-pm", label: "DailyTrack PM",   icon: Sunset,          serviceKeys: ["dailytrack_pm", "kitchentrack", "premisestrack"] },
+      ],
+    },
+    {
+      // Golf clubs run greenkeeping as its own department, so it gets its own
+      // section rather than sitting among the other operations tracks.
+      id: "greenkeeping",
+      title: "Greenkeeping",
+      defaultOpen: true,
+      items: [
+        { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack" },
       ],
     },
     {

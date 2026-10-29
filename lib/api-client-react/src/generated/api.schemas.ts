@@ -831,6 +831,8 @@ export interface GreenTrackProductInput {
   reorderLevel?: number | null;
   notes?: string | null;
   active?: boolean;
+  /** Only when adding a product. The amount in stock now, saved as a stock count dated today. */
+  openingStock?: number | null;
 }
 
 export type GreenTrackStockLedgerEntryKind = typeof GreenTrackStockLedgerEntryKind[keyof typeof GreenTrackStockLedgerEntryKind];
@@ -840,6 +842,7 @@ export const GreenTrackStockLedgerEntryKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
   application: 'application',
 } as const;
 
@@ -869,6 +872,7 @@ export const GreenTrackStockMovementKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
 } as const;
 
 export interface GreenTrackStockMovement {
@@ -878,7 +882,7 @@ export interface GreenTrackStockMovement {
   unit: string;
   movementDate: string;
   kind: GreenTrackStockMovementKind;
-  /** Signed change (a write-off is negative; a count is 0) */
+  /** Signed change (a write-off or use is negative; a count is 0) */
   quantity: number;
   countedQuantity?: number | null;
   supplier?: string | null;
@@ -896,13 +900,14 @@ export const GreenTrackStockMovementInputKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
 } as const;
 
 export interface GreenTrackStockMovementInput {
   productId: number;
   movementDate: string;
   kind: GreenTrackStockMovementInputKind;
-  /** Delivered or written-off quantity (above 0) */
+  /** Delivered, written-off or used quantity (above 0). "use" is refused for pesticides, whose use goes in a spraying record. */
   quantity?: number;
   /** The quantity counted, for a stock count */
   countedQuantity?: number;
@@ -3529,6 +3534,8 @@ export interface BikeTrackConfig {
 export interface GreenTrackConfig {
   green_show_fuel?: string;
   green_default_operators?: string;
+  /** The site new machines and the Daily checks tab start on ("" for none) */
+  green_default_site_id?: string;
 }
 
 export interface IncidentConfig {

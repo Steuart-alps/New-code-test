@@ -181,6 +181,47 @@ async function main() {
   const spare = await owner("POST", "/green-track/products", { name: "Never used", category: "seed", unit: "kg" });
   expectStatus("delete an unused product", await owner("DELETE", `/green-track/products/${spare.data.id}`), [200]);
 
+  // ── Products added with stock already on the shelf; "Used" takes it off ────
+  expectStatus("opening stock must be a number",
+    await owner("POST", "/green-track/products", { name: "Bad opening", category: "seed", unit: "kg", openingStock: -1 }), [400]);
+  const seed = await owner("POST", "/green-track/products", { name: "Bent seed", category: "seed", unit: "kg", openingStock: 40 });
+  expectStatus("add a product with stock already on the shelf", seed, [201]);
+  check("opening stock is today's stock", seed.data?.stockOnHand === 40 && seed.data?.lastCountDate != null, JSON.stringify(seed.data));
+  const used = await owner("POST", "/green-track/stock-movements", {
+    productId: seed.data.id, movementDate: iso(0), kind: "use", quantity: 12.5, notes: "Overseeding the 3rd green",
+  });
+  expectStatus("log a quantity used", used, [201]);
+  check("used stored as negative", used.data?.kind === "use" && used.data?.quantity === -12.5, JSON.stringify(used.data));
+  check("used comes off the opening stock", await stockOf(seed.data.id) === 27.5, String(await stockOf(seed.data.id)));
+  const seedHistory = (await owner("GET", `/green-track/products/${seed.data.id}/history`)).data?.entries?.map((e) => `${e.kind}:${e.change}:${e.balance}`);
+  check("history shows the opening count and the use", JSON.stringify(seedHistory) === JSON.stringify(["use:-12.5:27.5", "count:40:40"]), JSON.stringify(seedHistory));
+  const pesticideUse = await owner("POST", "/green-track/stock-movements", { productId: fId, movementDate: iso(0), kind: "use", quantity: 1 });
+  check("pesticide use must be a spraying record", pesticideUse.status === 400 && pesticideUse.data?.code === "PESTICIDE_USE_NEEDS_SPRAYING_RECORD", JSON.stringify(pesticideUse));
+  const noOpening = await owner("POST", "/green-track/products", { name: "Wetter", category: "wetting_agent", unit: "L" });
+  check("no opening stock leaves no stock record", noOpening.data?.stockOnHand === 0 && noOpening.data?.lastCountDate === null, JSON.stringify(noOpening.data));
+
+  // ── Greens mower types and the Template's default site ─────────────────────
+  const triple = await owner("POST", "/green-track/machines", { name: "Greens triple", type: "greens_mower_ride_on" });
+  expectStatus("add a ride-on greens mower", triple, [201]);
+  const imported = await owner("POST", "/green-track/machines/import", { rows: [
+    { name: "Greens hand mower 1", type: "Greens mower - hand" },
+    { name: "Greens triple 2", type: "greens mower - ride on" },
+  ] });
+  expectStatus("import greens mowers by name", imported, [201]);
+  const fleet = (await owner("GET", "/green-track/machines")).data ?? [];
+  check("greens mower types stored", fleet.find((m) => m.name === "Greens hand mower 1")?.type === "greens_mower_hand"
+    && fleet.find((m) => m.name === "Greens triple 2")?.type === "greens_mower_ride_on", JSON.stringify(fleet.map((m) => [m.name, m.type])));
+  const ownerSite = await owner("POST", "/sites", { name: "Greenkeeping shed" });
+  expectStatus("add a site", ownerSite, [200, 201]);
+  const otherSite = await other("POST", "/sites", { name: "Other club" });
+  expectStatus("other business adds a site", otherSite, [200, 201]);
+  expectStatus("default site must be the business's own",
+    await owner("PUT", "/green-track/config", { green_default_site_id: String(otherSite.data?.id) }), [400]);
+  expectStatus("save the default site", await owner("PUT", "/green-track/config", { green_default_site_id: String(ownerSite.data?.id) }), [200]);
+  check("template keeps the default site", (await owner("GET", "/green-track/config")).data?.green_default_site_id === String(ownerSite.data?.id));
+  expectStatus("clear the default site", await owner("PUT", "/green-track/config", { green_default_site_id: "" }), [200]);
+  check("default site cleared", (await owner("GET", "/green-track/config")).data?.green_default_site_id === "");
+
   // ── A sprayer's QR label offers to record spraying ─────────────────────────
   const sprayer = await owner("POST", "/green-track/machines", { name: "Greens sprayer", type: "sprayer_spreader" });
   const mower = await owner("POST", "/green-track/machines", { name: "Greens mower", type: "pedestrian" });
