@@ -13,7 +13,7 @@ import { chromium } from "@playwright/test";
 //   - the emergency lighting test explains the 5 minute flick test;
 //   - the annual discharge test and the contractor services say they are kept
 //     in step with their ComplyTrack tasks;
-//   - a drill cannot be saved until it says whether night staff took part;
+//   - a drill cannot be saved until it answers "Night staff included?" (Yes / No / N/A);
 //   - history shows the call point and night staff answers;
 //   - managers add call points with a location under Template, Call points,
 //     change their order with the arrows, and upload a list;
@@ -246,7 +246,7 @@ try {
   assert.match(cardText, /Fire drill \(6-monthly, with night staff\)[\s\S]*?At least every 6 months/);
   // ── History shows call points and night staff ────────────────────────────
   assert.match(cardText, /Call point: CP1 – Reception/);
-  assert.match(cardText, /Night staff: Night staff did not take part/);
+  assert.match(cardText, /Night staff included: No/);
   // ── The rotation card names the next call point and any behind ─────────
   const rotationCard = page.getByTestId("call-point-rotation");
   await rotationCard.waitFor();
@@ -334,7 +334,13 @@ try {
   dialog = await openRecordDialog(page, "Fire drill (6-monthly, with night staff)");
   const save = dialog.getByRole("button", { name: "Record Check" });
   assert.equal(await save.isDisabled(), true, "a drill cannot be saved without the night staff answer");
-  await dialog.getByText("Say whether night staff took part").waitFor();
+  await dialog.getByText("Say whether night staff were included (Yes, No or N/A)").waitFor();
+  await dialog.getByText("Night staff included?").waitFor();
+  assert.deepEqual(
+    await dialog.getByRole("radiogroup", { name: "Night staff included" }).getByRole("radio").allInnerTexts(),
+    ["Yes", "No", "N/A"]);
+  await dialog.getByTestId("night-staff-no_night_staff").click();
+  await dialog.getByText("N/A: this site has no night staff.").waitFor();
   await dialog.getByTestId("night-staff-not_included").click();
   await dialog.getByText("Plan the next drill so night staff take part.").waitFor();
   await shot(page, "4-drill-night-staff");
@@ -343,7 +349,7 @@ try {
   await dialog.waitFor({ state: "hidden" });
   assert.equal(posts.at(-1).body.nightStaff, "included");
   assert.equal(posts.at(-1).body.checkType, "fire_drill");
-  console.log("ok - a drill must say whether night staff took part");
+  console.log("ok - a drill must say whether night staff were included: Yes, No or N/A");
 
   // ── Without a list, the call point is typed in and required ──────────────
   callPoints.splice(0, callPoints.length);

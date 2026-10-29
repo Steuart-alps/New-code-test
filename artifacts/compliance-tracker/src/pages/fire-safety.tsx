@@ -116,10 +116,18 @@ function frequencyLabel(days: number): string {
 
 type NightStaff = "included" | "not_included" | "no_night_staff";
 
+// Button labels: the question is "Night staff included?".
+const NIGHT_STAFF_OPTIONS: Record<NightStaff, string> = {
+  included: "Yes",
+  not_included: "No",
+  no_night_staff: "N/A",
+};
+
+// History wording, after "Night staff included:".
 const NIGHT_STAFF_LABELS: Record<NightStaff, string> = {
-  included: "Night staff took part",
-  not_included: "Night staff did not take part",
-  no_night_staff: "No night staff at this site",
+  included: "Yes",
+  not_included: "No",
+  no_night_staff: "N/A (no night staff at this site)",
 };
 
 function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | null; onChange: (v: NightStaff) => void; optional?: boolean }) {
@@ -127,11 +135,11 @@ function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | n
     <div className="space-y-2 border border-border rounded-sm p-3 bg-muted/20">
       <div className="flex items-center gap-2">
         <Moon className="w-4 h-4 text-primary flex-shrink-0" />
-        <p className="text-sm font-medium">Night staff {optional && <span className="text-muted-foreground text-xs font-normal">optional</span>}</p>
+        <p className="text-sm font-medium">Night staff included? {optional && <span className="text-muted-foreground text-xs font-normal">optional</span>}</p>
       </div>
       <p className="text-xs text-muted-foreground">Drills are due at least every 6 months and should include night staff.</p>
-      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Night staff">
-        {(Object.keys(NIGHT_STAFF_LABELS) as NightStaff[]).map(option => (
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Night staff included">
+        {(Object.keys(NIGHT_STAFF_OPTIONS) as NightStaff[]).map(option => (
           <button key={option} type="button" role="radio" aria-checked={value === option} onClick={() => onChange(option)}
             data-testid={`night-staff-${option}`}
             className={cn(
@@ -140,7 +148,7 @@ function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | n
                 ? option === "not_included" ? "bg-amber-500 border-amber-500 text-white" : "bg-primary border-primary text-primary-foreground"
                 : "bg-background text-muted-foreground border-border hover:border-primary/50",
             )}>
-            {NIGHT_STAFF_LABELS[option]}
+            {NIGHT_STAFF_OPTIONS[option]}
           </button>
         ))}
       </div>
@@ -148,6 +156,9 @@ function NightStaffPicker({ value, onChange, optional }: { value: NightStaff | n
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-sm px-2 py-1.5">
           Plan the next drill so night staff take part.
         </p>
+      )}
+      {value === "no_night_staff" && (
+        <p className="text-xs text-muted-foreground">N/A: this site has no night staff.</p>
       )}
     </div>
   );
@@ -1086,7 +1097,7 @@ function RecordCheckDialog({
   const missing = checkType === "alarm" && !callPointChoice.callPointId && !callPointChoice.callPoint.trim()
     ? "Choose the call point tested"
     : checkType === "alarm" && soundLevel.db.trim() && parseSoundLevel(soundLevel.db) === null ? "Enter a sound level between 20 and 140 dB"
-    : checkType === "fire_drill" && !nightStaff ? "Say whether night staff took part" : null;
+    : checkType === "fire_drill" && !nightStaff ? "Say whether night staff were included (Yes, No or N/A)" : null;
 
   const handleSubmit = async () => {
     const data: CreateFireSafetyCheckRequest & { staffRosterId?: number | null } = {
@@ -1841,7 +1852,7 @@ export default function FireSafetyPage() {
                             )}
                             {check.nightStaff && (
                               <div className={cn(check.nightStaff === "not_included" && "text-amber-700")}>
-                                <span className="font-medium">Night staff:</span> {NIGHT_STAFF_LABELS[check.nightStaff as NightStaff] ?? check.nightStaff}
+                                <span className="font-medium">Night staff included:</span> {NIGHT_STAFF_LABELS[check.nightStaff as NightStaff] ?? check.nightStaff}
                               </div>
                             )}
                           </div>
