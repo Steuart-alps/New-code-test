@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { BedDouble, CheckCircle2, CheckSquare, ClipboardCheck, Loader2, Pencil, Plus, Archive, AlertCircle, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 
 type CheckValues = { clean: boolean; tidy: boolean; toStandard: boolean };
 
@@ -75,11 +75,15 @@ function RoomDialog({ room, sites, open, onOpenChange, onSaved }: {
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  // A new room starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
   const [form, setForm] = useState(() => ({
     roomNumber: room ? roomNumber(room) : "",
     name: room?.name ?? "",
     floor: room?.floor ?? "",
-    siteId: room && roomSiteId(room) ? String(roomSiteId(room)) : "__none__",
+    siteId: room
+      ? roomSiteId(room) ? String(roomSiteId(room)) : "__none__"
+      : workingSiteId ? String(workingSiteId) : "__none__",
     notes: room?.notes ?? "",
   }));
   const update = (key: keyof typeof form, value: string) => setForm(current => ({ ...current, [key]: value }));

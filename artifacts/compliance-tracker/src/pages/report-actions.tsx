@@ -19,6 +19,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadBlob, getDownloadErrorMessage } from "@/lib/download";
 import { takeLinkParams } from "@/lib/deep-link";
@@ -90,6 +91,9 @@ function UploadDialog({ open, onClose, options, onUploaded }: {
   const [reportDate, setReportDate] = useState("");
   const [siteId, setSiteId] = useState(WHOLE_BUSINESS);
   const [busy, setBusy] = useState(false);
+  // A new report starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  useEffect(() => { if (open) setSiteId(workingSiteId ? String(workingSiteId) : WHOLE_BUSINESS); }, [open]);
 
   function choose(picked: File | null) {
     if (picked && !REPORT_FILE_EXTENSIONS.test(picked.name)) {

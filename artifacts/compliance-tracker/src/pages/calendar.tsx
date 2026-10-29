@@ -7,7 +7,7 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 type CalendarKind =
   | "compliance_due" | "contractor_visit" | "contractor_insurance" | "contractor_indemnity"

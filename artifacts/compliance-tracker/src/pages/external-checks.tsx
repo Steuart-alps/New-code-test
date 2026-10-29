@@ -22,7 +22,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
-import { useOwnSiteId } from "@/hooks/use-own-site";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 
 type FilterKey =
   | "due-soon"
@@ -57,7 +57,7 @@ export default function ExternalChecksPage() {
 
   // Without ?siteId= the list starts on the user's own site (all sites for
   // an Owner or Consultant); picking "All sites" then puts siteId=all in the link.
-  const ownSiteId = useOwnSiteId();
+  const ownSiteId = useWorkingSiteId();
   const siteParam = useMemo(() => {
     const v = new URLSearchParams(search).get("siteId");
     return v ?? (ownSiteId ? String(ownSiteId) : "all");

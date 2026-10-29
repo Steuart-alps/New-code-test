@@ -22,7 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

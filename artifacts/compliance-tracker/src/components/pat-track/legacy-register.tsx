@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { printHtmlDocument } from "@/lib/download";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 const types = ["Class I", "Class II", "Class III", "Extension Lead", "IT Equipment", "Portable Tool", "Cleaning Equipment", "AV Equipment", "Kitchen Appliance", "Other"];
@@ -61,7 +61,9 @@ function RecordDialog({ open, close, appliance, sites, config, saved }: { open: 
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: "", applianceType: "Other", location: "", assetTag: "", description: "", siteId: "", active: true });
-  useEffect(() => { if (open) setForm(appliance ? { name: appliance.name, applianceType: appliance.appliance_type, location: appliance.location ?? "", assetTag: appliance.asset_tag ?? "", description: appliance.description ?? "", siteId: appliance.site_id ? String(appliance.site_id) : "", active: appliance.active } : { name: "", applianceType: "Other", location: "", assetTag: "", description: "", siteId: "", active: true }); }, [open, appliance]);
+  // A new appliance starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  useEffect(() => { if (open) setForm(appliance ? { name: appliance.name, applianceType: appliance.appliance_type, location: appliance.location ?? "", assetTag: appliance.asset_tag ?? "", description: appliance.description ?? "", siteId: appliance.site_id ? String(appliance.site_id) : "", active: appliance.active } : { name: "", applianceType: "Other", location: "", assetTag: "", description: "", siteId: workingSiteId ? String(workingSiteId) : "", active: true }); }, [open, appliance]);
   const save = async () => {
     if (!form.name.trim()) return;
     setSaving(true);
@@ -114,7 +116,9 @@ function ConfigDialog({ config, saved }: { config?: Config; saved: () => void })
 function PresetDialog({ open, close, sites, config, saved }: { open: boolean; close: () => void; sites: Site[]; config?: Config; saved: () => void }) {
   const { toast } = useToast(); const qc = useQueryClient(); const [key, setKey] = useState(""); const [items, setItems] = useState<{ name: string; type: string; checked: boolean }[]>([]); const newRow = useFocusNewRow(); const [location, setLocation] = useState(""); const [siteId, setSiteId] = useState(""); const [saving, setSaving] = useState(false);
   const templatesQ = useQuery({ queryKey: ["pat-track", "legacy-presets"], queryFn: () => api<Record<string, { name: string; type: string }[]>>("/preset-templates"), enabled: open });
-  useEffect(() => { if (!open) { setKey(""); setItems([]); setLocation(""); setSiteId(""); } }, [open]);
+  // New appliances start on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  useEffect(() => { if (!open) { setKey(""); setItems([]); setLocation(""); setSiteId(""); } else setSiteId(workingSiteId ? String(workingSiteId) : ""); }, [open]);
   const choose = (value: string) => { setKey(value); setItems((templatesQ.data?.[value] ?? presets[value].items).map(x => ({ ...x, checked: true }))); };
   const saveTemplate = async () => { await api(`/preset-templates/${key}`, { method: "PUT", body: JSON.stringify({ items: items.map(({ name, type }) => ({ name, type })) }) }); qc.invalidateQueries({ queryKey: ["pat-track", "legacy-presets"] }); toast({ title: "Preset template saved" }); };
   const reset = async () => { await api(`/preset-templates/${key}`, { method: "DELETE" }); setItems(presets[key].items.map(x => ({ ...x, checked: true }))); qc.invalidateQueries({ queryKey: ["pat-track", "legacy-presets"] }); toast({ title: "Preset reset to defaults" }); };

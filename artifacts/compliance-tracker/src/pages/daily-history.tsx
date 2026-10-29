@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { CheckCircle2, Sun, Moon, ShieldCheck, Printer, Search, ChevronLeft, ChevronRight } from "lucide-react";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 interface Submission {
   id: number;

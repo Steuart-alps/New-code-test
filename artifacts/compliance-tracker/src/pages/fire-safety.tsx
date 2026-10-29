@@ -61,7 +61,7 @@ import {
 import { SOUND_LEVEL_MIN_DB } from "@/lib/fire-sound-level";
 import { StringListEditor } from "@/components/string-list-editor";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
-import { useSiteFilterId } from "@/hooks/use-own-site";
+import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -1018,6 +1018,13 @@ function RecordCheckDialog({
   const createCheck = useCreateFireSafetyCheck();
   const { data: sites } = useListSites();
   const { data: config } = useGetFireSafetyConfig();
+  const workingSiteId = useWorkingSiteId();
+
+  // A new check starts on the page's site, else the user's working site.
+  useEffect(() => {
+    const initial = siteId ?? workingSiteId ?? undefined;
+    if (open && initial !== undefined) setSelectedSite(initial);
+  }, [open]);
 
   useEffect(() => {
     if (!open || !preset) return;

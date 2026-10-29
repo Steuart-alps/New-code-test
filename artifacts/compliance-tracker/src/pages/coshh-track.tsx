@@ -21,7 +21,7 @@ import {
   ConfirmDelete, DocumentField, SiteFilter, SiteSelect, addMonthsIso, downloadCsv, downloadRegisterDocument,
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 
 // COSHHTrack (API: /api/coshh-track/*). Substances come from the COSHH
 // register (/api/registers/coshh), which COSHHTrack shows as its Substances
@@ -220,6 +220,7 @@ export default function CoshhTrackPage() {
     return requested && TABS.includes(requested) ? requested : "due";
   });
   const [siteFilter, setSiteFilter] = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [checkFilter, setCheckFilter] = useState<"all" | CheckType>("all");
   const [showArchived, setShowArchived] = useState(false);
   const [editingAssessment, setEditingAssessment] = useState<Assessment | null>(null);
@@ -275,7 +276,7 @@ export default function CoshhTrackPage() {
     const today = todayIso();
     setEditingAssessment(null);
     setAssessmentForm({
-      siteId: substance?.siteId != null ? String(substance.siteId) : siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : "",
+      siteId: substance?.siteId != null ? String(substance.siteId) : siteFilter !== "all" ? siteFilter : workingSiteId ? String(workingSiteId) : sites.length === 1 ? String(sites[0].id) : "",
       substanceId: substance ? String(substance.id) : NONE,
       task: "", whoAtRisk: "", exposureRoutes: [], howOften: "", hazardStatements: "", signalWord: NONE,
       healthEffects: "", exposureLimits: "", controls: substance?.controls ?? "", ppe: [], ppeDetails: "", riskLevel: "medium",
@@ -350,7 +351,7 @@ export default function CoshhTrackPage() {
     const today = todayIso();
     setEditingCheck(null);
     setCheckForm({
-      siteId: assessment?.siteId != null ? String(assessment.siteId) : siteFilter !== "all" ? siteFilter : sites.length === 1 ? String(sites[0].id) : "",
+      siteId: assessment?.siteId != null ? String(assessment.siteId) : siteFilter !== "all" ? siteFilter : workingSiteId ? String(workingSiteId) : sites.length === 1 ? String(sites[0].id) : "",
       assessmentId: assessment ? String(assessment.id) : NONE,
       checkType, checkDate: today, subject: "", carriedOutBy: checkType === "staff_briefing" ? user?.name ?? "" : "",
       result: "pass", actionRequired: "", nextDueDate: addMonthsIso(today, CHECK_INFO[checkType].months), nextDueTouched: false,

@@ -44,7 +44,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
-import { useSiteFilterId } from "@/hooks/use-own-site";
+import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -438,7 +438,9 @@ function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
   const [name, setName] = useState("");
   const [type, setType] = useState<OutletType>("hot");
   const [location, setLocation] = useState("");
-  const [outletSite, setOutletSite] = useState<number | undefined>(siteId);
+  // Without a page site, a new outlet starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const [outletSite, setOutletSite] = useState<number | undefined>(siteId ?? workingSiteId ?? undefined);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
   const { data: sites } = useListSites();
@@ -647,6 +649,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
   const [addOpen, setAddOpen] = useState(false);
   const [walkRoundOpen, setWalkRoundOpen] = useState(false);
   const [walkSite, setWalkSite] = useState<number | undefined>(undefined);
+  const workingSiteId = useWorkingSiteId();
   const { data: sites } = useListSites();
   const { toast } = useToast();
 
@@ -733,7 +736,7 @@ function SentinelOutletsPanel({ canAdmin, siteId, openOutletId }: { canAdmin: bo
           </div>
           {canAdmin && (
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setWalkRoundOpen(true)} data-testid="button-walk-round-outlets">
+              <Button variant="outline" size="sm" onClick={() => { setWalkSite(workingSiteId ?? undefined); setWalkRoundOpen(true); }} data-testid="button-walk-round-outlets">
                 <Footprints className="w-3.5 h-3.5 mr-1.5" /> Walk round and speak
               </Button>
               <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
@@ -912,10 +915,12 @@ function RecordCheckDialog({
   const [notes, setNotes] = useState("");
   const [selectedSite, setSelectedSite] = useState<number | undefined>(siteId);
   const [equipment, setEquipment] = useState<{ id: number; name: string } | null>(null);
+  const workingSiteId = useWorkingSiteId();
 
   useEffect(() => {
     if (!open) return;
-    if (!preset) { setEquipment(null); return; }
+    // A new check starts on the page's site, else the user's working site.
+    if (!preset) { setEquipment(null); setSelectedSite(siteId ?? workingSiteId ?? undefined); return; }
     setEquipment({ id: preset.equipmentId, name: preset.name });
     setSelectedSite(preset.siteId);
     setLocation(preset.location ?? preset.name);

@@ -29,7 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { format, parseISO, isValid } from "date-fns";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -131,6 +131,11 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
   const inspectionTypes = pickOptions(formOptions, "premises_inspection_types");
   const isEdit = !!inspection;
   const [saving, setSaving] = useState(false);
+  // A new inspection starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  const formSiteId = inspection
+    ? inspection.siteId == null ? "all" : String(inspection.siteId)
+    : workingSiteId ? String(workingSiteId) : "all";
   // Keep the record's stored type selectable even if it was later removed from
   // the effective list, so editing other fields doesn't force a type change.
   const currentType = inspection?.inspectionType;
@@ -150,7 +155,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
     status:         inspection?.status ?? "open",
      inspectedBy:    inspection?.inspectedBy ?? "",
      staffRosterId:  (inspection as any)?.staffRosterId ?? null,
-    siteId:         inspection?.siteId == null ? "all" : String(inspection.siteId),
+    siteId:         formSiteId,
   }));
 
   useEffect(() => {
@@ -167,7 +172,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
       status: inspection?.status ?? "open",
       inspectedBy: inspection?.inspectedBy ?? "",
       staffRosterId: (inspection as any)?.staffRosterId ?? null,
-      siteId: inspection?.siteId == null ? "all" : String(inspection.siteId),
+      siteId: formSiteId,
     });
   }, [open, inspection, inspectionTypes]);
 

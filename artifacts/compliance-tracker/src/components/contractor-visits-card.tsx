@@ -8,7 +8,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
 import { formatDay, localToday } from "@/lib/onboarding";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 interface VisitType {
   key: string;

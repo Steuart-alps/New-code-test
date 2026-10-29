@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Link, useLocation } from "wouter";
 import {
   Lock, Plus, Pencil, Trash2, Search, Wrench, AlertTriangle, CheckCircle2,
@@ -635,6 +636,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
 
 export default function FixTrackPage() {
   const { hasService, user, activeClientId } = useAuth();
+  const workingSiteId = useWorkingSiteId();
   const clientApiFetch = useActiveClientApi();
   const clientCanAdmin = useCanAdmin();
   const canAdmin = clientCanAdmin || useIsMaintenanceManager();
@@ -736,6 +738,8 @@ export default function FixTrackPage() {
       reportedDate: today,
       reportedBy:   user?.name ?? "",
       mediaUrls:    [],
+      // A new report starts on the user's working site.
+      ...(workingSiteId ? { siteId: workingSiteId } : {}),
       ...prefill,
     });
     setDialogOpen(true);

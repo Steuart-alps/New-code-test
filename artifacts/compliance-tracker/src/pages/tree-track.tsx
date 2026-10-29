@@ -28,7 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -182,6 +182,7 @@ export default function TreeTrackPage() {
 
   const [filterType, setFilterType] = useState<CheckType | "all">("all");
   const [filterSite, setFilterSite] = useSiteFilter("all");
+  const workingSiteId = useWorkingSiteId();
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [editItem, setEditItem] = useState<TreeInspection | null>(null);
@@ -294,7 +295,7 @@ export default function TreeTrackPage() {
   function openAdd() {
     setEditItem(null);
     setResultChanged(false);
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), siteId: workingSiteId ? String(workingSiteId) : "" });
     setShowDialog(true);
   }
 

@@ -21,7 +21,7 @@ import { Download, RefreshCw, BarChart2, TrendingUp, AlertCircle, FileCheck, Shi
 import { cn } from "@/lib/utils";
 import { InspectionPackCard } from "@/components/inspection-pack-card";
 import { departmentLabel } from "@/lib/departments";
-import { useSiteFilter } from "@/hooks/use-own-site";
+import { useSiteFilter } from "@/hooks/use-working-site";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

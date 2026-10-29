@@ -22,6 +22,7 @@ import {
 import { SignaturePad } from "@/components/signature-pad";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { useLiveAcknowledgements } from "@/hooks/use-live-acknowledgements";
 import { cn } from "@/lib/utils";
 import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry";
@@ -457,6 +458,7 @@ export default function SafeTrackPage() {
   const canAdmin = useCanAdmin();
   const { data: sites = [] } = useListSites();
   const { toast } = useToast();
+  const workingSiteId = useWorkingSiteId();
 
   const [tab, setTab] = useState("risk");
   const [search, setSearch] = useState("");
@@ -499,7 +501,8 @@ export default function SafeTrackPage() {
     return sites.find(s => s.id === id)?.name ?? null;
   }
 
-  function openCreate() { setEditing(null); setForm({}); setDialogOpen(true); }
+  // A new record starts on the user's working site.
+  function openCreate() { setEditing(null); setForm(workingSiteId ? { siteId: String(workingSiteId) } : {}); setDialogOpen(true); }
   function openEdit(item: any) {
     setEditing(item);
     setForm({ ...item, siteId: item.siteId ? String(item.siteId) : "__none__" });

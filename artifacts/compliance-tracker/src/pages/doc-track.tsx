@@ -17,6 +17,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -305,6 +306,9 @@ function UploadDialog({
   const [category, setCategory] = useState<Category>(categories[0]);
   const [description, setDescription] = useState("");
   const [siteId, setSiteId] = useState<string>("none");
+  // A new document starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
+  useEffect(() => { if (open) setSiteId(workingSiteId ? String(workingSiteId) : "none"); }, [open]);
   const [department, setDepartment] = useState("");
   // Risk assessments (COSHH included), SOPs, policies and the like become a
   // read-and-sign task for staff unless the uploader unticks it.

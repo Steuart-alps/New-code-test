@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { dictationSupported } from "@/components/dictation-button";
 import { useDictation } from "@/hooks/use-dictation";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { useAuth } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
 import { parseColdUnits, parseStringArray, type ColdUnit } from "@/lib/kitchen-state";
@@ -102,6 +103,7 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: sites = [] } = useListSites();
+  const workingSiteId = useWorkingSiteId();
   const hasKitchen = hasService("kitchentrack");
   const hasFire = hasService("firetrack");
   const hasWater = hasService("legionellatrack");
@@ -116,7 +118,7 @@ export function VoiceLogDialog({ open, onClose, defaultSiteId }: {
   useEffect(() => {
     if (!open) return;
     setHeard(""); setDraft(null); setReading(null); setSaved([]);
-    setSiteId(defaultSiteId ?? (sites.length === 1 ? sites[0].id : null));
+    setSiteId(defaultSiteId ?? workingSiteId ?? (sites.length === 1 ? sites[0].id : null));
   }, [open]);
   useEffect(() => {
     if (open && siteId === null && sites.length === 1) setSiteId(sites[0].id);

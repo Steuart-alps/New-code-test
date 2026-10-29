@@ -1,14 +1,16 @@
 // Harness stand-in for "@/context/auth-context" in the daily checklist site
 // harness: a signed-in user of client 1 (staff unless the harness page's
-// ?role= says otherwise), whose department comes from ?dept= (none when absent).
+// ?role= says otherwise), whose department comes from ?dept= (none when absent)
+// and, for a Manager, whose departments come from ?depts=11,13.
 const query = new URLSearchParams(window.location.search);
 const dept = Number(query.get("dept")) || null;
 const role = query.get("role") ?? "client_staff";
+const departmentIds = query.get("depts")?.split(",").map(Number);
 
 export function useAuth() {
   return {
     activeClientId: null,
-    user: { id: 1, name: "Harness User", role, clientId: 1, departmentId: dept },
+    user: { id: 1, name: "Harness User", role, clientId: 1, departmentId: dept, departmentIds },
     hasService: () => true,
   };
 }

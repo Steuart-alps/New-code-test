@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { format } from "date-fns";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -290,6 +291,9 @@ function PoolRecordDialog({
   const [checkDate, setCheckDate] = useState(existing?.check_date ?? todayIso());
   const [checkTime, setCheckTime] = useState(existing?.check_time ?? nowTime());
   const [selectedSite, setSelectedSite] = useState<number | undefined>(existing?.site_id ?? siteId);
+  const workingSiteId = useWorkingSiteId();
+  // A new check starts on the page's site filter, else the user's working site.
+  useEffect(() => { if (open && !isEdit) setSelectedSite(siteId ?? workingSiteId ?? undefined); }, [open]);
   const [ph, setPh] = useState(existing?.ph_level ?? "");
   const [freeChlor, setFreeChlor] = useState(existing?.free_chlorine ?? "");
   const [combChlor, setCombChlor] = useState(existing?.combined_chlorine ?? "");
@@ -485,7 +489,8 @@ interface SwimStatus { sessionsToday: number; poolsClosedToday: number; surveill
 function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boolean; onClose: () => void; session?: SwimSession | null; sites: { id: number; name: string }[]; onSaved: () => void; }) {
   const { toast } = useToast();
   const today = todayIso();
-  const blank = { siteId: "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", openTime: "", closeTime: "", maxBathers: "", batherCountPeak: "", preSessionResult: "pass", preSessionNotes: "", poolClosed: false, closureReason: "", notes: "" };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", openTime: "", closeTime: "", maxBathers: "", batherCountPeak: "", preSessionResult: "pass", preSessionNotes: "", poolClosed: false, closureReason: "", notes: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
   // Staged before the record exists, so a required-photo rule can be met (the API refuses a create without them).
@@ -560,7 +565,8 @@ function SurveillanceDialog({ open, onClose, check, sites, onSaved }: { open: bo
   const { toast } = useToast();
   const today = todayIso();
   const now = nowTime();
-  const blank = { siteId: "", checkDate: today, checkTime: now, batherCount: "", scanCompleted: true, observations: "", checkedBy: "" };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", checkDate: today, checkTime: now, batherCount: "", scanCompleted: true, observations: "", checkedBy: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
   // Staged before the record exists, so a required-photo rule can be met (the API refuses a create without them).
@@ -607,7 +613,8 @@ function SurveillanceDialog({ open, onClose, check, sites, onSaved }: { open: bo
 function FirstAidDialog({ open, onClose, check, sites, onSaved }: { open: boolean; onClose: () => void; check?: FirstAidCheck | null; sites: { id: number; name: string }[]; onSaved: () => void; }) {
   const { toast } = useToast();
   const blankItems = Object.fromEntries(FIRST_AID_ITEMS.map(i => [i.key, true]));
-  const blank = { siteId: "", checkDate: todayIso(), checkedBy: "", defectsFound: "", notes: "", ...blankItems };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", checkDate: todayIso(), checkedBy: "", defectsFound: "", notes: "", ...blankItems };
   const [form, setForm] = useState<Record<string, any>>(blank);
   const [saving, setSaving] = useState(false);
   // Staged before the record exists, so a required-photo rule can be met (the API refuses a create without them).
@@ -661,7 +668,8 @@ function FirstAidDialog({ open, onClose, check, sites, onSaved }: { open: boolea
 
 function IncidentDialog({ open, onClose, incident, sites, onSaved }: { open: boolean; onClose: () => void; incident?: Incident | null; sites: { id: number; name: string }[]; onSaved: () => void; }) {
   const { toast } = useToast();
-  const blank = { siteId: "", incidentDate: todayIso(), incidentTime: "", incidentType: "near_miss", severity: "low", personsInvolved: "", description: "", actionTaken: "", reportedTo: "", reportedDate: "", outcome: "", notes: "" };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { siteId: workingSiteId ? String(workingSiteId) : "", incidentDate: todayIso(), incidentTime: "", incidentType: "near_miss", severity: "low", personsInvolved: "", description: "", actionTaken: "", reportedTo: "", reportedDate: "", outcome: "", notes: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
   // Staged before the record exists, so a required-photo rule can be met (the API refuses a create without them).

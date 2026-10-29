@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import {
@@ -816,12 +817,14 @@ function BikeFormDialog({
   const [siteId, setSiteId] = useState(bike?.siteId ? String(bike.siteId) : "");
   const [notes, setNotes] = useState(bike?.notes ?? "");
   const [saving, setSaving] = useState(false);
+  // A new bike starts on the user's working site.
+  const workingSiteId = useWorkingSiteId();
 
-  // Sync form when bike changes
+  // Sync form when bike changes (or the dialog opens for a new bike)
   useMemo(() => {
     setRef(bike?.ref ?? ""); setName(bike?.name ?? ""); setType(bike?.type ?? "hybrid");
-    setSiteId(bike?.siteId ? String(bike.siteId) : ""); setNotes(bike?.notes ?? "");
-  }, [bike]);
+    setSiteId(bike ? (bike.siteId ? String(bike.siteId) : "") : workingSiteId ? String(workingSiteId) : ""); setNotes(bike?.notes ?? "");
+  }, [bike, open]);
 
   async function handleSave() {
     if (!ref.trim()) return;

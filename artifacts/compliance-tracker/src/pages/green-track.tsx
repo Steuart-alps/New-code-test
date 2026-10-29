@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -467,7 +468,8 @@ function MachineDialog({
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
   const isEdit = !!machine;
-  const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: "", active: true, notes: "", sprayerCategory: "", purchaseDate: "" };
+  const workingSiteId = useWorkingSiteId();
+  const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: workingSiteId ? String(workingSiteId) : "", active: true, notes: "", sprayerCategory: "", purchaseDate: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
 

@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFileDrop } from "@/hooks/use-file-drop";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { useUpload } from "@/hooks/use-upload";
 import { localToday } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
@@ -84,11 +85,12 @@ interface Draft {
   checked: boolean;
 }
 
-function draftFrom(reading: CertificateReading): Draft {
+/** newSiteId: the site a new check starts on (the user's working site), or "" for all sites. */
+function draftFrom(reading: CertificateReading, newSiteId = ""): Draft {
   return {
     check: reading.itemId != null ? String(reading.itemId) : reading.newCheck ? NEW_CHECK : "",
     newTitle: reading.newCheck?.title ?? "",
-    newSiteId: "",
+    newSiteId,
     newFrequency: reading.newCheck?.frequencyMonths ? String(reading.newCheck.frequencyMonths) : "",
     name: reading.name,
     issueDate: reading.issueDate ?? "",
@@ -145,11 +147,13 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
   const { data: items = [] } = useListComplianceItems({});
   const { data: contractors = [] } = useListContractors();
   const { data: sites = [] } = useListSites();
+  const workingSiteId = useWorkingSiteId();
+  const newSiteId = workingSiteId ? String(workingSiteId) : "";
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const initialReading = inbox ? inbox.reading ?? blankReading(inbox) : null;
   const [reading, setReading] = useState<CertificateReading | null>(initialReading);
-  const [draft, setDraft] = useState<Draft | null>(initialReading ? draftFrom(initialReading) : null);
+  const [draft, setDraft] = useState<Draft | null>(initialReading ? draftFrom(initialReading, newSiteId) : null);
   const [inboxNote, setInboxNote] = useState<string | null>(inbox?.note ?? null);
   const readByAi = !!inbox?.reading || (!!inbox && reading !== initialReading) || !inbox;
   const [busy, setBusy] = useState<"reading" | "saving" | null>(null);
@@ -178,7 +182,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
       const result = await readCertificateInboxItem(inbox.id);
       setInboxNote(result.note);
       if (result.reading) {
-        const next = draftFrom(result.reading);
+        const next = draftFrom(result.reading, newSiteId);
         const item = items.find((i) => String(i.id) === next.check);
         if (item?.contractorId && quotable.some((c) => c.id === item.contractorId)) next.quoteContractorId = String(item.contractorId);
         setReading(result.reading);
@@ -217,7 +221,7 @@ export function CertificateReaderDialog({ open, onOpenChange, itemId = null, inb
       const shrunk = await shrinkPhoto(selected, mimeType);
       if (shrunk.blob.size > MAX_READ_BYTES) throw new Error("This file is too large to read (15 MB at most). Upload a smaller PDF, or fill the certificate in by hand.");
       const result = await readCertificate({ fileName: selected.name, mimeType: shrunk.mimeType, data: await toBase64(shrunk.blob), itemId });
-      const next = draftFrom(result);
+      const next = draftFrom(result, newSiteId);
       const item = items.find((i) => String(i.id) === next.check);
       if (item?.contractorId && quotable.some((c) => c.id === item.contractorId)) next.quoteContractorId = String(item.contractorId);
       else if (result.contractorName) {

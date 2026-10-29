@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 import { Users, Plus, Pencil, Trash2, Loader2, Search, UserCheck, UserX, Upload, FileSpreadsheet, X, Printer, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { downloadExcel, readSpreadsheet } from "@/lib/spreadsheet";
@@ -45,6 +46,7 @@ function StaffDialog({
   const { toast } = useToast();
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const workingSiteId = useWorkingSiteId();
 
   useEffect(() => {
     if (editing) {
@@ -58,7 +60,8 @@ function StaffDialog({
         active: editing.active,
       });
     } else {
-      setForm(EMPTY_FORM);
+      // A new staff member starts on the user's working site.
+      setForm({ ...EMPTY_FORM, siteId: workingSiteId ? String(workingSiteId) : "none" });
     }
   }, [editing, open]);
 

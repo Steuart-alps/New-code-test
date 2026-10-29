@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { DepartmentSwitcher } from "@/components/department-switcher";
+import { WorkingSiteSwitcher } from "@/components/working-site-switcher";
 import { Link, useLocation } from "wouter";
 import {
   ShieldCheck,
@@ -607,6 +608,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <WorkingSiteSwitcher />
             <DepartmentSwitcher />
             <Link
               href="/account-security"

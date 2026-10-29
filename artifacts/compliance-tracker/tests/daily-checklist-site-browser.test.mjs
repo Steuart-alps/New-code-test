@@ -9,8 +9,10 @@
 //    unsaved answers come back on a site that is still open;
 //  - RoomTrack room checks and KitchenTrack cleaning ticks also survive
 //    picking a site after filling them in;
-//  - a page's "All sites" filter starts on the user's own site, except for
-//    an Owner or Consultant.
+//  - a page's "All sites" filter starts on the user's working site: their
+//    department's site; for a Manager over several sites, the one they pick
+//    in the top bar (one of theirs only); for an Owner, the one they pick
+//    there, else All sites.
 //
 // The real page is mounted by tests/browser/daily-checklist-site.harness.tsx
 // and built with the app's React and Tailwind setup. API requests are
@@ -106,6 +108,7 @@ function mockApi(page, { rows = [], sitesDelayMs = 0 } = {}) {
   page.route(apiPath("/api/departments"), (route) => json(route, 200, [
     { id: 11, name: "Shop", siteId: 2, siteName: "Pro Shop" },
     { id: 12, name: "Office", siteId: null, siteName: null },
+    { id: 13, name: "Maintenance", siteId: 3, siteName: "Halfway House" },
   ]));
   page.route(apiPath("/api/checklist-templates"), (route) => {
     const url = new URL(route.request().url());
@@ -155,7 +158,8 @@ function mockApi(page, { rows = [], sitesDelayMs = 0 } = {}) {
 const kitchenCard = (page) => page.locator(".bg-card", { has: page.getByRole("heading", { name: "Kitchen Opening" }) });
 const answer = (page, label, option) => kitchenCard(page).getByRole("radiogroup", { name: label }).getByRole("radio", { name: option });
 const isSelected = async (page, label, option) => (await answer(page, label, option).getAttribute("aria-checked")) === "true";
-const siteSelect = (page) => page.getByRole("combobox", { name: "Site" });
+const siteSelect = (page) => page.getByRole("combobox", { name: "Site", exact: true });
+const workingSite = (page) => page.getByRole("combobox", { name: "Site you're working at" });
 
 async function pickSite(page, name) {
   await siteSelect(page).click();
@@ -305,6 +309,34 @@ async function main() {
       const owner = await open("?page=room-track&dept=11&role=client_admin", {}, null, (p) => p.getByRole("heading", { name: "101" }));
       assert.equal(await owner.page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "All sites");
       await owner.page.close();
+    });
+
+    await test("a Manager over several sites starts on their department's site and can switch between theirs", async () => {
+      const { page } = await open("?page=room-track&role=client_manager&dept=11&depts=11,13", {}, null, (p) => p.getByRole("heading", { name: "201" }));
+      assert.equal(await page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "Pro Shop");
+      assert.equal(await workingSite(page).textContent(), "Pro Shop");
+      await workingSite(page).click();
+      assert.deepEqual(await page.getByRole("option").allTextContents(), ["Pro Shop", "Halfway House"], "only their own sites, no All sites");
+      await page.getByRole("option", { name: "Halfway House" }).click();
+      // Every page now starts on the new working site.
+      await page.reload();
+      await page.getByRole("heading", { name: "201" }).waitFor({ state: "detached" });
+      assert.equal(await page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "Halfway House");
+      await page.close();
+    });
+
+    await test("an Owner picks a site in the top bar, then every page starts on it", async () => {
+      const context = await browser.newContext();
+      const first = await open("?page=room-track&role=client_admin", {}, context, (p) => p.getByRole("heading", { name: "101" }));
+      assert.equal(await first.page.getByRole("combobox", { name: "Filter rooms by site" }).textContent(), "All sites");
+      assert.equal(await workingSite(first.page).textContent(), "Choose your site");
+      await workingSite(first.page).click();
+      await first.page.getByRole("option", { name: "Clubhouse" }).click();
+      await first.page.close();
+      const later = await open("?page=daily-am&role=client_admin", {}, context);
+      assert.equal(await siteSelect(later.page).textContent(), "Clubhouse");
+      await later.page.close();
+      await context.close();
     });
 
     await test("KitchenTrack cleaning: ticks survive changing the kitchen", async () => {
