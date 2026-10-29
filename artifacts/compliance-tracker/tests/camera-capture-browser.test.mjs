@@ -57,10 +57,27 @@ const launchOptions = {
   webkit: {},
 }[browserName];
 
+// Playwright's WebKit has no fake camera, so there a moving canvas stands in
+// for one (and the microphone is missing, so clips are video only).
+function canvasCamera() {
+  navigator.mediaDevices.getUserMedia = async (constraints) => {
+    if (!constraints?.video) throw new DOMException("No microphone", "NotFoundError");
+    const canvas = document.createElement("canvas");
+    canvas.width = 640;
+    canvas.height = 480;
+    const context = canvas.getContext("2d");
+    let hue = 0;
+    const draw = () => { context.fillStyle = `hsl(${hue = (hue + 7) % 360} 70% 50%)`; context.fillRect(0, 0, 640, 480); };
+    draw();
+    setInterval(draw, 40);
+    return canvas.captureStream(25);
+  };
+}
+
 async function open({ initScript } = {}) {
-  // Chromium needs the camera granted; Firefox (prefs above) and Playwright's
-  // WebKit (which has no "camera" permission to grant) allow it already.
+  // Chromium needs the camera granted; Firefox allows it through the prefs above.
   const context = await browser.newContext(browserName === "chromium" ? { permissions: ["camera", "microphone"] } : {});
+  if (browserName === "webkit") await context.addInitScript(canvasCamera);
   if (initScript) await context.addInitScript(initScript);
   const page = await context.newPage();
   page.setDefaultTimeout(15_000);
@@ -113,6 +130,16 @@ try {
     const { context, page } = await open();
     await takeButton(page).click();
     const dialog = page.getByRole("dialog", { name: "Take a photo or video" });
+    await dialog.getByRole("button", { name: "Take photo" }).waitFor();
+    const canRecord = await page.evaluate(() => typeof MediaRecorder !== "undefined"
+      && ["video/mp4", "video/webm"].some(type => MediaRecorder.isTypeSupported(type)));
+    if (!canRecord) {
+      // A browser that can't record offers photos only.
+      assert.equal(await dialog.getByRole("button", { name: "Record video" }).count(), 0);
+      console.log(`  (${browserName} here can't record video; checked that no Record button is offered)`);
+      await context.close();
+      return;
+    }
     await dialog.getByRole("button", { name: "Record video" }).click();
     await dialog.getByText(/Recording 0:0[1-9]/).waitFor();
     await shot(page, "3-recording");
