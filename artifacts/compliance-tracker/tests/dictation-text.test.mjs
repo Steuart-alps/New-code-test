@@ -16,7 +16,7 @@ try {
     entryPoints: [path.join(root, "src/lib/dictation.ts")],
     bundle: true, platform: "node", format: "esm", outfile: bundle, logLevel: "silent",
   });
-  const { applySpokenPunctuation, insertDictatedText, splitSpokenList, dictationErrorMessage, normaliseSpokenName, matchSpokenName } =
+  const { applySpokenPunctuation, insertDictatedText, splitSpokenList, dictationErrorMessage, normaliseSpokenName, matchSpokenName, listensContinuously } =
     await import(pathToFileURL(bundle).href);
 
   // Spoken punctuation.
@@ -86,6 +86,26 @@ try {
 
   assert.match(dictationErrorMessage("not-allowed"), /Allow the microphone/);
   assert.equal(dictationErrorMessage("no-speech"), null);
+  assert.match(dictationErrorMessage("service-not-allowed"), /Enable Dictation/, "Safari with Dictation switched off says how to turn it on");
+
+  // One phrase per tap where continuous listening repeats words.
+  const ua = {
+    chromeDesktop: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+    edge: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0",
+    chromeMac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+    chromeAndroid: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36",
+    iphone: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
+    chromeIphone: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0.0.0 Mobile/15E148 Safari/604.1",
+    safariMac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+  };
+  assert.equal(listensContinuously(ua.chromeDesktop), true);
+  assert.equal(listensContinuously(ua.edge), true);
+  assert.equal(listensContinuously(ua.chromeMac), true);
+  assert.equal(listensContinuously(ua.chromeAndroid), false);
+  assert.equal(listensContinuously(ua.iphone, 5), false);
+  assert.equal(listensContinuously(ua.chromeIphone, 5), false, "every iPhone browser is Safari underneath");
+  assert.equal(listensContinuously(ua.safariMac, 0), false);
+  assert.equal(listensContinuously(ua.safariMac, 5), false, "an iPad says it is a Mac");
   console.log("Dictation text checks passed.");
 } finally {
   await rm(dir, { recursive: true, force: true });

@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -297,6 +298,24 @@ export default function TreeTrackPage() {
     setForm(emptyForm());
     setShowDialog(true);
   }
+
+  // An inspection said to Say it ("tree T12 by the car park, dead branch, urgent").
+  useSayItFill(["tree-inspection"], fill => {
+    const v = fill.values;
+    const text = (key: string) => (typeof v[key] === "string" ? v[key] as string : "");
+    setEditItem(null);
+    setResultChanged(false);
+    setForm({
+      ...emptyForm(),
+      checkType: (CHECK_TYPES as readonly string[]).includes(text("checkType")) ? text("checkType") as CheckType : "visual_assessment",
+      result: v.result === "fail" ? "fail" : "pass",
+      actionSeverity: v.result === "fail" ? (text("actionSeverity") as ActionSeverity) || "action_required" : "",
+      treeRef: text("treeRef"), location: text("location"),
+      siteId: fill.siteId ? String(fill.siteId) : "",
+      notes: withSpokenNote("", fill.text),
+    });
+    setShowDialog(true);
+  });
 
   function openEdit(r: TreeInspection) {
     setEditItem(r);

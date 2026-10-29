@@ -16,6 +16,8 @@ import { chromium } from "@playwright/test";
 //   - pins are kept per user and per business,
 //   - a pin for a module the business loses is removed for good,
 //   - at most MAX_PINNED_NAV_ITEMS can be pinned.
+// Scrolling (desktop):
+//   - the sidebar and the page scroll separately; scrolling one never moves the other.
 // The API is mocked: /api/auth/me returns the session below, everything else
 // returns an empty list, which every page tolerates as "no records".
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -248,8 +250,47 @@ try {
     "A seventh pin is refused");
   assert.ok(await desktop.getByRole("button", { name: "Unpin Other reminders" }).first().isEnabled());
 
+  // ─── Scrolling ────────────────────────────────────────────────────────────
+  // A short window and a long page, so both the sidebar and the page overflow.
+  await page.setViewportSize({ width: 1280, height: 500 });
+  await load();
+  const nav = page.getByTestId("desktop-sidebar-nav");
+  const content = page.getByTestId("page-scroll");
+  await content.evaluate(el => {
+    const spacer = document.createElement("div");
+    spacer.style.height = "3000px";
+    el.firstElementChild.appendChild(spacer);
+  });
+  const scrollTops = async () => ({
+    nav: await nav.evaluate(el => el.scrollTop),
+    content: await content.evaluate(el => el.scrollTop),
+    window: await page.evaluate(() => window.scrollY),
+  });
+  assert.ok(await nav.evaluate(el => el.scrollHeight > el.clientHeight), "The sidebar overflows the short window");
+  const navBox = await nav.boundingBox();
+  await page.mouse.move(navBox.x + navBox.width / 2, navBox.y + navBox.height / 2);
+  await page.mouse.wheel(0, 300);
+  await page.waitForFunction(() => document.querySelector('[data-testid="desktop-sidebar-nav"]').scrollTop > 0);
+  let tops = await scrollTops();
+  assert.equal(tops.content, 0, "Scrolling the sidebar leaves the page where it was");
+  assert.equal(tops.window, 0, "Scrolling the sidebar doesn't scroll the window");
+  const navTop = tops.nav;
+  const contentBox = await content.boundingBox();
+  await page.mouse.move(contentBox.x + contentBox.width / 2, contentBox.y + contentBox.height / 2);
+  await page.mouse.wheel(0, 600);
+  await page.waitForFunction(() => document.querySelector('[data-testid="page-scroll"]').scrollTop > 0);
+  tops = await scrollTops();
+  assert.equal(tops.nav, navTop, "Scrolling the page leaves the sidebar where it was");
+  assert.equal(tops.window, 0, "The page scrolls inside its own column");
+  // Scrolling the sidebar past its end doesn't carry on into the page.
+  await page.mouse.move(navBox.x + navBox.width / 2, navBox.y + navBox.height / 2);
+  await page.mouse.wheel(0, 5000);
+  await page.waitForTimeout(300);
+  assert.equal((await scrollTops()).content, tops.content, "The sidebar's end doesn't scroll the page");
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   assert.deepEqual(pageErrors, [], "No page errors");
-  console.log("Sidebar sections and pinned links browser tests passed.");
+  console.log("Sidebar sections, pinned links and scrolling browser tests passed.");
 } finally {
   await browser?.close();
   vite.kill();

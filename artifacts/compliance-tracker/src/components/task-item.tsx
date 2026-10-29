@@ -3,6 +3,7 @@ import { ArrowRight, CheckCircle2, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { MODULE_INFO, formatDay } from "@/lib/onboarding";
+import { RosterCheckButton, isRosterCheck, rosterCheckMonth } from "@/components/roster-check";
 
 // Shared by the Tasks page (/tasks) and the dashboard "My tasks today" card.
 export type TaskRow = {
@@ -23,7 +24,8 @@ function ordinal(n: number) {
   return `${n}${s}`;
 }
 
-export function describeRecurrence(task: Pick<TaskRow, "recurrence" | "startsOn">): string {
+export function describeRecurrence(task: Pick<TaskRow, "recurrence" | "startsOn"> & { module?: string | null }): string {
+  if (task.module && isRosterCheck({ module: task.module })) return "Every month, from the 1st";
   const start = new Date(`${task.startsOn}T00:00:00Z`);
   switch (task.recurrence) {
     case "daily": return "Every day";
@@ -39,11 +41,14 @@ export function useTaskClientId() {
   return user?.role === "consultant" ? activeClientId : null;
 }
 
-export function TaskItem({ task, onDone, onUndo, busy, readOnly }: {
+export function TaskItem({ task, onDone, onUndo, onAnswered, clientId = null, busy, readOnly }: {
   task: TaskRow; onDone: (t: TaskRow) => void; onUndo?: (t: TaskRow) => void; busy: boolean; readOnly?: boolean;
+  /** The roster check is answered in its own dialog; refresh the list afterwards. */
+  onAnswered?: () => void; clientId?: number | null;
 }) {
   const done = !!task.completion;
   const module = task.module ? MODULE_INFO[task.module] : null;
+  const rosterCheck = isRosterCheck(task);
   return (
     <li className={`rounded-lg border p-3 flex items-start gap-3 ${done ? "bg-emerald-50/50 border-emerald-200" : task.overdue ? "border-rose-200" : ""}`}>
       {done ? (
@@ -54,7 +59,7 @@ export function TaskItem({ task, onDone, onUndo, busy, readOnly }: {
       <div className="min-w-0 flex-1">
         <p className={`text-sm font-medium ${done ? "text-muted-foreground" : ""}`}>{task.title}</p>
         <p className="text-xs text-muted-foreground">
-          {[task.siteName, task.overdue ? `Overdue since ${formatDay(task.startsOn)}` : describeRecurrence(task)].filter(Boolean).join(" · ")}
+          {[task.siteName, rosterCheck ? rosterCheckMonth(task.occurrenceDate) : null, task.overdue ? `Overdue since ${formatDay(task.occurrenceDate)}` : describeRecurrence(task)].filter(Boolean).join(" · ")}
         </p>
         {task.instruction && <p className="text-xs mt-1 whitespace-pre-line">{task.instruction}</p>}
         {done && <p className="text-xs text-emerald-700 mt-1">Done by {task.completion!.completedByName} at {new Date(task.completion!.completedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}{task.completion!.note ? ` — ${task.completion!.note}` : ""}</p>}
@@ -64,9 +69,11 @@ export function TaskItem({ task, onDone, onUndo, busy, readOnly }: {
           </Link>
         )}
       </div>
-      {!done && !readOnly && task.canComplete && (
+      {!done && !readOnly && task.canComplete && (rosterCheck ? (
+        <RosterCheckButton task={task} clientId={clientId} onAnswered={() => onAnswered?.()} disabled={busy} />
+      ) : (
         <Button size="sm" variant="outline" className="shrink-0" disabled={busy} onClick={() => onDone(task)}>Mark done</Button>
-      )}
+      ))}
       {done && !readOnly && task.canUndo && onUndo && (
         <Button size="sm" variant="ghost" className="shrink-0" disabled={busy} onClick={() => onUndo(task)}>Undo</Button>
       )}

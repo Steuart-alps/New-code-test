@@ -19,9 +19,7 @@
 import { db } from "@workspace/db";
 import { auditEventsTable, complianceItemsTable, contractorVisitNotNeededTable, sitesTable } from "@workspace/db/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import {
-  getFireSiteStatuses, LEGIONELLA_CHECK_TYPES, TUB_CHECK_TYPES, type FireCheckType,
-} from "./checkReminders";
+import { LEGIONELLA_CHECK_TYPES, TUB_CHECK_TYPES } from "./checkReminders";
 import { approvedFrequencies } from "./waterMonitoringPlan";
 import { linkedTaskCompletions, TRACK_TASK_LINKS } from "./trackTaskLink";
 import { getEntitledServices, isEntitled, type ServiceKey } from "./services";
@@ -53,7 +51,6 @@ export interface ContractorVisitType {
 /** Title of the compliance check kept in step with PestTrack visits. */
 export const PEST_VISIT_CHECK_TITLE = "Pest Control Visit";
 
-const fireTitle = (checkType: keyof typeof TRACK_TASK_LINKS.fire) => TRACK_TASK_LINKS.fire[checkType];
 const waterTitle = (checkType: keyof typeof TRACK_TASK_LINKS.legionella) => TRACK_TASK_LINKS.legionella[checkType];
 
 export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
@@ -100,22 +97,25 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
     frequencyMonths: 12, dueFrom: "check",
   },
   {
+    // FireTrack's contractor services are kept only as these checks, which
+    // FireTrack shows (RETIRED_FIRE_CHECK_TYPES), so each check keeps its own
+    // due date.
     key: "fire:alarm_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
-    title: fireTitle("alarm_service"), label: "Fire alarm service (6-monthly)",
+    title: "Fire Alarm Maintenance", label: "Fire alarm service (6-monthly)",
     description: "Six-monthly servicing of the fire alarm system by a competent contractor (BS 5839).",
-    frequencyMonths: 6, dueFrom: "track",
+    frequencyMonths: 6, dueFrom: "check",
   },
   {
     key: "fire:extinguisher_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
-    title: fireTitle("extinguisher_service"), label: "Fire extinguisher service (annual)",
+    title: "Fire Extinguishers Maintenance", label: "Fire extinguisher service (annual)",
     description: "Annual service of all portable fire extinguishers (BS 5306-3).",
-    frequencyMonths: 12, dueFrom: "track",
+    frequencyMonths: 12, dueFrom: "check",
   },
   {
     key: "fire:emergency_lights_annual", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
-    title: fireTitle("emergency_lights_annual"), label: "Emergency lighting 3-hour test (annual)",
-    description: "Annual three-hour duration test and certification of emergency lighting (BS 5266).",
-    frequencyMonths: 12, dueFrom: "track",
+    title: "Emergency Light Maintenance", label: "Emergency lighting 3-hour test (annual)",
+    description: "Annual three-hour duration test and certification of emergency lighting (BS 5266), by a contractor or in house by a competent person.",
+    frequencyMonths: 12, dueFrom: "check",
   },
   {
     key: "fire:risk_assessment", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
@@ -276,14 +276,6 @@ export async function trackDueDates(clientId: number, types: readonly Contractor
   }
 
   if (needs("fire:")) {
-    const statuses = await getFireSiteStatuses(clientId);
-    for (const checkType of ["alarm_service", "extinguisher_service", "emergency_lights_annual"] as FireCheckType[]) {
-      const dates = new Map<number, string>();
-      for (const row of statuses) {
-        if (row.checkType === checkType && row.siteId != null && row.dueDate) dates.set(row.siteId, row.dueDate);
-      }
-      set(`fire:${checkType}`, dates);
-    }
     const reviewDates = new Map<number, string>();
     for (const [siteId, profile] of await profiles(clientId, "fire")) {
       const date = day((profile as { nextReviewDate?: unknown } | null)?.nextReviewDate);

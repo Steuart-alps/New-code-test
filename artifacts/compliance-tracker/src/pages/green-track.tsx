@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { takeLinkParams } from "@/lib/deep-link";
+import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -922,7 +923,7 @@ const CHECK_ITEMS = [
 type CheckItemKey = typeof CHECK_ITEMS[number]["key"];
 
 function PreUseDialog({
-  open, onClose, check, machines, onSaved, presetMachineId,
+  open, onClose, check, machines, onSaved, presetMachineId, spoken,
 }: {
   open: boolean; onClose: () => void;
   check?: PreUseCheck | null;
@@ -930,6 +931,8 @@ function PreUseDialog({
   onSaved: () => void;
   /** A new record for this machine (opened from a scanned QR label). */
   presetMachineId?: string;
+  /** Filled in from Say it. */
+  spoken?: { notes: string } | null;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -960,7 +963,7 @@ function PreUseDialog({
       controlsOk: check.controlsOk, lightsOk: check.lightsOk,
       cleanlinessOk: check.cleanlinessOk, notes: check.notes ?? "",
       hourMeter: (check.hourMeter ?? (check as any).hour_meter) != null ? String(check.hourMeter ?? (check as any).hour_meter) : "",
-    } : { ...blank, machineId: presetMachineId ?? "" });
+    } : { ...blank, machineId: presetMachineId ?? "", ...spoken });
   };
 
   // N/A is represented at checklist-item level; the completed observation is
@@ -1247,7 +1250,7 @@ function ServiceDialog({
 // ─── Defect dialog ────────────────────────────────────────────────────────────
 
 function DefectDialog({
-  open, onClose, defect, machines, onSaved, presetMachineId,
+  open, onClose, defect, machines, onSaved, presetMachineId, spoken,
 }: {
   open: boolean; onClose: () => void;
   defect?: Defect | null;
@@ -1255,6 +1258,8 @@ function DefectDialog({
   onSaved: () => void;
   /** A new record for this machine (opened from a scanned QR label). */
   presetMachineId?: string;
+  /** Filled in from Say it. */
+  spoken?: { notes: string; description?: string } | null;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -1280,7 +1285,7 @@ function DefectDialog({
       severity: defect.severity, outOfService: defect.outOfService,
       status: defect.status, resolution: defect.resolution ?? "",
       resolvedDate: defect.resolvedDate ?? "", notes: defect.notes ?? "",
-    } : { ...blank, machineId: presetMachineId ?? "" });
+    } : { ...blank, machineId: presetMachineId ?? "", ...spoken });
   };
 
   const handleSave = async () => {
@@ -1703,7 +1708,7 @@ const hoursText = (value: number | null | undefined) =>
   value == null ? "—" : `${value.toLocaleString("en-GB", { maximumFractionDigits: 1 })} h`;
 
 function HourReadingDialog({
-  open, onClose, reading, machines, hours, onSaved, presetMachineId,
+  open, onClose, reading, machines, hours, onSaved, presetMachineId, spoken,
 }: {
   open: boolean; onClose: () => void;
   reading?: HourReading | null;
@@ -1711,6 +1716,8 @@ function HourReadingDialog({
   hours: MachineHours[];
   onSaved: () => void;
   presetMachineId?: string;
+  /** Filled in from Say it. */
+  spoken?: { notes: string; hours?: string } | null;
 }) {
   const { toast } = useToast();
   const request = useActiveClientApi();
@@ -1729,7 +1736,7 @@ function HourReadingDialog({
     setForm(reading ? {
       machineId: String(reading.machineId), readingDate: reading.readingDate, hours: String(reading.hours),
       recordedBy: reading.recordedBy ?? "", recordedByRosterId: reading.recordedByRosterId, notes: reading.notes ?? "",
-    } : { ...blank, machineId: presetMachineId ?? "" });
+    } : { ...blank, machineId: presetMachineId ?? "", ...spoken });
   };
 
   const handleSave = async () => {
@@ -1953,7 +1960,7 @@ function HoursTab({ hours, readings, loading, filterMachine, q, canAdmin, onLog,
 // ─── Fuel log dialog ──────────────────────────────────────────────────────────
 
 function FuelLogDialog({
-  open, onClose, log, machines, onSaved, presetMachineId,
+  open, onClose, log, machines, onSaved, presetMachineId, spoken,
 }: {
   open: boolean; onClose: () => void;
   log?: FuelLog | null;
@@ -1961,6 +1968,8 @@ function FuelLogDialog({
   onSaved: () => void;
   /** A new record for this machine (opened from a scanned QR label). */
   presetMachineId?: string;
+  /** Filled in from Say it. */
+  spoken?: { notes: string; quantityLitres?: string } | null;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -1978,7 +1987,7 @@ function FuelLogDialog({
     engineHours: log.engineHours != null ? String(log.engineHours) : "",
     costPounds: log.costPence != null ? (log.costPence / 100).toFixed(2) : "",
     filledBy: log.filledBy ?? "", filledByRosterId: (log as any).filledByRosterId ?? (log as any).filled_by_roster_id ?? null, notes: log.notes ?? "",
-  } : { ...blank, machineId: presetMachineId ?? "" });
+  } : { ...blank, machineId: presetMachineId ?? "", ...spoken });
 
   const handleSave = async () => {
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
@@ -2112,6 +2121,7 @@ export default function GreenTrackPage() {
   const [scanMachineId, setScanMachineId] = useState<string | undefined>();
   const [sprayingFromScan, setSprayingFromScan] = useState<{ machineId?: number; productId?: number } | null>(null);
   const [sayMachineDialog, setSayMachineDialog] = useState(false);
+  const [spoken, setSpoken] = useState<{ notes: string; description?: string; hours?: string; quantityLitres?: string } | null>(null);
   // The site the Daily checks tab opens on (a dashboard or reminder link).
   const [dailySiteId, setDailySiteId] = useState<number | null>(null);
 
@@ -2290,6 +2300,21 @@ export default function GreenTrackPage() {
   const sayMachineItems = useMemo(() => activeMachines.map(m => ({
     id: m.id, name: m.name, aliases: [m.regNo, [m.make, m.model].filter(Boolean).join(" ")],
   })), [machines]);
+
+  // Say it: "fairway mower 1 pre-use", "greens mower 20 litres",
+  // "tractor hours 1250" or "fairway mower 2 hydraulic leak".
+  useSayItFill(["machine"], fill => {
+    const machine = matchSpokenItem(fill.item, sayMachineItems);
+    const v = fill.values;
+    const id = machine ? String(machine.id) : undefined;
+    const notes = withSpokenNote("", fill.text);
+    setScanMachineId(id);
+    if (v.intent === "fuel") { setSpoken({ notes, quantityLitres: String(v.litres ?? "") }); setActiveTab("fuel"); setEditFuel(null); setFuelDialog(true); }
+    else if (v.intent === "hours") { setSpoken({ notes, hours: String(v.hours ?? "") }); setActiveTab("hours"); setEditReading(null); setHoursMachineId(id); setHoursDialog(true); }
+    else if (v.intent === "defect") { setSpoken({ notes, description: String(v.description ?? "") }); setActiveTab("defects"); setEditDefect(null); setDefectDialog(true); }
+    else { setSpoken({ notes }); setActiveTab("pre-use"); setEditPreUse(null); setPreUseDialog(true); }
+    if (!machine) toast({ title: fill.item ? `Couldn't find ${fill.item}` : "Which machine?", description: "Choose the machine in the form." });
+  }, !machinesLoading);
 
   return (
     <AppLayout title="GreenTrack">
@@ -3104,29 +3129,29 @@ export default function GreenTrackPage() {
           setPreUseDialog(true);
         }} />
 
-      <PreUseDialog open={preUseDialog} onClose={() => { setPreUseDialog(false); setEditPreUse(null); setScanMachineId(undefined); }}
+      <PreUseDialog open={preUseDialog} onClose={() => { setPreUseDialog(false); setEditPreUse(null); setScanMachineId(undefined); setSpoken(null); }}
         presetMachineId={scanMachineId}
-        check={editPreUse} machines={activeMachines} onSaved={invalidate} />
+        check={editPreUse} machines={activeMachines} onSaved={invalidate} spoken={spoken} />
 
       <ServiceDialog open={serviceDialog} onClose={() => { setServiceDialog(false); setEditService(null); setScanMachineId(undefined); }}
         presetMachineId={scanMachineId}
         record={editService} machines={machines} onSaved={invalidate} />
 
-      <DefectDialog open={defectDialog} onClose={() => { setDefectDialog(false); setEditDefect(null); setScanMachineId(undefined); }}
+      <DefectDialog open={defectDialog} onClose={() => { setDefectDialog(false); setEditDefect(null); setScanMachineId(undefined); setSpoken(null); }}
         presetMachineId={scanMachineId}
-        defect={editDefect} machines={machines} onSaved={invalidate} />
+        defect={editDefect} machines={machines} onSaved={invalidate} spoken={spoken} />
 
       <PuwerDialog open={puwerDialog} onClose={() => { setPuwerDialog(false); setEditPuwer(null); setPuwerDefaults(null); setScanMachineId(undefined); }}
         presetMachineId={scanMachineId}
         inspection={editPuwer} defaults={puwerDefaults} machines={machines} onSaved={invalidate} />
 
-      <FuelLogDialog open={fuelDialog} onClose={() => { setFuelDialog(false); setEditFuel(null); setScanMachineId(undefined); }}
+      <FuelLogDialog open={fuelDialog} onClose={() => { setFuelDialog(false); setEditFuel(null); setScanMachineId(undefined); setSpoken(null); }}
         presetMachineId={scanMachineId}
-        log={editFuel} machines={machines} onSaved={invalidate} />
+        log={editFuel} machines={machines} onSaved={invalidate} spoken={spoken} />
 
       <HourReadingDialog open={hoursDialog}
-        onClose={() => { setHoursDialog(false); setEditReading(null); setHoursMachineId(undefined); setScanMachineId(undefined); }}
-        reading={editReading} presetMachineId={hoursMachineId} machines={machines} hours={machineHours?.machines ?? []} onSaved={invalidate} />
+        onClose={() => { setHoursDialog(false); setEditReading(null); setHoursMachineId(undefined); setScanMachineId(undefined); setSpoken(null); }}
+        reading={editReading} presetMachineId={hoursMachineId} machines={machines} hours={machineHours?.machines ?? []} onSaved={invalidate} spoken={spoken} />
 
       <AlertDialog open={!!deleteId} onOpenChange={v => { if (!v) setDeleteId(null); }}>
         <AlertDialogContent className="rounded-sm">

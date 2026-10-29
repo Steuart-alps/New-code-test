@@ -89,6 +89,7 @@ export const FIRST_RECORD_PRIORITY = [
 ];
 
 export function moduleLabel(key: string | null | undefined): string | null {
+  if (key === "roster_check") return "Staff roster";
   return key ? MODULE_INFO[key]?.label ?? key : null;
 }
 
