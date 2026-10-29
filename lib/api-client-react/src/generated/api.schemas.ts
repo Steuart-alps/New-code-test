@@ -1616,20 +1616,30 @@ export interface CertificateReadRequest {
   fileName: string;
   /** application/pdf, image/jpeg, image/png, image/webp, image/gif, .docx or text/plain */
   mimeType: string;
-  /** The file as base64 (15 MB at most before encoding) */
+  /** The file as base64 (20 MB at most before encoding) */
   data: string;
   /** The check the certificate is for, when the person opened the reader from one */
   itemId?: number | null;
 }
 
-export interface CertificateReadingDefect {
-  code: CertificateDefectCode;
-  description: string;
-  location: string | null;
-  /** The item or observation number on the certificate */
-  reference: string | null;
-  /** Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are. */
-  needsWork: boolean;
+export interface CertificateReadFile {
+  /** @maxLength 255 */
+  fileName: string;
+  /** application/pdf, image/jpeg, image/png, image/webp, image/gif, .docx or text/plain */
+  mimeType: string;
+  /** The file as base64 */
+  data: string;
+}
+
+export interface CertificateReadFilesRequest {
+  /**
+     * Up to 10 files, 20 MB at most together before encoding
+     * @minItems 1
+     * @maxItems 10
+     */
+  files: CertificateReadFile[];
+  /** The check the reader was opened from: the files are one certificate for it */
+  itemId?: number | null;
 }
 
 export interface CertificateReadingNewCheck {
@@ -1647,6 +1657,16 @@ export const CertificateReadingNextInspectionSource = {
   certificate: 'certificate',
   repeat: 'repeat',
 } as const;
+
+export interface CertificateReadingDefect {
+  code: CertificateDefectCode;
+  description: string;
+  location: string | null;
+  /** The item or observation number on the certificate */
+  reference: string | null;
+  /** Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are. */
+  needsWork: boolean;
+}
 
 export interface CertificateReading {
   certificateType: string;
@@ -1667,6 +1687,22 @@ export interface CertificateReading {
   defects: CertificateReadingDefect[];
   /** Things that could not be read with confidence. */
   unclear: string[];
+}
+
+export type CertificateFileReading = CertificateReading & {
+  /** The files (0-based, in the order sent) this certificate is on */
+  fileIndexes: number[];
+};
+
+export interface CertificateSkippedFile {
+  fileIndex: number;
+  reason: string;
+}
+
+export interface CertificateFilesReading {
+  certificates: CertificateFileReading[];
+  /** Files that hold no certificate */
+  skipped: CertificateSkippedFile[];
 }
 
 export interface CreateRecordSignatureRequest {

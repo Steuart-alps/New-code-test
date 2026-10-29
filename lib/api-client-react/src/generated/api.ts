@@ -42,8 +42,10 @@ import type {
   Category,
   Certificate,
   CertificateDefect,
+  CertificateFilesReading,
   CertificateInbox,
   CertificateInboxItem,
+  CertificateReadFilesRequest,
   CertificateReadRequest,
   CertificateReading,
   CertificateReadingStatus,
@@ -4073,6 +4075,78 @@ export const useReadCertificate = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReadCertificateMutationOptions(options));
+    }
+
+export const getReadCertificateFilesUrl = () => {
+
+
+
+
+  return `/api/certificates/read-files`
+}
+
+/**
+ * Claude reads up to 10 files together: the pages of one certificate photographed separately, a PDF holding several certificates, or a batch of certificates to sort to their compliance checks. Each certificate found comes back as with POST /certificates/read, with the files it is on. Nothing is saved or stored here. Uses the AI features add-on's allowance.
+ * @summary Read several certificate files with AI in one go (owners and ALPS)
+ */
+export const readCertificateFiles = async (certificateReadFilesRequest: CertificateReadFilesRequest, options?: RequestInit): Promise<CertificateFilesReading> => {
+
+  return customFetch<CertificateFilesReading>(getReadCertificateFilesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(certificateReadFilesRequest)
+  }
+);}
+
+
+
+
+
+export const getReadCertificateFilesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readCertificateFiles>>, TError,{data: BodyType<CertificateReadFilesRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof readCertificateFiles>>, TError,{data: BodyType<CertificateReadFilesRequest>}, TContext> => {
+
+const mutationKey = ['readCertificateFiles'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof readCertificateFiles>>, {data: BodyType<CertificateReadFilesRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  readCertificateFiles(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReadCertificateFilesMutationResult = NonNullable<Awaited<ReturnType<typeof readCertificateFiles>>>
+    export type ReadCertificateFilesMutationBody = BodyType<CertificateReadFilesRequest>
+    export type ReadCertificateFilesMutationError = ErrorType<void>
+
+    /**
+ * @summary Read several certificate files with AI in one go (owners and ALPS)
+ */
+export const useReadCertificateFiles = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof readCertificateFiles>>, TError,{data: BodyType<CertificateReadFilesRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof readCertificateFiles>>,
+        TError,
+        {data: BodyType<CertificateReadFilesRequest>},
+        TContext
+      > => {
+      return useMutation(getReadCertificateFilesMutationOptions(options));
     }
 
 export const getGetCertificateInboxUrl = () => {
