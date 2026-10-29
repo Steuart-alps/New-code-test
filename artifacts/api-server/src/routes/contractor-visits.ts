@@ -92,8 +92,8 @@ router.get("/contractor-visits", requireAuth, async (req, res) => {
     });
 
   res.json({
-    types: types.map(({ key, module, trackLabel, title, label, description, dueFrom }) =>
-      ({ key, module, trackLabel, title, label, description, dueFrom })),
+    types: types.map(({ key, module, trackLabel, title, label, description, dueFrom, trades }) =>
+      ({ key, module, trackLabel, title, label, description, dueFrom, trades: [...(trades ?? [])] })),
     visits,
     checks,
   });

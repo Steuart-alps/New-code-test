@@ -3,11 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
 import { formatDay, localToday } from "@/lib/onboarding";
+import { tradeLabel } from "@/lib/contractor-trades";
 
 interface VisitType {
   key: string;
@@ -15,6 +16,7 @@ interface VisitType {
   label: string;
   description: string;
   dueFrom: "track" | "later" | "check";
+  trades?: string[];
 }
 
 interface Visit {
@@ -45,7 +47,7 @@ interface RegisterCheck {
   notNeeded: boolean;
 }
 
-interface Contractor { id: number; name: string; company?: string | null }
+interface Contractor { id: number; name: string; company?: string | null; trades?: string[] | null }
 
 /** Select values besides a contractor id. */
 const UNDECIDED = "none";
@@ -65,6 +67,8 @@ interface Row {
   contractorId: number | null;
   contractorName: string | null;
   notNeeded: boolean;
+  /** Contractor trades listed first in the contractor choice. */
+  trades?: string[];
   /** Shown when the row takes a typed due date. */
   dateInput?: { value: string | null; onSave: (value: string | null) => void };
   choose: (choice: { contractorId: number | null; notNeeded: boolean }) => void;
@@ -144,6 +148,7 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
       contractorId: visit.contractorId,
       contractorName: visit.contractorName,
       notNeeded: !!visit.notNeeded,
+      trades: type.trades,
       dateInput: takesDate ? {
         value: visit.dueDate,
         onSave: value => putVisit(visit, { contractorId: visit.contractorId, dueDate: value }),
@@ -173,6 +178,34 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
   const showSite = sites.length > 1 && siteFilter === ALL_SITES;
   const allRows = [...groups.values()].flat();
   const undecided = allRows.filter(row => row.contractorId == null && !row.notNeeded).length;
+
+  // Contractors with one of the row's trades come first.
+  const contractorChoices = (trades: string[] | undefined) => {
+    const item = (contractor: Contractor) => (
+      <SelectItem key={contractor.id} value={String(contractor.id)}>
+        {[contractor.name, contractor.company].filter(Boolean).join(", ")}
+      </SelectItem>
+    );
+    const matches = (contractor: Contractor) =>
+      !!trades?.length && !!contractor.trades?.some(trade => trades.includes(trade));
+    const suggested = contractors.filter(matches);
+    const others = contractors.filter(contractor => !matches(contractor));
+    if (!suggested.length) return contractors.map(item);
+    return (
+      <>
+        <SelectGroup>
+          <SelectLabel>{trades!.map(tradeLabel).join(" or ")}</SelectLabel>
+          {suggested.map(item)}
+        </SelectGroup>
+        {others.length > 0 && (
+          <SelectGroup>
+            <SelectLabel>Other contractors</SelectLabel>
+            {others.map(item)}
+          </SelectGroup>
+        )}
+      </>
+    );
+  };
 
   const renderRow = (row: Row) => {
     const overdue = !!row.due && row.due < today && !row.completed;
@@ -223,11 +256,7 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
             <SelectContent>
               <SelectItem value={UNDECIDED}>Not chosen yet</SelectItem>
               <SelectItem value={NOT_NEEDED}>No contractor needed (N/A)</SelectItem>
-              {contractors.map(contractor => (
-                <SelectItem key={contractor.id} value={String(contractor.id)}>
-                  {[contractor.name, contractor.company].filter(Boolean).join(", ")}
-                </SelectItem>
-              ))}
+              {contractorChoices(row.trades)}
             </SelectContent>
           </Select>
         ) : (

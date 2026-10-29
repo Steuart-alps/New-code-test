@@ -46,6 +46,8 @@ export interface ContractorVisitType {
    * "check": the track has no due date; the check's own date is used.
    */
   dueFrom: "track" | "later" | "check";
+  /** Contractor trades (fixtrack_trades) suggested first when picking who does it. */
+  trades?: readonly string[];
 }
 
 /** Title of the compliance check kept in step with PestTrack visits. */
@@ -58,43 +60,43 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
     key: "pest:visit", module: "pest", trackLabel: "PestTrack", services: ["pesttrack"],
     title: PEST_VISIT_CHECK_TITLE, label: "Routine pest control visit",
     description: "Routine visit by the pest control contractor. Recording the visit in PestTrack completes this check, and completing this check records the visit in PestTrack.",
-    frequencyMonths: 3, dueFrom: "track",
+    frequencyMonths: 3, dueFrom: "track", trades: ["pest_control"],
   },
   {
     key: "legionella:cold_tank_clean", module: "legionella", trackLabel: "Water Safety", services: ["legionellatrack"],
     title: waterTitle("cold_tank_clean"), label: "Cold water tank clean and disinfect",
     description: "Annual inspection of cold water storage tanks, with cleaning and disinfection when the inspection shows it is needed (HSG274).",
-    frequencyMonths: 12, dueFrom: "track",
+    frequencyMonths: 12, dueFrom: "track", trades: ["legionella_water_hygiene"],
   },
   {
     key: "legionella:calorifier_inspection", module: "legionella", trackLabel: "Water Safety", services: ["legionellatrack"],
     title: waterTitle("calorifier_inspection"), label: "Calorifier internal inspection",
     description: "Internal inspection of calorifiers (HSG274). Kept in step with the Water Safety log.",
-    frequencyMonths: 12, dueFrom: "track",
+    frequencyMonths: 12, dueFrom: "track", trades: ["legionella_water_hygiene", "plumbing"],
   },
   {
     key: "legionella:calorifier_clean", module: "legionella", trackLabel: "Water Safety", services: ["legionellatrack"],
     title: waterTitle("calorifier_clean"), label: "Calorifier clean and disinfect",
     description: "Cleaning and disinfection of calorifiers (HSG274). Kept in step with the Water Safety log.",
-    frequencyMonths: 12, dueFrom: "track",
+    frequencyMonths: 12, dueFrom: "track", trades: ["legionella_water_hygiene", "plumbing"],
   },
   {
     key: "legionella:tmv_service", module: "legionella", trackLabel: "Water Safety", services: ["legionellatrack"],
     title: waterTitle("tmv_service"), label: "Thermostatic mixing valve (TMV) service",
     description: "Service and verification of thermostatic mixing valves. Kept in step with the Water Safety log.",
-    frequencyMonths: 12, dueFrom: "track",
+    frequencyMonths: 12, dueFrom: "track", trades: ["legionella_water_hygiene", "plumbing"],
   },
   {
     key: "legionella:risk_assessment", module: "legionella", trackLabel: "Water Safety", services: ["legionellatrack"],
     title: "Legionella Risk Assessment", label: "Legionella risk assessment review",
     description: "Review of the legionella risk assessment by your competent person (ACOP L8; HSG274). Its due date follows the review date on the site's Water Safety template; change that date there after each review.",
-    frequencyMonths: null, dueFrom: "later",
+    frequencyMonths: null, dueFrom: "later", trades: ["legionella_water_hygiene"],
   },
   {
     key: "legionella:water_sampling", module: "legionella", trackLabel: "Water Safety", services: ["legionellatrack"],
     title: "Legionella Water Sampling", label: "Legionella water sampling (laboratory)",
     description: "Water samples taken and analysed by an accredited laboratory, where the risk assessment or written scheme calls for sampling (HSG274).",
-    frequencyMonths: 12, dueFrom: "check",
+    frequencyMonths: 12, dueFrom: "check", trades: ["legionella_water_hygiene"],
   },
   {
     // FireTrack's contractor services are kept only as these checks, which
@@ -103,55 +105,129 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
     key: "fire:alarm_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
     title: "Fire Alarm Maintenance", label: "Fire alarm service (6-monthly)",
     description: "Six-monthly servicing of the fire alarm system by a competent contractor (BS 5839).",
-    frequencyMonths: 6, dueFrom: "check",
+    frequencyMonths: 6, dueFrom: "check", trades: ["fire_alarm"],
   },
   {
     key: "fire:extinguisher_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
     title: "Fire Extinguishers Maintenance", label: "Fire extinguisher service (annual)",
     description: "Annual service of all portable fire extinguishers (BS 5306-3).",
-    frequencyMonths: 12, dueFrom: "check",
+    frequencyMonths: 12, dueFrom: "check", trades: ["fire_extinguishers"],
   },
   {
     key: "fire:emergency_lights_annual", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
     title: "Emergency Light Maintenance", label: "Emergency lighting 3-hour test (annual)",
     description: "Annual three-hour duration test and certification of emergency lighting (BS 5266), by a contractor or in house by a competent person.",
-    frequencyMonths: 12, dueFrom: "check",
+    frequencyMonths: 12, dueFrom: "check", trades: ["emergency_lighting", "electrical"],
   },
   {
     key: "fire:risk_assessment", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
     title: "Fire Risk Assessment Review", label: "Fire risk assessment review",
     description: "Review of the fire risk assessment by your assessor. Its due date follows the next review date on the site's FireTrack template; change that date there after each review.",
-    frequencyMonths: 12, dueFrom: "later",
+    frequencyMonths: 12, dueFrom: "later", trades: ["fire_risk_assessor"],
+  },
+  // Other fire and security services: FireTrack keeps no date for these, so
+  // each check keeps its own (set it on the Contractors page).
+  {
+    key: "fire:kitchen_suppression_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Kitchen Fire Suppression Service", label: "Kitchen fire suppression service (6-monthly)",
+    description: "Service of the fire suppression system over the cooking range by a competent contractor, usually every six months (LPS 1223).",
+    frequencyMonths: 6, dueFrom: "check", trades: ["kitchen_fire_suppression"],
+  },
+  {
+    key: "fire:kitchen_extract_clean", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Kitchen Extract Cleaning (TR19 Grease)", label: "Kitchen extract (duct) cleaning",
+    description: "Specialist cleaning of the kitchen canopy, filters and extract ductwork to remove grease (TR19 Grease). Every 3, 6 or 12 months depending on daily use; change the repeat on the check to suit.",
+    frequencyMonths: 6, dueFrom: "check", trades: ["kitchen_extract_cleaning"],
+  },
+  {
+    key: "fire:sprinkler_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Sprinkler System Service", label: "Sprinkler system service (quarterly)",
+    description: "Quarterly inspection and service of the sprinkler system by a competent contractor (BS EN 12845). Weekly valve and pump checks are done in-house.",
+    frequencyMonths: 3, dueFrom: "check", trades: ["sprinkler_systems"],
+  },
+  {
+    key: "fire:aov_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "AOV / Smoke Vent Service", label: "AOV / smoke vent service (annual)",
+    description: "Annual service of automatic opening vents and smoke ventilation (BS EN 12101, BS 9999).",
+    frequencyMonths: 12, dueFrom: "check", trades: ["aov_smoke_vents"],
+  },
+  {
+    key: "fire:riser_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Dry / Wet Riser Service", label: "Dry / wet riser inspection (6-monthly)",
+    description: "Six-monthly inspection of dry or wet risers, with the annual pressure test of dry risers (BS 9990).",
+    frequencyMonths: 6, dueFrom: "check", trades: ["dry_wet_risers"],
+  },
+  {
+    key: "fire:fire_door_inspection", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Fire Door Inspection", label: "Fire door inspection (6-monthly)",
+    description: "Inspection of fire doors, frames, seals, closers and hold-open devices by a competent person.",
+    frequencyMonths: 6, dueFrom: "check", trades: ["fire_doors"],
+  },
+  {
+    key: "fire:shutter_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Fire Shutter / Curtain Service", label: "Fire shutter / curtain service (annual)",
+    description: "Annual service and drop test of fire shutters and fire curtains (BS 8524, BS 9999).",
+    frequencyMonths: 12, dueFrom: "check", trades: ["fire_shutters_curtains"],
+  },
+  {
+    key: "fire:damper_test", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Fire Damper Drop Test", label: "Fire damper drop test (annual)",
+    description: "Annual drop test and inspection of fire and smoke dampers in the ductwork (BS 9999).",
+    frequencyMonths: 12, dueFrom: "check", trades: ["fire_dampers"],
+  },
+  {
+    key: "fire:fire_stopping_survey", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Fire Stopping Survey", label: "Fire stopping survey (annual)",
+    description: "Survey of fire stopping where pipes, cables and ducts pass through fire-resisting walls and floors, especially after building or cabling work.",
+    frequencyMonths: 12, dueFrom: "check", trades: ["fire_stopping"],
+  },
+  {
+    key: "fire:intruder_alarm_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Intruder Alarm Service", label: "Intruder alarm service (annual)",
+    description: "Maintenance visit for the intruder alarm (BS EN 50131, PD 6662): at least once a year, twice for a monitored system.",
+    frequencyMonths: 12, dueFrom: "check", trades: ["intruder_alarm"],
+  },
+  {
+    key: "fire:cctv_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "CCTV Service", label: "CCTV service (annual)",
+    description: "Annual service of CCTV cameras and recorder.",
+    frequencyMonths: 12, dueFrom: "check", trades: ["cctv"],
+  },
+  {
+    key: "fire:access_control_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Access Control Service", label: "Access control / door entry service (annual)",
+    description: "Annual service of access control and door entry, including doors that release on fire alarm.",
+    frequencyMonths: 12, dueFrom: "check", trades: ["access_control"],
   },
   {
     key: "pat:testing", module: "pat", trackLabel: "PATtrack", services: ["pattrack"],
     title: "Electrical Appliance Testing (PAT)", label: "PAT testing visit",
     description: "Portable appliance testing. Due when the first appliance at the site is due for its next test; record the results in PATtrack.",
-    frequencyMonths: null, dueFrom: "track",
+    frequencyMonths: null, dueFrom: "track", trades: ["pat_testing", "electrical"],
   },
   {
     key: "green:service", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
     title: "GreenTrack Machine Servicing", label: "Machine servicing",
     description: "Servicing of grounds machinery. Due when the first machine at the site is due a service; record each service in GreenTrack.",
-    frequencyMonths: null, dueFrom: "track",
+    frequencyMonths: null, dueFrom: "track", trades: ["equipment"],
   },
   {
     key: "green:puwer", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
     title: "GreenTrack PUWER Inspection", label: "PUWER inspection",
     description: "Inspection of work equipment by a competent person (PUWER regulation 6). Due when the first machine at the site is due one; record each in GreenTrack's statutory log as a PUWER thorough examination.",
-    frequencyMonths: null, dueFrom: "track",
+    frequencyMonths: null, dueFrom: "track", trades: ["loler_puwer_inspection"],
   },
   {
     key: "green:loler_6_monthly", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
     title: "GreenTrack LOLER Thorough Examination (6-monthly)", label: "LOLER thorough examination, 6-monthly (e.g. vehicle lift)",
     description: "Six-monthly thorough examination of equipment that lifts people and of lifting accessories, such as a vehicle lift (LOLER regulation 9). Due when the first machine at the site is due one; record each in GreenTrack's statutory log as a 6-monthly LOLER examination.",
-    frequencyMonths: null, dueFrom: "track",
+    frequencyMonths: null, dueFrom: "track", trades: ["loler_puwer_inspection"],
   },
   {
     key: "green:loler", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
     title: "GreenTrack LOLER Thorough Examination", label: "LOLER thorough examination, annual (e.g. axle stands)",
     description: "Annual thorough examination of other lifting equipment, such as axle stands or a front loader (LOLER regulation 9). Due when the first machine at the site is due one; record each in GreenTrack's statutory log as an annual LOLER examination.",
-    frequencyMonths: null, dueFrom: "track",
+    frequencyMonths: null, dueFrom: "track", trades: ["loler_puwer_inspection"],
   },
   {
     key: "green:nsts", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
@@ -165,7 +241,7 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
     key: "green:examination", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
     title: "GreenTrack Statutory Examinations", label: "Other statutory inspections (annual, periodic and other)",
     description: "Annual, periodic and other statutory inspections of machinery that are not PUWER, LOLER or NSTS. Due when the first machine at the site is due one; record each in GreenTrack's statutory log.",
-    frequencyMonths: null, dueFrom: "track",
+    frequencyMonths: null, dueFrom: "track", trades: ["loler_puwer_inspection"],
   },
   {
     key: "bike:service", module: "bike", trackLabel: "BikeTrack", services: ["biketrack"],
@@ -177,19 +253,19 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
     key: "coshh:lev_examination", module: "coshh", trackLabel: "COSHHTrack", services: ["coshhtrack"],
     title: "LEV Thorough Examination", label: "Local exhaust ventilation (LEV) thorough examination",
     description: "Thorough examination and test of local exhaust ventilation by a competent contractor every 12 months, and never more than 14 months apart (COSHH regulation 9). Due when the first system at the site is due; record each examination in COSHHTrack.",
-    frequencyMonths: 12, dueFrom: "track",
+    frequencyMonths: 12, dueFrom: "track", trades: ["lev_testing"],
   },
   {
     key: "tree:visual_assessment", module: "tree", trackLabel: "TreeTrack", services: ["treetrack"],
     title: "Tree Safety Survey", label: "Annual tree survey (arborist)",
     description: "Annual visual tree assessment by a competent arborist (BS 5837 / NTSG). Record the survey in TreeTrack.",
-    frequencyMonths: 12, dueFrom: "track",
+    frequencyMonths: 12, dueFrom: "track", trades: ["tree_surgeon_arborist"],
   },
   {
     key: "hot_tub:microbiological_test", module: "hot_tub", trackLabel: "TubTrack", services: ["hottubtrack"],
     title: "Spa Microbiological Test", label: "Spa microbiological test (laboratory)",
     description: "Microbiological testing of spa pool water by an accredited laboratory (HSG282). Record the result in TubTrack.",
-    frequencyMonths: 3, dueFrom: "track",
+    frequencyMonths: 3, dueFrom: "track", trades: ["pool_spa_maintenance", "legionella_water_hygiene"],
   },
 ];
 

@@ -32,6 +32,7 @@ import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
 import { MEDIA_INPUT_ACCEPT, VIDEO_PATH, mediaContentType, mediaFileProblem, privateObjectUrl } from "@/lib/media-upload";
 import { useFileDrop } from "@/hooks/use-file-drop";
 import { PendingMediaPicker } from "@/components/pending-media-picker";
+import { tradeLabel } from "@/lib/contractor-trades";
 import { sortByLabel } from "@/lib/sort-options";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1043,7 +1044,7 @@ export default function FixTrackPage() {
               optionKey="fixtrack_trades"
               title="Contractor trades"
               triggerLabel="Customise trades"
-              labelFor={humanizeType}
+              labelFor={tradeLabel}
             />
             {canEdit && (
               <Button onClick={() => openCreate()} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
