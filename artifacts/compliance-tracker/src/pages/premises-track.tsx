@@ -18,7 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
@@ -31,6 +31,8 @@ import { printHtmlDocument } from "@/lib/download";
 import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { format, parseISO, isValid } from "date-fns";
 import { sortByLabel } from "@/lib/sort-options";
+import { useRecordMedia } from "@/components/record-media";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -134,6 +136,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
   const inspectionTypes = pickOptions(formOptions, "premises_inspection_types");
   const isEdit = !!inspection;
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("premises_inspection", { open, disabled: saving });
   // Keep the record's stored type selectable even if it was later removed from
   // the effective list, so editing other fields doesn't force a type change.
   const currentType = inspection?.inspectionType;
@@ -200,7 +203,8 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
       if (isEdit) {
         await apiFetch(`/${inspection.id}`, { method: "PUT", body: JSON.stringify(payload) });
       } else {
-        await apiFetch("/", { method: "POST", body: JSON.stringify(payload) });
+        const created = await apiFetch("/", { method: "POST", body: JSON.stringify(payload) });
+        await media.attach(created?.id);
       }
       toast({ title: isEdit ? "Inspection updated" : "Inspection logged" });
       onSaved(); onClose();
@@ -280,6 +284,9 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
             <Label>Action taken</Label>
             <Textarea rows={2} value={form.actionTaken} onChange={set("actionTaken")} placeholder="What was done in response" className="rounded-sm" />
           </div>
+          <div className="col-span-full">
+            {inspection ? <CheckPhotoUploader entityType="premises_inspection" entityId={inspection.id} /> : media.picker}
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-sm">Cancel</Button>
@@ -297,6 +304,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }:
 export default function PremisesTrackPage() {
   const { user, activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
+  const canEdit = useCanEdit();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const apiFetch = usePremisesApi();
@@ -630,6 +638,7 @@ ${sorted.map(r => `<tr>
                       <td className="px-4 py-3">
                          <p className="text-sm font-medium">{fmt(r.inspectionDate)}</p>
                          {r.inspectedBy && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[120px]">{r.inspectedBy}</p>}
+                         <CheckPhotoUploader entityType="premises_inspection" entityId={r.id} compact readOnly={!canEdit} />
                       </td>
                        <td className="px-4 py-3 text-xs">{TYPE_LABELS[r.inspectionType] ?? r.inspectionType}</td>
                       <td className="px-4 py-3 hidden sm:table-cell text-xs text-muted-foreground">

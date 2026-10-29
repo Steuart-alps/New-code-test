@@ -16,6 +16,7 @@ import { Calendar, CheckCircle2, Save, Plus, Trash2, AlertTriangle } from "lucid
 import { cn } from "@/lib/utils";
 import { kitchenWeeklyAttentionAnswer, kitchenWeeklyNeedsAttention } from "@workspace/api-client-react";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 
 // ── Data shape ────────────────────────────────────────────────────────────────
 
@@ -417,6 +418,11 @@ export default function WeeklyReviewTab() {
                   </Button>
                 </div>
               )}
+              <div className="border-t pt-3">
+                {record?.id ? (
+                  <CheckPhotoUploader entityType="kitchen_weekly_record" entityId={record.id} compact />
+                ) : !isSubmitted && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
+              </div>
             </CardContent>
           </Card>
         </>

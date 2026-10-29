@@ -317,6 +317,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
   const { toast } = useToast();
   const isEdit = !!activity;
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("pest_activity", { open, disabled: saving });
   const { data: formOptions } = useFormOptions();
   // Effective (custom or default) lists; include the record's stored value even
   // if it was removed from the list, so editing an old record still works.
@@ -375,7 +376,8 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
       if (isEdit) {
         await apiFetch(`/activity/${activity.id}`, { method: "PUT", body: JSON.stringify(payload) });
       } else {
-        await apiFetch("/activity", { method: "POST", body: JSON.stringify(payload) });
+        const created = await apiFetch("/activity", { method: "POST", body: JSON.stringify(payload) });
+        await media.attach(created?.id);
       }
       toast({ title: isEdit ? "Record updated" : "Activity logged" });
       onSaved(); onClose();
@@ -458,6 +460,9 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
               <p className="text-xs text-muted-foreground">Mark as resolved when pest activity has been dealt with</p>
             </div>
             <Switch checked={form.resolved} onCheckedChange={v => setForm(f => ({ ...f, resolved: v }))} />
+          </div>
+          <div className="col-span-full">
+            {activity ? <CheckPhotoUploader entityType="pest_activity" entityId={activity.id} /> : media.picker}
           </div>
         </div>
         <DialogFooter>
@@ -950,6 +955,7 @@ export default function PestTrackPage() {
                         <td className="px-4 py-3">
                           <p className="text-sm font-medium">{PEST_TYPE_LABELS[a.pestType] ?? a.pestType}</p>
                           <p className="text-xs text-muted-foreground">{EVIDENCE_LABELS[a.evidenceType] ?? a.evidenceType}</p>
+                          <CheckPhotoUploader entityType="pest_activity" entityId={a.id} compact />
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell text-xs text-muted-foreground">
                           {a.location ?? <span className="text-muted-foreground/40">—</span>}

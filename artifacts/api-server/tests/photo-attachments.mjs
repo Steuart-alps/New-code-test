@@ -78,6 +78,14 @@ try {
   assert.equal(PHOTO_ENTITY_TABLES.safe_handbook, "safe_handbook");
   assert.equal(PHOTO_ENTITY_TABLES.safe_training_record, "safe_training_records");
   assert.equal(PHOTO_ENTITY_TABLES.safe_induction, "safe_inductions");
+  assert.equal(PHOTO_ENTITY_TABLES.pest_activity, "pest_activity");
+  assert.equal(PHOTO_ENTITY_TABLES.premises_inspection, "premises_inspections");
+  assert.equal(PHOTO_ENTITY_TABLES.coshh_check, "coshh_checks");
+  assert.equal(PHOTO_ENTITY_TABLES.pat_certificate, "pat_certificates");
+  assert.equal(PHOTO_ENTITY_TABLES.pat_failure, "pat_failures");
+  assert.equal(PHOTO_ENTITY_TABLES.kitchen_cleaning_log, "kitchen_cleaning_logs");
+  assert.equal(PHOTO_ENTITY_TABLES.kitchen_weekly_record, "kitchen_weekly_records");
+  assert.equal(PHOTO_ENTITY_TABLES.kitchen_probe_check, "kitchen_probe_checks");
   assert.equal(isSupportedPhotoEntityType("other_tenants_table"), false);
   assert.deepEqual(
     [...TENANT_ATTACHMENT_REFERENCE_SOURCES],

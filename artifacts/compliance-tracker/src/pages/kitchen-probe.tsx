@@ -15,6 +15,7 @@ import { CheckCircle2, XCircle, Save, Plus, Trash2, Thermometer } from "lucide-r
 import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 
 // ── Method guide ──────────────────────────────────────────────────────────────
 
@@ -464,6 +465,11 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
                   </Button>
                 </div>
               )}
+              <div className="border-t pt-3">
+                {record?.id ? (
+                  <CheckPhotoUploader entityType="kitchen_probe_check" entityId={record.id} compact />
+                ) : !isSubmitted && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
+              </div>
             </CardContent>
           </Card>
         </>

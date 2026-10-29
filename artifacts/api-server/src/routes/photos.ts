@@ -59,6 +59,7 @@ export const PHOTO_ENTITY_TABLES = {
   incident: "incidents",
   pat_test: "pat_tests",
   pest_visit: "pest_visits",
+  pest_activity: "pest_activity",
   training_record: "train_track_records",
   tree_inspection: "tree_inspections",
   green_pre_use_check: "green_pre_use_checks",
@@ -73,6 +74,13 @@ export const PHOTO_ENTITY_TABLES = {
   safe_handbook: "safe_handbook",
   safe_training_record: "safe_training_records",
   safe_induction: "safe_inductions",
+  premises_inspection: "premises_inspections",
+  coshh_check: "coshh_checks",
+  pat_certificate: "pat_certificates",
+  pat_failure: "pat_failures",
+  kitchen_cleaning_log: "kitchen_cleaning_logs",
+  kitchen_weekly_record: "kitchen_weekly_records",
+  kitchen_probe_check: "kitchen_probe_checks",
 } as const;
 
 export type PhotoEntityType = keyof typeof PHOTO_ENTITY_TABLES;
@@ -91,12 +99,26 @@ const SITE_DEPARTMENT_SCOPED_ENTITIES: ReadonlySet<PhotoEntityType> = new Set<Ph
   "incident", "training_record", "tree_inspection",
   "swim_session", "swim_surveillance_check", "swim_first_aid_check", "swim_incident",
   "safe_risk_assessment", "safe_sop", "safe_handbook", "safe_training_record", "safe_induction",
+  "premises_inspection", "coshh_check", "pat_certificate", "pat_failure",
+  "kitchen_cleaning_log", "kitchen_weekly_record", "kitchen_probe_check",
 ]);
 
-/** SQL condition limiting `alias.site_id` to the department's sites (or none). */
-function departmentSiteCondition(alias: string, clientId: number, departmentId: number | null) {
+/**
+ * A record whose site is held elsewhere: a PAT failure belongs to the site of
+ * the certificate it was found on, as PAT's own failure routes decide.
+ */
+function siteColumn(entityType: PhotoEntityType, alias: string) {
+  const record = sql.raw(alias);
+  if (entityType === "pat_failure") {
+    return sql`(SELECT c.site_id FROM pat_certificates c WHERE c.id = ${record}.certificate_id AND c.client_id = ${record}.client_id)`;
+  }
+  return sql.raw(`${alias}.site_id`);
+}
+
+/** SQL condition limiting the record's site to the department's sites (or none). */
+function departmentSiteCondition(entityType: PhotoEntityType, alias: string, clientId: number, departmentId: number | null) {
   if (departmentId === null) return sql``;
-  const column = sql.raw(`${alias}.site_id`);
+  const column = siteColumn(entityType, alias);
   return sql`AND (${column} IS NULL OR ${column} IN (${visibleSiteIdsSql(clientId, departmentId)}))`;
 }
 
@@ -152,7 +174,7 @@ async function requireOwnedPhotoEntity(
   // table names come only from the constant above, never the request.
   const table = sql.raw(PHOTO_ENTITY_TABLES[entityType]);
   const scope = SITE_DEPARTMENT_SCOPED_ENTITIES.has(entityType)
-    ? departmentSiteCondition("e", clientId, departmentId)
+    ? departmentSiteCondition(entityType, "e", clientId, departmentId)
     : sql``;
   const result = await db.execute(sql`
     SELECT e.id FROM ${table} e WHERE e.id = ${entityId} AND e.client_id = ${clientId} ${scope} LIMIT 1
@@ -175,7 +197,7 @@ async function photoParentOutsideDepartment(
     || !SITE_DEPARTMENT_SCOPED_ENTITIES.has(entityType)) return false;
   const table = sql.raw(PHOTO_ENTITY_TABLES[entityType]);
   const result = await executor.execute(sql`
-    SELECT e.id, (TRUE ${departmentSiteCondition("e", clientId, departmentId)}) AS in_scope
+    SELECT e.id, (TRUE ${departmentSiteCondition(entityType, "e", clientId, departmentId)}) AS in_scope
     FROM ${table} e WHERE e.id = ${entityId} AND e.client_id = ${clientId} LIMIT 1
   `);
   const row = (result as any).rows[0] as { in_scope: boolean } | undefined;
