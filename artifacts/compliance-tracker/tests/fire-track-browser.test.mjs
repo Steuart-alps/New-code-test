@@ -13,6 +13,8 @@ import { chromium } from "@playwright/test";
 //   - the emergency lighting test explains the 5 minute flick test;
 //   - the annual discharge test and the contractor services say they are kept
 //     in step with their ComplyTrack tasks;
+//   - "Performed by" offers everyone with a login (not the roster, which can
+//     run to dozens), so a Manager can be chosen and roster staff typed in;
 //   - a drill cannot be saved until it gives the time of the drill, the time
 //     taken to evacuate, "Night staff included?" (Yes / No / N/A) and the
 //     improvements required; it sends the roster staff ticked as present;
@@ -116,6 +118,7 @@ const checks = [
 ];
 const posts = [];
 const unexpectedRequests = [];
+const assigneeRequests = [];
 
 const json = (route, data, code = 200) => route.fulfill({ status: code, contentType: "application/json", body: JSON.stringify(data) });
 async function routeApi(route) {
@@ -162,6 +165,15 @@ async function routeApi(route) {
       case "/api/track-actions/templates/matching":
       case "/api/track-evidence":
       case "/api/track-evidence/requirements": return json(route, []);
+      // FireTrack's "Performed by" lists people with a login (Owners, Managers,
+      // Staff), not the roster; roster staff are typed in under "Other".
+      case "/api/assignees":
+        assigneeRequests.push(url.searchParams.get("siteId"));
+        return json(route, [
+          { id: 7, name: "Duty Manager", role: "client_admin" },
+          { id: 10, name: "Sam Green", role: "client_staff" },
+          { id: 9, name: "Leanne Elliot", role: "client_manager" },
+        ]);
       case "/api/fire-safety/config": return json(route, {
         fire_escape_routes: "", fire_alarm_zones: "", fire_extinguisher_points: "", fire_show_drill: "true",
         fire_default_performer: "", fire_frequency_days: JSON.stringify(FREQUENCIES), controlProfile: null,
@@ -307,6 +319,17 @@ try {
   await shot(page, "2-alarm-call-point");
   await page.getByRole("option", { name: /CP1 – Reception/ }).click();
 
+  // Performed by: a Manager with a login but no roster entry can be chosen.
+  const performer = dialog.getByTestId("select-performed-by");
+  await page.waitForFunction(() => document.querySelector('[data-testid="select-performed-by"]')?.textContent?.includes("Leanne Elliot"));
+  assert.deepEqual(await performer.locator("option").allInnerTexts(),
+    ["Select a staff member", "Duty Manager", "Leanne Elliot", "Sam Green", "Other / enter name…"],
+    "logins only, A to Z; roster staff are typed in");
+  assert.equal(await performer.evaluate(select => select.selectedOptions[0].textContent), "Duty Manager", "starts on the signed-in person");
+  assert.equal(await dialog.getByTestId("input-performed-by-custom").count(), 0);
+  assert.ok(assigneeRequests.includes("1"), "logins are listed for the record's site");
+  await performer.selectOption({ label: "Leanne Elliot" });
+
   // Sound level: CP1 is near a sleeping area, so the 75 dB bedhead limit applies.
   const bedhead = dialog.getByTestId("checkbox-sound-level-bedhead");
   assert.equal(await bedhead.getAttribute("data-state"), "checked", "a sleeping-area call point sets the bedhead limit");
@@ -334,6 +357,8 @@ try {
   assert.equal(alarmPost.body.checkType, "alarm");
   assert.equal(alarmPost.body.callPointId, 11);
   assert.equal(alarmPost.body.siteId, 1, "a one-site business records against its site");
+  assert.equal(alarmPost.body.performedBy, "Leanne Elliot");
+  assert.equal(alarmPost.body.staffRosterId, null, "a login with no roster entry links no roster record");
   assert.deepEqual([alarmPost.body.soundLevelDb, alarmPost.body.soundLevelMethod, alarmPost.body.soundLevelBedhead], [70, "meter", true]);
   const soundLine = page.getByTestId(`sound-level-${checks.at(-1).id}`);
   await soundLine.waitFor();

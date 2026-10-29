@@ -242,6 +242,7 @@ async function routeApi(route, url) {
   }
   if (pathname === "/api/sites" && method === "GET") return jsonResponse(route, [SITE]);
   if (pathname === "/api/staff-roster" && method === "GET") return jsonResponse(route, []);
+  if (pathname === "/api/assignees" && method === "GET") return jsonResponse(route, []);
 
   if (pathname === "/api/track-actions" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/track-actions/templates/matching" && method === "GET") return jsonResponse(route, []);
