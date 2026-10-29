@@ -169,6 +169,8 @@ async function routeApi(route) {
       case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
       case "/api/fix-track/calendar-cancellations": return json(route, []);
       case "/api/managed-by": return json(route, null);
+      // A finished setup, so the "add your team first" gate (#237) stays out of the way.
+      case "/api/setup/state": return json(route, { needsSetup: false, canManage: true });
       case "/api/sites": return json(route, []);
       case "/api/staff-roster": return json(route, []);
       case "/api/compliance-items":

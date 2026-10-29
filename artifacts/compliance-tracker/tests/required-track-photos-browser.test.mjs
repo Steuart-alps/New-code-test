@@ -363,6 +363,11 @@ async function routeApi(route, url) {
     return jsonResponse(route, index >= 0 ? rows[index] : { id: Number(updateMatch[1]), ...body });
   }
 
+  if (pathname === "/api/setup/state" && method === "GET") {
+    // A finished setup, so the "add your team first" gate (#237) stays out of the way.
+    return jsonResponse(route, { needsSetup: false, canManage: true });
+  }
+
   if (pathname === "/api/managed-by" && method === "GET") {
     // No consultant practice branding for this business.
     managedByRequests += 1;
