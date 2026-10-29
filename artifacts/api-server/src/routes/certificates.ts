@@ -17,7 +17,9 @@ import {
 } from "../middleware/requireAuth";
 import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
 import { ReportReadingError, UnreadableReportError, reportReadingConfigured } from "../lib/reportReading";
-import { CERTIFICATE_READING_MAX_BYTES, readCertificate, type CertificateCheckChoice } from "../lib/certificateReading";
+import {
+  CERTIFICATE_READING_MAX_BYTES, CERTIFICATE_READING_MAX_FILES, readCertificate, readCertificates, type CertificateCheckChoice,
+} from "../lib/certificateReading";
 import { certificateCheckChoicesFor } from "../lib/certificateCheckChoices";
 import { appendAuditEvent } from "../lib/audit";
 import { getAccountToday } from "../lib/accountClock";
@@ -401,6 +403,15 @@ const certificateReadBody = z.object({
   itemId: z.number().int().positive().nullable().optional(),
 }).strict();
 
+const certificateFilesBody = z.object({
+  files: z.array(z.object({
+    fileName: z.string().trim().min(1).max(255),
+    mimeType: z.string().trim().min(1).max(200),
+    data: z.string().min(1).max(Math.ceil(CERTIFICATE_READING_MAX_BYTES / 3) * 4 + 4),
+  }).strict()).min(1).max(CERTIFICATE_READING_MAX_FILES),
+  itemId: z.number().int().positive().nullable().optional(),
+}).strict();
+
 /** The checks the person can file a certificate against, described for Claude. */
 function certificateCheckChoices(req: Request, clientId: number): Promise<CertificateCheckChoice[]> {
   return certificateCheckChoicesFor(clientId, getActiveDepartmentId(req));
@@ -420,7 +431,7 @@ router.post("/certificates/read", requireAuth, denyViewers, requireClientAdmin, 
     return void res.status(503).json({ error: "Reading certificates is not switched on yet. Fill the certificate in by hand.", code: "CERTIFICATE_READING_UNAVAILABLE" });
   }
   const parsed = certificateReadBody.safeParse(req.body);
-  if (!parsed.success) return void res.status(400).json({ error: "Choose a PDF, photo or Word certificate (15 MB at most)" });
+  if (!parsed.success) return void res.status(400).json({ error: "Choose a PDF, photo or Word certificate (20 MB at most)" });
   const checks = await certificateCheckChoices(req, clientId);
   const itemId = parsed.data.itemId ?? null;
   if (itemId !== null && !checks.some((check) => check.id === itemId)) {
@@ -450,6 +461,50 @@ router.post("/certificates/read", requireAuth, denyViewers, requireClientAdmin, 
     if (err instanceof UnreadableReportError) return void res.status(400).json({ error: err.message });
     if (!(err instanceof ReportReadingError)) req.log.error({ err }, "Certificate reading failed");
     res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read this certificate just now. Try again later, or fill it in by hand." });
+  }
+});
+
+// Several files at once (Steuart, 2026-10-29): the pages of one certificate
+// photographed separately, or a batch of certificates for ComplyTrack's AI to
+// sort to their checks. One request reads them all; the person then checks
+// and saves each certificate found, as with a single file.
+router.post("/certificates/read-files", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
+  if (!reportReadingConfigured()) {
+    return void res.status(503).json({ error: "Reading certificates is not switched on yet. Fill the certificate in by hand.", code: "CERTIFICATE_READING_UNAVAILABLE" });
+  }
+  const parsed = certificateFilesBody.safeParse(req.body);
+  if (!parsed.success) {
+    return void res.status(400).json({ error: `Choose up to ${CERTIFICATE_READING_MAX_FILES} PDF, photo or Word certificates (20 MB at most in one go)` });
+  }
+  const checks = await certificateCheckChoices(req, clientId);
+  const itemId = parsed.data.itemId ?? null;
+  if (itemId !== null && !checks.some((check) => check.id === itemId)) {
+    return void res.status(404).json({ error: "Compliance item not found" });
+  }
+  const files = parsed.data.files.map((file) => ({ bytes: Buffer.from(file.data, "base64"), mimeType: file.mimeType, fileName: file.fileName }));
+
+  let aiUseId: number | null = null;
+  try {
+    const result = await readCertificates({ files, today: await getAccountToday(clientId), checks, itemId }, async () => {
+      aiUseId = await claimAiUse({
+        clientId, userId: req.currentUser?.id ?? null, feature: "certificate_reading",
+        estimatePence: CERTIFICATE_READING_ESTIMATE_PENCE * files.length, instead: "Fill the certificates in by hand instead.",
+      });
+    });
+    if (aiUseId !== null) await settleAiUse(aiUseId, result.usage, true);
+    req.log.info({
+      clientId, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+      files: files.length, certificates: result.certificates.length, skipped: result.skipped.length,
+    }, "Certificates read");
+    res.json({ certificates: result.certificates, skipped: result.skipped });
+  } catch (err) {
+    if (aiUseId !== null) await settleAiUse(aiUseId, err instanceof ReportReadingError ? err.usage ?? null : null, false);
+    if (err instanceof AiUnavailableError) return void res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof UnreadableReportError) return void res.status(400).json({ error: err.message });
+    if (!(err instanceof ReportReadingError)) req.log.error({ err }, "Certificate reading failed");
+    res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read these certificates just now. Try again later, or fill them in by hand." });
   }
 });
 

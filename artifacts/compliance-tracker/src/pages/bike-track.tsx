@@ -40,6 +40,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1371,6 +1372,7 @@ export default function BikeTrackPage() {
       {/* ── Overview tab ─────────────────────────────────────────────────────── */}
       {activeTab === "overview" && (
         <div className="space-y-4">
+          <TrackContractorChecks module="bike" />
           <h3 className="font-bold text-sm text-muted-foreground uppercase tracking-wide">Active Hires</h3>
           {activeHires.length === 0 ? (
             <div className="text-center py-10 border border-dashed rounded-sm">

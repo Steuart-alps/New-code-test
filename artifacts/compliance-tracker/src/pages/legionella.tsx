@@ -45,6 +45,7 @@ import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // HSG274 Part 2 Table 2.1
@@ -1397,6 +1398,8 @@ export default function LegionellaPage() {
             queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) });
             queryClient.invalidateQueries({ queryKey: getGetLegionellaConfigQueryKey() });
           }} />
+        <TrackContractorChecks module="legionella" siteId={filterSite} />
+
         {/* Status Overview */}
         {filterSite && (statusLoading ? (
           <Card>

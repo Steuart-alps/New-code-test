@@ -1402,7 +1402,7 @@ export const readCertificateBodyFileNameMax = 255;
 export const ReadCertificateBody = zod.object({
   "fileName": zod.string().max(readCertificateBodyFileNameMax),
   "mimeType": zod.string().describe('application\/pdf, image\/jpeg, image\/png, image\/webp, image\/gif, .docx or text\/plain'),
-  "data": zod.string().describe('The file as base64 (15 MB at most before encoding)'),
+  "data": zod.string().describe('The file as base64 (20 MB at most before encoding)'),
   "itemId": zod.number().nullish().describe('The check the certificate is for, when the person opened the reader from one')
 })
 
@@ -1429,6 +1429,59 @@ export const ReadCertificateResponse = zod.object({
   "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
 })),
   "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+})
+
+
+/**
+ * Claude reads up to 10 files together: the pages of one certificate photographed separately, a PDF holding several certificates, or a batch of certificates to sort to their compliance checks. Each certificate found comes back as with POST /certificates/read, with the files it is on. Nothing is saved or stored here. Uses the AI features add-on's allowance.
+ * @summary Read several certificate files with AI in one go (owners and ALPS)
+ */
+export const readCertificateFilesBodyFilesItemFileNameMax = 255;
+
+export const readCertificateFilesBodyFilesMax = 10;
+
+
+
+export const ReadCertificateFilesBody = zod.object({
+  "files": zod.array(zod.object({
+  "fileName": zod.string().max(readCertificateFilesBodyFilesItemFileNameMax),
+  "mimeType": zod.string().describe('application\/pdf, image\/jpeg, image\/png, image\/webp, image\/gif, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64')
+})).min(1).max(readCertificateFilesBodyFilesMax).describe('Up to 10 files, 20 MB at most together before encoding'),
+  "itemId": zod.number().nullish().describe('The check the reader was opened from: the files are one certificate for it')
+})
+
+export const ReadCertificateFilesResponse = zod.object({
+  "certificates": zod.array(zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+}).and(zod.object({
+  "fileIndexes": zod.array(zod.number()).describe('The files (0-based, in the order sent) this certificate is on')
+}))),
+  "skipped": zod.array(zod.object({
+  "fileIndex": zod.number(),
+  "reason": zod.string()
+})).describe('Files that hold no certificate')
 })
 
 
