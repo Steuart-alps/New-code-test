@@ -9,6 +9,19 @@ import * as zod from 'zod';
 
 
 /**
+ * The setup wizard's team step. Records can't start in a business that is still being set up until it has a Manager or Staff login, or an Owner confirms here that only Owners record for now. Owners and consultants only; consultants pass the business as clientId.
+ * @summary Confirm that only the business's Owners record checks for now
+ */
+export const ConfirmSetupTeamAloneQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const ConfirmSetupTeamAloneResponse = zod.object({
+  "aloneAt": zod.date()
+})
+
+
+/**
  * Deletes the business's records and stored files at once, keeping the audit trail and a record of the deletion. Refused for the operator's own business and for any business with a subscription, a payment, an AI top-up or a legal hold. The business's name must be typed to confirm.
  * @summary Permanently delete a test business that never paid (platform operators)
  */

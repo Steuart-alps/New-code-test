@@ -31,6 +31,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { sortedEntries } from "@/lib/sort-options";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -427,7 +428,7 @@ function RecordDialog({
               <Select value={checkType} onValueChange={setCheckType}>
                 <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(CHECK_TYPE_LABELS).map(([k, v]) => (
+                  {sortedEntries(CHECK_TYPE_LABELS).map(([k, v]) => (
                     <SelectItem key={k} value={k}>{v}</SelectItem>
                   ))}
                 </SelectContent>
@@ -771,7 +772,7 @@ export default function PoolTrackPage() {
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="All types" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All types</SelectItem>
-                    {Object.entries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                    {sortedEntries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

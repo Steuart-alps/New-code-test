@@ -120,6 +120,12 @@ try {
     options => options.map(option => option.value).filter(Boolean),
   );
   assert.deepEqual(optionValues.sort(), [...apiBusinessTypes].sort(), "signup business types should match the register API");
+  const optionLabels = await businessType.locator("option").evaluateAll(
+    options => options.filter(option => option.value).map(option => option.textContent),
+  );
+  assert.equal(optionLabels.at(-1), "Other", "Other should be the last business type");
+  const namedLabels = optionLabels.slice(0, -1);
+  assert.deepEqual(namedLabels, [...namedLabels].sort((a, b) => a.localeCompare(b, "en-GB")), "business types should be in A to Z order");
   assert.equal(await recommendation.count(), 0, "no recommendation before a business type is chosen");
 
   // No plan chosen: relevant businesses are told to activate PestTrack after signup.

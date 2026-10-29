@@ -120,6 +120,8 @@ jobs:
         run: pnpm --filter @workspace/api-server run test:private-file-acl
       - name: Sidebar sections and pins test
         run: pnpm --filter @workspace/compliance-tracker run test:nav-groups
+      - name: Dropdown A to Z order test
+        run: pnpm --filter @workspace/compliance-tracker run test:sort-options
 
       - name: Reload after a new release test
         run: pnpm --filter @workspace/compliance-tracker run test:new-release-reload

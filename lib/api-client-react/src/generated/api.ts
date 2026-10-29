@@ -50,6 +50,7 @@ import type {
   CertificatesOutstandingResponse,
   ComplianceItem,
   ConfirmInspectionReportActions201,
+  ConfirmSetupTeamAloneParams,
   Contractor,
   ContractorSignInLinkEmailed,
   ContractorSignInSite,
@@ -255,6 +256,7 @@ import type {
   SetActiveDepartment200,
   SetContractorVisitRequest,
   SetPrivacyIntakeAssigneeParams,
+  SetupTeamAloneResult,
   SignTrainingRecordRequest,
   Site,
   StorageStatus,
@@ -322,6 +324,85 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getConfirmSetupTeamAloneUrl = (params?: ConfirmSetupTeamAloneParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/setup/team-alone?${stringifiedParams}` : `/api/setup/team-alone`
+}
+
+/**
+ * The setup wizard's team step. Records can't start in a business that is still being set up until it has a Manager or Staff login, or an Owner confirms here that only Owners record for now. Owners and consultants only; consultants pass the business as clientId.
+ * @summary Confirm that only the business's Owners record checks for now
+ */
+export const confirmSetupTeamAlone = async (params?: ConfirmSetupTeamAloneParams, options?: RequestInit): Promise<SetupTeamAloneResult> => {
+
+  return customFetch<SetupTeamAloneResult>(getConfirmSetupTeamAloneUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getConfirmSetupTeamAloneMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmSetupTeamAlone>>, TError,{params?: ConfirmSetupTeamAloneParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmSetupTeamAlone>>, TError,{params?: ConfirmSetupTeamAloneParams}, TContext> => {
+
+const mutationKey = ['confirmSetupTeamAlone'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmSetupTeamAlone>>, {params?: ConfirmSetupTeamAloneParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  confirmSetupTeamAlone(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmSetupTeamAloneMutationResult = NonNullable<Awaited<ReturnType<typeof confirmSetupTeamAlone>>>
+
+    export type ConfirmSetupTeamAloneMutationError = ErrorType<void>
+
+    /**
+ * @summary Confirm that only the business's Owners record checks for now
+ */
+export const useConfirmSetupTeamAlone = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmSetupTeamAlone>>, TError,{params?: ConfirmSetupTeamAloneParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof confirmSetupTeamAlone>>,
+        TError,
+        {params?: ConfirmSetupTeamAloneParams},
+        TContext
+      > => {
+      return useMutation(getConfirmSetupTeamAloneMutationOptions(options));
+    }
 
 export const getDeleteTestBusinessUrl = (id: number,) => {
 
