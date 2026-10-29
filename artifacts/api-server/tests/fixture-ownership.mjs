@@ -216,7 +216,10 @@ BEGIN
         total := total + deleted;
         UPDATE _fx_queue SET done = true WHERE seq = pending.seq;
         progress := true;
-      EXCEPTION WHEN foreign_key_violation THEN
+      -- A unique violation comes from an ON DELETE SET NULL elsewhere (deleting a
+      -- site nulls food_safety_records.site_id, which can clash with the
+      -- whole-business record for that date); that row goes later in this pass.
+      EXCEPTION WHEN foreign_key_violation OR unique_violation THEN
         remaining := remaining + 1;
       END;
     END LOOP;

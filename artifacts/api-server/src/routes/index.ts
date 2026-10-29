@@ -31,6 +31,7 @@ import bikeTrackRouter from "./bike-track";
 import poolTrackRouter from "./pool-track";
 import greenTrackRouter from "./green-track";
 import greenTrackSprayingRouter from "./green-track-spraying";
+import greenTrackDailyRouter from "./green-track-daily";
 import swimTrackRouter from "./swim-track";
 import photosRouter from "./photos";
 import staffRosterRouter from "./staff-roster";
@@ -158,6 +159,7 @@ router.use("/bike-track", requireAuth, requireService("biketrack"), bikeTrackRou
 router.use("/pool-track",   requireAuth, requireAnyService("pooltrack", "aquatrack"),  poolTrackRouter);
 router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackRouter);
 router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackSprayingRouter);
+router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackDailyRouter);
 router.use("/swim-track",   requireAuth, requireAnyService("swimtrack", "aquatrack"),  swimTrackRouter);
 router.use("/photos", requireAuth, photosRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);

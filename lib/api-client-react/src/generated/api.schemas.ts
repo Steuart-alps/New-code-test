@@ -1127,6 +1127,135 @@ export interface GreenTrackCertificateDownload {
   fileName?: string | null;
 }
 
+export type GreenShedChecklistType = typeof GreenShedChecklistType[keyof typeof GreenShedChecklistType];
+
+
+export const GreenShedChecklistType = {
+  greenkeeping_opening: 'greenkeeping_opening',
+  greenkeeping_closing: 'greenkeeping_closing',
+} as const;
+
+export type GreenShedChecklistItemResult = typeof GreenShedChecklistItemResult[keyof typeof GreenShedChecklistItemResult];
+
+
+export const GreenShedChecklistItemResult = {
+  pass: 'pass',
+  fail: 'fail',
+  na: 'na',
+} as const;
+
+export interface GreenShedChecklistItem {
+  label: string;
+  checked: boolean;
+  notes?: string;
+  section?: string;
+  result?: GreenShedChecklistItemResult;
+}
+
+export interface GreenShedChecklist {
+  id: number;
+  clientId: number;
+  siteId?: number | null;
+  checklistType: GreenShedChecklistType;
+  checkDate: string;
+  items: GreenShedChecklistItem[];
+  completedBy?: string | null;
+  staffRosterId?: number | null;
+  managerNote?: string | null;
+  submittedAt?: string | null;
+  [key: string]: unknown;
+ }
+
+export interface GreenShedChecklistInput {
+  siteId?: number | null;
+  checklistType: GreenShedChecklistType;
+  checkDate: string;
+  items?: GreenShedChecklistItem[];
+  completedBy?: string | null;
+  staffRosterId?: number | null;
+  managerNote?: string | null;
+  /** Set to submit; every item must be answered and failed items need a note */
+  submittedAt?: string | null;
+}
+
+export interface GreenShedChecklistUpdate {
+  items?: GreenShedChecklistItem[];
+  completedBy?: string | null;
+  staffRosterId?: number | null;
+  managerNote?: string | null;
+  submittedAt?: string | null;
+}
+
+export interface GreenShedTeamDepartment {
+  id: number;
+  name: string;
+}
+
+export interface GreenShedTeam {
+  siteId: number;
+  departmentId: number | null;
+  departmentName: string | null;
+  /** False when the department was matched by "green" in its name */
+  chosen: boolean;
+  departments: GreenShedTeamDepartment[];
+}
+
+export interface GreenShedTeamInput {
+  siteId: number;
+  departmentId: number | null;
+}
+
+export type GreenPreStartMachineStatus = typeof GreenPreStartMachineStatus[keyof typeof GreenPreStartMachineStatus];
+
+
+export const GreenPreStartMachineStatus = {
+  checked: 'checked',
+  failed: 'failed',
+  not_in_use: 'not_in_use',
+  todo: 'todo',
+} as const;
+
+export interface GreenPreStartMachine {
+  machineId: number;
+  name: string;
+  type: string | null;
+  siteId: number | null;
+  siteName: string | null;
+  status: GreenPreStartMachineStatus;
+  checkId: number | null;
+  checkedBy: string | null;
+  notInUseId: number | null;
+  notInUseReason: string | null;
+  markedBy: string | null;
+}
+
+export interface GreenPreStartDay {
+  date: string;
+  machines: GreenPreStartMachine[];
+  total: number;
+  checked: number;
+  failed: number;
+  notInUse: number;
+  todo: number;
+}
+
+export interface GreenMachineNotInUseInput {
+  machineId: number;
+  checkDate: string;
+  reason?: string | null;
+}
+
+/**
+ * The stored mark (database column names)
+ */
+export interface GreenMachineNotInUseRow {
+  id?: number;
+  machine_id?: number;
+  check_date?: string;
+  reason?: string | null;
+  [key: string]: unknown;
+ }
+
 export interface ErrorResponse {
   error: string;
 }
@@ -2688,6 +2817,12 @@ export const FireSafetyCheckSoundLevelMethod = {
   phone: 'phone',
 } as const;
 
+export interface FireDrillAttendee {
+  /** Null when the roster entry has since been deleted. */
+  staffRosterId: number | null;
+  name: string;
+}
+
 export interface FireSafetyCheck {
   id: number;
   clientId: number;
@@ -2704,6 +2839,19 @@ export interface FireSafetyCheck {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: FireSafetyCheckNightStaff;
+  /**
+     * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  drillTime?: string | null;
+  /**
+     * Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+     * @minimum 1
+     * @maximum 86400
+     */
+  evacuationSeconds?: number | null;
+  /** Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks. */
+  staffPresent?: FireDrillAttendee[];
   /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
   soundLevelDb?: number | null;
   /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
@@ -2759,6 +2907,22 @@ export interface CreateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: CreateFireSafetyCheckRequestNightStaff;
+  /**
+     * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  drillTime?: string | null;
+  /**
+     * Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+     * @minimum 1
+     * @maximum 86400
+     */
+  evacuationSeconds?: number | null;
+  /**
+     * Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+     * @maxItems 2000
+     */
+  staffPresentIds?: number[];
   /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
   soundLevelDb?: number | null;
   /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
@@ -2811,12 +2975,45 @@ export interface UpdateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
+  /**
+     * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  drillTime?: string | null;
+  /**
+     * Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+     * @minimum 1
+     * @maximum 86400
+     */
+  evacuationSeconds?: number | null;
+  /**
+     * Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+     * @maxItems 2000
+     */
+  staffPresentIds?: number[];
   /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
   soundLevelDb?: number | null;
   /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
   soundLevelMethod?: UpdateFireSafetyCheckRequestSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+}
+
+export interface FireDrillStaffStatus {
+  staffRosterId: number;
+  name: string;
+  siteId: number | null;
+  siteName: string | null;
+  /** The latest fire drill they were ticked present at. */
+  lastDrillDate: string | null;
+  /** True when they have not taken part in a fire drill within periodMonths. */
+  due: boolean;
+}
+
+export interface FireDrillAttendance {
+  /** Everyone should take part in a drill at least once in this many months. */
+  periodMonths: number;
+  staff: FireDrillStaffStatus[];
 }
 
 export interface FireCallPoint {
@@ -4948,6 +5145,13 @@ export type GetFireSafetyStatusParams = {
 siteId?: number;
 };
 
+export type GetFireDrillAttendanceParams = {
+/**
+ * Staff at this site and staff with no site. Omit for every visible member.
+ */
+siteId?: number;
+};
+
 export type ListFireCallPointsParams = {
 /**
  * A site id, or "none" for call points not tied to a site. Omit for every visible site.
@@ -5039,6 +5243,27 @@ siteId: number;
 export type ListGreenTrackHourReadingsParams = {
 machineId?: number;
 limit?: number;
+};
+
+export type ListGreenTrackShedChecksParams = {
+siteId?: number;
+date?: string;
+type?: GreenShedChecklistType;
+};
+
+export type GetGreenTrackShedTeamParams = {
+siteId: number;
+};
+
+export type GetGreenTrackPreStartDayParams = {
+/**
+ * Defaults to the business's today
+ */
+date?: string;
+/**
+ * Machines at this site and machines with no site
+ */
+siteId?: number;
 };
 
 export type ListGreenTrackStockMovementsParams = {
