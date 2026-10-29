@@ -1,19 +1,14 @@
 import assert from 'node:assert/strict';
 import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixtures.mjs';
 
-// Contractor jobs kept in two places stay in step: the 6-monthly fire alarm
-// service and the annual extinguisher service (FireTrack) and cleaning the
-// cold water tanks (Water Safety) each complete their ComplyTrack task when
-// passed, and completing the task records them in the track. Run:
+// Contractor jobs kept in two places stay in step: cleaning the cold water
+// tanks (Water Safety) completes its ComplyTrack task when passed, and
+// completing the task records it in the track. FireTrack's contractor services
+// were linked this way until Oct 2026 and no longer are. Run:
 //   FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-task-links.mjs
 
 const today = isoDay();
 const lastMonth = isoDay(-30);
-const addMonths = (day, months) => {
-  const date = new Date(`${day}T00:00:00Z`);
-  date.setUTCMonth(date.getUTCMonth() + months);
-  return date.toISOString().slice(0, 10);
-};
 const LEGIONELLA_FREQUENCIES = {
   calorifier_temp: 7, hot_sentinel_temp: 30, hot_nonsent_temp: 90, cold_tank_temp: 30, cold_sentinel_temp: 30,
   cold_nonsent_temp: 90, cold_tank_inspection: 183, cold_tank_clean: 365, calorifier_inspection: 365,
@@ -37,54 +32,14 @@ try {
     `SELECT id, check_date::text AS day, result, notes FROM ${table}
      WHERE client_id = $1 AND check_type = $2 AND site_id IS NOT DISTINCT FROM $3 ORDER BY id`,
     [clientId, checkType, siteId])).rows;
-  const fireStatus = async (siteId, checkType) => (await owner.request('GET', `/fire-safety/status?siteId=${siteId}`)).data
-    .find(row => row.checkType === checkType);
-
-  // ── FireTrack lists both contractor services ───────────────────────────────
-  assert.equal((await fireStatus(siteA.id, 'alarm_service')).frequencyDays, 180);
-  assert.equal((await fireStatus(siteA.id, 'alarm_service')).status, 'never');
-  assert.equal((await fireStatus(siteA.id, 'extinguisher_service')).frequencyDays, 365);
-  console.log('ok - FireTrack lists the 6-monthly alarm service and the annual extinguisher service');
-
-  // ── Fire alarm service ↔ "Fire Alarm Maintenance" ──────────────────────────
+  // ── FireTrack's contractor services are no longer linked ─────────────────
+  // They are kept only as their compliance checks, which FireTrack shows
+  // (tests/fire-retired-checks.mjs): completing one records nothing in FireTrack.
   const alarmA = await task(owner, siteA.id, 'Fire Alarm Maintenance', 6);
-  const alarmB = await task(owner, siteB.id, 'Fire Alarm Maintenance', 6);
-  const failed = await staff.request('POST', '/fire-safety', { checkType: 'alarm_service', checkDate: today, result: 'fail', siteId: siteA.id });
-  assert.equal(failed.status, 201, JSON.stringify(failed.data));
-  assert.equal((await getTask(alarmA.id)).completedAt, null, 'a failed service leaves the task open');
-  const serviced = await staff.request('POST', '/fire-safety', { checkType: 'alarm_service', checkDate: today, result: 'pass', siteId: siteA.id });
-  assert.equal(serviced.status, 201, JSON.stringify(serviced.data));
-  const afterA = await getTask(alarmA.id);
-  assert.equal(afterA.completedAt.slice(0, 10), today);
-  assert.equal(afterA.dueDate.slice(0, 10), addMonths(today, 6), 'the task reopens in 6 months');
-  assert.equal((await getTask(alarmB.id)).completedAt, null, "another site's task is not completed");
-  console.log('ok - a passed fire alarm service completes "Fire Alarm Maintenance" at that site');
-
-  const doneB = await staff.request('PATCH', `/compliance-items/${alarmB.id}/status`, { status: 'completed', completedAt: lastMonth });
-  assert.equal(doneB.status, 200, JSON.stringify(doneB.data));
-  const alarmRecordsB = await records('fire_safety_checks', owner.clientId, 'alarm_service', siteB.id);
-  assert.deepEqual(alarmRecordsB.map(r => [r.day, r.result]), [[lastMonth, 'pass']]);
-  assert.match(alarmRecordsB[0].notes, /Fire Alarm Maintenance/);
-  assert.equal((await fireStatus(siteB.id, 'alarm_service')).status, 'ok');
-  console.log('ok - completing "Fire Alarm Maintenance" records the service in FireTrack');
-
-  // ── Extinguisher service ↔ "Fire Extinguishers Maintenance" ────────────────
-  const extinguisherA = await task(owner, siteA.id, 'Fire Extinguishers Maintenance', 12);
-  const visual = await staff.request('POST', '/fire-safety', { checkType: 'extinguishers', checkDate: today, result: 'pass', siteId: siteA.id });
-  assert.equal(visual.status, 201, JSON.stringify(visual.data));
-  assert.equal((await getTask(extinguisherA.id)).completedAt, null, 'the weekly visual check is not the annual service');
-  const extinguisherService = await staff.request('POST', '/fire-safety', { checkType: 'extinguisher_service', checkDate: today, result: 'pass', siteId: siteA.id });
-  assert.equal(extinguisherService.status, 201, JSON.stringify(extinguisherService.data));
-  assert.equal((await getTask(extinguisherA.id)).completedAt.slice(0, 10), today);
-  console.log('ok - only the annual extinguisher service completes "Fire Extinguishers Maintenance"');
-
-  // Completions from before the link still count in FireTrack.
-  const extinguisherB = await task(owner, siteB.id, 'Fire Extinguishers Maintenance', 12);
-  await pool.query(`UPDATE compliance_items SET completed_at = $2::date WHERE id = $1`, [extinguisherB.id, lastMonth]);
-  const earlier = await fireStatus(siteB.id, 'extinguisher_service');
-  assert.equal(earlier.lastDate, lastMonth);
-  assert.equal(earlier.status, 'ok');
-  console.log('ok - an earlier task completion shows as the last extinguisher service');
+  const doneAlarm = await staff.request('PATCH', `/compliance-items/${alarmA.id}/status`, { status: 'completed', completedAt: lastMonth });
+  assert.equal(doneAlarm.status, 200, JSON.stringify(doneAlarm.data));
+  assert.equal((await records('fire_safety_checks', owner.clientId, 'alarm_service', siteA.id)).length, 0);
+  console.log('ok - completing "Fire Alarm Maintenance" adds no FireTrack record');
 
   // ── Water tanks ↔ "Clean & Disinfect Water Tanks" ──────────────────────────
   const plan = await owner.request('PUT', `/legionella/monitoring-plan?siteId=${siteA.id}`, {

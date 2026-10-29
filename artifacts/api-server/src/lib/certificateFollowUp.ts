@@ -99,6 +99,7 @@ export async function getVisitsAwaitingCertificate(
           CASE WHEN (ci.visit_scheduled_at AT TIME ZONE 'UTC')::date <= ${today}::date
             THEN (ci.visit_scheduled_at AT TIME ZONE 'UTC')::date END
         ) AS visit_day,
+        CASE WHEN ci.completed_in_house_by IS NOT NULL THEN (ci.completed_at AT TIME ZONE 'UTC')::date END AS in_house_day,
         k.id AS contractor_id, k.name AS contractor_name, k.company AS contractor_company, k.email AS contractor_email
       FROM compliance_items ci
       JOIN contractors k ON k.id = ci.contractor_id AND k.client_id = ci.client_id
@@ -107,6 +108,8 @@ export async function getVisitsAwaitingCertificate(
         AND (ci.completed_at IS NOT NULL OR ci.visit_scheduled_at IS NOT NULL)
     ) v
     WHERE v.visit_day IS NOT NULL
+      -- Done in house by a competent person (lib/certificateOutcomes.ts).
+      AND v.visit_day IS DISTINCT FROM v.in_house_day
       AND v.visit_day <= ${today}::date - ${afterDays}::int
       ${lookBackDays == null ? sql`` : sql`AND v.visit_day > ${today}::date - ${lookBackDays}::int`}
       AND NOT EXISTS (
