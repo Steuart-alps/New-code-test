@@ -24,10 +24,11 @@ import { getApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // GreenTrack spraying book and stock. Products (pesticides, fertiliser, top
 // dressing...) have stock worked out by the server from deliveries, counts,
-// write-offs and the spraying records that use them.
+// write-offs, quantities used and the spraying records that use them.
 
 export const PRODUCT_CATEGORY_LABELS: Record<string, string> = {
   pesticide: "Pesticide (plant protection product)",
@@ -52,8 +53,11 @@ const AREA_LABELS: Record<string, string> = {
   bunkers: "Bunkers", rough: "Rough", practice: "Practice area", other: "Other",
 };
 const MOVEMENT_LABELS: Record<string, string> = {
-  delivery: "Delivery", count: "Stock count", write_off: "Write-off", application: "Used",
+  delivery: "Delivery", count: "Stock count", write_off: "Write-off", use: "Used", application: "Applied",
 };
+
+/** Stock records other than spraying records. "use" is refused for pesticides. */
+type MovementKind = "delivery" | "count" | "write_off" | "use";
 
 export interface GreenProduct {
   id: number;
@@ -74,7 +78,7 @@ export interface GreenProduct {
 
 interface LedgerEntry {
   key: string;
-  kind: "delivery" | "count" | "write_off" | "application";
+  kind: MovementKind | "application";
   date: string;
   change: number;
   balance: number;
@@ -89,7 +93,7 @@ interface StockMovement {
   id: number;
   productId: number;
   movementDate: string;
-  kind: "delivery" | "count" | "write_off";
+  kind: MovementKind;
   quantity: number;
   countedQuantity: number | null;
   supplier: string | null;
@@ -196,17 +200,20 @@ function ProductDialog({ open, onClose, product }: { open: boolean; onClose: () 
   const { toast } = useToast();
   const api = useJsonApi();
   const invalidate = useInvalidateSpraying();
-  const blank = { name: "", category: "pesticide", unit: "L", mappNumber: "", activeIngredient: "", supplier: "", reorderLevel: "", notes: "" };
+  const blank = { name: "", category: "pesticide", unit: "L", mappNumber: "", activeIngredient: "", supplier: "", reorderLevel: "", notes: "", openingStock: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
   const reset = () => setForm(product ? {
     name: product.name, category: product.category, unit: product.unit, mappNumber: product.mappNumber ?? "",
     activeIngredient: product.activeIngredient ?? "", supplier: product.supplier ?? "",
-    reorderLevel: product.reorderLevel == null ? "" : String(product.reorderLevel), notes: product.notes ?? "",
+    reorderLevel: product.reorderLevel == null ? "" : String(product.reorderLevel), notes: product.notes ?? "", openingStock: "",
   } : blank);
 
   const save = async () => {
     if (!form.name.trim()) { toast({ title: "Enter the product name", variant: "destructive" }); return; }
+    if (!product && form.openingStock.trim() !== "" && !(Number(form.openingStock) >= 0)) {
+      toast({ title: "Enter the amount in stock now as a number", variant: "destructive" }); return;
+    }
     setSaving(true);
     try {
       const body = {
@@ -214,6 +221,8 @@ function ProductDialog({ open, onClose, product }: { open: boolean; onClose: () 
         mappNumber: form.mappNumber.trim() || null, activeIngredient: form.activeIngredient.trim() || null,
         supplier: form.supplier.trim() || null, reorderLevel: form.reorderLevel === "" ? null : Number(form.reorderLevel),
         notes: form.notes.trim() || null,
+        // Saved as today's stock count, so use comes off it from the start.
+        ...(!product && form.openingStock.trim() !== "" ? { openingStock: Number(form.openingStock) } : {}),
       };
       await api(product ? `/green-track/products/${product.id}` : "/green-track/products", {
         method: product ? "PUT" : "POST", body: JSON.stringify(body),
@@ -269,6 +278,15 @@ function ProductDialog({ open, onClose, product }: { open: boolean; onClose: () 
               </div>
             </div>
           )}
+          {!product && (
+            <div>
+              <Label>Amount in stock now <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Input type="number" min="0" step="any" inputMode="decimal" className="mt-1 rounded-sm" value={form.openingStock}
+                data-testid="input-opening-stock" placeholder={`in ${form.unit}`}
+                onChange={e => setForm(f => ({ ...f, openingStock: e.target.value }))} />
+              <p className="text-xs text-muted-foreground mt-1">What you have on the shelf today. Spraying records and quantities used come off it.</p>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Supplier <span className="text-muted-foreground text-xs">optional</span></Label>
@@ -297,11 +315,11 @@ function ProductDialog({ open, onClose, product }: { open: boolean; onClose: () 
   );
 }
 
-// ─── Delivery / stock count / write-off dialog ────────────────────────────────
+// ─── Delivery / stock count / write-off / used dialog ─────────────────────────
 
 function StockMovementDialog({ open, onClose, kind, products, presetProductId, movement }: {
   open: boolean; onClose: () => void;
-  kind: "delivery" | "count" | "write_off";
+  kind: MovementKind;
   products: GreenProduct[];
   presetProductId?: number;
   movement?: StockMovement | null;
@@ -320,7 +338,7 @@ function StockMovementDialog({ open, onClose, kind, products, presetProductId, m
     recordedBy: movement.recordedBy ?? "", recordedByRosterId: movement.recordedByRosterId, notes: movement.notes ?? "",
   } : { ...blank, productId: presetProductId ? String(presetProductId) : "" });
 
-  const title = { delivery: "Log Delivery", count: "Stock Count", write_off: "Write Off Stock" }[kind];
+  const title = { delivery: "Log Delivery", count: "Stock Count", write_off: "Write Off Stock", use: "Log Quantity Used" }[kind];
   const save = async () => {
     if (!form.productId) { toast({ title: "Select a product", variant: "destructive" }); return; }
     const amount = Number(form.quantity);
@@ -340,7 +358,7 @@ function StockMovementDialog({ open, onClose, kind, products, presetProductId, m
       await api(movement ? `/green-track/stock-movements/${movement.id}` : "/green-track/stock-movements", {
         method: movement ? "PUT" : "POST", body: JSON.stringify(body),
       });
-      toast({ title: { delivery: "Delivery logged", count: "Stock count saved", write_off: "Stock written off" }[kind] });
+      toast({ title: { delivery: "Delivery logged", count: "Stock count saved", write_off: "Stock written off", use: "Taken off stock" }[kind] });
       invalidate(); onClose();
     } catch (err: any) {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });
@@ -357,7 +375,7 @@ function StockMovementDialog({ open, onClose, kind, products, presetProductId, m
             <Select value={form.productId || "_none"} disabled={!!movement} onValueChange={v => setForm(f => ({ ...f, productId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm" data-testid="select-stock-product"><SelectValue placeholder="Select product" /></SelectTrigger>
               <SelectContent>
-                {sortByLabel(products.filter(p => p.active || String(p.id) === form.productId), p => p.name).map(p => (
+                {sortByLabel(products.filter(p => (p.active && !(kind === "use" && p.category === "pesticide")) || String(p.id) === form.productId), p => p.name).map(p => (
                   <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -373,7 +391,7 @@ function StockMovementDialog({ open, onClose, kind, products, presetProductId, m
                 onChange={e => setForm(f => ({ ...f, movementDate: e.target.value }))} />
             </div>
             <div>
-              <Label>{kind === "count" ? "Quantity counted *" : kind === "delivery" ? "Quantity delivered *" : "Quantity written off *"}</Label>
+              <Label>{{ count: "Quantity counted *", delivery: "Quantity delivered *", write_off: "Quantity written off *", use: "Quantity used *" }[kind]}</Label>
               <Input type="number" min="0" step="any" inputMode="decimal" className="mt-1 rounded-sm" value={form.quantity}
                 data-testid="input-stock-quantity" placeholder={product ? `in ${product.unit}` : ""}
                 onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} />
@@ -409,9 +427,9 @@ function StockMovementDialog({ open, onClose, kind, products, presetProductId, m
               onRosterIdChange={v => setForm(f => ({ ...f, recordedByRosterId: v }))} />
           </div>
           <div>
-            <Label>{kind === "write_off" ? "Reason" : "Notes"} <span className="text-muted-foreground text-xs">optional</span></Label>
+            <Label>{kind === "write_off" ? "Reason" : kind === "use" ? "What it was used for" : "Notes"} <span className="text-muted-foreground text-xs">optional</span></Label>
             <Textarea className="mt-1 rounded-sm" rows={2} value={form.notes}
-              placeholder={kind === "write_off" ? "e.g. spilt, out of date, returned to supplier" : ""}
+              placeholder={kind === "write_off" ? "e.g. spilt, out of date, returned to supplier" : kind === "use" ? "e.g. divot mix on the tees, overseeding the 3rd green" : ""}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
         </div>
@@ -516,7 +534,11 @@ function ProductHistoryDialog({ product, onClose, canAdmin, onEditMovement }: {
 
 // ─── Stock tab ────────────────────────────────────────────────────────────────
 
-export function GreenStockTab({ q, canAdmin }: { q: string; canAdmin: boolean }) {
+export function GreenStockTab({ q, canAdmin, onRecordSpraying }: {
+  q: string; canAdmin: boolean;
+  /** Pesticide use goes in the spraying book: opens a new spraying record for the product. */
+  onRecordSpraying: (productId: number) => void;
+}) {
   const { toast } = useToast();
   const api = useJsonApi();
   const invalidate = useInvalidateSpraying();
@@ -524,7 +546,7 @@ export function GreenStockTab({ q, canAdmin }: { q: string; canAdmin: boolean })
   const [showArchived, setShowArchived] = useState(false);
   const [productDialog, setProductDialog] = useState(false);
   const [editProduct, setEditProduct] = useState<GreenProduct | null>(null);
-  const [movementKind, setMovementKind] = useState<"delivery" | "count" | "write_off" | null>(null);
+  const [movementKind, setMovementKind] = useState<MovementKind | null>(null);
   const [movementProductId, setMovementProductId] = useState<number | undefined>();
   const [editMovement, setEditMovement] = useState<StockMovement | null>(null);
   const [historyProduct, setHistoryProduct] = useState<GreenProduct | null>(null);
@@ -534,7 +556,7 @@ export function GreenStockTab({ q, canAdmin }: { q: string; canAdmin: boolean })
     && (p.name.toLowerCase().includes(q) || (p.mappNumber ?? "").toLowerCase().includes(q) || (p.supplier ?? "").toLowerCase().includes(q)));
   const archivedCount = products.filter(p => !p.active).length;
 
-  const openMovement = (kind: "delivery" | "count" | "write_off", productId?: number) => {
+  const openMovement = (kind: MovementKind, productId?: number) => {
     setEditMovement(null); setMovementProductId(productId); setMovementKind(kind);
   };
   const editMovementById = async (movementId: number) => {
@@ -572,7 +594,7 @@ export function GreenStockTab({ q, canAdmin }: { q: string; canAdmin: boolean })
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-muted-foreground bg-muted/40 rounded-sm px-3 py-2 flex items-start gap-2 flex-1 min-w-[16rem]">
           <Package className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-          <span>Log deliveries as they arrive. Spraying records take what was used off stock, and a stock count corrects the figure.</span>
+          <span>Log deliveries as they arrive and press Used to take off what was used (pesticides go in the spraying book). A stock count sets the figure to what is on the shelf.</span>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8" onClick={() => openMovement("count")} disabled={!products.length}>
@@ -604,7 +626,7 @@ export function GreenStockTab({ q, canAdmin }: { q: string; canAdmin: boolean })
                 <th className="text-right font-medium px-3 py-2">In stock</th>
                 <th className="text-right font-medium px-3 py-2 hidden sm:table-cell">Re-order at</th>
                 <th className="text-left font-medium px-3 py-2 hidden lg:table-cell">Last delivery</th>
-                <th className="w-48" />
+                <th className="w-64" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -627,6 +649,9 @@ export function GreenStockTab({ q, canAdmin }: { q: string; canAdmin: boolean })
                     {p.active && (
                       <>
                         <Button size="sm" variant="outline" className="h-7 text-xs rounded-sm mr-1" onClick={() => openMovement("delivery", p.id)}>Delivery</Button>
+                        <Button size="sm" variant="outline" className="h-7 text-xs rounded-sm mr-1" data-testid={`button-used-${p.id}`}
+                          title={p.category === "pesticide" ? "Record the spray in the spraying book" : "Take the quantity used off stock"}
+                          onClick={() => p.category === "pesticide" ? onRecordSpraying(p.id) : openMovement("use", p.id)}>Used</Button>
                         <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Write off stock" title="Write off (spilt, out of date)" onClick={() => openMovement("write_off", p.id)}>
                           <Minus className="w-3.5 h-3.5" />
                         </Button>
@@ -686,10 +711,11 @@ export function GreenStockTab({ q, canAdmin }: { q: string; canAdmin: boolean })
 
 interface ProductLine { productId: string; rate: string; quantity: string }
 
-function ApplicationDialog({ open, onClose, application, machines, products, recent, presetMachineId }: {
+function ApplicationDialog({ open, onClose, application, machines, products, recent, presetMachineId, presetProductId }: {
   open: boolean; onClose: () => void;
   application: GreenApplication | null;
   presetMachineId?: number;
+  presetProductId?: number;
   machines: MachineOption[];
   products: GreenProduct[];
   recent: GreenApplication[];
@@ -723,7 +749,7 @@ function ApplicationDialog({ open, onClose, application, machines, products, rec
       setLines(application.products.map(p => ({ productId: String(p.productId), rate: str(p.ratePerHectare), quantity: String(p.quantityUsed) })));
     } else {
       setForm({ ...blank, machineId: presetMachineId ? String(presetMachineId) : "" });
-      setLines([{ productId: "", rate: "", quantity: "" }]);
+      setLines([{ productId: presetProductId ? String(presetProductId) : "", rate: "", quantity: "" }]);
     }
   };
 
@@ -993,8 +1019,8 @@ function downloadSprayingBook(applications: GreenApplication[]) {
 
 export function GreenSprayingTab({ q, canAdmin, machines, openNew, onOpenNewHandled }: {
   q: string; canAdmin: boolean; machines: MachineOption[];
-  /** A machine chosen from a QR label scan; opens a new record for it. */
-  openNew?: { machineId?: number } | null;
+  /** A machine chosen from a QR label scan, or a product's Used button on the Stock tab; opens a new record for it. */
+  openNew?: { machineId?: number; productId?: number } | null;
   onOpenNewHandled?: () => void;
 }) {
   const { activeClientId } = useAuth();
@@ -1010,10 +1036,11 @@ export function GreenSprayingTab({ q, canAdmin, machines, openNew, onOpenNewHand
   const [editing, setEditing] = useState<GreenApplication | null>(null);
   const [deleting, setDeleting] = useState<GreenApplication | null>(null);
   const [presetMachine, setPresetMachine] = useState<number | undefined>();
+  const [presetProduct, setPresetProduct] = useState<number | undefined>();
 
   useEffect(() => {
     if (!openNew) return;
-    setEditing(null); setPresetMachine(openNew.machineId); setDialog(true); onOpenNewHandled?.();
+    setEditing(null); setPresetMachine(openNew.machineId); setPresetProduct(openNew.productId); setDialog(true); onOpenNewHandled?.();
   }, [openNew]);
 
   const shown = useMemo(() => applications.filter(a =>
@@ -1046,7 +1073,7 @@ export function GreenSprayingTab({ q, canAdmin, machines, openNew, onOpenNewHand
           <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8" disabled={!shown.length} onClick={() => downloadSprayingBook(shown)}>
             <Download className="w-3.5 h-3.5" /> Download
           </Button>
-          <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditing(null); setPresetMachine(undefined); setDialog(true); }} data-testid="button-record-spraying">
+          <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditing(null); setPresetMachine(undefined); setPresetProduct(undefined); setDialog(true); }} data-testid="button-record-spraying">
             <Plus className="w-3.5 h-3.5" /> Record spraying
           </Button>
         </div>
@@ -1093,6 +1120,7 @@ export function GreenSprayingTab({ q, canAdmin, machines, openNew, onOpenNewHand
                   <td className="px-3 py-2 hidden md:table-cell align-top">
                     {a.operatorName ?? "—"}
                     {a.operatorCertificate && <p className="text-xs text-muted-foreground">{a.operatorCertificate}</p>}
+                    <RecordSignedBy recordType="green_application" recordId={a.id} compact className="mt-1 flex" />
                   </td>
                   <td className="px-3 py-2 hidden lg:table-cell text-muted-foreground align-top">{a.reason ?? "—"}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap align-top">
@@ -1112,8 +1140,8 @@ export function GreenSprayingTab({ q, canAdmin, machines, openNew, onOpenNewHand
         </div>
       )}
 
-      <ApplicationDialog open={dialog} onClose={() => { setDialog(false); setEditing(null); setPresetMachine(undefined); }}
-        application={editing} presetMachineId={presetMachine} machines={machines} products={products} recent={applications} />
+      <ApplicationDialog open={dialog} onClose={() => { setDialog(false); setEditing(null); setPresetMachine(undefined); setPresetProduct(undefined); }}
+        application={editing} presetMachineId={presetMachine} presetProductId={presetProduct} machines={machines} products={products} recent={applications} />
       <AlertDialog open={!!deleting} onOpenChange={v => !v && setDeleting(null)}>
         <AlertDialogContent className="rounded-sm">
           <AlertDialogHeader>

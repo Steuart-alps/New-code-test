@@ -90,6 +90,7 @@ function SetupGuide() {
       {open && (
         <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
           <li><span className="font-medium text-foreground">Check your items are listed.</span> Mowers, fridges, outlets, call points, hot tubs, bikes, rooms and PAT items come from their tracks automatically. Add anything else (boilers, water tanks, calorifiers, lifts, extinguishers) on the Equipment list tab.</li>
+          <li><span className="font-medium text-foreground">Add labels for each track's checks.</span> Every track you have gets labels for each site too: opening and closing checks, kitchen records, greenkeeping daily checks, the fire log, water and pool tests, COSHH register, report a fault, report an accident and the rest. Stick them where the work happens, such as the opening checks by the staff entrance or the COSHH register on the chemical store door.</li>
           <li><span className="font-medium text-foreground">Link the checks that keep it in date.</span> Edit a boiler or lift and tick its gas safety, service or LOLER Compliance Checks.</li>
           <li><span className="font-medium text-foreground">Print a label sheet.</span> On the Print labels tab, pick a site, tick the items and download the PDF. Print it at 100% (actual size) on A4 label sheets: 21 per sheet for indoor items, or 8 larger weatherproof labels per sheet for machines and plant rooms.</li>
           <li><span className="font-medium text-foreground">Stick each label on its item</span> where it is easy to scan and out of heat and water spray. Scan one with your phone camera to check it opens the right item.</li>
@@ -569,7 +570,7 @@ export default function EquipmentPage() {
       <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold">Equipment & QR labels</h1>
-          <p className="text-sm text-muted-foreground">Put a QR label on every item. A phone scan shows whether it is in date and opens today's check, reading or fault report.</p>
+          <p className="text-sm text-muted-foreground">Put a QR label on every item and by each track's checks. A phone scan shows whether it is in date and opens today's check, reading or fault report.</p>
         </div>
         <SetupGuide />
         <div className="flex flex-wrap items-center gap-2">

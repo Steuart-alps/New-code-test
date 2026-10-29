@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { takeLinkParams } from "@/lib/deep-link";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -58,6 +58,8 @@ import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/c
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { GreenDailyChecksTab } from "@/components/green-daily-checks";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -104,7 +106,7 @@ function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): 
   try { return JSON.parse(raw) as T[]; } catch { return fallback; }
 }
 
-function GreenConfigDialog() {
+function GreenConfigDialog({ sites }: { sites: { id: number; name: string }[] }) {
   const [open, setOpen] = useState(false);
   const { data: config } = useGetGreenTrackConfig();
   const { toast } = useToast();
@@ -114,11 +116,13 @@ function GreenConfigDialog() {
   const [defaultOperators, setDefaultOperators] = useState<string[]>([]);
   const newRow = useFocusNewRow();
   const [showFuel, setShowFuel] = useState(true);
+  const [defaultSiteId, setDefaultSiteId] = useState("");
 
   useEffect(() => {
     if (!config || !open) return;
     setDefaultOperators(parseJsonArray<string>(config.green_default_operators));
     setShowFuel(config.green_show_fuel !== "false");
+    setDefaultSiteId(config.green_default_site_id ?? "");
   }, [config, open]);
 
   const handleSave = () => {
@@ -127,6 +131,7 @@ function GreenConfigDialog() {
         data: {
           green_default_operators: JSON.stringify(defaultOperators.filter(Boolean)),
           green_show_fuel: showFuel ? "true" : "false",
+          green_default_site_id: defaultSiteId,
         },
       },
       {
@@ -151,9 +156,22 @@ function GreenConfigDialog() {
       <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>GreenTrack Template</DialogTitle>
-          <p className="text-sm text-muted-foreground mt-1">Configure defaults for pre-use checks.</p>
+          <p className="text-sm text-muted-foreground mt-1">Defaults for GreenTrack and its pre-use checks.</p>
         </DialogHeader>
         <div className="space-y-4 py-1">
+          {sites.length > 0 && (
+            <div className="space-y-2">
+              <Label>Default site</Label>
+              <p className="text-xs text-muted-foreground">Where the greenkeeping shed is. New machines and the Daily checks tab start on this site.</p>
+              <Select value={defaultSiteId || "_none"} onValueChange={v => setDefaultSiteId(v === "_none" ? "" : v)}>
+                <SelectTrigger className="h-8 rounded-sm text-sm" data-testid="select-green-default-site"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">No default site</SelectItem>
+                  {sortByLabel(sites, site => site.name).map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div ref={newRow.ref} className="space-y-2">
             <Label>Default operators</Label>
             <p className="text-xs text-muted-foreground">These appear as suggestions in the operator field on pre-use checks.</p>
@@ -195,6 +213,8 @@ function GreenConfigDialog() {
 const MACHINE_TYPE_LABELS: Record<string, string> = {
   ride_on_cylinder:  "Ride-on (cylinder)",
   ride_on_rotary:    "Ride-on (rotary)",
+  greens_mower_ride_on: "Greens mower – ride-on",
+  greens_mower_hand: "Greens mower – hand",
   ride_on:           "Ride-on equipment",
   pedestrian:        "Pedestrian equipment",
   fairway_mower:     "Fairway mower",
@@ -462,11 +482,13 @@ function DefectStatusBadge({ status }: { status: string }) {
 // ─── Machine dialog ───────────────────────────────────────────────────────────
 
 function MachineDialog({
-  open, onClose, machine, sites, onSaved,
+  open, onClose, machine, sites, defaultSiteId, onSaved,
 }: {
   open: boolean; onClose: () => void;
   machine?: Machine | null;
   sites: { id: number; name: string }[];
+  /** The site a new machine starts on (the Template's default site). */
+  defaultSiteId: number | null;
   onSaved: () => void;
 }) {
   const { toast } = useToast();
@@ -484,7 +506,7 @@ function MachineDialog({
     siteId: machine.siteId ? String(machine.siteId) : "",
     active: machine.active, notes: machine.notes ?? "",
     sprayerCategory: machine.sprayerCategory ?? "", purchaseDate: isoDay(machine.purchaseDate) ?? "",
-  } : blank);
+  } : { ...blank, siteId: defaultSiteId ? String(defaultSiteId) : "" });
 
   const handleSave = async () => {
     if (!form.name.trim()) { toast({ title: "Machine name is required", variant: "destructive" }); return; }
@@ -691,25 +713,37 @@ function parseMachineRoster(
   return { rows, errors };
 }
 
-async function downloadMachineRosterTemplate() {
+/** The example rows carry the default site, so a list filled in from them lands there. */
+async function downloadMachineListTemplate(siteName: string) {
   const { downloadExcel } = await import("@/lib/spreadsheet");
   downloadExcel("greentrack-equipment-template.xlsx", "Equipment", [
     ["name", "type", "make", "model", "serial_no", "reg_no", "year", "site", "notes", "active"],
-    ["Greens mower 1", "ride-on", "Toro", "Reelmaster 5010", "RM-001", "GT-01", "2021", "", "Main cutting unit", "true"],
-    ["Pedestrian mower 1", "pedestrian", "Honda", "HRX 537", "PM-001", "GT-02", "2022", "", "Walk-behind mower", "true"],
+    ["Greens mower 1", "greens mower - ride on", "Toro", "Greensmaster 3150", "GM-001", "GT-01", "2021", siteName, "Triple greens mower", "true"],
+    ["Greens mower 2", "greens mower - hand", "Toro", "Greensmaster 1000", "GM-002", "GT-02", "2022", siteName, "Hand greens mower", "true"],
+    ["Fairway mower 1", "fairway", "John Deere", "7500A", "FM-001", "GT-03", "2020", siteName, "", "true"],
   ]);
 }
 
-function MachineImportDialog({
-  open, onClose, sites, onImported,
+export function MachineImportDialog({
+  open, onClose, sites, defaultSiteId, onImported, initialFile,
 }: {
   open: boolean;
   onClose: () => void;
   sites: { id: number; name: string }[];
+  /** The Template's default site; rows that name no site go here unless changed. */
+  defaultSiteId: number | null;
   onImported: () => void;
+  /** A file chosen before the dialog opened ("Upload your lists"), read as soon as it opens. */
+  initialFile?: File | null;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
+  const [blankSiteId, setBlankSiteId] = useState("");
+  useEffect(() => {
+    if (open) setBlankSiteId(defaultSiteId ? String(defaultSiteId) : "");
+  }, [open, defaultSiteId]);
+  const blankSite = blankSiteId ? Number(blankSiteId) : null;
+  const siteOf = (row: MachineImportRow) => row.siteId ?? blankSite;
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<MachineImportRow[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -775,16 +809,23 @@ function MachineImportDialog({
   };
 
   usePastedFile(open && !readingList && !importing, file => void handleFile(file));
+  const startedWith = useRef<File | null>(null);
+  useEffect(() => {
+    if (!open) { startedWith.current = null; return; }
+    if (!initialFile || !reading.loaded || startedWith.current === initialFile) return;
+    startedWith.current = initialFile;
+    void handleFile(initialFile);
+  }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleImport = async () => {
     setImporting(true);
     try {
       const result = await apiFetch<{ imported: number; skipped: Array<{ name: string; reason: string }> }>(
         "/green-track/machines/import",
-        { method: "POST", body: JSON.stringify({ rows }) },
+        { method: "POST", body: JSON.stringify({ rows: rows.map(row => ({ ...row, siteId: siteOf(row) })) }) },
       );
       toast({
-        title: "Equipment roster imported",
+        title: "Equipment list imported",
         description: `${result.imported} added${result.skipped.length ? `, ${result.skipped.length} already in the fleet` : ""}.`,
       });
       onImported();
@@ -801,25 +842,38 @@ function MachineImportDialog({
     <Dialog open={open} onOpenChange={value => { if (!value && !importing) { onClose(); reset(); } }}>
       <DialogContent className="max-w-2xl rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Upload equipment roster</DialogTitle>
+          <DialogTitle>Upload equipment list</DialogTitle>
           <p className="text-sm text-muted-foreground">
             Import the account&apos;s equipment list once, then staff can select the active machines in GreenTrack.
           </p>
         </DialogHeader>
         <div className="space-y-4 py-1">
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" size="sm" className="gap-1.5 rounded-sm" onClick={downloadMachineRosterTemplate}>
+            <Button type="button" variant="outline" size="sm" className="gap-1.5 rounded-sm"
+              onClick={() => void downloadMachineListTemplate(sites.find(site => site.id === blankSite)?.name ?? "")}>
               <Download className="w-3.5 h-3.5" /> Download Excel template
             </Button>
             {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
             {readingList && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> Reading your list… this can take a minute</span>}
           </div>
+          {sites.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Label className="text-sm font-normal">Site for machines with no site</Label>
+              <Select value={blankSiteId || "_none"} onValueChange={v => setBlankSiteId(v === "_none" ? "" : v)}>
+                <SelectTrigger className="h-8 w-56 rounded-sm text-sm" data-testid="select-machine-import-site"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">No site</SelectItem>
+                  {sortByLabel(sites, site => site.name).map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <SpreadsheetDropZone onFile={file => void handleFile(file)} aiReading={reading.canRead && !readingList} testId="input-machine-roster-file" className="rounded-sm" />
           <ListReadingPanel reading={reading} kind="greentrack-equipment" noun="machines" disabled={readingList} onFile={file => void handleListFile(file)} onSpreadsheet={file => void handleFile(file)} />
           {readFromList && <ListReadNote result={readFromList} noun="machines" one="machine" kind="greentrack-equipment" onDownload={() => void downloadReadRows()} />}
           <p className="text-xs text-muted-foreground">
             Required columns: <strong>name</strong> and <strong>type</strong>. Supported broad types include
-            <strong> ride-on</strong>, <strong>pedestrian</strong>, tractor, utility, and other approved GreenTrack types.
+            <strong> greens mower - ride on</strong>, <strong>greens mower - hand</strong>, <strong>ride-on</strong>, <strong>pedestrian</strong>, tractor, utility, and other approved GreenTrack types.
             Optional columns include make, model, serial number, fleet number, year, site, notes, and active.
             Use names staff would say, such as &quot;Fairway mower 1&quot;, so they can open a machine&apos;s pre-use check by saying its name.
           </p>
@@ -846,7 +900,7 @@ function MachineImportDialog({
                         <td className="px-3 py-2 font-medium">{row.name}</td>
                         <td className="px-3 py-2">{MACHINE_TYPE_LABELS[row.type.toLowerCase()] ?? row.type}</td>
                         <td className="px-3 py-2 text-muted-foreground">{row.serialNo ?? row.regNo ?? "—"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{sites.find(site => site.id === row.siteId)?.name ?? "—"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{sites.find(site => site.id === siteOf(row))?.name ?? "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -2078,7 +2132,7 @@ export default function GreenTrackPage() {
   const [deleteId, setDeleteId] = useState<{ type: string; id: number } | null>(null);
   // A machine chosen by a scanned QR label, for the form the label opened.
   const [scanMachineId, setScanMachineId] = useState<string | undefined>();
-  const [sprayingFromScan, setSprayingFromScan] = useState<{ machineId?: number } | null>(null);
+  const [sprayingFromScan, setSprayingFromScan] = useState<{ machineId?: number; productId?: number } | null>(null);
   const [sayMachineDialog, setSayMachineDialog] = useState(false);
   const [spoken, setSpoken] = useState<{ notes: string; description?: string; hours?: string; quantityLitres?: string } | null>(null);
   // The site the Daily checks tab opens on (a dashboard or reminder link).
@@ -2233,6 +2287,15 @@ export default function GreenTrackPage() {
 
   const { data: greenConfig } = useGetGreenTrackConfig();
   const showFuelTab = greenConfig?.green_show_fuel !== "false";
+  // The Template's default site (where the shed is), else the site the user
+  // is working at, else the only site.
+  const workingSiteId = useWorkingSiteId();
+  const defaultSiteId = useMemo(() => {
+    const chosen = Number(greenConfig?.green_default_site_id || 0);
+    if (sites.some(site => site.id === chosen)) return chosen;
+    if (workingSiteId && sites.some(site => site.id === workingSiteId)) return workingSiteId;
+    return sites.length === 1 ? sites[0].id : null;
+  }, [greenConfig?.green_default_site_id, sites, workingSiteId]);
 
   const TABS: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: "daily",    label: "Daily checks", icon: Sunrise },
@@ -2360,6 +2423,8 @@ export default function GreenTrackPage() {
           </div>
         )}
 
+        <TrackContractorChecks module="green" />
+
         {/* ── Tabs + toolbar ────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex gap-1 rounded-sm border border-border overflow-hidden">
@@ -2402,7 +2467,7 @@ export default function GreenTrackPage() {
             {activeTab === "fleet" && canAdmin && (
               <>
                 <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8" onClick={() => setMachineImportDialog(true)}>
-                  <Upload className="w-3.5 h-3.5" /> Upload roster
+                  <Upload className="w-3.5 h-3.5" /> Upload equipment list
                 </Button>
                 <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditMachine(null); setMachineDialog(true); }}>
                   <Plus className="w-3.5 h-3.5" /> Add machine
@@ -2446,14 +2511,14 @@ export default function GreenTrackPage() {
                 <Plus className="w-3.5 h-3.5" /> Log fuel/oil
               </Button>
             )}
-            {canAdmin && <GreenConfigDialog />}
+            {canAdmin && <GreenConfigDialog sites={sites} />}
           </div>
         </div>
 
         {/* ── Daily checks tab ──────────────────────────────────────────── */}
         {activeTab === "daily" && (
           <GreenDailyChecksTab
-            initialSiteId={dailySiteId}
+            initialSiteId={dailySiteId ?? defaultSiteId}
             onCheckMachine={(machineId) => { setEditPreUse(null); setScanMachineId(String(machineId)); setPreUseDialog(true); }}
           />
         )}
@@ -2645,6 +2710,7 @@ export default function GreenTrackPage() {
                           )}
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell">
+                          <RecordSignedBy recordType="green_pre_use_check" recordId={c.id} compact className="mb-1" />
                           <CheckPhotoUploader entityType="green_pre_use_check" entityId={c.id} compact
                             required={photoRequirements.requirements.green_pre_use_check?.required ?? false}
                             minPhotos={photoRequirements.requirements.green_pre_use_check?.minPhotos ?? 1} />
@@ -2747,6 +2813,7 @@ export default function GreenTrackPage() {
                             {s.costPence ? `£${(s.costPence / 100).toFixed(2)}` : "—"}
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
+                            <RecordSignedBy recordType="green_service_record" recordId={s.id} compact className="mb-1" />
                             <CheckPhotoUploader entityType="green_service" entityId={s.id} compact
                               required={photoRequirements.requirements.green_service?.required ?? false}
                               minPhotos={photoRequirements.requirements.green_service?.minPhotos ?? 1} />
@@ -2918,6 +2985,7 @@ export default function GreenTrackPage() {
                           </td>
                           <td className="py-2 pr-4 text-muted-foreground hidden lg:table-cell">
                             {p.inspectorName ?? "—"}{p.inspectorCompany ? ` (${p.inspectorCompany})` : ""}
+                            <RecordSignedBy recordType="green_puwer_inspection" recordId={p.id} compact className="mt-1 flex" />
                           </td>
                           <td className="py-2 pr-4">
                             <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
@@ -3054,17 +3122,20 @@ export default function GreenTrackPage() {
             openNew={sprayingFromScan} onOpenNewHandled={() => setSprayingFromScan(null)} />
         )}
 
-        {activeTab === "stock" && <GreenStockTab q={q} canAdmin={canAdmin} />}
+        {activeTab === "stock" && (
+          <GreenStockTab q={q} canAdmin={canAdmin}
+            onRecordSpraying={productId => { setActiveTab("spraying"); setSprayingFromScan({ productId }); }} />
+        )}
 
         {activeTab === "actions" && (
           <ModuleActionsPanel moduleKey="green" />
         )}
 
       <MachineImportDialog open={machineImportDialog} onClose={() => setMachineImportDialog(false)}
-        sites={sites} onImported={invalidate} />
+        sites={sites} defaultSiteId={defaultSiteId} onImported={invalidate} />
 
       <MachineDialog open={machineDialog} onClose={() => { setMachineDialog(false); setEditMachine(null); }}
-        machine={editMachine} sites={sites} onSaved={invalidate} />
+        machine={editMachine} sites={sites} defaultSiteId={defaultSiteId} onSaved={invalidate} />
 
       <SpeakToPickDialog open={sayMachineDialog} onClose={() => setSayMachineDialog(false)}
         title="Say the machine"

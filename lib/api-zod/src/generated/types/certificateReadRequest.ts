@@ -11,7 +11,7 @@ export interface CertificateReadRequest {
   fileName: string;
   /** application/pdf, image/jpeg, image/png, image/webp, image/gif, .docx or text/plain */
   mimeType: string;
-  /** The file as base64 (15 MB at most before encoding) */
+  /** The file as base64 (20 MB at most before encoding) */
   data: string;
   /** The check the certificate is for, when the person opened the reader from one */
   itemId?: number | null;

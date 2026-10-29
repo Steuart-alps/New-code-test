@@ -14,7 +14,7 @@ export interface GreenTrackStockMovement {
   unit: string;
   movementDate: Date;
   kind: GreenTrackStockMovementKind;
-  /** Signed change (a write-off is negative; a count is 0) */
+  /** Signed change (a write-off or use is negative; a count is 0) */
   quantity: number;
   countedQuantity?: number | null;
   supplier?: string | null;

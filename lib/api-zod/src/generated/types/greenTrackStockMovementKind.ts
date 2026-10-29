@@ -13,4 +13,5 @@ export const GreenTrackStockMovementKind = {
   delivery: 'delivery',
   count: 'count',
   write_off: 'write_off',
+  use: 'use',
 } as const;

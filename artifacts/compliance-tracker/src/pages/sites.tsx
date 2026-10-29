@@ -15,7 +15,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, Building2, MapPin, Phone, User, ChevronRight, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Building2, MapPin, Phone, User, ChevronRight, Search, BedDouble } from "lucide-react";
+import { SiteFireWalkQuestions, fireWalkSummary } from "@/components/site-fire-walk-questions";
 
 const NO_DEPT = "__none__";
 
@@ -38,8 +39,13 @@ interface FormState {
   phone: string;
   seedStarterChecks: boolean;
   departmentId: number | null;
+  sleepingAccommodation: boolean | null;
+  nightPorter: boolean | null;
 }
-const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: false, departmentId: null };
+const empty: FormState = {
+  name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: false, departmentId: null,
+  sleepingAccommodation: null, nightPorter: null,
+};
 
 export default function SitesPage() {
   const { data: sites = [], isLoading } = useListSites();
@@ -94,6 +100,8 @@ export default function SitesPage() {
       phone: s.phone ?? "",
       seedStarterChecks: false,
       departmentId: s.departmentId ?? null,
+      sleepingAccommodation: s.sleepingAccommodation ?? null,
+      nightPorter: s.nightPorter ?? null,
     });
     setIsOpen(true);
   };
@@ -107,6 +115,8 @@ export default function SitesPage() {
       address: form.address.trim() || null,
       phone: form.phone.trim() || null,
       departmentId: form.departmentId,
+      sleepingAccommodation: form.sleepingAccommodation,
+      nightPorter: form.nightPorter,
     };
     if (editingId) {
       await updateSite.mutateAsync({ id: editingId, data: basePayload });
@@ -208,6 +218,7 @@ export default function SitesPage() {
                 {site.address && <div className="flex items-start gap-2"><MapPin className="w-3.5 h-3.5 opacity-60 mt-0.5" /><span className="line-clamp-2">{site.address}</span></div>}
                 {site.phone && <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 opacity-60" />{site.phone}</div>}
                 {!site.responsiblePerson && !site.address && !site.phone && <p className="italic text-xs opacity-60">No site details set yet.</p>}
+                {fireWalkSummary(site) && <div className="flex items-start gap-2 text-xs"><BedDouble className="w-3.5 h-3.5 opacity-60 mt-0.5" /><span>{fireWalkSummary(site)}</span></div>}
               </div>
 
               <Link href={`/sites/${site.id}`} className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline font-medium">
@@ -239,6 +250,11 @@ export default function SitesPage() {
             <div className="space-y-1.5">
               <Label>Site Telephone</Label>
               <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 0161 496 1234" />
+            </div>
+
+            <div className="rounded-md border border-border p-3">
+              <SiteFireWalkQuestions idPrefix="site-form" value={{ sleepingAccommodation: form.sleepingAccommodation, nightPorter: form.nightPorter }}
+                onChange={answers => setForm({ ...form, ...answers })} />
             </div>
 
             {departmentsFor(departments, editingId).length > 0 && (

@@ -33,6 +33,7 @@ import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 import { sortedEntries } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -862,6 +863,7 @@ export default function PoolTrackPage() {
                             <div className="text-xs text-muted-foreground"><span className="font-medium">Notes:</span> {check.notes}</div>
                           )}
                           {/* Photos */}
+                          <RecordSignedBy recordType="pool_check" recordId={check.id} />
                           <CheckPhotoUploader entityType="pool_check" entityId={check.id} compact />
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">

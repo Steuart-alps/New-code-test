@@ -12,6 +12,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useChecklistSite } from "@/hooks/use-checklist-site";
 import { ChecklistSiteSelect } from "@/components/checklist-site-select";
 import { carryAnswers, createChecklistDraftStore, hasAnswers, type ChecklistDraftSlot } from "@/lib/checklist-carry";
+import { useFireWalkChecklistItems, withFireWalkItems } from "@/components/fire-night-walks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Sunset, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, PenLine, Settings2 } from "lucide-react";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -192,9 +194,11 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
     })();
   }, [type, siteId, existing]);
 
-  const effectiveDefault = templateItems
+  // Sites with sleeping accommodation and no night porter walk for fire here.
+  const fireWalkItems = useFireWalkChecklistItems(type, siteId, !existing);
+  const effectiveDefault = withFireWalkItems(templateItems
     ? templateItems.map(i => ({ ...i, checked: false }))
-    : (TEMPLATES[type] ?? []);
+    : (TEMPLATES[type] ?? []), fireWalkItems);
 
   const { user } = useAuth();
   const { toast } = useToast();
@@ -218,7 +222,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
     setCompletedBy(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
     setStaffRosterId(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
     setManagerNote(carried?.managerNote || (existing?.managerNote ?? ""));
-  }, [existing, type, templateItems]);
+  }, [existing, type, templateItems, fireWalkItems.map(item => item.label).join("\n")]);
 
   useEffect(() => {
     if (touched.current && !submitted) draft?.set({ items, completedBy, staffRosterId, managerNote });
@@ -327,6 +331,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
         {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}
         {existing?.id && (
           <div className="border-t mt-3 pt-3">
+            <RecordSignedBy recordType="daily_checklist" recordId={existing.id} className="mb-2" />
             <CheckPhotoUploader entityType="daily_checklist_pm" entityId={existing.id} compact />
           </div>
         )}
@@ -402,6 +407,7 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
           <p>Manager: <span className="font-medium text-foreground">{existing?.managerName}</span></p>
           {existing?.notes && <p className="italic">{existing.notes}</p>}
           <p className="text-xs">Signed off at {new Date(existing!.submittedAt!).toLocaleString()}</p>
+          <RecordSignedBy recordType="daily_manager_signoff" recordId={existing!.id} />
         </div>
       ) : (
         <div className="space-y-3">

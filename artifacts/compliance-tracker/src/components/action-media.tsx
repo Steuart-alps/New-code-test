@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import { Camera, ImagePlus, Loader2 } from "lucide-react";
+import { useCameraCapture } from "@/components/camera-capture";
 import { Button } from "@/components/ui/button";
 import { MediaGallery } from "@/components/media-gallery";
 import { useAuth } from "@/context/auth-context";
@@ -98,6 +99,7 @@ export function ActionMedia({ actionId, mediaUrls, canAdd, onChange }: {
   }
 
   const drop = useFileDrop((files) => { void upload(files); }, canAdd && !uploading);
+  const camera = useCameraCapture((files) => { void upload(files); }, { video: true, fileInput: () => cameraRef.current });
 
   if (!canAdd && mediaUrls.length === 0) return null;
   return (
@@ -113,7 +115,7 @@ export function ActionMedia({ actionId, mediaUrls, canAdd, onChange }: {
           <input ref={cameraRef} type="file" accept={MEDIA_INPUT_ACCEPT} capture="environment" className="hidden" onChange={picked} />
           <input ref={pickRef} type="file" accept={MEDIA_INPUT_ACCEPT} multiple className="hidden" onChange={picked} />
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" variant="outline" disabled={uploading} onClick={() => cameraRef.current?.click()}>
+            <Button type="button" size="sm" variant="outline" disabled={uploading} onClick={camera.open}>
               <Camera className="mr-1.5 h-4 w-4" />Take photo or video
             </Button>
             <Button type="button" size="sm" variant="outline" disabled={uploading} onClick={() => pickRef.current?.click()}>
@@ -123,6 +125,7 @@ export function ActionMedia({ actionId, mediaUrls, canAdd, onChange }: {
               ? <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status"><Loader2 className="h-3.5 w-3.5 animate-spin" />{progress}</span>
               : <span className="hidden text-xs text-muted-foreground sm:inline">or drag them here</span>}
           </div>
+          {camera.dialog}
         </>
       )}
     </div>

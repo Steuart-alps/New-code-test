@@ -37,6 +37,8 @@ import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { useSiteFilter, useWorkingSiteId } from "@/hooks/use-working-site";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -619,6 +621,8 @@ export default function HotTubPage() {
       <WaterMonitoringPlan module="hot-tub" siteId={filterSite === "all" ? undefined : Number(filterSite)}
         checks={CHECK_TYPE_LABELS} unit="days" canManage={canAdmin}
         onChanged={() => qc.invalidateQueries({ queryKey: ["hot-tub-status", activeClientId, filterSite] })} />
+      <TrackContractorChecks module="hot_tub" siteId={filterSite !== "all" ? Number(filterSite) : undefined} />
+
       {/* Status overview */}
       {filterSite !== "all" && statuses.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
@@ -840,6 +844,7 @@ export default function HotTubPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{r.performedBy ?? <span className="opacity-40">—</span>}</td>
                     <td className="px-4 py-3 hidden sm:table-cell">
+                      <RecordSignedBy recordType="hot_tub_check" recordId={r.id} compact className="mb-1" />
                       <CheckPhotoUploader entityType="hot_tub_check" entityId={r.id} compact />
                     </td>
                     <td className="px-4 py-3">

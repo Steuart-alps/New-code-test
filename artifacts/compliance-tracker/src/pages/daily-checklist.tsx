@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, Sun, Moon, ArrowLeft } from "lucide-react";
 import { Link } from "wouter";
+import { RecordSignedBy } from "@/components/record-signature";
 
 interface Answer {
   question: string;
@@ -212,6 +213,7 @@ export default function DailyChecklistPage({ type }: { type: "am" | "pm" }) {
                       : "Awaiting manager sign-off"}
                   </p>
                 )}
+                {submission?.id && <RecordSignedBy recordType="daily_checklist_submission" recordId={submission.id} className="mt-2" />}
               </div>
             </div>
 

@@ -3,14 +3,14 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, requireUserManager, getClientId, denyViewers, getActiveDepartmentId, isDepartmentLead } from "../middleware/requireAuth";
-import { requireService } from "../lib/services";
+import { getEntitledServices, isEntitled, requireService, type ServiceKey } from "../lib/services";
 import { filterName } from "../lib/contentFilter";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { siteVisibleSql } from "../lib/departmentSites";
 import { getAccountToday } from "../lib/accountClock";
 import { ReportReadingError, reportReadingConfigured, UnreadableReportError } from "../lib/reportReading";
 import { readApplianceList, REGISTER_READING_MAX_BYTES, registerReadingMonthlyLimit } from "../lib/registerReading";
-import { isListReadingKind, readList, type ListReadingKind } from "../lib/listReading";
+import { isListReadingKind, readList, SORTABLE_LIST_KINDS, sortList, type ListReadingKind, type SortableListKind } from "../lib/listReading";
 import { AiUnavailableError, claimAiUse, getAiStatus, settleAiUse } from "../lib/aiAllowance";
 import {
   CSV_IMPORT_MAX_CELL_LENGTH,
@@ -420,6 +420,8 @@ const REGISTER_READS_SETTING = "patRegisterReads";
  */
 const REGISTER_READING_ESTIMATE_PENCE = 15;
 const LIST_READING_ESTIMATE_PENCE = 2;
+/** Sorting a file only asks which list it is, so it costs far less than reading it. */
+const LIST_SORTING_ESTIMATE_PENCE = 1;
 class RegisterReadLimitError extends Error {}
 
 async function importableSites(clientId: number, departmentId: number | null) {
@@ -590,6 +592,52 @@ router.post("/imports/list-reading/:kind/read", requireAuth, denyViewers, requir
     if (err instanceof UnreadableReportError) return res.status(400).json({ error: err.message });
     if (!(err instanceof ReportReadingError)) req.log.error({ err, kind }, "Import list reading failed");
     res.status(502).json({ error: err instanceof ReportReadingError ? err.message : "ComplyTrack could not read this list just now. Try again later, or upload a spreadsheet." });
+  }
+});
+
+// ── Sorting a file into the right import ("Upload your lists") ─────────────
+// Which import a photo, scan, PDF or Word list belongs in, among the imports
+// this business has. It uses the AI allowance but not the monthly reading
+// limit: the list is read (and counted) when the person opens it in its import.
+const SORTABLE_LIST_SERVICE: Record<SortableListKind, ServiceKey | null> = {
+  "pat-appliances": "pattrack",
+  "room-track-rooms": "roomtrack",
+  contractors: null,
+  "fire-call-points": "firetrack",
+  "greentrack-equipment": "greentrack",
+  "staff-roster": null,
+};
+
+router.post("/imports/sort-list", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!reportReadingConfigured()) {
+    return res.status(503).json({ error: "Reading photos and documents is not switched on yet. Upload a spreadsheet instead.", code: "REGISTER_READING_UNAVAILABLE" });
+  }
+  const parsed = registerReadBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a photo, PDF or Word file of your list (8 MB at most)" });
+  const services = await getEntitledServices(clientId);
+  const kinds = SORTABLE_LIST_KINDS.filter((kind) => {
+    const service = SORTABLE_LIST_SERVICE[kind];
+    return service === null || isEntitled(services, service);
+  });
+  let aiUseId: number | null = null;
+  try {
+    const result = await sortList({ bytes: Buffer.from(parsed.data.data, "base64"), mimeType: parsed.data.mimeType, fileName: parsed.data.fileName, kinds }, async () => {
+      aiUseId = await claimAiUse({
+        clientId, userId: req.currentUser?.id ?? null, feature: "list_reading",
+        estimatePence: LIST_SORTING_ESTIMATE_PENCE, instead: "Choose which list it is yourself.",
+      });
+    });
+    if (aiUseId !== null) await settleAiUse(aiUseId, result.usage, true);
+    req.log.info({ clientId, kind: result.kind, model: result.model }, "Import list sorted");
+    res.json({ kind: result.kind });
+  } catch (err) {
+    if (aiUseId !== null) await settleAiUse(aiUseId, null, false);
+    if (err instanceof AiUnavailableError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof UnreadableReportError) return res.status(400).json({ error: err.message });
+    req.log.error({ err }, "Import list sorting failed");
+    res.status(502).json({ error: "ComplyTrack could not sort this file just now. Choose which list it is yourself." });
   }
 });
 

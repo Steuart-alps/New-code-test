@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { getClientId, requireClientAdmin, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { todayIn } from "../lib/taskSchedule";
 import {
   GREEN_APPLICATION_AREAS, GREEN_APPLICATION_METHODS, GREEN_PRODUCT_CATEGORIES, GREEN_PRODUCT_UNITS,
   GREEN_STOCK_MOVEMENT_KINDS, greenStockLedger, parseQuantity, stockOnHand,
@@ -146,13 +147,25 @@ router.post("/products", denyViewers, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
     const input = productInput(req.body ?? {}, true);
-    const inserted = rows(await db.execute(sql`
-      INSERT INTO green_products (client_id, name, category, unit, mapp_number, active_ingredient, supplier, reorder_level, notes, active, created_by)
-      VALUES (${clientId}, ${input.name}, ${input.category ?? "other"}, ${input.unit ?? "L"}, ${input.mapp_number ?? null},
-              ${input.active_ingredient ?? null}, ${input.supplier ?? null}, ${input.reorder_level ?? null}, ${input.notes ?? null},
-              ${input.active ?? true}, ${req.currentUser!.id})
-      RETURNING id
-    `))[0];
+    // What is on the shelf already, saved as today's stock count so use can
+    // come off it straight away.
+    const openingStock = quantityField(req.body ?? {}, "openingStock", "Amount in stock now");
+    const inserted = await db.transaction(async (tx) => {
+      const product = rows(await tx.execute(sql`
+        INSERT INTO green_products (client_id, name, category, unit, mapp_number, active_ingredient, supplier, reorder_level, notes, active, created_by)
+        VALUES (${clientId}, ${input.name}, ${input.category ?? "other"}, ${input.unit ?? "L"}, ${input.mapp_number ?? null},
+                ${input.active_ingredient ?? null}, ${input.supplier ?? null}, ${input.reorder_level ?? null}, ${input.notes ?? null},
+                ${input.active ?? true}, ${req.currentUser!.id})
+        RETURNING id
+      `))[0];
+      if (openingStock != null) {
+        await tx.execute(sql`
+          INSERT INTO green_stock_movements (client_id, product_id, movement_date, kind, quantity, counted_quantity, notes, created_by)
+          VALUES (${clientId}, ${product.id}, ${todayIn()}, 'count', 0, ${openingStock}, 'Stock when the product was added', ${req.currentUser!.id})
+        `);
+      }
+      return product;
+    });
     const [product] = await productsWithStock(clientId, sql`AND p.id = ${inserted.id}`);
     res.status(201).json(product);
   } catch (err) {
@@ -266,7 +279,7 @@ function movementAmounts(kind: string, body: Body) {
   }
   const quantity = quantityField(body, "quantity", "Quantity");
   if (quantity == null || quantity <= 0) throw new InputError("Enter a quantity above 0");
-  return { quantity: kind === "write_off" ? -quantity : quantity, counted: null };
+  return { quantity: kind === "write_off" || kind === "use" ? -quantity : quantity, counted: null };
 }
 
 router.get("/stock-movements", async (req, res) => {
@@ -293,14 +306,18 @@ router.post("/stock-movements", denyViewers, async (req, res) => {
     if (!clientId) return res.status(400).json({ error: "No client context" });
     const body: Body = req.body ?? {};
     const product = rows(await db.execute(sql`
-      SELECT id FROM green_products WHERE id = ${Number(body.productId) || 0} AND client_id = ${clientId}
+      SELECT id, category FROM green_products WHERE id = ${Number(body.productId) || 0} AND client_id = ${clientId}
     `))[0];
     if (!product) return res.status(404).json({ error: "Product not found" });
     if (typeof body.movementDate !== "string" || !ISO_DATE.test(body.movementDate)) {
       return res.status(400).json({ error: "movementDate must be a date (YYYY-MM-DD)" });
     }
     const kind = body.kind;
-    if (!GREEN_STOCK_MOVEMENT_KINDS.includes(kind as any)) return res.status(400).json({ error: "kind must be delivery, count or write_off" });
+    if (!GREEN_STOCK_MOVEMENT_KINDS.includes(kind as any)) return res.status(400).json({ error: "kind must be delivery, count, write_off or use" });
+    // A pesticide's use belongs in the spraying book, the legal record.
+    if (kind === "use" && product.category === "pesticide") {
+      return res.status(400).json({ error: "Record pesticide use as a spraying record", code: "PESTICIDE_USE_NEEDS_SPRAYING_RECORD" });
+    }
     const { quantity, counted } = movementAmounts(kind as string, body);
     const supplier = textField(body, "supplier", "Supplier", 200);
     const batchNumber = textField(body, "batchNumber", "Batch number", 100);

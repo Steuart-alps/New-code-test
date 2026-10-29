@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
@@ -70,10 +70,12 @@ const ACTION_STYLE: Record<RowAction, { label: string; className: string }> = {
   error: { label: "Error", className: "bg-rose-50 text-rose-800 border-rose-200" },
 };
 
-export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }: {
+export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, initialFile }: {
   type: ImportCsvType; open: boolean; onOpenChange: (open: boolean) => void; onImported?: () => void;
   /** FireTrack call points: the site for rows whose Site cell is blank. */
   siteId?: number | null;
+  /** A file chosen before the dialog opened ("Upload your lists"), checked as soon as it opens. */
+  initialFile?: File | null;
 }) {
   const config = IMPORTS[type];
   const { activeClientId } = useAuth();
@@ -89,6 +91,14 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId }
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"reading" | "reading-list" | "preview" | "import" | null>(null);
   usePastedFile(open && busy === null && !result?.committed, selected => dropped(selected));
+  // Once the AI status is known, so a photo can go to the reader.
+  const startedWith = useRef<File | null>(null);
+  useEffect(() => {
+    if (!open) { startedWith.current = null; return; }
+    if (!initialFile || !reading.loaded || startedWith.current === initialFile) return;
+    startedWith.current = initialFile;
+    dropped(initialFile);
+  }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function reset() {
     setFile(null); setSheet(null); setResult(null); setError(null); setBusy(null); setReadFromList(null);

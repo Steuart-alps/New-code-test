@@ -185,6 +185,8 @@ async function routeApi(route) {
       case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
       case "/api/managed-by": return json(route, null);
       // Setup is finished, so the "Add your team first" gate stays out of the way.
+      // History rows ask who signed each record; none are signed here.
+      case "/api/record-signatures": return json(route, []);
       case "/api/setup/state": return json(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
       case "/api/sites": return json(route, [SITE]);
       case "/api/staff-roster": return json(route, roster);
@@ -197,6 +199,9 @@ async function routeApi(route) {
           return { staffRosterId: person.id, name: person.name, siteId: person.site_id, siteName: person.site_name, lastDrillDate, due: !lastDrillDate || lastDrillDate <= localDate(-365) };
         }),
       });
+      // The fixture site has no night porter and no escape routes listed.
+      case "/api/fire-safety/night-walks": return json(route, { walkTimes: ["22:00", "02:00", "06:00"], graceMinutes: 60, sites: [] });
+      case "/api/fire-safety/escape-routes": return json(route, { siteId: SITE.id, routes: [], shared: false });
       case "/api/storage/status": return json(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
       case "/api/photos":
       case "/api/photos/requirements":

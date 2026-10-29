@@ -81,11 +81,12 @@ assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Ev
 const membership = groups => Object.fromEntries(groups.map(g => [g.id, g.items.map(i => i.href)]));
 assert.deepEqual(membership(adminGroups), {
   core: ["/dashboard", "/portfolio"],
-  setup: ["/settings", "/sites", "/users", "/staff-roster", "/equipment"],
+  setup: ["/settings", "/sites", "/users", "/staff-roster", "/upload-lists", "/equipment"],
   compliance: ["/external", "/contractors", "/calendar", "/compliance-hub"],
   safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
-  operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
+  operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
+  greenkeeping: ["/green-track"],
   "people-training": ["/doc-track", "/train-track"],
   reporting: ["/reports", "/report-actions"],
   other: ["/tasks"],
@@ -96,7 +97,8 @@ assert.deepEqual(membership(userGroups), {
   compliance: ["/external", "/contractors", "/calendar", "/compliance-hub"],
   safety: ["/fire-safety", "/legionella", "/safe-track", "/incidents", "/coshh-track", "/asbestos"],
   "food-water": ["/kitchen", "/allergens", "/aqua-track", "/hot-tub"],
-  operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/green-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
+  operations: ["/fix-track", "/premises-track", "/room-track", "/tree-track", "/bike-track", "/pat-track", "/pest-track", "/daily-track-am", "/daily-track-pm"],
+  greenkeeping: ["/green-track"],
   "people-training": ["/doc-track", "/train-track"],
   reporting: ["/reports"],
   other: ["/tasks"],
@@ -108,7 +110,7 @@ assert.deepEqual(membership(getNavGroups({ isConsultant: false, canAdmin: false,
 
 // The menu follows the order a business sets up the service.
 assert.deepEqual(adminGroups.map(g => g.id),
-  ["core", "setup", "compliance", "safety", "food-water", "operations", "people-training", "reporting", "other", "admin"],
+  ["core", "setup", "compliance", "safety", "food-water", "operations", "greenkeeping", "people-training", "reporting", "other", "admin"],
   "Sections run in setup order, with Other and Administration last");
 const tasksItem = userGroups.flatMap(g => g.items).find(i => i.href === "/tasks");
 assert.equal(tasksItem?.label, "Other reminders", "Tasks is shown as Other reminders");

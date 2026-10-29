@@ -810,6 +810,8 @@ export const ListSitesResponseItem = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -824,7 +826,9 @@ export const CreateSiteBody = zod.object({
   "name": zod.string(),
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.')
 })
 
 export const CreateSiteResponse = zod.object({
@@ -835,6 +839,8 @@ export const CreateSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -855,6 +861,8 @@ export const GetSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -872,7 +880,9 @@ export const UpdateSiteBody = zod.object({
   "name": zod.string().optional(),
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.')
 })
 
 export const UpdateSiteResponse = zod.object({
@@ -883,6 +893,8 @@ export const UpdateSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -910,7 +922,8 @@ export const ListContractorVisitsResponse = zod.object({
   "title": zod.string().describe('Title of the linked compliance check'),
   "label": zod.string(),
   "description": zod.string(),
-  "dueFrom": zod.enum(['track', 'later', 'check'])
+  "dueFrom": zod.enum(['track', 'later', 'check']),
+  "trades": zod.array(zod.string()).optional().describe('Contractor trades suggested first when choosing who does this visit')
 })),
   "visits": zod.array(zod.object({
   "visitKey": zod.string(),
@@ -1401,7 +1414,7 @@ export const readCertificateBodyFileNameMax = 255;
 export const ReadCertificateBody = zod.object({
   "fileName": zod.string().max(readCertificateBodyFileNameMax),
   "mimeType": zod.string().describe('application\/pdf, image\/jpeg, image\/png, image\/webp, image\/gif, .docx or text\/plain'),
-  "data": zod.string().describe('The file as base64 (15 MB at most before encoding)'),
+  "data": zod.string().describe('The file as base64 (20 MB at most before encoding)'),
   "itemId": zod.number().nullish().describe('The check the certificate is for, when the person opened the reader from one')
 })
 
@@ -1428,6 +1441,59 @@ export const ReadCertificateResponse = zod.object({
   "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
 })),
   "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+})
+
+
+/**
+ * Claude reads up to 10 files together: the pages of one certificate photographed separately, a PDF holding several certificates, or a batch of certificates to sort to their compliance checks. Each certificate found comes back as with POST /certificates/read, with the files it is on. Nothing is saved or stored here. Uses the AI features add-on's allowance.
+ * @summary Read several certificate files with AI in one go (owners and ALPS)
+ */
+export const readCertificateFilesBodyFilesItemFileNameMax = 255;
+
+export const readCertificateFilesBodyFilesMax = 10;
+
+
+
+export const ReadCertificateFilesBody = zod.object({
+  "files": zod.array(zod.object({
+  "fileName": zod.string().max(readCertificateFilesBodyFilesItemFileNameMax),
+  "mimeType": zod.string().describe('application\/pdf, image\/jpeg, image\/png, image\/webp, image\/gif, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64')
+})).min(1).max(readCertificateFilesBodyFilesMax).describe('Up to 10 files, 20 MB at most together before encoding'),
+  "itemId": zod.number().nullish().describe('The check the reader was opened from: the files are one certificate for it')
+})
+
+export const ReadCertificateFilesResponse = zod.object({
+  "certificates": zod.array(zod.object({
+  "certificateType": zod.string(),
+  "name": zod.string().describe('A name to file the certificate under'),
+  "itemId": zod.number().nullable().describe('The check it is for; null when none fits'),
+  "checkReason": zod.string(),
+  "newCheck": zod.object({
+  "title": zod.string(),
+  "frequencyMonths": zod.number().nullable()
+}).nullable().describe('When no check fits, the check to create for it.'),
+  "contractorName": zod.string().nullable(),
+  "issueDate": zod.date().nullable(),
+  "nextInspectionDate": zod.date().nullable(),
+  "nextInspectionSource": zod.union([zod.literal('certificate'),zod.literal('repeat'),zod.literal(null)]).nullable().describe('\"certificate\" when it states the date; \"repeat\" when worked out from the check\'s repeat interval.'),
+  "outcome": zod.enum(['satisfactory', 'unsatisfactory', 'not_stated']).describe('Overall result stated on the certificate. Only satisfactory or not_stated (legacy) certificates move the check\'s due date.'),
+  "summary": zod.string(),
+  "defects": zod.array(zod.object({
+  "code": zod.enum(['C1', 'C2', 'C3', 'FI', 'ID', 'AR', 'other']).describe('EICR C1 danger present, C2 potentially dangerous, C3 improvement recommended, FI further investigation; gas ID immediately dangerous, AR at risk.'),
+  "description": zod.string(),
+  "location": zod.string().nullable(),
+  "reference": zod.string().nullable().describe('The item or observation number on the certificate'),
+  "needsWork": zod.boolean().describe('Remedial work: C1, C2, FI, ID, AR, or other work the certificate requires. C3s never are.')
+})),
+  "unclear": zod.array(zod.string()).describe('Things that could not be read with confidence.')
+}).and(zod.object({
+  "fileIndexes": zod.array(zod.number()).describe('The files (0-based, in the order sent) this certificate is on')
+}))),
+  "skipped": zod.array(zod.object({
+  "fileIndex": zod.number(),
+  "reason": zod.string()
+})).describe('Files that hold no certificate')
 })
 
 
@@ -1662,6 +1728,38 @@ export const DismissCertificateInboxItemParams = zod.object({
 export const DismissCertificateInboxItemResponse = zod.object({
   "ok": zod.boolean()
 })
+
+
+/**
+ * Returns a one-use token. The web app sends the save again with the token in the X-Record-Signature header after the API answered it with 428 SIGNATURE_REQUIRED; the signature is then linked to the saved record. Unused signatures are removed after a day.
+ * @summary Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+ */
+export const CreateRecordSignatureBody = zod.object({
+  "strokes": zod.array(zod.array(zod.number())).describe('Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box')
+})
+
+export const CreateRecordSignatureResponse = zod.object({
+  "token": zod.string(),
+  "expiresInMinutes": zod.number()
+})
+
+
+/**
+ * @summary Signatures on recorded checks of one type, for history lists
+ */
+export const ListRecordSignaturesQueryParams = zod.object({
+  "recordType": zod.coerce.string(),
+  "ids": zod.coerce.string().describe('Up to 200 record ids, comma separated')
+})
+
+export const ListRecordSignaturesResponseItem = zod.object({
+  "recordType": zod.string(),
+  "recordId": zod.number(),
+  "signerName": zod.string().describe('The name of the login that signed'),
+  "signedAt": zod.date(),
+  "strokes": zod.array(zod.array(zod.number()))
+})
+export const ListRecordSignaturesResponse = zod.array(ListRecordSignaturesResponseItem)
 
 
 /**
@@ -3736,7 +3834,7 @@ export const AssignFixTrackContractorResponse = zod.object({
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']).optional(),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).optional(),
   "siteId": zod.coerce.number().optional()
 })
 
@@ -3749,7 +3847,7 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -3767,6 +3865,7 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3784,7 +3883,7 @@ export const createFireSafetyCheckBodyStaffPresentIdsMax = 2000;
 
 
 export const CreateFireSafetyCheckBody = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "siteId": zod.number().nullish(),
@@ -3799,7 +3898,8 @@ export const CreateFireSafetyCheckBody = zod.object({
   "staffPresentIds": zod.array(zod.number()).max(createFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
-  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
 
 export const createFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -3811,7 +3911,7 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -3829,6 +3929,7 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3842,7 +3943,7 @@ export const GetFireSafetyStatusQueryParams = zod.object({
 })
 
 export const GetFireSafetyStatusResponseItem = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "frequencyDays": zod.number(),
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
@@ -3854,6 +3955,95 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   "sitesAffected": zod.number().optional().describe('How many of those sites are overdue or have never recorded the check.')
 })
 export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponseItem)
+
+
+/**
+ * @summary A site's escape routes, ticked on each escape route sign-off and night fire walk
+ */
+export const GetFireEscapeRoutesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('The site. Omit for a business with no sites.')
+})
+
+export const getFireEscapeRoutesResponseRoutesItemNameMax = 200;
+
+export const getFireEscapeRoutesResponseRoutesItemLocationMax = 200;
+
+
+
+export const GetFireEscapeRoutesResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(getFireEscapeRoutesResponseRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(getFireEscapeRoutesResponseRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})),
+  "shared": zod.boolean().describe('True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.')
+})
+
+
+/**
+ * @summary Replace a site's escape route list (managers)
+ */
+export const UpdateFireEscapeRoutesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('The site. Omit for a business with no sites.')
+})
+
+export const updateFireEscapeRoutesBodyRoutesItemNameMax = 200;
+
+export const updateFireEscapeRoutesBodyRoutesItemLocationMax = 200;
+
+export const updateFireEscapeRoutesBodyRoutesMax = 100;
+
+
+
+export const UpdateFireEscapeRoutesBody = zod.object({
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(updateFireEscapeRoutesBodyRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(updateFireEscapeRoutesBodyRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})).max(updateFireEscapeRoutesBodyRoutesMax)
+})
+
+export const updateFireEscapeRoutesResponseRoutesItemNameMax = 200;
+
+export const updateFireEscapeRoutesResponseRoutesItemLocationMax = 200;
+
+
+
+export const UpdateFireEscapeRoutesResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(updateFireEscapeRoutesResponseRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(updateFireEscapeRoutesResponseRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})),
+  "shared": zod.boolean().describe('True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.')
+})
+
+
+/**
+ * @summary Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+ */
+export const GetNightFireWalksQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetNightFireWalksResponse = zod.object({
+  "walkTimes": zod.array(zod.string()),
+  "graceMinutes": zod.number().describe('A walk counts as missed this many minutes after its time.'),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "nights": zod.array(zod.object({
+  "nightOf": zod.string().describe('The evening the night starts (YYYY-MM-DD); its 02:00 and 06:00 walks fall on the next day.'),
+  "walks": zod.array(zod.object({
+  "date": zod.string().describe('The calendar day the walk falls on (YYYY-MM-DD).'),
+  "time": zod.enum(['22:00', '02:00', '06:00']),
+  "status": zod.enum(['done', 'failed', 'due', 'missed', 'upcoming', 'not_needed']).describe('done or failed once recorded (failed = something found); due from its time until an hour after; missed after that; upcoming before its time; not_needed before the site had a night porter.'),
+  "checkId": zod.number().nullable(),
+  "performedBy": zod.string().nullable()
+}))
+})).describe('Tonight (or the night now ending) first, then the six nights before.'),
+  "missedCount": zod.number().describe('Walks missed over the nights listed.')
+})).describe('Sites with a night porter that the caller can see.')
+})
 
 
 /**
@@ -4199,6 +4389,26 @@ export const ReadImportListResponse = zod.object({
 
 
 /**
+ * For "Upload your lists", where many files are dropped at once. Claude only says which of the business's imports the file is (PAT appliances, RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster); the rows are read later by that import. Uses the AI allowance but not the monthly reading number. The file is not stored. Off until the server has an Anthropic API key.
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const sortImportListBodyFileNameMax = 255;
+
+
+
+export const SortImportListBody = zod.object({
+  "fileName": zod.string().max(sortImportListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const SortImportListResponse = zod.object({
+  "kind": zod.union([zod.literal('pat-appliances'),zod.literal('room-track-rooms'),zod.literal('contractors'),zod.literal('fire-call-points'),zod.literal('greentrack-equipment'),zod.literal('staff-roster'),zod.literal(null)]).nullable().describe('The import the file belongs in; null when it is none of them')
+})
+
+
+/**
  * @summary Rename, move, archive or restore a call point (managers)
  */
 export const UpdateFireCallPointParams = zod.object({
@@ -4255,7 +4465,8 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "staffPresentIds": zod.array(zod.number()).max(updateFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
-  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
 
 export const updateFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -4267,7 +4478,7 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -4285,6 +4496,7 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -4864,7 +5076,8 @@ export const UpdateBikeTrackConfigResponse = zod.object({
  */
 export const GetGreenTrackConfigResponse = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 
@@ -4873,12 +5086,14 @@ export const GetGreenTrackConfigResponse = zod.object({
  */
 export const UpdateGreenTrackConfigBody = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 export const UpdateGreenTrackConfigResponse = zod.object({
   "green_show_fuel": zod.string().optional(),
-  "green_default_operators": zod.string().optional()
+  "green_default_operators": zod.string().optional(),
+  "green_default_site_id": zod.string().optional().describe('The site new machines and the Daily checks tab start on (\"\" for none)')
 })
 
 
@@ -5269,7 +5484,8 @@ export const CreateGreenTrackProductBody = zod.object({
   "supplier": zod.string().nullish(),
   "reorderLevel": zod.number().nullish(),
   "notes": zod.string().nullish(),
-  "active": zod.boolean().optional()
+  "active": zod.boolean().optional(),
+  "openingStock": zod.number().nullish().describe('Only when adding a product. The amount in stock now, saved as a stock count dated today.')
 })
 
 export const CreateGreenTrackProductResponse = zod.object({
@@ -5309,7 +5525,8 @@ export const UpdateGreenTrackProductBody = zod.object({
   "supplier": zod.string().nullish(),
   "reorderLevel": zod.number().nullish(),
   "notes": zod.string().nullish(),
-  "active": zod.boolean().optional()
+  "active": zod.boolean().optional(),
+  "openingStock": zod.number().nullish().describe('Only when adding a product. The amount in stock now, saved as a stock count dated today.')
 })
 
 export const UpdateGreenTrackProductResponse = zod.object({
@@ -5372,7 +5589,7 @@ export const GetGreenTrackProductHistoryResponse = zod.object({
 }),
   "entries": zod.array(zod.object({
   "key": zod.string(),
-  "kind": zod.enum(['delivery', 'count', 'write_off', 'application']),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use', 'application']),
   "productId": zod.number(),
   "date": zod.date(),
   "change": zod.number(),
@@ -5404,8 +5621,8 @@ export const ListGreenTrackStockMovementsResponseItem = zod.object({
   "productName": zod.string(),
   "unit": zod.string(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
   "countedQuantity": zod.number().nullish(),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -5423,8 +5640,8 @@ export const ListGreenTrackStockMovementsResponse = zod.array(ListGreenTrackStoc
 export const CreateGreenTrackStockMovementBody = zod.object({
   "productId": zod.number(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().optional().describe('Delivered or written-off quantity (above 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().optional().describe('Delivered, written-off or used quantity (above 0). \"use\" is refused for pesticides, whose use goes in a spraying record.'),
   "countedQuantity": zod.number().optional().describe('The quantity counted, for a stock count'),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -5440,8 +5657,8 @@ export const CreateGreenTrackStockMovementResponse = zod.object({
   "productName": zod.string(),
   "unit": zod.string(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
   "countedQuantity": zod.number().nullish(),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -5477,8 +5694,8 @@ export const UpdateGreenTrackStockMovementResponse = zod.object({
   "productName": zod.string(),
   "unit": zod.string(),
   "movementDate": zod.date(),
-  "kind": zod.enum(['delivery', 'count', 'write_off']),
-  "quantity": zod.number().describe('Signed change (a write-off is negative; a count is 0)'),
+  "kind": zod.enum(['delivery', 'count', 'write_off', 'use']),
+  "quantity": zod.number().describe('Signed change (a write-off or use is negative; a count is 0)'),
   "countedQuantity": zod.number().nullish(),
   "supplier": zod.string().nullish(),
   "batchNumber": zod.string().nullish(),
@@ -6938,7 +7155,7 @@ export const ListEquipmentLabelsQueryParams = zod.object({
 })
 
 export const ListEquipmentLabelsResponseItem = zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
   "ref": zod.string(),
   "track": zod.string(),
   "name": zod.string(),
@@ -6956,8 +7173,8 @@ export const ListEquipmentLabelsResponse = zod.array(ListEquipmentLabelsResponse
  */
 export const PrintEquipmentLabelSheetBody = zod.object({
   "items": zod.array(zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
-  "ref": zod.string().describe('The record\'s id, or \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer.')
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string().describe('The record\'s id, \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer, or \"<point>:<siteId or 0>\" for a track\'s checks at a site.')
 })),
   "size": zod.enum(['standard', 'large']).optional()
 })
@@ -6969,12 +7186,12 @@ export const PrintEquipmentLabelSheetResponse = zod.unknown()
  * @summary Replace a lost or damaged label; the old code stops working
  */
 export const ReplaceEquipmentLabelBody = zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
-  "ref": zod.string().describe('The record\'s id, or \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer.')
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
+  "ref": zod.string().describe('The record\'s id, \"<siteId or 0>:<unit id>\" for a kitchen fridge or freezer, or \"<point>:<siteId or 0>\" for a track\'s checks at a site.')
 })
 
 export const ReplaceEquipmentLabelResponse = zod.object({
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
   "ref": zod.string(),
   "track": zod.string(),
   "name": zod.string(),
@@ -6996,7 +7213,7 @@ export const ScanEquipmentLabelParams = zod.object({
 export const ScanEquipmentLabelResponse = zod.object({
   "code": zod.string(),
   "clientId": zod.number(),
-  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment']),
+  "kind": zod.enum(['green_machine', 'pat_appliance', 'hot_tub', 'fire_call_point', 'water_outlet', 'bike', 'room', 'cold_unit', 'equipment', 'track_point']),
   "track": zod.string(),
   "name": zod.string(),
   "detail": zod.string().nullable(),

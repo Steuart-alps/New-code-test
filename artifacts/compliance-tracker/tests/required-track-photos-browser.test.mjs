@@ -304,6 +304,8 @@ async function routeApi(route, url) {
   if (pathname === "/api/green-track/machines" && method === "GET") return jsonResponse(route, [MACHINE]);
   // The layout's "Add your team first" gate: this business is already set up.
   if (pathname === "/api/setup/state" && method === "GET") return jsonResponse(route, { needsSetup: false, canManage: true });
+  // History rows ask who signed each record; none are signed here.
+  if (pathname === "/api/record-signatures" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/green-track/status" && method === "GET") {
     return jsonResponse(route, {
       totalMachines: 1, activeMachines: 1, openDefects: 1, outOfService: 0,
@@ -369,10 +371,18 @@ async function routeApi(route, url) {
     return jsonResponse(route, index >= 0 ? rows[index] : { id: Number(updateMatch[1]), ...body });
   }
 
+  // History rows ask who signed each record; none are signed here.
+  if (pathname === "/api/record-signatures" && method === "GET") return jsonResponse(route, []);
+
   if (pathname === "/api/setup/state" && method === "GET") {
     // Setup is finished, so the "Add your team first" gate stays out of the way.
     return jsonResponse(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
   }
+
+  // GreenTrack's "Contractor checks" box (components/track-contractor-checks.tsx):
+  // no contractor visits or compliance checks in this business.
+  if (pathname === "/api/contractor-visits" && method === "GET") return jsonResponse(route, { types: [], visits: [] });
+  if (pathname === "/api/compliance-items" && method === "GET") return jsonResponse(route, []);
 
   if (pathname === "/api/managed-by" && method === "GET") {
     // No consultant practice branding for this business.

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { CheckCircle2, Sun, Moon, ShieldCheck, Printer, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useSiteFilter } from "@/hooks/use-working-site";
+import { RecordSignedBy } from "@/components/record-signature";
 
 interface Submission {
   id: number;
@@ -66,6 +67,7 @@ function PrintView({ sub }: { sub: Submission }) {
             <p><span className="font-medium">Signed off by:</span> {sub.signedOffByName} at {formatTime(sub.signedOffAt)}</p>
           )}
         </div>
+        <RecordSignedBy recordType="daily_checklist_submission" recordId={sub.id} className="mt-2" />
       </div>
 
       {/* Summary */}
@@ -278,6 +280,7 @@ export default function DailyHistoryPage() {
                     </td>
                     <td className="px-5 py-3 text-sm text-muted-foreground hidden md:table-cell">
                       {sub.submittedByName ?? "—"}
+                      <RecordSignedBy recordType="daily_checklist_submission" recordId={sub.id} compact className="mt-1 flex" />
                     </td>
                     <td className="px-5 py-3 hidden md:table-cell">
                       {sub.type === "pm" ? (

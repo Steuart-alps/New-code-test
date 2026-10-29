@@ -328,9 +328,14 @@ async function readerRoutes(owner, viewer) {
   const off = await owner("POST", "/certificates/read", body);
   check("reader: reading is refused with a plain message while off",
     off.status === 503 && off.data?.code === "CERTIFICATE_READING_UNAVAILABLE", JSON.stringify(off.data));
+  const batch = { files: [body, { ...body, fileName: "boiler.pdf" }] };
+  const batchOff = await owner("POST", "/certificates/read-files", batch);
+  check("reader: reading several files is refused with a plain message while off",
+    batchOff.status === 503 && batchOff.data?.code === "CERTIFICATE_READING_UNAVAILABLE", JSON.stringify(batchOff.data));
   if (viewer) {
     check("reader: a viewer cannot see the status", (await viewer("GET", "/certificates/reading")).status === 403);
     check("reader: a viewer cannot send a certificate to be read", (await viewer("POST", "/certificates/read", body)).status === 403);
+    check("reader: a viewer cannot send several files to be read", (await viewer("POST", "/certificates/read-files", batch)).status === 403);
   }
 }
 
