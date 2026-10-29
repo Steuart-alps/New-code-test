@@ -94,6 +94,7 @@ async function setupWizard(a, b, viewer) {
     LEGAL_CORE.every((t) => starter.some((c) => c.title === t && c.core === true)), JSON.stringify(starter.map((c) => c.title)));
   check("setup: signup starter checks are offered as untouched", starter.find((c) => c.title === "Fire Risk Assessment Review")?.state === "untouched");
   check("setup: modules offered during trial", (state.data?.modules?.available ?? []).includes("firetrack"));
+  check("setup: a trial business is not shown as included free", state.data?.complimentary === false, JSON.stringify(state.data?.complimentary));
 
   // Step 1: business type + nation (hub profile created with editable defaults).
   const business = await a("PUT", "/setup/business", { businessType: "care_home_healthcare", nation: "scotland" });

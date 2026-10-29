@@ -93,8 +93,12 @@ router.get("/setup/state", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const role = req.currentUser!.role;
-  const [client] = await db.select({ businessType: clientsTable.businessType, setupCompletedAt: clientsTable.setupCompletedAt })
-    .from(clientsTable).where(eq(clientsTable.id, clientId));
+  const [client] = await db.select({
+    businessType: clientsTable.businessType,
+    setupCompletedAt: clientsTable.setupCompletedAt,
+    trialEndsAt: clientsTable.trialEndsAt,
+    stripeSubscriptionId: clientsTable.stripeSubscriptionId,
+  }).from(clientsTable).where(eq(clientsTable.id, clientId));
   if (!client) return res.status(404).json({ error: "Client not found" });
   const canManage = role === "consultant" || role === "client_admin";
   const base = { setupCompletedAt: client.setupCompletedAt, needsSetup: client.setupCompletedAt == null, canManage, businessType: client.businessType };
@@ -112,6 +116,9 @@ router.get("/setup/state", requireAuth, async (req, res) => {
   res.json({
     ...base,
     deferredAt: await setting(clientId, DEFERRED_SETTING),
+    // No trial end and no subscription: every site and module is free (see
+    // GET /billing/config), so the wizard doesn't talk about per-site prices.
+    complimentary: client.trialEndsAt === null && !client.stripeSubscriptionId,
     nation: ((profile.rows as Array<{ nation: string }>)[0]?.nation) ?? null,
     businessTypes: BUSINESS_TYPES,
     sites,

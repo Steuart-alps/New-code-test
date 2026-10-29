@@ -111,6 +111,7 @@ function ClientDialog({
   onSaved: () => void;
   client: Client | null;
 }) {
+  const { user } = useAuth();
   const [form, setForm] = useState({
     name: "",
     slug: "",
@@ -221,6 +222,13 @@ function ClientDialog({
               />
             </div>
           </div>
+          {!client && (
+            <p className="text-xs text-muted-foreground">
+              {user?.platformOperator
+                ? "Every module is included free, with no trial end and no billing. You can open it with View once it is added."
+                : "The business starts on the usual 14-day free trial."}
+            </p>
+          )}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
