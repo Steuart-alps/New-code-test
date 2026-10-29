@@ -7,6 +7,7 @@ import { SPREADSHEET_ACCEPT, isSpreadsheetFile, usePastedFile } from "@/componen
 import { AiAllowanceNote } from "@/components/ai-allowance-note";
 import { READABLE_LIST, isPhotoOrPdf, listFileBody, useListReading } from "@/components/ai-list-reader";
 import { MachineImportDialog } from "@/pages/green-track";
+import { RosterImportDialog } from "@/components/roster-import-dialog";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
@@ -47,7 +48,7 @@ export function UploadLists() {
   // The AI status for sorting photos and PDFs (the contractors import is open
   // to every owner and consultant, whatever their modules).
   const reading = useListReading("contractors", true);
-  const kinds: ListKind[] = availableListKinds(hasService).filter(kind => kind !== "staff-roster");
+  const kinds: ListKind[] = availableListKinds(hasService);
   const [items, setItems] = useState<Item[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -218,6 +219,10 @@ export function UploadLists() {
       {open?.kind && CSV_IMPORTS[open.kind] && (
         <ImportCsvDialog key={open.id} type={CSV_IMPORTS[open.kind]!} open initialFile={open.file}
           onOpenChange={value => { if (!value) close(); }} onImported={() => done(open.id)} />
+      )}
+      {open?.kind === "staff-roster" && (
+        <RosterImportDialog key={open.id} open initialFile={open.file} sites={sites.data ?? []}
+          onClose={close} onImported={() => done(open.id)} />
       )}
       {open?.kind === "greentrack-equipment" && (
         <MachineImportDialog key={open.id} open initialFile={open.file} sites={sites.data ?? []}

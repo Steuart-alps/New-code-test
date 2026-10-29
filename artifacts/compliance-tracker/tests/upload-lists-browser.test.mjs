@@ -10,7 +10,7 @@ import { chromium } from "@playwright/test";
 //     a PDF by its file name (no AI), and an unclear one asks the person;
 //   - "Check and import" opens the import's own dialog with the file already
 //     in it (contractors preview, call points read by AI, GreenTrack
-//     machines), and an import marks the file done;
+//     machines, the staff roster), and an import marks the file done;
 //   - without the AI add-on, photos are never sent to AI.
 // API responses mirror artifacts/api-server/src/routes/csv-imports.ts.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -113,6 +113,7 @@ const FILES = [
   { name: "IMG_0042.png", type: "image/png" },
   { name: "machines.pdf", type: "application/pdf" },
   { name: "notes.csv", type: "text/csv", text: "Foo,Bar\n1,2\n" },
+  { name: "Book1.csv", type: "text/csv", text: "Payroll ID,Name,Job Title,Department\n1001,Jane Roster,Chef,Kitchen\n" },
 ];
 
 try {
@@ -141,7 +142,14 @@ try {
     await page.getByTestId("select-upload-list-kind-5").selectOption("contractors");
     assert.ok(await page.getByTestId("button-upload-list-open-5").isEnabled());
     const options = await page.getByTestId("select-upload-list-kind-5").locator("option").allInnerTexts();
-    assert.ok(!options.includes("Staff roster"));
+    assert.ok(options.includes("Staff roster"));
+    assert.equal(await page.getByTestId("select-upload-list-kind-6").inputValue(), "staff-roster");
+
+    // The staff list opens in the roster upload with its people read.
+    await page.getByTestId("button-upload-list-open-6").click();
+    await page.getByRole("dialog").getByText("Jane Roster").first().waitFor();
+    await page.keyboard.press("Escape");
+    await page.getByRole("dialog").waitFor({ state: "detached" });
 
     // Contractors: the import dialog opens with the spreadsheet already previewed.
     await page.getByTestId("button-upload-list-open-1").click();
