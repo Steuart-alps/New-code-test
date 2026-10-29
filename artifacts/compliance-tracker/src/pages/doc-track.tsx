@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MyDocumentsView } from "@/components/my-documents-view";
+import { DepartmentNameSelect } from "@/components/department-name-select";
 import { AcknowledgementsDialog, type StaffMember } from "@/components/acknowledgements-dialog";
 import { assertWithinUploadLimit } from "@/lib/upload-limits";
 import { sortByLabel } from "@/lib/sort-options";
@@ -349,10 +350,8 @@ function UploadDialog({
     }
   }
 
-  const departmentOptions = Array.from(new Set([
-    ...existingDepts,
-    ...(roster ?? []).map(m => m.department?.trim()).filter(Boolean) as string[],
-  ])).sort((a, b) => a.localeCompare(b));
+  // Departments not set up in Settings but already on documents or the roster.
+  const departmentsUsedBefore = [...existingDepts, ...(roster ?? []).map(m => m.department)];
   // Same rule as the server: active staff in the department and at the site, when set.
   const signers = (roster ?? []).filter(m =>
     (!department.trim() || m.department === department.trim())
@@ -490,20 +489,6 @@ function UploadDialog({
             </Select>
           </div>
 
-          {/* Department */}
-          <div className="space-y-1.5">
-            <Label>Department <span className="text-muted-foreground text-xs">(optional, leave blank for all staff)</span></Label>
-            <Input
-              value={department}
-              onChange={e => setDepartment(e.target.value)}
-              placeholder="e.g. Kitchen, Front of House, All Staff"
-              list="upload-dept-list"
-            />
-            <datalist id="upload-dept-list">
-              {departmentOptions.map(d => <option key={d} value={d} />)}
-            </datalist>
-          </div>
-
           {/* Site */}
           {sites.length > 0 && (
             <div className="space-y-1.5">
@@ -517,6 +502,19 @@ function UploadDialog({
               </Select>
             </div>
           )}
+
+          {/* Department */}
+          <div className="space-y-1.5">
+            <Label htmlFor="upload-department">Department</Label>
+            <DepartmentNameSelect
+              id="upload-department"
+              value={department}
+              onChange={setDepartment}
+              siteId={siteId !== "none" ? Number(siteId) : null}
+              usedBefore={departmentsUsedBefore}
+              noneLabel="All departments"
+            />
+          </div>
 
           {/* Description */}
           <div className="space-y-1.5">
