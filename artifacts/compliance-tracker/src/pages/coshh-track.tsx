@@ -22,6 +22,7 @@ import {
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // COSHHTrack (API: /api/coshh-track/*). Substances come from the COSHH
@@ -547,6 +548,7 @@ export default function CoshhTrackPage() {
           </TabsList>
 
           <TabsContent value="due" className="space-y-4 pt-3">
+            <TrackContractorChecks module="coshh" siteId={siteFilter !== "all" ? Number(siteFilter) : undefined} />
             {actionItems.length === 0 ? (
               <div className="rounded-xl border-2 border-dashed border-muted py-10 text-center text-sm text-muted-foreground">
                 {(status?.items.length ?? 0) === 0 ? "Nothing recorded yet. Start with a COSHH assessment." : "Nothing overdue or due in the next 30 days."}
