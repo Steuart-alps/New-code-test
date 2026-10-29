@@ -23,6 +23,8 @@ interface StaffPerformerSelectProps {
   onRosterIdChange?: (value: number | null) => void;
   /** Lists only the logins who can see this site; omit for the whole business. */
   siteId?: number | null;
+  /** False lists logins only; anyone else is typed in under "Other". */
+  includeRoster?: boolean;
   label?: string;
   optional?: boolean;
   placeholder?: string;
@@ -35,12 +37,15 @@ const nameKey = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase()
  * Picker for who did a frontline record: the staff roster plus everyone with a
  * login for the business (Owners, Managers, Staff), so a Manager who isn't on
  * the roster can still be chosen. Existing free-text values remain editable.
+ * Checks done by managers and permanent staff (FireTrack) list logins only,
+ * since a long roster makes the right name hard to find.
  */
 export function StaffPerformerSelect({
   value,
   onChange,
   onRosterIdChange,
   siteId,
+  includeRoster = true,
   label = "Performed by",
   optional = false,
   placeholder = "Select a staff member",
@@ -53,6 +58,7 @@ export function StaffPerformerSelect({
 
   useEffect(() => {
     let cancelled = false;
+    if (!includeRoster) { setRoster([]); return; }
     apiFetch("/staff-roster")
       .then((response) => response.ok ? response.json() : [])
       .then((members: StaffPerformer[]) => {

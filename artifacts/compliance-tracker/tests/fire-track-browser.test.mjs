@@ -13,8 +13,8 @@ import { chromium } from "@playwright/test";
 //   - the emergency lighting test explains the 5 minute flick test;
 //   - the annual discharge test and the contractor services say they are kept
 //     in step with their ComplyTrack tasks;
-//   - "Performed by" offers the roster and everyone with a login, so a Manager
-//     who is not on the roster can be chosen;
+//   - "Performed by" offers everyone with a login (not the roster, which can
+//     run to dozens), so a Manager can be chosen and roster staff typed in;
 //   - a drill cannot be saved until it says whether night staff took part;
 //   - history shows the call point and night staff answers;
 //   - managers add call points with a location under Template, Call points,
@@ -108,6 +108,7 @@ const checks = [
 const posts = [];
 const unexpectedRequests = [];
 const assigneeRequests = [];
+let rosterRequests = 0;
 
 const json = (route, data, code = 200) => route.fulfill({ status: code, contentType: "application/json", body: JSON.stringify(data) });
 async function routeApi(route) {
@@ -142,15 +143,17 @@ async function routeApi(route) {
       case "/api/track-actions/templates/matching":
       case "/api/track-evidence":
       case "/api/track-evidence/requirements": return json(route, []);
-      // "Performed by" lists the roster plus everyone with a login (Owners,
-      // Managers, Staff); a login with the same name as a roster entry shows once.
-      case "/api/staff-roster": return json(route, [{ id: 31, name: "Pat Porter", active: true }, { id: 32, name: "Left Last Year", active: false }]);
+      // FireTrack's "Performed by" lists people with a login (Owners, Managers,
+      // Staff), not the roster; roster staff are typed in under "Other".
+      case "/api/staff-roster":
+        rosterRequests += 1;
+        return json(route, [{ id: 31, name: "Pat Porter", active: true }]);
       case "/api/assignees":
         assigneeRequests.push(url.searchParams.get("siteId"));
         return json(route, [
           { id: 7, name: "Duty Manager", role: "client_admin" },
+          { id: 10, name: "Sam Green", role: "client_staff" },
           { id: 9, name: "Leanne Elliot", role: "client_manager" },
-          { id: 10, name: "pat  porter", role: "client_staff" },
         ]);
       // A finished setup: the team step (#237) does not hold back the forms.
       case "/api/setup/state": return json(route, { needsSetup: false, canManage: true });
@@ -286,11 +289,12 @@ try {
   const performer = dialog.getByTestId("select-performed-by");
   await page.waitForFunction(() => document.querySelector('[data-testid="select-performed-by"]')?.textContent?.includes("Leanne Elliot"));
   assert.deepEqual(await performer.locator("option").allInnerTexts(),
-    ["Select a staff member", "Duty Manager", "Leanne Elliot", "Pat Porter", "Other / enter name…"],
-    "roster and logins together, A to Z, each name once, no inactive roster entries");
+    ["Select a staff member", "Duty Manager", "Leanne Elliot", "Sam Green", "Other / enter name…"],
+    "logins only, A to Z; roster staff are typed in");
   assert.equal(await performer.evaluate(select => select.selectedOptions[0].textContent), "Duty Manager", "starts on the signed-in person");
   assert.equal(await dialog.getByTestId("input-performed-by-custom").count(), 0);
   assert.ok(assigneeRequests.includes("1"), "logins are listed for the record's site");
+  assert.equal(rosterRequests, 0, "the staff roster is not loaded for fire checks");
   await performer.selectOption({ label: "Leanne Elliot" });
 
   // Sound level: CP1 is near a sleeping area, so the 75 dB bedhead limit applies.
