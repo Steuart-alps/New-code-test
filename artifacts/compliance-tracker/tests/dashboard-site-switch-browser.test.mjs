@@ -391,6 +391,27 @@ async function main() {
       await page.close();
     });
 
+    await test("a count in the summary bar lists those tracks with their checks open", async () => {
+      const { page, api } = await open();
+      await pickSite(page, "Harbour Kitchen");
+      await (await api.nextSummary("11")).respond();
+      await expectShowing(page, "11", "Harbour loaded");
+      // Harbour: AM done (complete), PM missing (requires action).
+      await page.getByRole("button", { name: "1 track requires action" }).click();
+      assert.equal(await page.getByRole("link", { name: /^Open Daily AM Checklist:/ }).count(), 0, "AM card hidden by the filter");
+      const pm = dailyRow(page, "Daily PM Sign-off");
+      assert.equal(await pm.getByRole("button", { name: /PM Sign-off checks$/ }).getAttribute("aria-expanded"), "true", "PM checks open");
+      const siteLink = pm.getByRole("link", { name: /Harbour Kitchen/ });
+      assert.equal(await siteLink.getAttribute("href"), "/daily-track-pm?siteId=11", "second click opens Harbour's PM checklist");
+      await page.getByRole("button", { name: "1 complete" }).click();
+      assert.equal(await page.getByRole("link", { name: /^Open Daily PM Sign-off:/ }).count(), 0, "PM card hidden by the complete filter");
+      assert.ok(await page.getByRole("link", { name: /^Open Daily AM Checklist:/ }).count() > 0, "AM card shown");
+      await page.getByRole("button", { name: "Show all tracks" }).click();
+      assert.ok(await page.getByRole("link", { name: /^Open Daily PM Sign-off:/ }).count() > 0, "PM card back");
+      assert.ok(await page.getByRole("link", { name: /^Open Daily AM Checklist:/ }).count() > 0, "AM card still shown");
+      await page.close();
+    });
+
     await test("retry reloads the selected site", async () => {
       const { page, api } = await open();
       await pickSite(page, "Riverside Deli");

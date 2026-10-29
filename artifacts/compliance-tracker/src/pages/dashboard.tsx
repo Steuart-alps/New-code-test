@@ -102,8 +102,13 @@ function StatusIcon({ status, health, className }: { status: TrackStatus; health
 
 // ── Track row ─────────────────────────────────────────────────────────────────
 
-function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchenOverdueBadge?: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
+function TrackRow({ track, kitchenOverdueBadge, defaultOpen = false }: {
+  track: TrackSummary;
+  kitchenOverdueBadge?: React.ReactNode;
+  /** Start with the checks listed, e.g. when picked from the summary bar. */
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const hasItems = track.items.length > 0;
   const canExpand = hasItems;
 
@@ -220,51 +225,79 @@ function DisabledTrack({ track }: { track: TrackSummary }) {
 
 // ── Summary bar ───────────────────────────────────────────────────────────────
 
-function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
+type SummaryFilter = "action_required" | "due" | "complete" | "not_started";
+
+// These buckets are deliberately ordered so every module is counted once:
+// an overdue or failed module is action-needed even when its status is not
+// "attention", while future due items remain a separate, non-urgent state.
+// Modules with nothing recorded yet are "not started", a neutral state.
+const SUMMARY_FILTERS: Record<SummaryFilter, (t: TrackSummary) => boolean> = {
+  action_required: (t) => t.health === "action_required",
+  due: (t) => t.health === "clear" && t.status === "attention",
+  complete: (t) => t.health === "clear" && t.status === "ok",
+  not_started: (t) => t.health === "not_started",
+};
+
+const SUMMARY_FILTER_LABEL: Record<SummaryFilter, string> = {
+  action_required: "that require action",
+  due: "due soon",
+  complete: "complete",
+  not_started: "not started",
+};
+
+/**
+ * Counts of modules by state. Each count is a button that narrows the module
+ * list below to those modules with their checks listed, so anything still to
+ * do is one more click away. "Not applicable" opens the disabled list.
+ */
+function SummaryBar({ tracks, filter, onFilter, onShowDisabled }: {
+  tracks: TrackSummary[];
+  filter: SummaryFilter | null;
+  onFilter: (filter: SummaryFilter | null) => void;
+  onShowDisabled: () => void;
+}) {
   const enabled = tracks.filter((t) => t.enabled);
-  // These buckets are deliberately ordered so every module is counted once:
-  // an overdue or failed module is action-needed even when its status is not
-  // "attention", while future due items remain a separate, non-urgent state.
-  // Modules with nothing recorded yet are "not started", a neutral state.
-  const actionRequired = enabled.filter((t) => t.health === "action_required").length;
-  const due = enabled.filter((t) => t.health === "clear" && t.status === "attention").length;
-  const complete = enabled.filter((t) => t.health === "clear" && t.status === "ok").length;
-  const notStarted = enabled.filter((t) => t.health === "not_started").length;
+  const count = (key: SummaryFilter) => enabled.filter(SUMMARY_FILTERS[key]).length;
+  const actionRequired = count("action_required");
+  const due = count("due");
+  const complete = count("complete");
+  const notStarted = count("not_started");
   const notApplicable = tracks.filter((t) => !t.enabled).length;
 
   if (enabled.length === 0) return null;
 
+  const chip = (key: SummaryFilter, className: string, icon: ReactNode, label: string) => (
+    <button
+      type="button"
+      aria-pressed={filter === key}
+      onClick={() => onFilter(filter === key ? null : key)}
+      className={cn(
+        "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+        filter === key ? "border-current bg-muted/60" : "border-transparent",
+        className,
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
   return (
-    <div className="flex items-center gap-4 text-sm flex-wrap">
-      {actionRequired > 0 && (
-        <span className="flex items-center gap-1.5 text-rose-600 font-medium">
-          <AlertCircle className="w-4 h-4" />
-          {actionRequired} track{actionRequired > 1 ? "s" : ""} require action
-        </span>
-      )}
-      {due > 0 && (
-        <span className="flex items-center gap-1.5 text-amber-700">
-          <AlertTriangle className="w-4 h-4" />
-          {due} due soon
-        </span>
-      )}
-      {complete > 0 && (
-        <span className="flex items-center gap-1.5 text-emerald-600">
-          <CheckCircle2 className="w-4 h-4" />
-          {complete} complete
-        </span>
-      )}
-      {notStarted > 0 && (
-        <span className="flex items-center gap-1.5 text-muted-foreground">
-          <Circle className="w-4 h-4" />
-          {notStarted} not started
-        </span>
-      )}
+    <div className="flex items-center gap-x-2 gap-y-1 text-sm flex-wrap -mx-2.5">
+      {actionRequired > 0 && chip("action_required", "text-rose-600 font-medium", <AlertCircle className="w-4 h-4" />,
+        `${actionRequired} track${actionRequired > 1 ? "s require" : " requires"} action`)}
+      {due > 0 && chip("due", "text-amber-700", <AlertTriangle className="w-4 h-4" />, `${due} due soon`)}
+      {complete > 0 && chip("complete", "text-emerald-600", <CheckCircle2 className="w-4 h-4" />, `${complete} complete`)}
+      {notStarted > 0 && chip("not_started", "text-muted-foreground", <Circle className="w-4 h-4" />, `${notStarted} not started`)}
       {notApplicable > 0 && (
-        <span className="flex items-center gap-1.5 text-muted-foreground">
+        <button
+          type="button"
+          onClick={onShowDisabled}
+          className="flex cursor-pointer items-center gap-1.5 rounded-full border border-transparent px-2.5 py-1 text-muted-foreground transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        >
           <MinusCircle className="w-4 h-4" />
           {notApplicable} not applicable
-        </span>
+        </button>
       )}
     </div>
   );
@@ -391,7 +424,8 @@ function ChecklistLink({ href, label, children }: { href: string; label: string;
   );
 }
 
-function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals | null; loading: boolean }) {
+function DailyTrackSnapshotCard({ totals, loading, siteId }: { totals: ChecklistTotals | null; loading: boolean; siteId: string }) {
+  const siteQuery = siteId === "all" ? "" : `?siteId=${siteId}`;
   if (!totals && !loading) return null;
   const requiredPairs = (totals?.expectedAmPairs ?? 0) + (totals?.expectedPmPairs ?? 0);
   const completedPairs = (totals?.completedAmPairs ?? 0) + (totals?.completedPmPairs ?? 0);
@@ -476,12 +510,16 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
       {!loading && (
         <div className="mt-3 flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
           {totals?.expectedAmPairs ? (
-            <span className="text-emerald-700"><strong>{totals.completedAmPairs}/{totals.expectedAmPairs}</strong> AM complete</span>
+            <Link href={`/daily-track-am${siteQuery}`} className="cursor-pointer rounded-sm text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+              <strong>{totals.completedAmPairs}/{totals.expectedAmPairs}</strong> AM complete
+            </Link>
           ) : (
             <span className="text-muted-foreground">AM not applicable</span>
           )}
           {totals?.expectedPmPairs ? (
-            <span className="text-emerald-700"><strong>{totals.completedPmPairs}/{totals.expectedPmPairs}</strong> PM complete</span>
+            <Link href={`/daily-track-pm${siteQuery}`} className="cursor-pointer rounded-sm text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+              <strong>{totals.completedPmPairs}/{totals.expectedPmPairs}</strong> PM complete
+            </Link>
           ) : (
             <span className="text-muted-foreground">PM not applicable</span>
           )}
@@ -555,6 +593,8 @@ export default function Dashboard() {
   // Bumped by Retry so a retry goes through the effect below and is cancelled
   // like any other summary request when the site changes.
   const [reloadKey, setReloadKey] = useState(0);
+  const [summaryFilter, setSummaryFilter] = useState<SummaryFilter | null>(null);
+  const [disabledOpen, setDisabledOpen] = useState(false);
 
   useEffect(() => {
     if (!canManageContractorEmails) return;
@@ -630,6 +670,11 @@ export default function Dashboard() {
       (healthOrder[a.health] ?? 1) - (healthOrder[b.health] ?? 1) ||
       statusOrder[a.status] - statusOrder[b.status],
   );
+  // A count picked in the summary bar narrows the list; it lifts itself once
+  // nothing matches (e.g. after switching site).
+  const filtered = summaryFilter ? sorted.filter(SUMMARY_FILTERS[summaryFilter]) : [];
+  const activeFilter = filtered.length > 0 ? summaryFilter : null;
+  const listed = activeFilter ? filtered : sorted;
 
   return (
     <AppLayout title="Dashboard">
@@ -744,22 +789,44 @@ export default function Dashboard() {
         )}
 
         {/* DailyTrack snapshot */}
-        {hasDailytrack && <DailyTrackSnapshotCard totals={checklistTotals} loading={checklistLoading} />}
+        {hasDailytrack && <DailyTrackSnapshotCard totals={checklistTotals} loading={checklistLoading} siteId={siteId} />}
 
         {/* Today by department (Owners; other roles as chosen in Settings) */}
         <TodayByDepartmentCard siteId={siteId === "all" ? null : Number(siteId)} />
 
         {/* Summary bar */}
         {!loading && !error && tracks.length > 0 && (
-          <SummaryBar tracks={tracks.filter((t) => !t.otherModule)} />
+          <SummaryBar
+            tracks={tracks.filter((t) => !t.otherModule)}
+            filter={activeFilter}
+            onFilter={setSummaryFilter}
+            onShowDisabled={() => {
+              setDisabledOpen(true);
+              requestAnimationFrame(() => document.getElementById("dashboard-disabled-tracks")?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+            }}
+          />
         )}
 
         {/* Track list */}
-        {!loading && !error && sorted.length > 0 && (
+        {!loading && !error && activeFilter && (
+          <p className="-mt-3 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+            Showing {filtered.length} track{filtered.length === 1 ? "" : "s"} {SUMMARY_FILTER_LABEL[activeFilter]}.
+            <button
+              type="button"
+              onClick={() => setSummaryFilter(null)}
+              className="cursor-pointer rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            >
+              Show all tracks
+            </button>
+          </p>
+        )}
+        {!loading && !error && listed.length > 0 && (
           <div className="space-y-2">
-            {sorted.map((track) => (
+            {listed.map((track) => (
               <TrackRow
-                key={track.trackId}
+                // Remounts when a summary count is picked so its checks open.
+                key={`${track.trackId}:${activeFilter ?? ""}`}
+                defaultOpen={Boolean(activeFilter)}
                 track={track}
                 kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill siteId={siteId} /> : null}
               />
@@ -784,7 +851,12 @@ export default function Dashboard() {
 
         {/* Disabled tracks (collapsed section) */}
         {!loading && !error && disabledTracks.length > 0 && (
-          <details className="group">
+          <details
+            id="dashboard-disabled-tracks"
+            className="group"
+            open={disabledOpen}
+            onToggle={(event) => setDisabledOpen(event.currentTarget.open)}
+          >
             <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground select-none list-none flex items-center gap-1">
               <ChevronRight className="w-3.5 h-3.5 group-open:rotate-90 transition-transform" />
               {disabledTracks.length} disabled track{disabledTracks.length > 1 ? "s" : ""}
