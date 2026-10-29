@@ -36,6 +36,8 @@ export interface ComplianceItem {
   frequencyMonths?: number | null;
   notificationSentAt?: Date | null;
   completedAt?: Date | null;
+  /** The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it). */
+  completedInHouseBy?: string | null;
   notes?: string | null;
   /** The newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects, or the contractor visit has happened with no certificate uploaded since (certificate_outstanding), so the check needs action and is not compliant whatever its due date. */
   needsAction?: boolean;

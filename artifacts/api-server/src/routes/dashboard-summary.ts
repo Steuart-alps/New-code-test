@@ -11,7 +11,7 @@ import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
 import { db } from "@workspace/db";
 import { sql, type SQL } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId } from "../middleware/requireAuth";
-import { getCheckAlerts, type CheckAlert } from "../lib/checkReminders";
+import { getCheckAlerts, RETIRED_FIRE_CHECK_TYPES, type CheckAlert } from "../lib/checkReminders";
 import { getCoshhDueItems } from "../lib/coshhTrack";
 import { NSTS_TEST_INSPECTION_TYPE, nstsStatus } from "@workspace/api-zod/nsts-sprayer-tests";
 import { getEntitledServices, isEntitled } from "../lib/services";
@@ -1501,6 +1501,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       query: sql`
         SELECT DISTINCT ON (site_id, check_type) check_type, check_date AS date, result, location
         FROM fire_safety_checks WHERE client_id = ${clientId} ${protectedSiteClause}
+          AND check_type NOT IN (${sql.join(RETIRED_FIRE_CHECK_TYPES.map((type) => sql`${type}`), sql`, `)})
         ORDER BY site_id, check_type, check_date DESC, id DESC
       `,
     },

@@ -4,6 +4,7 @@
  * to fill in.
  */
 import * as XLSX from "@e965/xlsx";
+import { oldWordRows, oldWordText } from "./word-doc";
 
 /**
  * Excel stores a typed date as a number with a date format, and the default
@@ -97,12 +98,25 @@ function readWordDocument(data: Uint8Array): string[][] {
   return wordDocumentRows(new TextDecoder().decode(entry.content as Uint8Array));
 }
 
+/**
+ * An old Word (.doc) file: Word 97-2003, or a newer file that was only given
+ * a .doc name. Rich text saved as .doc isn't read.
+ */
+function readOldWordFile(data: Uint8Array): string[][] {
+  if (data[0] === 0x50 && data[1] === 0x4B) return readWordDocument(data);
+  if (data[0] !== 0xD0 || data[1] !== 0xCF) {
+    throw new Error("This Word file could not be read. In Word, choose File > Save As > Word Document (.docx), then upload that.");
+  }
+  const { table, lines } = oldWordRows(oldWordText(data));
+  return table ?? delimitedRows(lines);
+}
+
 /** Read the first sheet of an Excel or CSV file (or a Word table or text list) as a header row plus cell text. */
 export async function readSpreadsheet(file: File): Promise<{ headers: string[]; rows: string[][] }> {
   const name = file.name.toLowerCase();
   let table: string[][];
   if (/\.doc$/.test(name) || file.type === "application/msword") {
-    throw new Error("Older Word files (.doc) can't be read. In Word, choose File > Save As > Word Document (.docx), then upload that.");
+    table = readOldWordFile(new Uint8Array(await file.arrayBuffer()));
   } else if (/\.docx$/.test(name)) {
     table = readWordDocument(new Uint8Array(await file.arrayBuffer()));
   } else if (/\.(txt|tsv)$/.test(name) || file.type === "text/plain") {

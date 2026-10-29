@@ -142,13 +142,14 @@ try {
   assert.deepEqual(types.find(type => type.key === 'bike:service').trades, []);
   console.log('ok - fire and security services keep their own date and suggest a trade');
 
-  // ── FireTrack: the service date comes from the FireTrack log ───────────────
-  await choose('fire:alarm_service', siteA.id, waterCo.id);
+  // ── FireTrack: the service is its compliance check, with its own date ──────
+  // (FireTrack shows the check; it no longer records the service itself.)
+  await choose('fire:alarm_service', siteA.id, waterCo.id, { dueDate: isoDay(10) });
   const alarm = await row('fire:alarm_service', siteA.id);
   assert.equal((await check(alarm.checkId)).title, 'Fire Alarm Maintenance');
-  ok(await owner.request('POST', '/fire-safety', { checkType: 'alarm_service', checkDate: isoDay(-170), result: 'pass', siteId: siteA.id }), 201);
-  assert.equal((await row('fire:alarm_service', siteA.id)).dueDate, isoDay(10));
-  console.log('ok - the fire alarm service check is due when FireTrack says');
+  assert.equal(alarm.dueDate, isoDay(10));
+  assert.equal(alarm.trackDueDate, null);
+  console.log('ok - the fire alarm service check keeps the date typed for it');
 
   // ── PAT, GreenTrack and TreeTrack due dates ────────────────────────────────
   const insertId = async (text, values) => (await pool.query(text, values)).rows[0].id;
