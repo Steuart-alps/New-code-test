@@ -8,7 +8,7 @@ import { CertificatesOutstandingCard } from "@/components/certificates-outstandi
 import { ContractorVisitsCard } from "@/components/contractor-visits-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, Building, Mail, Phone, ChevronRight, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
+import { Plus, Search, Building, Mail, Phone, ChevronRight, CheckCircle2, AlertTriangle, Clock, LogIn } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -89,6 +89,9 @@ export default function ContractorsPage() {
             Missing or expired ({nonCompliantCount})
           </Button>
           <ImportCsvButton type="contractors" className="h-10" />
+          <Button asChild variant="outline">
+            <Link href="/contractor-sign-in"><LogIn className="w-4 h-4 mr-2" /> Contractor sign-in</Link>
+          </Button>
         </div>
         {canAdmin && (
           <Button onClick={() => setIsFormOpen(true)} className="shadow-lg shadow-primary/20 w-full sm:w-auto">

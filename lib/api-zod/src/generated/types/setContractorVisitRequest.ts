@@ -12,4 +12,6 @@ export interface SetContractorVisitRequest {
   contractorId: number | null;
   /** Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet) */
   dueDate?: Date | null;
+  /** True marks the visit as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too. */
+  notNeeded?: boolean;
 }

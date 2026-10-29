@@ -120,6 +120,8 @@ jobs:
         run: pnpm --filter @workspace/api-server run test:private-file-acl
       - name: Sidebar sections and pins test
         run: pnpm --filter @workspace/compliance-tracker run test:nav-groups
+      - name: Dropdown A to Z order test
+        run: pnpm --filter @workspace/compliance-tracker run test:sort-options
 
       - name: Reload after a new release test
         run: pnpm --filter @workspace/compliance-tracker run test:new-release-reload
@@ -239,6 +241,9 @@ jobs:
       - name: Document read-and-sign tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:doc-sign-offs
 
+      - name: DocTrack categories by service (KitchenTrack HACCP and recipe sheets)
+        run: pnpm --filter @workspace/api-server run test:doc-track-scope
+
       # Older, populated databases (Replit-era table layouts) must keep every
       # record through the runtime migrations, readable through today's routes.
       - name: Upgrade-path fixture tests
@@ -252,6 +257,9 @@ jobs:
 
       - name: GreenTrack hour meter readings (production schema base)
         run: pnpm --filter @workspace/api-server run test:green-hours
+
+      - name: GreenTrack shed and machine pre-start daily checks (production schema base)
+        run: pnpm --filter @workspace/api-server run test:green-daily-checks
 
       - name: GreenTrack spraying book and stock (production schema base)
         run: pnpm --filter @workspace/api-server run test:green-spraying
@@ -332,6 +340,10 @@ jobs:
       - name: Approved account deletion tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:approved-account-deletion
 
+      # ALPS deletes a never-paid test business at once; anything paid is refused.
+      - name: Test business deletion tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:delete-test-business
+
       - name: Client data deletion completeness tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:client-data-deletion-feedback
 
@@ -364,6 +376,9 @@ jobs:
       - name: FireTrack call point and night staff tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-call-points
 
+      - name: FireTrack drill time, evacuation, staff present and drill attendance tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:fire-drill-records
+
       - name: FireTrack discharge test and ComplyTrack task link tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-discharge-task-link
 
@@ -381,6 +396,9 @@ jobs:
 
       - name: Certificates emailed or uploaded by contractors wait to be confirmed (production schema base)
         run: pnpm --filter @workspace/api-server run test:certificate-inbox
+
+      - name: Contractor sign-in on arrival, fire procedure and asbestos register (production schema base)
+        run: pnpm --filter @workspace/api-server run test:contractor-sign-in
 
       - name: Equipment list and QR label tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:equipment-labels

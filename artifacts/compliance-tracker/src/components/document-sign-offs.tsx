@@ -37,6 +37,7 @@ interface DocumentSignOffStatus {
 
 const CATEGORY_LABEL: Record<string, string> = {
   risk_assessment: "Risk assessment", sop: "SOP", handbook: "Handbook", policy: "Policy", procedure: "Procedure", other: "Document",
+  haccp: "HACCP plan", recipe_spec: "Recipe spec sheet",
 };
 const ukDate = (value: string | null) => (value ? format(new Date(value), "d MMM yyyy") : "");
 

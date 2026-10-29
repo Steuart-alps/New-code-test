@@ -3,7 +3,7 @@ import { Readable } from "stream";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { clientDocumentsTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { requireAuth, getClientId, canAccessClient, denyViewers } from "../middleware/requireAuth";
 import {
   ObjectContentError,
@@ -18,7 +18,14 @@ import { createDownloadMeter } from "../lib/downloadUsage";
 const router = Router();
 const storage = new ObjectStorageService();
 
+// Optional document types; a document without a type is a general business
+// document. (KitchenTrack's HACCP plans and recipe spec sheets live in
+// DocTrack so staff can read and sign them: lib/docTrackScope.ts.)
+export const DOCUMENT_CATEGORIES = ["haccp", "recipe_spec"] as const;
+const categorySchema = z.enum(DOCUMENT_CATEGORIES);
+
 // ── List documents for the current client ────────────────────────────────────
+// ?category=haccp,recipe_spec lists only documents of those types.
 
 router.get("/documents", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -27,17 +34,27 @@ router.get("/documents", requireAuth, async (req, res) => {
     return;
   }
 
+  const requested = typeof req.query.category === "string" ? req.query.category.split(",").filter(Boolean) : [];
+  const categories = z.array(categorySchema).safeParse(requested);
+  if (!categories.success) {
+    res.status(400).json({ error: "Unknown document type" });
+    return;
+  }
+
   const docs = await db
     .select()
     .from(clientDocumentsTable)
-    .where(eq(clientDocumentsTable.clientId, clientId))
+    .where(and(
+      eq(clientDocumentsTable.clientId, clientId),
+      categories.data.length ? inArray(clientDocumentsTable.category, categories.data) : undefined,
+    ))
     .orderBy(clientDocumentsTable.createdAt);
 
   res.json(docs);
 });
 
 // ── Register a document after the client has uploaded it to object storage ───
-// Body: { name, description?, objectPath, fileSize?, mimeType? }
+// Body: { name, description?, objectPath, fileSize?, mimeType?, category? }
 
 const CreateDocBody = z.object({
   name: z.string().min(1).max(255),
@@ -45,6 +62,7 @@ const CreateDocBody = z.object({
   objectPath: z.string().min(1),
   fileSize: z.number().int().positive().optional().nullable(),
   mimeType: z.string().optional().nullable(),
+  category: categorySchema.optional().nullable(),
 });
 
 router.post("/documents", requireAuth, denyViewers, async (req, res) => {
@@ -67,7 +85,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
     return;
   }
 
-  const { name, description, objectPath, fileSize, mimeType } = parsed.data;
+  const { name, description, objectPath, fileSize, mimeType, category } = parsed.data;
 
   try {
     // Registration is the point at which a presigned upload becomes a tenant
@@ -99,6 +117,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
     objectPath,
     fileSize: fileSize ?? null,
     mimeType: mimeType ?? null,
+    category: category ?? null,
     uploadedById: user.id,
     uploadedByName: user.name,
   }).returning();

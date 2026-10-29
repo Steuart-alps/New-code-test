@@ -21,6 +21,7 @@ import {
   ConfirmDelete, DocumentField, SiteFilter, SiteSelect, addMonthsIso, downloadCsv, downloadRegisterDocument,
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
+import { sortByLabel } from "@/lib/sort-options";
 
 // COSHHTrack (API: /api/coshh-track/*). Substances come from the COSHH
 // register (/api/registers/coshh), which COSHHTrack shows as its Substances
@@ -42,7 +43,7 @@ const PPE = [
   { key: "footwear", label: "Safety footwear" },
 ] as const;
 const CHECK_TYPES = [
-  { key: "lev_examination", label: "LEV thorough examination", short: "Extraction (LEV) tests", subject: "Extraction system", subjectHint: "For example: spray booth, welding fume arm, dust extractor", by: "Examiner or company", months: 14 },
+  { key: "lev_examination", label: "LEV thorough examination", short: "Extraction (LEV) tests", subject: "Extraction system", subjectHint: "For example: spray booth, welding fume arm, dust extractor", by: "Examiner or company", months: 12 },
   { key: "health_surveillance", label: "Health check", short: "Health checks", subject: "Person checked", subjectHint: "Name of the member of staff", by: "Checked by (e.g. occupational health)", months: 12 },
   { key: "exposure_monitoring", label: "Exposure monitoring", short: "Air monitoring", subject: "Area or task monitored", subjectHint: "For example: kitchen deep clean, workshop", by: "Carried out by", months: 12 },
   { key: "staff_briefing", label: "Staff briefing", short: "Staff briefings", subject: "Person briefed", subjectHint: "Name of the member of staff", by: "Briefed by", months: 12 },
@@ -493,7 +494,7 @@ export default function CoshhTrackPage() {
           <Info className="w-4 h-4 shrink-0 mt-0.5" />
           <p>
             Under the COSHH Regulations 2002 you assess the risks from hazardous substances, put controls in place, keep
-            them working (extraction systems are examined at least every 14 months), provide health checks where the
+            them working (extraction systems are examined by a contractor every 12 months, and never more than 14 months apart), provide health checks where the
             assessment calls for them, and tell staff about the risks. List your products and safety data sheets in
             the <button type="button" className="underline font-medium" onClick={() => setTab("substances")}>Substances</button> tab
             (your COSHH register), then assess each one.
@@ -529,7 +530,7 @@ export default function CoshhTrackPage() {
                   <SelectValue placeholder="Record a check…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CHECK_TYPES.map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}
+                  {sortByLabel(CHECK_TYPES, (type) => type.label).map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             )}
@@ -698,7 +699,7 @@ export default function CoshhTrackPage() {
                 <SelectTrigger className="h-8 text-xs rounded-sm w-48" aria-label="Filter by type"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All checks</SelectItem>
-                  {CHECK_TYPES.map((type) => <SelectItem key={type.key} value={type.key}>{type.short}</SelectItem>)}
+                  {sortByLabel(CHECK_TYPES, (type) => type.short).map((type) => <SelectItem key={type.key} value={type.key}>{type.short}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Button variant="outline" size="sm" className="rounded-sm h-8 text-xs gap-1.5" onClick={exportChecks} disabled={visibleChecks.length === 0}>
@@ -772,7 +773,7 @@ export default function CoshhTrackPage() {
                       <SelectTrigger id="coshh-assessment-substance"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value={NONE}>None (a task or process)</SelectItem>
-                        {siteSubstances.map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.productName}</SelectItem>)}
+                        {sortByLabel(siteSubstances, (s) => s.productName).map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.productName}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -916,7 +917,7 @@ export default function CoshhTrackPage() {
                     }}>
                       <SelectTrigger id="coshh-check-type"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {CHECK_TYPES.map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}
+                        {sortByLabel(CHECK_TYPES, (type) => type.label).map((type) => <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -928,7 +929,7 @@ export default function CoshhTrackPage() {
                     <SelectTrigger id="coshh-check-assessment"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NONE}>Not linked</SelectItem>
-                      {siteAssessments.map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.task}</SelectItem>)}
+                      {sortByLabel(siteAssessments, (a) => a.task).map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.task}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

@@ -1,7 +1,8 @@
 // Setup wizard and staff tasks. Run through test:setup-tasks (self-booted API).
 //  - Setup: state, business type + hub nation, module picks, starter-check
 //    selection with real due dates (claim / create / remove-untouched / keep
-//    edited), completion, tenant isolation and viewers refused.
+//    edited), the team step (Manager/Staff login or Owners-only confirmation
+//    before setup can finish), completion, tenant isolation and viewers refused.
 //  - Tasks: one-off and recurring occurrences, "mine" vs "all", staff can only
 //    complete their own or their role's tasks (today/yesterday), managers
 //    manage, department scoping, tenant isolation and viewers refused;
@@ -94,6 +95,7 @@ async function setupWizard(a, b, viewer) {
     LEGAL_CORE.every((t) => starter.some((c) => c.title === t && c.core === true)), JSON.stringify(starter.map((c) => c.title)));
   check("setup: signup starter checks are offered as untouched", starter.find((c) => c.title === "Fire Risk Assessment Review")?.state === "untouched");
   check("setup: modules offered during trial", (state.data?.modules?.available ?? []).includes("firetrack"));
+  check("setup: a trial business is not shown as included free", state.data?.complimentary === false, JSON.stringify(state.data?.complimentary));
 
   // Step 1: business type + nation (hub profile created with editable defaults).
   const business = await a("PUT", "/setup/business", { businessType: "care_home_healthcare", nation: "scotland" });
@@ -177,6 +179,25 @@ async function setupWizard(a, b, viewer) {
   check("setup viewer: cannot change business", (await viewer("PUT", "/setup/business", { businessType: "retail" })).status === 403);
   check("setup viewer: cannot apply starter checks", (await viewer("POST", "/setup/starter-checks", { checks: [] })).status === 403);
   check("setup viewer: cannot complete setup", (await viewer("POST", "/setup/complete", {})).status === 403);
+
+  // Team step: a Viewer only signs their own training, so it doesn't count as
+  // someone who records; setup can't finish until there is a Manager or Staff
+  // login, or an Owner confirms only Owners record for now.
+  const noTeam = (await a("GET", "/setup/state")).data?.team;
+  check("setup team: a Viewer alone is not a team", noTeam?.ready === false && noTeam?.recorders === 0, JSON.stringify(noTeam));
+  const refused = await a("POST", "/setup/complete", {});
+  check("setup team: can't finish before the team step", refused.status === 409 && refused.data?.code === "TEAM_NOT_SET_UP", JSON.stringify(refused.data));
+  check("setup team: viewer cannot confirm Owners-only", (await viewer("POST", "/setup/team-alone", {})).status === 403);
+  check("setup team isolation: other tenant cannot confirm for this business",
+    (await b("POST", `/setup/team-alone?clientId=${a.clientId}`, {})).status === 403);
+  check("setup team isolation: still not set up after the refused confirm", (await a("GET", "/setup/state")).data?.team?.ready === false);
+  const alone = await a("POST", "/setup/team-alone", {});
+  check("setup team: Owner confirms only Owners record for now", alone.status === 200 && !!alone.data?.aloneAt, JSON.stringify(alone.data));
+  check("setup team: ready after confirming", (await a("GET", "/setup/state")).data?.team?.ready === true);
+  check("setup team: other business still needs its team", (await b("GET", "/setup/state")).data?.team?.ready === false);
+  await member(b, "teamstaff", "client_staff");
+  const staffed = (await b("GET", "/setup/state")).data?.team;
+  check("setup team: a Staff login makes the team ready", staffed?.ready === true && staffed?.recorders === 1, JSON.stringify(staffed));
 
   check("setup: finish later", (await a("POST", "/setup/defer", {})).status === 200);
   const deferred = (await a("GET", "/setup/state")).data;

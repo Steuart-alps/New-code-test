@@ -9,12 +9,14 @@ import { TaskItem, useTaskClientId, type TaskList, type TaskRow } from "@/compon
 import { showQuickTutorialIfNew } from "@/components/quick-tutorial";
 import { readBillingReturn } from "@/lib/billing-return";
 
-type SetupSummary = { needsSetup: boolean; canManage: boolean; deferredAt?: string | null };
+type SetupSummary = { needsSetup: boolean; canManage: boolean; deferredAt?: string | null; team?: { ready: boolean } };
 
 /**
  * Top-of-dashboard cards: the setup wizard banner for admins of a business
  * that has not finished setup (sending them to /setup once per session until
- * they choose "Finish later"), and "My tasks today" for staff and Managers.
+ * they choose "Finish later", and even after it while the team step is still
+ * to do, because checklists and forms stay closed until then), and "My tasks
+ * today" for staff and Managers.
  * Everyone gets the quick tutorial on their first dashboard visit; Owners
  * once the setup wizard is finished or put off, so it doesn't open just
  * before the redirect.
@@ -47,7 +49,8 @@ function SetupBanner() {
       .then((data) => {
         if (cancelled) return;
         setState(data);
-        if (!data.needsSetup || data.deferredAt) {
+        const teamPending = data.canManage && data.team?.ready === false;
+        if (!data.needsSetup || (data.deferredAt && !teamPending)) {
           if (user) showQuickTutorialIfNew(user.id);
           return;
         }
@@ -58,20 +61,25 @@ function SetupBanner() {
           sessionStorage.setItem(key, "1");
         } catch { /* storage unavailable: still redirect once per load */ }
         if (alreadyOpened || backFromCheckout) return;
-        navigate("/setup");
+        navigate(data.deferredAt ? "/setup?step=team" : "/setup");
       })
       .catch(() => { /* the dashboard works without setup state */ });
     return () => { cancelled = true; };
   }, [clientId, activeClientId]);
 
   if (!state?.needsSetup || !state.canManage) return null;
+  const teamPending = state.team?.ready === false;
   return (
-    <Link href="/setup" className="flex items-center justify-between gap-4 rounded-xl border border-primary/30 bg-primary/5 p-4 transition-colors hover:bg-primary/10">
+    <Link href={teamPending && state.deferredAt ? "/setup?step=team" : "/setup"} className="flex items-center justify-between gap-4 rounded-xl border border-primary/30 bg-primary/5 p-4 transition-colors hover:bg-primary/10">
       <div className="flex items-center gap-3">
         <Sparkles className="h-5 w-5 text-primary shrink-0" />
         <div>
-          <p className="font-semibold text-sm">Continue the setup wizard</p>
-          <p className="text-xs text-muted-foreground">Pick your business type, first site, modules and the checks that apply, so this dashboard shows what matters to you.</p>
+          <p className="font-semibold text-sm">{teamPending ? "Add your team before recording anything" : "Continue the setup wizard"}</p>
+          <p className="text-xs text-muted-foreground">
+            {teamPending
+              ? "Checklists and forms open once you have added the people who will do them, so every record is in the right name."
+              : "Pick your business type, first site, modules and the checks that apply, so this dashboard shows what matters to you."}
+          </p>
         </div>
       </div>
       <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-primary">Continue <ArrowRight className="h-4 w-4" /></span>
@@ -116,7 +124,7 @@ function MyTasksTodayCard() {
             : (
               <ul className="space-y-2">
                 {outstanding.slice(0, 5).map((t) => <TaskItem key={`${t.id}:${t.occurrenceDate}`} task={t} onDone={complete} busy={busyId === t.id} />)}
-                {outstanding.length > 5 && <li className="text-xs text-muted-foreground">and {outstanding.length - 5} more on the Tasks page.</li>}
+                {outstanding.length > 5 && <li><Link href="/tasks" className="text-xs text-primary hover:underline">and {outstanding.length - 5} more on the Tasks page</Link></li>}
               </ul>
             )}
     </section>

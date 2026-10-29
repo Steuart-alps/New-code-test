@@ -70,6 +70,8 @@ async function routeApi(route) {
       });
       case "/api/billing/cancellation-status": return json(route, { accessEndsAt: null });
       case "/api/managed-by": return json(route, null);
+      // Setup is finished, so the "Add your team first" gate stays out of the way.
+      case "/api/setup/state": return json(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
       case "/api/form-options": return json(route, { options: {}, defaults: {}, disabled: {}, customised: {} });
       case "/api/train-track/records": return json(route, records);
       case "/api/sites": return json(route, []);

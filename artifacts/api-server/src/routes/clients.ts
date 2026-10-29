@@ -3,11 +3,11 @@ import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { clientsTable, usersTable, consultantClientsTable } from "@workspace/db/schema";
-import { eq, inArray, sql } from "drizzle-orm";
-import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers, isPlatformOperator } from "../middleware/requireAuth";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers, isPlatformOperator, requirePlatformOperator } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
-import { APPROVED_ERASURE_REQUEST_READY, ERASURE_REQUEST_BLOCKING, runDataDeletionJob } from "../lib/offboarding";
+import { APPROVED_ERASURE_REQUEST_READY, ERASURE_REQUEST_BLOCKING, deleteTestBusiness, runDataDeletionJob } from "../lib/offboarding";
 import { eraseClientStorageObjects } from "../lib/clientStorageErasure";
 
 const router = Router();
@@ -26,10 +26,11 @@ router.get("/clients", requireAuth, requireConsultant, async (req, res) => {
     res.json([]);
     return;
   }
+  // A business whose data has been deleted has nothing left to open.
   const clients = await db
     .select()
     .from(clientsTable)
-    .where(inArray(clientsTable.id, allowed))
+    .where(and(inArray(clientsTable.id, allowed), isNull(clientsTable.dataDeletedAt)))
     .orderBy(clientsTable.name);
   res.json(clients);
 });
@@ -196,6 +197,50 @@ router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) =
   res.status(409).json({ error: result === "request"
     ? "Account deletion requires manual review and the full 30-day retention window. Request deletion from Settings; it can be completed once the request is approved and 30 days have passed."
     : "Client data cannot be deleted while a privacy legal hold or deletion exception is active" });
+});
+
+// A platform operator deletes a test business that never paid, at once
+// (deleteTestBusiness). Typing the business's name confirms it, and their own
+// business is never offered.
+const DeleteTestBusinessBody = z.object({ confirmName: z.string().min(1).max(200) });
+
+router.post("/clients/:id/delete-test-business", requireAuth, requireConsultant, requirePlatformOperator, async (req, res) => {
+  const id = Number(req.params.id);
+  const parsed = DeleteTestBusinessBody.safeParse(req.body);
+  if (!Number.isSafeInteger(id) || id < 1 || !parsed.success) {
+    res.status(400).json({ error: "Type the business's name to confirm" });
+    return;
+  }
+  const operator = req.currentUser!;
+  if (operator.clientId === id) {
+    res.status(409).json({ error: "This is your own business, so it can't be deleted here" });
+    return;
+  }
+  const [client] = await db.select({ name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.id, id));
+  if (!client) {
+    res.status(404).json({ error: "Client not found" });
+    return;
+  }
+  const typed = parsed.data.confirmName.trim().toLowerCase();
+  if (typed !== client.name.trim().toLowerCase()) {
+    res.status(400).json({ error: `Type "${client.name}" exactly to confirm` });
+    return;
+  }
+  try {
+    const result = await deleteTestBusiness(id, operator.id, eraseClientStorageObjects);
+    if (result.status === "not_found") {
+      res.status(404).json({ error: "Client not found" });
+      return;
+    }
+    if (result.status === "refused") {
+      res.status(409).json({ error: "Only a test business that never paid can be deleted here. This one has (or had) a subscription, a payment or an AI top-up, is under a legal hold, or is already deleted." });
+      return;
+    }
+    logger.info({ clientId: id, operatorId: operator.id, rowsDeleted: result.rowsDeleted }, "Test business deleted");
+    res.json({ ok: true, rowsDeleted: result.rowsDeleted, filesDeleted: result.objectsDeleted });
+  } catch {
+    res.status(503).json({ error: "The business could not be deleted. Its records were kept; try again later." });
+  }
 });
 
 export default router;

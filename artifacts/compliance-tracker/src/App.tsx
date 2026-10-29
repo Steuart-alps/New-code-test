@@ -61,6 +61,8 @@ const StaffRosterPage = lazy(() => import("@/pages/staff-roster"));
 const SignOffPage = lazy(() => import("@/pages/sign-off"));
 const PrivacyRequestPage = lazy(() => import("@/pages/privacy-request"));
 const ContractorPortalPage = lazy(() => import("@/pages/contractor-portal"));
+const SiteSignInPage = lazy(() => import("@/pages/site-sign-in"));
+const ContractorSignInPage = lazy(() => import("@/pages/contractor-sign-in"));
 const ContractorApprovalsPage = lazy(() => import("@/pages/contractor-approvals"));
 const ContractorQuotePage = lazy(() => import("@/pages/contractor-quote"));
 const IncidentsPage = lazy(() => import("@/pages/incidents"));
@@ -166,6 +168,7 @@ function ProtectedRoutes() {
   if (location.startsWith("/privacy-request/")) return <PrivacyRequestPage />;
   if (location.startsWith("/contractor-portal/")) return <Route path="/contractor-portal/:token" component={ContractorPortalPage} />;
   if (location.startsWith("/contractor-quote/")) return <ContractorQuotePage />;
+  if (location.startsWith("/site-sign-in/")) return <Route path="/site-sign-in/:token" component={SiteSignInPage} />;
   if (location === "/kiosk") return <KioskPage />;
   if (location === "/staff/set-pin") return <StaffSetPinPage />;
 
@@ -237,6 +240,7 @@ function ProtectedRoutes() {
       {canManageContractorEmails && <Route path="/contractor-approvals" component={ContractorApprovalsPage} />}
       <Route path="/contractors" component={ContractorsPage} />
       <Route path="/contractors/:id" component={ContractorDetailPage} />
+      <Route path="/contractor-sign-in" component={ContractorSignInPage} />
       <Route path="/external" component={ExternalChecksPage} />
       <Route path="/external-checks" component={ExternalChecksPage} />
       <Route path="/items/:id" component={ItemDetailPage} />

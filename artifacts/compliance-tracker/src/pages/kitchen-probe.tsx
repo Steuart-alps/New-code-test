@@ -16,6 +16,38 @@ import { cn } from "@/lib/utils";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 
+// ── Method guide ──────────────────────────────────────────────────────────────
+
+/** How to carry out the two calibration tests, shown on the check page. */
+function ProbeMethodGuide() {
+  return (
+    <details className="rounded-sm border bg-muted/20 p-3 text-sm">
+      <summary className="cursor-pointer font-medium">How to check a probe thermometer</summary>
+      <div className="mt-3 space-y-3 text-muted-foreground">
+        <p>Clean and sanitise the probe before you start, and check the battery, the tip and the cable for damage.</p>
+        <div>
+          <p className="font-medium text-foreground">Ice-point test (should read between -1°C and 1°C)</p>
+          <ol className="list-decimal pl-5 space-y-0.5">
+            <li>Fill a cup or jug with crushed ice and add a little cold water, so the ice is wet but not floating.</li>
+            <li>Stir and leave it for about a minute to settle.</li>
+            <li>Put the probe tip into the middle of the ice, not touching the sides or bottom.</li>
+            <li>Wait until the reading stops changing, then record it.</li>
+          </ol>
+        </div>
+        <div>
+          <p className="font-medium text-foreground">Boiling-point test (should read between 99°C and 101°C)</p>
+          <ol className="list-decimal pl-5 space-y-0.5">
+            <li>Bring a pan of water to a full rolling boil.</li>
+            <li>Put the probe tip into the water, away from the sides and bottom of the pan. Keep your hand clear of the steam.</li>
+            <li>Wait until the reading stops changing, then record it.</li>
+          </ol>
+        </div>
+        <p>If either reading is more than 1°C out, take the probe out of use and use a spare. Have it repaired, recalibrated or replaced, and write what you did in the notes. Clean and sanitise the probe again when you finish.</p>
+      </div>
+    </details>
+  );
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ProbeRow = {
@@ -284,11 +316,12 @@ export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeN
               )}
             </div>
           </CardHeader>
-          <CardContent className="p-4">
+          <CardContent className="p-4 space-y-4">
             <div className="flex items-center gap-3">
               <Label className="text-sm whitespace-nowrap">Check date:</Label>
               <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="max-w-xs" />
             </div>
+            <ProbeMethodGuide />
           </CardContent>
         </Card>
 

@@ -59,10 +59,23 @@ async function main() {
     objectPath,
     fileSize: uploaded.length,
     mimeType: "application/pdf",
+    category: "haccp",
   });
   assert.equal(response.status, 201, "owner registers and finalizes its document");
   const documentId = response.data?.id;
   assert.equal(Number.isInteger(documentId), true, "registered document has an id");
+  assert.equal(response.data?.category, "haccp", "document keeps its KitchenTrack type");
+
+  // KitchenTrack lists only its HACCP plans and recipe spec sheets.
+  response = await owner.request("GET", "/documents?category=haccp,recipe_spec");
+  assert.equal(response.status, 200, "owner lists HACCP and recipe documents");
+  assert.equal(response.data.some((doc) => doc.id === documentId), true, "HACCP plan is listed");
+  response = await owner.request("GET", "/documents?category=recipe_spec");
+  assert.equal(response.data.some((doc) => doc.id === documentId), false, "HACCP plan is not a recipe spec sheet");
+  response = await owner.request("GET", "/documents");
+  assert.equal(response.data.some((doc) => doc.id === documentId), true, "all documents include the HACCP plan");
+  response = await owner.request("GET", "/documents?category=menu");
+  assert.equal(response.status, 400, "unknown document type is rejected");
 
   // Provider metadata: owner is the uploading client, visibility private.
   await run.assertProviderAcl(objectPath, { ownerClientId: owner.clientId, bytes: uploaded });

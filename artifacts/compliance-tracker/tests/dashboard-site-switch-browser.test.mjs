@@ -121,7 +121,11 @@ function summaryFor(scope) {
       status: missing.length === 0 ? "ok" : branch === "am" ? "overdue" : "attention",
       health: missing.length === 0 ? "clear" : "action_required",
       badge: branch === "am" ? e.amBadge : e.pmBadge,
-      items: missing.map((name) => ({ label: name, detail: `${branch.toUpperCase()} checklist not submitted today`, path })),
+      items: missing.map((name) => ({
+        label: name,
+        detail: `${branch.toUpperCase()} checklist not submitted today`,
+        path: `${path}?siteId=${SITES.find((s) => s.name === name).id}`,
+      })),
     };
   };
   return {
@@ -134,6 +138,9 @@ function summaryFor(scope) {
       expectedPmPairs: sites.length,
       completedPmPairs: sites.filter((s) => DONE[s.id].pm).length,
       completedSitePairs: sites.filter((s) => DONE[s.id].am && DONE[s.id].pm).length,
+      outstanding: sites
+        .filter((s) => !DONE[s.id].am || !DONE[s.id].pm)
+        .map((s) => ({ siteId: s.id, siteName: s.name, am: !DONE[s.id].am, pm: !DONE[s.id].pm })),
     },
   };
 }
@@ -144,7 +151,7 @@ function summaryFor(scope) {
  * Answers the page's background reads at once and holds every dashboard
  * summary request until the test releases it with `nextSummary(scope)`.
  */
-function mockApi(page) {
+function mockApi(page, extra = {}) {
   const held = [];
   const waiters = [];
   const json = (route, status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -166,6 +173,7 @@ function mockApi(page) {
       wake();
       return;
     }
+    if (apiPath in extra) return json(route, 200, extra[apiPath]);
     if (apiPath === "/sites") return json(route, 200, SITES);
     if (apiPath === "/setup/state") return json(route, 200, { needsSetup: false, canManage: false });
     if (apiPath === "/food-safety/status") return json(route, 200, []);
@@ -247,11 +255,11 @@ async function main() {
   const executablePath = process.env.CHROMIUM_PATH ?? ["/opt/pw-browsers/chromium"].find((p) => existsSync(p));
   const browser = await chromium.launch({ executablePath });
   /** Opens the dashboard and lets the first (all sites) summary load. */
-  const open = async () => {
+  const open = async (extra) => {
     const page = await browser.newPage();
     page.setDefaultTimeout(5_000);
     if (process.env.DEBUG_BROWSER) page.on("console", (m) => console.log("[browser]", m.type(), m.text()));
-    const api = mockApi(page);
+    const api = mockApi(page, extra);
     await page.goto(base);
     await (await api.nextSummary("all")).respond();
     await expectShowing(page, "all", "first load");
@@ -360,6 +368,69 @@ async function main() {
       await retry.respond();
       await settle(page);
       await expectShowing(page, "22", "after the old retry answered");
+      await page.close();
+    });
+
+    await test("each checklist still to do links to that site's checklist", async () => {
+      const { page, api } = await open();
+      const links = await strip(page).getByRole("link", { name: /^Open .* (AM|PM) checklist$/ })
+        .evaluateAll((els) => els.map((el) => [el.getAttribute("aria-label"), el.getAttribute("href")]));
+      assert.deepEqual(links, [
+        ["Open Harbour Kitchen PM checklist", "/daily-track-pm?siteId=11"],
+        ["Open Hilltop Cafe AM checklist", "/daily-track-am?siteId=22"],
+        ["Open Riverside Deli AM checklist", "/daily-track-am?siteId=33"],
+        ["Open Riverside Deli PM checklist", "/daily-track-pm?siteId=33"],
+      ]);
+      await pickSite(page, "Harbour Kitchen");
+      await (await api.nextSummary("11")).respond();
+      await expectShowing(page, "11", "Harbour loaded");
+      assert.deepEqual(
+        await strip(page).getByRole("link", { name: /checklist$/ }).evaluateAll((els) => els.map((el) => el.getAttribute("href"))),
+        ["/daily-track-pm?siteId=11"],
+        "only Harbour's PM checklist is still to do",
+      );
+      await page.close();
+    });
+
+    await test("a count in the summary bar lists those tracks with their checks open", async () => {
+      const { page, api } = await open();
+      await pickSite(page, "Harbour Kitchen");
+      await (await api.nextSummary("11")).respond();
+      await expectShowing(page, "11", "Harbour loaded");
+      // Harbour: AM done (complete), PM missing (requires action).
+      await page.getByRole("button", { name: "1 track requires action" }).click();
+      assert.equal(await page.getByRole("link", { name: /^Open Daily AM Checklist:/ }).count(), 0, "AM card hidden by the filter");
+      const pm = dailyRow(page, "Daily PM Sign-off");
+      assert.equal(await pm.getByRole("button", { name: /PM Sign-off checks$/ }).getAttribute("aria-expanded"), "true", "PM checks open");
+      const siteLink = pm.getByRole("link", { name: /Harbour Kitchen/ });
+      assert.equal(await siteLink.getAttribute("href"), "/daily-track-pm?siteId=11", "second click opens Harbour's PM checklist");
+      await page.getByRole("button", { name: "1 complete" }).click();
+      assert.equal(await page.getByRole("link", { name: /^Open Daily PM Sign-off:/ }).count(), 0, "PM card hidden by the complete filter");
+      assert.ok(await page.getByRole("link", { name: /^Open Daily AM Checklist:/ }).count() > 0, "AM card shown");
+      await page.getByRole("button", { name: "Show all tracks" }).click();
+      assert.ok(await page.getByRole("link", { name: /^Open Daily PM Sign-off:/ }).count() > 0, "PM card back");
+      assert.ok(await page.getByRole("link", { name: /^Open Daily AM Checklist:/ }).count() > 0, "AM card still shown");
+      await page.close();
+    });
+
+    await test("every department bar opens, even with nothing outstanding", async () => {
+      const departments = { date: TODAY, groups: [{ siteId: 11, siteName: "Harbour Kitchen", rows: [
+        { key: "1", kind: "department", departmentId: 1, name: "Kitchen", done: 1, todo: 1, failed: 0, moreItems: 0,
+          items: [{ status: "todo", label: "Kitchen closing checks", detail: "Not submitted yet", path: "/daily-track-pm?siteId=11" }] },
+        { key: "2", kind: "department", departmentId: 2, name: "Front of house", done: 2, todo: 0, failed: 0, moreItems: 0, items: [] },
+      ] }] };
+      const { page } = await open({ "/dashboard/today-by-department": departments });
+      const card = page.getByTestId("card-today-by-department");
+      await card.getByRole("button", { name: /^Kitchen/ }).click();
+      assert.equal(await card.getByRole("link", { name: /Kitchen closing checks/ }).getAttribute("href"), "/daily-track-pm?siteId=11");
+      const done = card.getByRole("button", { name: /^Front of house/ });
+      assert.equal(await done.isEnabled(), true, "a bar with everything done can still be clicked");
+      await done.click();
+      await card.getByText("Everything due here today is done.").waitFor();
+      assert.deepEqual(
+        await card.getByRole("link", { name: /checklists|Tasks/ }).evaluateAll((els) => els.map((el) => el.getAttribute("href"))),
+        ["/daily-track-am?siteId=11", "/daily-track-pm?siteId=11", "/tasks"],
+      );
       await page.close();
     });
 

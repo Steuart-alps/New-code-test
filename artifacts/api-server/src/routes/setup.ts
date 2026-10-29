@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { appSettingsTable, categoriesTable, clientsTable, complianceItemsTable, sitesTable } from "@workspace/db/schema";
+import { appSettingsTable, categoriesTable, clientsTable, complianceItemsTable, sitesTable, usersTable } from "@workspace/db/schema";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
@@ -10,14 +10,18 @@ import { addMonthsToDay, isCalendarDay } from "../lib/taskSchedule";
 import { BUSINESS_TYPES } from "./auth";
 
 // First-run setup wizard (web /setup): business type and nation, first site
-// (created through POST /sites), modules to start with, and which starter
-// compliance checks apply with their last service dates. Every step is
-// optional; clients.setup_completed_at hides the wizard once finished.
+// (created through POST /sites), the team (people added through POST /users),
+// modules to start with, and which starter compliance checks apply with their
+// last service dates. Every step but the team is optional: records should be
+// in the names of the people who do them, so setup can't finish until the
+// business has a Manager or Staff login, or the Owner says only Owners record
+// for now. clients.setup_completed_at hides the wizard once finished.
 const router = Router();
 
 const NATIONS = ["england", "wales", "scotland", "northern_ireland", "multi_nation"] as const;
 const PICKED_MODULES_SETTING = "setup_modules";
 const DEFERRED_SETTING = "setup_deferred_at";
+const TEAM_ALONE_SETTING = "setup_team_alone_at";
 // Superseded service keys are not offered as starting modules.
 const LEGACY_MODULES = new Set(["pooltrack", "swimtrack", "safetrack"]);
 
@@ -84,6 +88,19 @@ function parsePicked(raw: string | null): string[] {
   }
 }
 
+/**
+ * The team step: Managers and Staff are the people who record checks (Viewers
+ * only sign their own training), so one of them, or the Owner saying only
+ * Owners record for now, is what lets records start.
+ */
+async function teamState(clientId: number) {
+  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(usersTable)
+    .where(and(eq(usersTable.clientId, clientId), eq(usersTable.active, true), inArray(usersTable.role, ["client_manager", "client_staff"])));
+  const recorders = row?.count ?? 0;
+  const aloneAt = await setting(clientId, TEAM_ALONE_SETTING);
+  return { recorders, aloneAt, ready: recorders > 0 || aloneAt != null };
+}
+
 /** Modules picked in the setup wizard; empty when none were picked. */
 export async function getPickedModules(clientId: number): Promise<string[]> {
   return parsePicked(await setting(clientId, PICKED_MODULES_SETTING));
@@ -93,8 +110,12 @@ router.get("/setup/state", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const role = req.currentUser!.role;
-  const [client] = await db.select({ businessType: clientsTable.businessType, setupCompletedAt: clientsTable.setupCompletedAt })
-    .from(clientsTable).where(eq(clientsTable.id, clientId));
+  const [client] = await db.select({
+    businessType: clientsTable.businessType,
+    setupCompletedAt: clientsTable.setupCompletedAt,
+    trialEndsAt: clientsTable.trialEndsAt,
+    stripeSubscriptionId: clientsTable.stripeSubscriptionId,
+  }).from(clientsTable).where(eq(clientsTable.id, clientId));
   if (!client) return res.status(404).json({ error: "Client not found" });
   const canManage = role === "consultant" || role === "client_admin";
   const base = { setupCompletedAt: client.setupCompletedAt, needsSetup: client.setupCompletedAt == null, canManage, businessType: client.businessType };
@@ -109,9 +130,15 @@ router.get("/setup/state", requireAuth, async (req, res) => {
   const present = new Set(titles.length ? (await db.select({ title: complianceItemsTable.title }).from(complianceItemsTable)
     .where(and(eq(complianceItemsTable.clientId, clientId), inArray(complianceItemsTable.title, titles)))).map((r) => r.title) : []);
   const values = (check: (typeof catalogue)[number]["check"]) => starterItemValues(check, client.businessType);
+  const team = await teamState(clientId);
   res.json({
     ...base,
     deferredAt: await setting(clientId, DEFERRED_SETTING),
+    // A finished setup never blocks records again.
+    team: client.setupCompletedAt ? { ...team, ready: true } : team,
+    // No trial end and no subscription: every site and module is free (see
+    // GET /billing/config), so the wizard doesn't talk about per-site prices.
+    complimentary: client.trialEndsAt === null && !client.stripeSubscriptionId,
     nation: ((profile.rows as Array<{ nation: string }>)[0]?.nation) ?? null,
     businessTypes: BUSINESS_TYPES,
     sites,
@@ -263,9 +290,26 @@ router.post("/setup/defer", requireAuth, requireClientAdmin, async (req, res) =>
   res.json({ ok: true });
 });
 
+// "Only Owners record for now": the business has nobody else signing in yet,
+// so records can start in the Owners' names. Adding Staff later still works.
+router.post("/setup/team-alone", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const aloneAt = new Date().toISOString();
+  await saveSetting(clientId, TEAM_ALONE_SETTING, aloneAt);
+  res.json({ aloneAt });
+});
+
 router.post("/setup/complete", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const [client] = await db.select({ setupCompletedAt: clientsTable.setupCompletedAt }).from(clientsTable).where(eq(clientsTable.id, clientId));
+  if (!client?.setupCompletedAt && !(await teamState(clientId)).ready) {
+    return res.status(409).json({
+      error: "Add the people who will record checks (Managers or Staff) before finishing setup, or confirm that only Owners record for now.",
+      code: "TEAM_NOT_SET_UP",
+    });
+  }
   const [updated] = await db.update(clientsTable).set({ setupCompletedAt: new Date() })
     .where(and(eq(clientsTable.id, clientId), isNull(clientsTable.setupCompletedAt)))
     .returning({ setupCompletedAt: clientsTable.setupCompletedAt });

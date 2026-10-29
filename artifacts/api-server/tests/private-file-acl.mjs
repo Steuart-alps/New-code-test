@@ -109,7 +109,8 @@ try {
   });
   app.use("/api", lib.storageRouter);
   app.use("/api", lib.documentsRouter);
-  app.use("/api/doc-track", lib.docTrackRouter);
+  // routes/index.ts sets the account's DocTrack categories; null opens them all.
+  app.use("/api/doc-track", (_req, res, next) => { res.locals.docCategories = null; next(); }, lib.docTrackRouter);
   server = await new Promise(resolve => {
     const listener = app.listen(0, "127.0.0.1", () => resolve(listener));
   });

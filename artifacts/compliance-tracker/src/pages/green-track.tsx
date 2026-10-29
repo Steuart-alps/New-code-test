@@ -37,10 +37,10 @@ import {
   Tractor, Plus, AlertTriangle, CheckCircle2, Clock, Wrench,
   Pencil, Trash2, Lock, Search, Building2, Filter, ChevronDown, X,
   ShieldAlert, XCircle, CheckCheck, Gauge, Fuel, ClipboardCheck, Droplet, Settings,
-  Upload, Download, SprayCan, Package, Mic, Loader2,
+  Upload, Download, SprayCan, Package, Mic, Loader2, Sunrise,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SpreadsheetDropZone, isSpreadsheetFile } from "@/components/spreadsheet-drop-zone";
+import { SpreadsheetDropZone, isSpreadsheetFile, usePastedFile } from "@/components/spreadsheet-drop-zone";
 import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
 import { format } from "date-fns";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -54,6 +54,8 @@ import { getApiErrorMessage } from "@/lib/api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/components/register-shared";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { GreenDailyChecksTab } from "@/components/green-daily-checks";
+import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -210,7 +212,7 @@ const MACHINE_TYPE_LABELS: Record<string, string> = {
   other:             "Other",
 };
 
-const MACHINE_TYPES = Object.keys(MACHINE_TYPE_LABELS);
+const MACHINE_TYPES = sortByLabel(Object.keys(MACHINE_TYPE_LABELS), t => MACHINE_TYPE_LABELS[t]);
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   scheduled:  "Scheduled service",
@@ -232,7 +234,8 @@ const DEFECT_STATUS_LABELS: Record<string, string> = {
 
 const PUWER_INSPECTION_TYPE_LABELS: Record<string, string> = {
   thorough_examination: "Thorough examination (PUWER)",
-  loler_examination:    "Thorough examination (LOLER)",
+  loler_examination:    "Thorough examination (LOLER, annual)",
+  loler_examination_6_monthly: "Thorough examination (LOLER, 6-monthly: lifts people, or a lifting accessory)",
   annual_inspection:    "Annual inspection",
   periodic_inspection:  "Periodic inspection",
   [NSTS_TEST_INSPECTION_TYPE]: "NSTS sprayer test",
@@ -542,7 +545,7 @@ function MachineDialog({
                   <SelectTrigger className="mt-1 rounded-sm" data-testid="select-sprayer-category"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="_none">— Not a pesticide sprayer / not set —</SelectItem>
-                    {Object.entries(NSTS_SPRAYER_CATEGORIES).map(([key, c]) => (
+                    {sortByLabel(Object.entries(NSTS_SPRAYER_CATEGORIES), ([, c]) => c.label).map(([key, c]) => (
                       <SelectItem key={key} value={key}>{c.label} · {nstsIntervalText(key)}</SelectItem>
                     ))}
                   </SelectContent>
@@ -748,7 +751,7 @@ function MachineImportDialog({
     if (!file) return;
     if (!isSpreadsheetFile(file)) {
       if (reading.canRead && isPhotoOrPdf(file)) return void handleListFile(file);
-      toast({ title: "That isn't a spreadsheet", description: "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
+      toast({ title: "That isn't a spreadsheet", description: isPhotoOrPdf(file) && reading.status ? "Reading a photo, screenshot or PDF needs the AI features add-on. Or choose an Excel (.xlsx or .xls) or CSV file." : "Choose an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
       return;
     }
     let table: string[][];
@@ -767,6 +770,8 @@ function MachineImportDialog({
     setRows(parsed.rows);
     setErrors(parsed.errors);
   };
+
+  usePastedFile(open && !readingList && !importing, file => void handleFile(file));
 
   const handleImport = async () => {
     setImporting(true);
@@ -806,8 +811,8 @@ function MachineImportDialog({
             {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
             {readingList && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> Reading your list… this can take a minute</span>}
           </div>
-          <SpreadsheetDropZone onFile={file => void handleFile(file)} testId="input-machine-roster-file" className="rounded-sm" />
-          <ListReadingPanel reading={reading} kind="greentrack-equipment" noun="machines" disabled={readingList} onFile={file => void handleListFile(file)} />
+          <SpreadsheetDropZone onFile={file => void handleFile(file)} aiReading={reading.canRead && !readingList} testId="input-machine-roster-file" className="rounded-sm" />
+          <ListReadingPanel reading={reading} kind="greentrack-equipment" noun="machines" disabled={readingList} onFile={file => void handleListFile(file)} onSpreadsheet={file => void handleFile(file)} />
           {readFromList && <ListReadNote result={readFromList} noun="machines" one="machine" kind="greentrack-equipment" onDownload={() => void downloadReadRows()} />}
           <p className="text-xs text-muted-foreground">
             Required columns: <strong>name</strong> and <strong>type</strong>. Supported broad types include
@@ -967,7 +972,7 @@ function PreUseDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.filter(m => m.active).map(m => (
+                {sortByLabel(machines.filter(m => m.active), m => m.name).map(m => (
                   <SelectItem key={m.id} value={String(m.id)}>
                     {m.name} <span className="opacity-50">({MACHINE_TYPE_LABELS[m.type] ?? m.type})</span>
                   </SelectItem>
@@ -1122,7 +1127,7 @@ function ServiceDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.map(m => (
+                {sortByLabel(machines, m => m.name).map(m => (
                   <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -1139,7 +1144,7 @@ function ServiceDialog({
               <Select value={form.serviceType} onValueChange={v => setForm(f => ({ ...f, serviceType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(SERVICE_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(SERVICE_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
@@ -1278,7 +1283,7 @@ function DefectDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.map(m => (
+                {sortByLabel(machines, m => m.name).map(m => (
                   <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -1465,7 +1470,7 @@ function PuwerDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+                {sortByLabel(machines, m => m.name).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -1485,7 +1490,7 @@ function PuwerDialog({
               <Select value={form.inspectionType} onValueChange={v => setForm(f => ({ ...f, inspectionType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm" data-testid="select-inspection-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(PUWER_INSPECTION_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(PUWER_INSPECTION_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
@@ -1722,7 +1727,7 @@ function HourReadingDialog({
               onValueChange={v => { setLowerWarning(null); setForm(f => ({ ...f, machineId: v === "_none" ? "" : v })); }}>
               <SelectTrigger className="mt-1 rounded-sm" data-testid="select-hours-machine"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.filter(m => m.active).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+                {sortByLabel(machines.filter(m => m.active), m => m.name).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
               </SelectContent>
             </Select>
             {!reading && last?.currentHours != null && (
@@ -1968,7 +1973,7 @@ function FuelLogDialog({
             <Select value={form.machineId || "_none"} onValueChange={v => setForm(f => ({ ...f, machineId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select machine" /></SelectTrigger>
               <SelectContent>
-                {machines.filter(m => m.active).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+                {sortByLabel(machines.filter(m => m.active), m => m.name).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -1983,7 +1988,7 @@ function FuelLogDialog({
               <Select value={form.fuelType} onValueChange={v => setForm(f => ({ ...f, fuelType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(FUEL_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(FUEL_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
@@ -2026,7 +2031,7 @@ function FuelLogDialog({
   );
 }
 
-type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "hours" | "spraying" | "stock" | "fuel" | "actions";
+type Tab = "daily" | "fleet" | "pre-use" | "services" | "defects" | "puwer" | "hours" | "spraying" | "stock" | "fuel" | "actions";
 
 export default function GreenTrackPage() {
   const { user, activeClientId } = useAuth();
@@ -2064,8 +2069,15 @@ export default function GreenTrackPage() {
   const [scanMachineId, setScanMachineId] = useState<string | undefined>();
   const [sprayingFromScan, setSprayingFromScan] = useState<{ machineId?: number } | null>(null);
   const [sayMachineDialog, setSayMachineDialog] = useState(false);
+  // The site the Daily checks tab opens on (a dashboard or reminder link).
+  const [dailySiteId, setDailySiteId] = useState<number | null>(null);
 
   useEffect(() => {
+    const daily = takeLinkParams(["tab", "siteId"] as const);
+    if (daily?.tab === "daily") {
+      setActiveTab("daily");
+      if (daily.siteId && /^\d+$/.test(daily.siteId)) setDailySiteId(Number(daily.siteId));
+    }
     const link = takeLinkParams(["machine", "open"] as const);
     if (!link?.machine || !/^\d+$/.test(link.machine)) return;
     const machineId = link.machine;
@@ -2140,6 +2152,7 @@ export default function GreenTrackPage() {
     queryClient.invalidateQueries({ queryKey: ["green-status"] });
     queryClient.invalidateQueries({ queryKey: ["green-hours"] });
     queryClient.invalidateQueries({ queryKey: ["green-hour-readings"] });
+    queryClient.invalidateQueries({ queryKey: ["green-pre-start"] });
   };
 
   // Delete handler
@@ -2210,6 +2223,7 @@ export default function GreenTrackPage() {
   const showFuelTab = greenConfig?.green_show_fuel !== "false";
 
   const TABS: { key: Tab; label: string; icon: any; count?: number }[] = [
+    { key: "daily",    label: "Daily checks", icon: Sunrise },
     { key: "fleet",    label: "Fleet",       icon: Tractor,        count: machines.length },
     { key: "pre-use",  label: "Pre-use",     icon: CheckCheck,     count: status?.checkedTodayCount },
     { key: "services", label: "Services",    icon: Wrench },
@@ -2341,12 +2355,12 @@ export default function GreenTrackPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {activeTab !== "actions" && <div className="relative">
+            {activeTab !== "actions" && activeTab !== "daily" && <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search…" className="pl-8 h-8 w-44 rounded-sm text-sm" />
             </div>}
-            {activeTab !== "fleet" && activeTab !== "actions" && activeTab !== "spraying" && activeTab !== "stock" && (
+            {activeTab !== "fleet" && activeTab !== "actions" && activeTab !== "spraying" && activeTab !== "stock" && activeTab !== "daily" && (
               <Select value={filterMachine || "_all"} onValueChange={v => setFilterMachine(v === "_all" ? "" : v)}>
                 <SelectTrigger className="h-8 rounded-sm text-sm w-44">
                   <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
@@ -2354,7 +2368,7 @@ export default function GreenTrackPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_all">All machines</SelectItem>
-                  {machines.map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+                  {sortByLabel(machines, m => m.name).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             )}
@@ -2408,6 +2422,14 @@ export default function GreenTrackPage() {
             {canAdmin && <GreenConfigDialog />}
           </div>
         </div>
+
+        {/* ── Daily checks tab ──────────────────────────────────────────── */}
+        {activeTab === "daily" && (
+          <GreenDailyChecksTab
+            initialSiteId={dailySiteId}
+            onCheckMachine={(machineId) => { setEditPreUse(null); setScanMachineId(String(machineId)); setPreUseDialog(true); }}
+          />
+        )}
 
         {/* ── Fleet tab ─────────────────────────────────────────────────── */}
         {activeTab === "fleet" && (

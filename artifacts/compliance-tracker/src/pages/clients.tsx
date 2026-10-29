@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ErrorReportsCheck } from "@/components/error-reports-check";
-import { Plus, Pencil, Building2, ToggleLeft, ToggleRight, TicketPercent, Copy, Check } from "lucide-react";
+import { Plus, Pencil, Building2, ToggleLeft, ToggleRight, TicketPercent, Copy, Check, Trash2 } from "lucide-react";
 
 interface Client {
   id: number;
@@ -111,6 +111,7 @@ function ClientDialog({
   onSaved: () => void;
   client: Client | null;
 }) {
+  const { user } = useAuth();
   const [form, setForm] = useState({
     name: "",
     slug: "",
@@ -221,6 +222,13 @@ function ClientDialog({
               />
             </div>
           </div>
+          {!client && (
+            <p className="text-xs text-muted-foreground">
+              {user?.platformOperator
+                ? "Every module is included free, with no trial end and no billing. You can open it with View once it is added."
+                : "The business starts on the usual 14-day free trial."}
+            </p>
+          )}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
@@ -374,14 +382,79 @@ function DiscountCodeDialog({ client, onClose }: { client: Client | null; onClos
   );
 }
 
+// Platform operators clear out test businesses that never paid. The server
+// refuses anything that has paid, so the dialog only explains and confirms.
+function DeleteTestBusinessDialog({ client, onClose, onDeleted }: { client: Client | null; onClose: () => void; onDeleted: (id: number) => void }) {
+  const [typed, setTyped] = useState("");
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setTyped("");
+    setError("");
+  }, [client?.id]);
+
+  const matches = !!client && typed.trim().toLowerCase() === client.name.trim().toLowerCase();
+
+  async function remove() {
+    if (!client || !matches) return;
+    setWorking(true);
+    setError("");
+    try {
+      const res = await apiFetch(`/clients/${client.id}/delete-test-business`, {
+        method: "POST",
+        body: JSON.stringify({ confirmName: typed }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not delete the business");
+      onDeleted(client.id);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not delete the business");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <Dialog open={!!client} onOpenChange={v => !v && !working && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete test business — {client?.name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 mt-2">
+          <p className="text-sm">
+            This permanently deletes every record and file in this business, and removes the sign-ins of the people in it.
+            It can't be undone. Only the change history and a note that you deleted it are kept.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Only a test business that never paid can be deleted here. A business with a subscription, a payment or an AI top-up is refused.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="delete-test-business-name">Type <span className="font-semibold">{client?.name}</span> to confirm</Label>
+            <Input id="delete-test-business-name" value={typed} onChange={e => setTyped(e.target.value)} autoComplete="off" disabled={working} />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={onClose} disabled={working}>Cancel</Button>
+            <Button type="button" variant="destructive" onClick={remove} disabled={!matches || working}>
+              {working ? "Deleting…" : "Delete permanently"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function ClientsPage() {
-  const { setActiveClientId, user } = useAuth();
+  const { setActiveClientId, activeClientId, user } = useAuth();
   const [, navigate] = useLocation();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [discountClient, setDiscountClient] = useState<Client | null>(null);
+  const [deletingClient, setDeletingClient] = useState<Client | null>(null);
 
   async function load() {
     setLoading(true);
@@ -453,6 +526,11 @@ export default function ClientsPage() {
                       <TicketPercent className="w-3.5 h-3.5 text-muted-foreground" />
                     </Button>
                   )}
+                  {user?.platformOperator && c.id !== user.clientId && (
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDeletingClient(c)} title="Delete test business">
+                      <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleActive(c)} title={c.active ? "Deactivate" : "Activate"}>
                     {c.active ? <ToggleRight className="w-4 h-4 text-green-600" /> : <ToggleLeft className="w-4 h-4 text-muted-foreground" />}
                   </Button>
@@ -483,6 +561,15 @@ export default function ClientsPage() {
         client={editingClient}
       />
       <DiscountCodeDialog client={discountClient} onClose={() => setDiscountClient(null)} />
+      <DeleteTestBusinessDialog
+        client={deletingClient}
+        onClose={() => setDeletingClient(null)}
+        onDeleted={(id) => {
+          setDeletingClient(null);
+          if (activeClientId === id) setActiveClientId(null);
+          load();
+        }}
+      />
     </AppLayout>
   );
 }

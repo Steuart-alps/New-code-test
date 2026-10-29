@@ -7,6 +7,9 @@
  *  - Whole site: the daily checklists and manager sign-off the client's
  *    services expect at every site (dailyTrackRequirements), web and phone.
  *    A submitted checklist with a failed item counts as failed.
+ *  - Greenkeeping (GreenTrack): the shed opening and closing checklists and the
+ *    machines' pre-start checks at sites that do shed checks, under the site's
+ *    greenkeeping team (lib/greenkeepingChecks.ts), else Whole site.
  *  - A department: checks saved today by its staff (the department recorded
  *    on the record, never the author's current one), failed when the result
  *    is a fail; tasks due today assigned to one of its people; and compliance
@@ -23,7 +26,11 @@ import { db } from "@workspace/db";
 import { sql, type SQL } from "drizzle-orm";
 import type { SafeUser } from "@workspace/db/schema";
 import { dailyTrackRequirements, type DailyTrackRequirement } from "./dailyChecklistEntitlements";
-import { getEntitledServices } from "./services";
+import { getEntitledServices, isEntitled } from "./services";
+import {
+  GREENKEEPING_CHECKLIST_NAMES, GREENKEEPING_CHECKLIST_TYPES, getGreenkeepingShedDay, getPreStartDay, greenDailyChecksPath,
+  greenkeepingShedSites, loadGreenkeepingTeams,
+} from "./greenkeepingChecks";
 import { getAccountTimezone, localDateIn, addCalendarDays, zonedDateTimeToUtc } from "./accountClock";
 import { occursOn } from "./taskSchedule";
 import { submittedDailyChecklists } from "./dailyChecklistCompletion";
@@ -254,6 +261,18 @@ const CHECKLIST_NAMES: Record<DailyTrackRequirement, string> = {
   signoff: "Manager sign-off",
 };
 
+/**
+ * The department that owns a site's kitchen checklists: the one department at
+ * that site named like "Kitchen" (an exact "Kitchen" wins when several match).
+ * null keeps them under Whole site.
+ */
+export function kitchenDepartmentAt(site: TodaySite, departments: TodayDepartment[]): number | null {
+  const matches = departments.filter((department) => /kitchen/i.test(department.name) && departmentAtSite(site, department));
+  if (matches.length === 1) return matches[0].id;
+  const exact = matches.filter((department) => department.name.trim().toLowerCase() === "kitchen");
+  return exact.length === 1 ? exact[0].id : null;
+}
+
 /** Results the action register treats as a failure (sync_track_action_from_source), minus "monitor". */
 const FAILED_RESULT_SQL = sql.raw(`('fail', 'failed', 'action_required', 'urgent_action', 'urgent', 'out_of_range', 'unsafe')`);
 
@@ -333,7 +352,7 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
     ? sql`${column} IN (${siteIn})`
     : sql`(${column} IS NULL OR ${column} IN (${siteIn}))`;
 
-  // ── Whole site: daily checklists and sign-off ───────────────────────────────
+  // ── Daily checklists and sign-off (Whole site; kitchen ones to the Kitchen) ─
   const requirements = dailyTrackRequirements(await getEntitledServices(clientId));
   if (requirements.length > 0) {
     const hasFail = (column: string) => sql.raw(`(jsonb_typeof(${column}) = 'array' AND EXISTS (
@@ -367,6 +386,11 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
         started: current.started || change.started === true,
       });
     };
+    // Every kitchen-named department, not only the ones this person covers, so a
+    // kitchen checklist never falls back to Whole site for someone outside it.
+    const kitchenDepartments = rows<{ id: number; name: string; site_id: number | null }>(await db.execute(sql`
+      SELECT id, name, site_id FROM departments WHERE client_id = ${clientId} AND name ILIKE '%kitchen%'
+    `)).map((row) => ({ id: Number(row.id), name: row.name, siteId: row.site_id == null ? null : Number(row.site_id) }));
     const truthy = (value: unknown) => value === true || value === "t" || value === "true";
     for (const row of rows<{ site_id: number; checklist_type: string; submitted: unknown; failed: unknown }>(web)) {
       const submitted = truthy(row.submitted);
@@ -384,17 +408,21 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
     for (const row of rows<{ site_id: number }>(signoffs)) mark(Number(row.site_id), "signoff", { submitted: true });
 
     for (const site of sites) {
+      const kitchenDepartmentId = kitchenDepartmentAt(site, kitchenDepartments);
       for (const requirement of requirements) {
         const current = state.get(`${site.id}:${requirement}`);
-        const path = requirement.endsWith("_opening") ? "/daily-track-am" : "/daily-track-pm";
+        // Kitchen opening / closing checks belong to the site's Kitchen team.
+        const departmentId = requirement.startsWith("kitchen_") ? kitchenDepartmentId : null;
+        // Open the checklist for this site, not the page's "No site filter" slot.
+        const path = `${requirement.endsWith("_opening") ? "/daily-track-am" : "/daily-track-pm"}?siteId=${site.id}`;
         const label = CHECKLIST_NAMES[requirement];
         if (current?.submitted) {
           push(current.failed
-            ? { siteId: site.id, departmentId: null, outcome: "failed", label, detail: "Submitted with a failed item", path }
-            : { siteId: site.id, departmentId: null, outcome: "done" });
+            ? { siteId: site.id, departmentId, outcome: "failed", label, detail: "Submitted with a failed item", path }
+            : { siteId: site.id, departmentId, outcome: "done" });
         } else {
           push({
-            siteId: site.id, departmentId: null, outcome: "todo", label,
+            siteId: site.id, departmentId, outcome: "todo", label,
             detail: current?.started ? "Started, not submitted yet" : "Not submitted yet", path,
           });
         }
@@ -402,9 +430,52 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
     }
   }
 
+  // ── Greenkeeping: shed checks and machine pre-start checks ──────────────────
+  // At the sites that do shed checks (lib/greenkeepingChecks.ts), under the
+  // site's greenkeeping team, or Whole site when it has none.
+  if (isEntitled(await getEntitledServices(clientId), "greentrack")) {
+    const teams = await loadGreenkeepingTeams(clientId, siteIds);
+    const shedSiteIds = await greenkeepingShedSites(clientId, today, siteIds, teams);
+    const shedSites = sites.filter((site) => shedSiteIds.has(site.id));
+    if (shedSites.length > 0) {
+      const [days, machines] = await Promise.all([
+        getGreenkeepingShedDay(clientId, today, shedSites.map((site) => site.id)),
+        getPreStartDay(clientId, today, shedSites.map((site) => site.id)),
+      ]);
+      for (const site of shedSites) {
+        const departmentId = teams.get(site.id)?.departmentId ?? null;
+        const path = greenDailyChecksPath(site.id);
+        for (const type of GREENKEEPING_CHECKLIST_TYPES) {
+          const state = days.get(site.id)?.[type];
+          const label = GREENKEEPING_CHECKLIST_NAMES[type];
+          if (state?.submitted) {
+            push(state.failed
+              ? { siteId: site.id, departmentId, outcome: "failed", label, detail: "Submitted with a failed item", path }
+              : { siteId: site.id, departmentId, outcome: "done" });
+          } else {
+            push({ siteId: site.id, departmentId, outcome: "todo", label, detail: state?.started ? "Started, not submitted yet" : "Not submitted yet", path });
+          }
+        }
+        // Machines kept at this site; one with no site counts at a one-site business.
+        const atSite = machines.filter((machine) => machine.siteId === site.id || (machine.siteId === null && sites.length === 1));
+        if (atSite.length === 0) continue;
+        const todo = atSite.filter((machine) => machine.status === "todo").length;
+        const failed = atSite.filter((machine) => machine.status === "failed").length;
+        const label = "Machine pre-start checks";
+        if (failed > 0) {
+          push({ siteId: site.id, departmentId, outcome: "failed", label, detail: `${failed} of ${atSite.length} machines failed today's check`, path });
+        } else if (todo > 0) {
+          push({ siteId: site.id, departmentId, outcome: "todo", label, detail: `${todo} of ${atSite.length} machines not checked or marked not in use`, path });
+        } else {
+          push({ siteId: site.id, departmentId, outcome: "done" });
+        }
+      }
+    }
+  }
+
   // ── Checks saved today by each department ───────────────────────────────────
   // The tables that record the submitter's department (SUBMITTER_DEPARTMENT_TABLES),
-  // less the daily checklists (Whole site) and incidents and FixTrack issues,
+  // less the daily checklists (above) and incidents and FixTrack issues,
   // which report problems rather than complete checks.
   const recordSources: Array<{ name: string; path: string; query: SQL }> = [
     { name: "Fire safety check", path: "/fire-safety", query: sql`

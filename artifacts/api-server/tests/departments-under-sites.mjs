@@ -91,7 +91,8 @@ try {
   assert.equal((await staffA.request('GET', `/compliance-items/${itemB}`)).status, 403);
 
   // Writes at another site are refused.
-  const drill = siteId => ({ checkType: 'fire_drill', checkDate: isoDay(), result: 'pass', siteId, nightStaff: 'included' });
+  const drill = siteId => ({ checkType: 'fire_drill', checkDate: isoDay(), result: 'pass', siteId, nightStaff: 'included',
+    drillTime: '10:30', evacuationSeconds: 150, notes: 'No improvements needed' });
   const wrongSite = await staffA.request('POST', '/fire-safety', drill(siteB));
   assert.equal(wrongSite.status, 403, JSON.stringify(wrongSite.data));
   const ownSite = await staffA.request('POST', '/fire-safety', drill(siteA));
@@ -130,6 +131,30 @@ try {
   assert.deepEqual(ids(sites.data), [siteB]);
   fire = await manager.request('GET', '/fire-safety');
   assert.deepEqual(ids(fire.data), [fireB]);
+
+  // The staff roster follows the site too: staff see the people at their own
+  // site and those with no site; Viewers can't read the roster at all.
+  const rosterEntry = async (name, siteId) => (await pool.query(
+    'INSERT INTO staff_roster (client_id, site_id, name) VALUES ($1, $2, $3) RETURNING id',
+    [owner.clientId, siteId, name],
+  )).rows[0].id;
+  const rosterA = await rosterEntry('Ann at the hotel', siteA);
+  const rosterB = await rosterEntry('Ben at the lodge', siteB);
+  const rosterAny = await rosterEntry('Cat with no site', null);
+  const rosterIds = async (who, path = '/staff-roster') => {
+    const listed = await who.request('GET', path);
+    assert.equal(listed.status, 200, JSON.stringify(listed.data));
+    return ids(listed.data);
+  };
+  const roster = [rosterA, rosterB, rosterAny];
+  assert.deepEqual(await rosterIds(owner), roster, 'Owners see everyone');
+  assert.deepEqual(await rosterIds(staffA), [rosterA, rosterAny], 'staff see their own site');
+  assert.deepEqual(await rosterIds(staffA, '/staff'), [rosterA, rosterAny], 'the PIN roster list matches');
+  assert.deepEqual(await rosterIds(manager), [rosterB, rosterAny], 'a Manager sees the site they are working at');
+  assert.equal((await manager.request('PUT', '/users/me/active-department', { departmentId: housekeepingA.id })).status, 200);
+  assert.deepEqual(await rosterIds(manager), [rosterA, rosterAny]);
+  const viewer = await createUser(owner, { role: 'client_viewer', staffRosterId: rosterB });
+  assert.equal((await viewer.request('GET', '/staff-roster')).status, 403, 'Viewers never see the roster');
 
   // Owners see everything.
   sites = await owner.request('GET', '/sites');

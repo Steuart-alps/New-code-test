@@ -22,6 +22,7 @@ import legionellaRouter from "./legionella";
 import safeTrackRouter from "./safe-track";
 import fixTrackRouter from "./fix-track";
 import docTrackRouter from "./doc-track";
+import { docTrackCategoryScope } from "../middleware/docTrackCategoryScope";
 import trainTrackRouter from "./train-track";
 import hotTubRouter from "./hot-tub";
 import treeTrackRouter from "./tree-track";
@@ -30,6 +31,7 @@ import bikeTrackRouter from "./bike-track";
 import poolTrackRouter from "./pool-track";
 import greenTrackRouter from "./green-track";
 import greenTrackSprayingRouter from "./green-track-spraying";
+import greenTrackDailyRouter from "./green-track-daily";
 import swimTrackRouter from "./swim-track";
 import photosRouter from "./photos";
 import staffRosterRouter from "./staff-roster";
@@ -58,6 +60,7 @@ import inspectionPackRouter from "./inspection-pack";
 import calendarRouter from "./calendar";
 import privacyGovernanceRouter from "./privacy-governance";
 import privacyIntakePublicRouter from "./privacy-intake-public";
+import contractorSignInRouter, { siteSignInPublicRouter } from "./contractor-sign-in";
 import dashboardSummaryRouter from "./dashboard-summary";
 import dashboardTodayRouter from "./dashboard-today";
 import complianceHubRouter from "./compliance-hub";
@@ -113,6 +116,8 @@ router.use("/certificate-upload", publicLinkRateLimits, certificateUploadPublicR
 router.use("/sign-off", publicLinkRateLimits, signOffRouter);
 // Public privacy rights-request form (token-protected).
 router.use("/privacy-intake", publicLinkRateLimits, privacyIntakePublicRouter);
+// Contractor sign-in link for a site (token-protected; QR poster at reception).
+router.use("/site-sign-in", publicLinkRateLimits, siteSignInPublicRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
@@ -145,7 +150,8 @@ router.use("/fix-track", requireAuth, (req, res, next) => {
 }, fixTrackRouter);
 router.use(staffRosterRouter);
 // safetrack and doctrack are now the same module; either key grants access.
-router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack"), docTrackRouter);
+// KitchenTrack alone opens it for HACCP plans and recipe spec sheets only.
+router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack", "kitchentrack"), docTrackCategoryScope, docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
 router.use("/hot-tub", requireAuth, requireService("hottubtrack"), hotTubRouter);
 router.use("/tree-track", requireAuth, requireService("treetrack"), treeTrackRouter);
@@ -153,6 +159,7 @@ router.use("/bike-track", requireAuth, requireService("biketrack"), bikeTrackRou
 router.use("/pool-track",   requireAuth, requireAnyService("pooltrack", "aquatrack"),  poolTrackRouter);
 router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackRouter);
 router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackSprayingRouter);
+router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackDailyRouter);
 router.use("/swim-track",   requireAuth, requireAnyService("swimtrack", "aquatrack"),  swimTrackRouter);
 router.use("/photos", requireAuth, photosRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
@@ -179,6 +186,8 @@ router.use("/registers", requireAuth, registersRouter);
 // KitchenTrack ingredients, menus and allergen chart sign-offs (gated inside).
 router.use("/registers", requireAuth, allergenRecipesRouter);
 router.use("/coshh-track", requireAuth, requireService("coshhtrack"), coshhTrackRouter);
+// Contractor sign-in on arrival: set-up, who is on site, past visits.
+router.use("/contractor-sign-in", contractorSignInRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
 router.use(exportRouter);

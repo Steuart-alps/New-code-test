@@ -57,12 +57,46 @@ export function putFileWithProgress(
   });
 }
 
+export const isHeic = (file: File) => /^image\/hei[cf]/i.test(file.type) || HEIC_EXTENSION.test(file.name);
+
+// Longest side of a HEIC photo once it is turned into JPEG: plenty for
+// evidence, inside Safari's canvas limits, and well under the 10 MB limit.
+const HEIC_JPEG_MAX_SIDE = 4096;
+
+/**
+ * A HEIC photo as a JPEG, for browsers that can show HEIC (Safari on a Mac,
+ * where photos dragged out of the Photos app are usually HEIC). Any other file,
+ * or a HEIC photo the browser can't read, comes back unchanged so the usual
+ * "HEIC photos can't be read" message still explains it.
+ */
+export async function heicToJpeg(file: File): Promise<File> {
+  if (!isHeic(file)) return file;
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const scale = Math.min(1, HEIC_JPEG_MAX_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+    if (!jpeg) return file;
+    return new File([jpeg], file.name.replace(HEIC_EXTENSION, ".jpg"), { type: "image/jpeg", lastModified: file.lastModified });
+  } catch {
+    return file;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export const VIDEO_PATH = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i;
 
 /** Why a picked or dropped file can't be used as a photo or video, or null when it can. */
 export function mediaFileProblem(file: File): string | null {
   const contentType = mediaContentType(file);
-  if (/^image\/hei[cf]/.test(contentType) || HEIC_EXTENSION.test(file.name)) {
+  if (isHeic(file)) {
     return "HEIC photos can't be read. Save the photo as JPEG and upload it again.";
   }
   if (!Object.values(MEDIA_TYPE_BY_EXTENSION).includes(contentType)) return "Use a JPEG, PNG, WebP, MP4, MOV, or WebM file.";

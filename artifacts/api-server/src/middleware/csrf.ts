@@ -9,6 +9,7 @@ const PUBLIC_LINK_PREFIXES = [
   "/api/fix-track/quotes/public/",
   "/api/privacy-intake/",
   "/api/certificate-upload/",
+  "/api/site-sign-in/",
 ];
 
 function getHeaderValue(value: string | string[] | undefined): string | undefined {
