@@ -29,6 +29,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetHeader, SheetDescription } from "@/components/ui/sheet";
 import alpsLogo from "@/assets/alps-logo.png";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
+import { SayItButton } from "@/components/say-it-button";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { CancellationBanner } from "@/components/cancellation-banner";
 import { StorageLimitBanner } from "@/components/storage-limit-banner";
@@ -37,6 +38,13 @@ import { ManagedByBadge } from "@/components/managed-by-badge";
 import { NotificationBell } from "@/components/notification-bell";
 import { QuickTutorial, openQuickTutorial } from "@/components/quick-tutorial";
 import { APP_SCROLL_ID } from "@/lib/page-scroll";
+
+// Pages for setting up the business and accounts, where there's nothing to
+// say a reading or an action about; the dashboard has its own large Say it.
+const noSayItRoutes = [
+  "/dashboard", "/settings", "/users", "/setup", "/sites", "/categories", "/staff-roster", "/clients", "/portfolio",
+  "/business-dashboard", "/feedback", "/privacy-governance", "/account-security",
+];
 
 const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/daily-track-am", moduleKey: "daily_am" },
@@ -349,6 +357,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
   const moduleActionKey = moduleActionRoutes.find(route => location.startsWith(route.prefix))?.moduleKey;
   // The guidance applies to track (module) records, so only show it there.
   const isTrackPage = moduleActionKey !== undefined || location.startsWith("/green-track");
+  const showSayIt = !noSayItRoutes.some(prefix => location === prefix || location.startsWith(`${prefix}/`));
   const [trackGuidanceDismissed, dismissTrackGuidance] = useTrackGuidanceDismissed(user?.id);
 
   const primaryColor = client?.primaryColor ?? "#7FA8C9";
@@ -611,6 +620,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            {showSayIt && <SayItButton compact />}
             <DepartmentSwitcher />
             <Link
               href="/account-security"

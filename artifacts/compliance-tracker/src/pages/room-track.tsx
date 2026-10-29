@@ -3,6 +3,7 @@ import { AppLayout } from "@/components/layout";
 import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { apiFetch } from "@/lib/api";
 import { takeLinkParams } from "@/lib/deep-link";
+import { matchSpokenItem, useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -182,6 +183,21 @@ export default function RoomTrackPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // A check said to Say it ("room 12 all done") shows that room's card ticked.
+  const [spokenCheck, setSpokenCheck] = useState<{ roomId: number; fill: SayItFill } | null>(null);
+  useSayItFill(["room-check"], fill => {
+    const live = rooms.filter(room => !room.archived && !room.isArchived);
+    const room = matchSpokenItem(fill.item, live.map(r => ({
+      ...r, name: roomNumber(r) ? `Room ${roomNumber(r)}` : r.name ?? "", aliases: [r.name, roomNumber(r), `${roomNumber(r) ?? ""} ${r.name ?? ""}`],
+    })));
+    if (!room) {
+      toast({ title: "Room not found", description: `"${fill.item ?? fill.text}" didn't match a room${siteId === "__all__" ? "" : " at this site"}.`, variant: "destructive" });
+      return;
+    }
+    setOnlyRoomId(room.id);
+    setSpokenCheck({ roomId: room.id, fill });
+  }, !loading);
+
   const activeRooms = rooms.filter(room => !room.archived && !room.isArchived && (siteId === "__all__" || roomSiteId(room) === Number(siteId)));
   const shownRooms = onlyRoomId === null ? activeRooms : activeRooms.filter(room => room.id === onlyRoomId);
   const saveCheck = async (room: Room, values: CheckValues, notes: string, checkedBy: string, checkedByRosterId: number | null) => {
@@ -234,7 +250,7 @@ export default function RoomTrackPage() {
           <div className="rounded-sm border border-dashed p-12 text-center"><BedDouble className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" /><p className="text-sm font-medium text-muted-foreground">No active rooms for this selection</p>{canAdmin && <Button variant="outline" size="sm" className="mt-4" onClick={() => { setEditingRoom(null); setDialogOpen(true); }}>Add the first room</Button>}</div>
         ) : <div className="grid gap-4 lg:grid-cols-2">{shownRooms.map(room => {
           const check = checks.find(item => checkRoomId(item) === room.id);
-          return <RoomCheckCard key={room.id} room={room} check={check} disabled={savingId === room.id} defaultCheckedBy={user?.name ?? ""} canAdmin={canAdmin} onSave={saveCheck} onEdit={() => { setEditingRoom(room); setDialogOpen(true); }} onArchive={() => archive(room)} />;
+          return <RoomCheckCard key={room.id} room={room} check={check} spoken={spokenCheck?.roomId === room.id ? spokenCheck.fill : null} disabled={savingId === room.id} defaultCheckedBy={user?.name ?? ""} canAdmin={canAdmin} onSave={saveCheck} onEdit={() => { setEditingRoom(room); setDialogOpen(true); }} onArchive={() => archive(room)} />;
         })}</div>}
         {canAdmin && activeRooms.length > 0 && <section className="rounded-sm border border-border"><div className="border-b bg-muted/30 px-4 py-3"><h2 className="text-sm font-bold">Active room register</h2><p className="text-xs text-muted-foreground">Edit room details or archive rooms no longer in use.</p></div><div className="divide-y">{activeRooms.map(room => <div key={room.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm"><span className="font-medium">{roomNumber(room) || room.name}</span>{room.name && roomNumber(room) && <span className="text-muted-foreground">{room.name}</span>}<span className="text-xs text-muted-foreground">{room.floor || "No floor"}</span><span className="ml-auto flex gap-1"><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingRoom(room); setDialogOpen(true); }} aria-label={`Edit ${roomNumber(room) || room.name}`}><Pencil className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => archive(room)} aria-label={`Archive ${roomNumber(room) || room.name}`}><Archive className="h-3.5 w-3.5" /></Button></span></div>)}</div></section>}
       </div>
@@ -243,8 +259,8 @@ export default function RoomTrackPage() {
   );
 }
 
-function RoomCheckCard({ room, check, defaultCheckedBy, disabled, canAdmin, onSave, onEdit, onArchive }: {
-  room: Room; check?: RoomCheck; defaultCheckedBy: string; disabled: boolean; canAdmin: boolean;
+function RoomCheckCard({ room, check, spoken, defaultCheckedBy, disabled, canAdmin, onSave, onEdit, onArchive }: {
+  room: Room; check?: RoomCheck; spoken?: SayItFill | null; defaultCheckedBy: string; disabled: boolean; canAdmin: boolean;
   onSave: (room: Room, values: CheckValues, notes: string, checkedBy: string, checkedByRosterId: number | null) => void; onEdit: () => void; onArchive: () => void;
 }) {
   const [values, setValues] = useState<CheckValues>(() => checkValues(check));
@@ -252,6 +268,13 @@ function RoomCheckCard({ room, check, defaultCheckedBy, disabled, canAdmin, onSa
   const [checkedByRosterId, setCheckedByRosterId] = useState<number | null>((check as any)?.checkedByRosterId ?? null);
   const [checkedBy, setCheckedBy] = useState(check ? checkBy(check) ?? "" : defaultCheckedBy);
   useEffect(() => { setValues(checkValues(check)); setNotes(check?.notes ?? ""); setCheckedBy(check ? checkBy(check) ?? "" : defaultCheckedBy); }, [check, defaultCheckedBy]);
+  // Ticks said to Say it are added to the card, to check and save.
+  useEffect(() => {
+    if (!spoken) return;
+    const v = spoken.values;
+    setValues(current => ({ clean: current.clean || v.clean === true, tidy: current.tidy || v.tidy === true, toStandard: current.toStandard || v.toStandard === true }));
+    setNotes(current => withSpokenNote([current, typeof v.notes === "string" ? v.notes : ""].filter(Boolean).join("\n"), spoken.text));
+  }, [spoken]);
   const completeCount = Object.values(values).filter(Boolean).length;
   const isComplete = completeCount === OUTCOMES.length;
   return <Card className={cn("rounded-sm border-l-4 p-4", isComplete ? "border-l-emerald-500" : "border-l-amber-400 bg-amber-50/40")}>

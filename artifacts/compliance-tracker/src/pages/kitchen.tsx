@@ -1,5 +1,4 @@
 import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
-import { SayItButton } from "@/components/say-it-button";
 import { FoodJurisdictionOptions, KitchenGuidanceNote } from "@/components/kitchen-temperature-guidance";
 import { assessKitchenTemperatures, isFoodJurisdiction, kitchenFailureValue, kitchenHoldRequirement, kitchenTemperatureGuidance, parseKitchenTemperatureRules, type FoodJurisdiction, type KitchenTemperatureFailure } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -2364,7 +2363,6 @@ export default function KitchenPage() {
             <p className="text-sm text-muted-foreground">{activeTabMeta.description}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <SayItButton />
             <Link href="/food-safety" className="text-sm font-medium text-primary underline underline-offset-2">Inspection register &amp; diary calendar</Link>
             <Link href="/allergens">
               <Button variant="outline" size="sm" className="gap-1.5">Allergen records</Button>
