@@ -109,6 +109,7 @@ import type {
   FireCallPointImportRequest,
   FireCallPointImportResult,
   FireDrillAttendance,
+  FireEscapeRouteList,
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
@@ -127,6 +128,7 @@ import type {
   GetDailyTrackHistoryParams,
   GetFeedbackScreenshotParams,
   GetFireDrillAttendanceParams,
+  GetFireEscapeRoutesParams,
   GetFireSafetyConfigParams,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
@@ -140,6 +142,7 @@ import type {
   GetLegionellaConfigParams,
   GetLegionellaMonitoringPlanParams,
   GetLegionellaStatusParams,
+  GetNightFireWalksParams,
   GetPATPresetTemplates200,
   GetPoolMonitoringPlanParams,
   GetPrivacyGovernanceParams,
@@ -177,6 +180,7 @@ import type {
   ImportExtinguisherPoints200,
   ImportExtinguisherPointsBody,
   ImportListReadResult,
+  ImportListSortResult,
   IncidentConfig,
   InspectionReport,
   InspectionReportDetail,
@@ -222,6 +226,7 @@ import type {
   ListRecordSignaturesParams,
   MyCoshhSignOffs,
   MyDocumentSignOffs,
+  NightFireWalks,
   OkResponse,
   OrderFireCallPointsRequest,
   OwnTrainingRecord,
@@ -290,6 +295,8 @@ import type {
   UpdateEquipmentItemRequest,
   UpdateFeedbackReportParams,
   UpdateFireCallPointRequest,
+  UpdateFireEscapeRoutesParams,
+  UpdateFireEscapeRoutesRequest,
   UpdateFireSafetyCheckRequest,
   UpdateFireSafetyConfigParams,
   UpdateFoodSafetyConfig200,
@@ -8243,6 +8250,253 @@ export function useGetFireSafetyStatus<TData = Awaited<ReturnType<typeof getFire
 
 
 
+export const getGetFireEscapeRoutesUrl = (params?: GetFireEscapeRoutesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fire-safety/escape-routes?${stringifiedParams}` : `/api/fire-safety/escape-routes`
+}
+
+/**
+ * @summary A site's escape routes, ticked on each escape route sign-off and night fire walk
+ */
+export const getFireEscapeRoutes = async (params?: GetFireEscapeRoutesParams, options?: RequestInit): Promise<FireEscapeRouteList> => {
+
+  return customFetch<FireEscapeRouteList>(getGetFireEscapeRoutesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFireEscapeRoutesQueryKey = (params?: GetFireEscapeRoutesParams,) => {
+    return [
+    `/api/fire-safety/escape-routes`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFireEscapeRoutesQueryOptions = <TData = Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError = ErrorType<void>>(params?: GetFireEscapeRoutesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFireEscapeRoutesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFireEscapeRoutes>>> = ({ signal }) => getFireEscapeRoutes(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFireEscapeRoutesQueryResult = NonNullable<Awaited<ReturnType<typeof getFireEscapeRoutes>>>
+export type GetFireEscapeRoutesQueryError = ErrorType<void>
+
+
+/**
+ * @summary A site's escape routes, ticked on each escape route sign-off and night fire walk
+ */
+
+export function useGetFireEscapeRoutes<TData = Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError = ErrorType<void>>(
+ params?: GetFireEscapeRoutesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireEscapeRoutes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFireEscapeRoutesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateFireEscapeRoutesUrl = (params?: UpdateFireEscapeRoutesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fire-safety/escape-routes?${stringifiedParams}` : `/api/fire-safety/escape-routes`
+}
+
+/**
+ * @summary Replace a site's escape route list (managers)
+ */
+export const updateFireEscapeRoutes = async (updateFireEscapeRoutesRequest: UpdateFireEscapeRoutesRequest,
+    params?: UpdateFireEscapeRoutesParams, options?: RequestInit): Promise<FireEscapeRouteList> => {
+
+  return customFetch<FireEscapeRouteList>(getUpdateFireEscapeRoutesUrl(params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateFireEscapeRoutesRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateFireEscapeRoutesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireEscapeRoutes>>, TError,{data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFireEscapeRoutes>>, TError,{data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams}, TContext> => {
+
+const mutationKey = ['updateFireEscapeRoutes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFireEscapeRoutes>>, {data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  updateFireEscapeRoutes(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFireEscapeRoutesMutationResult = NonNullable<Awaited<ReturnType<typeof updateFireEscapeRoutes>>>
+    export type UpdateFireEscapeRoutesMutationBody = BodyType<UpdateFireEscapeRoutesRequest>
+    export type UpdateFireEscapeRoutesMutationError = ErrorType<void>
+
+    /**
+ * @summary Replace a site's escape route list (managers)
+ */
+export const useUpdateFireEscapeRoutes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireEscapeRoutes>>, TError,{data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateFireEscapeRoutes>>,
+        TError,
+        {data: BodyType<UpdateFireEscapeRoutesRequest>;params?: UpdateFireEscapeRoutesParams},
+        TContext
+      > => {
+      return useMutation(getUpdateFireEscapeRoutesMutationOptions(options));
+    }
+
+export const getGetNightFireWalksUrl = (params?: GetNightFireWalksParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fire-safety/night-walks?${stringifiedParams}` : `/api/fire-safety/night-walks`
+}
+
+/**
+ * @summary Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+ */
+export const getNightFireWalks = async (params?: GetNightFireWalksParams, options?: RequestInit): Promise<NightFireWalks> => {
+
+  return customFetch<NightFireWalks>(getGetNightFireWalksUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetNightFireWalksQueryKey = (params?: GetNightFireWalksParams,) => {
+    return [
+    `/api/fire-safety/night-walks`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetNightFireWalksQueryOptions = <TData = Awaited<ReturnType<typeof getNightFireWalks>>, TError = ErrorType<void>>(params?: GetNightFireWalksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNightFireWalks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNightFireWalksQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNightFireWalks>>> = ({ signal }) => getNightFireWalks(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNightFireWalks>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetNightFireWalksQueryResult = NonNullable<Awaited<ReturnType<typeof getNightFireWalks>>>
+export type GetNightFireWalksQueryError = ErrorType<void>
+
+
+/**
+ * @summary Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+ */
+
+export function useGetNightFireWalks<TData = Awaited<ReturnType<typeof getNightFireWalks>>, TError = ErrorType<void>>(
+ params?: GetNightFireWalksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNightFireWalks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetNightFireWalksQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetFireDrillAttendanceUrl = (params?: GetFireDrillAttendanceParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -9148,6 +9402,78 @@ export const useReadImportList = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReadImportListMutationOptions(options));
+    }
+
+export const getSortImportListUrl = () => {
+
+
+
+
+  return `/api/imports/sort-list`
+}
+
+/**
+ * For "Upload your lists", where many files are dropped at once. Claude only says which of the business's imports the file is (PAT appliances, RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster); the rows are read later by that import. Uses the AI allowance but not the monthly reading number. The file is not stored. Off until the server has an Anthropic API key.
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const sortImportList = async (patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<ImportListSortResult> => {
+
+  return customFetch<ImportListSortResult>(getSortImportListUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(patRegisterReadRequest)
+  }
+);}
+
+
+
+
+
+export const getSortImportListMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sortImportList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sortImportList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext> => {
+
+const mutationKey = ['sortImportList'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sortImportList>>, {data: BodyType<PatRegisterReadRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  sortImportList(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SortImportListMutationResult = NonNullable<Awaited<ReturnType<typeof sortImportList>>>
+    export type SortImportListMutationBody = BodyType<PatRegisterReadRequest>
+    export type SortImportListMutationError = ErrorType<void>
+
+    /**
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const useSortImportList = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sortImportList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sortImportList>>,
+        TError,
+        {data: BodyType<PatRegisterReadRequest>},
+        TContext
+      > => {
+      return useMutation(getSortImportListMutationOptions(options));
     }
 
 export const getUpdateFireCallPointUrl = (id: number,) => {

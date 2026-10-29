@@ -124,6 +124,8 @@ jobs:
         run: pnpm --filter @workspace/compliance-tracker run test:sort-options
       - name: Old Word (.doc) import reading test
         run: pnpm --filter @workspace/compliance-tracker run test:word-doc
+      - name: Upload your lists sorting test
+        run: pnpm --filter @workspace/compliance-tracker run test:list-kinds
 
       - name: Setup "What we need from you" workbooks match the import templates
         run: pnpm --filter @workspace/compliance-tracker run test:setup-info-sheets
@@ -389,6 +391,9 @@ jobs:
 
       - name: FireTrack drill time, evacuation, staff present and drill attendance tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-drill-records
+
+      - name: FireTrack sleeping accommodation, per-site escape routes and night porter fire walks tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:night-fire-walks
 
       - name: FireTrack retired checks and in-house completion tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-retired-checks

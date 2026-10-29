@@ -16,7 +16,8 @@ const lastMonth = isoDay(-30);
 try {
   const owner = await createTenant('fire-retired');
   const staff = await createUser(owner, { role: 'client_staff' });
-  const site = (await owner.request('POST', '/sites', { name: 'Retired checks site', seedStarterChecks: false })).data;
+  // Sleeping accommodation, so the escape route sign-off (fire_walk) applies.
+  const site = (await owner.request('POST', '/sites', { name: 'Retired checks site', seedStarterChecks: false, sleepingAccommodation: true })).data;
 
   // ── Not in the FireTrack status, so never due or overdue ───────────────────
   const status = (await owner.request('GET', `/fire-safety/status?siteId=${site.id}`)).data;

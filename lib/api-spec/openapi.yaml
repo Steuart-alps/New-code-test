@@ -2610,6 +2610,76 @@ paths:
         "403":
           description: The site belongs to a department the caller cannot see
 
+  /fire-safety/escape-routes:
+    get:
+      operationId: getFireEscapeRoutes
+      tags: [fire-safety]
+      summary: A site's escape routes, ticked on each escape route sign-off and night fire walk
+      parameters:
+        - in: query
+          name: siteId
+          description: The site. Omit for a business with no sites.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The site's escape routes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireEscapeRouteList"
+        "400":
+          description: The site is not one of this client's sites
+        "403":
+          description: The site belongs to a department the caller cannot see
+    put:
+      operationId: updateFireEscapeRoutes
+      tags: [fire-safety]
+      summary: Replace a site's escape route list (managers)
+      parameters:
+        - in: query
+          name: siteId
+          description: The site. Omit for a business with no sites.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFireEscapeRoutesRequest"
+      responses:
+        "200":
+          description: The saved list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireEscapeRouteList"
+        "400":
+          description: A route has no name, two routes share a name, or the site is not one of this client's sites
+
+  /fire-safety/night-walks:
+    get:
+      operationId: getNightFireWalks
+      tags: [fire-safety]
+      summary: Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Night fire walks by site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NightFireWalks"
+        "400":
+          description: The site is not one of this client's sites
+        "403":
+          description: The site belongs to a department the caller cannot see
+
   /fire-safety/drill-attendance:
     get:
       operationId: getFireDrillAttendance
@@ -2902,6 +2972,42 @@ paths:
           description: This business has used its readings for the month, or its AI allowance (code AI_ALLOWANCE_USED)
         "502":
           description: The file could not be read just now
+        "503":
+          description: Reading is not switched on (no Anthropic API key)
+
+  /imports/sort-list:
+    post:
+      operationId: sortImportList
+      tags: [imports]
+      summary: Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+      description: >-
+        For "Upload your lists", where many files are dropped at once. Claude
+        only says which of the business's imports the file is (PAT appliances,
+        RoomTrack rooms, contractors, FireTrack call points, GreenTrack
+        equipment or the staff roster); the rows are read later by that
+        import. Uses the AI allowance but not the monthly reading number. The
+        file is not stored. Off until the server has an Anthropic API key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatRegisterReadRequest"
+      responses:
+        "200":
+          description: The import the file belongs in, or null when it is none of them
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportListSortResult"
+        "400":
+          description: The file cannot be read here
+        "402":
+          description: The business does not have the AI features add-on (code AI_ADDON_REQUIRED)
+        "429":
+          description: The business has used its AI allowance (code AI_ALLOWANCE_USED)
+        "502":
+          description: The file could not be sorted just now
         "503":
           description: Reading is not switched on (no Anthropic API key)
 
@@ -7731,6 +7837,14 @@ components:
         phone:
           type: string
           nullable: true
+        sleepingAccommodation:
+          type: boolean
+          nullable: true
+          description: Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.
+        nightPorter:
+          type: boolean
+          nullable: true
+          description: A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.
         createdAt:
           type: string
           format: date-time
@@ -7761,6 +7875,14 @@ components:
         phone:
           type: string
           nullable: true
+        sleepingAccommodation:
+          type: boolean
+          nullable: true
+          description: Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.
+        nightPorter:
+          type: boolean
+          nullable: true
+          description: A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.
       required:
         - name
 
@@ -7781,6 +7903,14 @@ components:
         phone:
           type: string
           nullable: true
+        sleepingAccommodation:
+          type: boolean
+          nullable: true
+          description: Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.
+        nightPorter:
+          type: boolean
+          nullable: true
+          description: A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.
 
     ContractorVisitType:
       type: object
@@ -9801,7 +9931,10 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel, emergency_lights_annual, alarm_service, extinguisher_service, night_walk]
+      description: >-
+        "fire_walk" is the escape route sign-off (sites with sleeping accommodation). "night_walk" is a night
+        porter's fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see /fire-safety/night-walks).
 
     FireSafetyCheck:
       type: object
@@ -9871,6 +10004,11 @@ components:
           type: boolean
           nullable: true
           description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
+        walkTime:
+          type: string
+          nullable: true
+          enum: ["22:00", "02:00", "06:00"]
+          description: Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
         createdAt:
           type: string
           format: date-time
@@ -9951,6 +10089,11 @@ components:
           type: boolean
           nullable: true
           description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
+        walkTime:
+          type: string
+          nullable: true
+          enum: ["22:00", "02:00", "06:00"]
+          description: Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
       required:
         - checkType
         - checkDate
@@ -10019,6 +10162,138 @@ components:
           type: boolean
           nullable: true
           description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
+        walkTime:
+          type: string
+          nullable: true
+          enum: ["22:00", "02:00", "06:00"]
+          description: Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on.
+
+    FireEscapeRoute:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          description: e.g. "Final fire exit door route 1" or "Escape stairway 2".
+        location:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: Where it leads, or the assembly point (optional).
+      required:
+        - name
+
+    FireEscapeRouteList:
+      type: object
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        routes:
+          type: array
+          items:
+            $ref: "#/components/schemas/FireEscapeRoute"
+        shared:
+          type: boolean
+          description: True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.
+      required:
+        - siteId
+        - routes
+        - shared
+
+    UpdateFireEscapeRoutesRequest:
+      type: object
+      properties:
+        routes:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/FireEscapeRoute"
+      required:
+        - routes
+
+    NightFireWalk:
+      type: object
+      properties:
+        date:
+          type: string
+          description: The calendar day the walk falls on (YYYY-MM-DD).
+        time:
+          type: string
+          enum: ["22:00", "02:00", "06:00"]
+        status:
+          type: string
+          enum: [done, failed, due, missed, upcoming, not_needed]
+          description: >-
+            done or failed once recorded (failed = something found); due from its time until an hour after;
+            missed after that; upcoming before its time; not_needed before the site had a night porter.
+        checkId:
+          type: integer
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+      required:
+        - date
+        - time
+        - status
+        - checkId
+        - performedBy
+
+    NightFireWalkNight:
+      type: object
+      properties:
+        nightOf:
+          type: string
+          description: The evening the night starts (YYYY-MM-DD); its 02:00 and 06:00 walks fall on the next day.
+        walks:
+          type: array
+          items:
+            $ref: "#/components/schemas/NightFireWalk"
+      required:
+        - nightOf
+        - walks
+
+    NightFireWalkSite:
+      type: object
+      properties:
+        siteId:
+          type: integer
+        siteName:
+          type: string
+        nights:
+          type: array
+          description: Tonight (or the night now ending) first, then the six nights before.
+          items:
+            $ref: "#/components/schemas/NightFireWalkNight"
+        missedCount:
+          type: integer
+          description: Walks missed over the nights listed.
+      required:
+        - siteId
+        - siteName
+        - nights
+        - missedCount
+
+    NightFireWalks:
+      type: object
+      properties:
+        walkTimes:
+          type: array
+          items:
+            type: string
+        graceMinutes:
+          type: integer
+          description: A walk counts as missed this many minutes after its time.
+        sites:
+          type: array
+          description: Sites with a night porter that the caller can see.
+          items:
+            $ref: "#/components/schemas/NightFireWalkSite"
+      required:
+        - walkTimes
+        - graceMinutes
+        - sites
 
     FireDrillAttendee:
       type: object
@@ -10207,6 +10482,16 @@ components:
             items: { type: string }
         unclear: { type: integer, description: "Rows that were hard to read; their Notes start with \"Check:\"" }
       required: [headers, rows, unclear]
+
+    ImportListSortResult:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          type: [string, "null"]
+          enum: [pat-appliances, room-track-rooms, contractors, fire-call-points, greentrack-equipment, staff-roster, null]
+          description: The import the file belongs in; null when it is none of them
 
     ImportListReadResult:
       type: object

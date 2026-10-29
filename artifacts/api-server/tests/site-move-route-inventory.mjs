@@ -60,6 +60,7 @@ const INVENTORY = {
   "inspection-reports.ts POST /inspection-reports/:id/confirm": covered("scoped manager cannot confirm report actions for another department's site", "inspection-reports.mjs"),
   "fire-safety.ts PUT /call-points/:id": notAMove("renames or archives; the call point keeps its site"),
   "fire-safety.ts PUT /call-points/order": notAMove("reorders one site's call points, access-checked; none changes site"),
+  "fire-safety.ts PUT /escape-routes": adminOnly("a site's escape route list (Template)"),
   "fire-safety.ts PUT /config": notAMove("per-site settings selected by query"),
   "fix-track-public.ts POST /:token/booked": notAMove("contractor's visit date on the issue's stored site; the site is only read to address the bell notice"),
   "fix-track-public.ts POST /:token": notAMove("contractor marks the issue done on its stored site; the site is only read to address the bell notice"),

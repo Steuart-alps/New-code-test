@@ -268,7 +268,7 @@ async function fireSiteStatusesFor(
   const conditions: SQL[] = [sql`site_id IS NULL`];
   if (siteIds.length) conditions.push(sql`site_id IN (${idList(siteIds)})`);
 
-  const [latestRows, settingRows, profileRows] = await Promise.all([
+  const [latestRows, settingRows, profileRows, sleepingRows] = await Promise.all([
     db.execute(sql`
       SELECT DISTINCT ON (site_id, check_type) id, site_id, check_type, check_date, result
       FROM fire_safety_checks
@@ -280,7 +280,14 @@ async function fireSiteStatusesFor(
       SELECT site_id, profile FROM track_control_profiles
       WHERE client_id = ${clientId} AND module = 'fire' AND site_id IN (${idList(siteIds)})
     `) : Promise.resolve({ rows: [] as unknown[] }),
+    siteIds.length ? db.execute(sql`
+      SELECT id, sleeping_accommodation FROM sites WHERE client_id = ${clientId} AND id IN (${idList(siteIds)})
+    `) : Promise.resolve({ rows: [] as unknown[] }),
   ]);
+  const sleeping = new Map<number, boolean | null>(
+    ((sleepingRows.rows ?? []) as { id: number; sleeping_accommodation: boolean | null }[])
+      .map(row => [Number(row.id), row.sleeping_accommodation]),
+  );
   type Latest = { id: number; check_date: string; result: string | null };
   const latest = new Map<string, Latest>();
   for (const row of (latestRows.rows ?? []) as (Latest & { site_id: number | null; check_type: string })[]) {
@@ -298,6 +305,13 @@ async function fireSiteStatusesFor(
     for (const checkType of ACTIVE_FIRE_CHECK_TYPES) {
       const own = unit.id == null ? undefined : latest.get(`${unit.id}:${checkType}`);
       const unassigned = latest.get(`none:${checkType}`);
+      // The escape route sign-off is only for sites with sleeping
+      // accommodation. A site not yet answered keeps it only if fire walks
+      // have been recorded for it, so nothing new appears unasked.
+      if (checkType === "fire_walk") {
+        const answer = unit.id == null ? null : sleeping.get(unit.id) ?? null;
+        if (answer === false || (answer === null && !own && !unassigned)) continue;
+      }
       const last = !own ? unassigned : !unassigned ? own
         : String(unassigned.check_date) > String(own.check_date) ? unassigned : own;
       const frequencyDays = frequencies[checkType];

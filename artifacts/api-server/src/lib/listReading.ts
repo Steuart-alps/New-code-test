@@ -256,3 +256,78 @@ export async function readList(input: ListReadingInput, beforeSending?: () => Pr
     usage,
   };
 }
+
+// ── Sorting a file into the right import ────────────────────────────────────
+// "Upload your lists" takes many files at once. A spreadsheet is sorted in the
+// browser by its column headings; a photo, scan, PDF or Word list is shown to
+// Claude here only to ask which list it is. The rows are read later by the
+// import the person opens it in, as usual.
+
+/** Every import a file can be sorted into, and what its list holds. */
+export const SORTABLE_LISTS = {
+  "pat-appliances": "electrical appliances for portable appliance (PAT) testing",
+  "room-track-rooms": "rooms or bedrooms, usually with room numbers",
+  contractors: "contractors, suppliers or tradespeople with contact details",
+  "fire-call-points": "fire alarm call points",
+  "greentrack-equipment": "grounds or greenkeeping machinery (mowers, tractors, utility vehicles, other powered equipment)",
+  "staff-roster": "staff or employees",
+} as const;
+export type SortableListKind = keyof typeof SORTABLE_LISTS;
+export const SORTABLE_LIST_KINDS = Object.keys(SORTABLE_LISTS) as SortableListKind[];
+
+export interface ListSortingResult {
+  /** Null when the file is none of the lists. */
+  kind: SortableListKind | null;
+  model: string;
+  usage: RegisterReadingResult["usage"];
+}
+
+const SORT_PROMPT = (kinds: SortableListKind[]) => `You help UK businesses move their existing lists into ComplyTrack, a health and safety compliance app. A person has uploaded several lists at once. Say which one of these lists this file is:
+${kinds.map((kind) => `- ${kind}: a list of ${SORTABLE_LISTS[kind]}`).join("\n")}
+Answer "none" when it is none of them, or not a list at all. Only sort the file: do not read out or summarise its contents.
+
+${aiScopeRules("a list to sort")}`;
+
+/**
+ * Which of `kinds` a photo, scan, PDF or Word list is. `beforeSending` runs
+ * once the file is known to be readable, as for readList.
+ */
+export async function sortList(
+  input: { bytes: Buffer; mimeType: string; fileName: string; kinds: SortableListKind[] },
+  beforeSending?: () => Promise<void>,
+): Promise<ListSortingResult> {
+  const content = fileContentBlock(input.bytes, input.mimeType, REGISTER_FILE_WORDING, REGISTER_READING_MAX_BYTES);
+  await beforeSending?.();
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["wrong_file", "kind"],
+    properties: { wrong_file: WRONG_FILE_PROPERTY, kind: { type: "string", enum: [...input.kinds, "none"] } },
+  };
+  const client = new Anthropic();
+  const send = (model: string) => client.beta.messages.stream({
+    model,
+    max_tokens: 4000,
+    ...serverSideFallbackParams(model),
+    system: SORT_PROMPT(input.kinds),
+    output_config: { effort: aiEffortFor("list_reading"), format: { type: "json_schema", schema } },
+    messages: [{ role: "user", content: [content, { type: "text", text: `File name: ${promptLabel(input.fileName)}\n\nWhich list is this?` }] }],
+  }).finalMessage();
+  // The same model as list reading (Claude Haiku 5.5 by default).
+  let model = aiModelFor("list_reading");
+  let message = await send(model);
+  let usage = usageFromMessage(message, model);
+  if (message.stop_reason === "refusal" && !hasServerSideFallback(model)) {
+    const declined = usage;
+    model = HAIKU_REFUSAL_RETRY_MODEL;
+    message = await send(model);
+    usage = combinedUsage(usageFromMessage(message, model), declined);
+  }
+  const text = message.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("");
+  let json: unknown = null;
+  try { json = JSON.parse(text); } catch { /* sorted as none */ }
+  const parsed = z.object({ wrong_file: z.boolean().optional(), kind: z.string() }).safeParse(json);
+  const kind = message.stop_reason !== "refusal" && parsed.success && !parsed.data.wrong_file
+    && (input.kinds as string[]).includes(parsed.data.kind) ? parsed.data.kind as SortableListKind : null;
+  return { kind, model: message.model ?? model, usage };
+}

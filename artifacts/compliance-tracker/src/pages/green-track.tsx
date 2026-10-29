@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { takeLinkParams } from "@/lib/deep-link";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -722,8 +722,8 @@ async function downloadMachineListTemplate(siteName: string) {
   ]);
 }
 
-function MachineImportDialog({
-  open, onClose, sites, defaultSiteId, onImported,
+export function MachineImportDialog({
+  open, onClose, sites, defaultSiteId, onImported, initialFile,
 }: {
   open: boolean;
   onClose: () => void;
@@ -731,6 +731,8 @@ function MachineImportDialog({
   /** The Template's default site; rows that name no site go here unless changed. */
   defaultSiteId: number | null;
   onImported: () => void;
+  /** A file chosen before the dialog opened ("Upload your lists"), read as soon as it opens. */
+  initialFile?: File | null;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -805,6 +807,13 @@ function MachineImportDialog({
   };
 
   usePastedFile(open && !readingList && !importing, file => void handleFile(file));
+  const startedWith = useRef<File | null>(null);
+  useEffect(() => {
+    if (!open) { startedWith.current = null; return; }
+    if (!initialFile || !reading.loaded || startedWith.current === initialFile) return;
+    startedWith.current = initialFile;
+    void handleFile(initialFile);
+  }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleImport = async () => {
     setImporting(true);

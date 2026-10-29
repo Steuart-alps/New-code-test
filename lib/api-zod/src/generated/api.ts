@@ -810,6 +810,8 @@ export const ListSitesResponseItem = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -824,7 +826,9 @@ export const CreateSiteBody = zod.object({
   "name": zod.string(),
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.')
 })
 
 export const CreateSiteResponse = zod.object({
@@ -835,6 +839,8 @@ export const CreateSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -855,6 +861,8 @@ export const GetSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -872,7 +880,9 @@ export const UpdateSiteBody = zod.object({
   "name": zod.string().optional(),
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
-  "phone": zod.string().nullish()
+  "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.')
 })
 
 export const UpdateSiteResponse = zod.object({
@@ -883,6 +893,8 @@ export const UpdateSiteResponse = zod.object({
   "responsiblePerson": zod.string().nullish(),
   "address": zod.string().nullish(),
   "phone": zod.string().nullish(),
+  "sleepingAccommodation": zod.boolean().nullish().describe('Bedrooms or other sleeping accommodation at the site. Null until answered. The escape route sign-off only applies to sites with sleeping accommodation.'),
+  "nightPorter": zod.boolean().nullish().describe('A night porter on duty overnight (only asked with sleeping accommodation). Yes adds the 22:00, 02:00 and 06:00 night fire walks; no puts the fire walk on the opening and closing checklists.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3822,7 +3834,7 @@ export const AssignFixTrackContractorResponse = zod.object({
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']).optional(),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).optional(),
   "siteId": zod.coerce.number().optional()
 })
 
@@ -3835,7 +3847,7 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -3853,6 +3865,7 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3870,7 +3883,7 @@ export const createFireSafetyCheckBodyStaffPresentIdsMax = 2000;
 
 
 export const CreateFireSafetyCheckBody = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "siteId": zod.number().nullish(),
@@ -3885,7 +3898,8 @@ export const CreateFireSafetyCheckBody = zod.object({
   "staffPresentIds": zod.array(zod.number()).max(createFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
-  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
 
 export const createFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -3897,7 +3911,7 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -3915,6 +3929,7 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })
@@ -3928,7 +3943,7 @@ export const GetFireSafetyStatusQueryParams = zod.object({
 })
 
 export const GetFireSafetyStatusResponseItem = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "frequencyDays": zod.number(),
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
@@ -3940,6 +3955,95 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   "sitesAffected": zod.number().optional().describe('How many of those sites are overdue or have never recorded the check.')
 })
 export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponseItem)
+
+
+/**
+ * @summary A site's escape routes, ticked on each escape route sign-off and night fire walk
+ */
+export const GetFireEscapeRoutesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('The site. Omit for a business with no sites.')
+})
+
+export const getFireEscapeRoutesResponseRoutesItemNameMax = 200;
+
+export const getFireEscapeRoutesResponseRoutesItemLocationMax = 200;
+
+
+
+export const GetFireEscapeRoutesResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(getFireEscapeRoutesResponseRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(getFireEscapeRoutesResponseRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})),
+  "shared": zod.boolean().describe('True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.')
+})
+
+
+/**
+ * @summary Replace a site's escape route list (managers)
+ */
+export const UpdateFireEscapeRoutesQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('The site. Omit for a business with no sites.')
+})
+
+export const updateFireEscapeRoutesBodyRoutesItemNameMax = 200;
+
+export const updateFireEscapeRoutesBodyRoutesItemLocationMax = 200;
+
+export const updateFireEscapeRoutesBodyRoutesMax = 100;
+
+
+
+export const UpdateFireEscapeRoutesBody = zod.object({
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(updateFireEscapeRoutesBodyRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(updateFireEscapeRoutesBodyRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})).max(updateFireEscapeRoutesBodyRoutesMax)
+})
+
+export const updateFireEscapeRoutesResponseRoutesItemNameMax = 200;
+
+export const updateFireEscapeRoutesResponseRoutesItemLocationMax = 200;
+
+
+
+export const UpdateFireEscapeRoutesResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "routes": zod.array(zod.object({
+  "name": zod.string().max(updateFireEscapeRoutesResponseRoutesItemNameMax).describe('e.g. \"Final fire exit door route 1\" or \"Escape stairway 2\".'),
+  "location": zod.string().max(updateFireEscapeRoutesResponseRoutesItemLocationMax).nullish().describe('Where it leads, or the assembly point (optional).')
+})),
+  "shared": zod.boolean().describe('True when the site has no list of its own yet and these are the business-wide routes saved before routes were set per site.')
+})
+
+
+/**
+ * @summary Night porter fire walks (22:00, 02:00, 06:00) for each site with a night porter, tonight and the last six nights
+ */
+export const GetNightFireWalksQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional()
+})
+
+export const GetNightFireWalksResponse = zod.object({
+  "walkTimes": zod.array(zod.string()),
+  "graceMinutes": zod.number().describe('A walk counts as missed this many minutes after its time.'),
+  "sites": zod.array(zod.object({
+  "siteId": zod.number(),
+  "siteName": zod.string(),
+  "nights": zod.array(zod.object({
+  "nightOf": zod.string().describe('The evening the night starts (YYYY-MM-DD); its 02:00 and 06:00 walks fall on the next day.'),
+  "walks": zod.array(zod.object({
+  "date": zod.string().describe('The calendar day the walk falls on (YYYY-MM-DD).'),
+  "time": zod.enum(['22:00', '02:00', '06:00']),
+  "status": zod.enum(['done', 'failed', 'due', 'missed', 'upcoming', 'not_needed']).describe('done or failed once recorded (failed = something found); due from its time until an hour after; missed after that; upcoming before its time; not_needed before the site had a night porter.'),
+  "checkId": zod.number().nullable(),
+  "performedBy": zod.string().nullable()
+}))
+})).describe('Tonight (or the night now ending) first, then the six nights before.'),
+  "missedCount": zod.number().describe('Walks missed over the nights listed.')
+})).describe('Sites with a night porter that the caller can see.')
+})
 
 
 /**
@@ -4285,6 +4389,26 @@ export const ReadImportListResponse = zod.object({
 
 
 /**
+ * For "Upload your lists", where many files are dropped at once. Claude only says which of the business's imports the file is (PAT appliances, RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster); the rows are read later by that import. Uses the AI allowance but not the monthly reading number. The file is not stored. Off until the server has an Anthropic API key.
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const sortImportListBodyFileNameMax = 255;
+
+
+
+export const SortImportListBody = zod.object({
+  "fileName": zod.string().max(sortImportListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const SortImportListResponse = zod.object({
+  "kind": zod.union([zod.literal('pat-appliances'),zod.literal('room-track-rooms'),zod.literal('contractors'),zod.literal('fire-call-points'),zod.literal('greentrack-equipment'),zod.literal('staff-roster'),zod.literal(null)]).nullable().describe('The import the file belongs in; null when it is none of them')
+})
+
+
+/**
  * @summary Rename, move, archive or restore a call point (managers)
  */
 export const UpdateFireCallPointParams = zod.object({
@@ -4341,7 +4465,8 @@ export const UpdateFireSafetyCheckBody = zod.object({
   "staffPresentIds": zod.array(zod.number()).max(updateFireSafetyCheckBodyStaffPresentIdsMax).optional().describe('Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.'),
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
-  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).')
+  "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.')
 })
 
 export const updateFireSafetyCheckResponseDrillTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -4353,7 +4478,7 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel', 'emergency_lights_annual', 'alarm_service', 'extinguisher_service', 'night_walk']).describe('\"fire_walk\" is the escape route sign-off (sites with sleeping accommodation). \"night_walk\" is a night porter\'s fire walk at 22:00, 02:00 or 06:00; it has no due-date status card (see \/fire-safety\/night-walks).'),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -4371,6 +4496,7 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "soundLevelDb": zod.number().nullish().describe('Weekly alarm tests, optional. The sound level heard, in dB (20 to 140).'),
   "soundLevelMethod": zod.enum(['meter', 'phone']).nullish().describe('How the sound level was taken. \"meter\" is read off a sound meter; \"phone\" is a rough reading from the phone\'s microphone. Defaults to \"meter\" when a level is given.'),
   "soundLevelBedhead": zod.boolean().nullish().describe('Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).'),
+  "walkTime": zod.enum(['22:00', '02:00', '06:00']).nullish().describe('Night fire walks. Which of the night\'s three walks this is; checkDate is the day it fell on.'),
   "createdAt": zod.date(),
   "updatedAt": zod.date()
 })

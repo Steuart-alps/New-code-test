@@ -13,6 +13,7 @@ import { SetupGettingStarted, type SetupAi, type SetupAssistRequest } from "@/co
 import { departmentLabel } from "@/lib/departments";
 import { roleLabel } from "@/lib/roles";
 import { UserDialog, type RosterEntry, type User as Person } from "@/pages/users";
+import { SiteFireWalkQuestions, type FireWalkAnswers } from "@/components/site-fire-walk-questions";
 import {
   BUSINESS_TYPE_OPTIONS, DEPARTMENT_SUGGESTIONS, FIRST_RECORD_PRIORITY, MODULE_INFO, NATION_OPTIONS, RECOMMENDED_MODULES,
   formatDay, localToday, onboardingRequest,
@@ -24,7 +25,8 @@ type StarterCheck = {
 };
 type SetupState = {
   needsSetup: boolean; setupCompletedAt: string | null; canManage: boolean; businessType: string | null;
-  deferredAt?: string | null; nation?: string | null; sites?: { id: number; name: string }[];
+  deferredAt?: string | null; nation?: string | null;
+  sites?: ({ id: number; name: string } & Partial<FireWalkAnswers>)[];
   modules?: { available: string[]; picked: string[] }; starterChecks?: StarterCheck[];
   complimentary?: boolean; team?: SetupTeam; ai?: SetupAi; assistRequest?: SetupAssistRequest | null;
 };
@@ -197,6 +199,17 @@ export default function SetupPage() {
   // "Save and continue" saves any site still typed in and moves on in one click.
   const saveSite = () => run(addTypedSite, false);
   const saveSitesAndContinue = () => run(addTypedSite);
+  // Each answer saves straight away; the list shows it at once.
+  async function saveFireWalkAnswers(id: number, answers: FireWalkAnswers) {
+    setState((current) => current && { ...current, sites: current.sites?.map((s) => s.id === id ? { ...s, ...answers } : s) });
+    try {
+      await post(`/sites/${id}`, answers, "PATCH");
+      void queryClient.invalidateQueries();
+    } catch (err) {
+      toast({ title: "Could not save", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      await load();
+    }
+  }
 
   const sites = state?.sites ?? [];
   const activeDeptSiteId = deptSiteId ?? sites[0]?.id ?? null;
@@ -422,10 +435,13 @@ export default function SetupPage() {
                   <p className="text-sm text-muted-foreground">A site is a building or location where checks are recorded. Add each of your locations now; you will set up their departments next.</p>
                 </div>
                 {sites.length > 0 && (
-                  <ul className="space-y-1.5" aria-label="Your sites">
+                  <ul className="space-y-2" aria-label="Your sites">
                     {sites.map((s) => (
-                      <li key={s.id} className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-                        <MapPin className="h-4 w-4 text-primary shrink-0" /> {s.name}
+                      <li key={s.id} className="rounded-lg border bg-muted/30 px-3 py-2 text-sm space-y-2">
+                        <span className="flex items-center gap-2 font-medium"><MapPin className="h-4 w-4 text-primary shrink-0" /> {s.name}</span>
+                        <SiteFireWalkQuestions idPrefix={`setup-site-${s.id}`}
+                          value={{ sleepingAccommodation: s.sleepingAccommodation ?? null, nightPorter: s.nightPorter ?? null }}
+                          onChange={(answers) => void saveFireWalkAnswers(s.id, answers)} />
                       </li>
                     ))}
                   </ul>

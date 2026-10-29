@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -102,12 +102,14 @@ function PeopleList({ title, names, tone }: { title: string; names: string[]; to
   );
 }
 
-export function RosterImportDialog({ open, onClose, onImported, sites, fixedSite = null, rosterCheck = null }: {
+export function RosterImportDialog({ open, onClose, onImported, sites, fixedSite = null, rosterCheck = null, initialFile = null }: {
   open: boolean; onClose: () => void; onImported: (result: RosterImportResult) => void; sites: Site[];
   /** Update just this site's roster (no site picker). */
   fixedSite?: Site | null;
   /** Answer Yes to this month's roster check with the upload. */
   rosterCheck?: { taskId: number; date: string } | null;
+  /** A file chosen before the dialog opened ("Upload your lists"), read as soon as it opens. */
+  initialFile?: File | null;
 }) {
   const { toast } = useToast();
   const [mode, setMode] = useState<"excel" | "paste">("excel");
@@ -169,6 +171,13 @@ export function RosterImportDialog({ open, onClose, onImported, sites, fixedSite
   }
 
   usePastedFile(open && !result && mode === "excel" && !excelFile && !parsing, file => void handleFileChange(file));
+  const startedWith = useRef<File | null>(null);
+  useEffect(() => {
+    if (!open) { startedWith.current = null; return; }
+    if (!initialFile || !reading.loaded || startedWith.current === initialFile) return;
+    startedWith.current = initialFile;
+    void handleFileChange(initialFile);
+  }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const members: ParsedStaff[] = mode === "excel" ? preview : parsePasteText(text);
   const canImport = members.length > 0 && members.every(member => member.name.trim()) && !importing;
