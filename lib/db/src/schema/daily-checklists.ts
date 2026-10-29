@@ -1,8 +1,9 @@
-import { pgTable, serial, text, timestamp, integer, date, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, jsonb, uniqueIndex, index, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
+import { departmentsTable } from "./departments";
 
 export const dailyChecklistsTable = pgTable("daily_checklists", {
   id: serial("id").primaryKey(),
@@ -92,3 +93,27 @@ export const dailyChecklistSubmissionsTable = pgTable("daily_checklist_submissio
 ]);
 
 export type DailyChecklistSubmission = typeof dailyChecklistSubmissionsTable.$inferSelect;
+
+/**
+ * Which department does a site's checklists of one area, e.g. the Greenkeeping
+ * department for the greenkeeping shed opening and closing checks. Checklists
+ * given to a team are shown under that team on "Today by department" and
+ * chased to its Managers (api-server lib/greenkeepingChecks.ts). Only
+ * 'greenkeeping' is used so far; 'kitchen' and 'premises' are kept for giving
+ * the kitchen and clubhouse checklists their own teams. Also created by the
+ * runtime migrations.
+ */
+export const dailyChecklistTeamsTable = pgTable("daily_checklist_teams", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").notNull().references(() => sitesTable.id, { onDelete: "cascade" }),
+  area: text("area").$type<"greenkeeping" | "kitchen" | "premises">().notNull(),
+  departmentId: integer("department_id").notNull().references(() => departmentsTable.id, { onDelete: "cascade" }),
+  updatedBy: integer("updated_by").references(() => usersTable.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("uq_daily_checklist_teams_site_area").on(table.siteId, table.area),
+  check("ck_daily_checklist_teams_area", sql`${table.area} IN ('greenkeeping', 'kitchen', 'premises')`),
+]);
+
+export type DailyChecklistTeam = typeof dailyChecklistTeamsTable.$inferSelect;

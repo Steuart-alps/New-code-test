@@ -7,6 +7,9 @@
  *  - Whole site: the daily checklists and manager sign-off the client's
  *    services expect at every site (dailyTrackRequirements), web and phone.
  *    A submitted checklist with a failed item counts as failed.
+ *  - Greenkeeping (GreenTrack): the shed opening and closing checklists and the
+ *    machines' pre-start checks at sites that do shed checks, under the site's
+ *    greenkeeping team (lib/greenkeepingChecks.ts), else Whole site.
  *  - A department: checks saved today by its staff (the department recorded
  *    on the record, never the author's current one), failed when the result
  *    is a fail; tasks due today assigned to one of its people; and compliance
@@ -23,7 +26,11 @@ import { db } from "@workspace/db";
 import { sql, type SQL } from "drizzle-orm";
 import type { SafeUser } from "@workspace/db/schema";
 import { dailyTrackRequirements, type DailyTrackRequirement } from "./dailyChecklistEntitlements";
-import { getEntitledServices } from "./services";
+import { getEntitledServices, isEntitled } from "./services";
+import {
+  GREENKEEPING_CHECKLIST_NAMES, GREENKEEPING_CHECKLIST_TYPES, getGreenkeepingShedDay, getPreStartDay, greenDailyChecksPath,
+  greenkeepingShedSites, loadGreenkeepingTeams,
+} from "./greenkeepingChecks";
 import { getAccountTimezone, localDateIn, addCalendarDays, zonedDateTimeToUtc } from "./accountClock";
 import { occursOn } from "./taskSchedule";
 import { submittedDailyChecklists } from "./dailyChecklistCompletion";
@@ -398,6 +405,49 @@ export async function getTodayByDepartment(scope: TodayScope, now: Date = new Da
             siteId: site.id, departmentId: null, outcome: "todo", label,
             detail: current?.started ? "Started, not submitted yet" : "Not submitted yet", path,
           });
+        }
+      }
+    }
+  }
+
+  // ── Greenkeeping: shed checks and machine pre-start checks ──────────────────
+  // At the sites that do shed checks (lib/greenkeepingChecks.ts), under the
+  // site's greenkeeping team, or Whole site when it has none.
+  if (isEntitled(await getEntitledServices(clientId), "greentrack")) {
+    const teams = await loadGreenkeepingTeams(clientId, siteIds);
+    const shedSiteIds = await greenkeepingShedSites(clientId, today, siteIds, teams);
+    const shedSites = sites.filter((site) => shedSiteIds.has(site.id));
+    if (shedSites.length > 0) {
+      const [days, machines] = await Promise.all([
+        getGreenkeepingShedDay(clientId, today, shedSites.map((site) => site.id)),
+        getPreStartDay(clientId, today, shedSites.map((site) => site.id)),
+      ]);
+      for (const site of shedSites) {
+        const departmentId = teams.get(site.id)?.departmentId ?? null;
+        const path = greenDailyChecksPath(site.id);
+        for (const type of GREENKEEPING_CHECKLIST_TYPES) {
+          const state = days.get(site.id)?.[type];
+          const label = GREENKEEPING_CHECKLIST_NAMES[type];
+          if (state?.submitted) {
+            push(state.failed
+              ? { siteId: site.id, departmentId, outcome: "failed", label, detail: "Submitted with a failed item", path }
+              : { siteId: site.id, departmentId, outcome: "done" });
+          } else {
+            push({ siteId: site.id, departmentId, outcome: "todo", label, detail: state?.started ? "Started, not submitted yet" : "Not submitted yet", path });
+          }
+        }
+        // Machines kept at this site; one with no site counts at a one-site business.
+        const atSite = machines.filter((machine) => machine.siteId === site.id || (machine.siteId === null && sites.length === 1));
+        if (atSite.length === 0) continue;
+        const todo = atSite.filter((machine) => machine.status === "todo").length;
+        const failed = atSite.filter((machine) => machine.status === "failed").length;
+        const label = "Machine pre-start checks";
+        if (failed > 0) {
+          push({ siteId: site.id, departmentId, outcome: "failed", label, detail: `${failed} of ${atSite.length} machines failed today's check`, path });
+        } else if (todo > 0) {
+          push({ siteId: site.id, departmentId, outcome: "todo", label, detail: `${todo} of ${atSite.length} machines not checked or marked not in use`, path });
+        } else {
+          push({ siteId: site.id, departmentId, outcome: "done" });
         }
       }
     }
