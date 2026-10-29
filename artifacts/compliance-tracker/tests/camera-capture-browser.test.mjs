@@ -58,7 +58,9 @@ const launchOptions = {
 }[browserName];
 
 async function open({ initScript } = {}) {
-  const context = await browser.newContext(browserName === "firefox" ? {} : { permissions: ["camera", "microphone"] });
+  // Chromium needs the camera granted; Firefox (prefs above) and Playwright's
+  // WebKit (which has no "camera" permission to grant) allow it already.
+  const context = await browser.newContext(browserName === "chromium" ? { permissions: ["camera", "microphone"] } : {});
   if (initScript) await context.addInitScript(initScript);
   const page = await context.newPage();
   page.setDefaultTimeout(15_000);
