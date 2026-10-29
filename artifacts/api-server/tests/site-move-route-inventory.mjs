@@ -133,6 +133,7 @@ const INVENTORY = {
   "track-evidence.ts POST /:id/review": notAMove("evidence review on the action's stored site"),
   "train-track.ts PATCH /records/:id": covered("scoped staff cannot PATCH TrainTrack site"),
   "tree-track.ts PUT /:id": siteMove("Tree inspection"),
+  "tree-track.ts PUT /trees/:id": adminOnly("tree register"),
 };
 
 const ADMIN_GUARD = /\brequire(?:ClientAdmin|Consultant)\b|\brequireRole\(\s*["']client_admin["']/;

@@ -20,15 +20,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TreePine, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Pencil, Trash2, Lock, Search, Building2, Filter, CalendarDays,
-  UserCheck, MapPin, Loader2,
+  UserCheck, MapPin, Loader2, ExternalLink, ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
-import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
+import { useSayItFill, withSpokenNote, matchSpokenItem } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 import { RecordSignedBy } from "@/components/record-signature";
 
@@ -56,12 +57,38 @@ interface TreeInspection {
   result: string;
   observationResult?: CheckResult;
   actionSeverity?: ActionSeverity | null;
+  treeId?: number | null;
   treeRef: string | null;
   location: string | null;
+  what3words?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   inspector: string | null;
   followUpDate: string | null;
   notes: string | null;
   createdAt: string;
+}
+
+type RiskZone = "high" | "medium" | "low";
+
+interface Tree {
+  id: number;
+  siteId: number | null;
+  ref: string;
+  species: string | null;
+  location: string | null;
+  what3words: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  riskZone: RiskZone;
+  inspectionIntervalMonths: number;
+  notes: string | null;
+  removedAt: string | null;
+  lastInspected: string | null;
+  lastCheckDate: string | null;
+  openIssue: { checkDate: string; severity: ActionSeverity | null } | null;
+  nextDue: string | null;
+  status: CheckStatus;
 }
 
 interface StatusRow {
@@ -103,6 +130,26 @@ const SEVERITY_CFG: Record<ActionSeverity, { label: string; badge: string }> = {
   urgent_action:   { label: "Urgent Action", badge: "bg-rose-50 text-rose-700 border-rose-200" },
 };
 
+const RISK_ZONE_LABELS: Record<RiskZone, string> = {
+  high:   "Busy area",
+  medium: "Sometimes used",
+  low:    "Rarely visited",
+};
+
+const RISK_ZONE_HINTS: Record<RiskZone, string> = {
+  high:   "Paths, car parks, play areas, roads, buildings, tees and greens: people are often underneath.",
+  medium: "Used now and then, such as rough, wider grounds or quieter paths.",
+  low:    "Woodland or boundaries people rarely go near.",
+};
+
+const RISK_ZONE_BADGE: Record<RiskZone, string> = {
+  high:   "bg-rose-50 text-rose-700 border-rose-200",
+  medium: "bg-amber-50 text-amber-700 border-amber-200",
+  low:    "bg-slate-50 text-slate-600 border-slate-200",
+};
+
+const INTERVAL_OPTIONS = [6, 12, 18, 24, 36];
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** JSON request through the shared client: adds the /api prefix, the CSRF
@@ -117,6 +164,124 @@ async function apiFetch(path: string, opts?: RequestInit) {
 function fmt(d: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** A what3words address as typed ("///Filled.Count.Soap", "filled count soap") as "filled.count.soap", or null. */
+function normaliseWhat3Words(value: string): string | null {
+  const words = value.trim().replace(/^\/+/u, "").replace(/\u200b/gu, "").toLowerCase()
+    .split(/[.\s。．｡・]+/u).filter(Boolean);
+  return words.length === 3 && words.every(w => /^\p{L}+$/u.test(w)) ? words.join(".") : null;
+}
+
+function What3WordsLink({ words }: { words: string | null | undefined }) {
+  if (!words) return null;
+  return (
+    <a href={`https://what3words.com/${words}`} target="_blank" rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-xs font-medium text-rose-700 hover:underline"
+      onClick={e => e.stopPropagation()}>
+      ///{words} <ExternalLink className="w-3 h-3" />
+    </a>
+  );
+}
+
+function MapLink({ latitude, longitude }: { latitude?: number | null; longitude?: number | null }) {
+  if (latitude == null || longitude == null) return null;
+  return (
+    <a href={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`} target="_blank" rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline"
+      onClick={e => e.stopPropagation()}>
+      <MapPin className="w-3 h-3" /> Map
+    </a>
+  );
+}
+
+/**
+ * Where something is: the place in words, its what3words address and, when
+ * a phone saved one, its GPS spot. Shared by the tree and inspection forms.
+ */
+function LocationFields({ location, what3words, latitude, longitude, onChange, locationLabel, what3wordsLabel }: {
+  location: string; what3words: string; latitude: number | null; longitude: number | null;
+  onChange: (patch: Partial<{ location: string; what3words: string; latitude: number | null; longitude: number | null }>) => void;
+  locationLabel: string; what3wordsLabel: string;
+}) {
+  const { toast } = useToast();
+  const [locating, setLocating] = useState(false);
+  const words = what3words.trim() ? normaliseWhat3Words(what3words) : null;
+
+  function captureMyLocation() {
+    if (!navigator.geolocation) {
+      toast({ title: "Location unavailable", description: "This browser can't share its location.", variant: "destructive" });
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const latitude = Math.round(pos.coords.latitude * 1e6) / 1e6;
+        const longitude = Math.round(pos.coords.longitude * 1e6) / 1e6;
+        onChange({ latitude, longitude });
+        // The three words come from what3words' paid service when it is set
+        // up; otherwise the GPS spot is saved and the words are typed in.
+        let found: string | null = null;
+        try {
+          const res = await sharedApiFetch(`/w3w/convert?lat=${latitude}&lng=${longitude}`);
+          if (res.ok) found = ((await res.json()) as { words?: string }).words ?? null;
+        } catch { /* the GPS spot is saved either way */ }
+        if (found) onChange({ what3words: found });
+        toast({
+          title: "Location saved",
+          description: found ? `///${found}` : "GPS spot saved. Add the what3words address from the what3words app if you have it.",
+        });
+        setLocating(false);
+      },
+      (err) => {
+        setLocating(false);
+        const msg = err.code === 1 ? "Location permission denied." : err.code === 2 ? "Location unavailable." : "Location timed out.";
+        toast({ title: "Couldn't get your location", description: msg, variant: "destructive" });
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
+
+  return (
+    <>
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <Label htmlFor="location">{locationLabel}</Label>
+          <button type="button" onClick={captureMyLocation} disabled={locating}
+            className="flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+            {locating ? <Loader2 className="w-3 h-3 animate-spin" /> : <MapPin className="w-3 h-3" />}
+            {locating ? "Getting location…" : "Use my location"}
+          </button>
+        </div>
+        <Input id="location" dictation placeholder="e.g. By the 9th tee, car park perimeter, east boundary"
+          value={location} onChange={e => onChange({ location: e.target.value })} className="rounded-sm" />
+        {latitude != null && longitude != null && (
+          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+            <span>GPS {latitude.toFixed(5)}, {longitude.toFixed(5)}</span>
+            <MapLink latitude={latitude} longitude={longitude} />
+            <button type="button" className="hover:underline" onClick={() => onChange({ latitude: null, longitude: null })}>Clear</button>
+          </div>
+        )}
+      </div>
+      <div>
+        <Label htmlFor="what3words">{what3wordsLabel}</Label>
+        <div className="relative mt-1">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-rose-600">///</span>
+          <Input id="what3words" placeholder="filled.count.soap" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+            value={what3words.replace(/^\/+/, "")} onChange={e => onChange({ what3words: e.target.value })} className="pl-9 rounded-sm" />
+        </div>
+        {what3words.trim() && !words ? (
+          <p className="text-xs text-rose-600 mt-1">Three words with dots between them, like filled.count.soap</p>
+        ) : words ? (
+          <div className="mt-1"><What3WordsLink words={words} /></div>
+        ) : (
+          <p className="text-xs text-muted-foreground mt-1">
+            From the free what3words app or <a href="https://what3words.com" target="_blank" rel="noopener noreferrer" className="underline">what3words.com</a>, so anyone can find the exact spot.
+          </p>
+        )}
+      </div>
+    </>
+  );
 }
 
 function daysUntil(d: string | null) {
@@ -165,12 +330,30 @@ const emptyForm = () => ({
   checkDate: new Date().toISOString().slice(0, 10),
   result: "pass" as CheckResult,
   actionSeverity: "" as "" | ActionSeverity,
+  treeId: "",
   treeRef: "",
   location: "",
+  what3words: "",
+  latitude: null as number | null,
+  longitude: null as number | null,
   inspector: "",
   followUpDate: "",
   siteId: "",
   notes: "",
+});
+
+const emptyTreeForm = () => ({
+  ref: "",
+  species: "",
+  siteId: "",
+  location: "",
+  what3words: "",
+  latitude: null as number | null,
+  longitude: null as number | null,
+  riskZone: "medium" as RiskZone,
+  inspectionIntervalMonths: 12,
+  notes: "",
+  removedAt: "",
 });
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -191,43 +374,14 @@ export default function TreeTrackPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [resultChanged, setResultChanged] = useState(false);
-  const [w3wLoading, setW3wLoading] = useState(false);
-
-  async function handleUseLocation() {
-    if (!navigator.geolocation) {
-      toast({ title: "Location unavailable", description: "Your browser does not support geolocation.", variant: "destructive" });
-      return;
-    }
-    setW3wLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const { latitude: lat, longitude: lng } = pos.coords;
-          const res = await fetch(
-            `/api/w3w/convert?lat=${lat}&lng=${lng}`,
-            { credentials: "include" },
-          );
-          if (!res.ok) {
-            const b = await res.json().catch(() => ({}));
-            throw new Error(b?.error ?? `${res.status}`);
-          }
-          const { words } = await res.json() as { words: string };
-          setForm(f => ({ ...f, location: `///\u200b${words}` }));
-          toast({ title: "Location captured", description: `///\u200b${words}` });
-        } catch (err: any) {
-          toast({ title: "Could not get W3W address", description: err?.message ?? "Unknown error", variant: "destructive" });
-        } finally {
-          setW3wLoading(false);
-        }
-      },
-      (err) => {
-        setW3wLoading(false);
-        const msg = err.code === 1 ? "Location permission denied." : err.code === 2 ? "Location unavailable." : "Location timed out.";
-        toast({ title: "Geolocation failed", description: msg, variant: "destructive" });
-      },
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
-  }
+  const [tab, setTab] = useState<"trees" | "log">("trees");
+  const [treeSearch, setTreeSearch] = useState("");
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [showTreeDialog, setShowTreeDialog] = useState(false);
+  const [editTree, setEditTree] = useState<Tree | null>(null);
+  const [treeForm, setTreeForm] = useState(emptyTreeForm());
+  const [savingTree, setSavingTree] = useState(false);
+  const [deleteTree, setDeleteTree] = useState<Tree | null>(null);
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -242,6 +396,12 @@ export default function TreeTrackPage() {
     queryFn: () => apiFetch("/tree-track/status"),
     enabled: !!activeClientId && hasTrees,
     retry: (count, err: any) => err?.status !== 403 && count < 3,
+  });
+
+  const { data: trees = [], isSuccess: treesLoaded } = useQuery<Tree[]>({
+    queryKey: ["tree-track-trees", activeClientId, showRemoved],
+    queryFn: () => apiFetch(`/tree-track/trees${showRemoved ? "?includeRemoved=true" : ""}`),
+    enabled: !!activeClientId && hasTrees,
   });
 
   const { data: sites = [] } = useQuery<Site[]>({
@@ -260,6 +420,26 @@ export default function TreeTrackPage() {
     () => records.filter(r => (r.actionSeverity ?? r.result) === "action_required").length,
     [records],
   );
+
+  const siteName = (id: number | null | undefined) => sites.find(s => s.id === id)?.name ?? null;
+  const activeTrees = useMemo(() => trees.filter(t => !t.removedAt), [trees]);
+  const treesOverdue = activeTrees.filter(t => t.status === "overdue" || t.status === "never").length;
+  const treesWithIssues = activeTrees.filter(t => t.openIssue).length;
+
+  const filteredTrees = useMemo(() => {
+    let rows = trees;
+    if (filterSite !== "all") rows = rows.filter(t => String(t.siteId) === filterSite);
+    if (treeSearch.trim()) {
+      const q = treeSearch.toLowerCase();
+      rows = rows.filter(t => [t.ref, t.species, t.location, t.what3words, t.notes]
+        .some(v => (v ?? "").toLowerCase().includes(q)));
+    }
+    // Most pressing first: open issues, then overdue or never inspected, then by due date.
+    const rank = (t: Tree) => t.removedAt ? 4 : t.openIssue ? 0 : t.status === "overdue" || t.status === "never" ? 1 : t.status === "due_soon" ? 2 : 3;
+    return [...rows].sort((a, b) => rank(a) - rank(b)
+      || (a.nextDue ?? "").localeCompare(b.nextDue ?? "")
+      || a.ref.localeCompare(b.ref, "en-GB", { numeric: true }));
+  }, [trees, filterSite, treeSearch]);
 
   const filtered = useMemo(() => {
     let rows = records;
@@ -283,6 +463,7 @@ export default function TreeTrackPage() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["tree-track"] });
     qc.invalidateQueries({ queryKey: ["tree-track-status"] });
+    qc.invalidateQueries({ queryKey: ["tree-track-trees"] });
   };
 
   const deleteMutation = useMutation({
@@ -300,10 +481,105 @@ export default function TreeTrackPage() {
     setShowDialog(true);
   }
 
+  /** The inspection form for one tree, its place filled in from the tree list. */
+  function treeFields(tree: Tree) {
+    return {
+      treeId: String(tree.id),
+      treeRef: tree.ref,
+      location: tree.location ?? "",
+      what3words: tree.what3words ?? "",
+      latitude: tree.latitude,
+      longitude: tree.longitude,
+      siteId: tree.siteId ? String(tree.siteId) : "",
+    };
+  }
+
+  function openInspectTree(tree: Tree) {
+    setEditItem(null);
+    setResultChanged(false);
+    setForm({ ...emptyForm(), ...treeFields(tree) });
+    setShowDialog(true);
+  }
+
+  function chooseTree(value: string) {
+    const tree = trees.find(t => String(t.id) === value);
+    setForm(f => tree ? { ...f, ...treeFields(tree) } : { ...f, treeId: "", treeRef: "" });
+  }
+
+  function openAddTree() {
+    setEditTree(null);
+    setTreeForm({ ...emptyTreeForm(), siteId: filterSite !== "all" ? filterSite : sites.length === 1 ? String(sites[0].id) : "" });
+    setShowTreeDialog(true);
+  }
+
+  function openEditTree(tree: Tree) {
+    setEditTree(tree);
+    setTreeForm({
+      ref: tree.ref,
+      species: tree.species ?? "",
+      siteId: tree.siteId ? String(tree.siteId) : "",
+      location: tree.location ?? "",
+      what3words: tree.what3words ?? "",
+      latitude: tree.latitude,
+      longitude: tree.longitude,
+      riskZone: tree.riskZone,
+      inspectionIntervalMonths: tree.inspectionIntervalMonths,
+      notes: tree.notes ?? "",
+      removedAt: tree.removedAt ?? "",
+    });
+    setShowTreeDialog(true);
+  }
+
+  async function handleSaveTree() {
+    if (!treeForm.ref.trim()) { toast({ title: "Give the tree a reference, such as T12", variant: "destructive" }); return; }
+    const words = treeForm.what3words.trim() ? normaliseWhat3Words(treeForm.what3words) : null;
+    if (treeForm.what3words.trim() && !words) {
+      toast({ title: "Check the what3words address", description: "Three words with dots between them, like filled.count.soap", variant: "destructive" });
+      return;
+    }
+    setSavingTree(true);
+    try {
+      const body = {
+        ref: treeForm.ref.trim(),
+        species: treeForm.species.trim() || null,
+        siteId: treeForm.siteId ? Number(treeForm.siteId) : null,
+        location: treeForm.location.trim() || null,
+        what3words: words,
+        latitude: treeForm.latitude,
+        longitude: treeForm.longitude,
+        riskZone: treeForm.riskZone,
+        inspectionIntervalMonths: treeForm.inspectionIntervalMonths,
+        notes: treeForm.notes.trim() || null,
+        removedAt: treeForm.removedAt || null,
+      };
+      if (editTree) {
+        await apiFetch(`/tree-track/trees/${editTree.id}`, { method: "PUT", body: JSON.stringify(body) });
+        toast({ title: "Tree updated" });
+      } else {
+        await apiFetch("/tree-track/trees", { method: "POST", body: JSON.stringify(body) });
+        toast({ title: "Tree added", description: "Record its first inspection with Inspect." });
+      }
+      invalidate();
+      setShowTreeDialog(false);
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    } finally {
+      setSavingTree(false);
+    }
+  }
+
+  const deleteTreeMutation = useMutation({
+    mutationFn: (id: number) => apiFetch(`/tree-track/trees/${id}`, { method: "DELETE" }),
+    onSuccess: () => { invalidate(); toast({ title: "Tree removed from the list" }); setDeleteTree(null); setShowTreeDialog(false); },
+    onError: (e: any) => { toast({ title: "Couldn't delete the tree", description: e.message, variant: "destructive" }); setDeleteTree(null); },
+  });
+
   // An inspection said to Say it ("tree T12 by the car park, dead branch, urgent").
   useSayItFill(["tree-inspection"], fill => {
     const v = fill.values;
     const text = (key: string) => (typeof v[key] === "string" ? v[key] as string : "");
+    const spokenTree = matchSpokenItem(text("treeRef"), activeTrees.map(t => ({ id: t.id, name: t.ref, aliases: [t.species] })));
+    const tree = spokenTree ? activeTrees.find(t => t.id === spokenTree.id) : undefined;
     setEditItem(null);
     setResultChanged(false);
     setForm({
@@ -313,10 +589,11 @@ export default function TreeTrackPage() {
       actionSeverity: v.result === "fail" ? (text("actionSeverity") as ActionSeverity) || "action_required" : "",
       treeRef: text("treeRef"), location: text("location"),
       siteId: fill.siteId ? String(fill.siteId) : "",
+      ...(tree ? { ...treeFields(tree), location: text("location") || tree.location || "" } : {}),
       notes: withSpokenNote("", fill.text),
     });
     setShowDialog(true);
-  });
+  }, treesLoaded);
 
   function openEdit(r: TreeInspection) {
     setEditItem(r);
@@ -325,8 +602,12 @@ export default function TreeTrackPage() {
       checkDate: r.checkDate?.slice(0, 10) ?? "",
       result: r.observationResult ?? (r.result === "pass" ? "pass" : "fail"),
       actionSeverity: (r.actionSeverity ?? (["monitor", "action_required", "urgent_action"].includes(r.result) ? r.result : "")) as "" | ActionSeverity,
+      treeId: r.treeId ? String(r.treeId) : "",
       treeRef: r.treeRef ?? "",
       location: r.location ?? "",
+      what3words: r.what3words ?? "",
+      latitude: r.latitude ?? null,
+      longitude: r.longitude ?? null,
       inspector: r.inspector ?? "",
       followUpDate: r.followUpDate?.slice(0, 10) ?? "",
       siteId: r.siteId ? String(r.siteId) : "",
@@ -338,6 +619,11 @@ export default function TreeTrackPage() {
 
   async function handleSave() {
     if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
+    const words = form.what3words.trim() ? normaliseWhat3Words(form.what3words) : null;
+    if (form.what3words.trim() && !words) {
+      toast({ title: "Check the what3words address", description: "Three words with dots between them, like filled.count.soap", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     try {
       const body: any = {
@@ -345,8 +631,12 @@ export default function TreeTrackPage() {
         checkDate: form.checkDate,
         result: form.result,
         actionSeverity: form.actionSeverity || null,
+        treeId: form.treeId ? Number(form.treeId) : null,
         treeRef: form.treeRef.trim() || null,
         location: form.location.trim() || null,
+        what3words: words,
+        latitude: form.latitude,
+        longitude: form.longitude,
         inspector: form.inspector.trim() || null,
         followUpDate: form.followUpDate || null,
         siteId: form.siteId ? Number(form.siteId) : null,
@@ -414,13 +704,20 @@ export default function TreeTrackPage() {
   return (
     <AppLayout title="TreeTrack">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
         <p className="text-sm text-muted-foreground mt-1">
           Tree inspection logbook — visual assessments, detailed surveys, post-storm checks and remedial works records
         </p>
-        <Button onClick={openAdd} className="gap-2 rounded-sm flex-shrink-0">
-          <Plus className="w-4 h-4" /> Record Inspection
-        </Button>
+        <div className="flex flex-wrap sm:justify-end gap-2 flex-shrink-0">
+          {canAdmin && (
+            <Button variant="outline" onClick={openAddTree} className="gap-2 rounded-sm">
+              <TreePine className="w-4 h-4" /> Add tree
+            </Button>
+          )}
+          <Button onClick={openAdd} className="gap-2 rounded-sm">
+            <Plus className="w-4 h-4" /> Record Inspection
+          </Button>
+        </div>
       </div>
 
       {/* Status overview */}
@@ -488,6 +785,152 @@ export default function TreeTrackPage() {
         </div>
       )}
 
+      {treesWithIssues > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-sm border bg-rose-50 border-rose-300 text-rose-800 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>
+            <strong>{treesWithIssues} tree{treesWithIssues !== 1 ? "s" : ""}</strong> failed {treesWithIssues !== 1 ? "their" : "its"} last inspection. They stay flagged until an inspection passes.
+          </span>
+        </div>
+      )}
+      {treesOverdue > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-sm border bg-amber-50 border-amber-300 text-amber-800 text-sm">
+          <CalendarX className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>
+            <strong>{treesOverdue} tree{treesOverdue !== 1 ? "s are" : " is"}</strong> overdue or not inspected yet.
+          </span>
+        </div>
+      )}
+
+      <Tabs value={tab} onValueChange={v => setTab(v as "trees" | "log")} className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="trees">Trees ({activeTrees.length})</TabsTrigger>
+          <TabsTrigger value="log">Inspection log ({records.length})</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="trees" className="space-y-4 mt-0">
+          <div className="flex flex-wrap gap-2 items-center">
+            {sites.length > 0 && (
+              <Select value={filterSite} onValueChange={setFilterSite}>
+                <SelectTrigger className="w-40 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All sites</SelectItem>
+                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input placeholder="Search tree, species, place, what3words…" value={treeSearch}
+                onChange={e => setTreeSearch(e.target.value)} className="pl-9 rounded-sm" />
+            </div>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input type="checkbox" checked={showRemoved} onChange={e => setShowRemoved(e.target.checked)} />
+              Show felled trees
+            </label>
+          </div>
+
+          {!treesLoaded ? (
+            <div className="py-12 text-center text-sm text-muted-foreground animate-pulse">Loading…</div>
+          ) : filteredTrees.length === 0 ? (
+            <div className="text-center py-12 px-4 border border-dashed border-border rounded-sm">
+              <TreePine className="w-9 h-9 mx-auto text-muted-foreground/30 mb-3" />
+              {trees.length === 0 ? (
+                <>
+                  <p className="text-sm text-foreground font-medium">List the trees you look after</p>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+                    Add each tree, or group of trees, with where it is and its what3words address. TreeTrack then shows when each one is due for inspection and flags any that fail.
+                  </p>
+                  {canAdmin ? (
+                    <Button onClick={openAddTree} variant="outline" size="sm" className="mt-4 rounded-sm gap-2">
+                      <Plus className="w-4 h-4" /> Add tree
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mt-3">An Owner adds trees to the list.</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">No trees match the current filter.</p>
+              )}
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {filteredTrees.map(t => {
+                const days = daysUntil(t.nextDue);
+                return (
+                  <Card key={t.id} className={cn("rounded-sm", t.removedAt && "opacity-60")}>
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <TreePine className="w-4 h-4 text-green-700 flex-shrink-0" />
+                            <span className="font-semibold">{t.ref}</span>
+                            {t.species && <span className="text-sm text-muted-foreground truncate">{t.species}</span>}
+                          </div>
+                          {(siteName(t.siteId) || t.location) && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {[siteName(t.siteId), t.location].filter(Boolean).join(" · ")}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-3 mt-1">
+                            <What3WordsLink words={t.what3words} />
+                            <MapLink latitude={t.latitude} longitude={t.longitude} />
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          {t.removedAt ? (
+                            <Badge variant="outline" className="bg-slate-50 text-slate-500 border-slate-200">Felled {fmt(t.removedAt)}</Badge>
+                          ) : (
+                            <StatusBadge status={t.status} />
+                          )}
+                          {t.openIssue && (
+                            <Badge variant="outline" className={SEVERITY_CFG[t.openIssue.severity ?? "action_required"]?.badge ?? RESULT_CFG.fail.badge}>
+                              <AlertTriangle className="w-3 h-3 mr-1" />
+                              {t.openIssue.severity ? SEVERITY_CFG[t.openIssue.severity].label : "Failed"}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <Badge variant="outline" className={RISK_ZONE_BADGE[t.riskZone]}>{RISK_ZONE_LABELS[t.riskZone]}</Badge>
+                        <span className="self-center">Every {t.inspectionIntervalMonths} months</span>
+                        <span className="self-center">Last inspected {t.lastInspected ? fmt(t.lastInspected) : "never"}</span>
+                        {!t.removedAt && (
+                          <span className={cn("self-center", (t.status === "overdue" || t.status === "never") && "text-rose-600 font-medium", t.status === "due_soon" && "text-amber-600 font-medium")}>
+                            {t.status === "never" ? "Due now"
+                              : days !== null && days < 0 ? `Due ${fmt(t.nextDue)} (${Math.abs(days)}d overdue)`
+                              : `Next due ${fmt(t.nextDue)}`}
+                          </span>
+                        )}
+                      </div>
+                      {!t.removedAt && (
+                        <div className="flex justify-end gap-2 pt-1">
+                          {canAdmin && (
+                            <Button variant="ghost" size="sm" className="rounded-sm gap-1" onClick={() => openEditTree(t)}>
+                              <Pencil className="w-3.5 h-3.5" /> Edit
+                            </Button>
+                          )}
+                          <Button variant="outline" size="sm" className="rounded-sm gap-1" onClick={() => openInspectTree(t)}>
+                            <ClipboardCheck className="w-3.5 h-3.5" /> Inspect
+                          </Button>
+                        </div>
+                      )}
+                      {t.removedAt && canAdmin && (
+                        <div className="flex justify-end">
+                          <Button variant="ghost" size="sm" className="rounded-sm gap-1" onClick={() => openEditTree(t)}>
+                            <Pencil className="w-3.5 h-3.5" /> Edit
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="log" className="space-y-4 mt-0">
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
         {sites.length > 0 && (
@@ -580,10 +1023,18 @@ export default function TreeTrackPage() {
                       {r.treeRef ?? <span className="opacity-40">—</span>}
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell">
-                      {r.location ? (
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <Building2 className="w-3 h-3 opacity-50" />{r.location}
-                        </span>
+                      {r.location || r.what3words || r.latitude != null ? (
+                        <div className="space-y-0.5">
+                          {r.location && (
+                            <span className="flex items-center gap-1 text-muted-foreground">
+                              <Building2 className="w-3 h-3 opacity-50" />{r.location}
+                            </span>
+                          )}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <What3WordsLink words={r.what3words} />
+                            <MapLink latitude={r.latitude} longitude={r.longitude} />
+                          </div>
+                        </div>
                       ) : <span className="text-muted-foreground opacity-40">—</span>}
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell">
@@ -629,6 +1080,8 @@ export default function TreeTrackPage() {
           </div>
         </div>
       )}
+        </TabsContent>
+      </Tabs>
 
       {/* Guidance footer */}
       <div className="bg-green-50 border border-green-200 rounded-sm p-4 text-xs text-green-900">
@@ -659,6 +1112,24 @@ export default function TreeTrackPage() {
             ) : (
               <div className="px-3 py-2 bg-muted/40 rounded-sm text-sm text-muted-foreground">
                 {CHECK_TYPE_LABELS[editItem.checkType as CheckType] ?? editItem.checkType}
+              </div>
+            )}
+
+            {/* Tree */}
+            {activeTrees.length > 0 && (
+              <div>
+                <Label>Tree</Label>
+                <Select value={form.treeId || "none"} onValueChange={v => chooseTree(v === "none" ? "" : v)}>
+                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not on the tree list (an area or other tree)</SelectItem>
+                    {[...activeTrees].sort((a, b) => a.ref.localeCompare(b.ref, "en-GB", { numeric: true })).map(t => (
+                      <SelectItem key={t.id} value={String(t.id)}>
+                        {t.ref}{t.species ? ` · ${t.species}` : ""}{siteName(t.siteId) ? ` · ${siteName(t.siteId)}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 
@@ -697,46 +1168,22 @@ export default function TreeTrackPage() {
             )}
 
             {/* Tree reference */}
-            <div>
-              <Label htmlFor="treeRef">Tree Reference / Tag</Label>
-              <Input id="treeRef" placeholder="e.g. T1, Oak-North, Group A…"
-                value={form.treeRef}
-                onChange={e => setForm(f => ({ ...f, treeRef: e.target.value }))}
-                className="mt-1 rounded-sm" />
-            </div>
-
-            {/* Location */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <Label htmlFor="location">Location on Site</Label>
-                <button
-                  type="button"
-                  onClick={handleUseLocation}
-                  disabled={w3wLoading}
-                  className="flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {w3wLoading
-                    ? <Loader2 className="w-3 h-3 animate-spin" />
-                    : <MapPin className="w-3 h-3" />}
-                  {w3wLoading ? "Getting location…" : "Use my location"}
-                </button>
+            {!form.treeId && (
+              <div>
+                <Label htmlFor="treeRef">Tree Reference / Tag</Label>
+                <Input id="treeRef" placeholder="e.g. T1, Oak-North, Group A…"
+                  value={form.treeRef}
+                  onChange={e => setForm(f => ({ ...f, treeRef: e.target.value }))}
+                  className="mt-1 rounded-sm" />
               </div>
-              <Input id="location" dictation placeholder="e.g. Car park perimeter, East boundary, or ///word.word.word"
-                value={form.location}
-                onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
-                className="rounded-sm" />
-              {form.location.startsWith("///") && (
-                <a
-                  href={`https://what3words.com/${form.location.replace(/^\/\/\/\u200b?/, "")}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 mt-1 text-xs text-emerald-700 hover:underline"
-                >
-                  <MapPin className="w-3 h-3" />
-                  View on what3words.com
-                </a>
-              )}
-            </div>
+            )}
+
+            <LocationFields
+              location={form.location} what3words={form.what3words}
+              latitude={form.latitude} longitude={form.longitude}
+              onChange={patch => setForm(f => ({ ...f, ...patch }))}
+              locationLabel="Location on Site"
+              what3wordsLabel={form.result === "fail" ? "what3words address of the problem" : "what3words address"} />
 
             {/* Inspector */}
             <div>
@@ -751,7 +1198,8 @@ export default function TreeTrackPage() {
             {sites.length > 0 && (
               <div>
                 <Label>Site</Label>
-                <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
+                <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}
+                  disabled={!!form.treeId && !!activeTrees.find(t => String(t.id) === form.treeId)?.siteId}>
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No specific site</SelectItem>
@@ -787,6 +1235,112 @@ export default function TreeTrackPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Add/Edit tree */}
+      <Dialog open={showTreeDialog} onOpenChange={v => { if (!savingTree) setShowTreeDialog(v); }}>
+        <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editTree ? `Edit tree ${editTree.ref}` : "Add a tree"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="treeRefNew">Tree reference *</Label>
+                <Input id="treeRefNew" placeholder="e.g. T12 or Beech group" value={treeForm.ref}
+                  onChange={e => setTreeForm(f => ({ ...f, ref: e.target.value }))} className="mt-1 rounded-sm" />
+              </div>
+              <div>
+                <Label htmlFor="species">Species</Label>
+                <Input id="species" placeholder="e.g. Beech, Scots pine" value={treeForm.species}
+                  onChange={e => setTreeForm(f => ({ ...f, species: e.target.value }))} className="mt-1 rounded-sm" />
+              </div>
+            </div>
+            {sites.length > 0 && (
+              <div>
+                <Label>Site</Label>
+                <Select value={treeForm.siteId || "none"} onValueChange={v => setTreeForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
+                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No specific site</SelectItem>
+                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <LocationFields
+              location={treeForm.location} what3words={treeForm.what3words}
+              latitude={treeForm.latitude} longitude={treeForm.longitude}
+              onChange={patch => setTreeForm(f => ({ ...f, ...patch }))}
+              locationLabel="Where it is" what3wordsLabel="what3words address" />
+            <div>
+              <Label>How busy is the area under it?</Label>
+              <Select value={treeForm.riskZone} onValueChange={v => setTreeForm(f => ({ ...f, riskZone: v as RiskZone }))}>
+                <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(["high", "medium", "low"] as RiskZone[]).map(z => <SelectItem key={z} value={z}>{RISK_ZONE_LABELS[z]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground italic mt-1">{RISK_ZONE_HINTS[treeForm.riskZone]}</p>
+            </div>
+            <div>
+              <Label>Inspect every</Label>
+              <Select value={String(treeForm.inspectionIntervalMonths)} onValueChange={v => setTreeForm(f => ({ ...f, inspectionIntervalMonths: Number(v) }))}>
+                <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Array.from(new Set([...INTERVAL_OPTIONS, treeForm.inspectionIntervalMonths])).sort((a, b) => a - b)
+                    .map(m => <SelectItem key={m} value={String(m)}>{m} months</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground italic mt-1">
+                At least once a year is usual. Your tree surveyor may advise more often for trees in busy areas or with known defects.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="treeNotes">Notes</Label>
+              <Textarea id="treeNotes" placeholder="e.g. Tree preservation order, known defects, access"
+                value={treeForm.notes} onChange={e => setTreeForm(f => ({ ...f, notes: e.target.value }))} className="mt-1 rounded-sm" rows={2} />
+            </div>
+            {editTree && (
+              <div>
+                <Label htmlFor="removedAt">Felled or removed on</Label>
+                <Input id="removedAt" type="date" value={treeForm.removedAt}
+                  onChange={e => setTreeForm(f => ({ ...f, removedAt: e.target.value }))} className="mt-1 rounded-sm" />
+                <p className="text-xs text-muted-foreground mt-1">Takes it off the list of trees due; its inspections are kept.</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            {editTree ? (
+              <Button variant="ghost" className="rounded-sm text-destructive hover:text-destructive" disabled={savingTree}
+                onClick={() => setDeleteTree(editTree)}>
+                <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+              </Button>
+            ) : <span />}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowTreeDialog(false)} disabled={savingTree} className="rounded-sm">Cancel</Button>
+              <Button onClick={handleSaveTree} disabled={savingTree} className="rounded-sm">
+                {savingTree ? "Saving…" : editTree ? "Save Changes" : "Add tree"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteTree !== null} onOpenChange={v => { if (!v) setDeleteTree(null); }}>
+        <AlertDialogContent className="rounded-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete tree {deleteTree?.ref}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Only for a tree added by mistake. A tree with inspections can't be deleted; set the day it was felled or removed instead, so its records are kept.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-sm">Cancel</AlertDialogCancel>
+            <AlertDialogAction className="rounded-sm bg-destructive hover:bg-destructive/90"
+              onClick={() => deleteTree && deleteTreeMutation.mutate(deleteTree.id)}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete confirm */}
       <AlertDialog open={deleteId !== null} onOpenChange={v => { if (!v) setDeleteId(null); }}>

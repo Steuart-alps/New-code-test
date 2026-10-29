@@ -3265,6 +3265,36 @@ async function migrateTreeTrack() {
     END $$
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_client" ON "tree_inspections" ("client_id")`);
+  // The tree register, and where each inspection's tree or issue is.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "trees" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "ref" text NOT NULL,
+      "species" text,
+      "location" text,
+      "what3words" text,
+      "latitude" double precision,
+      "longitude" double precision,
+      "risk_zone" text NOT NULL DEFAULT 'medium',
+      "inspection_interval_months" integer NOT NULL DEFAULT 12,
+      "notes" text,
+      "removed_at" date,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_trees_client" ON "trees" ("client_id")`);
+  await db.execute(sql`
+    ALTER TABLE "tree_inspections"
+    ADD COLUMN IF NOT EXISTS "tree_id" integer REFERENCES "trees"("id") ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS "what3words" text,
+    ADD COLUMN IF NOT EXISTS "latitude" double precision,
+    ADD COLUMN IF NOT EXISTS "longitude" double precision
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_tree" ON "tree_inspections" ("tree_id")`);
 }
 
 // ---- BikeTrack ----

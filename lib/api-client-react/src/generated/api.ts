@@ -218,6 +218,7 @@ import type {
   ListPremisesInspectionsParams,
   ListPublicLinkAccessParams,
   ListRecordSignaturesParams,
+  ListTreeTrackTreesParams,
   MyCoshhSignOffs,
   MyDocumentSignOffs,
   OkResponse,
@@ -281,6 +282,10 @@ import type {
   TrackActionMediaUploadRequest,
   TrackActionMediaUploadResponse,
   TrackSummaryPreview,
+  TreeTrackTree,
+  TreeTrackTreeInput,
+  TreeTrackTreeUpdate,
+  TreeTrackTreeWithStatus,
   UpdateCategoryRequest,
   UpdateCertificateDefectRequest,
   UpdateComplianceItemRequest,
@@ -10247,6 +10252,304 @@ export const useUpdateHotTubCheck = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateHotTubCheckMutationOptions(options));
+    }
+
+export const getListTreeTrackTreesUrl = (params?: ListTreeTrackTreesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/tree-track/trees?${stringifiedParams}` : `/api/tree-track/trees`
+}
+
+/**
+ * @summary The tree register, each tree with its last inspection and when it is next due
+ */
+export const listTreeTrackTrees = async (params?: ListTreeTrackTreesParams, options?: RequestInit): Promise<TreeTrackTreeWithStatus[]> => {
+
+  return customFetch<TreeTrackTreeWithStatus[]>(getListTreeTrackTreesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTreeTrackTreesQueryKey = (params?: ListTreeTrackTreesParams,) => {
+    return [
+    `/api/tree-track/trees`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListTreeTrackTreesQueryOptions = <TData = Awaited<ReturnType<typeof listTreeTrackTrees>>, TError = ErrorType<unknown>>(params?: ListTreeTrackTreesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTreeTrackTrees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTreeTrackTreesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTreeTrackTrees>>> = ({ signal }) => listTreeTrackTrees(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTreeTrackTrees>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListTreeTrackTreesQueryResult = NonNullable<Awaited<ReturnType<typeof listTreeTrackTrees>>>
+export type ListTreeTrackTreesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary The tree register, each tree with its last inspection and when it is next due
+ */
+
+export function useListTreeTrackTrees<TData = Awaited<ReturnType<typeof listTreeTrackTrees>>, TError = ErrorType<unknown>>(
+ params?: ListTreeTrackTreesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTreeTrackTrees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListTreeTrackTreesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateTreeTrackTreeUrl = () => {
+
+
+
+
+  return `/api/tree-track/trees`
+}
+
+/**
+ * @summary Add a tree to the register (Owners and consultants)
+ */
+export const createTreeTrackTree = async (treeTrackTreeInput: TreeTrackTreeInput, options?: RequestInit): Promise<TreeTrackTree> => {
+
+  return customFetch<TreeTrackTree>(getCreateTreeTrackTreeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(treeTrackTreeInput)
+  }
+);}
+
+
+
+
+
+export const getCreateTreeTrackTreeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTreeTrackTree>>, TError,{data: BodyType<TreeTrackTreeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createTreeTrackTree>>, TError,{data: BodyType<TreeTrackTreeInput>}, TContext> => {
+
+const mutationKey = ['createTreeTrackTree'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createTreeTrackTree>>, {data: BodyType<TreeTrackTreeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createTreeTrackTree(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateTreeTrackTreeMutationResult = NonNullable<Awaited<ReturnType<typeof createTreeTrackTree>>>
+    export type CreateTreeTrackTreeMutationBody = BodyType<TreeTrackTreeInput>
+    export type CreateTreeTrackTreeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Add a tree to the register (Owners and consultants)
+ */
+export const useCreateTreeTrackTree = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTreeTrackTree>>, TError,{data: BodyType<TreeTrackTreeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createTreeTrackTree>>,
+        TError,
+        {data: BodyType<TreeTrackTreeInput>},
+        TContext
+      > => {
+      return useMutation(getCreateTreeTrackTreeMutationOptions(options));
+    }
+
+export const getUpdateTreeTrackTreeUrl = (id: number,) => {
+
+
+
+
+  return `/api/tree-track/trees/${id}`
+}
+
+/**
+ * @summary Change a tree on the register, or mark it felled or removed (Owners and consultants)
+ */
+export const updateTreeTrackTree = async (id: number,
+    treeTrackTreeUpdate: TreeTrackTreeUpdate, options?: RequestInit): Promise<TreeTrackTree> => {
+
+  return customFetch<TreeTrackTree>(getUpdateTreeTrackTreeUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(treeTrackTreeUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateTreeTrackTreeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTreeTrackTree>>, TError,{id: number;data: BodyType<TreeTrackTreeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateTreeTrackTree>>, TError,{id: number;data: BodyType<TreeTrackTreeUpdate>}, TContext> => {
+
+const mutationKey = ['updateTreeTrackTree'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateTreeTrackTree>>, {id: number;data: BodyType<TreeTrackTreeUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateTreeTrackTree(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateTreeTrackTreeMutationResult = NonNullable<Awaited<ReturnType<typeof updateTreeTrackTree>>>
+    export type UpdateTreeTrackTreeMutationBody = BodyType<TreeTrackTreeUpdate>
+    export type UpdateTreeTrackTreeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Change a tree on the register, or mark it felled or removed (Owners and consultants)
+ */
+export const useUpdateTreeTrackTree = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTreeTrackTree>>, TError,{id: number;data: BodyType<TreeTrackTreeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateTreeTrackTree>>,
+        TError,
+        {id: number;data: BodyType<TreeTrackTreeUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateTreeTrackTreeMutationOptions(options));
+    }
+
+export const getDeleteTreeTrackTreeUrl = (id: number,) => {
+
+
+
+
+  return `/api/tree-track/trees/${id}`
+}
+
+/**
+ * @summary Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+ */
+export const deleteTreeTrackTree = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteTreeTrackTreeUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteTreeTrackTreeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTreeTrackTree>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteTreeTrackTree>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteTreeTrackTree'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteTreeTrackTree>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteTreeTrackTree(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteTreeTrackTreeMutationResult = NonNullable<Awaited<ReturnType<typeof deleteTreeTrackTree>>>
+
+    export type DeleteTreeTrackTreeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete a tree added by mistake; one with inspections is marked felled instead (Owners and consultants)
+ */
+export const useDeleteTreeTrackTree = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTreeTrackTree>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteTreeTrackTree>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteTreeTrackTreeMutationOptions(options));
     }
 
 export const getGetBikeTrackConfigUrl = () => {
