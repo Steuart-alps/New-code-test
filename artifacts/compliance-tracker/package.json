@@ -14,6 +14,8 @@
     "test:nav-groups": "node tests/nav-groups.test.mjs",
     "test:sort-options": "node tests/sort-options.test.mjs",
     "test:word-doc": "node tests/word-doc.test.mjs",
+    "test:list-kinds": "node tests/list-kinds.test.mjs",
+    "test:upload-lists-browser": "node tests/upload-lists-browser.test.mjs",
     "test:new-release-reload": "node tests/new-release-reload.test.mjs",
     "test:select-item-values": "node tests/select-item-values.test.mjs",
     "test:sidebar-browser": "node tests/sidebar-browser.test.mjs",

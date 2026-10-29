@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { takeLinkParams } from "@/lib/deep-link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
@@ -697,13 +697,15 @@ async function downloadMachineRosterTemplate() {
   ]);
 }
 
-function MachineImportDialog({
-  open, onClose, sites, onImported,
+export function MachineImportDialog({
+  open, onClose, sites, onImported, initialFile,
 }: {
   open: boolean;
   onClose: () => void;
   sites: { id: number; name: string }[];
   onImported: () => void;
+  /** A file chosen before the dialog opened ("Upload your lists"), read as soon as it opens. */
+  initialFile?: File | null;
 }) {
   const { toast } = useToast();
   const apiFetch = useGreenTrackApi();
@@ -772,6 +774,13 @@ function MachineImportDialog({
   };
 
   usePastedFile(open && !readingList && !importing, file => void handleFile(file));
+  const startedWith = useRef<File | null>(null);
+  useEffect(() => {
+    if (!open) { startedWith.current = null; return; }
+    if (!initialFile || !reading.loaded || startedWith.current === initialFile) return;
+    startedWith.current = initialFile;
+    void handleFile(initialFile);
+  }, [open, initialFile, reading.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleImport = async () => {
     setImporting(true);

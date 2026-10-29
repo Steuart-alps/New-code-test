@@ -58,6 +58,7 @@ const DailyTrackAmPage = lazy(() => import("@/pages/daily-track-am"));
 const DailyTrackPmPage = lazy(() => import("@/pages/daily-track-pm"));
 const DailyTrackStatusPage = lazy(() => import("@/pages/daily-track-status"));
 const StaffRosterPage = lazy(() => import("@/pages/staff-roster"));
+const UploadListsPage = lazy(() => import("@/pages/upload-lists"));
 const SignOffPage = lazy(() => import("@/pages/sign-off"));
 const PrivacyRequestPage = lazy(() => import("@/pages/privacy-request"));
 const ContractorPortalPage = lazy(() => import("@/pages/contractor-portal"));
@@ -287,6 +288,7 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/categories" component={CategoriesPage} />}
       {canManageUsers && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
+      {canAdmin && <Route path="/upload-lists" component={UploadListsPage} />}
       {canAdmin && <Route path="/feedback" component={FeedbackInboxPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
       <Route path="/account-security" component={AccountSecurityPage} />

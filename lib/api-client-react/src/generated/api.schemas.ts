@@ -3123,6 +3123,30 @@ export interface PatRegisterReadResult {
   unclear: number;
 }
 
+/**
+ * The import the file belongs in; null when it is none of them
+ * @nullable
+ */
+export type ImportListSortResultKind = typeof ImportListSortResultKind[keyof typeof ImportListSortResultKind] | null;
+
+
+export const ImportListSortResultKind = {
+  'pat-appliances': 'pat-appliances',
+  'room-track-rooms': 'room-track-rooms',
+  contractors: 'contractors',
+  'fire-call-points': 'fire-call-points',
+  'greentrack-equipment': 'greentrack-equipment',
+  'staff-roster': 'staff-roster',
+} as const;
+
+export interface ImportListSortResult {
+  /**
+     * The import the file belongs in; null when it is none of them
+     * @nullable
+     */
+  kind: ImportListSortResultKind;
+}
+
 export interface ImportListReadResult {
   headers: string[];
   rows: string[][];
