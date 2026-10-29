@@ -1,20 +1,21 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { ArrowRight, Building2, CheckCircle2, ClipboardList, FileCheck2, HardHat, Handshake, MapPin, Network, Sparkles, UsersRound, Wrench } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, ClipboardList, Download, FileCheck2, FileSpreadsheet, HardHat, Handshake, MapPin, Network, Sparkles, UsersRound, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDay } from "@/lib/onboarding";
+import { INFO_SHEETS, SETUP_SERVICE_FEE, downloadInfoSheet, type InfoSheet } from "@/lib/setup-info-sheets";
 
 export type SetupAi = { configured: boolean; active: boolean };
 export type SetupAssistRequest = { requestedAt: string; requestedBy: string };
 
-/**
- * Shown on the setup service offer. ALPS agrees the price with each business
- * and invoices it, so there is no fixed price to show yet.
- */
-export const SETUP_SERVICE_PRICE_NOTE = "We'll agree the price with you before we start, and invoice it separately from your subscription.";
+/** Shown on the setup service offer. ALPS invoices it; nothing is charged in the app. */
+export const SETUP_SERVICE_PRICE_NOTE = `A one-off fee of ${SETUP_SERVICE_FEE}, invoiced separately from your subscription.`;
+
+/** The two workbooks every business needs; the per-track ones sit under them. */
+const MAIN_SHEETS = new Set(["getting-started", "compliance"]);
 
 const HAVE_READY = [
   { icon: MapPin, title: "Your sites", text: "The name and address of each premises." },
@@ -56,6 +57,8 @@ export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onReq
         ))}
       </ul>
 
+      <InfoSheetDownloads />
+
       <AiNote ai={ai} />
 
       {canRequestAssist && <SetupServiceOffer request={assistRequest} onRequest={onRequestAssist} />}
@@ -66,6 +69,40 @@ export function SetupGettingStarted({ ai, assistRequest, canRequestAssist, onReq
         </Button>
       </div>
     </section>
+  );
+}
+
+function InfoSheetDownloads() {
+  const main = INFO_SHEETS.filter((sheet) => MAIN_SHEETS.has(sheet.key));
+  const tracks = INFO_SHEETS.filter((sheet) => !MAIN_SHEETS.has(sheet.key));
+  return (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex gap-3">
+        <FileSpreadsheet className="w-5 h-5 mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">What we need from you: Excel checklists</p>
+          <p className="text-sm text-muted-foreground">One workbook for each track, with a tab for every list to gather. Lists such as staff, contractors and equipment can be uploaded straight back in: choose the whole workbook in "Import spreadsheet". Or send them to ALPS with a setup request.</p>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {main.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} />)}
+      </div>
+      <details className="group">
+        <summary className="cursor-pointer text-sm font-medium text-primary hover:underline">Checklists for each track ({tracks.length})</summary>
+        <div className="grid gap-2 sm:grid-cols-2 pt-3">
+          {tracks.map((sheet) => <SheetButton key={sheet.key} sheet={sheet} />)}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function SheetButton({ sheet }: { sheet: InfoSheet }) {
+  return (
+    <Button type="button" variant="outline" size="sm" className="justify-start h-auto py-2 text-left whitespace-normal"
+      onClick={() => void downloadInfoSheet(sheet)} data-testid={`button-download-info-${sheet.key}`}>
+      <Download className="w-4 h-4 mr-2 shrink-0" aria-hidden="true" /> {sheet.label}
+    </Button>
   );
 }
 
@@ -125,7 +162,7 @@ function SetupServiceOffer({ request, onRequest }: {
       {request ? (
         <p className="text-sm flex items-start gap-2 rounded-md bg-emerald-50 text-emerald-800 p-3 dark:bg-emerald-950/40 dark:text-emerald-200" role="status">
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
-          <span>Request sent on {formatDay(request.requestedAt.slice(0, 10))}{request.requestedBy ? ` by ${request.requestedBy}` : ""}. ALPS will be in touch to agree the price and how to send your lists. You can carry on setting up in the meantime.</span>
+          <span>Request sent on {formatDay(request.requestedAt.slice(0, 10))}{request.requestedBy ? ` by ${request.requestedBy}` : ""}. ALPS will be in touch to arrange how to send your lists. You can carry on setting up in the meantime.</span>
         </p>
       ) : open ? (
         <div className="space-y-3">

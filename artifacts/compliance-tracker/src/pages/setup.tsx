@@ -305,7 +305,7 @@ export default function SetupPage() {
         ...(details.notes ? { notes: details.notes } : {}),
       }) as SetupAssistRequest;
       setState((current) => current ? { ...current, assistRequest: { requestedAt: result.requestedAt, requestedBy: result.requestedBy } } : current);
-      toast({ title: "Request sent to ALPS", description: "We'll be in touch to agree the price and how to send your lists." });
+      toast({ title: "Request sent to ALPS", description: "We'll be in touch to arrange how to send your lists." });
     } catch (err) {
       toast({ title: "Request not sent", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
       throw err;
