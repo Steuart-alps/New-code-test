@@ -7,6 +7,8 @@ servers:
   - url: /api
     description: Base API path
 tags:
+  - name: record-signatures
+    description: Drawn signatures on recorded checks
   - name: billing
     description: Subscription add-ons
   - name: health
@@ -93,6 +95,45 @@ paths:
           description: No business to confirm for
         "403":
           description: Not an Owner or consultant of the business
+
+  /setup/assist-request:
+    post:
+      operationId: requestSetupAssist
+      tags: [setup]
+      summary: Ask ALPS to enter the business's initial data (setup service)
+      description: >-
+        The getting-started page's offer. Emails ALPS (ADMIN_EMAIL) with the
+        business, the person asking and their notes; ALPS agrees the price and
+        invoices it, so nothing is charged here. One request per business:
+        asking again returns the first request and sends no second email.
+        Owners and consultants only; consultants pass the business as clientId.
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupAssistRequestBody"
+      responses:
+        "200":
+          description: Request sent (or already sent earlier)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupAssistRequestResult"
+        "400":
+          description: No business, or the phone number or notes are too long
+        "403":
+          description: Not an Owner or consultant of the business
+        "502":
+          description: The email to ALPS failed; nothing was recorded
+        "503":
+          description: ALPS's email address is not configured on this server
 
   /clients/{id}/delete-test-business:
     post:
@@ -1324,6 +1365,57 @@ paths:
                 $ref: "#/components/schemas/OkResponse"
         "404":
           description: Not a waiting certificate of this business
+
+  /record-signatures:
+    post:
+      operationId: createRecordSignature
+      tags: [record-signatures]
+      summary: Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+      description: >-
+        Returns a one-use token. The web app sends the save again with the
+        token in the X-Record-Signature header after the API answered it with
+        428 SIGNATURE_REQUIRED; the signature is then linked to the saved
+        record. Unused signatures are removed after a day.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRecordSignatureRequest"
+      responses:
+        "201":
+          description: The token to send with the save
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordSignatureToken"
+        "400":
+          description: No usable drawing
+    get:
+      operationId: listRecordSignatures
+      tags: [record-signatures]
+      summary: Signatures on recorded checks of one type, for history lists
+      parameters:
+        - name: recordType
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: ids
+          in: query
+          required: true
+          description: Up to 200 record ids, comma separated
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The signatures, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RecordSignature"
 
   /contractor-sign-in/sites:
     get:
@@ -5909,6 +6001,19 @@ components:
           minLength: 1
           maxLength: 200
           description: The business's name, typed to confirm
+    SetupAssistRequestBody:
+      type: object
+      additionalProperties: false
+      properties:
+        phone: { type: string, maxLength: 40, description: "Best number for ALPS to call" }
+        notes: { type: string, maxLength: 2000, description: "Anything ALPS should know, such as how many sites or where their lists are kept" }
+    SetupAssistRequestResult:
+      type: object
+      required: [requestedAt, requestedBy, emailed]
+      properties:
+        requestedAt: { type: string, format: date-time }
+        requestedBy: { type: string }
+        emailed: { type: boolean, description: "False when the request had already been sent earlier" }
     SetupTeamAloneResult:
       type: object
       required: [aloneAt]
@@ -8170,6 +8275,38 @@ components:
           items: { type: string }
           description: Things that could not be read with confidence.
       required: [certificateType, name, itemId, checkReason, newCheck, contractorName, issueDate, nextInspectionDate, nextInspectionSource, outcome, summary, defects, unclear]
+
+    CreateRecordSignatureRequest:
+      type: object
+      properties:
+        strokes:
+          type: array
+          description: Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box
+          items:
+            type: array
+            items: { type: integer }
+      required: [strokes]
+
+    RecordSignatureToken:
+      type: object
+      properties:
+        token: { type: string }
+        expiresInMinutes: { type: integer }
+      required: [token, expiresInMinutes]
+
+    RecordSignature:
+      type: object
+      properties:
+        recordType: { type: string }
+        recordId: { type: integer }
+        signerName: { type: string, description: "The name of the login that signed" }
+        signedAt: { type: string, format: date-time }
+        strokes:
+          type: array
+          items:
+            type: array
+            items: { type: integer }
+      required: [recordType, recordId, signerName, signedAt, strokes]
 
     ContractorSignInSites:
       type: object

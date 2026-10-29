@@ -28,6 +28,7 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
 import { camelCaseRows } from "@/lib/camel-case-rows";
 import { sortedEntries } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 function useSwimTrackApi() {
   const request = useActiveClientApi();
@@ -1040,6 +1041,7 @@ export default function SwimTrackPage() {
                             : <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Open</span>}
                         </td>
                         <td className="py-2 px-2">
+                          <RecordSignedBy recordType="swim_session" recordId={s.id} compact className="mb-1" />
                           <CheckPhotoUploader entityType="swim_session" entityId={s.id}
                             required={photoRequirements.swim_session?.required ?? false}
                             minPhotos={photoRequirements.swim_session?.minPhotos ?? 1} compact />
@@ -1118,6 +1120,7 @@ export default function SwimTrackPage() {
                           {c.observations ?? "—"}
                         </td>
                         <td className="py-2 px-2">
+                          <RecordSignedBy recordType="swim_surveillance_check" recordId={c.id} compact className="mb-1" />
                           <CheckPhotoUploader entityType="swim_surveillance_check" entityId={c.id}
                             required={photoRequirements.swim_surveillance_check?.required ?? false}
                             minPhotos={photoRequirements.swim_surveillance_check?.minPhotos ?? 1} compact />
@@ -1215,6 +1218,7 @@ export default function SwimTrackPage() {
                                 </span>}
                           </td>
                           <td className="py-2 px-2">
+                            <RecordSignedBy recordType="swim_first_aid_check" recordId={f.id} compact className="mb-1" />
                             <CheckPhotoUploader entityType="swim_first_aid_check" entityId={f.id}
                               required={photoRequirements.swim_first_aid_check?.required ?? false}
                               minPhotos={photoRequirements.swim_first_aid_check?.minPhotos ?? 1} compact />

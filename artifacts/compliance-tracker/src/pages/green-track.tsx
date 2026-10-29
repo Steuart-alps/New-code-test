@@ -57,6 +57,7 @@ import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/c
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { GreenDailyChecksTab } from "@/components/green-daily-checks";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -2643,6 +2644,7 @@ export default function GreenTrackPage() {
                           )}
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell">
+                          <RecordSignedBy recordType="green_pre_use_check" recordId={c.id} compact className="mb-1" />
                           <CheckPhotoUploader entityType="green_pre_use_check" entityId={c.id} compact
                             required={photoRequirements.requirements.green_pre_use_check?.required ?? false}
                             minPhotos={photoRequirements.requirements.green_pre_use_check?.minPhotos ?? 1} />
@@ -2745,6 +2747,7 @@ export default function GreenTrackPage() {
                             {s.costPence ? `£${(s.costPence / 100).toFixed(2)}` : "—"}
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
+                            <RecordSignedBy recordType="green_service_record" recordId={s.id} compact className="mb-1" />
                             <CheckPhotoUploader entityType="green_service" entityId={s.id} compact
                               required={photoRequirements.requirements.green_service?.required ?? false}
                               minPhotos={photoRequirements.requirements.green_service?.minPhotos ?? 1} />
@@ -2916,6 +2919,7 @@ export default function GreenTrackPage() {
                           </td>
                           <td className="py-2 pr-4 text-muted-foreground hidden lg:table-cell">
                             {p.inspectorName ?? "—"}{p.inspectorCompany ? ` (${p.inspectorCompany})` : ""}
+                            <RecordSignedBy recordType="green_puwer_inspection" recordId={p.id} compact className="mt-1 flex" />
                           </td>
                           <td className="py-2 pr-4">
                             <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${

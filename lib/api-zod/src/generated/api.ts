@@ -22,6 +22,32 @@ export const ConfirmSetupTeamAloneResponse = zod.object({
 
 
 /**
+ * The getting-started page's offer. Emails ALPS (ADMIN_EMAIL) with the business, the person asking and their notes; ALPS agrees the price and invoices it, so nothing is charged here. One request per business: asking again returns the first request and sends no second email. Owners and consultants only; consultants pass the business as clientId.
+ * @summary Ask ALPS to enter the business's initial data (setup service)
+ */
+export const RequestSetupAssistQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const requestSetupAssistBodyPhoneMax = 40;
+
+export const requestSetupAssistBodyNotesMax = 2000;
+
+
+
+export const RequestSetupAssistBody = zod.object({
+  "phone": zod.string().max(requestSetupAssistBodyPhoneMax).optional().describe('Best number for ALPS to call'),
+  "notes": zod.string().max(requestSetupAssistBodyNotesMax).optional().describe('Anything ALPS should know, such as how many sites or where their lists are kept')
+})
+
+export const RequestSetupAssistResponse = zod.object({
+  "requestedAt": zod.date(),
+  "requestedBy": zod.string(),
+  "emailed": zod.boolean().describe('False when the request had already been sent earlier')
+})
+
+
+/**
  * Deletes the business's records and stored files at once, keeping the audit trail and a record of the deletion. Refused for the operator's own business and for any business with a subscription, a payment, an AI top-up or a legal hold. The business's name must be typed to confirm.
  * @summary Permanently delete a test business that never paid (platform operators)
  */
@@ -1689,6 +1715,38 @@ export const DismissCertificateInboxItemParams = zod.object({
 export const DismissCertificateInboxItemResponse = zod.object({
   "ok": zod.boolean()
 })
+
+
+/**
+ * Returns a one-use token. The web app sends the save again with the token in the X-Record-Signature header after the API answered it with 428 SIGNATURE_REQUIRED; the signature is then linked to the saved record. Unused signatures are removed after a day.
+ * @summary Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+ */
+export const CreateRecordSignatureBody = zod.object({
+  "strokes": zod.array(zod.array(zod.number())).describe('Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box')
+})
+
+export const CreateRecordSignatureResponse = zod.object({
+  "token": zod.string(),
+  "expiresInMinutes": zod.number()
+})
+
+
+/**
+ * @summary Signatures on recorded checks of one type, for history lists
+ */
+export const ListRecordSignaturesQueryParams = zod.object({
+  "recordType": zod.coerce.string(),
+  "ids": zod.coerce.string().describe('Up to 200 record ids, comma separated')
+})
+
+export const ListRecordSignaturesResponseItem = zod.object({
+  "recordType": zod.string(),
+  "recordId": zod.number(),
+  "signerName": zod.string().describe('The name of the login that signed'),
+  "signedAt": zod.date(),
+  "strokes": zod.array(zod.array(zod.number()))
+})
+export const ListRecordSignaturesResponse = zod.array(ListRecordSignaturesResponseItem)
 
 
 /**

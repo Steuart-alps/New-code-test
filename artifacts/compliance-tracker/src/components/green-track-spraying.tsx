@@ -24,6 +24,7 @@ import { getApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
+import { RecordSignedBy } from "@/components/record-signature";
 
 // GreenTrack spraying book and stock. Products (pesticides, fertiliser, top
 // dressing...) have stock worked out by the server from deliveries, counts,
@@ -1093,6 +1094,7 @@ export function GreenSprayingTab({ q, canAdmin, machines, openNew, onOpenNewHand
                   <td className="px-3 py-2 hidden md:table-cell align-top">
                     {a.operatorName ?? "—"}
                     {a.operatorCertificate && <p className="text-xs text-muted-foreground">{a.operatorCertificate}</p>}
+                    <RecordSignedBy recordType="green_application" recordId={a.id} compact className="mt-1 flex" />
                   </td>
                   <td className="px-3 py-2 hidden lg:table-cell text-muted-foreground align-top">{a.reason ?? "—"}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap align-top">

@@ -7,12 +7,14 @@ import { installStrayFileDropGuard } from "../src/hooks/use-file-drop";
 import "../src/index.css";
 
 declare global {
-  interface Window { __files: Record<string, Array<{ name: string; type: string }>> }
+  interface Window { __files: Record<string, Array<{ name: string; type: string }>>; __raw: Record<string, File[]> }
 }
 window.__files = {};
+window.__raw = {};
 installStrayFileDropGuard();
 
 // Like the new FixTrack issue form: text boxes, with one photos box below.
+// Also used by camera-capture-browser.test.mjs.
 function IssueForm({ name }: { name: string }) {
   const [files, setFiles] = useState<File[]>([]);
   return (
@@ -23,6 +25,7 @@ function IssueForm({ name }: { name: string }) {
         onChange={(next) => {
           setFiles(next);
           window.__files[name] = next.map((file) => ({ name: file.name, type: file.type }));
+          window.__raw[name] = next;
         }} />
     </section>
   );
