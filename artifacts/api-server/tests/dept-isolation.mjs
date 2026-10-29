@@ -362,6 +362,16 @@ async function main() {
       (pm?.status === "ok") === (completedPm === expectedSites) &&
       (pm?.health === "clear") === (completedPm === expectedSites),
       `totals=${JSON.stringify(totals)} card=${JSON.stringify(pm)}`);
+    // The strip links each checklist still to do; the card items open that site.
+    const outstanding = Array.isArray(totals?.outstanding) ? totals.outstanding : [];
+    check(`${label}: strip lists each checklist still to do`,
+      outstanding.filter(site => site.am).length === expectedSites - completedAm &&
+      outstanding.filter(site => site.pm).length === expectedSites - completedPm &&
+      outstanding.every(site => Number.isInteger(site.siteId) && site.siteName && (site.am || site.pm)),
+      `outstanding=${JSON.stringify(totals?.outstanding)}`);
+    check(`${label}: AM / PM card items open their site`,
+      [...(am?.items ?? []), ...(pm?.items ?? [])].every(item => /^\/daily-track-(am|pm)\?siteId=\d+$/.test(item.path)),
+      `am=${JSON.stringify(am?.items)} pm=${JSON.stringify(pm?.items)}`);
   };
   const today = uniqueDate(0);
   const yesterday = uniqueDate(1);

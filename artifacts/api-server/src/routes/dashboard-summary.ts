@@ -89,6 +89,12 @@ export interface ChecklistTotals {
   expectedPmPairs: number;
   completedPmPairs: number;
   completedSitePairs: number;
+  /**
+   * Sites with a checklist still to submit today, in site order: `am` / `pm`
+   * are true while that checklist is outstanding. Lets the dashboard link
+   * straight to each one. Empty while totals are unavailable.
+   */
+  outstanding: Array<{ siteId: number; siteName: string; am: boolean; pm: boolean }>;
 }
 
 type TrackDraft = Omit<TrackSummary, "health">;
@@ -218,6 +224,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     expectedPmPairs: pmEnabled ? allSites.length : 0,
     completedPmPairs: 0,
     completedSitePairs: 0,
+    outstanding: [],
   };
   const checklistCompletionBySite = new Map<number, { am: boolean; pm: boolean }>();
   let checklistTotalsAvailable = sitesAvailable && allSites.length === 0;
@@ -238,6 +245,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         if (amEnabled && amComplete) checklistTotals.completedAmPairs++;
         if (pmEnabled && pmComplete) checklistTotals.completedPmPairs++;
         if ((amEnabled || pmEnabled) && amComplete && pmComplete) checklistTotals.completedSitePairs++;
+        if (!amComplete || !pmComplete) {
+          checklistTotals.outstanding.push({ siteId: site.id, siteName: site.name, am: !amComplete, pm: !pmComplete });
+        }
       }
     } catch (error) {
       req.log.error({ err: error }, "Unable to load today's checklist completion");
@@ -270,7 +280,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           status = branch === "am" ? "overdue" : "attention";
           badge = `${plural(missingCount, "site")} not submitted`;
           for (const site of missing.slice(0, 10)) {
-            items.push({ label: site.name, detail: `${branch.toUpperCase()} checklist not submitted today`, path });
+            items.push({ label: site.name, detail: `${branch.toUpperCase()} checklist not submitted today`, path: `${path}?siteId=${site.id}` });
           }
         }
       } else {

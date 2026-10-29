@@ -111,17 +111,19 @@ export function ComplianceChecksDue({ siteId = null }: { siteId?: number | null 
             </li>
           ))}
           {flagged.length > MAX_ROWS && (
-            <li className="text-xs text-muted-foreground px-1 pt-1">
-              and {flagged.length - MAX_ROWS} more
+            <li className="px-1 pt-1">
+              <Link href="/external-checks" className="text-xs text-primary hover:underline">
+                and {flagged.length - MAX_ROWS} more
+              </Link>
             </li>
           )}
         </ul>
       )}
 
       {noDueDate > 0 && (
-        <p className="px-4 py-2.5 text-xs text-muted-foreground border-t border-inherit">
+        <Link href="/external-checks" className="block px-4 py-2.5 text-xs text-muted-foreground border-t border-inherit hover:text-foreground hover:underline">
           {noDueDate} open compliance check{noDueDate === 1 ? " has" : "s have"} no due date yet. Set each one from the last service or inspection date so reminders work.
-        </p>
+        </Link>
       )}
     </section>
   );
