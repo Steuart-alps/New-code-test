@@ -2684,6 +2684,12 @@ export const FireSafetyCheckSoundLevelMethod = {
   phone: 'phone',
 } as const;
 
+export interface FireDrillAttendee {
+  /** Null when the roster entry has since been deleted. */
+  staffRosterId: number | null;
+  name: string;
+}
+
 export interface FireSafetyCheck {
   id: number;
   clientId: number;
@@ -2700,6 +2706,19 @@ export interface FireSafetyCheck {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: FireSafetyCheckNightStaff;
+  /**
+     * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  drillTime?: string | null;
+  /**
+     * Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+     * @minimum 1
+     * @maximum 86400
+     */
+  evacuationSeconds?: number | null;
+  /** Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks. */
+  staffPresent?: FireDrillAttendee[];
   /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
   soundLevelDb?: number | null;
   /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
@@ -2755,6 +2774,22 @@ export interface CreateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: CreateFireSafetyCheckRequestNightStaff;
+  /**
+     * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  drillTime?: string | null;
+  /**
+     * Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+     * @minimum 1
+     * @maximum 86400
+     */
+  evacuationSeconds?: number | null;
+  /**
+     * Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+     * @maxItems 2000
+     */
+  staffPresentIds?: number[];
   /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
   soundLevelDb?: number | null;
   /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
@@ -2807,12 +2842,45 @@ export interface UpdateFireSafetyCheckRequest {
   callPoint?: string | null;
   /** Fire drills. Whether night staff took part. */
   nightStaff?: UpdateFireSafetyCheckRequestNightStaff;
+  /**
+     * Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  drillTime?: string | null;
+  /**
+     * Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+     * @minimum 1
+     * @maximum 86400
+     */
+  evacuationSeconds?: number | null;
+  /**
+     * Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+     * @maxItems 2000
+     */
+  staffPresentIds?: number[];
   /** Weekly alarm tests, optional. The sound level heard, in dB (20 to 140). */
   soundLevelDb?: number | null;
   /** How the sound level was taken. "meter" is read off a sound meter; "phone" is a rough reading from the phone's microphone. Defaults to "meter" when a level is given. */
   soundLevelMethod?: UpdateFireSafetyCheckRequestSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+}
+
+export interface FireDrillStaffStatus {
+  staffRosterId: number;
+  name: string;
+  siteId: number | null;
+  siteName: string | null;
+  /** The latest fire drill they were ticked present at. */
+  lastDrillDate: string | null;
+  /** True when they have not taken part in a fire drill within periodMonths. */
+  due: boolean;
+}
+
+export interface FireDrillAttendance {
+  /** Everyone should take part in a drill at least once in this many months. */
+  periodMonths: number;
+  staff: FireDrillStaffStatus[];
 }
 
 export interface FireCallPoint {
@@ -4936,6 +5004,13 @@ siteId?: number;
 export type GetFireSafetyStatusParams = {
 /**
  * Use the site's checks and its risk-assessed frequencies.
+ */
+siteId?: number;
+};
+
+export type GetFireDrillAttendanceParams = {
+/**
+ * Staff at this site and staff with no site. Omit for every visible member.
  */
 siteId?: number;
 };

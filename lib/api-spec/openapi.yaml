@@ -2424,6 +2424,29 @@ paths:
         "403":
           description: The site belongs to a department the caller cannot see
 
+  /fire-safety/drill-attendance:
+    get:
+      operationId: getFireDrillAttendance
+      tags: [fire-safety]
+      summary: Active roster staff with the latest fire drill each took part in
+      parameters:
+        - in: query
+          name: siteId
+          description: Staff at this site and staff with no site. Omit for every visible member.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Staff fire drill attendance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireDrillAttendance"
+        "400":
+          description: The site is not one of this client's sites
+        "403":
+          description: The caller is a viewer, or the site belongs to a department the caller cannot see
+
   /fire-safety/call-points:
     get:
       operationId: listFireCallPoints
@@ -8997,6 +9020,22 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        drillTime:
+          type: string
+          nullable: true
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+        evacuationSeconds:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 86400
+          description: Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+        staffPresent:
+          type: array
+          description: Fire drills. Roster staff ticked as present (names as recorded). Empty for other checks.
+          items:
+            $ref: "#/components/schemas/FireDrillAttendee"
         soundLevelDb:
           type: number
           nullable: true
@@ -9060,6 +9099,23 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        drillTime:
+          type: string
+          nullable: true
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+        evacuationSeconds:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 86400
+          description: Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+        staffPresentIds:
+          type: array
+          description: Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+          maxItems: 2000
+          items:
+            type: integer
         soundLevelDb:
           type: number
           nullable: true
@@ -9111,6 +9167,23 @@ components:
           nullable: true
           enum: [included, not_included, no_night_staff]
           description: Fire drills. Whether night staff took part.
+        drillTime:
+          type: string
+          nullable: true
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: Fire drills. The time of the drill (HH:MM, the business's local time). Required on new drills.
+        evacuationSeconds:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 86400
+          description: Fire drills. How long everyone took to evacuate, in seconds. Required on new drills.
+        staffPresentIds:
+          type: array
+          description: Fire drills. Roster ids of the staff present. On an update, leaving it out keeps the list as recorded.
+          maxItems: 2000
+          items:
+            type: integer
         soundLevelDb:
           type: number
           nullable: true
@@ -9124,6 +9197,61 @@ components:
           type: boolean
           nullable: true
           description: Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB).
+
+    FireDrillAttendee:
+      type: object
+      properties:
+        staffRosterId:
+          type: integer
+          nullable: true
+          description: Null when the roster entry has since been deleted.
+        name:
+          type: string
+      required:
+        - staffRosterId
+        - name
+
+    FireDrillStaffStatus:
+      type: object
+      properties:
+        staffRosterId:
+          type: integer
+        name:
+          type: string
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        lastDrillDate:
+          type: string
+          nullable: true
+          description: The latest fire drill they were ticked present at.
+        due:
+          type: boolean
+          description: True when they have not taken part in a fire drill within periodMonths.
+      required:
+        - staffRosterId
+        - name
+        - siteId
+        - siteName
+        - lastDrillDate
+        - due
+
+    FireDrillAttendance:
+      type: object
+      properties:
+        periodMonths:
+          type: integer
+          description: Everyone should take part in a drill at least once in this many months.
+        staff:
+          type: array
+          items:
+            $ref: "#/components/schemas/FireDrillStaffStatus"
+      required:
+        - periodMonths
+        - staff
 
     FireCallPoint:
       type: object
