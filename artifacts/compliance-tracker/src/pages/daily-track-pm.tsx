@@ -118,6 +118,9 @@ const PREMISES_CLOSING_ITEMS: ChecklistItem[] = [
   { label: "External escape routes are clear", checked: false },
   { label: "Fire extinguishers are unobstructed and clearly visible", checked: false },
   { label: "Manual break glass call points are unobstructed and clearly visible", checked: false },
+  // The alarm panel is checked here, not as a separate FireTrack check; saved
+  // lists got this item once (addFireAlarmPanelToSavedPremisesChecks, api-server).
+  { label: "Fire alarm panel shows normal: no fault, fire or disabled zone lights (report any fault at once)", checked: false },
   { label: "Emergency lights are in working order", checked: false },
   { label: "All access to and egress from the premises are free from obstructions or hazards", checked: false },
   { label: "Internal public areas are safe and well maintained", checked: false },

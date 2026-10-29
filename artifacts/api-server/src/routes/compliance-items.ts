@@ -56,6 +56,9 @@ const CompletedDay = z.preprocess(
     .nullish(),
 );
 
+/** The competent person who did a check in house, instead of a contractor. */
+const InHouseBy = z.string().trim().min(1).max(200).nullish();
+
 function buildItemResponse(
   item: typeof complianceItemsTable.$inferSelect,
   site: typeof sitesTable.$inferSelect | null,
@@ -419,6 +422,8 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
     const completion = completionFields(frequency, completedAt);
     Object.assign(updateData, completion.fields);
     if (completion.recurring) recurrence = { completedAt, nextDueDate: completion.fields.dueDate };
+    // A new completion from the edit form says nothing about who did it.
+    if (String(completion.fields.completedAt) !== String(existing[0].completedAt)) updateData.completedInHouseBy = null;
   }
   // The edit form always re-sends the status. Only reopening a completed
   // one-off check clears its completion; a repeating check keeps its "last
@@ -426,6 +431,7 @@ router.put("/compliance-items/:id", requireAuth, denyViewers, requireClientAdmin
   else if (body.status && existing[0].status === "completed"
     && !((body.frequencyMonths !== undefined ? body.frequencyMonths : existing[0].frequencyMonths) ?? 0)) {
     updateData.completedAt = null;
+    updateData.completedInHouseBy = null;
   }
   // A reminder delivered for the old due date does not cover the new one, so
   // the scheduler may remind again for the new cycle.
@@ -497,6 +503,18 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
     res.status(400).json({ error: "completedAt can only be sent when completing a check" });
     return;
   }
+  // Done in house by a competent person (e.g. the annual emergency lighting
+  // test): the name is kept with the completion, and no contractor
+  // certificate is then due for it (lib/certificateOutcomes.ts).
+  const inHouseBy = InHouseBy.safeParse(req.body?.completedInHouseBy);
+  if (!inHouseBy.success) {
+    res.status(400).json({ error: "Enter the name of the competent person who did the check" });
+    return;
+  }
+  if (inHouseBy.data && status !== "completed") {
+    res.status(400).json({ error: "completedInHouseBy can only be sent when completing a check" });
+    return;
+  }
 
   if (user.role === "client_viewer") {
     res.status(403).json({ error: "Forbidden" });
@@ -537,6 +555,7 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
   const statusFields = completion
     ? {
         ...completion.fields,
+        completedInHouseBy: inHouseBy.data ?? null,
         // The next due date starts a new reminder cycle.
         ...(completion.recurring ? { notificationSentAt: null } : {}),
       }
@@ -544,7 +563,7 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
         status,
         // Reopening a completed one-off check clears its completion; a
         // repeating check keeps its "last completed" date.
-        ...(existing[0].status === "completed" && !existing[0].frequencyMonths ? { completedAt: null } : {}),
+        ...(existing[0].status === "completed" && !existing[0].frequencyMonths ? { completedAt: null, completedInHouseBy: null } : {}),
       };
   await db.transaction(async (tx) => {
     await tx
