@@ -120,6 +120,7 @@ function AiFinanceSection({ ai }: { ai: BusinessDashboardAi }) {
   const t = ai.totals;
   const monthMax = Math.max(1, ...ai.months.map(m => Math.max(m.incomePence, m.costPence)));
   const topUps = t.topUpPence + t.invoicedTopUpPence;
+  const usingAi = ai.businesses.filter(b => b.requests > 0).length;
   return (
     <div className="space-y-4">
       <div>
@@ -127,6 +128,7 @@ function AiFinanceSection({ ai }: { ai: BusinessDashboardAi }) {
         <p className="text-sm text-muted-foreground">
           What businesses paid for AI (the £15 add-on and £6 top-ups) against what Claude actually charged for their requests, before VAT.
           Free businesses pay nothing for their allowance, so they show the cost only. Claude bills in dollars; the cost uses $1 = £{ai.usdToGbp.toFixed(2)}.
+          Unused AI use carries over for 12 months; whatever a paid month or top-up still holds then lapses back to ALPS.
         </p>
       </div>
       {!ai.addonIncomeAvailable && (
@@ -134,12 +136,18 @@ function AiFinanceSection({ ai }: { ai: BusinessDashboardAi }) {
       )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="AI income" value={money(t.incomePence)} note={`${money(t.addonPence)} add-on, ${money(topUps)} top-ups`} tone={t.incomePence > 0 ? "good" : "neutral"} />
-        <StatCard label="Claude cost" value={money(t.costPence)} note={`${t.requests} request${t.requests === 1 ? "" : "s"} to Claude`} tone={t.costPence > 0 ? "bad" : "neutral"} />
+        <StatCard
+          label="Claude cost"
+          value={money(t.costPence)}
+          note={`${t.requests} request${t.requests === 1 ? "" : "s"} from ${usingAi} business${usingAi === 1 ? "" : "es"}`}
+          tone={t.costPence > 0 ? "bad" : "neutral"}
+        />
         <StatCard label="AI margin" value={signedMoney(t.marginPence)} note={marginShare(t)} tone={t.marginPence > 0 ? "good" : t.marginPence < 0 ? "bad" : "neutral"} />
         <StatCard
-          label="Businesses using AI"
-          value={String(ai.businesses.filter(b => b.requests > 0).length)}
-          note={`${ai.businesses.filter(b => b.addonPence > 0).length} paid for the add-on in these dates`}
+          label="Lapsed back to ALPS"
+          value={money(t.lapsedPence)}
+          note="Paid-for AI use left unused for 12 months. Already part of the margin."
+          tone={t.lapsedPence > 0 ? "good" : "neutral"}
         />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -151,6 +159,7 @@ function AiFinanceSection({ ai }: { ai: BusinessDashboardAi }) {
                 <IncomeCostBars row={m} max={monthMax} />
                 <span className="tabular-nums whitespace-nowrap text-right">
                   {money(m.incomePence)} − {money(m.costPence)} = <span className={`font-bold ${marginTone(m.marginPence)}`}>{signedMoney(m.marginPence)}</span>
+                  {m.lapsedPence > 0 && <span className="block text-xs text-muted-foreground">{money(m.lapsedPence)} lapsed back to ALPS</span>}
                 </span>
               </div>
             ))}
@@ -176,6 +185,7 @@ function AiFinanceSection({ ai }: { ai: BusinessDashboardAi }) {
                       b.topUpPence ? `top-ups ${money(b.topUpPence)}` : null,
                       b.invoicedTopUpPence ? `top-ups invoiced by ALPS ${money(b.invoicedTopUpPence)}` : null,
                       `Claude ${money(b.costPence)} for ${b.requests} request${b.requests === 1 ? "" : "s"}`,
+                      b.lapsedPence ? `${money(b.lapsedPence)} lapsed back to ALPS` : null,
                     ].filter(Boolean).join(" · ")}
                   </p>
                 </li>
