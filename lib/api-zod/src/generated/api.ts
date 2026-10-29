@@ -4848,6 +4848,251 @@ export const DeleteGreenTrackHourReadingResponse = zod.object({
 
 
 /**
+ * @summary List greenkeeping shed opening and closing checklists
+ */
+export const ListGreenTrackShedChecksQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional(),
+  "date": zod.coerce.string().optional(),
+  "type": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']).optional()
+})
+
+export const ListGreenTrackShedChecksResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+export const ListGreenTrackShedChecksResponse = zod.array(ListGreenTrackShedChecksResponseItem)
+
+
+/**
+ * @summary Save the day's shed checklist for a site (creates it, or updates its draft)
+ */
+export const SaveGreenTrackShedCheckBody = zod.object({
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})).optional(),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish().describe('Set to submit; every item must be answered and failed items need a note')
+})
+
+export const SaveGreenTrackShedCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary One shed checklist
+ */
+export const GetGreenTrackShedCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGreenTrackShedCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Edit or submit a draft shed checklist
+ */
+export const UpdateGreenTrackShedCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateGreenTrackShedCheckBody = zod.object({
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})).optional(),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+export const UpdateGreenTrackShedCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "checklistType": zod.enum(['greenkeeping_opening', 'greenkeeping_closing']),
+  "checkDate": zod.string(),
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "checked": zod.boolean(),
+  "notes": zod.string().optional(),
+  "section": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail', 'na']).optional()
+})),
+  "completedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "managerNote": zod.string().nullish(),
+  "submittedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Delete a draft shed checklist
+ */
+export const DeleteGreenTrackShedCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackShedCheckResponse = zod.void()
+
+
+/**
+ * @summary The department that does a site's shed checks, and the departments that could
+ */
+export const GetGreenTrackShedTeamQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetGreenTrackShedTeamResponse = zod.object({
+  "siteId": zod.number(),
+  "departmentId": zod.number().nullable(),
+  "departmentName": zod.string().nullable(),
+  "chosen": zod.boolean().describe('False when the department was matched by \"green\" in its name'),
+  "departments": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary Choose the department that does a site's shed checks (Owners); null matches by name again
+ */
+export const SetGreenTrackShedTeamBody = zod.object({
+  "siteId": zod.number(),
+  "departmentId": zod.number().nullable()
+})
+
+export const SetGreenTrackShedTeamResponse = zod.object({
+  "siteId": zod.number(),
+  "departmentId": zod.number().nullable(),
+  "departmentName": zod.string().nullable(),
+  "chosen": zod.boolean().describe('False when the department was matched by \"green\" in its name'),
+  "departments": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary Every active machine's pre-start check for a day, or its "not in use" mark
+ */
+export const GetGreenTrackPreStartDayQueryParams = zod.object({
+  "date": zod.coerce.string().optional().describe('Defaults to the business\'s today'),
+  "siteId": zod.coerce.number().optional().describe('Machines at this site and machines with no site')
+})
+
+export const GetGreenTrackPreStartDayResponse = zod.object({
+  "date": zod.string(),
+  "machines": zod.array(zod.object({
+  "machineId": zod.number(),
+  "name": zod.string(),
+  "type": zod.string().nullable(),
+  "siteId": zod.number().nullable(),
+  "siteName": zod.string().nullable(),
+  "status": zod.enum(['checked', 'failed', 'not_in_use', 'todo']),
+  "checkId": zod.number().nullable(),
+  "checkedBy": zod.string().nullable(),
+  "notInUseId": zod.number().nullable(),
+  "notInUseReason": zod.string().nullable(),
+  "markedBy": zod.string().nullable()
+})),
+  "total": zod.number(),
+  "checked": zod.number(),
+  "failed": zod.number(),
+  "notInUse": zod.number(),
+  "todo": zod.number()
+})
+
+
+/**
+ * @summary Mark a machine as not in use for a day, so it needs no pre-start check
+ */
+export const MarkGreenTrackMachineNotInUseBody = zod.object({
+  "machineId": zod.number(),
+  "checkDate": zod.string(),
+  "reason": zod.string().nullish()
+})
+
+export const MarkGreenTrackMachineNotInUseResponse = zod.object({
+  "id": zod.number().optional(),
+  "machine_id": zod.number().optional(),
+  "check_date": zod.string().optional(),
+  "reason": zod.string().nullish()
+}).describe('The stored mark (database column names)')
+
+
+/**
+ * @summary Remove a "not in use" mark
+ */
+export const DeleteGreenTrackMachineNotInUseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteGreenTrackMachineNotInUseResponse = zod.void()
+
+
+/**
  * @summary List spraying and stock products with their stock on hand
  */
 export const ListGreenTrackProductsResponseItem = zod.object({

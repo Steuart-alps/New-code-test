@@ -21,7 +21,7 @@ import kitchenInspectionExport from "./kitchen-inspection-export";
 // archiver v8 is pure ESM — use ZipArchive directly, no factory function.
 import { ZipArchive } from "archiver";
 import { db } from "@workspace/db";
-import { sql, eq, and, notInArray } from "drizzle-orm";
+import { sql, eq, and, notInArray, notLike } from "drizzle-orm";
 import path from "path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
@@ -670,7 +670,9 @@ router.get(
         )));
 
         // ── Kitchen ───────────────────────────────────────────────────────────
-        await out.csv("kitchen/daily-checklists.csv", () => db.select().from(dailyChecklistsTable).where(eq(dailyChecklistsTable.clientId, cid)));
+        // GreenTrack's greenkeeping shed checklists share the table; they go in green-track/.
+        await out.csv("kitchen/daily-checklists.csv", () => db.select().from(dailyChecklistsTable)
+          .where(and(eq(dailyChecklistsTable.clientId, cid), notLike(dailyChecklistsTable.checklistType, "greenkeeping%"))));
 
         await out.csv("kitchen/manager-signoffs.csv", () => db.select().from(dailyManagerSignoffsTable).where(eq(dailyManagerSignoffsTable.clientId, cid)));
 
@@ -738,6 +740,10 @@ router.get(
         await out.csv("green-track/machines.csv", async () => (await db.execute(sql`SELECT * FROM green_machines WHERE client_id = ${cid} ORDER BY created_at DESC`)).rows);
 
         await out.csv("green-track/pre-use-checks.csv", async () => (await db.execute(sql`SELECT * FROM green_pre_use_checks WHERE client_id = ${cid} ORDER BY check_date DESC`)).rows);
+
+        await out.csv("green-track/machines-not-in-use.csv", async () => (await db.execute(sql`SELECT * FROM green_machine_not_in_use WHERE client_id = ${cid} ORDER BY check_date DESC, id`)).rows);
+
+        await out.csv("green-track/shed-checks.csv", async () => (await db.execute(sql`SELECT * FROM daily_checklists WHERE client_id = ${cid} AND checklist_type LIKE 'greenkeeping%' ORDER BY check_date DESC, id`)).rows);
 
         await out.csv("green-track/puwer-inspections.csv", async () => (await db.execute(sql`SELECT * FROM green_puwer_inspections WHERE client_id = ${cid} ORDER BY inspection_date DESC, id`)).rows);
 

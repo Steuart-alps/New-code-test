@@ -3229,6 +3229,271 @@ paths:
               schema:
                 $ref: "#/components/schemas/OkResponse"
 
+  /green-track/shed-checks:
+    get:
+      operationId: listGreenTrackShedChecks
+      tags: [green-track]
+      summary: List greenkeeping shed opening and closing checklists
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/GreenShedChecklistType"
+      responses:
+        "200":
+          description: Shed checklists, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GreenShedChecklist"
+    post:
+      operationId: saveGreenTrackShedCheck
+      tags: [green-track]
+      summary: Save the day's shed checklist for a site (creates it, or updates its draft)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenShedChecklistInput"
+      responses:
+        "200":
+          description: Draft updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedChecklist"
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedChecklist"
+        "400":
+          description: Invalid, or not every item answered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/shed-checks/{id}:
+    get:
+      operationId: getGreenTrackShedCheck
+      tags: [green-track]
+      summary: One shed checklist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The checklist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedChecklist"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateGreenTrackShedCheck
+      tags: [green-track]
+      summary: Edit or submit a draft shed checklist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenShedChecklistUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedChecklist"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteGreenTrackShedCheck
+      tags: [green-track]
+      summary: Delete a draft shed checklist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "409":
+          description: A submitted checklist cannot be deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/shed-team:
+    get:
+      operationId: getGreenTrackShedTeam
+      tags: [green-track]
+      summary: The department that does a site's shed checks, and the departments that could
+      parameters:
+        - name: siteId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The site's team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedTeam"
+    put:
+      operationId: setGreenTrackShedTeam
+      tags: [green-track]
+      summary: Choose the department that does a site's shed checks (Owners); null matches by name again
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenShedTeamInput"
+      responses:
+        "200":
+          description: The site's team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenShedTeam"
+        "400":
+          description: That department does not work at the site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/pre-start:
+    get:
+      operationId: getGreenTrackPreStartDay
+      tags: [green-track]
+      summary: Every active machine's pre-start check for a day, or its "not in use" mark
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Defaults to the business's today
+          schema:
+            type: string
+        - name: siteId
+          in: query
+          required: false
+          description: Machines at this site and machines with no site
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The day's machines
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenPreStartDay"
+
+  /green-track/pre-start/not-in-use:
+    post:
+      operationId: markGreenTrackMachineNotInUse
+      tags: [green-track]
+      summary: Mark a machine as not in use for a day, so it needs no pre-start check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenMachineNotInUseInput"
+      responses:
+        "200":
+          description: Already marked for that day
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenMachineNotInUseRow"
+        "201":
+          description: Marked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenMachineNotInUseRow"
+        "409":
+          description: The machine already has a pre-start check that day
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /green-track/pre-start/not-in-use/{id}:
+    delete:
+      operationId: deleteGreenTrackMachineNotInUse
+      tags: [green-track]
+      summary: Remove a "not in use" mark
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /green-track/products:
     get:
       operationId: listGreenTrackProducts
@@ -6987,6 +7252,220 @@ components:
         downloadUrl:
           type: string
         fileName:
+          type: string
+          nullable: true
+
+    GreenShedChecklistType:
+      type: string
+      enum: [greenkeeping_opening, greenkeeping_closing]
+    GreenShedChecklistItem:
+      type: object
+      required: [label, checked]
+      properties:
+        label:
+          type: string
+        checked:
+          type: boolean
+        notes:
+          type: string
+        section:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail, na]
+    GreenShedChecklist:
+      type: object
+      additionalProperties: true
+      required: [id, clientId, checklistType, checkDate, items]
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        checklistType:
+          $ref: "#/components/schemas/GreenShedChecklistType"
+        checkDate:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenShedChecklistItem"
+        completedBy:
+          type: string
+          nullable: true
+        staffRosterId:
+          type: integer
+          nullable: true
+        managerNote:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          nullable: true
+    GreenShedChecklistInput:
+      type: object
+      required: [checklistType, checkDate]
+      properties:
+        siteId:
+          type: integer
+          nullable: true
+        checklistType:
+          $ref: "#/components/schemas/GreenShedChecklistType"
+        checkDate:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenShedChecklistItem"
+        completedBy:
+          type: string
+          nullable: true
+        staffRosterId:
+          type: integer
+          nullable: true
+        managerNote:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          nullable: true
+          description: Set to submit; every item must be answered and failed items need a note
+    GreenShedChecklistUpdate:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenShedChecklistItem"
+        completedBy:
+          type: string
+          nullable: true
+        staffRosterId:
+          type: integer
+          nullable: true
+        managerNote:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          nullable: true
+    GreenShedTeamDepartment:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+    GreenShedTeam:
+      type: object
+      required: [siteId, departmentId, departmentName, chosen, departments]
+      properties:
+        siteId:
+          type: integer
+        departmentId:
+          type: integer
+          nullable: true
+        departmentName:
+          type: string
+          nullable: true
+        chosen:
+          type: boolean
+          description: False when the department was matched by "green" in its name
+        departments:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenShedTeamDepartment"
+    GreenShedTeamInput:
+      type: object
+      required: [siteId, departmentId]
+      properties:
+        siteId:
+          type: integer
+        departmentId:
+          type: integer
+          nullable: true
+    GreenPreStartMachine:
+      type: object
+      required: [machineId, name, type, siteId, siteName, status, checkId, checkedBy, notInUseId, notInUseReason, markedBy]
+      properties:
+        machineId:
+          type: integer
+        name:
+          type: string
+        type:
+          type: string
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [checked, failed, not_in_use, todo]
+        checkId:
+          type: integer
+          nullable: true
+        checkedBy:
+          type: string
+          nullable: true
+        notInUseId:
+          type: integer
+          nullable: true
+        notInUseReason:
+          type: string
+          nullable: true
+        markedBy:
+          type: string
+          nullable: true
+    GreenPreStartDay:
+      type: object
+      required: [date, machines, total, checked, failed, notInUse, todo]
+      properties:
+        date:
+          type: string
+        machines:
+          type: array
+          items:
+            $ref: "#/components/schemas/GreenPreStartMachine"
+        total:
+          type: integer
+        checked:
+          type: integer
+        failed:
+          type: integer
+        notInUse:
+          type: integer
+        todo:
+          type: integer
+    GreenMachineNotInUseInput:
+      type: object
+      required: [machineId, checkDate]
+      properties:
+        machineId:
+          type: integer
+        checkDate:
+          type: string
+        reason:
+          type: string
+          nullable: true
+    GreenMachineNotInUseRow:
+      type: object
+      description: The stored mark (database column names)
+      additionalProperties: true
+      properties:
+        id:
+          type: integer
+        machine_id:
+          type: integer
+        check_date:
+          type: string
+        reason:
           type: string
           nullable: true
 
