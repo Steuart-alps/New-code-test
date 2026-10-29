@@ -1,4 +1,4 @@
-name: Drag and drop photos
+name: Drag and drop photos and the laptop camera
 
 # Runs only when the drag-and-drop code, its test or dependencies change, so
 # ordinary PRs spend no extra CI minutes on it. WebKit stands in for Safari.
@@ -8,7 +8,9 @@ on:
       - "artifacts/compliance-tracker/src/hooks/use-file-drop.ts"
       - "artifacts/compliance-tracker/src/lib/media-upload.ts"
       - "artifacts/compliance-tracker/src/components/pending-media-picker.tsx"
+      - "artifacts/compliance-tracker/src/components/camera-capture.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/camera-capture-browser.test.mjs"
       - "artifacts/compliance-tracker/tests/file-drop-harness.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-harness.html"
       - "artifacts/compliance-tracker/package.json"
@@ -21,7 +23,9 @@ on:
       - "artifacts/compliance-tracker/src/hooks/use-file-drop.ts"
       - "artifacts/compliance-tracker/src/lib/media-upload.ts"
       - "artifacts/compliance-tracker/src/components/pending-media-picker.tsx"
+      - "artifacts/compliance-tracker/src/components/camera-capture.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-browser.test.mjs"
+      - "artifacts/compliance-tracker/tests/camera-capture-browser.test.mjs"
       - "artifacts/compliance-tracker/tests/file-drop-harness.tsx"
       - "artifacts/compliance-tracker/tests/file-drop-harness.html"
       - "artifacts/compliance-tracker/package.json"
@@ -32,7 +36,7 @@ on:
 
 jobs:
   file-drop:
-    name: ${{ matrix.browser }} drag and drop
+    name: ${{ matrix.browser }} drag and drop and camera
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -63,3 +67,9 @@ jobs:
         env:
           FILE_DROP_BROWSER: ${{ matrix.browser }}
         run: pnpm --filter @workspace/compliance-tracker run test:file-drop-browser
+
+      - name: Run camera checks
+        if: ${{ !cancelled() }}
+        env:
+          FILE_DROP_BROWSER: ${{ matrix.browser }}
+        run: pnpm --filter @workspace/compliance-tracker run test:camera-capture-browser
