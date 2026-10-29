@@ -418,7 +418,7 @@ export default function IncidentsPage() {
   const [actionDraft, setActionDraft] = useState({ title: "", ownerName: "", correctiveAction: "" });
   const [editingActionId, setEditingActionId] = useState<number | null>(null);
   const canRecordActions = user?.role !== "client_viewer";
-  const actionOwnerGroups = usePeopleAndContractors(canAdmin);
+  const actionOwnerGroups = usePeopleAndContractors(canAdmin && !!historyIncident);
   const [savingAction, setSavingAction] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
