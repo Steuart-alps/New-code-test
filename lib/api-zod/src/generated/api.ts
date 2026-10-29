@@ -857,7 +857,7 @@ export const DeleteSiteResponse = zod.void()
 
 
 /**
- * Each visit type the business's tracks cover, at each site the user can see: when the track says it is next due, and the compliance check (with its contractor) that drives the contractor reminder.
+ * Each visit type the business's tracks cover, at each site the user can see: when the track says it is next due, and the compliance check (with its contractor) that drives the contractor reminder. Also the compliance check register's other checks. Each row says whether it has been marked "No contractor needed".
  * @summary Contractor visits kept on the tracks, per site, with the contractor reminded
  */
 export const ListContractorVisitsResponse = zod.object({
@@ -881,8 +881,21 @@ export const ListContractorVisitsResponse = zod.object({
   "status": zod.string().nullable(),
   "contractorId": zod.number().nullable(),
   "contractorName": zod.string().nullable(),
-  "reminderSentAt": zod.date().nullable()
-}))
+  "reminderSentAt": zod.date().nullable(),
+  "notNeeded": zod.boolean().describe('Marked \"No contractor needed\" (never true while a contractor is chosen)')
+})),
+  "checks": zod.array(zod.object({
+  "checkId": zod.number(),
+  "title": zod.string(),
+  "siteId": zod.number().nullable().describe('Null for a business-wide check'),
+  "siteName": zod.string().nullable(),
+  "dueDate": zod.date().nullable(),
+  "status": zod.string(),
+  "contractorId": zod.number().nullable(),
+  "contractorName": zod.string().nullable(),
+  "reminderSentAt": zod.date().nullable(),
+  "notNeeded": zod.boolean().describe('Marked \"No contractor needed\" (never true while a contractor is chosen)')
+})).describe('The compliance check register\'s other checks (gas safety, EICR...), not finished one-offs, business-wide or at a site the user can see\n')
 })
 
 
@@ -893,10 +906,28 @@ export const SetContractorVisitBody = zod.object({
   "visitKey": zod.string(),
   "siteId": zod.number(),
   "contractorId": zod.number().nullable(),
-  "dueDate": zod.date().nullish().describe('Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)')
+  "dueDate": zod.date().nullish().describe('Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)'),
+  "notNeeded": zod.boolean().optional().describe('True marks the visit as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.')
 })
 
 export const SetContractorVisitResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Choose the contractor reminded about a compliance check, or mark it as needing none
+ */
+export const SetContractorRegisterCheckParams = zod.object({
+  "checkId": zod.coerce.number()
+})
+
+export const SetContractorRegisterCheckBody = zod.object({
+  "contractorId": zod.number().nullable(),
+  "notNeeded": zod.boolean().optional().describe('True marks the check as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.')
+})
+
+export const SetContractorRegisterCheckResponse = zod.object({
   "ok": zod.boolean()
 })
 

@@ -793,7 +793,9 @@ paths:
       description: >
         Each visit type the business's tracks cover, at each site the user can
         see: when the track says it is next due, and the compliance check
-        (with its contractor) that drives the contractor reminder.
+        (with its contractor) that drives the contractor reminder. Also the
+        compliance check register's other checks. Each row says whether it
+        has been marked "No contractor needed".
       responses:
         "200":
           description: Visit types and per-site rows
@@ -811,6 +813,30 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/SetContractorVisitRequest"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /contractor-visits/checks/{checkId}:
+    put:
+      operationId: setContractorRegisterCheck
+      tags: [contractors]
+      summary: Choose the contractor reminded about a compliance check, or mark it as needing none
+      parameters:
+        - name: checkId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetContractorRegisterCheckRequest"
       responses:
         "200":
           description: Saved
@@ -7082,7 +7108,7 @@ components:
         dueFrom: { type: string, enum: [track, later, check] }
     ContractorVisit:
       type: object
-      required: [visitKey, siteId, siteName, trackDueDate, checkId, checkSiteId, dueDate, status, contractorId, contractorName, reminderSentAt]
+      required: [visitKey, siteId, siteName, trackDueDate, checkId, checkSiteId, dueDate, status, contractorId, contractorName, reminderSentAt, notNeeded]
       properties:
         visitKey: { type: string }
         siteId: { type: integer }
@@ -7095,9 +7121,24 @@ components:
         contractorId: { type: integer, nullable: true }
         contractorName: { type: string, nullable: true }
         reminderSentAt: { type: string, format: date-time, nullable: true }
+        notNeeded: { type: boolean, description: Marked "No contractor needed" (never true while a contractor is chosen) }
+    ContractorRegisterCheck:
+      type: object
+      required: [checkId, title, siteId, siteName, dueDate, status, contractorId, contractorName, reminderSentAt, notNeeded]
+      properties:
+        checkId: { type: integer }
+        title: { type: string }
+        siteId: { type: integer, nullable: true, description: Null for a business-wide check }
+        siteName: { type: string, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+        status: { type: string }
+        contractorId: { type: integer, nullable: true }
+        contractorName: { type: string, nullable: true }
+        reminderSentAt: { type: string, format: date-time, nullable: true }
+        notNeeded: { type: boolean, description: Marked "No contractor needed" (never true while a contractor is chosen) }
     ContractorVisitsResponse:
       type: object
-      required: [types, visits]
+      required: [types, visits, checks]
       properties:
         types:
           type: array
@@ -7105,6 +7146,20 @@ components:
         visits:
           type: array
           items: { $ref: "#/components/schemas/ContractorVisit" }
+        checks:
+          type: array
+          description: >
+            The compliance check register's other checks (gas safety, EICR...),
+            not finished one-offs, business-wide or at a site the user can see
+          items: { $ref: "#/components/schemas/ContractorRegisterCheck" }
+    SetContractorRegisterCheckRequest:
+      type: object
+      required: [contractorId]
+      properties:
+        contractorId: { type: integer, nullable: true }
+        notNeeded:
+          type: boolean
+          description: True marks the check as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.
     CertificateOutstanding:
       type: object
       required: [itemId, title, siteId, siteName, visitDate, daysSinceVisit, contractorName, chasing]
@@ -7140,6 +7195,9 @@ components:
           format: date
           nullable: true
           description: Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet)
+        notNeeded:
+          type: boolean
+          description: True marks the visit as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too.
     Contractor:
       type: object
       properties:
