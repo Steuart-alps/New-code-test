@@ -67,13 +67,17 @@ import {
   DrillAttendanceCard, DrillStaffPicker, DrillTimingFields, EMPTY_EVACUATION, evacuationFromSeconds, evacuationIsBlank,
   formatEvacuation, parseEvacuation, type EvacuationValue,
 } from "@/components/fire-drill";
+import {
+  EscapeRouteListEditor, NIGHT_WALK_TIMES, NightWalksCard, useSiteEscapeRoutes, type NightWalkPreset, type NightWalkTime,
+} from "@/components/fire-night-walks";
+import { SignaturePad } from "@/components/signature-pad";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
 const ALL_CHECK_TYPES = [
   "alarm", "emergency_lights", "extinguishers",
   "fire_doors", "fire_drill", "fire_walk", "alarm_panel",
-  "emergency_lights_annual", "alarm_service", "extinguisher_service",
+  "emergency_lights_annual", "alarm_service", "extinguisher_service", "night_walk",
 ] as const;
 type AnyCheckType = typeof ALL_CHECK_TYPES[number];
 
@@ -88,7 +92,11 @@ const CHECK_TYPE_LABELS: Record<AnyCheckType, string> = {
   emergency_lights_annual: "Annual 3-hour emergency lighting discharge test",
   alarm_service:    "6-monthly fire alarm service",
   extinguisher_service: "Annual fire extinguisher service",
+  night_walk:       "Night fire walk (night porter, 22:00 / 02:00 / 06:00)",
 };
+
+/** Walks that tick each of the site's escape routes. */
+const ROUTE_WALK_TYPES = new Set<AnyCheckType>(["fire_walk", "night_walk"]);
 
 const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
   {
@@ -97,7 +105,7 @@ const CHECK_TYPE_GROUPS: { label: string; types: AnyCheckType[] }[] = [
   },
   {
     label: "Walkthroughs & drills",
-    types: ["fire_walk", "fire_drill"],
+    types: ["fire_walk", "night_walk", "fire_drill"],
   },
   {
     label: "Contractor services & annual tests",
@@ -612,9 +620,12 @@ function StatusBadge({ status, lastResult }: { status: "ok" | "due_soon" | "over
 function EscapeRouteEditor({
   routes,
   onChange,
+  fixed,
 }: {
   routes: EscapeRoute[];
   onChange: (routes: EscapeRoute[]) => void;
+  /** The site's listed routes: each is answered, none added or removed. */
+  fixed?: boolean;
 }) {
   const newRow = useFocusNewRow();
   function add() {
@@ -630,22 +641,32 @@ function EscapeRouteEditor({
 
   return (
     <div ref={newRow.ref} className="space-y-2">
-      {routes.length === 0 && (
-        <p className="text-xs text-muted-foreground italic">No routes added yet. Add each escape route below.</p>
+      {routes.length === 0 && !fixed && (
+        <p className="text-xs text-muted-foreground italic">
+          No escape routes are listed for this site yet. A manager lists them once in Template → Escape routes; until then add each route walked below.
+        </p>
       )}
+      {fixed && <p className="text-xs text-muted-foreground">Mark every route: ✓ clear, ! obstructed, ✗ blocked.</p>}
       {routes.map((r, i) => (
-        <div key={i} className="flex gap-2 items-start">
-          <Input
-            value={r.name}
-            onChange={e => update(i, { name: e.target.value })}
-            placeholder={`Route ${i + 1} (e.g. "Main entrance → car park")`}
-            className="rounded-sm text-sm flex-1"
-          />
+        <div key={i} className="flex gap-2 items-start flex-wrap sm:flex-nowrap">
+          {fixed ? (
+            <span className="flex-1 min-w-[10rem] text-sm py-1.5 font-medium">{r.name}</span>
+          ) : (
+            <Input
+              value={r.name}
+              onChange={e => update(i, { name: e.target.value })}
+              placeholder={`Route ${i + 1} (e.g. "Main entrance → car park")`}
+              className="rounded-sm text-sm flex-1"
+            />
+          )}
           <div className="flex gap-0.5 flex-shrink-0">
             {(["clear", "obstructed", "blocked"] as const).map(s => (
               <button
                 key={s}
                 type="button"
+                title={s === "clear" ? "Clear" : s === "obstructed" ? "Obstructed" : "Blocked"}
+                aria-label={`${r.name || `Route ${i + 1}`}: ${s}`}
+                aria-pressed={r.status === s}
                 onClick={() => update(i, { status: s })}
                 className={cn(
                   "px-2 py-1.5 text-xs rounded-sm border font-medium transition-colors",
@@ -666,14 +687,18 @@ function EscapeRouteEditor({
             placeholder="Notes (optional)"
             className="rounded-sm text-sm w-36 flex-shrink-0"
           />
-          <button type="button" onClick={() => remove(i)} className="text-muted-foreground hover:text-destructive mt-2">
-            <X className="w-3.5 h-3.5" />
-          </button>
+          {!fixed && (
+            <button type="button" onClick={() => remove(i)} className="text-muted-foreground hover:text-destructive mt-2">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       ))}
-      <Button type="button" variant="outline" size="sm" onClick={add} className="rounded-sm gap-1.5 text-xs">
-        <Plus className="w-3 h-3" /> Add Route
-      </Button>
+      {!fixed && (
+        <Button type="button" variant="outline" size="sm" onClick={add} className="rounded-sm gap-1.5 text-xs">
+          <Plus className="w-3 h-3" /> Add Route
+        </Button>
+      )}
     </div>
   );
 }
@@ -761,8 +786,6 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
   useEffect(() => { if (open) setCallPointSite(siteId ?? (sites?.length === 1 ? sites[0].id : undefined)); }, [open, siteId, sites]);
 
   const [defaultPerformer, setDefaultPerformer] = useState("");
-  const [escapeRoutes, setEscapeRoutes] = useState<Array<{ name: string; location: string }>>([]);
-  const newRow = useFocusNewRow();
   const [alarmZones, setAlarmZones] = useState<string[]>([]);
   const [extinguisherPoints, setExtinguisherPoints] = useState<string[]>([]);
   const [frequencyDays, setFrequencyDays] = useState<Record<string, string>>(
@@ -777,7 +800,6 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
   useEffect(() => {
     if (!config || !open) return;
     setDefaultPerformer(config.fire_default_performer ?? "");
-    setEscapeRoutes(parseJsonArray<{ name: string; location: string }>(config.fire_escape_routes));
     setAlarmZones(parseJsonArray<string>(config.fire_alarm_zones));
     setExtinguisherPoints(parseJsonArray<string>(config.fire_extinguisher_points));
     const saved = parseJsonRecord(config.fire_frequency_days, DEFAULT_FIRE_FREQUENCIES);
@@ -801,7 +823,6 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
       {
         data: {
           fire_default_performer: defaultPerformer,
-          fire_escape_routes: JSON.stringify(escapeRoutes.filter(r => r.name || r.location)),
           fire_alarm_zones: JSON.stringify(alarmZones.filter(Boolean)),
           fire_extinguisher_points: JSON.stringify(extinguisherPoints.filter(Boolean)),
           ...(siteId ? { controlProfile: { ...profile, frequencyDays: numericFrequencies } } : { fire_frequency_days: JSON.stringify(numericFrequencies) }),
@@ -898,29 +919,21 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
 
           <TabsContent value="routes" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
             <p className="text-xs text-muted-foreground">
-              List your named escape routes. They'll be pre-loaded when recording a fire walk so staff just mark each one clear or obstructed.
+              List this site's escape routes once, e.g. "Final fire exit door route 1" or "Escape stairway 2". Every escape route sign-off and night fire walk then ticks each one clear, obstructed or blocked.
             </p>
-            <div ref={newRow.ref} className="space-y-2">
-              {escapeRoutes.map((r, i) => (
-                <div key={i} className="flex gap-2 items-start">
-                  <div className="flex-1 space-y-1">
-                    <Input value={r.name} placeholder='Route name (e.g. "Main entrance → car park")'
-                      className="h-8 text-sm rounded-sm"
-                      onChange={e => { const n = [...escapeRoutes]; n[i] = { ...n[i], name: e.target.value }; setEscapeRoutes(n); }} />
-                    <Input value={r.location} placeholder="Location / assembly point (optional)"
-                      className="h-7 text-xs rounded-sm"
-                      onChange={e => { const n = [...escapeRoutes]; n[i] = { ...n[i], location: e.target.value }; setEscapeRoutes(n); }} />
-                  </div>
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0 mt-0.5"
-                    onClick={() => setEscapeRoutes(escapeRoutes.filter((_, x) => x !== i))}>
-                    <X className="w-3.5 h-3.5 text-destructive" />
-                  </Button>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" onClick={() => { newRow.expect(); setEscapeRoutes([...escapeRoutes, { name: "", location: "" }]); }}>
-                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add route
-              </Button>
-            </div>
+            {hasSites && (
+              <Select value={callPointSite ? String(callPointSite) : ""} onValueChange={v => setCallPointSite(Number(v))}>
+                <SelectTrigger className="rounded-sm" data-testid="select-escape-route-site"><SelectValue placeholder="Choose a site" /></SelectTrigger>
+                <SelectContent>
+                  {sites!.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {hasSites && !callPointSite ? (
+              <p className="text-xs text-muted-foreground italic">Choose a site to list its escape routes.</p>
+            ) : (
+              <EscapeRouteListEditor key={callPointSite ?? "none"} siteId={callPointSite ?? null} enabled={open} />
+            )}
           </TabsContent>
 
           <TabsContent value="callpoints" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">

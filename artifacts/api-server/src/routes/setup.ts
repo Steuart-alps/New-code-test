@@ -122,7 +122,10 @@ router.get("/setup/state", requireAuth, async (req, res) => {
   if (!canManage) return res.json(base);
 
   const profile = await db.execute(sql`SELECT nation FROM compliance_profiles WHERE client_id = ${clientId} LIMIT 1`);
-  const sites = await db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable)
+  const sites = await db.select({
+    id: sitesTable.id, name: sitesTable.name,
+    sleepingAccommodation: sitesTable.sleepingAccommodation, nightPorter: sitesTable.nightPorter,
+  }).from(sitesTable)
     .where(eq(sitesTable.clientId, clientId)).orderBy(asc(sitesTable.id));
   const catalogue = starterChecksFor(client.businessType).flatMap((cat) => cat.checks.map((check) => ({ category: cat.name, check })));
   const titles = catalogue.map((c) => c.check.title);

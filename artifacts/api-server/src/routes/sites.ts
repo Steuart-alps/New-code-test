@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { sitesTable } from "@workspace/db/schema";
+import { sitesTable, type Site } from "@workspace/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
@@ -40,6 +40,30 @@ async function validateDepartmentForClient(rawDepartmentId: unknown, clientId: n
     .limit(1);
   if (!department) return "invalid";
   return department.siteId === null || department.siteId === siteId ? departmentId : "invalid";
+}
+
+type FireWalkAnswers = Pick<Site, "sleepingAccommodation" | "nightPorter" | "nightPorterSince">;
+
+/**
+ * The site's answers to "Sleeping accommodation?" and "Night porter?" (true,
+ * false or null for not answered). A night porter is only asked about with
+ * sleeping accommodation, so without it the answer is cleared. The time the
+ * night porter answer became yes is kept so earlier nights never count as
+ * missed walks. Returns "invalid" for anything but a boolean or null.
+ */
+function fireWalkAnswers(body: Record<string, unknown>, existing?: FireWalkAnswers): FireWalkAnswers | "invalid" {
+  const answer = (key: "sleepingAccommodation" | "nightPorter"): boolean | null | "invalid" => {
+    if (!(key in body)) return existing?.[key] ?? null;
+    const value = body[key];
+    return value === null || typeof value === "boolean" ? value : "invalid";
+  };
+  const sleepingAccommodation = answer("sleepingAccommodation");
+  const asked = answer("nightPorter");
+  if (sleepingAccommodation === "invalid" || asked === "invalid") return "invalid";
+  const nightPorter = sleepingAccommodation === true ? asked : null;
+  const nightPorterSince = nightPorter !== true ? null
+    : existing?.nightPorter === true && existing.nightPorterSince ? existing.nightPorterSince : new Date();
+  return { sleepingAccommodation, nightPorter, nightPorterSince };
 }
 
 router.get("/sites", requireAuth, async (req, res) => {
@@ -112,6 +136,11 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     res.status(400).json({ error: "Department does not belong to this client or this site" });
     return;
   }
+  const fireWalks = fireWalkAnswers(req.body ?? {});
+  if (fireWalks === "invalid") {
+    res.status(400).json({ error: "Answer sleeping accommodation and night porter with yes or no" });
+    return;
+  }
   // The site row and its billing charge intent are created atomically: a
   // crash can never produce an added site that was never billed.
   const site = await db.transaction(async (tx) => {
@@ -124,6 +153,7 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
         responsiblePerson: req.body.responsiblePerson ?? null,
         address: req.body.address ?? null,
         phone: req.body.phone ?? null,
+        ...fireWalks,
         updatedAt: new Date(),
       })
       .returning();
@@ -169,6 +199,14 @@ router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   for (const key of ["responsiblePerson", "address", "phone"] as const) {
     if (key in req.body) updates[key] = req.body[key];
+  }
+  if ("sleepingAccommodation" in req.body || "nightPorter" in req.body) {
+    const fireWalks = fireWalkAnswers(req.body, existing);
+    if (fireWalks === "invalid") {
+      res.status(400).json({ error: "Answer sleeping accommodation and night porter with yes or no" });
+      return;
+    }
+    Object.assign(updates, fireWalks);
   }
   // Same name rules as POST /sites.
   if ("name" in req.body) {

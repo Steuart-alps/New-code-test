@@ -134,6 +134,8 @@ const FIRE_TYPES: Record<string, { label: string; days: number }> = {
   alarm_service: { label: "6-monthly fire alarm service", days: 180 },
   extinguisher_service: { label: "Annual fire extinguisher service", days: 365 },
 };
+/** Recorded fire checks with no due-date schedule of their own. */
+const FIRE_OTHER_LABELS: Record<string, string> = { night_walk: "Night fire walk (night porter)" };
 
 const LEGIONELLA_TYPES: Record<string, string> = {
   calorifier_temp: "Calorifier flow / return temperature",
@@ -286,7 +288,7 @@ async function complianceSection(scope: SiteAccessScope, from: string, to: strin
 
 async function fireSection(scope: SiteAccessScope, from: string, to: string, today: string, totalDays: number) {
   const siteScope = siteScopeSql(scope, sql`f.site_id`);
-  const [counts, failures, latest, setting, profiles] = await Promise.all([
+  const [counts, failures, latest, setting, profiles, sleeping] = await Promise.all([
     rowsOf(sql`
       SELECT check_type, COUNT(*)::int AS records, COUNT(*) FILTER (WHERE result = 'fail')::int AS failed
       FROM fire_safety_checks f
@@ -313,15 +315,21 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
     `),
     rowsOf(sql`SELECT value FROM app_settings WHERE client_id = ${scope.clientId} AND key = 'fire_frequency_days' LIMIT 1`),
     rowsOf(sql`SELECT site_id, profile FROM track_control_profiles WHERE client_id = ${scope.clientId} AND module = 'fire'`),
+    rowsOf(sql`SELECT id, sleeping_accommodation FROM sites WHERE client_id = ${scope.clientId}`),
   ]);
   const siteIds = activeSiteIds(scope, latest);
   const state = new Map<string, SiteTypeState>();
   for (const siteId of siteIds) {
     const profile = profiles.find(row => Number(row.site_id) === siteId)?.profile ?? null;
     const frequencies = fireFrequencies(setting[0]?.value, profile);
+    // The escape route sign-off is only due at sites with sleeping
+    // accommodation (or, not yet answered, where fire walks were recorded),
+    // as on FireTrack (lib/checkReminders.ts).
+    const sleepingAnswer = sleeping.find(row => Number(row.id) === siteId)?.sleeping_accommodation;
     for (const key of Object.keys(FIRE_TYPES)) {
       const last = latest.find(row => Number(row.site_id) === siteId && row.check_type === key);
-      state.set(`${siteId}:${key}`, { lastDone: text(last?.last_done), frequency: frequencies[key] });
+      const applies = key !== "fire_walk" || sleepingAnswer === true || (sleepingAnswer == null && Boolean(last));
+      state.set(`${siteId}:${key}`, { lastDone: text(last?.last_done), frequency: applies ? frequencies[key] : null });
     }
   }
   const siteNames = new Map(scope.sites.map(site => [site.id, site.name]));
@@ -329,7 +337,7 @@ async function fireSection(scope: SiteAccessScope, from: string, to: string, tod
   const result = checkTypeRows(labels, siteNames, counts, state, siteIds, today, totalDays);
   const exceptions = failures.map(row => ({
     date: row.check_date, siteName: text(row.site_name),
-    check: FIRE_TYPES[row.check_type]?.label ?? row.check_type,
+    check: FIRE_TYPES[row.check_type]?.label ?? FIRE_OTHER_LABELS[row.check_type] ?? row.check_type,
     reading: soundLevelLowText({
       soundLevelDb: row.sound_level_db == null ? null : Number(row.sound_level_db),
       soundLevelBedhead: row.sound_level_bedhead == null ? null : Boolean(row.sound_level_bedhead),

@@ -8,6 +8,7 @@
 import type { UpdateFireSafetyCheckRequestNightStaff } from './updateFireSafetyCheckRequestNightStaff';
 import type { UpdateFireSafetyCheckRequestResult } from './updateFireSafetyCheckRequestResult';
 import type { UpdateFireSafetyCheckRequestSoundLevelMethod } from './updateFireSafetyCheckRequestSoundLevelMethod';
+import type { UpdateFireSafetyCheckRequestWalkTime } from './updateFireSafetyCheckRequestWalkTime';
 
 export interface UpdateFireSafetyCheckRequest {
   checkDate?: string;
@@ -44,4 +45,8 @@ export interface UpdateFireSafetyCheckRequest {
   soundLevelMethod?: UpdateFireSafetyCheckRequestSoundLevelMethod;
   /** Whether the sound level was taken at a bedhead in a sleeping area (75 dB needed) rather than a general area (65 dB). */
   soundLevelBedhead?: boolean | null;
+  /** Night fire walks. Which of the night's three walks this is; checkDate is the day it fell on. */
+  walkTime?: UpdateFireSafetyCheckRequestWalkTime;
+  /** Night fire walks. The drawn signature of the person who walked (a PNG data URL). Required on new night walks. */
+  signature?: string | null;
 }

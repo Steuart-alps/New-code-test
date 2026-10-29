@@ -17,10 +17,23 @@ import { SOUND_LEVEL_METHODS } from "../lib/fireSoundLevel";
 import {
   DRILL_ATTENDANCE_MONTHS, listDrillAttendees, resolveDrillAttendees, saveDrillAttendees, staffDrillStatuses,
 } from "../lib/fireDrillAttendance";
+import {
+  checkWalkRoutes, duplicateRouteName, escapeRouteListSchema, loadEscapeRoutes, parseWalkNotes, saveEscapeRoutes, walkFound,
+} from "../lib/fireEscapeRoutes";
+import {
+  NIGHT_WALK_EARLY_MINUTES, NIGHT_WALK_GRACE_MINUTES, NIGHT_WALK_TIMES, nightWalkSites, walkInstant,
+} from "../lib/nightFireWalks";
+import { getAccountTimezone } from "../lib/accountClock";
 
 const router = Router();
 
 const CHECK_TYPES = FIRE_CHECK_TYPES;
+// Everything that can be recorded: the due-date checks plus the night
+// porter's fire walks, which have their own nightly schedule (lib/nightFireWalks).
+const RECORD_TYPES = [...FIRE_CHECK_TYPES, "night_walk"] as const;
+/** Checks that tick each of the site's escape routes. */
+const ROUTE_WALK_TYPES = new Set<string>(["fire_walk", "night_walk"]);
+const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
 
 // Default check frequencies, in days
 const FREQUENCY_DAYS = FIRE_FREQUENCY_DAYS;
@@ -44,7 +57,7 @@ const fireProfileSchema = z.object({
 const NIGHT_STAFF_VALUES = ["included", "not_included", "no_night_staff"] as const;
 
 const createSchema = z.object({
-  checkType: z.enum(CHECK_TYPES),
+  checkType: z.enum(RECORD_TYPES),
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   result: z.enum(["pass", "fail"]),
   siteId: z.number().int().nullable().optional(),
@@ -66,17 +79,21 @@ const createSchema = z.object({
   soundLevelDb: z.number().min(20).max(140).nullable().optional(),
   soundLevelMethod: z.enum(SOUND_LEVEL_METHODS).nullable().optional(),
   soundLevelBedhead: z.boolean().nullable().optional(),
+  // Night fire walks: which of the night's walks, and the walker's signature.
+  walkTime: z.enum(NIGHT_WALK_TIMES).nullable().optional(),
+  signature: drawnSignature.nullable().optional(),
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
 
 type FireDetails = Pick<FireSafetyCheck,
   "callPointId" | "callPoint" | "nightStaff" | "drillTime" | "evacuationSeconds"
-  | "soundLevelDb" | "soundLevelMethod" | "soundLevelBedhead">;
+  | "soundLevelDb" | "soundLevelMethod" | "soundLevelBedhead" | "walkTime" | "signature">;
 type FireDetailInput = {
   callPointId?: number | null; callPoint?: string | null; nightStaff?: FireDetails["nightStaff"];
   drillTime?: string | null; evacuationSeconds?: number | null; notes?: string | null;
   soundLevelDb?: number | null; soundLevelMethod?: FireDetails["soundLevelMethod"]; soundLevelBedhead?: boolean | null;
+  walkTime?: string | null; signature?: string | null; performedBy?: string | null;
 };
 
 /**
@@ -93,7 +110,7 @@ async function resolveFireDetails(
 ): Promise<FireDetails | { error: string }> {
   const details: FireDetails = {
     callPointId: null, callPoint: null, nightStaff: null, drillTime: null, evacuationSeconds: null,
-    soundLevelDb: null, soundLevelMethod: null, soundLevelBedhead: null,
+    soundLevelDb: null, soundLevelMethod: null, soundLevelBedhead: null, walkTime: null, signature: null,
   };
   if (checkType === "alarm") {
     let callPointId = existing?.callPointId ?? null;
@@ -141,7 +158,38 @@ async function resolveFireDetails(
       return { error: "Write the improvements required, or notes, for the drill" };
     }
   }
+  if (checkType === "night_walk") {
+    // A night walk is at a site, at one of the night's walk times, in the
+    // name of the person who walked and signed by them.
+    if (siteId == null) return { error: "Choose the site of the night fire walk" };
+    const walkTime = input.walkTime !== undefined ? input.walkTime : existing?.walkTime ?? null;
+    if (!walkTime) return { error: "Choose which night walk this is: 22:00, 02:00 or 06:00" };
+    details.walkTime = walkTime;
+    const performedBy = input.performedBy !== undefined ? input.performedBy : existing?.performedBy ?? null;
+    if (!performedBy?.trim()) return { error: "Say who did the night fire walk" };
+    const signature = input.signature !== undefined ? input.signature : existing?.signature ?? null;
+    if (!signature && (!existing || existing.signature)) return { error: "Sign the night fire walk" };
+    details.signature = signature;
+  }
   return details;
+}
+
+/**
+ * The escape routes a new walk must answer, then its answers checked against
+ * them. On an edit, the routes recorded on the walk stay the ones it covers.
+ * Returns the result to store: any route not clear makes the walk a fail.
+ */
+async function resolveWalkRoutes(
+  clientId: number, checkType: string, siteId: number | null, notes: string | null | undefined,
+  result: "pass" | "fail", existing?: FireSafetyCheck,
+): Promise<{ result: "pass" | "fail" } | { error: string }> {
+  if (!ROUTE_WALK_TYPES.has(checkType)) return { result };
+  const required = existing
+    ? parseWalkNotes(existing.notes)?.routes.map(route => route.name) ?? []
+    : (await loadEscapeRoutes(clientId, siteId)).routes.map(route => route.name);
+  const checked = checkWalkRoutes(notes, required);
+  if ("error" in checked) return checked;
+  return { result: walkFound(checked.walk) ? "fail" : result };
 }
 // Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
 const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
@@ -194,7 +242,7 @@ router.get("/", requireAuth, async (req, res) => {
 
   const conditions = [eq(fireSafetyChecksTable.clientId, clientId)];
   const { checkType, siteId } = req.query as { checkType?: string; siteId?: string };
-  if (checkType && (CHECK_TYPES as readonly string[]).includes(checkType)) {
+  if (checkType && (RECORD_TYPES as readonly string[]).includes(checkType)) {
     conditions.push(eq(fireSafetyChecksTable.checkType, checkType));
   }
   if (siteId && !isNaN(parseInt(siteId))) {
@@ -218,6 +266,87 @@ router.get("/", requireAuth, async (req, res) => {
 
   const attendees = await listDrillAttendees(clientId, rows.filter(row => row.checkType === "fire_drill").map(row => row.id));
   res.json(rows.map(row => ({ ...row, staffPresent: attendees.get(row.id) ?? [] })));
+});
+
+/**
+ * A night walk can't be recorded more than an hour before its time, and each
+ * walk of a night is recorded once per site. A device replay of the same
+ * entry is let through to be recognised as a replay.
+ */
+async function refuseNightWalk(
+  clientId: number, siteId: number, checkDate: string, walkTime: (typeof NIGHT_WALK_TIMES)[number],
+  clientEntryId?: string, exceptId?: number,
+): Promise<{ status: number; error: string } | null> {
+  const timeZone = await getAccountTimezone(clientId);
+  if (walkInstant(checkDate, walkTime, timeZone).getTime() - NIGHT_WALK_EARLY_MINUTES * 60_000 > Date.now()) {
+    return { status: 400, error: `The ${walkTime} walk on that day hasn't come round yet` };
+  }
+  const [already] = await db.select({ id: fireSafetyChecksTable.id, clientEntryId: fireSafetyChecksTable.clientEntryId })
+    .from(fireSafetyChecksTable)
+    .where(and(
+      eq(fireSafetyChecksTable.clientId, clientId), eq(fireSafetyChecksTable.siteId, siteId),
+      eq(fireSafetyChecksTable.checkType, "night_walk"), eq(fireSafetyChecksTable.checkDate, checkDate),
+      eq(fireSafetyChecksTable.walkTime, walkTime),
+      ...(exceptId ? [sql`${fireSafetyChecksTable.id} <> ${exceptId}`] : []),
+    )).limit(1);
+  if (already && !(clientEntryId && already.clientEntryId === clientEntryId)) {
+    return { status: 409, error: `The ${walkTime} night walk on that day is already recorded for this site` };
+  }
+  return null;
+}
+
+// GET /api/fire-safety/escape-routes?siteId=
+// The site's escape routes, ticked on each escape route sign-off and night walk.
+router.get("/escape-routes", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const { routes, shared } = await loadEscapeRoutes(clientId, siteId);
+  res.json({ siteId, routes, shared });
+});
+
+// PUT /api/fire-safety/escape-routes?siteId= — replace the site's list (managers).
+// Walks already recorded keep the routes they ticked.
+router.put("/escape-routes", requireAuth, denyViewers, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const parsed = escapeRouteListSchema.safeParse(req.body?.routes);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid routes" });
+  const duplicate = duplicateRouteName(parsed.data);
+  if (duplicate) return res.status(400).json({ error: `Two routes are called "${duplicate}". Give each route its own name.` });
+  const before = await loadEscapeRoutes(clientId, siteId);
+  await saveEscapeRoutes(clientId, siteId, parsed.data);
+  await appendAuditEvent(req, {
+    clientId, entityType: "fire_escape_routes", entityId: siteId ?? 0, action: "updated",
+    before: { siteId, routes: before.routes }, after: { siteId, routes: parsed.data },
+  });
+  res.json({ siteId, routes: parsed.data, shared: false });
+});
+
+// GET /api/fire-safety/night-walks?siteId=
+// The night porter's 22:00, 02:00 and 06:00 walks at each site with a night
+// porter: tonight (or the night now ending) and the six nights before.
+router.get("/night-walks", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  const deptId = getActiveDepartmentId(req);
+  const access = await checkSiteAccess(siteId, clientId, deptId);
+  if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const accessibleSiteIds = deptId === null ? null : (await allowedSitesSubquery(clientId, deptId)).map(site => site.id);
+  const sites = await nightWalkSites(clientId, { siteId, accessibleSiteIds });
+  res.json({ walkTimes: NIGHT_WALK_TIMES, graceMinutes: NIGHT_WALK_GRACE_MINUTES, sites });
 });
 
 // GET /api/fire-safety/drill-attendance?siteId=
@@ -287,8 +416,14 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
-  const details = await resolveFireDetails(clientId, data.checkType, data.siteId ?? null, data);
+  const details = await resolveFireDetails(clientId, data.checkType, data.siteId ?? null, { ...data, performedBy: performer.performedBy });
   if ("error" in details) return res.status(400).json({ error: details.error });
+  const walk = await resolveWalkRoutes(clientId, data.checkType, data.siteId ?? null, data.notes, data.result);
+  if ("error" in walk) return res.status(400).json({ error: walk.error });
+  if (data.checkType === "night_walk") {
+    const refused = await refuseNightWalk(clientId, data.siteId!, data.checkDate, details.walkTime as (typeof NIGHT_WALK_TIMES)[number], data.clientEntryId);
+    if (refused) return res.status(refused.status).json({ error: refused.error });
+  }
   const isDrill = data.checkType === "fire_drill";
   const present = isDrill ? await resolveDrillAttendees(clientId, deptId, data.staffPresentIds ?? []) : { attendees: [] };
   if ("error" in present) return res.status(400).json({ error: present.error });
@@ -310,7 +445,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
           clientId,
           checkType: data.checkType,
           checkDate: data.checkDate,
-          result: data.result,
+          result: walk.result,
           siteId: data.siteId ?? null,
           location: data.location ?? null,
           notes: data.notes ?? null,
@@ -377,14 +512,26 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const {
     callPointId, callPoint, nightStaff, drillTime, evacuationSeconds, staffPresentIds,
-    soundLevelDb, soundLevelMethod, soundLevelBedhead, ...changes
+    soundLevelDb, soundLevelMethod, soundLevelBedhead, walkTime, signature, ...changes
   } = parsed.data;
   const siteId = "siteId" in parsed.data ? parsed.data.siteId ?? null : existing.siteId;
   const details = await resolveFireDetails(clientId, existing.checkType, siteId, {
     callPointId, callPoint, nightStaff, drillTime, evacuationSeconds, notes: changes.notes,
-    soundLevelDb, soundLevelMethod, soundLevelBedhead,
+    soundLevelDb, soundLevelMethod, soundLevelBedhead, walkTime, signature,
+    performedBy: performer ? performer.performedBy : undefined,
   }, existing);
   if ("error" in details) return res.status(400).json({ error: details.error });
+  if (changes.notes !== undefined || changes.result !== undefined) {
+    const walk = await resolveWalkRoutes(clientId, existing.checkType, siteId,
+      changes.notes !== undefined ? changes.notes : existing.notes, changes.result ?? existing.result as "pass" | "fail", existing);
+    if ("error" in walk) return res.status(400).json({ error: walk.error });
+    changes.result = walk.result;
+  }
+  if (existing.checkType === "night_walk" && (details.walkTime !== existing.walkTime || changes.checkDate !== undefined || siteId !== existing.siteId)) {
+    const refused = await refuseNightWalk(clientId, siteId!, changes.checkDate ?? existing.checkDate,
+      details.walkTime as (typeof NIGHT_WALK_TIMES)[number], undefined, id);
+    if (refused) return res.status(refused.status).json({ error: refused.error });
+  }
   const isDrill = existing.checkType === "fire_drill";
   // Leaving the list out keeps who was present as recorded.
   const present = isDrill && staffPresentIds !== undefined

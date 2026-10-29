@@ -379,6 +379,9 @@ jobs:
       - name: FireTrack drill time, evacuation, staff present and drill attendance tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-drill-records
 
+      - name: FireTrack sleeping accommodation, per-site escape routes and night porter fire walks tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:night-fire-walks
+
       - name: FireTrack discharge test and ComplyTrack task link tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:fire-discharge-task-link
 
