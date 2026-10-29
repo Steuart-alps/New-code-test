@@ -153,6 +153,8 @@ async function routeApi(route) {
     case "/api/managed-by": return json(route, null);
     // The app-wide storage limit banner (#156).
     case "/api/storage/status": return json(route, { state: "not_limited", canManage: true, autoTopUp: false, usedBytes: 0, capacityBytes: null });
+    // A finished setup, so the "add your team first" gate stays out of the way.
+    case "/api/setup/state": return json(route, { needsSetup: false, canManage: true });
     case "/api/sites": return json(route, SITES);
     case "/api/photos": return json(route, []);
     case "/api/photos/requirements": return json(route, []);
