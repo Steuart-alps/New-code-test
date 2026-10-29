@@ -376,6 +376,11 @@ async function routeApi(route, url) {
     return jsonResponse(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
   }
 
+  // GreenTrack's "Contractor checks" box (components/track-contractor-checks.tsx):
+  // no contractor visits or compliance checks in this business.
+  if (pathname === "/api/contractor-visits" && method === "GET") return jsonResponse(route, { types: [], visits: [] });
+  if (pathname === "/api/compliance-items" && method === "GET") return jsonResponse(route, []);
+
   if (pathname === "/api/managed-by" && method === "GET") {
     // No consultant practice branding for this business.
     managedByRequests += 1;

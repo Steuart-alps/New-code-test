@@ -41,6 +41,7 @@ try {
   const listed = await visits();
   for (const key of ['pest:visit', 'legionella:cold_tank_clean', 'legionella:calorifier_inspection', 'legionella:tmv_service',
     'legionella:risk_assessment', 'legionella:water_sampling', 'fire:alarm_service', 'fire:risk_assessment',
+    'fire:sprinkler_service', 'fire:kitchen_suppression_service', 'fire:aov_service', 'fire:intruder_alarm_service', 'fire:cctv_service',
     'pat:testing', 'green:service', 'green:puwer', 'green:loler_6_monthly', 'green:loler', 'green:nsts', 'green:examination', 'bike:service',
     'coshh:lev_examination', 'tree:visual_assessment', 'hot_tub:microbiological_test']) {
     assert.ok(listed.types.some(type => type.key === key), `${key} is listed`);
@@ -124,6 +125,22 @@ try {
   assert.equal(sampling.dueDate, isoDay(30));
   assert.equal((await check(sampling.checkId)).title, 'Legionella Water Sampling');
   console.log('ok - water sampling keeps the date typed for it');
+
+  // FireTrack's other fire and security services work the same way, and say
+  // which contractor trade to suggest.
+  await choose('fire:sprinkler_service', siteA.id, waterCo.id, { dueDate: isoDay(45) });
+  const sprinkler = await row('fire:sprinkler_service', siteA.id);
+  assert.equal(sprinkler.dueDate, isoDay(45));
+  const sprinklerCheck = await check(sprinkler.checkId);
+  assert.equal(sprinklerCheck.title, 'Sprinkler System Service');
+  assert.equal(sprinklerCheck.contractorId, waterCo.id);
+  assert.equal(sprinklerCheck.frequencyMonths, 3);
+  const types = (await visits()).types;
+  assert.deepEqual(types.find(type => type.key === 'fire:sprinkler_service').trades, ['sprinkler_systems']);
+  assert.deepEqual(types.find(type => type.key === 'fire:alarm_service').trades, ['fire_alarm']);
+  assert.deepEqual(types.find(type => type.key === 'pest:visit').trades, ['pest_control']);
+  assert.deepEqual(types.find(type => type.key === 'bike:service').trades, []);
+  console.log('ok - fire and security services keep their own date and suggest a trade');
 
   // ── FireTrack: the service is its compliance check, with its own date ──────
   // (FireTrack shows the check; it no longer records the service itself.)

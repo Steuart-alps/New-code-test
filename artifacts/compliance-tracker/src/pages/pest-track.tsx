@@ -37,6 +37,7 @@ import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -788,6 +789,8 @@ export default function PestTrackPage() {
             <p className="text-xs text-muted-foreground">contractor visits</p>
           </div>
         </div>
+
+        <TrackContractorChecks module="pest" />
 
         {/* ── Tabs ─────────────────────────────────────────────────────────── */}
         <Tabs value={activeTab} onValueChange={v => setActiveTab(v as any)}>

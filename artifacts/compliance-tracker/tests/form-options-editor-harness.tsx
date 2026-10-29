@@ -10,7 +10,8 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 0 } },
 });
 
-// Same labelling as the FixTrack trades editor (src/pages/fix-track.tsx).
+// A plain label for each stored code, as the trades editors pass
+// (tradeLabel in src/lib/contractor-trades.ts).
 const humanizeType = (value: string) =>
   value.split("_").map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(" ");
 

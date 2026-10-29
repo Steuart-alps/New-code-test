@@ -58,6 +58,7 @@ import { DocumentField, downloadRegisterDocument, type DocumentValue } from "@/c
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { GreenDailyChecksTab } from "@/components/green-daily-checks";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -2417,6 +2418,8 @@ export default function GreenTrackPage() {
             ))}
           </div>
         )}
+
+        <TrackContractorChecks module="green" />
 
         {/* ── Tabs + toolbar ────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center justify-between gap-3">

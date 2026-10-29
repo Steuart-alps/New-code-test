@@ -31,6 +31,7 @@ import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -427,6 +428,8 @@ export default function TreeTrackPage() {
           <Plus className="w-4 h-4" /> Record Inspection
         </Button>
       </div>
+
+      <TrackContractorChecks module="tree" siteId={filterSite !== "all" ? Number(filterSite) : undefined} />
 
       {/* Status overview */}
       {statuses.length > 0 && (
