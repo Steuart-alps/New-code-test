@@ -142,9 +142,15 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
     frequencyMonths: null, dueFrom: "track",
   },
   {
+    key: "green:loler_6_monthly", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
+    title: "GreenTrack LOLER Thorough Examination (6-monthly)", label: "LOLER thorough examination, 6-monthly (e.g. vehicle lift)",
+    description: "Six-monthly thorough examination of equipment that lifts people and of lifting accessories, such as a vehicle lift (LOLER regulation 9). Due when the first machine at the site is due one; record each in GreenTrack's statutory log as a 6-monthly LOLER examination.",
+    frequencyMonths: null, dueFrom: "track",
+  },
+  {
     key: "green:loler", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
-    title: "GreenTrack LOLER Thorough Examination", label: "LOLER thorough examination (lifting equipment)",
-    description: "Thorough examination of lifting equipment and accessories by a competent person: every 12 months, or 6 months for equipment that lifts people and for accessories (LOLER regulation 9). Due when the first machine at the site is due one; record each in GreenTrack's statutory log.",
+    title: "GreenTrack LOLER Thorough Examination", label: "LOLER thorough examination, annual (e.g. axle stands)",
+    description: "Annual thorough examination of other lifting equipment, such as axle stands or a front loader (LOLER regulation 9). Due when the first machine at the site is due one; record each in GreenTrack's statutory log as an annual LOLER examination.",
     frequencyMonths: null, dueFrom: "track",
   },
   {
@@ -170,8 +176,8 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
   {
     key: "coshh:lev_examination", module: "coshh", trackLabel: "COSHHTrack", services: ["coshhtrack"],
     title: "LEV Thorough Examination", label: "Local exhaust ventilation (LEV) thorough examination",
-    description: "Thorough examination and test of local exhaust ventilation by a competent person, at least every 14 months (COSHH regulation 9). Due when the first system at the site is due; record each examination in COSHHTrack.",
-    frequencyMonths: 14, dueFrom: "track",
+    description: "Thorough examination and test of local exhaust ventilation by a competent contractor every 12 months, and never more than 14 months apart (COSHH regulation 9). Due when the first system at the site is due; record each examination in COSHHTrack.",
+    frequencyMonths: 12, dueFrom: "track",
   },
   {
     key: "tree:visual_assessment", module: "tree", trackLabel: "TreeTrack", services: ["treetrack"],
@@ -194,6 +200,7 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
  */
 const GREEN_INSPECTION_TYPES: Record<string, readonly string[]> = {
   "green:puwer": ["thorough_examination"],
+  "green:loler_6_monthly": ["loler_examination_6_monthly"],
   "green:loler": ["loler_examination"],
   "green:nsts": [NSTS_TEST_INSPECTION_TYPE, "nsts"],
   "green:examination": [],
@@ -338,7 +345,8 @@ export async function trackDueDates(clientId: number, types: readonly Contractor
   }
 
   // GreenTrack's statutory log: each machine's latest inspection of each
-  // kind. PUWER, LOLER and NSTS have their own lines; the rest share one.
+  // kind. PUWER, LOLER (6-monthly and annual) and NSTS have their own lines;
+  // the rest share one.
   if ([...wanted].some((key) => key in GREEN_INSPECTION_TYPES)) {
     const rows = rowsOf<{ site_id: number; inspection_type: string; due: unknown }>(await db.execute(sql`
       SELECT m.site_id, p.inspection_type, MIN(p.next_inspection_date) AS due

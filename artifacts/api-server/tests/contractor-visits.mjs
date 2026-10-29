@@ -41,7 +41,7 @@ try {
   const listed = await visits();
   for (const key of ['pest:visit', 'legionella:cold_tank_clean', 'legionella:calorifier_inspection', 'legionella:tmv_service',
     'legionella:risk_assessment', 'legionella:water_sampling', 'fire:alarm_service', 'fire:risk_assessment',
-    'pat:testing', 'green:service', 'green:puwer', 'green:loler', 'green:nsts', 'green:examination', 'bike:service',
+    'pat:testing', 'green:service', 'green:puwer', 'green:loler_6_monthly', 'green:loler', 'green:nsts', 'green:examination', 'bike:service',
     'coshh:lev_examination', 'tree:visual_assessment', 'hot_tub:microbiological_test']) {
     assert.ok(listed.types.some(type => type.key === key), `${key} is listed`);
     assert.ok(listed.visits.some(v => v.visitKey === key && v.siteId === siteA.id && v.checkId === null));
@@ -155,20 +155,22 @@ try {
   const loader = await insertId(`INSERT INTO green_machines (client_id, site_id, name) VALUES ($1, $2, 'Loader') RETURNING id`, [owner.clientId, siteA.id]);
   for (const [machineId, type, next] of [
     [machine, 'thorough_examination', isoDay(90)], [loader, 'thorough_examination', isoDay(70)],
-    [loader, 'loler_examination', isoDay(30)], [machine, 'nsts_test', isoDay(400)], [machine, 'annual_inspection', isoDay(15)],
+    [loader, 'loler_examination', isoDay(30)], [loader, 'loler_examination_6_monthly', isoDay(45)],
+    [machine, 'nsts_test', isoDay(400)], [machine, 'annual_inspection', isoDay(15)],
   ]) {
     await pool.query(`INSERT INTO green_puwer_inspections (client_id, machine_id, inspection_date, next_inspection_date, inspection_type)
       VALUES ($1, $2, $3, $4, $5)`, [owner.clientId, machineId, isoDay(-200), next, type]);
   }
   assert.equal((await row('green:puwer', siteA.id)).trackDueDate, isoDay(70), "the first machine's PUWER inspection");
   assert.equal((await row('green:loler', siteA.id)).trackDueDate, isoDay(30));
+  assert.equal((await row('green:loler_6_monthly', siteA.id)).trackDueDate, isoDay(45), '6-monthly LOLER has its own line');
   assert.equal((await row('green:nsts', siteA.id)).trackDueDate, isoDay(400));
   assert.equal((await row('green:examination', siteA.id)).trackDueDate, isoDay(15), 'other inspections share one line');
   await choose('green:loler', siteA.id, waterCo.id);
   const loler = await row('green:loler', siteA.id);
   assert.equal((await check(loler.checkId)).title, 'GreenTrack LOLER Thorough Examination');
   assert.equal(loler.dueDate, isoDay(30));
-  console.log('ok - GreenTrack PUWER, LOLER, NSTS and other inspections each have their own line and date');
+  console.log('ok - GreenTrack PUWER, LOLER (6-monthly and annual), NSTS and other inspections each have their own line and date');
 
   // ── BikeTrack servicing and COSHHTrack LEV examinations ────────────────────
   const bike = await insertId(`INSERT INTO bikes (client_id, site_id, ref) VALUES ($1, $2, 'B1') RETURNING id`, [owner.clientId, siteA.id]);

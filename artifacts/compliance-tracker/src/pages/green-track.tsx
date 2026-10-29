@@ -232,7 +232,8 @@ const DEFECT_STATUS_LABELS: Record<string, string> = {
 
 const PUWER_INSPECTION_TYPE_LABELS: Record<string, string> = {
   thorough_examination: "Thorough examination (PUWER)",
-  loler_examination:    "Thorough examination (LOLER)",
+  loler_examination:    "Thorough examination (LOLER, annual)",
+  loler_examination_6_monthly: "Thorough examination (LOLER, 6-monthly: lifts people, or a lifting accessory)",
   annual_inspection:    "Annual inspection",
   periodic_inspection:  "Periodic inspection",
   [NSTS_TEST_INSPECTION_TYPE]: "NSTS sprayer test",
