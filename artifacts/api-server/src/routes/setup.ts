@@ -183,7 +183,9 @@ router.put("/setup/modules", requireAuth, requireClientAdmin, async (req, res) =
 // due date from the last service date (or a next due date); checks missing
 // from the list are added; with removeUnticked, unticked starter checks that
 // are still exactly as seeded are taken off the list. Edited checks are never
-// changed or removed here.
+// changed or removed here. `custom` adds the business's own checks ("Add
+// check" under a heading) with the repeat interval it chose; one already on
+// the list with the same title at the same site is not added twice.
 router.post("/setup/starter-checks", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -192,6 +194,12 @@ router.post("/setup/starter-checks", requireAuth, requireClientAdmin, async (req
     siteId: z.number().int().positive().nullable().optional(),
     checks: z.array(z.object({ title: z.string().min(1).max(300), lastDone: day.nullable().optional(), nextDue: day.nullable().optional() }).strict()).max(100),
     removeUnticked: z.boolean().default(false),
+    custom: z.array(z.object({
+      category: z.string().trim().min(1).max(100),
+      title: z.string().trim().min(1).max(300),
+      frequencyMonths: z.number().int().min(1).max(120),
+      lastDone: day.nullable().optional(),
+    }).strict()).max(50).default([]),
   }).strict().safeParse(body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const siteId = parsed.data.siteId ?? null;
@@ -245,6 +253,37 @@ router.post("/setup/starter-checks", requireAuth, requireClientAdmin, async (req
         await tx.insert(complianceItemsTable).values({ clientId, categoryId, siteId, ...values, ...fields });
         counts.created++;
       }
+    }
+
+    for (const custom of parsed.data.custom) {
+      const [duplicate] = await tx.select({ id: complianceItemsTable.id }).from(complianceItemsTable)
+        .where(and(
+          eq(complianceItemsTable.clientId, clientId),
+          sql`lower(${complianceItemsTable.title}) = lower(${custom.title})`,
+          siteId == null ? isNull(complianceItemsTable.siteId) : eq(complianceItemsTable.siteId, siteId),
+        )).limit(1);
+      if (duplicate) { counts.kept++; continue; }
+      let categoryId = categoryByName.get(custom.category.toLowerCase());
+      if (categoryId == null) {
+        const starter = categories.find((cat) => cat.name.toLowerCase() === custom.category.toLowerCase());
+        const [inserted] = await tx.insert(categoriesTable)
+          .values({ clientId, name: starter?.name ?? custom.category, color: starter?.color ?? "#6366f1" }).returning();
+        categoryId = inserted.id;
+        categoryByName.set(custom.category.toLowerCase(), categoryId);
+      }
+      const lastDone = custom.lastDone ?? null;
+      await tx.insert(complianceItemsTable).values({
+        clientId, categoryId, siteId,
+        title: custom.title,
+        status: "pending",
+        priority: "high",
+        leadTimeDays: 30,
+        frequencyMonths: custom.frequencyMonths,
+        dueDate: lastDone ? new Date(`${addMonthsToDay(lastDone, custom.frequencyMonths)}T00:00:00Z`) : null,
+        completedAt: lastDone ? new Date(`${lastDone}T00:00:00Z`) : null,
+        notes: lastDone ? `Added during setup. Last service or inspection ${ukDate(lastDone)}.` : "Added during setup. Set the due date from your last service or inspection.",
+      });
+      counts.created++;
     }
 
     if (parsed.data.removeUnticked) {

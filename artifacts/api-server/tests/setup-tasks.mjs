@@ -163,6 +163,33 @@ async function setupWizard(a, b, viewer) {
   check("setup: edited starter checks are never removed", byTitle.get("Goods Lift — Thorough Examination")?.notes === "We have a goods lift");
   check("setup: unknown starter title rejected",
     (await a("POST", "/setup/starter-checks", { checks: [{ title: "Rocket engine service" }] })).status === 400);
+  check("setup: front loader is on the LOLER starter list",
+    starter.find((c) => c.title === "Front Loader — Thorough Examination")?.category === "LOLER"
+      && starter.find((c) => c.title === "Front Loader — Thorough Examination")?.frequencyMonths === 12);
+
+  // "Add check": the business's own check under a heading, with its own interval.
+  const custom = await a("POST", "/setup/starter-checks", {
+    siteId: site.data?.id,
+    checks: [],
+    custom: [
+      { category: "LOLER", title: "Mini digger — Thorough Examination", frequencyMonths: 6, lastDone: "2026-05-15" },
+      { category: "Grounds", title: "Bunker rake check", frequencyMonths: 3 },
+    ],
+  });
+  check("setup custom: own checks are added", custom.status === 200 && custom.data?.created === 2, JSON.stringify(custom.data));
+  const withCustom = (await a("GET", "/compliance-items")).data ?? [];
+  const digger = withCustom.find((i) => i.title === "Mini digger — Thorough Examination");
+  check("setup custom: due date is last done plus the chosen interval",
+    isoDay(digger?.dueDate) === "2026-11-15" && digger?.frequencyMonths === 6 && digger?.siteId === site.data?.id && digger?.categoryName === "LOLER",
+    JSON.stringify(digger));
+  const rake = withCustom.find((i) => i.title === "Bunker rake check");
+  check("setup custom: undated own check under a new heading", rake?.dueDate == null && rake?.frequencyMonths === 3 && rake?.categoryName === "Grounds", JSON.stringify(rake));
+  const again = await a("POST", "/setup/starter-checks", {
+    siteId: site.data?.id, checks: [], custom: [{ category: "LOLER", title: "mini digger — thorough examination", frequencyMonths: 6 }],
+  });
+  check("setup custom: saving the same check again does not add it twice", again.data?.created === 0 && again.data?.kept === 1, JSON.stringify(again.data));
+  check("setup custom: interval must be 1 to 120 months",
+    (await a("POST", "/setup/starter-checks", { checks: [], custom: [{ category: "LOLER", title: "Crane", frequencyMonths: 0 }] })).status === 400);
 
   // Tenant isolation.
   check("setup isolation: other tenant cannot use this site",
