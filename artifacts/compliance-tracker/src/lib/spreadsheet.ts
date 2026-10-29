@@ -164,13 +164,23 @@ export function downloadExcel(filename: string, sheetName: string, rows: string[
   XLSX.writeFile(workbook, filename);
 }
 
-/** Save several tabs as one .xlsx file, every cell stored as text (see downloadExcel). */
-export function downloadWorkbook(filename: string, sheets: { name: string; rows: string[][] }[]) {
+/** A workbook cell: text, or a formula Excel works out (shown with `format`). */
+export type WorkbookCell = string | { formula: string; format?: string };
+
+/**
+ * Save several tabs as one .xlsx file. Text cells are stored as text (see
+ * downloadExcel); formula cells are left for Excel to calculate.
+ */
+export function downloadWorkbook(filename: string, sheets: { name: string; rows: WorkbookCell[][] }[]) {
   const workbook = XLSX.utils.book_new();
   for (const { name, rows } of sheets) {
-    const sheet = XLSX.utils.aoa_to_sheet(rows.map(row => row.map(value => ({ t: "s", v: value }))));
+    const sheet = XLSX.utils.aoa_to_sheet(rows.map(row => row.map(value => typeof value === "string"
+      ? { t: "s", v: value }
+      : { t: "n", f: value.formula, ...(value.format ? { z: value.format } : {}) })));
     const columns = Math.max(0, ...rows.map(row => row.length));
-    sheet["!cols"] = Array.from({ length: columns }, (_, column) => ({ wch: Math.min(60, Math.max(12, ...rows.map(row => (row[column] ?? "").length + 2))) }));
+    // Titles and notes above the headings (a single long cell) don't widen the column.
+    const width = (value: WorkbookCell | undefined, row: WorkbookCell[]) => typeof value === "string" && row.length > 1 ? value.length + 2 : 12;
+    sheet["!cols"] = Array.from({ length: columns }, (_, column) => ({ wch: Math.min(48, Math.max(12, ...rows.map(row => width(row[column], row)))) }));
     XLSX.utils.book_append_sheet(workbook, sheet, name.slice(0, 31));
   }
   XLSX.writeFile(workbook, filename);

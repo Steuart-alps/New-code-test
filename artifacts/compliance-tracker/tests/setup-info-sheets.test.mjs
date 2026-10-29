@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { INFO_SHEETS, infoSheetForBusiness, readMeRows, siteCountsTab } from "../src/lib/setup-info-sheets.ts";
+import { CHECKLISTS } from "../src/lib/setup-checklists.ts";
 
 // The setup wizard's "What we need from you" workbooks (src/lib/setup-info-sheets.ts):
 // a tab that says it can be uploaded must carry exactly the headers of that
@@ -88,6 +89,36 @@ for (const row of services) assert.ok(tradeCodes.has(normalise(row[2])), `trade 
   const fitted = infoSheetForBusiness(INFO_SHEETS.find((sheet) => sheet.key === "getting-started"), { modules: ["kitchentrack"], sites: ["Main"] });
   const countsTab = fitted.tabs.find((tab) => tab.name === "Counts per site");
   assert.ok(items(countsTab).includes("Fridges") && !items(countsTab).includes("Showers"), "the Getting started workbook carries the fitted counts tab");
+}
+
+// Checklist tabs: the clients' own compliance checklist layout, first in each
+// workbook, with Due Date and Status formulas pointing at their own row.
+{
+  const BRAMSHAW_COLUMNS = ["Item", "Time Period", "Last Completed", "Due Date", "Status", "Contractor", "Telephone Number", "Email Address"];
+  for (const key of Object.keys(CHECKLISTS)) {
+    const sheet = INFO_SHEETS.find((candidate) => candidate.key === key);
+    assert.ok(sheet, `checklist ${key} belongs to a workbook`);
+    const [tab] = sheet.tabs;
+    assert.equal(tab.name, "Checklist", `${sheet.label}: Checklist is the first tab`);
+    assert.deepEqual(tab.headers.slice(0, 8), BRAMSHAW_COLUMNS, `${sheet.label}: checklist columns match the clients' checklist`);
+    const headingRow = (tab.preamble?.length ?? 0) + 1;
+    tab.rows.forEach((row, index) => {
+      const excelRow = headingRow + 1 + index;
+      const [item, , , due, status] = row;
+      if (typeof status !== "object") return; // blank or section line
+      assert.ok(typeof item === "string" && item, `${sheet.label}: line ${excelRow} has an item`);
+      assert.ok(status.formula.startsWith(`IF(D${excelRow}=""`), `${sheet.label}: "${item}" status reads its own due date (row ${excelRow})`);
+      if (typeof due === "object") assert.ok(due.formula.includes(`EDATE(C${excelRow},`) && due.format === "dd/mm/yyyy", `${sheet.label}: "${item}" due date from its own last completed date`);
+    });
+    const items = tab.rows.filter((row) => typeof row[4] === "object").map((row) => row[0]);
+    assert.equal(new Set(items).size, items.length, `${sheet.label}: no item listed twice`);
+  }
+  const fire = INFO_SHEETS.find((sheet) => sheet.key === "firetrack").tabs[0].rows.map((row) => row[0]);
+  assert.ok(fire.includes("In-house") && fire.indexOf("Fire alarm maintenance") < fire.indexOf("In-house"), "contractor work first, then In-house");
+  // An item belongs to one spreadsheet only.
+  const everywhere = Object.values(CHECKLISTS).flatMap((list) => [...list.contractor, ...list.inHouse].map((entry) => entry.item));
+  const repeated = everywhere.filter((item, index) => everywhere.indexOf(item) !== index);
+  assert.deepEqual(repeated, [], "no checklist item on two spreadsheets");
 }
 
 console.log(`setup info sheets: ${INFO_SHEETS.length} workbooks, ${importable.length} uploadable tabs match their imports`);

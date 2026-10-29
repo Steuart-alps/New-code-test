@@ -7,6 +7,8 @@
  * uploaded as it is; keep them in step when an import template changes.
  */
 
+import { CHECKLISTS, CHECKLIST_HEADERS, checklistRows, type InfoCell } from "./setup-checklists.ts";
+
 export const SETUP_SERVICE_FEE = "£500 + VAT";
 
 export type InfoSheetTab = {
@@ -15,9 +17,11 @@ export type InfoSheetTab = {
   about: string;
   /** Where a filled-in tab can be uploaded; otherwise it is typed in (or sent to ALPS). */
   importsInto?: string;
+  /** Title lines above the heading row. */
+  preamble?: string[][];
   headers: string[];
   /** Example or starter rows (an example row is replaced by your own). */
-  rows: string[][];
+  rows: InfoCell[][];
 };
 
 export type InfoSheet = { key: string; label: string; about: string; tabs: InfoSheetTab[] };
@@ -141,10 +145,8 @@ export function siteCountsTab(context: InfoSheetContext = {}): InfoSheetTab {
   };
 }
 
-const serviceDates = (items: string[]): string[][] => items.map((item) => [item, "", "", "", "", ""]);
-const SERVICE_DATE_HEADERS = ["Check", "Site", "Last done (dd/mm/yyyy)", "Done by (contractor or person)", "Certificate or report held? (Yes/No)", "Notes"];
 
-export const INFO_SHEETS: InfoSheet[] = [
+const SHEETS: InfoSheet[] = [
   {
     key: "getting-started",
     label: "Getting started (every business)",
@@ -186,7 +188,7 @@ export const INFO_SHEETS: InfoSheet[] = [
         rows: [["Sam Patel", "Patel Electrical Ltd", "sam@example.co.uk", "01234 567890", "", "Electrical", "", "31/03/2027", ""]],
       },
       {
-        name: "Services by track", about: "Every contractor service ComplyTrack tracks. Put the company that does it, or N/A if you don't need it. Delete the tracks you don't use. When each was last done goes on the Compliance Checks spreadsheet.",
+        name: "Services by track", about: "Every contractor service ComplyTrack tracks. Put the company that does it, or N/A if you don't need it. Delete the tracks you don't use. When each was last done goes on the Checklist tab of that track's spreadsheet.",
         headers: ["Track", "Contractor service", "Trade", "Contractor company (or N/A)"],
         rows: CONTRACTOR_SERVICES.map(([track, service, trade]) => [track, service, trade, ""]),
       },
@@ -198,18 +200,6 @@ export const INFO_SHEETS: InfoSheet[] = [
     about: "When your servicing, inspections and certificates were last done. ComplyTrack works out when each is next due.",
     tabs: [
       {
-        name: "Service dates", about: "Fill in the ones that apply and delete the rest. Add any others on new lines. With AI features on, ComplyTrack can also read the dates from the certificates themselves.",
-        headers: SERVICE_DATE_HEADERS,
-        rows: serviceDates([
-          "Fire risk assessment", "Fire alarm service", "Emergency lighting service", "Fire extinguisher service",
-          "Electrical installation (EICR)", "Portable appliance testing (PAT)", "Gas safety certificate", "Boiler service",
-          "Oil boiler / tank service", "Legionella risk assessment", "Legionella water sampling", "Cold water tank inspection / clean",
-          "Calorifier inspection", "TMV service", "Asbestos management survey", "Lift thorough examination (LOLER)",
-          "Kitchen extraction / ductwork clean", "Air conditioning inspection", "Lightning protection test",
-          "Employers' liability insurance", "Public liability insurance", "Waste transfer note", "Waste carrier registration",
-        ]),
-      },
-      {
         name: "Asbestos register", about: "From your asbestos survey. Leave blank if the building was built after 2000.",
         headers: ["Site", "Location", "Material", "Condition", "Risk score", "Action", "Last inspected (dd/mm/yyyy)", "Notes"],
         rows: [["Main building", "Boiler room ceiling", "Asbestos insulating board", "Good", "Low", "Manage and re-inspect yearly", "", ""]],
@@ -219,7 +209,7 @@ export const INFO_SHEETS: InfoSheet[] = [
   {
     key: "firetrack",
     label: "FireTrack",
-    about: "Fire alarm call points, fire equipment and fire drills.",
+    about: "Fire safety checks, call points and fire equipment.",
     tabs: [
       {
         name: "Call points", about: "Every manual call point, in the order you test them.",
@@ -231,11 +221,6 @@ export const INFO_SHEETS: InfoSheet[] = [
         name: "Fire equipment", about: "Extinguishers, fire blankets, emergency lights, fire doors and alarm panels.",
         headers: ["Item (extinguisher, blanket, emergency light, fire door, alarm panel)", "Reference", "Type (e.g. CO2, foam)", "Location", "Site"],
         rows: [["Extinguisher", "EX1", "CO2 2kg", "Kitchen door", "Main building"]],
-      },
-      {
-        name: "Fire drills", about: "Your most recent fire drill at each site. Servicing dates go on the Compliance Checks spreadsheet.",
-        headers: ["Site", "Last fire drill (dd/mm/yyyy)", "Evacuation time (minutes)", "Notes"],
-        rows: [["Main building", "", "", ""]],
       },
     ],
   },
@@ -282,7 +267,7 @@ export const INFO_SHEETS: InfoSheet[] = [
     about: "The water outlets you test and flush, from your legionella risk assessment.",
     tabs: [
       {
-        name: "Outlets", about: "Sentinel outlets (nearest and furthest from each tank or heater), little-used outlets (including showers not used every week), calorifiers and TMVs. Servicing dates go on the Compliance Checks spreadsheet.",
+        name: "Outlets", about: "Sentinel outlets (nearest and furthest from each tank or heater), little-used outlets (including showers not used every week), calorifiers and TMVs. Servicing and testing dates go on the Checklist tab.",
         headers: ["Outlet name", "Type (hot, cold, calorifier, TMV, little-used)", "Location", "Site"],
         rows: [["Room 12 basin hot", "Hot", "First floor, room 12", "Main building"]],
       },
@@ -496,17 +481,34 @@ export const INFO_SHEETS: InfoSheet[] = [
   },
 ];
 
+/** Each workbook with a checklist starts with it, in the layout clients already use. */
+export const INFO_SHEETS: InfoSheet[] = SHEETS.map((sheet) => {
+  const checklist = CHECKLISTS[sheet.key];
+  if (!checklist) return sheet;
+  const title = sheet.key === "compliance" ? "Compliance Checklist" : `${sheet.label} Checklist`;
+  const { preamble, rows } = checklistRows(title, checklist);
+  return {
+    ...sheet,
+    tabs: [{
+      name: "Checklist",
+      about: "Every check with its time period, when it was last done and who does it: contractor work first, then in-house checks.",
+      preamble, headers: CHECKLIST_HEADERS, rows,
+    }, ...sheet.tabs],
+  };
+});
+
 /** The Read me tab: what each tab is for and how it gets into ComplyTrack. */
 export function readMeRows(sheet: InfoSheet): string[][] {
   return [
     [`ComplyTrack: ${sheet.label}`],
     [sheet.about],
     [],
+    [`Rather not fill this in? ALPS can set up your whole account for you for a one-off ${SETUP_SERVICE_FEE}: send us what you have, in any form. Ask from Set up > Before you get started.`],
+    [],
     ["Tab", "What to fill in", "How it gets into ComplyTrack"],
     ...sheet.tabs.map((tab) => [tab.name, tab.about, tab.importsInto ? `Upload this whole workbook at ${tab.importsInto}; it reads this tab` : "Type it in, or send it to ALPS"]),
     [],
     ["Where a tab starts with an example line, replace it with your own. Leave out anything you don't have yet; it can be added later."],
-    [`Short of time? ALPS can enter all of this for you for a one-off ${SETUP_SERVICE_FEE}. Ask from Set up > Before you get started.`],
   ];
 }
 
@@ -520,6 +522,6 @@ export async function downloadInfoSheet(sheet: InfoSheet, context: InfoSheetCont
   const fitted = infoSheetForBusiness(sheet, context);
   downloadWorkbook(`complytrack-${sheet.key}-information.xlsx`, [
     { name: "Read me", rows: readMeRows(fitted) },
-    ...fitted.tabs.map((tab) => ({ name: tab.name, rows: [tab.headers, ...tab.rows] })),
+    ...fitted.tabs.map((tab) => ({ name: tab.name, rows: [...(tab.preamble ?? []), tab.headers, ...tab.rows] })),
   ]);
 }
