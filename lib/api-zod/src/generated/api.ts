@@ -9,6 +9,29 @@ import * as zod from 'zod';
 
 
 /**
+ * Deletes the business's records and stored files at once, keeping the audit trail and a record of the deletion. Refused for the operator's own business and for any business with a subscription, a payment, an AI top-up or a legal hold. The business's name must be typed to confirm.
+ * @summary Permanently delete a test business that never paid (platform operators)
+ */
+export const DeleteTestBusinessParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const deleteTestBusinessBodyConfirmNameMax = 200;
+
+
+
+export const DeleteTestBusinessBody = zod.object({
+  "confirmName": zod.string().min(1).max(deleteTestBusinessBodyConfirmNameMax).describe('The business\'s name, typed to confirm')
+})
+
+export const DeleteTestBusinessResponse = zod.object({
+  "ok": zod.boolean(),
+  "rowsDeleted": zod.number(),
+  "filesDeleted": zod.number()
+})
+
+
+/**
  * @summary List feedback for the selected client (administrators only)
  */
 export const ListFeedbackReportsQueryParams = zod.object({

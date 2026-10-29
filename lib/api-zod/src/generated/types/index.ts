@@ -461,6 +461,8 @@ export * from './storageUsage';
 export * from './storageUsageEstimatedCost';
 export * from './storageUsageEstimatedCostCurrency';
 export * from './temperatureLimit';
+export * from './testBusinessDeletionRequest';
+export * from './testBusinessDeletionResult';
 export * from './testEmailRequest';
 export * from './testEmailResponse';
 export * from './todayByDepartment';

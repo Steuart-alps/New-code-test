@@ -335,6 +335,10 @@ jobs:
       - name: Approved account deletion tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:approved-account-deletion
 
+      # ALPS deletes a never-paid test business at once; anything paid is refused.
+      - name: Test business deletion tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:delete-test-business
+
       - name: Client data deletion completeness tests (fresh schema)
         run: pnpm --filter @workspace/api-server run test:client-data-deletion-feedback
 

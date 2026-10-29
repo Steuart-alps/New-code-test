@@ -248,6 +248,8 @@ import type {
   Site,
   StorageStatus,
   StorageUsage,
+  TestBusinessDeletionRequest,
+  TestBusinessDeletionResult,
   TestEmailRequest,
   TestEmailResponse,
   TodayByDepartment,
@@ -309,6 +311,79 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getDeleteTestBusinessUrl = (id: number,) => {
+
+
+
+
+  return `/api/clients/${id}/delete-test-business`
+}
+
+/**
+ * Deletes the business's records and stored files at once, keeping the audit trail and a record of the deletion. Refused for the operator's own business and for any business with a subscription, a payment, an AI top-up or a legal hold. The business's name must be typed to confirm.
+ * @summary Permanently delete a test business that never paid (platform operators)
+ */
+export const deleteTestBusiness = async (id: number,
+    testBusinessDeletionRequest: TestBusinessDeletionRequest, options?: RequestInit): Promise<TestBusinessDeletionResult> => {
+
+  return customFetch<TestBusinessDeletionResult>(getDeleteTestBusinessUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(testBusinessDeletionRequest)
+  }
+);}
+
+
+
+
+
+export const getDeleteTestBusinessMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTestBusiness>>, TError,{id: number;data: BodyType<TestBusinessDeletionRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteTestBusiness>>, TError,{id: number;data: BodyType<TestBusinessDeletionRequest>}, TContext> => {
+
+const mutationKey = ['deleteTestBusiness'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteTestBusiness>>, {id: number;data: BodyType<TestBusinessDeletionRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  deleteTestBusiness(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteTestBusinessMutationResult = NonNullable<Awaited<ReturnType<typeof deleteTestBusiness>>>
+    export type DeleteTestBusinessMutationBody = BodyType<TestBusinessDeletionRequest>
+    export type DeleteTestBusinessMutationError = ErrorType<void>
+
+    /**
+ * @summary Permanently delete a test business that never paid (platform operators)
+ */
+export const useDeleteTestBusiness = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTestBusiness>>, TError,{id: number;data: BodyType<TestBusinessDeletionRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteTestBusiness>>,
+        TError,
+        {id: number;data: BodyType<TestBusinessDeletionRequest>},
+        TContext
+      > => {
+      return useMutation(getDeleteTestBusinessMutationOptions(options));
+    }
 
 export const getListFeedbackReportsUrl = (params?: ListFeedbackReportsParams,) => {
   const normalizedParams = new URLSearchParams();
