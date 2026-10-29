@@ -46,6 +46,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useChecklistSite } from "@/hooks/use-checklist-site";
+import { useWorkingSite } from "@/hooks/use-working-site";
 import { ChecklistSiteSelect } from "@/components/checklist-site-select";
 import { carryAnswers, createChecklistDraftStore, hasAnswers, type ChecklistDraftSlot } from "@/lib/checklist-carry";
 import WeeklyReviewTab from "./kitchen-weekly";
@@ -850,10 +851,13 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
 export function DailyDiaryTab() {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  // Which site's diary we're viewing/filling. null = the legacy client-wide
-  // whole-organisation diary (records with no site), matching the original
-  // single-diary behaviour.
-  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
+  // Which site's diary we're viewing/filling. It starts on the user's working
+  // site; null = the legacy client-wide whole-organisation diary (records with
+  // no site), which is also where a user without a working site starts.
+  const workingSite = useWorkingSite();
+  const [chosenSite, setChosenSite] = useState<{ id: number | null } | null>(null);
+  const selectedSiteId = chosenSite ? chosenSite.id : workingSite.siteId;
+  const setSelectedSiteId = (id: number | null) => setChosenSite({ id });
   const { data: sites } = useListSites();
 
   // The diary is scoped to the selected site: it loads that site's effective
@@ -1324,7 +1328,7 @@ export function DailyDiaryTab() {
         </CardContent>
       </Card>
 
-      {recordLoading || configLoading || !formReady ? (
+      {recordLoading || configLoading || !formReady || (!chosenSite && !workingSite.ready) ? (
         <Card>
           <CardContent className="p-12 flex justify-center">
             <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />

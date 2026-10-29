@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getApiErrorMessage } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
 import { AlertTriangle, Copy, Download, Flame, Loader2, LogOut, Mail, Phone, Printer, RefreshCw, ShieldAlert, Users } from "lucide-react";
+import { useWorkingSiteId } from "@/hooks/use-working-site";
 
 const ASBESTOS_TEXT: Record<ContractorSignInSite["asbestosStatus"], string> = {
   register: "Contractors see this site's asbestos register.",
@@ -67,7 +68,9 @@ export default function ContractorSignInPage() {
   });
   const sites = sitesQuery.data?.sites ?? [];
   const canManage = sitesQuery.data?.canManage ?? false;
-  const site = sites.find((s) => s.siteId === siteId) ?? sites[0] ?? null;
+  // A link's site, else the user's working site, else the first site.
+  const workingSiteId = useWorkingSiteId();
+  const site = sites.find((s) => s.siteId === (siteId ?? workingSiteId)) ?? sites[0] ?? null;
 
   useEffect(() => { setFireDraft(site?.fireProcedure ?? ""); }, [site?.siteId, site?.fireProcedure]);
 

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { useWorkingSiteId } from "@/hooks/use-working-site";
+import { useSiteFilterId, useWorkingSiteId } from "@/hooks/use-working-site";
 import { format } from "date-fns";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -745,7 +745,7 @@ export default function AquaTrackPage() {
 
   // ── Pool Quality state ──────────────────────────────────────────────────────
   const [filterType, setFilterType] = useState("");
-  const [filterSite, setFilterSite] = useState<number | undefined>();
+  const [filterSite, setFilterSite] = useSiteFilterId();
   const [poolRecordOpen, setPoolRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<string | undefined>();
   const [poolChecks, setPoolChecks] = useState<PoolCheck[]>([]);

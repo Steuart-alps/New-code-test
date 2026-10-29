@@ -231,6 +231,12 @@ try {
   await page.route("**/api/**", routeApi);
 
   await page.goto(`${baseUrl}/tests/kitchen-diary-harness.html`, { waitUntil: "domcontentloaded" });
+  // The business has one site, so the diary opens on it (the user's working
+  // site); the organisation diary is still a pick away.
+  await waitForDiary(page, { date: TODAY, unit: "Site Fridge", correctives: "" });
+  assert.equal((await diaryState(page)).site, String(SITE.id), "the diary opens on the working site");
+  checks.push("site: the diary opens on the user's working site");
+  await siteSelect(page).selectOption("");
   await waitForDiary(page, { date: TODAY, unit: "Org Fridge", correctives: "" });
 
   // ── A closed day is labelled closed, never missing ──

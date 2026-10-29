@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { API_BASE } from "@/lib/api";
 import { downloadFile } from "@/lib/download";
 import { useListSites } from "@workspace/api-client-react";
+import { useWorkingSite } from "@/hooks/use-working-site";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -387,6 +388,7 @@ export default function CleaningScheduleTab() {
   const [view, setView]                 = useState<string | null>(null);
   const [hasAccountLevel, setHasAccountLevel] = useState(false);
   const viewSite = sites.find(site => String(site.id) === view) ?? null;
+  const workingSite = useWorkingSite();
   const loadSeq = useRef(0);
   // Ticks, names and notes not yet saved, by period and task: kept when the
   // kitchen is changed so they aren't wiped by the reload; cleared by a save.
@@ -516,13 +518,15 @@ export default function CleaningScheduleTab() {
     loadTasks();
   }, []);
 
-  // Open on the first kitchen once kitchens exist; a business without
+  // Open on the user's working site's kitchen (else the first kitchen) once
+  // kitchens exist; a business without
   // kitchens keeps the account-level view it has always had.
   useEffect(() => {
-    if (sitesLoading) return;
+    if (sitesLoading || !workingSite.ready) return;
     if (view !== null && (view === ACCOUNT_LEVEL || viewSite)) return;
-    setView(sites.length > 0 ? String(sites[0].id) : ACCOUNT_LEVEL);
-  }, [sites, sitesLoading, view, viewSite]);
+    const startSite = sites.find(site => site.id === workingSite.siteId) ?? sites[0];
+    setView(startSite ? String(startSite.id) : ACCOUNT_LEVEL);
+  }, [sites, sitesLoading, view, viewSite, workingSite.ready, workingSite.siteId]);
 
   useEffect(() => {
     setHistory([]);

@@ -13,6 +13,7 @@ import {
   foodSafetyMonthFigures,
   type FoodSafetyCompleteness,
 } from "@/lib/kitchen-state";
+import { useSiteFilterId } from "@/hooks/use-working-site";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -179,7 +180,9 @@ function CalendarGrid({
 export default function FoodSafetyPage() {
   const today = todayStr();
   const [ym, setYm] = useState(currentYM());
-  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
+  const [siteFilter, setSiteFilter] = useSiteFilterId();
+  const selectedSiteId = siteFilter ?? null;
+  const setSelectedSiteId = (id: number | null) => setSiteFilter(id ?? undefined);
   const { data: sites = [] } = useListSites();
   const [recorded, setRecorded] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<string[]>([]);
