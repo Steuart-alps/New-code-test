@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
@@ -189,6 +190,7 @@ export default function TreeTrackPage() {
   const [editItem, setEditItem] = useState<TreeInspection | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("tree_inspection", { disabled: saving });
   const [form, setForm] = useState(emptyForm());
   const [resultChanged, setResultChanged] = useState(false);
   const [w3wLoading, setW3wLoading] = useState(false);
@@ -297,6 +299,7 @@ export default function TreeTrackPage() {
     setEditItem(null);
     setResultChanged(false);
     setForm(emptyForm());
+    media.clear();
     setShowDialog(true);
   }
 
@@ -333,6 +336,7 @@ export default function TreeTrackPage() {
       notes: r.notes ?? "",
     });
     setResultChanged(false);
+    media.clear();
     setShowDialog(true);
   }
 
@@ -363,7 +367,8 @@ export default function TreeTrackPage() {
         await apiFetch(`/tree-track/${editItem.id}`, { method: "PUT", body: JSON.stringify(updateBody) });
         toast({ title: "Record updated" });
       } else {
-        await apiFetch("/tree-track", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiFetch("/tree-track", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(created?.id);
         toast({ title: "Inspection recorded" });
       }
       invalidate();
@@ -777,6 +782,8 @@ export default function TreeTrackPage() {
                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
                 className="mt-1 rounded-sm" rows={3} />
             </div>
+
+            {editItem ? <CheckPhotoUploader entityType="tree_inspection" entityId={editItem.id} /> : media.picker}
           </div>
 
           <DialogFooter>

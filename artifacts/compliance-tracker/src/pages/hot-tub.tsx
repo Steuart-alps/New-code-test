@@ -31,6 +31,7 @@ import { downloadBlob } from "@/lib/download";
 import { takeLinkParams } from "@/lib/deep-link";
 import { trackInspectionPdfDownload } from "@/lib/analytics";
 import { createHotTubLogPdf, HotTubLogPdfError } from "@/lib/hot-tub-log-pdf";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
@@ -241,6 +242,7 @@ export default function HotTubPage() {
   const [editItem, setEditItem] = useState<HotTubCheck | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("hot_tub_check", { disabled: saving });
   const [form, setForm] = useState(emptyForm());
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [showConfig, setShowConfig] = useState(false);
@@ -389,6 +391,7 @@ export default function HotTubPage() {
     setEditItem(null);
     setForm({ ...emptyForm(), performedBy: user?.name ?? "" });
     setStaffRosterId(null);
+    media.clear();
     setShowDialog(true);
   }
 
@@ -408,6 +411,7 @@ export default function HotTubPage() {
     setEditItem(null);
     setForm({ ...emptyForm(), performedBy: user?.name ?? "", hotTubId: String(tub.id), siteId: tub.siteId ? String(tub.siteId) : "" });
     setStaffRosterId(null);
+    media.clear();
     setShowDialog(true);
   }, [scanTubId, hotTubs]);
 
@@ -447,6 +451,7 @@ export default function HotTubPage() {
       notes: r.notes ?? "",
     });
     setStaffRosterId(r.staffRosterId ?? null);
+    media.clear();
     setShowDialog(true);
   }
 
@@ -490,6 +495,7 @@ export default function HotTubPage() {
         toast({ title: "Record updated", description: `Server outcome: ${response?.result ?? body.result}.` });
       } else {
         const response = await apiFetch("/hot-tub", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(response?.id);
         toast({ title: "Record saved", description: `Server outcome: ${response?.result ?? body.result}.` });
       }
       invalidate();
@@ -1049,6 +1055,8 @@ export default function HotTubPage() {
                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
                 className="mt-1 rounded-sm" rows={2} />
             </div>
+
+            {editItem ? <CheckPhotoUploader entityType="hot_tub_check" entityId={editItem.id} /> : media.picker}
           </div>
 
           <DialogFooter>

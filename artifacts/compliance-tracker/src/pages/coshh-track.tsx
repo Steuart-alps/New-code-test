@@ -22,6 +22,8 @@ import {
   ensureOk, fmtDate, todayIso, useRegisterList, useRegisterSites, type DocumentValue,
 } from "@/components/register-shared";
 import { sortByLabel } from "@/lib/sort-options";
+import { useRecordMedia } from "@/components/record-media";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // COSHHTrack (API: /api/coshh-track/*). Substances come from the COSHH
@@ -228,6 +230,7 @@ export default function CoshhTrackPage() {
   const [editingCheck, setEditingCheck] = useState<Check | null>(null);
   const [checkForm, setCheckForm] = useState<CheckForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("coshh_check", { open: checkForm !== null, disabled: saving });
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "assessment"; item: Assessment } | { kind: "check"; item: Check } | null>(null);
 
   const siteQuery = siteFilter === "all" ? "" : `?siteId=${siteFilter}`;
@@ -378,7 +381,7 @@ export default function CoshhTrackPage() {
     if (f.result === "fail" && !f.actionRequired.trim()) { toast({ title: "Say what needs to be done", variant: "destructive" }); return; }
     setSaving(true);
     try {
-      await ensureOk(await api(editingCheck ? `${CHECKS}/${editingCheck.id}` : CHECKS, {
+      const response = await ensureOk(await api(editingCheck ? `${CHECKS}/${editingCheck.id}` : CHECKS, {
         method: editingCheck ? "PUT" : "POST",
         body: JSON.stringify({
           siteId: Number(f.siteId),
@@ -390,6 +393,7 @@ export default function CoshhTrackPage() {
           objectPath: f.document.objectPath, fileName: f.document.fileName,
         }),
       }), "Could not save");
+      if (!editingCheck) await media.attach(((await response.json().catch(() => null)) as { id?: number } | null)?.id);
       toast({ title: editingCheck ? "Record updated" : "Record saved" });
       setCheckForm(null);
       setEditingCheck(null);
@@ -722,6 +726,7 @@ export default function CoshhTrackPage() {
                         {[fmtDate(c.checkDate), siteName(c.siteId), c.carriedOutBy, assessmentName(c.assessmentId)].filter(Boolean).join(" · ")}
                       </p>
                       {c.result === "fail" && c.actionRequired && <p className="text-xs text-red-700">Action: {c.actionRequired}</p>}
+                      <CheckPhotoUploader entityType="coshh_check" entityId={c.id} compact readOnly={!canEdit} />
                       <RecordSignedBy recordType="coshh_check" recordId={c.id} className="pt-1" />
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -968,6 +973,7 @@ export default function CoshhTrackPage() {
                 )}
                 <DocumentField label="Report or certificate" value={f.document} onChange={(document) => set({ document })} />
                 <TextField id="coshh-check-notes" label="Notes" value={f.notes} max={4000} onChange={(notes) => set({ notes })} />
+                {editingCheck ? <CheckPhotoUploader entityType="coshh_check" entityId={editingCheck.id} /> : media.picker}
               </div>
             );
           })()}

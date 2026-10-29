@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
@@ -183,6 +184,7 @@ function SessionDialog({
   const [form, setForm] = useState(blank);
   const [preSessionResultChanged, setPreSessionResultChanged] = useState(false);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("swim_session", { disabled: saving });
 
   const reset = () => {
     setPreSessionResultChanged(false);
@@ -225,11 +227,12 @@ function SessionDialog({
       if (session) {
         await apiFetch(`/swim-track/sessions/${session.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/sessions", {
+        const created = await apiFetch("/swim-track/sessions", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: session ? "Session updated" : "Session logged" });
       onSaved(); onClose();
@@ -240,7 +243,7 @@ function SessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{session ? "Edit Session" : "Log Pool Session"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
@@ -337,6 +340,7 @@ function SessionDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           {!session && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {session ? <CheckPhotoUploader entityType="swim_session" entityId={session.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -366,6 +370,7 @@ function SurveillanceDialog({
   };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("swim_surveillance_check", { disabled: saving });
 
   const reset = () => setForm(check ? {
     siteId: check.siteId ? String(check.siteId) : "",
@@ -393,11 +398,12 @@ function SurveillanceDialog({
       if (check) {
         await apiFetch(`/swim-track/surveillance/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/surveillance", {
+        const created = await apiFetch("/swim-track/surveillance", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: check ? "Check updated" : "Surveillance check logged" });
       onSaved(); onClose();
@@ -408,7 +414,7 @@ function SurveillanceDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{check ? "Edit Surveillance Check" : "Log Surveillance Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1">
           <div className="grid grid-cols-2 gap-3">
@@ -458,6 +464,7 @@ function SurveillanceDialog({
               placeholder="Anything to note during this surveillance check…" />
           </div>
           {!check && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {check ? <CheckPhotoUploader entityType="swim_surveillance_check" entityId={check.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -484,6 +491,7 @@ function FirstAidDialog({
   const blank = { siteId: "", checkDate: today, checkedBy: "", checkedByRosterId: null as number | null, defectsFound: "", notes: "", ...blankItems };
   const [form, setForm] = useState<Record<string, any>>(blank);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("swim_first_aid_check", { disabled: saving });
 
   const reset = () => setForm(check ? {
     siteId: check.siteId ? String(check.siteId) : "",
@@ -508,11 +516,12 @@ function FirstAidDialog({
       if (check) {
         await apiFetch(`/swim-track/first-aid/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/first-aid", {
+        const created = await apiFetch("/swim-track/first-aid", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: check ? "Check updated" : "First-aid check saved" });
       onSaved(); onClose();
@@ -523,7 +532,7 @@ function FirstAidDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{check ? "Edit First-Aid Check" : "First-Aid Readiness Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1">
           <div className="grid grid-cols-2 gap-3">
@@ -576,6 +585,7 @@ function FirstAidDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           {!check && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {check ? <CheckPhotoUploader entityType="swim_first_aid_check" entityId={check.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -605,6 +615,7 @@ function IncidentDialog({
   };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("swim_incident", { disabled: saving });
 
   const reset = () => setForm(incident ? {
     siteId: incident.siteId ? String(incident.siteId) : "",
@@ -636,11 +647,12 @@ function IncidentDialog({
       if (incident) {
         await apiFetch(`/swim-track/incidents/${incident.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/incidents", {
+        const created = await apiFetch("/swim-track/incidents", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: incident ? "Incident updated" : "Incident logged" });
       onSaved(); onClose();
@@ -651,7 +663,7 @@ function IncidentDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); media.clear(); }}>
         <DialogHeader><DialogTitle>{incident ? "Edit Incident" : "Log Incident / Near Miss"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
@@ -741,6 +753,7 @@ function IncidentDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           {!incident && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
+          {incident ? <CheckPhotoUploader entityType="swim_incident" entityId={incident.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>

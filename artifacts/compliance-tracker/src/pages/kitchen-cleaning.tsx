@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { API_BASE } from "@/lib/api";
 import { downloadFile } from "@/lib/download";
 import { useListSites } from "@workspace/api-client-react";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RecordSignedBy } from "@/components/record-signature";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -861,6 +862,11 @@ export default function CleaningScheduleTab() {
                     {log?.id && <RecordSignedBy recordType="kitchen_cleaning_log" recordId={log.id} compact className="ml-2" />}
                   </p>
                 )}
+                <div className="border-t pt-3">
+                  {log?.id ? (
+                    <CheckPhotoUploader entityType="kitchen_cleaning_log" entityId={log.id} compact />
+                  ) : !submitted && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
+                </div>
               </CardContent>
             </Card>
           )}

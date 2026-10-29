@@ -1882,13 +1882,13 @@ export function DailyDiaryTab() {
           </Card>
           )}
 
-          {/* Photos */}
-          {record?.id && (
+          {/* Photos and videos */}
+          {record?.id ? (
             <>
               <RecordSignedBy recordType="food_safety_record" recordId={record.id} className="mb-2" />
               <CheckPhotoUploader entityType="food_safety_check" entityId={record.id} compact />
             </>
-          )}
+          ) : !isSubmitted && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
         </>
       )}
 
@@ -2156,6 +2156,7 @@ function KitchenChecklistCard({
               <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}</Button>
               <Button size="sm" onClick={() => save(true)} disabled={saving || !progress.ready} className="flex-1">Submit checklist</Button>
             </div>
+            {!existing?.id && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
           </div>
         )}
         {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}

@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ import { useSayItFill } from "@/lib/say-it-fill";
 import { sortByLabel } from "@/lib/sort-options";
 import { localDate } from "@/lib/voice-log";
 import { useManagedBy } from "@/components/managed-by-badge";
+import { VIDEO_PATH } from "@/lib/media-upload";
 import { takeLinkParams } from "@/lib/deep-link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -177,7 +179,7 @@ interface RiddorHistoryEvent {
   receiptSource: "upload" | "incident_attachment" | null;
   createdAt: string; actorName: string | null; actorEmail: string | null;
 }
-interface IncidentAttachment { id: number; caption: string | null; created_at: string; }
+interface IncidentAttachment { id: number; caption: string | null; created_at: string; object_path?: string; }
 interface IncidentAction {
   id: number; title: string; status: string; ownerName: string;
   correctiveAction: string; evidenceReference: string | null;
@@ -451,6 +453,7 @@ export default function IncidentsPage() {
   const [showDialog, setShowDialog] = useState(false);
   const [editItem, setEditItem] = useState<Incident | null>(null);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("incident", { disabled: saving });
   const [historyIncident, setHistoryIncident] = useState<Incident | null>(null);
   const [actionDraft, setActionDraft] = useState({ title: "", ownerName: "", correctiveAction: "" });
   const [editingActionId, setEditingActionId] = useState<number | null>(null);
@@ -626,6 +629,7 @@ ${rows.map(r => `<tr>
     if (incidentConfig?.incident_default_reporter) f.reportedBy = incidentConfig.incident_default_reporter;
     setForm({ ...f, ...spoken });
     setFormSection("details");
+    media.clear();
     setShowDialog(true);
   }
 
@@ -683,6 +687,7 @@ ${rows.map(r => `<tr>
       siteId: r.siteId ? String(r.siteId) : "",
     });
     setFormSection("details");
+    media.clear();
     setShowDialog(true);
   }
 
@@ -693,7 +698,9 @@ ${rows.map(r => `<tr>
   const receiptChosen = isManager && (!!form.receiptUpload.objectPath || !!form.receiptAttachmentId);
   const { data: incidentAttachments = [] } = useQuery<IncidentAttachment[]>({
     queryKey: ["incident-attachments", editItem?.id, activeClientId],
-    queryFn: () => apiFetch(`/photos?entityType=incident&entityId=${editItem!.id}`),
+    // A receipt is a photo, so the incident's videos aren't offered.
+    queryFn: async () => ((await apiFetch(`/photos?entityType=incident&entityId=${editItem!.id}`)) as IncidentAttachment[])
+      .filter(attachment => !VIDEO_PATH.test(attachment.object_path ?? "")),
     enabled: showDialog && !!editItem && isManager && submissionChanged,
   });
 
@@ -772,7 +779,8 @@ ${rows.map(r => `<tr>
         await apiFetch(`/incidents/${editItem.id}`, { method: "PUT", body: JSON.stringify(body) });
         toast({ title: "Record updated" });
       } else {
-        await apiFetch("/incidents", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiFetch("/incidents", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(created?.id);
         toast({ title: "Incident recorded" });
       }
       invalidate();
@@ -1302,6 +1310,8 @@ ${rows.map(r => `<tr>
                     onChange={e => setForm(f => ({ ...f, reportedBy: e.target.value }))}
                     className="mt-1 rounded-sm" />
                 </div>
+
+                {editItem ? <CheckPhotoUploader entityType="incident" entityId={editItem.id} /> : media.picker}
               </>
             )}
 

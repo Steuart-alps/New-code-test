@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { AuditLog } from "@/components/audit-log";
@@ -1019,6 +1020,7 @@ function RecordCheckDialog({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const createCheck = useCreateFireSafetyCheck();
+  const media = useRecordMedia("fire_safety_check", { disabled: createCheck.isPending });
   const { data: sites } = useListSites();
   const { data: config } = useGetFireSafetyConfig();
 
@@ -1085,6 +1087,7 @@ function RecordCheckDialog({
     setRoutes([]); setPanelStatus("normal"); setFaultsFound(""); setZonesTested(""); setActionsTaken("");
     setCallPointChoice({ callPointId: null, callPoint: "" }); setNightStaff(null); setSoundLevel(EMPTY_SOUND_LEVEL);
     setDrillTime(""); setEvacuation(EMPTY_EVACUATION); setStaffPresentIds([]);
+    media.clear();
   }
 
   const missing = checkType === "alarm" && !callPointChoice.callPointId && !callPointChoice.callPoint.trim()
@@ -1117,7 +1120,8 @@ function RecordCheckDialog({
     createCheck.mutate(
       { data },
       {
-        onSuccess: () => {
+        onSuccess: async (created) => {
+          await media.attach(created?.id);
           queryClient.invalidateQueries({ queryKey: getListFireSafetyChecksQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetFireSafetyStatusQueryKey() });
           queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
@@ -1300,12 +1304,13 @@ function RecordCheckDialog({
               <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm" />
             </div>
           )}
+          {media.picker}
         </div>
         <DialogFooter className="items-center">
           {missing && <p className="text-xs text-muted-foreground sm:mr-auto">{missing}</p>}
-          <Button variant="outline" onClick={() => { reset(); setOpen(false); }}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={createCheck.isPending || !!missing}>
-            {createCheck.isPending ? "Saving…" : "Record Check"}
+          <Button variant="outline" disabled={media.attaching} onClick={() => { reset(); setOpen(false); }}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={createCheck.isPending || media.attaching || !!missing}>
+            {media.attaching ? "Adding photos…" : createCheck.isPending ? "Saving…" : "Record Check"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1565,6 +1570,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={isDrill ? 3 : 2} className="rounded-sm"
               placeholder={isDrill ? DRILL_NOTES_PLACEHOLDER : undefined} />
           </div>
+          <CheckPhotoUploader entityType="fire_safety_check" entityId={check.id} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

@@ -27,6 +27,7 @@ import {
   useUpdatePoolTrackConfig,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
@@ -360,6 +361,7 @@ function RecordDialog({
   const [actionsTaken, setActionsTaken] = useState(existing?.actions_taken ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [overrideResult, setOverrideResult] = useState<string | null>(null);
+  const media = useRecordMedia("pool_check");
 
   const { toast } = useToast();
   const { data: sites } = useListSites();
@@ -401,7 +403,8 @@ function RecordDialog({
       if (isEdit) {
         await apiFetch(`/pool-track/${existing!.id}`, { method: "PUT", body: JSON.stringify(payload) });
       } else {
-        await apiFetch("/pool-track", { method: "POST", body: JSON.stringify(payload) });
+        const created = await apiFetch<{ id?: number }>("/pool-track", { method: "POST", body: JSON.stringify(payload) });
+        await media.attach(created?.id);
       }
       toast({ title: isEdit ? "Record updated" : "Check recorded" });
       setOpen(false); onSaved();
@@ -411,7 +414,7 @@ function RecordDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={o => { setOpen(o); }}>
+    <Dialog open={open} onOpenChange={o => { setOpen(o); if (!o) media.clear(); }}>
       <DialogTrigger asChild>
         {isEdit
           ? <Button variant="ghost" size="sm"><Pencil className="w-3.5 h-3.5" /></Button>
@@ -554,10 +557,11 @@ function RecordDialog({
             <Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm" />
           </div>
+          {isEdit ? <CheckPhotoUploader entityType="pool_check" entityId={existing!.id} /> : media.picker}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleSubmit}>{isEdit ? "Update" : "Record Check"}</Button>
+          <Button variant="outline" disabled={media.attaching} onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={media.attaching}>{media.attaching ? "Adding photos…" : isEdit ? "Update" : "Record Check"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
