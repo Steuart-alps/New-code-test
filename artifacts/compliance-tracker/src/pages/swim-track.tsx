@@ -27,6 +27,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { getApiErrorMessage } from "@/lib/api";
 import { camelCaseRows } from "@/lib/camel-case-rows";
+import { sortedEntries } from "@/lib/sort-options";
 
 function useSwimTrackApi() {
   const request = useActiveClientApi();
@@ -252,7 +253,7 @@ function SessionDialog({
               <Select value={form.sessionType} onValueChange={v => setForm(f => ({ ...f, sessionType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(SESSION_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(SESSION_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
@@ -668,7 +669,7 @@ function IncidentDialog({
               <Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(INCIDENT_TYPE_LABELS).map(([v, l]) => (
+                  {sortedEntries(INCIDENT_TYPE_LABELS).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
