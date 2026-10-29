@@ -21,6 +21,7 @@ type SetupState = {
   needsSetup: boolean; setupCompletedAt: string | null; canManage: boolean; businessType: string | null;
   deferredAt?: string | null; nation?: string | null; sites?: { id: number; name: string }[];
   modules?: { available: string[]; picked: string[] }; starterChecks?: StarterCheck[];
+  complimentary?: boolean;
 };
 type Choice = { ticked: boolean; date: string };
 /** A department sits under one site; `siteId` null means it spans every site. */
@@ -306,7 +307,11 @@ export default function SetupPage() {
                     </Button>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground">Your plan is priced per site, so each extra site adds to the monthly price once your free trial ends. You can add or remove sites later from Sites.</p>
+                <p className="text-xs text-muted-foreground">
+                  {state.complimentary
+                    ? "Every site is included free for this business. You can add or remove sites later from Sites."
+                    : "Your plan is priced per site, so each extra site adds to the monthly price once your free trial ends. You can add or remove sites later from Sites."}
+                </p>
                 <div className="flex items-center justify-end gap-2 pt-2">
                   {sites.length === 0 && <Button variant="ghost" onClick={() => setStep(2)} disabled={busy}>Skip this step</Button>}
                   <Button onClick={saveSitesAndContinue} disabled={busy || (sites.length === 0 && !siteName.trim())}>
