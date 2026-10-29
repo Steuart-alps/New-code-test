@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  getGetFireEscapeRoutesQueryKey, useGetFireEscapeRoutes, useGetNightFireWalks, useUpdateFireEscapeRoutes,
-  type NightFireWalk, type NightFireWalkSite,
+  getGetFireEscapeRoutesQueryKey, getListSitesQueryKey, useGetFireEscapeRoutes, useGetNightFireWalks, useListSites,
+  useUpdateFireEscapeRoutes, type NightFireWalk, type NightFireWalkSite,
 } from "@workspace/api-client-react";
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Clock, Moon, Plus, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,35 @@ export function useSiteEscapeRoutes(siteId: number | undefined, enabled: boolean
     query: { enabled, queryKey: getGetFireEscapeRoutesQueryKey(params) },
   });
   return { routes: data?.routes ?? [], loading: enabled && isLoading };
+}
+
+const FIRE_WALK_CHECKLISTS = new Set(["premises_opening", "premises_closing"]);
+export const FIRE_WALK_SECTION = "Fire walk (sleeping accommodation)";
+type FireWalkItem = { label: string; checked: false; section?: string };
+
+/**
+ * A site with sleeping accommodation and no night porter does its fire walk
+ * on the premises opening and closing checks: these lines (one per listed
+ * escape route) are added to a new checklist there. Empty everywhere else.
+ */
+export function useFireWalkChecklistItems(type: string, siteId: number | null, enabled: boolean): FireWalkItem[] {
+  const wanted = enabled && FIRE_WALK_CHECKLISTS.has(type) && siteId != null;
+  const { data: sites } = useListSites({ query: { enabled: wanted, queryKey: getListSitesQueryKey() } });
+  const site = wanted ? sites?.find(s => s.id === siteId) : undefined;
+  const applies = !!site && site.sleepingAccommodation === true && site.nightPorter === false;
+  const { routes } = useSiteEscapeRoutes(siteId ?? undefined, applies);
+  if (!applies) return [];
+  return [
+    { section: FIRE_WALK_SECTION, label: "Fire walk completed: every floor, corridor and sleeping area walked", checked: false },
+    { label: "Fire doors closed (not wedged open) and no fire hazards found", checked: false },
+    ...routes.map(route => ({ label: `Escape route clear: ${route.name}`, checked: false as const })),
+  ];
+}
+
+/** The checklist's own lines, then any fire walk line it doesn't already have. */
+export function withFireWalkItems<T extends { label: string }>(items: T[], extra: T[]): T[] {
+  const have = new Set(items.map(item => item.label.trim().toLowerCase()));
+  return [...items, ...extra.filter(item => !have.has(item.label.trim().toLowerCase()))];
 }
 
 /**
@@ -116,6 +145,7 @@ export function EscapeRouteListEditor({ siteId, enabled }: { siteId: number | nu
           {save.isPending ? "Saving…" : "Save routes"}
         </Button>
       </div>
+      {dirty && <p className="text-[11px] text-amber-700">Routes are saved with "Save routes", not with the Template's save button.</p>}
     </div>
   );
 }
@@ -163,7 +193,8 @@ export function NightWalksCard({ siteId, enabled, canRecord, onRecord }: {
       <CardContent className="space-y-4">
         {sites.map(site => {
           const tonight = site.nights[0];
-          const missedBefore = site.nights.slice(1).flatMap(night => night.walks.filter(walk => walk.status === "missed"));
+          const missedBefore = site.nights.slice(1).flatMap(night => night.walks.filter(walk => walk.status === "missed"))
+            .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
           return (
             <div key={site.siteId} className="space-y-2" data-testid={`night-walks-site-${site.siteId}`}>
               {sites.length > 1 || !siteId ? <p className="text-sm font-medium">{site.siteName}</p> : null}

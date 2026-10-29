@@ -25,6 +25,7 @@ import {
   useOrderFireCallPoints,
   FireCallPoint,
   getGetFireDrillAttendanceQueryKey,
+  getGetNightFireWalksQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { SayItButton } from "@/components/say-it-button";
@@ -987,6 +988,27 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
 
 // ── Record Check Dialog ───────────────────────────────────────────────────────
 
+type RecordPreset = { siteId?: number; callPointId?: number; location?: string; date?: string; walkTime?: NightWalkTime };
+
+/** The night walk most likely being recorded now: the one just due, or the last one if recording late. */
+function defaultNightWalk(now = new Date()): { date: string; walkTime: NightWalkTime } {
+  const hour = now.getHours();
+  const day = (offset: number) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  if (hour >= 20) return { date: day(0), walkTime: "22:00" };
+  if (hour < 1) return { date: day(-1), walkTime: "22:00" };
+  if (hour < 4) return { date: day(0), walkTime: "02:00" };
+  return { date: day(0), walkTime: "06:00" };
+}
+
+/** Any escape route not clear makes a walk a fail. */
+function routesResult(routes: EscapeRoute[], result: "pass" | "fail"): "pass" | "fail" {
+  return routes.some(r => r.status !== "clear") ? "fail" : result;
+}
+
 function RecordCheckDialog({
   siteId,
   open: controlledOpen,
@@ -998,8 +1020,8 @@ function RecordCheckDialog({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   defaultCheckType?: AnyCheckType;
-  /** Filled in from a scanned QR label: its site, call point or extinguisher location. */
-  preset?: { siteId?: number; callPointId?: number; location?: string };
+  /** Filled in from a scanned QR label (its site, call point or extinguisher location) or a night walk to record. */
+  preset?: RecordPreset;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
@@ -1041,8 +1063,18 @@ function RecordCheckDialog({
     setSelectedSite(value);
   };
 
-  // Fire walk state
+  // Fire walk and night walk state: the site's listed routes, each answered.
   const [routes, setRoutes] = useState<EscapeRoute[]>([]);
+  const [walkTime, setWalkTime] = useState<NightWalkTime | null>(null);
+  const [signature, setSignature] = useState<string | null>(null);
+  const isWalk = ROUTE_WALK_TYPES.has(checkType);
+  const siteRoutes = useSiteEscapeRoutes(selectedSite, open && isWalk);
+  const listedRoutes = siteRoutes.routes.map(r => r.name).join("\n");
+  useEffect(() => {
+    if (!open || !isWalk || siteRoutes.loading) return;
+    setRoutes(siteRoutes.routes.map(r => ({ name: r.name, status: "clear" as const, note: "" })));
+  }, [open, isWalk, listedRoutes, siteRoutes.loading]);
+  const routesFixed = siteRoutes.routes.length > 0;
 
   // Alarm panel state
   const [panelStatus, setPanelStatus] = useState<"normal" | "fault" | "zones_active">("normal");
@@ -1061,7 +1093,20 @@ function RecordCheckDialog({
     if (preset.siteId !== undefined) setSelectedSite(preset.siteId);
     if (preset.callPointId) setCallPointChoice({ callPointId: preset.callPointId, callPoint: "" });
     if (preset.location) setLocation(preset.location);
+    if (preset.date) setCheckDate(preset.date);
+    if (preset.walkTime) setWalkTime(preset.walkTime);
   }, [open, preset]);
+
+  // A night walk opened without a preset: the walk most likely being done now,
+  // at the site with a night porter when there is only one.
+  useEffect(() => {
+    if (!open || checkType !== "night_walk" || walkTime || preset?.walkTime) return;
+    const suggested = defaultNightWalk();
+    setWalkTime(suggested.walkTime);
+    setCheckDate(suggested.date);
+    const porterSites = sites?.filter(s => s.nightPorter) ?? [];
+    if (selectedSite === undefined && porterSites.length === 1) setSelectedSite(porterSites[0].id);
+  }, [open, checkType]);
 
   // A business with one site records against it, so its call point list applies.
   useEffect(() => {
@@ -1077,14 +1122,6 @@ function RecordCheckDialog({
   // Pre-fill check-type-specific fields when checkType changes (only if still empty)
   useEffect(() => {
     if (!open || !config) return;
-    if (checkType === "fire_walk" && routes.length === 0 && config.fire_escape_routes) {
-      try {
-        const saved = JSON.parse(config.fire_escape_routes) as Array<{ name: string; location: string }>;
-        if (Array.isArray(saved) && saved.length > 0) {
-          setRoutes(saved.map(r => ({ name: r.name || "", status: "clear" as const, note: r.location || "" })));
-        }
-      } catch {}
-    }
     if (checkType === "alarm_panel" && !zonesTested && config.fire_alarm_zones) {
       try {
         const zones = JSON.parse(config.fire_alarm_zones) as string[];
@@ -1096,12 +1133,14 @@ function RecordCheckDialog({
   // Auto-compute result for fire walk
   const effectiveResult: "pass" | "fail" = checkType === "fire_walk"
     ? autoFireWalkResult(routes)
+    : checkType === "night_walk"
+    ? routesResult(routes, result)
     : checkType === "alarm_panel"
     ? (panelStatus === "fault" ? "fail" : "pass")
     : result;
 
   function buildNotes(): string | undefined {
-    if (checkType === "fire_walk") {
+    if (isWalk) {
       const data: FireWalkNotes = { _type: "fire_walk", routes, freeNotes: notes };
       return JSON.stringify(data);
     }
@@ -1119,7 +1158,16 @@ function RecordCheckDialog({
     setRoutes([]); setPanelStatus("normal"); setFaultsFound(""); setZonesTested(""); setActionsTaken("");
     setCallPointChoice({ callPointId: null, callPoint: "" }); setNightStaff(null); setSoundLevel(EMPTY_SOUND_LEVEL);
     setDrillTime(""); setEvacuation(EMPTY_EVACUATION); setStaffPresentIds([]);
+    setWalkTime(null); setSignature(null);
   }
+
+  const selectedSiteRow = sites?.find(s => s.id === selectedSite);
+  // The escape route sign-off is for sites with sleeping accommodation, night
+  // walks for sites with a night porter. The chosen type always stays listed.
+  const offered = (k: AnyCheckType) => k === checkType
+    || (k === "fire_walk" ? selectedSiteRow?.sleepingAccommodation !== false
+      : k === "night_walk" ? (selectedSiteRow ? selectedSiteRow.nightPorter === true : !!sites?.some(s => s.nightPorter))
+      : true);
 
   const missing = checkType === "alarm" && !callPointChoice.callPointId && !callPointChoice.callPoint.trim()
     ? "Choose the call point tested"
@@ -1127,7 +1175,12 @@ function RecordCheckDialog({
     : checkType === "fire_drill" && !drillTime ? "Give the time of the drill"
     : checkType === "fire_drill" && parseEvacuation(evacuation) === null ? "Give the time taken to evacuate"
     : checkType === "fire_drill" && !nightStaff ? "Say whether night staff were included (Yes, No or N/A)"
-    : checkType === "fire_drill" && !notes.trim() ? "Write the improvements required, or notes" : null;
+    : checkType === "fire_drill" && !notes.trim() ? "Write the improvements required, or notes"
+    : checkType === "night_walk" && !selectedSite ? "Choose the site"
+    : checkType === "night_walk" && !walkTime ? "Choose which walk: 22:00, 02:00 or 06:00"
+    : checkType === "night_walk" && !performedBy.trim() ? "Say who did the walk"
+    : checkType === "night_walk" && !signature ? "Sign the walk"
+    : isWalk && siteRoutes.loading ? "Loading the site's escape routes…" : null;
 
   const handleSubmit = async () => {
     const data: CreateFireSafetyCheckRequest & { staffRosterId?: number | null } = {
@@ -1147,6 +1200,7 @@ function RecordCheckDialog({
       ...(checkType === "fire_drill" ? {
         nightStaff, drillTime, evacuationSeconds: parseEvacuation(evacuation), staffPresentIds,
       } : {}),
+      ...(checkType === "night_walk" ? { walkTime, signature } : {}),
     };
     createCheck.mutate(
       { data },
@@ -1156,6 +1210,7 @@ function RecordCheckDialog({
           queryClient.invalidateQueries({ queryKey: getGetFireSafetyStatusQueryKey() });
           queryClient.invalidateQueries({ queryKey: getListFireCallPointsQueryKey().slice(0, 1) });
           queryClient.invalidateQueries({ queryKey: getGetFireDrillAttendanceQueryKey().slice(0, 1) });
+          queryClient.invalidateQueries({ queryKey: getGetNightFireWalksQueryKey().slice(0, 1) });
           toast({ title: "Check recorded", description: "Fire safety check saved." });
           reset(); setOpen(false);
         },
@@ -1187,7 +1242,7 @@ function RecordCheckDialog({
                 {CHECK_TYPE_GROUPS.map(g => (
                   <div key={g.label}>
                     <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
-                    {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => (
+                    {sortByLabel(g.types.filter(offered), k => CHECK_TYPE_LABELS[k]).map(k => (
                       <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>
                     ))}
                   </div>
@@ -1202,13 +1257,14 @@ function RecordCheckDialog({
               <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} className="rounded-sm" />
             </div>
             <div className="space-y-1.5">
-              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} siteId={selectedSite} includeRoster={false} optional />
+              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} siteId={selectedSite} includeRoster={false}
+                optional={checkType !== "night_walk"} />
             </div>
           </div>
 
           {sites && sites.length > 0 && (
             <div className="space-y-1.5">
-              <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Label>Site {checkType !== "night_walk" && <span className="text-muted-foreground text-xs">optional</span>}</Label>
               <Select value={selectedSite ? String(selectedSite) : "none"} onValueChange={v => changeSite(v === "none" ? undefined : Number(v))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
@@ -1238,14 +1294,34 @@ function RecordCheckDialog({
             </>
           )}
 
-          {/* ── Fire walk ─────────────────────────────────────────────────── */}
-          {checkType === "fire_walk" && (
+          {/* ── Night walk: which of the night's walks ──────────────────────── */}
+          {checkType === "night_walk" && (
+            <div className="space-y-2 border border-border rounded-sm p-3 bg-muted/20">
+              <div className="flex items-center gap-2">
+                <Moon className="w-4 h-4 text-primary flex-shrink-0" />
+                <p className="text-sm font-medium">Which night walk?</p>
+              </div>
+              <div className="flex gap-2" role="radiogroup" aria-label="Night walk time">
+                {NIGHT_WALK_TIMES.map(time => (
+                  <button key={time} type="button" role="radio" aria-checked={walkTime === time} onClick={() => setWalkTime(time)}
+                    className={cn("px-3 py-1.5 text-sm font-medium rounded-sm border transition-colors",
+                      walkTime === time ? "bg-primary text-primary-foreground border-primary" : "bg-background text-muted-foreground border-border hover:border-primary/50")}>
+                    {time}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">The date is the day the walk fell on, so the 02:00 and 06:00 walks are dated the morning after.</p>
+            </div>
+          )}
+
+          {/* ── Fire walk / night walk: every listed escape route ──────────── */}
+          {isWalk && (
             <div className="space-y-3 border border-border rounded-sm p-3 bg-muted/20">
               <div className="flex items-center gap-2">
                 <Route className="w-4 h-4 text-primary flex-shrink-0" />
                 <p className="text-sm font-medium">Escape Route Sign-Off</p>
               </div>
-              <EscapeRouteEditor routes={routes} onChange={setRoutes} />
+              <EscapeRouteEditor routes={routes} onChange={setRoutes} fixed={routesFixed} />
               {routes.length > 0 && (
                 <div className={cn("text-xs px-3 py-2 rounded-sm border font-medium",
                   autoFireWalkResult(routes) === "pass"
@@ -1316,7 +1392,7 @@ function RecordCheckDialog({
             </div>
           )}
 
-          {checkType !== "fire_walk" && checkType !== "alarm_panel" && checkType !== "alarm" && (
+          {checkType !== "fire_walk" && checkType !== "night_walk" && checkType !== "alarm_panel" && checkType !== "alarm" && (
             <div className="space-y-1.5">
               <Label>Location <span className="text-muted-foreground text-xs">optional</span></Label>
               <Input value={location} onChange={e => setLocation(e.target.value)} placeholder="e.g. Ground floor near kitchen" className="rounded-sm" />
@@ -1331,9 +1407,14 @@ function RecordCheckDialog({
             </div>
           ) : (
             <div className="space-y-1.5">
-              <Label>{checkType === "fire_walk" || checkType === "alarm_panel" ? "Additional notes" : "Notes"} <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm" />
+              <Label>{isWalk || checkType === "alarm_panel" ? "Additional notes" : "Notes"} <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="rounded-sm"
+                placeholder={checkType === "night_walk" ? "e.g. fire door on floor 2 wedged open, closed it" : undefined} />
             </div>
+          )}
+
+          {checkType === "night_walk" && (
+            <SignaturePad value={signature} onChange={setSignature} label="Signature of the person who walked" />
           )}
         </div>
         <DialogFooter className="items-center">
@@ -1378,6 +1459,10 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
 
   const checkType = check.checkType as AnyCheckType;
   const isFireWalk = checkType === "fire_walk";
+  const isNightWalk = checkType === "night_walk";
+  const isRouteWalk = isFireWalk || isNightWalk;
+  // The routes a walk ticked stay the ones it covers; only their answers change.
+  const routesFixed = structured?._type === "fire_walk" && (structured as FireWalkNotes).routes.length > 0;
   const isPanel = checkType === "alarm_panel";
   const isAlarm = checkType === "alarm";
   const isDrill = checkType === "fire_drill";
@@ -1414,12 +1499,14 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
 
   const effectiveResult: "pass" | "fail" = isFireWalk
     ? autoFireWalkResult(routes)
+    : isNightWalk
+    ? routesResult(routes, result)
     : isPanel
     ? (panelStatus === "fault" ? "fail" : "pass")
     : result;
 
   function buildNotes(): string | undefined {
-    if (isFireWalk) return JSON.stringify({ _type: "fire_walk", routes, freeNotes: notes } satisfies FireWalkNotes);
+    if (isRouteWalk) return JSON.stringify({ _type: "fire_walk", routes, freeNotes: notes } satisfies FireWalkNotes);
     if (isPanel) return JSON.stringify({ _type: "alarm_panel", panelStatus, faultsFound, zonesTested, actionsTaken, freeNotes: notes } satisfies AlarmPanelNotes);
     return notes || undefined;
   }
@@ -1514,13 +1601,17 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
             </>
           )}
 
-          {isFireWalk && (
+          {isNightWalk && (
+            <p className="text-sm"><span className="font-medium">Night walk:</span> {check.walkTime ?? "time not recorded"}{check.signature ? " · signed" : ""}</p>
+          )}
+
+          {isRouteWalk && (
             <div className="space-y-3 border border-border rounded-sm p-3 bg-muted/20">
               <div className="flex items-center gap-2">
                 <Route className="w-4 h-4 text-primary flex-shrink-0" />
                 <p className="text-sm font-medium">Escape Route Sign-Off</p>
               </div>
-              <EscapeRouteEditor routes={routes} onChange={setRoutes} />
+              <EscapeRouteEditor routes={routes} onChange={setRoutes} fixed={routesFixed} />
               {routes.length > 0 && (
                 <div className={cn("text-xs px-3 py-2 rounded-sm border font-medium",
                   autoFireWalkResult(routes) === "pass"
@@ -1586,7 +1677,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
                   </SelectContent>
                 </Select>
               </div>
-              {(!isAlarm || check.location) && (
+              {((!isAlarm && !isNightWalk) || check.location) && (
                 <div className="space-y-1.5">
                   <Label>{isAlarm ? "Location / Call Point" : "Location"}</Label>
                   <Input value={location} onChange={e => setLocation(e.target.value)} className="rounded-sm" />
@@ -1596,7 +1687,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
           )}
 
           <div className="space-y-1.5">
-            <Label>{isDrill ? DRILL_NOTES_LABEL : isFireWalk || isPanel ? "Additional notes" : "Notes"}</Label>
+            <Label>{isDrill ? DRILL_NOTES_LABEL : isRouteWalk || isPanel ? "Additional notes" : "Notes"}</Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={isDrill ? 3 : 2} className="rounded-sm"
               placeholder={isDrill ? DRILL_NOTES_PLACEHOLDER : undefined} />
           </div>
@@ -1627,7 +1718,12 @@ export default function FireSafetyPage() {
   const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<AnyCheckType | undefined>(undefined);
-  const [scanPreset, setScanPreset] = useState<{ siteId?: number; callPointId?: number; location?: string }>();
+  const [scanPreset, setScanPreset] = useState<RecordPreset>();
+  const recordNightWalk = (preset: NightWalkPreset) => {
+    setScanPreset(preset);
+    setQuickCheckType("night_walk");
+    setRecordOpen(true);
+  };
 
   // A scanned QR label: a call point opens its weekly alarm test, an
   // extinguisher opens its weekly visual check at that location.
@@ -1822,6 +1918,7 @@ export default function FireSafetyPage() {
           </div>
         )}
 
+        <NightWalksCard siteId={filterSite} enabled={hasFiretrack} canRecord={canEdit} onRecord={recordNightWalk} />
         <CallPointRotationCard siteId={filterSite} sites={sites} enabled={hasFiretrack} />
         {hasFiretrack && canEdit && <DrillAttendanceCard siteId={filterSite} />}
 
@@ -1910,6 +2007,7 @@ export default function FireSafetyPage() {
                           <div className="text-xs text-muted-foreground space-y-0.5">
                             <div><span className="font-medium">Date:</span> {format(new Date(check.checkDate), "dd/MM/yyyy")}</div>
                             {check.performedBy && <div><span className="font-medium">Performed by:</span> {check.performedBy}</div>}
+                            {check.walkTime && <div><span className="font-medium">Night walk:</span> {check.walkTime}</div>}
                             {check.callPoint && <div><span className="font-medium">Call point:</span> {check.callPoint}</div>}
                             {check.location && <div><span className="font-medium">{check.checkType === "alarm" && !check.callPoint ? "Location / Call Point" : "Location"}:</span> {check.location}</div>}
                             {check.soundLevelDb != null && (
@@ -1940,6 +2038,10 @@ export default function FireSafetyPage() {
                           {structured?._type === "fire_walk" && <FireWalkDisplay data={structured as FireWalkNotes} />}
                           {structured?._type === "alarm_panel" && <AlarmPanelDisplay data={structured as AlarmPanelNotes} />}
                           {/* Plain notes fallback */}
+                          {check.signature && (
+                            <img src={check.signature} alt={`Signature of ${check.performedBy ?? "the person who walked"}`}
+                              className="h-12 w-auto max-w-[12rem] rounded-sm border border-border bg-white" />
+                          )}
                           {!structured && check.notes && (
                             <div className="text-xs text-muted-foreground"><span className="font-medium">{check.checkType === "fire_drill" ? `${DRILL_NOTES_LABEL}:` : "Notes:"}</span> {check.notes}</div>
                           )}

@@ -10,6 +10,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useListSites } from "@workspace/api-client-react";
+import { useFireWalkChecklistItems, withFireWalkItems } from "@/components/fire-night-walks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -189,9 +190,11 @@ export function ChecklistCard({
     })();
   }, [type, siteId, existing]);
 
-  const effectiveDefault = templateItems
+  // Sites with sleeping accommodation and no night porter walk for fire here.
+  const fireWalkItems = useFireWalkChecklistItems(type, siteId, !existing);
+  const effectiveDefault = withFireWalkItems(templateItems
     ? templateItems.map(i => ({ ...i, checked: false }))
-    : builtIn;
+    : builtIn, fireWalkItems);
 
   const { user } = useAuth();
   const { toast } = useToast();
@@ -206,7 +209,7 @@ export function ChecklistCard({
     setItems(existing?.items ?? effectiveDefault);
     setCompletedBy(existing?.completedBy ?? user?.name ?? "");
     setManagerNote(existing?.managerNote ?? "");
-  }, [existing, type, templateItems]);
+  }, [existing, type, templateItems, fireWalkItems.map(item => item.label).join("\n")]);
 
   const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
   const passRemaining = () => { if (submitted) return; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
