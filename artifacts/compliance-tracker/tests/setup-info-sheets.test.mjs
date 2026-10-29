@@ -53,8 +53,20 @@ for (const sheet of INFO_SHEETS) {
   }
   assert.ok(readMeRows(sheet).some((row) => row[0]?.includes("£500 + VAT")), `${sheet.label}: Read me offers the setup service`);
 }
-for (const key of ["getting-started", "compliance", "firetrack", "kitchentrack", "legionellatrack", "pattrack", "roomtrack", "greentrack",
+for (const key of ["getting-started", "contractors", "compliance", "firetrack", "kitchentrack", "legionellatrack", "pattrack", "roomtrack", "greentrack",
   "coshhtrack", "traintrack", "doctrack", "fixtrack", "incidenttrack", "pesttrack", "premisestrack", "hottubtrack", "aquatrack", "treetrack", "biketrack", "dailytrack"]) {
   assert.ok(keys.has(key), `a workbook for ${key}`);
 }
+// Contractors are on one spreadsheet only; its services tab lists every
+// contractor service on the Contractors page card, with a trade the import accepts.
+const contractorTabs = INFO_SHEETS.flatMap((sheet) => sheet.tabs.filter((tab) => tab.name === "Contractors").map(() => sheet.key));
+assert.deepEqual(contractorTabs, ["contractors"], "only the Contractors spreadsheet has a Contractors tab");
+const services = INFO_SHEETS.find((sheet) => sheet.key === "contractors").tabs.find((tab) => tab.name === "Services by track").rows;
+const visitLabels = [...source("../../api-server/src/lib/contractorVisits.ts").matchAll(/key: "[a-z_]+:[a-z_0-9]+", module:[^\n]*\n\s*title: [^\n]*label: "([^"]+)"/g)].map((m) => m[1]);
+assert.ok(visitLabels.length >= 30, `contractor visit types found (${visitLabels.length})`);
+for (const label of visitLabels) assert.ok(services.some((row) => row[1] === label), `"${label}" is on the Services by track tab`);
+const normalise = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+const tradeCodes = new Set([...source("../src/lib/contractor-trades.ts").matchAll(/value: "([a-z_]+)"/g)].map((m) => normalise(m[1])));
+for (const row of services) assert.ok(tradeCodes.has(normalise(row[2])), `trade "${row[2]}" for "${row[1]}" is a known trade`);
+
 console.log(`setup info sheets: ${INFO_SHEETS.length} workbooks, ${importable.length} uploadable tabs match their imports`);

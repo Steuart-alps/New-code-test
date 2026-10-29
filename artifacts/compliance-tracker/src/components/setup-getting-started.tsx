@@ -14,8 +14,8 @@ export type SetupAssistRequest = { requestedAt: string; requestedBy: string };
 /** Shown on the setup service offer. ALPS invoices it; nothing is charged in the app. */
 export const SETUP_SERVICE_PRICE_NOTE = `A one-off fee of ${SETUP_SERVICE_FEE}, invoiced separately from your subscription.`;
 
-/** The two workbooks every business needs; the per-track ones sit under them. */
-const MAIN_SHEETS = new Set(["getting-started", "compliance"]);
+/** The workbooks every business needs; the per-track ones sit under them. */
+const MAIN_SHEETS = new Set(["getting-started", "contractors", "compliance"]);
 
 const HAVE_READY = [
   { icon: MapPin, title: "Your sites", text: "The name and address of each premises." },

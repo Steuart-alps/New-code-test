@@ -24,6 +24,57 @@ export type InfoSheet = { key: string; label: string; about: string; tabs: InfoS
 
 const CONTRACTOR_HEADERS = ["Contact name", "Company", "Email", "Phone", "Address", "Trades", "Gas Safe number", "Public liability expiry", "Notes"];
 
+/**
+ * The contractor services on the Contractors page's "Contractor inspections
+ * and visits" card (api-server lib/contractorVisits.ts CONTRACTOR_VISIT_TYPES,
+ * labels kept the same) plus the usual Compliance Checks done by contractors.
+ * Trade is the stored trade code written out, which the contractor import accepts.
+ */
+const CONTRACTOR_SERVICES: [track: string, service: string, trade: string][] = [
+  ["Compliance Checks", "Gas safety certificate", "Gas Heating"],
+  ["Compliance Checks", "Kitchen gas appliance service", "Gas Kitchen"],
+  ["Compliance Checks", "Boiler service", "Gas Heating"],
+  ["Compliance Checks", "Electrical installation (EICR)", "Electrical"],
+  ["Compliance Checks", "Lift thorough examination (LOLER)", "Loler Puwer Inspection"],
+  ["Compliance Checks", "Asbestos management survey", "Asbestos"],
+  ["Compliance Checks", "Air conditioning service", "Hvac"],
+  ["Compliance Checks", "Waste collection", "Waste Collection"],
+  ["FireTrack", "Fire alarm service (6-monthly)", "Fire Alarm"],
+  ["FireTrack", "Fire extinguisher service (annual)", "Fire Extinguishers"],
+  ["FireTrack", "Emergency lighting 3-hour test (annual)", "Emergency Lighting"],
+  ["FireTrack", "Fire risk assessment review", "Fire Risk Assessor"],
+  ["FireTrack", "Kitchen fire suppression service (6-monthly)", "Kitchen Fire Suppression"],
+  ["FireTrack", "Kitchen extract (duct) cleaning", "Kitchen Extract Cleaning"],
+  ["FireTrack", "Sprinkler system service (quarterly)", "Sprinkler Systems"],
+  ["FireTrack", "AOV / smoke vent service (annual)", "Aov Smoke Vents"],
+  ["FireTrack", "Dry / wet riser inspection (6-monthly)", "Dry Wet Risers"],
+  ["FireTrack", "Fire door inspection (6-monthly)", "Fire Doors"],
+  ["FireTrack", "Fire shutter / curtain service (annual)", "Fire Shutters Curtains"],
+  ["FireTrack", "Fire damper drop test (annual)", "Fire Dampers"],
+  ["FireTrack", "Fire stopping survey (annual)", "Fire Stopping"],
+  ["FireTrack", "Intruder alarm service (annual)", "Intruder Alarm"],
+  ["FireTrack", "CCTV service (annual)", "Cctv"],
+  ["FireTrack", "Access control / door entry service (annual)", "Access Control"],
+  ["LegionellaTrack", "Legionella risk assessment review", "Legionella Water Hygiene"],
+  ["LegionellaTrack", "Legionella water sampling (laboratory)", "Legionella Water Hygiene"],
+  ["LegionellaTrack", "Cold water tank clean and disinfect", "Legionella Water Hygiene"],
+  ["LegionellaTrack", "Calorifier internal inspection", "Legionella Water Hygiene"],
+  ["LegionellaTrack", "Calorifier clean and disinfect", "Legionella Water Hygiene"],
+  ["LegionellaTrack", "Thermostatic mixing valve (TMV) service", "Plumbing"],
+  ["PestTrack", "Routine pest control visit", "Pest Control"],
+  ["PATtrack", "PAT testing visit", "Pat Testing"],
+  ["GreenTrack", "Machine servicing", "Equipment"],
+  ["GreenTrack", "PUWER inspection", "Loler Puwer Inspection"],
+  ["GreenTrack", "LOLER thorough examination, 6-monthly (e.g. vehicle lift)", "Loler Puwer Inspection"],
+  ["GreenTrack", "LOLER thorough examination, annual (e.g. axle stands)", "Loler Puwer Inspection"],
+  ["GreenTrack", "NSTS sprayer test", "Equipment"],
+  ["GreenTrack", "Other statutory inspections (annual, periodic and other)", "Loler Puwer Inspection"],
+  ["COSHHTrack", "Local exhaust ventilation (LEV) thorough examination", "Lev Testing"],
+  ["TreeTrack", "Annual tree survey (arborist)", "Tree Surgeon Arborist"],
+  ["TubTrack", "Spa microbiological test (laboratory)", "Pool Spa Maintenance"],
+  ["BikeTrack", "Bike servicing", "Equipment"],
+];
+
 const serviceDates = (items: string[]): string[][] => items.map((item) => [item, "", "", "", "", ""]);
 const SERVICE_DATE_HEADERS = ["Check", "Site", "Last done (dd/mm/yyyy)", "Done by (contractor or person)", "Certificate or report held? (Yes/No)", "Notes"];
 
@@ -31,7 +82,7 @@ export const INFO_SHEETS: InfoSheet[] = [
   {
     key: "getting-started",
     label: "Getting started (every business)",
-    about: "Your sites, departments, the people who will use ComplyTrack and your contractors. Fill this in first.",
+    about: "Your sites, departments and the people who will use ComplyTrack. Fill this in first.",
     tabs: [
       {
         name: "Sites", about: "One line per premises.",
@@ -54,11 +105,23 @@ export const INFO_SHEETS: InfoSheet[] = [
         headers: ["Payroll ID", "Name", "Job Title", "Department", "Email"],
         rows: [["1001", "Jane Smith", "Chef de partie", "Kitchen", "jane.smith@example.com"]],
       },
+    ],
+  },
+  {
+    key: "contractors",
+    label: "Contractors",
+    about: "Everyone who services, inspects or repairs for you, and which contractor does each service on each track.",
+    tabs: [
       {
-        name: "Contractors", about: "Everyone who services, inspects or repairs for you. Several trades are separated with ;. Gas Safe number for gas engineers only.",
+        name: "Contractors", about: "One line per contractor. Trades are the words in the Trade column of the next tab; separate several with ;. Gas Safe number for gas engineers only.",
         importsInto: "Contractors > Import spreadsheet",
         headers: CONTRACTOR_HEADERS,
         rows: [["Sam Patel", "Patel Electrical Ltd", "sam@example.co.uk", "01234 567890", "", "Electrical", "", "31/03/2027", ""]],
+      },
+      {
+        name: "Services by track", about: "Every contractor service ComplyTrack tracks. Put the company that does it, or N/A if you don't need it. Delete the tracks you don't use.",
+        headers: ["Track", "Contractor service", "Trade", "Contractor company (or N/A)", "Last visit (dd/mm/yyyy)"],
+        rows: CONTRACTOR_SERVICES.map(([track, service, trade]) => [track, service, trade, "", ""]),
       },
     ],
   },
@@ -295,9 +358,9 @@ export const INFO_SHEETS: InfoSheet[] = [
     about: "Your pest control contract and bait points.",
     tabs: [
       {
-        name: "Pest contract", about: "From your pest control contract.",
-        headers: ["Company", "Contact", "Email", "Phone", "Visits per year", "Contract renewal (dd/mm/yyyy)"],
-        rows: [["", "", "", "", "", ""]],
+        name: "Pest contract", about: "From your pest control contract. The pest contractor's details go on the Contractors spreadsheet.",
+        headers: ["Visits per year", "Contract renewal (dd/mm/yyyy)"],
+        rows: [["", ""]],
       },
       {
         name: "Bait points", about: "From the site plan your pest contractor left.",
