@@ -134,7 +134,7 @@ const failed = await ok(owner.request("POST", "/coshh-track/checks", {
   siteId: siteB.id, checkType: "lev_examination", checkDate: isoDay(0), subject: " spray booth ", result: "fail",
   actionRequired: "Replace the filter and re-test",
 }), 201, "failed LEV examination");
-assert.equal(failed.nextDueDate, addMonths(isoDay(0), 14), "LEV defaults to 14 months");
+assert.equal(failed.nextDueDate, addMonths(isoDay(0), 12), "LEV defaults to 12 months");
 status = await ok(owner.request("GET", `/coshh-track/status?siteId=${siteB.id}`), 200, "site B status after re-test");
 assert.ok(!status.items.some((i) => i.recordId === oldLev.id), "older examination in the same series replaced");
 const action = await pool.query(

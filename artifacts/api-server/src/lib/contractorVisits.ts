@@ -1,7 +1,8 @@
 /**
  * Contractor visits kept on the tracks (pest control, water system servicing,
- * fire servicing, PAT testing, machine servicing and examinations, tree
- * surveys, spa lab tests) reach the contractor through the one contractor
+ * fire servicing, PAT testing, machine servicing and each kind of statutory
+ * examination, bike servicing, LEV examinations, tree surveys, spa lab tests)
+ * reach the contractor through the one contractor
  * reminder: a ComplyTrack compliance check with a contractor and a due date,
  * which the 08:00 job (routes/notifications.ts runReminderJob) drafts into
  * Contractor Approvals.
@@ -11,11 +12,13 @@
  * syncContractorVisitChecks moves each linked check's due date to the
  * track's; the check holds the contractor. A business-wide check counts at a
  * business with a single site. Checks are created only when someone picks a
- * contractor for a visit, never in bulk.
+ * contractor for a visit, never in bulk. A visit (or a register check) can be
+ * marked "No contractor needed" instead (contractor_visit_not_needed), so the
+ * Contractors page shows what still needs a decision.
  */
 import { db } from "@workspace/db";
-import { auditEventsTable, complianceItemsTable, sitesTable } from "@workspace/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { auditEventsTable, complianceItemsTable, contractorVisitNotNeededTable, sitesTable } from "@workspace/db/schema";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import {
   getFireSiteStatuses, LEGIONELLA_CHECK_TYPES, TUB_CHECK_TYPES, type FireCheckType,
 } from "./checkReminders";
@@ -24,6 +27,7 @@ import { linkedTaskCompletions, TRACK_TASK_LINKS } from "./trackTaskLink";
 import { getEntitledServices, isEntitled, type ServiceKey } from "./services";
 import { reminderCycleOf, supersedeStaleReminderCycles } from "./reminderCycles";
 import { TREE_FREQUENCY_DAYS } from "../routes/tree-track";
+import { NSTS_TEST_INSPECTION_TYPE } from "@workspace/api-zod/nsts-sprayer-tests";
 
 export interface ContractorVisitType {
   key: string;
@@ -132,10 +136,48 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
     frequencyMonths: null, dueFrom: "track",
   },
   {
-    key: "green:examination", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
-    title: "GreenTrack Statutory Examinations", label: "Statutory examinations and inspections (PUWER, LOLER and others)",
-    description: "Thorough examinations and statutory inspections of machinery. Due when the first machine at the site is due one; record each in GreenTrack.",
+    key: "green:puwer", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
+    title: "GreenTrack PUWER Inspection", label: "PUWER inspection",
+    description: "Inspection of work equipment by a competent person (PUWER regulation 6). Due when the first machine at the site is due one; record each in GreenTrack's statutory log as a PUWER thorough examination.",
     frequencyMonths: null, dueFrom: "track",
+  },
+  {
+    key: "green:loler_6_monthly", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
+    title: "GreenTrack LOLER Thorough Examination (6-monthly)", label: "LOLER thorough examination, 6-monthly (e.g. vehicle lift)",
+    description: "Six-monthly thorough examination of equipment that lifts people and of lifting accessories, such as a vehicle lift (LOLER regulation 9). Due when the first machine at the site is due one; record each in GreenTrack's statutory log as a 6-monthly LOLER examination.",
+    frequencyMonths: null, dueFrom: "track",
+  },
+  {
+    key: "green:loler", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
+    title: "GreenTrack LOLER Thorough Examination", label: "LOLER thorough examination, annual (e.g. axle stands)",
+    description: "Annual thorough examination of other lifting equipment, such as axle stands or a front loader (LOLER regulation 9). Due when the first machine at the site is due one; record each in GreenTrack's statutory log as an annual LOLER examination.",
+    frequencyMonths: null, dueFrom: "track",
+  },
+  {
+    key: "green:nsts", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
+    title: "GreenTrack NSTS Sprayer Test", label: "NSTS sprayer test",
+    description: "National Sprayer Testing Scheme test of pesticide application equipment by an NSTS-approved tester. Due when the first sprayer at the site is due one; record each in GreenTrack's statutory log.",
+    frequencyMonths: null, dueFrom: "track",
+  },
+  {
+    // Before October 2026 this one line covered every statutory inspection;
+    // its title is kept so a contractor already chosen stays linked.
+    key: "green:examination", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],
+    title: "GreenTrack Statutory Examinations", label: "Other statutory inspections (annual, periodic and other)",
+    description: "Annual, periodic and other statutory inspections of machinery that are not PUWER, LOLER or NSTS. Due when the first machine at the site is due one; record each in GreenTrack's statutory log.",
+    frequencyMonths: null, dueFrom: "track",
+  },
+  {
+    key: "bike:service", module: "bike", trackLabel: "BikeTrack", services: ["biketrack"],
+    title: "BikeTrack Bike Servicing", label: "Bike servicing",
+    description: "Servicing of hire bikes by a bike mechanic. Due when the first bike at the site is due a service; record each service in BikeTrack.",
+    frequencyMonths: null, dueFrom: "track",
+  },
+  {
+    key: "coshh:lev_examination", module: "coshh", trackLabel: "COSHHTrack", services: ["coshhtrack"],
+    title: "LEV Thorough Examination", label: "Local exhaust ventilation (LEV) thorough examination",
+    description: "Thorough examination and test of local exhaust ventilation by a competent contractor every 12 months, and never more than 14 months apart (COSHH regulation 9). Due when the first system at the site is due; record each examination in COSHHTrack.",
+    frequencyMonths: 12, dueFrom: "track",
   },
   {
     key: "tree:visual_assessment", module: "tree", trackLabel: "TreeTrack", services: ["treetrack"],
@@ -150,6 +192,19 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
     frequencyMonths: 3, dueFrom: "track",
   },
 ];
+
+/**
+ * GreenTrack statutory log inspection types (green_puwer_inspections.
+ * inspection_type) behind each GreenTrack line; an empty list takes every
+ * type the others do not.
+ */
+const GREEN_INSPECTION_TYPES: Record<string, readonly string[]> = {
+  "green:puwer": ["thorough_examination"],
+  "green:loler_6_monthly": ["loler_examination_6_monthly"],
+  "green:loler": ["loler_examination"],
+  "green:nsts": [NSTS_TEST_INSPECTION_TYPE, "nsts"],
+  "green:examination": [],
+};
 
 export function getContractorVisitType(key: string): ContractorVisitType | undefined {
   return CONTRACTOR_VISIT_TYPES.find((type) => type.key === key);
@@ -289,20 +344,61 @@ export async function trackDueDates(clientId: number, types: readonly Contractor
     `))));
   }
 
-  // Every kind of examination or inspection in GreenTrack's statutory log,
-  // each machine's latest of each kind.
-  if (wanted.has("green:examination")) {
-    set("green:examination", await dueByKey(rowsOf(await db.execute(sql`
-      SELECT m.site_id, MIN(p.next_inspection_date) AS due
+  // GreenTrack's statutory log: each machine's latest inspection of each
+  // kind. PUWER, LOLER (6-monthly and annual) and NSTS have their own lines;
+  // the rest share one.
+  if ([...wanted].some((key) => key in GREEN_INSPECTION_TYPES)) {
+    const rows = rowsOf<{ site_id: number; inspection_type: string; due: unknown }>(await db.execute(sql`
+      SELECT m.site_id, p.inspection_type, MIN(p.next_inspection_date) AS due
       FROM green_machines m
       JOIN (
-        SELECT DISTINCT ON (machine_id, inspection_type) machine_id, next_inspection_date
+        SELECT DISTINCT ON (machine_id, inspection_type) machine_id, inspection_type, next_inspection_date
         FROM green_puwer_inspections
         WHERE client_id = ${clientId}
         ORDER BY machine_id, inspection_type, inspection_date DESC, id DESC
       ) p ON p.machine_id = m.id
       WHERE m.client_id = ${clientId} AND m.active = true AND m.site_id IS NOT NULL AND p.next_inspection_date IS NOT NULL
-      GROUP BY m.site_id
+      GROUP BY m.site_id, p.inspection_type
+    `));
+    const named = new Set(Object.values(GREEN_INSPECTION_TYPES).flat());
+    for (const key of Object.keys(GREEN_INSPECTION_TYPES)) {
+      const inspectionTypes = GREEN_INSPECTION_TYPES[key]!;
+      set(key, await dueByKey(rows.filter((row) => inspectionTypes.length
+        ? inspectionTypes.includes(row.inspection_type)
+        : !named.has(row.inspection_type)).map((row) => ({ site_id: row.site_id, due: row.due }))));
+    }
+  }
+
+  if (wanted.has("bike:service")) {
+    set("bike:service", await dueByKey(rowsOf(await db.execute(sql`
+      SELECT b.site_id, MIN(s.next_service_date) AS due
+      FROM bikes b
+      JOIN LATERAL (
+        SELECT next_service_date FROM bike_services
+        WHERE bike_id = b.id AND client_id = b.client_id
+        ORDER BY service_date DESC, id DESC LIMIT 1
+      ) s ON true
+      WHERE b.client_id = ${clientId} AND b.active = true AND b.site_id IS NOT NULL AND s.next_service_date IS NOT NULL
+      GROUP BY b.site_id
+    `))));
+  }
+
+  // Each extraction system's latest examination (as lib/coshhTrack.ts reads
+  // them), for current assessments only.
+  if (wanted.has("coshh:lev_examination")) {
+    set("coshh:lev_examination", await dueByKey(rowsOf(await db.execute(sql`
+      SELECT site_id, MIN(next_due_date) AS due FROM (
+        SELECT DISTINCT ON (c.site_id, COALESCE(c.assessment_id, 0), lower(btrim(COALESCE(c.subject, ''))))
+               c.site_id, c.next_due_date
+        FROM coshh_checks c
+        LEFT JOIN coshh_assessments a ON a.id = c.assessment_id AND a.client_id = c.client_id
+        WHERE c.client_id = ${clientId} AND c.deleted_at IS NULL AND c.check_type = 'lev_examination'
+          AND c.site_id IS NOT NULL
+          AND (c.assessment_id IS NULL OR (a.deleted_at IS NULL AND a.status = 'current'))
+        ORDER BY c.site_id, COALESCE(c.assessment_id, 0), lower(btrim(COALESCE(c.subject, ''))), c.check_date DESC, c.id DESC
+      ) latest
+      WHERE next_due_date IS NOT NULL
+      GROUP BY site_id
     `))));
   }
 
@@ -411,4 +507,52 @@ export async function syncContractorVisitChecks(clientId: number, onlyKeys?: rea
     changed++;
   }
   return changed;
+}
+
+/** Titles of every track visit's linked check, whatever the subscription. */
+export const VISIT_CHECK_TITLES = new Set(CONTRACTOR_VISIT_TYPES.map((type) => normalise(type.title)));
+
+/** visit_key of a compliance check register row in contractor_visit_not_needed. */
+const REGISTER_CHECK_KEY = "check";
+
+/**
+ * What has been marked "No contractor needed": track visits as
+ * `${visitKey}@${siteId}`, and register checks by id.
+ */
+export async function notNeededChoices(clientId: number): Promise<{ visits: Set<string>; checks: Set<number> }> {
+  const rows = await db.select().from(contractorVisitNotNeededTable).where(eq(contractorVisitNotNeededTable.clientId, clientId));
+  const visits = new Set<string>();
+  const checks = new Set<number>();
+  for (const row of rows) {
+    if (row.complianceItemId != null) checks.add(row.complianceItemId);
+    else if (row.siteId != null) visits.add(`${row.visitKey}@${row.siteId}`);
+  }
+  return { visits, checks };
+}
+
+/**
+ * Mark a track visit at a site, or a register check, as needing no
+ * contractor, or clear the mark. The audit log records each change (the
+ * table is audited; lib/auditLogMigration.ts).
+ */
+export async function setNotNeeded(
+  clientId: number,
+  target: { visitKey: string; siteId: number } | { checkId: number },
+  notNeeded: boolean,
+  userId: number | null,
+): Promise<void> {
+  const t = contractorVisitNotNeededTable;
+  const match = "checkId" in target
+    ? and(eq(t.clientId, clientId), eq(t.complianceItemId, target.checkId))
+    : and(eq(t.clientId, clientId), eq(t.visitKey, target.visitKey), eq(t.siteId, target.siteId), isNull(t.complianceItemId));
+  const [existing] = await db.select({ id: t.id }).from(t).where(match).limit(1);
+  if (!notNeeded) {
+    if (existing) await db.delete(t).where(and(eq(t.id, existing.id), eq(t.clientId, clientId)));
+    return;
+  }
+  if (existing) return;
+  await db.insert(t).values("checkId" in target
+    ? { clientId, visitKey: REGISTER_CHECK_KEY, complianceItemId: target.checkId, markedBy: userId }
+    : { clientId, visitKey: target.visitKey, siteId: target.siteId, markedBy: userId })
+    .onConflictDoNothing();
 }

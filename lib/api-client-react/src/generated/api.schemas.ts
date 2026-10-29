@@ -1350,11 +1350,36 @@ export interface ContractorVisit {
   contractorId: number | null;
   contractorName: string | null;
   reminderSentAt: string | null;
+  /** Marked "No contractor needed" (never true while a contractor is chosen) */
+  notNeeded: boolean;
+}
+
+export interface ContractorRegisterCheck {
+  checkId: number;
+  title: string;
+  /** Null for a business-wide check */
+  siteId: number | null;
+  siteName: string | null;
+  dueDate: string | null;
+  status: string;
+  contractorId: number | null;
+  contractorName: string | null;
+  reminderSentAt: string | null;
+  /** Marked "No contractor needed" (never true while a contractor is chosen) */
+  notNeeded: boolean;
 }
 
 export interface ContractorVisitsResponse {
   types: ContractorVisitType[];
   visits: ContractorVisit[];
+  /** The compliance check register's other checks (gas safety, EICR...), not finished one-offs, business-wide or at a site the user can see */
+  checks: ContractorRegisterCheck[];
+}
+
+export interface SetContractorRegisterCheckRequest {
+  contractorId: number | null;
+  /** True marks the check as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too. */
+  notNeeded?: boolean;
 }
 
 export interface CertificateOutstanding {
@@ -1381,6 +1406,8 @@ export interface SetContractorVisitRequest {
   contractorId: number | null;
   /** Only for a visit its track gives no date for (water sampling, or a site with nothing recorded on the track yet) */
   dueDate?: string | null;
+  /** True marks the visit as needing no contractor (contractorId must be null); false clears that. Choosing a contractor clears it too. */
+  notNeeded?: boolean;
 }
 
 export interface Contractor {

@@ -78,6 +78,7 @@ function mockApi(page, saveResponses) {
   const apiPath = (prefix) => (url) => url.pathname.includes(prefix);
   page.route(apiPath("/api/auth/csrf-token"), (route) => json(route, 200, { token: "harness-csrf" }));
   page.route(apiPath("/api/staff-roster"), (route) => json(route, 200, []));
+  page.route(apiPath("/api/assignees"), (route) => json(route, 200, []));
   page.route(apiPath("/api/checklist-templates"), (route) => json(route, 200, {
     items: [{ label: "Alpha check" }, { label: "Bravo check" }],
   }));
