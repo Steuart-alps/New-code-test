@@ -40,6 +40,7 @@ Wednesday 28 October.
 | 21 | White-labelling for resellers (for example insurance brokers) | After launch | Possibly small extra email and web address costs per partner | Your answers on billing and what partners see |
 | 22 | Let Owners choose the AI model and effort for each AI feature | After launch | Depends on the choices made; capped | AI features live first |
 | 23 | Contractor sign-in on site and logging their own test results | After launch (you chose this on 28 October) | None | Your "go" in its own thread |
+| 24 | Let Owners choose how often urgent alerts are sent | After launch | None | Nothing; urgent alerts stay same-day for now |
 
 My suggested order after launch is the order of the table, with 2, 5, 11 and
 14 built together because they share the same set-up (one AI key and one
@@ -860,6 +861,28 @@ access to log tests", which will build it when you say go.
 
 ---
 
+## 24. Choose how often urgent alerts are sent
+
+**When:** after launch. You decided on 29 October (in the thread "Let Owners
+choose email frequency") to keep urgent alerts going out the same day for now,
+and to keep this as a future option.
+
+Owners can already choose how often the routine emails come (#212). This would
+add the same kind of choice for urgent alerts, sitting next to it in
+Settings, for example:
+
+- **Straight away** (today's behaviour, and the default);
+- **Gathered up** into one urgent email at set times of day;
+- **Included in the daily email** only.
+
+**Guard rail.** Some alerts should never wait, such as a serious incident or a
+fridge or freezer that has failed. Those would always go straight away
+whatever the setting, and the setting page would say so plainly.
+
+**Cost:** none. No extra hosting.
+
+---
+
 ## Future apps (separate from ComplyTrack)
 
 Ideas for separate apps, outside ComplyTrack itself. Logged only; nothing
@@ -911,6 +934,7 @@ work:
 | Bar opening and closing checks | None |
 | Site safety information to contractors | None |
 | Contractor sign-in and test logging | None |
+| Choose how often urgent alerts are sent | None |
 | Choose AI model and effort | Depends on choices; stronger settings cost more per use, capped by spending limits |
 | White-labelling for resellers | Little or none for hosting; possibly a small cost per partner web address and email address |
 | FireTrack sound level meter | None |
