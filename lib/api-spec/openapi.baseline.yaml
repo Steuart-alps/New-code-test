@@ -63,7 +63,37 @@ tags:
     description: KitchenTrack ingredients, menus and allergen chart sign-offs
   - name: clients
     description: Businesses managed by ALPS consultants
+  - name: setup
+    description: First-run setup wizard
 paths:
+  /setup/team-alone:
+    post:
+      operationId: confirmSetupTeamAlone
+      tags: [setup]
+      summary: Confirm that only the business's Owners record checks for now
+      description: >-
+        The setup wizard's team step. Records can't start in a business that
+        is still being set up until it has a Manager or Staff login, or an
+        Owner confirms here that only Owners record for now. Owners and
+        consultants only; consultants pass the business as clientId.
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupTeamAloneResult"
+        "400":
+          description: No business to confirm for
+        "403":
+          description: Not an Owner or consultant of the business
+
   /clients/{id}/delete-test-business:
     post:
       operationId: deleteTestBusiness
@@ -5527,6 +5557,13 @@ components:
           minLength: 1
           maxLength: 200
           description: The business's name, typed to confirm
+    SetupTeamAloneResult:
+      type: object
+      required: [aloneAt]
+      properties:
+        aloneAt:
+          type: string
+          format: date-time
     TestBusinessDeletionResult:
       type: object
       required: [ok, rowsDeleted, filesDeleted]

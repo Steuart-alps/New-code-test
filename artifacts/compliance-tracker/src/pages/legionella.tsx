@@ -44,6 +44,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { WalkRoundDialog, type WalkRoundPoint } from "@/components/walk-round-dialog";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { sortByLabel } from "@/lib/sort-options";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -370,7 +371,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
                <Label>UK nation</Label>
                <Select value={profile.ukNation || "none"} disabled={!siteId} onValueChange={value => setProfile(current => ({ ...current, ukNation: value === "none" ? "" : value }))}>
                  <SelectTrigger><SelectValue placeholder="Select nation" /></SelectTrigger>
-                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem></SelectContent>
+                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem></SelectContent>
                </Select>
              </div>
            </TabsContent>
@@ -477,11 +478,11 @@ function AddOutletDialog({ open, onClose, onSuccess, siteId }: {
             <Select value={type} onValueChange={v => setType(v as any)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="hot">Hot water</SelectItem>
-                <SelectItem value="cold">Cold water</SelectItem>
                 <SelectItem value="calorifier">Calorifier</SelectItem>
-                <SelectItem value="tmv">TMV / thermostatic mixing valve outlet</SelectItem>
+                <SelectItem value="cold">Cold water</SelectItem>
+                <SelectItem value="hot">Hot water</SelectItem>
                 <SelectItem value="little_used">Little-used outlet (weekly flush)</SelectItem>
+                <SelectItem value="tmv">TMV / thermostatic mixing valve outlet</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1005,7 +1006,7 @@ function RecordCheckDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(CHECK_TYPE_LABELS) as LegionellaCheckType[]).map((key) => (
+                {sortByLabel(Object.keys(CHECK_TYPE_LABELS) as LegionellaCheckType[], t => CHECK_TYPE_LABELS[t]).map((key) => (
                   <SelectItem key={key} value={key}>{CHECK_TYPE_LABELS[key]}</SelectItem>
                 ))}
               </SelectContent>
@@ -1489,7 +1490,7 @@ export default function LegionellaPage() {
                   <SelectTrigger><SelectValue placeholder="All types" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All types</SelectItem>
-                    {(Object.keys(CHECK_TYPE_LABELS) as LegionellaCheckType[]).map((key) => (
+                    {sortByLabel(Object.keys(CHECK_TYPE_LABELS) as LegionellaCheckType[], t => CHECK_TYPE_LABELS[t]).map((key) => (
                       <SelectItem key={key} value={key}>{CHECK_TYPE_LABELS[key]}</SelectItem>
                     ))}
                   </SelectContent>

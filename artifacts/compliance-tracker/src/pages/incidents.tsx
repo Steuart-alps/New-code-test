@@ -40,6 +40,7 @@ import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { StringListEditor } from "@/components/string-list-editor";
 import { useSayItFill } from "@/lib/say-it-fill";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -893,7 +894,7 @@ ${rows.map(r => `<tr>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All types</SelectItem>
-            {incidentTypeOptions.map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
+            {sortByLabel(incidentTypeOptions, typeLabel).map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
           </SelectContent>
         </Select>
         <Input
@@ -1093,7 +1094,7 @@ ${rows.map(r => `<tr>
                     <Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {formTypeOptions.map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
+                        {sortByLabel(formTypeOptions, typeLabel).map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1198,7 +1199,7 @@ ${rows.map(r => `<tr>
                     <Select value={form.involvedEmploymentType} onValueChange={v => setForm(f => ({ ...f, involvedEmploymentType: v as EmploymentType }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {EMPLOYMENT_TYPES.map(t => <SelectItem key={t} value={t}>{EMPLOYMENT_LABELS[t]}</SelectItem>)}
+                        {sortByLabel(EMPLOYMENT_TYPES, t => EMPLOYMENT_LABELS[t]).map(t => <SelectItem key={t} value={t}>{EMPLOYMENT_LABELS[t]}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>

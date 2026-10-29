@@ -69,6 +69,7 @@ import { trackTrainingMatrixDownload } from "@/lib/analytics";
 import { CoshhSignOffSection } from "@/components/coshh-sign-offs";
 import { DocumentSignOffSection } from "@/components/document-sign-offs";
 import { matchSpokenItem, spokenDate, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
+import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1184,7 +1185,7 @@ ${rows.map(r => `<tr>
                   })}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                     <SelectContent>
-                      {[...trainingTypeOptions, ...certForm.trainingType && !trainingTypeOptions.includes(certForm.trainingType) ? [certForm.trainingType] : []]
+                      {sortByLabel([...trainingTypeOptions, ...certForm.trainingType && !trainingTypeOptions.includes(certForm.trainingType) ? [certForm.trainingType] : []], t => t)
                         .map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -1264,7 +1265,7 @@ ${rows.map(r => `<tr>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select type (optional)" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Not specified</SelectItem>
-                      {Object.entries(DOCUMENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                      {sortedEntries(DOCUMENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1309,7 +1310,7 @@ ${rows.map(r => `<tr>
                   <Select value={internalForm.trainingType} onValueChange={v => setInternalForm(f => ({ ...f, trainingType: v, customType: "" }))}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select or describe…" /></SelectTrigger>
                     <SelectContent>
-                      {[...trainingTypeOptions, ...internalForm.trainingType && !trainingTypeOptions.includes(internalForm.trainingType) ? [internalForm.trainingType] : []]
+                      {sortByLabel([...trainingTypeOptions, ...internalForm.trainingType && !trainingTypeOptions.includes(internalForm.trainingType) ? [internalForm.trainingType] : []], t => t)
                         .map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>

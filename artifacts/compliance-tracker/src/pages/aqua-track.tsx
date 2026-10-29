@@ -39,6 +39,7 @@ import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { sortedEntries } from "@/lib/sort-options";
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
@@ -366,7 +367,7 @@ function PoolRecordDialog({
               <Label>Check Type</Label>
               <Select value={checkType} onValueChange={setCheckType}>
                 <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.entries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                <SelectContent>{sortedEntries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           )}
@@ -531,7 +532,7 @@ function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boole
             <div><Label>Session type</Label>
               <Select value={form.sessionType} onValueChange={v => setForm(f => ({ ...f, sessionType: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.entries(SESSION_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
+                <SelectContent>{sortedEntries(SESSION_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             {sites.length > 0 && (
@@ -712,7 +713,7 @@ function IncidentDialog({ open, onClose, incident, sites, onSaved }: { open: boo
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Incident date *</Label><Input type="date" className="mt-1 rounded-sm" value={form.incidentDate} onChange={e => setForm(f => ({ ...f, incidentDate: e.target.value }))} /></div>
             <div><Label>Time <span className="text-muted-foreground text-xs">optional</span></Label><Input type="time" className="mt-1 rounded-sm" value={form.incidentTime} onChange={e => setForm(f => ({ ...f, incidentTime: e.target.value }))} /></div>
-            <div><Label>Type</Label><Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(INCIDENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>Type</Label><Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger><SelectContent>{sortedEntries(INCIDENT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
             <div><Label>Severity</Label><Select value={form.severity} onValueChange={v => setForm(f => ({ ...f, severity: v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(SEVERITY_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
             {sites.length > 0 && (<div className="col-span-2"><Label>Site <span className="text-muted-foreground text-xs">optional</span></Label><Select value={form.siteId || "_none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "_none" ? "" : v }))}><SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger><SelectContent><SelectItem value="_none">— All sites —</SelectItem>{sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}</SelectContent></Select></div>)}
           </div>
@@ -1051,7 +1052,7 @@ export default function AquaTrackPage() {
                       <SelectTrigger className="rounded-sm"><SelectValue placeholder="All types" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All types</SelectItem>
-                        {Object.entries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                        {sortedEntries(CHECK_TYPE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>

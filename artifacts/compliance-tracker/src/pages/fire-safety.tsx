@@ -61,6 +61,7 @@ import {
 import { SOUND_LEVEL_MIN_DB } from "@/lib/fire-sound-level";
 import { StringListEditor } from "@/components/string-list-editor";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -870,7 +871,7 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
                <Label>UK nation</Label>
                <Select value={profile.ukNation || "none"} disabled={!siteId} onValueChange={value => setProfile(current => ({ ...current, ukNation: value === "none" ? "" : value }))}>
                  <SelectTrigger><SelectValue placeholder="Select nation" /></SelectTrigger>
-                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem></SelectContent>
+                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem></SelectContent>
                </Select>
              </div>
            </TabsContent>
@@ -1142,7 +1143,7 @@ function RecordCheckDialog({
                 {CHECK_TYPE_GROUPS.map(g => (
                   <div key={g.label}>
                     <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
-                    {g.types.map(k => (
+                    {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => (
                       <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>
                     ))}
                   </div>
@@ -1763,7 +1764,7 @@ export default function FireSafetyPage() {
                     {CHECK_TYPE_GROUPS.map(g => (
                       <div key={g.label}>
                         <p className="px-2 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{g.label}</p>
-                        {g.types.map(k => <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>)}
+                        {sortByLabel(g.types, k => CHECK_TYPE_LABELS[k]).map(k => <SelectItem key={k} value={k}>{CHECK_TYPE_LABELS[k]}</SelectItem>)}
                       </div>
                     ))}
                   </SelectContent>

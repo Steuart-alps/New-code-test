@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -504,7 +505,7 @@ export default function TreeTrackPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All inspection types</SelectItem>
-            {CHECK_TYPES.map(t => <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>)}
+            {sortByLabel(CHECK_TYPES, t => CHECK_TYPE_LABELS[t]).map(t => <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="relative flex-1 min-w-[180px]">
@@ -648,7 +649,7 @@ export default function TreeTrackPage() {
                 <Select value={form.checkType} onValueChange={v => setForm(f => ({ ...f, checkType: v as CheckType }))}>
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {CHECK_TYPES.map(t => <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>)}
+                    {sortByLabel(CHECK_TYPES, t => CHECK_TYPE_LABELS[t]).map(t => <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground italic mt-1">{CHECK_TYPE_HINTS[form.checkType]}</p>

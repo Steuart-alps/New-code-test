@@ -35,6 +35,7 @@ import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -396,7 +397,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
             <Select value={form.pestType} onValueChange={v => setForm(f => ({ ...f, pestType: v }))}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {pestTypeOpts.map(t => <SelectItem key={t} value={t}>{PEST_TYPE_LABELS[t] ?? t}</SelectItem>)}
+                {sortByLabel(pestTypeOpts, t => PEST_TYPE_LABELS[t] ?? t).map(t => <SelectItem key={t} value={t}>{PEST_TYPE_LABELS[t] ?? t}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -405,7 +406,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites, spoken }: {
             <Select value={form.evidenceType} onValueChange={v => setForm(f => ({ ...f, evidenceType: v }))}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {evidenceTypeOpts.map(t => <SelectItem key={t} value={t}>{EVIDENCE_LABELS[t] ?? t}</SelectItem>)}
+                {sortByLabel(evidenceTypeOpts, t => EVIDENCE_LABELS[t] ?? t).map(t => <SelectItem key={t} value={t}>{EVIDENCE_LABELS[t] ?? t}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

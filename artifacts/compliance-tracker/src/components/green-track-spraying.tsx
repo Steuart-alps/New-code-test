@@ -23,6 +23,7 @@ import { useAuth } from "@/context/auth-context";
 import { getApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 
 // GreenTrack spraying book and stock. Products (pesticides, fertiliser, top
 // dressing...) have stock worked out by the server from deliveries, counts,
@@ -240,7 +241,7 @@ function ProductDialog({ open, onClose, product }: { open: boolean; onClose: () 
               <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm" data-testid="select-product-category"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(PRODUCT_CATEGORY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  {sortedEntries(PRODUCT_CATEGORY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -249,7 +250,7 @@ function ProductDialog({ open, onClose, product }: { open: boolean; onClose: () 
               <Select value={form.unit} onValueChange={v => setForm(f => ({ ...f, unit: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm" data-testid="select-product-unit"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(UNIT_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  {sortedEntries(UNIT_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -356,7 +357,7 @@ function StockMovementDialog({ open, onClose, kind, products, presetProductId, m
             <Select value={form.productId || "_none"} disabled={!!movement} onValueChange={v => setForm(f => ({ ...f, productId: v === "_none" ? "" : v }))}>
               <SelectTrigger className="mt-1 rounded-sm" data-testid="select-stock-product"><SelectValue placeholder="Select product" /></SelectTrigger>
               <SelectContent>
-                {products.filter(p => p.active || String(p.id) === form.productId).map(p => (
+                {sortByLabel(products.filter(p => p.active || String(p.id) === form.productId), p => p.name).map(p => (
                   <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -803,7 +804,7 @@ function ApplicationDialog({ open, onClose, application, machines, products, rec
               <Select value={form.method} onValueChange={v => setForm(f => ({ ...f, method: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm" data-testid="select-application-method"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(METHOD_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  {sortedEntries(METHOD_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -843,7 +844,7 @@ function ApplicationDialog({ open, onClose, application, machines, products, rec
                         <Select value={line.productId || "_none"} onValueChange={v => updateLine(i, { productId: v === "_none" ? "" : v })}>
                           <SelectTrigger className="rounded-sm" data-testid={`select-line-product-${i}`}><SelectValue placeholder="Select product" /></SelectTrigger>
                           <SelectContent>
-                            {usable.map(p => (
+                            {sortByLabel(usable, p => p.name).map(p => (
                               <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
                             ))}
                           </SelectContent>

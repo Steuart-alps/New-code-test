@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { SetupTeamGate } from "@/components/setup-team-gate";
 import { useAuth, useIsConsultant, useCanAdmin, useCanManageUsers } from "@/context/auth-context";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -712,8 +713,10 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                 </div>
               </div>
             )}
-            {children}
-            {moduleActionKey && <ModuleActionsPanel moduleKey={moduleActionKey} />}
+            <SetupTeamGate>
+              {children}
+              {moduleActionKey && <ModuleActionsPanel moduleKey={moduleActionKey} />}
+            </SetupTeamGate>
           </motion.div>
         </div>
       </main>

@@ -32,6 +32,7 @@ import { AssignContractorDialog } from "@/components/assign-contractor-dialog";
 import { MEDIA_INPUT_ACCEPT, VIDEO_PATH, mediaContentType, mediaFileProblem, privateObjectUrl } from "@/lib/media-upload";
 import { useFileDrop } from "@/hooks/use-file-drop";
 import { PendingMediaPicker } from "@/components/pending-media-picker";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -285,7 +286,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
           <Select value={form.issueType ?? ""} onValueChange={handleTypeChange}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {formIssueTypeOptions.map(k => (
+              {sortByLabel(formIssueTypeOptions, k => issueTypeMeta(k).label).map(k => (
                 <SelectItem key={k} value={k}>{issueTypeMeta(k).label}</SelectItem>
               ))}
             </SelectContent>
@@ -1164,7 +1165,7 @@ export default function FixTrackPage() {
             <SelectTrigger className="bg-card"><SelectValue placeholder="All types" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
-              {issueTypeOptions.map(k => <SelectItem key={k} value={k}>{issueTypeMeta(k).label}</SelectItem>)}
+              {sortByLabel(issueTypeOptions, k => issueTypeMeta(k).label).map(k => <SelectItem key={k} value={k}>{issueTypeMeta(k).label}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={filterPriority || "all"} onValueChange={v => setFilterPriority(v === "all" ? "" : v)}>

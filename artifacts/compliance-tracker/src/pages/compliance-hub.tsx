@@ -13,6 +13,7 @@ import { AlertTriangle, BookOpen, CheckCircle2, ExternalLink, Plus, ShieldCheck,
 import { useToast } from "@/hooks/use-toast";
 import { fetchWithOverrideReason, withCsrfToken } from "@/lib/api";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
+import { sortByLabel } from "@/lib/sort-options";
 
 type Appointment = { area: string; person: string; evidence?: string | null };
 type Profile = {
@@ -58,7 +59,7 @@ const emptyAction = {
   sourceTrack: "FireTrack", sourceRecordId: "", title: "", severity: "medium" as const,
   ownerName: "", dueDate: "", interimControl: "", correctiveAction: "", evidenceReference: "",
 };
-const trackOptions = ["DailyTrack AM", "DailyTrack PM", "KitchenTrack", "FireTrack", "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack", "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack", "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack", "COSHHTrack"];
+const trackOptions = sortByLabel(["DailyTrack AM", "DailyTrack PM", "KitchenTrack", "FireTrack", "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack", "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack", "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack", "COSHHTrack"], track => track);
 
 export default function ComplianceHubPage() {
   const { activeClientId, user } = useAuth();

@@ -35,6 +35,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
+import { sortByLabel } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -746,7 +747,7 @@ export default function HotTubPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All check types</SelectItem>
-            {CHECK_TYPES.map(t => <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>)}
+            {sortByLabel(CHECK_TYPES, t => CHECK_TYPE_LABELS[t]).map(t => <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="relative flex-1 min-w-[180px]">
@@ -881,7 +882,7 @@ export default function HotTubPage() {
                 <Select value={form.checkType} onValueChange={v => setForm(f => ({ ...f, checkType: v as CheckType }))}>
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {CHECK_TYPES.map(t => (
+                    {sortByLabel(CHECK_TYPES, t => CHECK_TYPE_LABELS[t]).map(t => (
                       <SelectItem key={t} value={t}>{CHECK_TYPE_LABELS[t]}</SelectItem>
                     ))}
                   </SelectContent>
@@ -1001,7 +1002,7 @@ export default function HotTubPage() {
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select tub (optional)" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Not tub-specific</SelectItem>
-                    {activeTubs.map(t => (
+                    {sortByLabel(activeTubs, t => t.name).map(t => (
                       <SelectItem key={t.id} value={String(t.id)}>
                         <span className="flex items-center gap-2">
                           <Waves className="w-3.5 h-3.5 text-cyan-600" />{t.name}
