@@ -25,6 +25,8 @@ const PICKED_MODULES_SETTING = "setup_modules";
 const DEFERRED_SETTING = "setup_deferred_at";
 const TEAM_ALONE_SETTING = "setup_team_alone_at";
 const ASSIST_SETTING = "setup_assist_requested";
+/** The setup service's one-off fee, as the getting-started page shows it. ALPS invoices it. */
+const SETUP_SERVICE_FEE = "£500 + VAT";
 // Superseded service keys are not offered as starting modules.
 const LEGACY_MODULES = new Set(["pooltrack", "swimtrack", "safetrack"]);
 
@@ -362,8 +364,8 @@ router.post("/setup/team-alone", requireAuth, requireClientAdmin, async (req, re
 });
 
 // "Ask ALPS to set it up for you": the getting-started page's offer of a
-// paid setup service. It only emails ALPS (ADMIN_EMAIL), who agree the price
-// and invoice it themselves; nothing is charged here. One request per
+// paid setup service (a one-off SETUP_SERVICE_FEE). It only emails ALPS
+// (ADMIN_EMAIL), who invoice it themselves; nothing is charged here. One request per
 // business: asking again returns the first request without a second email.
 router.post("/setup/assist-request", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
@@ -406,14 +408,14 @@ router.post("/setup/assist-request", requireAuth, requireClientAdmin, async (req
       subject: `Setup service request: ${businessName}`,
       html: `
         <h2>Setup service request</h2>
-        <p>This business would like ALPS to enter its initial data for it. Agree the price with them before starting; nothing has been charged.</p>
+        <p>This business would like ALPS to enter its initial data for it, for the one-off ${SETUP_SERVICE_FEE} shown in the app. Nothing has been charged in ComplyTrack.</p>
         <table style="border-collapse: collapse; margin: 16px 0;">
           ${rows.map(([label, value]) => `<tr><td style="padding: 4px 16px 4px 0; color: #64748b;">${label}</td><td style="padding: 4px 0;"><strong>${escapeHtml(value)}</strong></td></tr>`).join("")}
         </table>
         ${notes ? `<h3>Their notes</h3><p style="white-space:pre-wrap">${escapeHtml(notes)}</p>` : ""}
         <p>The business is listed under Clients in <a href="${escapeHtml(appUrl)}">ComplyTrack</a>.</p>
       `,
-      text: `Setup service request\n\nThis business would like ALPS to enter its initial data for it. Agree the price with them before starting; nothing has been charged.\n\n${rows.map(([label, value]) => `${label}: ${value}`).join("\n")}${notes ? `\n\nTheir notes:\n${notes}` : ""}\n\nThe business is listed under Clients in ComplyTrack: ${appUrl}`,
+      text: `Setup service request\n\nThis business would like ALPS to enter its initial data for it, for the one-off ${SETUP_SERVICE_FEE} shown in the app. Nothing has been charged in ComplyTrack.\n\n${rows.map(([label, value]) => `${label}: ${value}`).join("\n")}${notes ? `\n\nTheir notes:\n${notes}` : ""}\n\nThe business is listed under Clients in ComplyTrack: ${appUrl}`,
       idempotencyKey: `setup-assist-${clientId}`,
     });
   } catch (err) {

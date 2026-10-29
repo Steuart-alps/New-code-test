@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 export type ImportCsvType = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points";
 
-const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string }> = {
+const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string; required: string; optional: string; matching: string; template: string; sheet: string }> = {
   "pat-appliances": {
     title: "Upload appliance register",
     noun: "appliances",
@@ -24,6 +24,8 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Asset tag, Appliance type, Site, Location, Notes",
     matching: "Rows match existing appliances by asset tag, or by name, site and location when there is no asset tag.",
     template: "pattrack-appliances-template",
+    // The tab of the same name in a setup "What we need from you" workbook.
+    sheet: "Appliances",
   },
   "room-track-rooms": {
     title: "Import rooms from a spreadsheet",
@@ -33,6 +35,7 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Room name, Floor, Site, Notes",
     matching: "Rows match existing rooms by site and room number.",
     template: "roomtrack-rooms-template",
+    sheet: "Rooms",
   },
   contractors: {
     title: "Import contractors from a spreadsheet",
@@ -42,6 +45,7 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Company, Phone, Address, Trades (separate with ;), Gas Safe number, Public liability expiry (DD/MM/YYYY), Notes",
     matching: "Rows match existing contractors by email address.",
     template: "contractors-template",
+    sheet: "Contractors",
   },
   "fire-call-points": {
     title: "Upload call points",
@@ -51,6 +55,7 @@ const IMPORTS: Record<ImportCsvType, { title: string; noun: string; one: string;
     optional: "Location, Site (leave blank for the site chosen here)",
     matching: "List them in the order you want them tested: new call points join the end of the rotation in file order. Rows match existing call points by site and call point name.",
     template: "firetrack-call-points-template",
+    sheet: "Call points",
   },
 };
 
@@ -122,7 +127,7 @@ export function ImportCsvDialog({ type, open, onOpenChange, onImported, siteId, 
     setFile(selected);
     setBusy("reading");
     try {
-      const data = await readSpreadsheet(selected);
+      const data = await readSpreadsheet(selected, { sheet: config.sheet });
       if (!data.headers.length || !data.rows.length) throw new Error("The file has no rows below the header row");
       setSheet(data);
       setBusy("preview");

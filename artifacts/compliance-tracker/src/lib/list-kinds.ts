@@ -7,6 +7,19 @@
 
 export type ListKind = "pat-appliances" | "room-track-rooms" | "contractors" | "fire-call-points" | "greentrack-equipment" | "staff-roster";
 
+/**
+ * The tab each list has in the setup wizard's "What we need from you"
+ * workbooks (src/lib/setup-info-sheets.ts); its import reads that tab.
+ */
+export const WORKBOOK_TABS: Record<ListKind, string> = {
+  "pat-appliances": "Appliances",
+  "room-track-rooms": "Rooms",
+  contractors: "Contractors",
+  "fire-call-points": "Call points",
+  "greentrack-equipment": "Equipment",
+  "staff-roster": "Staff roster",
+};
+
 export const LIST_KINDS: Record<ListKind, { label: string; noun: string; service: string | null; headings: string[]; fileName: RegExp }> = {
   "pat-appliances": {
     label: "PATTrack appliances",

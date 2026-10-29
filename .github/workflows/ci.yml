@@ -127,6 +127,9 @@ jobs:
       - name: Upload your lists sorting test
         run: pnpm --filter @workspace/compliance-tracker run test:list-kinds
 
+      - name: Setup "What we need from you" workbooks match the import templates
+        run: pnpm --filter @workspace/compliance-tracker run test:setup-info-sheets
+
       - name: Reload after a new release test
         run: pnpm --filter @workspace/compliance-tracker run test:new-release-reload
 

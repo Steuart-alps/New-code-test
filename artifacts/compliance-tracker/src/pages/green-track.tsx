@@ -793,9 +793,9 @@ export function MachineImportDialog({
     }
     let table: string[][];
     try {
-      // Excel or CSV, read in the browser from the first sheet.
+      // Excel or CSV, read in the browser (the Equipment tab of a setup workbook).
       const { readSpreadsheet } = await import("@/lib/spreadsheet");
-      const sheet = await readSpreadsheet(file);
+      const sheet = await readSpreadsheet(file, { sheet: "Equipment" });
       table = sheet.headers.length ? [sheet.headers, ...sheet.rows].map(row => row.map(cell => cell.trim())).filter(row => row.some(Boolean)) : [];
     } catch (err) {
       toast({ title: "Could not read file", description: err instanceof Error && err.message ? err.message : "Make sure it is an Excel (.xlsx or .xls) or CSV file.", variant: "destructive" });
