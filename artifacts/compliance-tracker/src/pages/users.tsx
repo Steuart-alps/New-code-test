@@ -15,7 +15,7 @@ import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff, Mail, MailX,
 
 const NO_DEPT_VALUE = "__none__";
 
-interface User {
+export interface User {
   id: number;
   email: string;
   name: string;
@@ -40,9 +40,9 @@ interface User {
   } | null;
 }
 
-type ActionMessage = { kind: "success" | "error"; text: string };
+export type ActionMessage = { kind: "success" | "error"; text: string };
 
-interface Department {
+export interface Department {
   id: number;
   name: string;
   clientId: number;
@@ -50,7 +50,7 @@ interface Department {
   siteName?: string | null;
 }
 
-interface RosterEntry {
+export interface RosterEntry {
   id: number;
   name: string;
   email: string | null;
@@ -105,7 +105,8 @@ const ROLE_COLORS: Record<string, string> = {
   client_viewer: "bg-gray-100 text-gray-700",
 };
 
-function UserDialog({
+/** Add or edit one person; also opened from the setup wizard's team step. */
+export function UserDialog({
   open,
   onClose,
   onSaved,
@@ -116,6 +117,7 @@ function UserDialog({
   isConsultant,
   currentUserId,
   actor,
+  defaultRole = "client_viewer",
 }: {
   open: boolean;
   onClose: () => void;
@@ -128,6 +130,8 @@ function UserDialog({
   currentUserId: number | null;
   /** The signed-in user; a Manager adds and edits Staff and Viewers in their own departments. */
   actor: { role: string; departmentId: number | null; departmentIds?: number[]; allDepartments?: boolean } | null;
+  /** The role a new person starts with. */
+  defaultRole?: string;
 }) {
   const actorIsManager = actor?.role === "client_manager";
   const editingSelfAsManager = actorIsManager && !!user && user.id === currentUserId;
@@ -166,7 +170,9 @@ function UserDialog({
     } else {
       // A Manager's new people start in the department the Manager is working in.
       const departmentId = actorIsManager && !actor?.allDepartments ? actor?.departmentId?.toString() ?? "" : "";
-      setForm({ name: "", email: "", password: "", role: "client_viewer", departmentId, departmentIds: [], allDepartments: false, staffRosterId: "", active: true });
+      // A Manager can't add Managers, so their new people start as Staff at most.
+      const role = actorIsManager && isManagerChoice(defaultRole) ? "client_staff" : defaultRole;
+      setForm({ name: "", email: "", password: "", role, departmentId, departmentIds: [], allDepartments: false, staffRosterId: "", active: true });
     }
     setError("");
   }, [user, open]);
