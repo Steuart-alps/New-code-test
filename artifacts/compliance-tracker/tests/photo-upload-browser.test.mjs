@@ -462,7 +462,7 @@ try {
   await navigateHarness("safe");
   const safeRow = page.getByRole("row").filter({ hasText: safeRisk.title });
   await safeRow.waitFor({ state: "visible" });
-  const safeInput = safeRow.locator('input[type="file"]');
+  const safeInput = safeRow.locator('input[type="file"]:not([capture])');
   assert.equal(await safeInput.count(), 1, "SafeTrack's real risk-assessment row should own its photo input");
   const safeExpected = { entityType: "safe_risk_assessment", entityId: safeRisk.id };
   const photoListError = safeRow.getByRole("alert");
@@ -515,7 +515,7 @@ try {
   assert.equal(await supplierInput.inputValue(), diarySupplier, "KitchenTrack should load the existing diary record");
   await page.getByText("Recent Records", { exact: true }).waitFor({ state: "visible" });
   const kitchenMain = page.locator("main");
-  const kitchenInput = kitchenMain.locator('input[type="file"]');
+  const kitchenInput = kitchenMain.locator('input[type="file"]:not([capture])');
   assert.equal(await kitchenInput.count(), 1, "KitchenTrack's existing diary form should own its photo input");
   await uploadAndAssert(kitchenInput, kitchenMain, "food_safety_check", diaryId);
   assert.ok(
@@ -540,42 +540,42 @@ try {
   const bikeUploadTargets = [
     {
       row: alphaRow,
-      input: alphaRow.getByText("Pre:", { exact: false }).locator("xpath=..").locator('input[type="file"]'),
+      input: alphaRow.getByText("Pre:", { exact: false }).locator("xpath=..").locator('input[type="file"]:not([capture])'),
       entityType: "bike_check",
       entityId: bikeHires[0].preCheckId,
       section: alphaRow.getByText("Pre:", { exact: false }).locator("xpath=.."),
     },
     {
       row: alphaRow,
-      input: alphaRow.getByText("Post:", { exact: false }).locator("xpath=..").locator('input[type="file"]'),
+      input: alphaRow.getByText("Post:", { exact: false }).locator("xpath=..").locator('input[type="file"]:not([capture])'),
       entityType: "bike_check",
       entityId: bikeHires[0].postCheckId,
       section: alphaRow.getByText("Post:", { exact: false }).locator("xpath=.."),
     },
     {
       row: alphaRow,
-      input: alphaRow.locator("td").nth(6).locator('input[type="file"]'),
+      input: alphaRow.locator("td").nth(6).locator('input[type="file"]:not([capture])'),
       entityType: "bike_hire",
       entityId: bikeHires[0].id,
       section: alphaRow.locator("td").nth(6),
     },
     {
       row: betaRow,
-      input: betaRow.getByText("Pre:", { exact: false }).locator("xpath=..").locator('input[type="file"]'),
+      input: betaRow.getByText("Pre:", { exact: false }).locator("xpath=..").locator('input[type="file"]:not([capture])'),
       entityType: "bike_check",
       entityId: bikeHires[1].preCheckId,
       section: betaRow.getByText("Pre:", { exact: false }).locator("xpath=.."),
     },
     {
       row: betaRow,
-      input: betaRow.getByText("Post:", { exact: false }).locator("xpath=..").locator('input[type="file"]'),
+      input: betaRow.getByText("Post:", { exact: false }).locator("xpath=..").locator('input[type="file"]:not([capture])'),
       entityType: "bike_check",
       entityId: bikeHires[1].postCheckId,
       section: betaRow.getByText("Post:", { exact: false }).locator("xpath=.."),
     },
     {
       row: betaRow,
-      input: betaRow.locator("td").nth(6).locator('input[type="file"]'),
+      input: betaRow.locator("td").nth(6).locator('input[type="file"]:not([capture])'),
       entityType: "bike_hire",
       entityId: bikeHires[1].id,
       section: betaRow.locator("td").nth(6),
