@@ -175,13 +175,13 @@ async function main() {
   const mutations = (state) => state.requests.filter((r) => r.method !== "GET");
 
   try {
-    for (const layout of [{ label: "full", query: "?", add: "Add Photo" }, { label: "compact", query: "?compact=1", add: "Add photo" }]) {
+    for (const layout of [{ label: "full", query: "?", add: "Choose files" }, { label: "compact", query: "?compact=1", add: "Add photo or video" }]) {
       await test(`${layout.label}: every control is named and reachable by Tab, in order`, async () => {
         const { page } = await open(layout.query);
         const sequence = await tabSequence(page);
         const expected = layout.label === "full"
-          ? ["Take photo", layout.add, "View photo 1 of 2", "Remove photo 1 of 2", "View photo 2 of 2", "Remove photo 2 of 2"]
-          : ["View photo 1 of 2", "Remove photo 1 of 2", "View photo 2 of 2", "Remove photo 2 of 2", layout.add];
+          ? ["Take photo or video", layout.add, "View photo 1 of 2", "Remove photo 1 of 2", "View photo 2 of 2", "Remove photo 2 of 2"]
+          : ["View photo 1 of 2", "Remove photo 1 of 2", "View photo 2 of 2", "Remove photo 2 of 2", layout.add, "Take photo or video"];
         assert.deepEqual(sequence, expected);
         assert.deepEqual(await page.locator('input[type="file"]').evaluateAll((els) => els.map((el) => el.tabIndex)), [-1, -1], "the file inputs themselves are not Tab stops");
         await page.close();

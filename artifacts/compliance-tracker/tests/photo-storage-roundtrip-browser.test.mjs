@@ -219,7 +219,7 @@ try {
   await input.setInputFiles({ name: "spoofed.png", mimeType: "image/png", buffer: spoofedPng });
   const rejected = await rejectedAttach;
   assert.equal(rejected.status(), 400, "spoofed bytes are rejected at attach time");
-  assert.equal((await rejected.json()).error, "Photo contents must be a valid JPEG or PNG");
+  assert.equal((await rejected.json()).error, "The file must be a valid JPEG, PNG, WebP, MP4, MOV or WebM photo or video");
   await waitForToast(pageA, "Upload failed");
   assert.equal(storageRequests.filter(request => request.method === "PUT").length, 2, "the spoofed file did reach storage");
   assert.deepEqual(await inspector.list(`uploads/tenant-${tenantA.clientId}/`), [], "rejected staging bytes are discarded");

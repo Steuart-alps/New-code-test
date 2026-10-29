@@ -20,6 +20,7 @@ import {
   GraduationCap, AlertTriangle, Printer,
 } from "lucide-react";
 import { SignaturePad } from "@/components/signature-pad";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useToast } from "@/hooks/use-toast";
 import { useLiveAcknowledgements } from "@/hooks/use-live-acknowledgements";
@@ -472,6 +473,8 @@ export default function SafeTrackPage() {
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
+  // Which record the photos go on follows the open tab (see attach below).
+  const media = useRecordMedia("safe_risk_assessment", { open: dialogOpen, disabled: saving });
 
   // Acknowledgements dialog
   const [ackTarget, setAckTarget] = useState<{ id: number; title: string; sub: string } | null>(null);
@@ -543,6 +546,7 @@ export default function SafeTrackPage() {
         toast({ title: "Could not save", description: await getApiErrorMessage(res, `Error ${res.status}`), variant: "destructive" });
         return;
       }
+      if (!editing) await media.attach(((await res.json().catch(() => null)) as { id?: number } | null)?.id, PHOTO_ENTITY_TYPE[tab as TabKey]);
       setDialogOpen(false);
       load();
     } catch (err: any) {
@@ -828,24 +832,20 @@ export default function SafeTrackPage() {
 
             {!["training", "inductions"].includes(tab) && <FileUploadField form={form} setForm={setForm} />}
 
-            {/* Photos — only available once the record exists (needs a real id) */}
-            {!["training", "inductions"].includes(tab) && (editing?.id ? (
-              <div className="pt-1 border-t">
+            {/* Photos and videos: picked here and uploaded once a new record is saved */}
+            <div className="pt-1 border-t">
+              {editing?.id ? (
                 <CheckPhotoUploader
                   entityType={PHOTO_ENTITY_TYPE[tab as TabKey]}
                   entityId={editing.id}
                 />
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground pt-1 border-t">
-                Save this record first, then re-open it to attach photos.
-              </p>
-            ))}
+              ) : media.picker}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} type="button">Cancel</Button>
             <Button onClick={() => handleSave(currentTab.sub)} disabled={saving}>
-              {editing ? "Save Changes" : "Create"}
+              {media.attaching ? "Adding photos…" : editing ? "Save Changes" : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -316,6 +316,7 @@ export function ChecklistCard({
                 Submit checklist
               </Button>
             </div>
+            {!existing?.id && <p className="text-xs text-muted-foreground">Save a draft to add photos or videos.</p>}
           </div>
         )}
 

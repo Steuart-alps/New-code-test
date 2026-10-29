@@ -3,6 +3,7 @@ import { useSayItFill, withSpokenNote, type SayItFill } from "@/lib/say-it-fill"
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -171,6 +172,7 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
   const { toast } = useToast();
   const isEdit = !!visit;
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("pest_visit", { open, disabled: saving });
   const [form, setForm] = useState(() => ({
     visitDate:          visit?.visitDate ?? new Date().toISOString().slice(0, 10),
     contractorName:     visit?.contractorName ?? config.pest_contractor_name ?? "",
@@ -210,7 +212,8 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
       if (isEdit) {
         await apiFetch(`/visits/${visit.id}`, { method: "PUT", body: JSON.stringify(payload) });
       } else {
-        await apiFetch("/visits", { method: "POST", body: JSON.stringify(payload) });
+        const created = await apiFetch("/visits", { method: "POST", body: JSON.stringify(payload) });
+        await media.attach(created?.id);
       }
       toast({ title: isEdit ? "Visit updated" : "Visit logged" });
       onSaved(); onClose();
@@ -284,6 +287,9 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
           <div className="col-span-full space-y-1.5">
             <Label>Notes</Label>
             <Textarea rows={2} value={form.notes} onChange={set("notes")} className="rounded-sm" />
+          </div>
+          <div className="col-span-full">
+            {visit ? <CheckPhotoUploader entityType="pest_visit" entityId={visit.id} /> : media.picker}
           </div>
         </div>
         <DialogFooter>

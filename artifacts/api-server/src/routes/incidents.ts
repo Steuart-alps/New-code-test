@@ -180,6 +180,11 @@ async function resolveReceipt(
       res.status(404).json({ error: "That attachment is not on this incident" });
       return null;
     }
+    // Records can hold videos too; a receipt is a photo or a PDF.
+    if (/\.(mp4|mov|webm)$/i.test(photo.object_path)) {
+      res.status(400).json({ error: "Pick a photo of the receipt, not a video" });
+      return null;
+    }
     const contentType = /\.png$/i.test(photo.object_path) ? "image/png"
       : /\.jpe?g$/i.test(photo.object_path) ? "image/jpeg" : null;
     return {

@@ -22,6 +22,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import {
   useGetBikeTrackConfig,
@@ -409,6 +410,7 @@ function NewHireDialog({
   const { toast } = useToast();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
+  const hireMedia = useRecordMedia("bike_hire", { open, disabled: saving });
 
   // Step 1 — bike selection
   const [selectedBikeId, setSelectedBikeId] = useState<number | null>(null);
@@ -457,7 +459,7 @@ function NewHireDialog({
     setStep(1); setSelectedBikeId(null);
     setGuestName(""); setGuestContact(""); setHireDate(todayIso()); setReturnExpected(""); setDepositPence("");
     setCheckItems(emptyCheckItems()); setPerformedBy(""); setCheckNotes(""); setSkipCheck(false);
-    setSaving(false);
+    setSaving(false); hireMedia.clear();
   }
 
   async function handleSubmit() {
@@ -481,7 +483,10 @@ function NewHireDialog({
           checkNotes: checkNotes.trim() || null,
         };
       }
-      await apiFetch("/bike-track/hires", { method: "POST", body: JSON.stringify(body) });
+      const created = await apiFetch("/bike-track/hires", { method: "POST", body: JSON.stringify(body) });
+      // With a pre-hire check they show on the check, otherwise on the hire.
+      if (created?.preCheck?.id) await hireMedia.attach(created.preCheck.id, "bike_check");
+      else await hireMedia.attach(created?.hire?.id);
       toast({ title: "Hire recorded", description: `${selectedBike?.ref} hired to ${guestName.trim()}` });
       reset();
       onCreated();
@@ -618,6 +623,7 @@ function NewHireDialog({
                   No pre-hire check will be recorded. You can add a standalone check later from the Checks log.
                 </p>
               )}
+              {hireMedia.picker}
             </div>
           )}
         </div>
@@ -670,6 +676,7 @@ function ReturnDialog({
   const [notes, setNotes] = useState("");
   const [returnDate, setReturnDate] = useState(todayIso());
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("bike_hire", { open: !!hire, disabled: saving });
 
   async function handleReturn() {
     if (!hire) return;
@@ -690,6 +697,9 @@ function ReturnDialog({
         };
       }
       const result = await apiFetch(`/bike-track/hires/${hire.id}/return`, { method: "POST", body: JSON.stringify(body) });
+      // With a post-return check they show on the check, otherwise on the hire.
+      if (result?.postCheck?.id) await media.attach(result.postCheck.id, "bike_check");
+      else await media.attach(hire.id);
       const bikeStatus = result?.bikeStatus ?? "available";
       toast({
         title: "Bike returned",
@@ -775,6 +785,7 @@ function ReturnDialog({
                 </div>
               </div>
             )}
+            {media.picker}
           </div>
         </div>
 
@@ -927,6 +938,7 @@ function LogServiceDialog({
   const [costPence, setCostPence] = useState(service?.costPence ? String(service.costPence / 100) : "");
   const [notes, setNotes] = useState(service?.notes ?? "");
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("bike_service", { open, disabled: saving });
 
   // Auto-fill next service date when type or date changes, unless editing existing
   useMemo(() => {
@@ -970,7 +982,8 @@ function LogServiceDialog({
         toast({ title: "Service record updated" });
       } else {
         body.bikeId = parseInt(bikeId);
-        await apiFetch("/bike-track/services", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiFetch("/bike-track/services", { method: "POST", body: JSON.stringify(body) });
+        await media.attach(created?.id);
         toast({ title: "Service logged" });
       }
       onSaved();
@@ -1049,6 +1062,7 @@ function LogServiceDialog({
             <Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Work carried out, parts replaced, observations…" rows={3} className="rounded-sm" />
           </div>
+          {service ? <CheckPhotoUploader entityType="bike_service" entityId={service.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-sm">Cancel</Button>

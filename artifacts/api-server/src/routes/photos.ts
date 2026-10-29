@@ -14,6 +14,7 @@ import {
   ObjectStorageService,
   ObjectNotFoundError,
   ObjectOwnershipError,
+  UploadTooLargeError,
   isTenantReservedObjectPath,
 } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
@@ -29,6 +30,12 @@ import { cancelStagedPhotoReceipt, cleanupStagedPhotoUploads } from "../lib/stag
 const router = Router();
 const storage = new ObjectStorageService();
 const ALLOWED_PHOTO_TYPES: ReadonlySet<AllowedUploadType> = new Set(["image/jpeg", "image/png"]);
+// A saved record takes photos and short videos, the same types as FixTrack
+// issues and track actions (finalizeVerifiedIssueMediaUpload checks them).
+// Required photo evidence staged before a record exists stays JPEG or PNG.
+const RECORD_MEDIA_TYPES = [
+  "image/jpeg", "image/png", "image/webp", "image/avif", "video/mp4", "video/quicktime", "video/webm",
+] as const;
 const STAGED_ENTITY_TYPE_SET: ReadonlySet<string> = new Set(STAGED_PHOTO_ENTITY_TYPES);
 
 /**
@@ -111,9 +118,13 @@ const greenServiceCreationRole: RequestHandler = (req, res, next) => {
   next();
 };
 
-function photoStorageError(err: unknown): { status: number; error: string } {
+function photoStorageError(
+  err: unknown,
+  badContent = "Photo contents must be a valid JPEG or PNG",
+): { status: number; error: string } {
   const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
-    : err instanceof ObjectContentError ? "Photo contents must be a valid JPEG or PNG"
+    : err instanceof UploadTooLargeError ? err.message
+    : err instanceof ObjectContentError ? badContent
     : err instanceof ObjectGenerationError ? err.message
     : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded photo";
   const status = err instanceof ObjectNotFoundError ? 404
@@ -315,8 +326,8 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
     entityType: z.string().min(1).max(100),
     entityId: z.number().int().positive(),
     name: z.string().min(1).max(200),
-    contentType: z.enum(["image/jpeg", "image/png"], {
-      message: "Photos must be JPEG or PNG",
+    contentType: z.enum(RECORD_MEDIA_TYPES, {
+      message: "Choose a JPEG, PNG, WebP, MP4, MOV, or WebM file",
     }),
   }).parse(req.body);
 
@@ -351,26 +362,18 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     if (!isTenantReservedObjectPath(normalizedPath, clientId)) {
       throw new ObjectOwnershipError("Upload was not reserved for this tenant");
     }
-    // This storage primitive pins generation + metageneration, fully validates
-    // the image, and copies exactly those bytes to a fresh immutable key before
-    // applying the ACL. A still-live staging PUT cannot replace attached data.
-    const finalized = await storage.finalizeVerifiedTenantUpload(
-      normalizedPath,
-      clientId,
-      ALLOWED_PHOTO_TYPES,
-    );
+    // Images are fully decoded and normalised; videos are signature-checked.
+    // Either way exactly the verified bytes are copied to a fresh immutable
+    // key before the ACL is applied, so a still-live staging PUT cannot
+    // replace attached data.
+    const finalized = await storage.finalizeVerifiedIssueMediaUpload(normalizedPath, clientId);
     objectPath = finalized.objectPath;
   } catch (err) {
     // Rejected uploads are still unfinalised. Best-effort deletion prevents
     // invalid bytes from accumulating; a foreign path is refused by this call.
     await storage.discardTenantUpload(body.objectPath, clientId).catch(() => {});
-    const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
-      : err instanceof ObjectContentError ? "Photo contents must be a valid JPEG or PNG"
-      : err instanceof ObjectGenerationError ? err.message
-      : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded photo";
-    return res.status(err instanceof ObjectNotFoundError ? 404
-      : err instanceof ObjectContentError ? 400
-      : err instanceof ObjectGenerationError ? 409 : 403).json({ error });
+    const mapped = photoStorageError(err, "The file must be a valid JPEG, PNG, WebP, MP4, MOV or WebM photo or video");
+    return res.status(mapped.status).json({ error: mapped.error });
   }
 
   const result = await db.execute(sql`

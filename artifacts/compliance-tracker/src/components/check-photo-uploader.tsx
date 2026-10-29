@@ -1,5 +1,6 @@
 /**
- * CheckPhotoUploader — reusable photo attachment component for any check record.
+ * CheckPhotoUploader — reusable photo and video attachment component for any
+ * check record.
  *
  * Usage:
  *   <CheckPhotoUploader entityType="fire_safety_check" entityId={check.id} />
@@ -9,7 +10,7 @@
  * enforcement is done here — the parent form decides whether to block submit.
  */
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Camera, ImagePlus, Trash2, X, ZoomIn, Loader2 } from "lucide-react";
+import { Camera, ImagePlus, Trash2, X, ZoomIn, Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,8 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useAuth } from "@/context/auth-context";
 import { useFileDrop } from "@/hooks/use-file-drop";
 import { useCameraCapture } from "@/components/camera-capture";
+import { MEDIA_INPUT_ACCEPT, VIDEO_PATH, mediaContentType, mediaFileProblem } from "@/lib/media-upload";
+import { assertWithinUploadLimit } from "@/lib/upload-limits";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -28,6 +31,14 @@ async function parsePhotoResponse<T = any>(res: Response): Promise<T> {
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
   return data as T;
+}
+
+// The same record's photos can show in two places at once (its row in a list
+// and its edit form), so a change in one refreshes the other.
+const PHOTOS_CHANGED = "check-photos-changed";
+type PhotosChanged = { key: string; from?: object };
+export function announcePhotosChanged(entityType: string, entityId: number, from?: object) {
+  window.dispatchEvent(new CustomEvent<PhotosChanged>(PHOTOS_CHANGED, { detail: { key: `${entityType}:${entityId}`, from } }));
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -62,17 +73,18 @@ export interface CheckPhotoUploaderProps {
  * inside it (the close button is its only control) until Escape, the close
  * button or a backdrop click closes it; the opener restores focus.
  */
-function Lightbox({ src, label, onClose }: { src: string; label: string; onClose: () => void }) {
+function Lightbox({ src, label, video, onClose }: { src: string; label: string; video: boolean; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     closeRef.current?.focus();
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      else if (e.key === "Tab") { e.preventDefault(); closeRef.current?.focus(); }
+      // A video's own controls take focus too; anything else returns to close.
+      else if (e.key === "Tab" && !video) { e.preventDefault(); closeRef.current?.focus(); }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, video]);
 
   return (
     <div
@@ -91,12 +103,24 @@ function Lightbox({ src, label, onClose }: { src: string; label: string; onClose
       >
         <X className="w-6 h-6" aria-hidden="true" />
       </button>
-      <img
-        src={src}
-        alt={label}
-        className="max-w-[90vw] max-h-[90vh] object-contain rounded shadow-2xl"
-        onClick={e => e.stopPropagation()}
-      />
+      {video ? (
+        <video
+          src={src}
+          aria-label={label}
+          controls
+          autoPlay
+          playsInline
+          className="max-w-[90vw] max-h-[90vh] rounded shadow-2xl"
+          onClick={e => e.stopPropagation()}
+        />
+      ) : (
+        <img
+          src={src}
+          alt={label}
+          className="max-w-[90vw] max-h-[90vh] object-contain rounded shadow-2xl"
+          onClick={e => e.stopPropagation()}
+        />
+      )}
     </div>
   );
 }
@@ -123,7 +147,7 @@ export function CheckPhotoUploader({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [lightbox, setLightbox] = useState<{ src: string; label: string } | null>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; label: string; video: boolean } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
@@ -131,6 +155,8 @@ export function CheckPhotoUploader({
   // The control that opened the lightbox, so focus returns to it on close.
   const lightboxOpenerRef = useRef<HTMLElement | null>(null);
   const { toast } = useToast();
+  // Identifies this box's own change announcements.
+  const self = useRef({});
 
   // ── Fetch existing photos ─────────────────────────────────────────────────
 
@@ -158,6 +184,14 @@ export function CheckPhotoUploader({
   }, [entityType, entityId, onCountChange, apiFetch]);
 
   useEffect(() => { fetchPhotos(); }, [fetchPhotos]);
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const { key, from } = (event as CustomEvent<PhotosChanged>).detail;
+      if (key === `${entityType}:${entityId}` && from !== self.current) void fetchPhotos();
+    };
+    window.addEventListener(PHOTOS_CHANGED, changed);
+    return () => window.removeEventListener(PHOTOS_CHANGED, changed);
+  }, [entityType, entityId, fetchPhotos]);
 
   // ── Upload flow ───────────────────────────────────────────────────────────
 
@@ -180,29 +214,28 @@ export function CheckPhotoUploader({
   };
 
   const uploadFile = async (file: File) => {
-    if (!["image/jpeg", "image/png"].includes(file.type)) {
-      toast({ title: "JPEG or PNG only", description: `${file.name} isn't a JPEG or PNG photo.`, variant: "destructive" });
+    const problem = mediaFileProblem(file);
+    if (problem) {
+      toast({ title: `${file.name} can't be added`, description: problem, variant: "destructive" });
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      toast({ title: "File too large", description: "Maximum 10 MB per photo.", variant: "destructive" });
-      return;
-    }
+    const contentType = mediaContentType(file);
 
     try {
+      assertWithinUploadLimit(file);
       // Step 1 — request presigned URL
       const { uploadUrl, objectPath } = await apiFetch<{ uploadUrl: string; objectPath: string }>(
         "/photos/request-upload",
         {
           method: "POST",
-          body: JSON.stringify({ entityType, entityId, name: file.name, contentType: file.type }),
+          body: JSON.stringify({ entityType, entityId, name: file.name.slice(0, 200), contentType }),
         }
       );
 
       // Step 2 — PUT file directly to GCS
       const putRes = await fetch(uploadUrl, {
         method: "PUT",
-        headers: { "Content-Type": file.type },
+        headers: { "Content-Type": contentType },
         body: file,
       });
       if (!putRes.ok) throw new Error("Upload to storage failed");
@@ -214,24 +247,26 @@ export function CheckPhotoUploader({
       });
 
       await fetchPhotos();
-      toast({ title: "Photo added" });
+      announcePhotosChanged(entityType, entityId, self.current);
+      toast({ title: contentType.startsWith("video/") ? "Video added" : "Photo added" });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     }
   };
   const drop = useFileDrop((files) => { void uploadFiles(files); }, !readOnly && !uploading);
-  const camera = useCameraCapture((files) => { void uploadFiles(files); }, { fileInput: () => cameraInputRef.current });
+  const camera = useCameraCapture((files) => { void uploadFiles(files); }, { video: true, fileInput: () => cameraInputRef.current });
   const dropProps = readOnly ? {} : drop.dropZoneProps;
   const dropHighlight = drop.isDragging && "rounded-sm ring-2 ring-primary ring-offset-2 bg-primary/5";
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
   const handleDelete = async (photo: CheckPhoto) => {
-    if (!confirm("Remove this photo?")) return;
+    if (!confirm(VIDEO_PATH.test(photo.objectPath) ? "Remove this video?" : "Remove this photo?")) return;
     try {
       await apiFetch(`/photos/${photo.id}`, { method: "DELETE" });
       await fetchPhotos();
-      toast({ title: "Photo removed" });
+      announcePhotosChanged(entityType, entityId, self.current);
+      toast({ title: VIDEO_PATH.test(photo.objectPath) ? "Video removed" : "Photo removed" });
       // The focused control was removed with the photo: keep keyboard users
       // in the component rather than dropping focus to the page.
       requestAnimationFrame(() => {
@@ -247,11 +282,20 @@ export function CheckPhotoUploader({
   // ── Photo serving URL ─────────────────────────────────────────────────────
 
   const photoUrl = (objectPath: string) => `${apiBase}/storage${objectPath}${activeClientId ? `?clientId=${activeClientId}` : ""}`;
-  const photoLabel = (index: number) => `photo ${index + 1} of ${photos.length}`;
+  const isVideo = (photo: CheckPhoto) => VIDEO_PATH.test(photo.objectPath);
+  const photoLabel = (index: number) => `${isVideo(photos[index]!) ? "video" : "photo"} ${index + 1} of ${photos.length}`;
+  // A video shows its first frame, with a play mark over it.
+  const thumbnail = (photo: CheckPhoto, className: string) => isVideo(photo) ? (
+    <span className="relative block h-full w-full">
+      <video src={`${photoUrl(photo.objectPath)}#t=0.1`} muted playsInline preload="metadata" className={className} />
+      <Play className="absolute inset-0 m-auto h-4 w-4 fill-white text-white drop-shadow" aria-hidden="true" />
+    </span>
+  ) : <img src={photoUrl(photo.objectPath)} alt="" className={className} />;
 
   const openLightbox = (photo: CheckPhoto, index: number, opener: HTMLElement) => {
     lightboxOpenerRef.current = opener;
-    setLightbox({ src: photoUrl(photo.objectPath), label: `Photo ${index + 1} of ${photos.length}` });
+    const label = photoLabel(index);
+    setLightbox({ src: photoUrl(photo.objectPath), label: label[0]!.toUpperCase() + label.slice(1), video: isVideo(photo) });
   };
   const closeLightbox = useCallback(() => {
     setLightbox(null);
@@ -260,7 +304,7 @@ export function CheckPhotoUploader({
     // After the dialog unmounts.
     requestAnimationFrame(() => opener?.focus());
   }, []);
-  const lightboxEl = lightbox && <Lightbox src={lightbox.src} label={lightbox.label} onClose={closeLightbox} />;
+  const lightboxEl = lightbox && <Lightbox src={lightbox.src} label={lightbox.label} video={lightbox.video} onClose={closeLightbox} />;
 
   // Without `capture`, phones offer the camera and the photo library; the
   // camera input opens the camera straight away.
@@ -269,7 +313,7 @@ export function CheckPhotoUploader({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/jpeg,image/png"
+        accept={MEDIA_INPUT_ACCEPT}
         multiple
         className="hidden"
         tabIndex={-1}
@@ -279,7 +323,7 @@ export function CheckPhotoUploader({
       <input
         ref={cameraInputRef}
         type="file"
-        accept="image/jpeg,image/png"
+        accept={MEDIA_INPUT_ACCEPT}
         capture="environment"
         className="hidden"
         tabIndex={-1}
@@ -290,7 +334,7 @@ export function CheckPhotoUploader({
     </>
   );
   const status = (
-    <span role="status" className="sr-only">{uploading ? "Uploading photo…" : ""}</span>
+    <span role="status" className="sr-only">{uploading ? "Uploading…" : ""}</span>
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -318,7 +362,7 @@ export function CheckPhotoUploader({
               className={cn("block w-full h-full", focusRing)}
               onClick={(e) => openLightbox(p, index, e.currentTarget)}
             >
-              <img src={photoUrl(p.objectPath)} alt="" className="w-full h-full object-cover" />
+              {thumbnail(p, "w-full h-full object-cover")}
             </button>
             {!readOnly && <button
               type="button"
@@ -336,7 +380,7 @@ export function CheckPhotoUploader({
         {!readOnly && <button
           ref={addButtonRef}
           type="button"
-          aria-label={uploading ? "Uploading photo" : "Add photo"}
+          aria-label={uploading ? "Uploading" : "Add photo or video"}
           disabled={uploading}
           aria-busy={uploading}
           onClick={() => fileInputRef.current?.click()}
@@ -350,6 +394,19 @@ export function CheckPhotoUploader({
             ? <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" aria-hidden="true" />
             : <ImagePlus className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
           }
+        </button>}
+        {!readOnly && <button
+          type="button"
+          aria-label="Take photo or video"
+          disabled={uploading}
+          onClick={camera.open}
+          className={cn(
+            "w-10 h-10 rounded-sm border-2 border-dashed border-border flex items-center justify-center cursor-pointer",
+            "hover:border-primary/50 hover:bg-muted/40 transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-default",
+            focusRing,
+          )}
+        >
+          <Camera className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
         </button>}
         {!readOnly && fileInput}
         {required && (
@@ -370,7 +427,7 @@ export function CheckPhotoUploader({
       {status}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Photos</span>
+          <span className="text-sm font-medium">Photos and videos</span>
           {required && (
             <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-xs">Required</Badge>
           )}
@@ -389,7 +446,7 @@ export function CheckPhotoUploader({
               focusRing,
             )}
           >
-            <Camera className="w-3.5 h-3.5" aria-hidden="true" /> Take photo
+            <Camera className="w-3.5 h-3.5" aria-hidden="true" /> Take photo or video
           </button>
           <button
             ref={addButtonRef}
@@ -406,7 +463,7 @@ export function CheckPhotoUploader({
             {uploading ? (
               <><Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Uploading…</>
             ) : (
-              <><ImagePlus className="w-3.5 h-3.5" aria-hidden="true" /> Add Photo</>
+              <><ImagePlus className="w-3.5 h-3.5" aria-hidden="true" /> Choose files</>
             )}
           </button>
         </div>}
@@ -422,8 +479,8 @@ export function CheckPhotoUploader({
       {loadErrorNotice}
       {!loading && !loadError && photos.length === 0 && (
         <p className="text-xs text-muted-foreground italic py-1">
-              {required ? `At least ${minPhotos} ${minPhotos === 1 ? "photo is" : "photos are"} required for this check.` : "No photos attached."}
-              {!readOnly && <span className="hidden sm:inline"> You can also drag photos here.</span>}
+              {required ? `At least ${minPhotos} ${minPhotos === 1 ? "photo is" : "photos are"} required for this check.` : "No photos or videos attached."}
+              {!readOnly && <span className="hidden sm:inline"> You can also drag them here.</span>}
         </p>
       )}
 
@@ -431,12 +488,12 @@ export function CheckPhotoUploader({
         <div className="grid grid-cols-4 gap-2">
           {photos.map((p, index) => (
             <div key={p.id} className="relative group aspect-square rounded-sm overflow-hidden border border-border">
-              <img
-                src={photoUrl(p.objectPath)}
-                alt=""
-                className="w-full h-full object-cover cursor-pointer transition-transform group-hover:scale-105"
+              <span
+                className="block w-full h-full cursor-pointer"
                 onClick={(e) => openLightbox(p, index, e.currentTarget.parentElement?.querySelector("button") ?? e.currentTarget)}
-              />
+              >
+                {thumbnail(p, "w-full h-full object-cover transition-transform group-hover:scale-105")}
+              </span>
               {/* Shown on hover and whenever one of its controls has keyboard focus. */}
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 group-focus-within:bg-black/30 transition-colors flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
                 <button

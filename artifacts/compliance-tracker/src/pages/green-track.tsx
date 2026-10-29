@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { SpreadsheetDropZone, isSpreadsheetFile, usePastedFile } from "@/components/spreadsheet-drop-zone";
 import { ListReadNote, ListReadingPanel, isPhotoOrPdf, useListReading, type ListReadResult } from "@/components/ai-list-reader";
 import { format } from "date-fns";
+import { useRecordMedia } from "@/components/record-media";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
@@ -905,6 +906,7 @@ function PreUseDialog({
   };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("green_pre_use_check", { open, disabled: saving });
   const photoEvidenceBlocked = photoEvidence.enabled && (
     !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
     (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
@@ -950,11 +952,12 @@ function PreUseDialog({
       if (check) {
         await apiFetch(`/green-track/pre-use-checks/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/pre-use-checks", {
+        const created = await apiFetch("/green-track/pre-use-checks", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: check ? "Check updated" : "Pre-use check recorded" });
       onSaved(); onClose();
@@ -1033,6 +1036,7 @@ function PreUseDialog({
               placeholder="Any faults observed, corrective action taken…" />
           </div>
           <RequiredRecordPhotoEvidence evidence={photoEvidence} />
+          {check ? <CheckPhotoUploader entityType="green_pre_use_check" entityId={check.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -1068,6 +1072,7 @@ function ServiceDialog({
   };
   const [form, setForm] = useState({ ...blank, servicedByRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("green_service", { open, disabled: saving });
   const photoEvidenceBlocked = photoEvidence.enabled && (
     !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
     (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
@@ -1105,11 +1110,12 @@ function ServiceDialog({
       if (record) {
         await apiFetch(`/green-track/service-records/${record.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/service-records", {
+        const created = await apiFetch("/green-track/service-records", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: record ? "Service record updated" : "Service record logged" });
       onSaved(); onClose();
@@ -1192,6 +1198,7 @@ function ServiceDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           <RequiredRecordPhotoEvidence evidence={photoEvidence} />
+          {record ? <CheckPhotoUploader entityType="green_service" entityId={record.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -1229,6 +1236,7 @@ function DefectDialog({
   };
   const [form, setForm] = useState({ ...blank, reportedByRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
+  const media = useRecordMedia("green_defect", { open, disabled: saving });
   const photoEvidenceBlocked = photoEvidence.enabled && (
     !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
     (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
@@ -1261,11 +1269,12 @@ function DefectDialog({
       if (defect) {
         await apiFetch(`/green-track/defects/${defect.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/defects", {
+        const created = await apiFetch("/green-track/defects", {
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
         photoEvidence.consume();
+        await media.attach(created?.id);
       }
       toast({ title: defect ? "Defect updated" : "Defect reported" });
       onSaved(); onClose();
@@ -1365,6 +1374,7 @@ function DefectDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           <RequiredRecordPhotoEvidence evidence={photoEvidence} />
+          {defect ? <CheckPhotoUploader entityType="green_defect" entityId={defect.id} /> : media.picker}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
