@@ -33,6 +33,7 @@
     "test:photo-uploader-keyboard-browser": "node tests/photo-uploader-keyboard-browser.test.mjs",
     "test:file-drop-browser": "node tests/file-drop-browser.test.mjs",
     "test:import-file-types-browser": "node tests/import-file-types-browser.test.mjs",
+    "test:certificate-reader-browser": "node tests/certificate-reader-browser.test.mjs",
     "test:feedback-inbox-browser": "node tests/feedback-inbox-browser.test.mjs",
     "test:required-track-photos-browser": "node tests/required-track-photos-browser.test.mjs",
     "test:recovery-code-browser": "node tests/recovery-code-browser.test.mjs",
@@ -145,6 +146,7 @@
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
-    "@sentry/react": "^10.70.0"
+    "@sentry/react": "^10.70.0",
+    "pdf-lib": "^1.17.1"
   }
 }
