@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -402,6 +403,8 @@ export default function TreeTrackPage() {
           <Plus className="w-4 h-4" /> Record Inspection
         </Button>
       </div>
+
+      <TrackContractorChecks module="tree" siteId={filterSite !== "all" ? Number(filterSite) : undefined} />
 
       {/* Status overview */}
       {statuses.length > 0 && (

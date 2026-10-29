@@ -35,6 +35,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 import { sortByLabel } from "@/lib/sort-options";
+import { TrackContractorChecks } from "@/components/track-contractor-checks";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -597,6 +598,8 @@ export default function HotTubPage() {
       <WaterMonitoringPlan module="hot-tub" siteId={filterSite === "all" ? undefined : Number(filterSite)}
         checks={CHECK_TYPE_LABELS} unit="days" canManage={canAdmin}
         onChanged={() => qc.invalidateQueries({ queryKey: ["hot-tub-status", activeClientId, filterSite] })} />
+      <TrackContractorChecks module="hot_tub" siteId={filterSite !== "all" ? Number(filterSite) : undefined} />
+
       {/* Status overview */}
       {filterSite !== "all" && statuses.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
