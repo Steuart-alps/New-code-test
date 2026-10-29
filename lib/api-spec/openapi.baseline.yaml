@@ -7080,6 +7080,10 @@ components:
         label: { type: string }
         description: { type: string }
         dueFrom: { type: string, enum: [track, later, check] }
+        trades:
+          type: array
+          items: { type: string }
+          description: Contractor trades suggested first when choosing who does this visit
     ContractorVisit:
       type: object
       required: [visitKey, siteId, siteName, trackDueDate, checkId, checkSiteId, dueDate, status, contractorId, contractorName, reminderSentAt]

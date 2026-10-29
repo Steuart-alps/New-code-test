@@ -868,7 +868,8 @@ export const ListContractorVisitsResponse = zod.object({
   "title": zod.string().describe('Title of the linked compliance check'),
   "label": zod.string(),
   "description": zod.string(),
-  "dueFrom": zod.enum(['track', 'later', 'check'])
+  "dueFrom": zod.enum(['track', 'later', 'check']),
+  "trades": zod.array(zod.string()).optional().describe('Contractor trades suggested first when choosing who does this visit')
 })),
   "visits": zod.array(zod.object({
   "visitKey": zod.string(),

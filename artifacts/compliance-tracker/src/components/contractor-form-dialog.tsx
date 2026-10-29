@@ -16,25 +16,7 @@ import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Contractor } from "@workspace/api-client-react";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
-
-// ── Trade options (must match fix-track issue types) ─────────────────────────
-
-const TRADE_OPTIONS = [
-  { value: "electrical",    label: "Electrical" },
-  { value: "plumbing",      label: "Plumbing" },
-  // Gas is a single issue type but we record which kind of gas work
-  // the contractor covers so managers can pick the right specialist.
-  { value: "gas_kitchen",   label: "Gas — Kitchen (hobs, ovens, ranges)" },
-  { value: "gas_fireplace", label: "Gas — Fireplace / Fires" },
-  { value: "gas_heating",   label: "Gas — Heating Plant (boilers)" },
-  { value: "structural",    label: "Structural" },
-  { value: "equipment",     label: "Equipment" },
-  { value: "hvac",          label: "HVAC (ventilation, air handling)" },
-  { value: "it_comms",      label: "IT / Comms" },
-  { value: "safety_hazard", label: "Safety Hazard" },
-  { value: "cleaning",      label: "Cleaning" },
-  { value: "general",       label: "General" },
-];
+import { TRADE_GROUPS, tradeGroup, tradeLabel } from "@/lib/contractor-trades";
 
 // ── Form schema ───────────────────────────────────────────────────────────────
 
@@ -95,15 +77,23 @@ export function ContractorFormDialog({
   // API accepts it on edit because it is unchanged. New contractors only ever
   // see the active list.
   const { data: formOptions } = useFormOptions();
-  const tradeLabels: Record<string, string> = Object.fromEntries(TRADE_OPTIONS.map(o => [o.value, o.label]));
-  const humanizeTrade = (v: string) => v.split("_").map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(" ");
   const effectiveTradeValues = pickOptions(formOptions, "fixtrack_trades");
   const storedTrades: string[] = Array.isArray((contractor as any)?.trades) ? (contractor as any).trades : [];
   const retiredTrades = [...new Set([...storedTrades, ...trades])].filter(t => !effectiveTradeValues.includes(t));
   const tradeOptionList = [...effectiveTradeValues, ...retiredTrades].map(value => {
-    const label = tradeLabels[value] ?? humanizeTrade(value);
+    const label = tradeLabel(value);
     return { value, label: formOptions && retiredTrades.includes(value) ? `${label} (disabled)` : label };
   });
+  // Grouped so the fire and security trades are easy to find in a long list;
+  // disabled trades still come last.
+  const isRetired = (value: string) => !!formOptions && retiredTrades.includes(value);
+  const tradeOptionGroups = [
+    ...TRADE_GROUPS.map(group => ({
+      group: group as string,
+      options: tradeOptionList.filter(opt => !isRetired(opt.value) && tradeGroup(opt.value) === group),
+    })),
+    { group: "No longer offered", options: tradeOptionList.filter(opt => isRetired(opt.value)) },
+  ].filter(entry => entry.options.length > 0);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -303,38 +293,43 @@ export function ContractorFormDialog({
                 optionKey="fixtrack_trades"
                 title="Trade specialisms"
                 triggerLabel="Customise trades"
-                labelFor={v => tradeLabels[v] ?? humanizeTrade(v)}
+                labelFor={tradeLabel}
               />
             </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {tradeOptionList.map(opt => {
-                const checked = trades.includes(opt.value);
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    aria-pressed={checked}
-                    onClick={() => toggleTrade(opt.value)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm text-left transition-colors ${
-                      checked
-                        ? "bg-primary/10 border-primary/40 text-primary font-medium"
-                        : "bg-muted/40 border-border text-muted-foreground hover:border-primary/30"
-                    }`}
-                  >
-                    <span className={`w-3.5 h-3.5 rounded-sm border flex-shrink-0 flex items-center justify-center ${
-                      checked ? "bg-primary border-primary" : "border-muted-foreground/40"
-                    }`}>
-                      {checked && (
-                        <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 12 12">
-                          <path d="M10 3L5 8.5 2 5.5" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      )}
-                    </span>
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
+            {tradeOptionGroups.map(({ group, options }) => (
+              <div key={group} role="group" aria-label={group} className="space-y-1.5">
+                {tradeOptionGroups.length > 1 && <p className="text-xs font-semibold text-muted-foreground">{group}</p>}
+                <div className="grid grid-cols-2 gap-1.5">
+                  {options.map(opt => {
+                    const checked = trades.includes(opt.value);
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        aria-pressed={checked}
+                        onClick={() => toggleTrade(opt.value)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm text-left transition-colors ${
+                          checked
+                            ? "bg-primary/10 border-primary/40 text-primary font-medium"
+                            : "bg-muted/40 border-border text-muted-foreground hover:border-primary/30"
+                        }`}
+                      >
+                        <span className={`w-3.5 h-3.5 rounded-sm border flex-shrink-0 flex items-center justify-center ${
+                          checked ? "bg-primary border-primary" : "border-muted-foreground/40"
+                        }`}>
+                          {checked && (
+                            <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 12 12">
+                              <path d="M10 3L5 8.5 2 5.5" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          )}
+                        </span>
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
             {trades.length > 0 && (
               <p className="text-xs text-primary font-medium">
                 {trades.length} trade{trades.length !== 1 ? "s" : ""} selected

@@ -52,7 +52,13 @@ const MAX_OPTIONS = 50;
 const DEFAULT_TRADES = [
   "electrical", "plumbing",
   "gas_kitchen", "gas_fireplace", "gas_heating",
-  "structural", "equipment", "hvac", "it_comms",
+  "structural", "equipment", "hvac",
+  "fire_alarm", "emergency_lighting", "fire_extinguishers",
+  "kitchen_fire_suppression", "sprinkler_systems", "aov_smoke_vents",
+  "dry_wet_risers", "fire_doors", "fire_shutters_curtains", "fire_dampers",
+  "fire_stopping", "kitchen_extract_cleaning", "fire_risk_assessor",
+  "intruder_alarm", "cctv", "access_control",
+  "it_comms",
   "safety_hazard", "cleaning", "general",
 ];
 const humanize = value => value.split("_").map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(" ");
@@ -198,8 +204,8 @@ async function save(page) {
 }
 
 /** What the open editor shows: active rows and the "Disabled options" section. */
-function editorState(page) {
-  return dialogOf(page).evaluate(dialog => {
+async function editorState(page) {
+  const state = await dialogOf(page).evaluate(dialog => {
     const style = el => {
       const cs = getComputedStyle(el);
       return { borderStyle: cs.borderTopStyle, color: cs.color };
@@ -229,7 +235,12 @@ function editorState(page) {
         heading.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING) : false,
     };
   });
+  // Built-in options show their label; `active` is what each row stores.
+  return { ...state, shown: state.active, active: state.active.map(storedValue) };
 }
+
+/** The stored value behind a row's text: a built-in shows its label. */
+const storedValue = text => DEFAULT_TRADES.find(value => humanize(value) === text) ?? text;
 
 const enableButton = (page, label) =>
   dialogOf(page).getByText(label, { exact: true }).locator("xpath=..").getByRole("button", { name: "Enable" });
@@ -280,6 +291,7 @@ try {
   await openEditor(page, DEFAULT_TRADES.length);
   let state = await editorState(page);
   assert.deepEqual(state.active, DEFAULT_TRADES, "the editor starts from the default list");
+  assert.deepEqual(state.shown, DEFAULT_TRADES.map(humanize), "built-in options show their capitalised label, not the stored code");
   assert.deepEqual(state.disabled, [], "no disabled section for an untouched list");
 
   // 2. Add a custom trade and disable a built-in; both persist.
@@ -361,7 +373,7 @@ try {
   checks.push("re-adding a disabled value by name restores it");
 
   // 8. The 50-option limit applies to the active list.
-  const customs = Array.from({ length: 38 }, (_, i) => `Custom trade ${String(i + 1).padStart(2, "0")}`);
+  const customs = Array.from({ length: MAX_OPTIONS - DEFAULT_TRADES.length }, (_, i) => `Custom trade ${String(i + 1).padStart(2, "0")}`);
   stored = {
     active: [...DEFAULT_TRADES.filter(t => t !== "gas_fireplace"), ...customs], // 49
     disabled: ["gas_fireplace", "Roof Access Crew"],

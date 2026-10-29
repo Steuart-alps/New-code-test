@@ -1190,6 +1190,8 @@ export interface ContractorVisitType {
   label: string;
   description: string;
   dueFrom: ContractorVisitTypeDueFrom;
+  /** Contractor trades suggested first when choosing who does this visit */
+  trades?: string[];
 }
 
 export interface ContractorVisit {

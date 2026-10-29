@@ -44,6 +44,8 @@ export interface ContractorVisitType {
    * "check": the track has no due date; the check's own date is used.
    */
   dueFrom: "track" | "later" | "check";
+  /** Contractor trades (fixtrack_trades) suggested first when picking who does it. */
+  trades?: readonly string[];
 }
 
 /** Title of the compliance check kept in step with PestTrack visits. */
@@ -99,31 +101,105 @@ export const CONTRACTOR_VISIT_TYPES: readonly ContractorVisitType[] = [
     key: "fire:alarm_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
     title: fireTitle("alarm_service"), label: "Fire alarm service (6-monthly)",
     description: "Six-monthly servicing of the fire alarm system by a competent contractor (BS 5839).",
-    frequencyMonths: 6, dueFrom: "track",
+    frequencyMonths: 6, dueFrom: "track", trades: ["fire_alarm"],
   },
   {
     key: "fire:extinguisher_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
     title: fireTitle("extinguisher_service"), label: "Fire extinguisher service (annual)",
     description: "Annual service of all portable fire extinguishers (BS 5306-3).",
-    frequencyMonths: 12, dueFrom: "track",
+    frequencyMonths: 12, dueFrom: "track", trades: ["fire_extinguishers"],
   },
   {
     key: "fire:emergency_lights_annual", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
     title: fireTitle("emergency_lights_annual"), label: "Emergency lighting 3-hour test (annual)",
     description: "Annual three-hour duration test and certification of emergency lighting (BS 5266).",
-    frequencyMonths: 12, dueFrom: "track",
+    frequencyMonths: 12, dueFrom: "track", trades: ["emergency_lighting", "electrical"],
   },
   {
     key: "fire:risk_assessment", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
     title: "Fire Risk Assessment Review", label: "Fire risk assessment review",
     description: "Review of the fire risk assessment by your assessor. Its due date follows the next review date on the site's FireTrack template; change that date there after each review.",
-    frequencyMonths: 12, dueFrom: "later",
+    frequencyMonths: 12, dueFrom: "later", trades: ["fire_risk_assessor"],
+  },
+  // Other fire and security services: FireTrack keeps no date for these, so
+  // each check keeps its own (set it on the Contractors page).
+  {
+    key: "fire:kitchen_suppression_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Kitchen Fire Suppression Service", label: "Kitchen fire suppression service (6-monthly)",
+    description: "Service of the fire suppression system over the cooking range by a competent contractor, usually every six months (LPS 1223).",
+    frequencyMonths: 6, dueFrom: "check", trades: ["kitchen_fire_suppression"],
+  },
+  {
+    key: "fire:kitchen_extract_clean", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Kitchen Extract Cleaning (TR19 Grease)", label: "Kitchen extract (duct) cleaning",
+    description: "Specialist cleaning of the kitchen canopy, filters and extract ductwork to remove grease (TR19 Grease). Every 3, 6 or 12 months depending on daily use; change the repeat on the check to suit.",
+    frequencyMonths: 6, dueFrom: "check", trades: ["kitchen_extract_cleaning"],
+  },
+  {
+    key: "fire:sprinkler_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Sprinkler System Service", label: "Sprinkler system service (quarterly)",
+    description: "Quarterly inspection and service of the sprinkler system by a competent contractor (BS EN 12845). Weekly valve and pump checks are done in-house.",
+    frequencyMonths: 3, dueFrom: "check", trades: ["sprinkler_systems"],
+  },
+  {
+    key: "fire:aov_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "AOV / Smoke Vent Service", label: "AOV / smoke vent service (annual)",
+    description: "Annual service of automatic opening vents and smoke ventilation (BS EN 12101, BS 9999).",
+    frequencyMonths: 12, dueFrom: "check", trades: ["aov_smoke_vents"],
+  },
+  {
+    key: "fire:riser_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Dry / Wet Riser Service", label: "Dry / wet riser inspection (6-monthly)",
+    description: "Six-monthly inspection of dry or wet risers, with the annual pressure test of dry risers (BS 9990).",
+    frequencyMonths: 6, dueFrom: "check", trades: ["dry_wet_risers"],
+  },
+  {
+    key: "fire:fire_door_inspection", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Fire Door Inspection", label: "Fire door inspection (6-monthly)",
+    description: "Inspection of fire doors, frames, seals, closers and hold-open devices by a competent person.",
+    frequencyMonths: 6, dueFrom: "check", trades: ["fire_doors"],
+  },
+  {
+    key: "fire:shutter_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Fire Shutter / Curtain Service", label: "Fire shutter / curtain service (annual)",
+    description: "Annual service and drop test of fire shutters and fire curtains (BS 8524, BS 9999).",
+    frequencyMonths: 12, dueFrom: "check", trades: ["fire_shutters_curtains"],
+  },
+  {
+    key: "fire:damper_test", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Fire Damper Drop Test", label: "Fire damper drop test (annual)",
+    description: "Annual drop test and inspection of fire and smoke dampers in the ductwork (BS 9999).",
+    frequencyMonths: 12, dueFrom: "check", trades: ["fire_dampers"],
+  },
+  {
+    key: "fire:fire_stopping_survey", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Fire Stopping Survey", label: "Fire stopping survey (annual)",
+    description: "Survey of fire stopping where pipes, cables and ducts pass through fire-resisting walls and floors, especially after building or cabling work.",
+    frequencyMonths: 12, dueFrom: "check", trades: ["fire_stopping"],
+  },
+  {
+    key: "fire:intruder_alarm_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Intruder Alarm Service", label: "Intruder alarm service (annual)",
+    description: "Maintenance visit for the intruder alarm (BS EN 50131, PD 6662): at least once a year, twice for a monitored system.",
+    frequencyMonths: 12, dueFrom: "check", trades: ["intruder_alarm"],
+  },
+  {
+    key: "fire:cctv_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "CCTV Service", label: "CCTV service (annual)",
+    description: "Annual service of CCTV cameras and recorder.",
+    frequencyMonths: 12, dueFrom: "check", trades: ["cctv"],
+  },
+  {
+    key: "fire:access_control_service", module: "fire", trackLabel: "FireTrack", services: ["firetrack"],
+    title: "Access Control Service", label: "Access control / door entry service (annual)",
+    description: "Annual service of access control and door entry, including doors that release on fire alarm.",
+    frequencyMonths: 12, dueFrom: "check", trades: ["access_control"],
   },
   {
     key: "pat:testing", module: "pat", trackLabel: "PATtrack", services: ["pattrack"],
     title: "Electrical Appliance Testing (PAT)", label: "PAT testing visit",
     description: "Portable appliance testing. Due when the first appliance at the site is due for its next test; record the results in PATtrack.",
-    frequencyMonths: null, dueFrom: "track",
+    frequencyMonths: null, dueFrom: "track", trades: ["electrical"],
   },
   {
     key: "green:service", module: "green", trackLabel: "GreenTrack", services: ["greentrack"],

@@ -3,11 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useToast } from "@/hooks/use-toast";
 import { formatDay, localToday } from "@/lib/onboarding";
+import { tradeLabel } from "@/lib/contractor-trades";
 
 interface VisitType {
   key: string;
@@ -15,6 +16,7 @@ interface VisitType {
   label: string;
   description: string;
   dueFrom: "track" | "later" | "check";
+  trades?: string[];
 }
 
 interface Visit {
@@ -30,7 +32,7 @@ interface Visit {
   reminderSentAt: string | null;
 }
 
-interface Contractor { id: number; name: string; company?: string | null }
+interface Contractor { id: number; name: string; company?: string | null; trades?: string[] | null }
 
 const NONE = "none";
 const ALL_SITES = "all";
@@ -161,11 +163,33 @@ export function ContractorVisitsCard({ contractors }: { contractors: Contractor[
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value={NONE}>No contractor (no reminder)</SelectItem>
-                            {contractors.map(contractor => (
-                              <SelectItem key={contractor.id} value={String(contractor.id)}>
-                                {[contractor.name, contractor.company].filter(Boolean).join(", ")}
-                              </SelectItem>
-                            ))}
+                            {(() => {
+                              // Contractors with the visit's trade come first.
+                              const item = (contractor: Contractor) => (
+                                <SelectItem key={contractor.id} value={String(contractor.id)}>
+                                  {[contractor.name, contractor.company].filter(Boolean).join(", ")}
+                                </SelectItem>
+                              );
+                              const matches = (contractor: Contractor) =>
+                                !!type.trades?.length && !!contractor.trades?.some(trade => type.trades!.includes(trade));
+                              const suggested = contractors.filter(matches);
+                              const others = contractors.filter(contractor => !matches(contractor));
+                              if (!suggested.length) return contractors.map(item);
+                              return (
+                                <>
+                                  <SelectGroup>
+                                    <SelectLabel>{type.trades!.map(tradeLabel).join(" or ")}</SelectLabel>
+                                    {suggested.map(item)}
+                                  </SelectGroup>
+                                  {others.length > 0 && (
+                                    <SelectGroup>
+                                      <SelectLabel>Other contractors</SelectLabel>
+                                      {others.map(item)}
+                                    </SelectGroup>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </SelectContent>
                         </Select>
                       ) : (

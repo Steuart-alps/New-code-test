@@ -277,6 +277,9 @@ jobs:
       - name: Pricing AI requests (pure)
         run: pnpm --filter @workspace/api-server run test:ai-pricing
 
+      - name: Saved form option lists get new default trades (pure)
+        run: pnpm --filter @workspace/api-server run test:form-option-defaults
+
       - name: AI allowance rollover ledger (pure)
         run: pnpm --filter @workspace/api-server run test:ai-credit
 

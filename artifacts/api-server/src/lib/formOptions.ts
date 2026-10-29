@@ -21,7 +21,16 @@ import { eq, and } from "drizzle-orm";
 export const DEFAULT_FIXTRACK_TRADES = [
   "electrical", "plumbing",
   "gas_kitchen", "gas_fireplace", "gas_heating",
-  "structural", "equipment", "hvac", "it_comms",
+  "structural", "equipment", "hvac",
+  // Fire safety trades (October 2026). Several are linked to FireTrack's
+  // contractor visits (CONTRACTOR_VISIT_TYPES in lib/contractorVisits.ts).
+  "fire_alarm", "emergency_lighting", "fire_extinguishers",
+  "kitchen_fire_suppression", "sprinkler_systems", "aov_smoke_vents",
+  "dry_wet_risers", "fire_doors", "fire_shutters_curtains", "fire_dampers",
+  "fire_stopping", "kitchen_extract_cleaning", "fire_risk_assessor",
+  // Security trades (October 2026).
+  "intruder_alarm", "cctv", "access_control",
+  "it_comms",
   "safety_hazard", "cleaning", "general",
 ] as const;
 
@@ -95,6 +104,22 @@ export const FORM_OPTION_DEFAULTS: Record<string, readonly string[]> = {
   bike_types:                DEFAULT_BIKE_TYPES,
 };
 
+/**
+ * Defaults added after businesses could already have saved their own list.
+ * A saved list that names one of these neither as active nor as disabled was
+ * saved before it existed, so it is offered as active rather than treated as
+ * removed. Once the business saves the list again the choice is theirs.
+ */
+export const DEFAULTS_ADDED_LATER: Partial<Record<string, readonly string[]>> = {
+  fixtrack_trades: [
+    "fire_alarm", "emergency_lighting", "fire_extinguishers",
+    "kitchen_fire_suppression", "sprinkler_systems", "aov_smoke_vents",
+    "dry_wet_risers", "fire_doors", "fire_shutters_curtains", "fire_dampers",
+    "fire_stopping", "kitchen_extract_cleaning", "fire_risk_assessor",
+    "intruder_alarm", "cctv", "access_control",
+  ],
+};
+
 export type FormOptionKey = keyof typeof FORM_OPTION_DEFAULTS;
 
 export const FORM_OPTION_KEYS = Object.keys(FORM_OPTION_DEFAULTS) as FormOptionKey[];
@@ -161,19 +186,21 @@ function validateDisabledList(input: unknown): { ok: true; value: string[] } | {
 export function parseStoredOptionState(
   input: unknown,
   defaults: readonly string[],
+  addedLater: readonly string[] = [],
 ): { ok: true; value: StoredOptionState } | { ok: false; error: string } {
+  const has = (list: readonly string[], item: string) =>
+    list.some((candidate) => candidate.toLowerCase() === item.toLowerCase());
+  // Defaults the saved list has never seen join the end of the active list.
+  const withAddedLater = (active: string[], disabled: string[]) => [
+    ...active,
+    ...addedLater.filter((item) => !has(active, item) && !has(disabled, item)),
+  ].slice(0, Math.max(active.length, MAX_OPTIONS));
+
   if (Array.isArray(input)) {
     const active = validateOptionList(input);
     if (!active.ok) return active;
-    return {
-      ok: true,
-      value: {
-        active: active.value,
-        disabled: defaults.filter((item) =>
-          !active.value.some((candidate) => candidate.toLowerCase() === item.toLowerCase()),
-        ),
-      },
-    };
+    const disabled = defaults.filter((item) => !has(active.value, item) && !has(addedLater, item));
+    return { ok: true, value: { active: withAddedLater(active.value, disabled), disabled } };
   }
 
   if (!input || typeof input !== "object") {
@@ -193,7 +220,7 @@ export function parseStoredOptionState(
   if (disabled.value.some((item) => activeKeys.has(item.toLowerCase()))) {
     return { ok: false, error: "an option cannot be active and disabled" };
   }
-  return { ok: true, value: { active: active.value, disabled: disabled.value } };
+  return { ok: true, value: { active: withAddedLater(active.value, disabled.value), disabled: disabled.value } };
 }
 
 export function serialiseOptionState(state: StoredOptionState): string {
@@ -212,7 +239,7 @@ export async function getEffectiveOptionState(clientId: number, key: FormOptionK
   const raw = rows[0]?.value;
   if (raw) {
     try {
-      const check = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key]);
+      const check = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key], DEFAULTS_ADDED_LATER[key]);
       if (check.ok) return check.value;
     } catch { /* fall through to default */ }
   }
