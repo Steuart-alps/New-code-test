@@ -117,7 +117,7 @@ try {
   await test("with two boxes in view a stray photo is held and the page says where to drop it", async () => {
     const page = await open("?two");
     assert.equal(await drop(page, "[data-testid='page-heading']", { files: [{ name: "stray.png", type: "image/png" }] }), true, "the browser must not open the file");
-    await page.getByText("Drop it on an upload box").waitFor();
+    await page.getByText("Drop it on an upload box", { exact: true }).waitFor();
     assert.deepEqual(await filesIn(page, "first"), []);
     assert.deepEqual(await filesIn(page, "second"), []);
     // Dropped on a box, it goes to that box only.
@@ -131,7 +131,7 @@ try {
     const page = await open();
     const link = "file:///Users/someone/Pictures/Photos%20Library.photoslibrary/originals/7/7F67F344.jpeg";
     assert.equal(await drop(page, "[data-testid='beside-first']", { data: { "text/uri-list": link } }), true, "the browser must not open the file link");
-    await page.getByText("The browser didn't pass the photo on").waitFor();
+    await page.getByText("The browser didn't pass the photo on", { exact: true }).waitFor();
     assert.match(await toastText(page), /onto your desktop first/);
     assert.deepEqual(await filesIn(page, "first"), []);
     await page.close();
