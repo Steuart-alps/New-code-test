@@ -1605,6 +1605,38 @@ export const DismissCertificateInboxItemResponse = zod.object({
 
 
 /**
+ * Returns a one-use token. The web app sends the save again with the token in the X-Record-Signature header after the API answered it with 428 SIGNATURE_REQUIRED; the signature is then linked to the saved record. Unused signatures are removed after a day.
+ * @summary Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+ */
+export const CreateRecordSignatureBody = zod.object({
+  "strokes": zod.array(zod.array(zod.number())).describe('Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box')
+})
+
+export const CreateRecordSignatureResponse = zod.object({
+  "token": zod.string(),
+  "expiresInMinutes": zod.number()
+})
+
+
+/**
+ * @summary Signatures on recorded checks of one type, for history lists
+ */
+export const ListRecordSignaturesQueryParams = zod.object({
+  "recordType": zod.coerce.string(),
+  "ids": zod.coerce.string().describe('Up to 200 record ids, comma separated')
+})
+
+export const ListRecordSignaturesResponseItem = zod.object({
+  "recordType": zod.string(),
+  "recordId": zod.number(),
+  "signerName": zod.string().describe('The name of the login that signed'),
+  "signedAt": zod.date(),
+  "strokes": zod.array(zod.array(zod.number()))
+})
+export const ListRecordSignaturesResponse = zod.array(ListRecordSignaturesResponseItem)
+
+
+/**
  * @summary Contractor sign-in set-up and who is on site, for each site the caller can see (not Viewers)
  */
 export const ListContractorSignInSitesResponse = zod.object({

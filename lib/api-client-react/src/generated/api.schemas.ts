@@ -1613,6 +1613,25 @@ export interface CertificateReading {
   unclear: string[];
 }
 
+export interface CreateRecordSignatureRequest {
+  /** Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box */
+  strokes: number[][];
+}
+
+export interface RecordSignatureToken {
+  token: string;
+  expiresInMinutes: number;
+}
+
+export interface RecordSignature {
+  recordType: string;
+  recordId: number;
+  /** The name of the login that signed */
+  signerName: string;
+  signedAt: string;
+  strokes: number[][];
+}
+
 export type ContractorSignInSiteAsbestosStatus = typeof ContractorSignInSiteAsbestosStatus[keyof typeof ContractorSignInSiteAsbestosStatus];
 
 
@@ -5052,6 +5071,14 @@ export const ListPublicLinkAccessActionType = {
 
 export type ListAssigneesParams = {
 siteId?: number;
+};
+
+export type ListRecordSignaturesParams = {
+recordType: string;
+/**
+ * Up to 200 record ids, comma separated
+ */
+ids: string;
 };
 
 export type ListContractorSignInsParams = {

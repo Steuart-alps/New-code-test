@@ -7,6 +7,8 @@ servers:
   - url: /api
     description: Base API path
 tags:
+  - name: record-signatures
+    description: Drawn signatures on recorded checks
   - name: billing
     description: Subscription add-ons
   - name: health
@@ -1260,6 +1262,57 @@ paths:
                 $ref: "#/components/schemas/OkResponse"
         "404":
           description: Not a waiting certificate of this business
+
+  /record-signatures:
+    post:
+      operationId: createRecordSignature
+      tags: [record-signatures]
+      summary: Store the logged-in user's drawn signature for the check they are saving (not Viewers)
+      description: >-
+        Returns a one-use token. The web app sends the save again with the
+        token in the X-Record-Signature header after the API answered it with
+        428 SIGNATURE_REQUIRED; the signature is then linked to the saved
+        record. Unused signatures are removed after a day.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRecordSignatureRequest"
+      responses:
+        "201":
+          description: The token to send with the save
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordSignatureToken"
+        "400":
+          description: No usable drawing
+    get:
+      operationId: listRecordSignatures
+      tags: [record-signatures]
+      summary: Signatures on recorded checks of one type, for history lists
+      parameters:
+        - name: recordType
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: ids
+          in: query
+          required: true
+          description: Up to 200 record ids, comma separated
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The signatures, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RecordSignature"
 
   /contractor-sign-in/sites:
     get:
@@ -8018,6 +8071,38 @@ components:
           items: { type: string }
           description: Things that could not be read with confidence.
       required: [certificateType, name, itemId, checkReason, newCheck, contractorName, issueDate, nextInspectionDate, nextInspectionSource, outcome, summary, defects, unclear]
+
+    CreateRecordSignatureRequest:
+      type: object
+      properties:
+        strokes:
+          type: array
+          description: Each stroke is [x, y, x, y, ...] in whole numbers inside a 600 x 200 box
+          items:
+            type: array
+            items: { type: integer }
+      required: [strokes]
+
+    RecordSignatureToken:
+      type: object
+      properties:
+        token: { type: string }
+        expiresInMinutes: { type: integer }
+      required: [token, expiresInMinutes]
+
+    RecordSignature:
+      type: object
+      properties:
+        recordType: { type: string }
+        recordId: { type: integer }
+        signerName: { type: string, description: "The name of the login that signed" }
+        signedAt: { type: string, format: date-time }
+        strokes:
+          type: array
+          items:
+            type: array
+            items: { type: integer }
+      required: [recordType, recordId, signerName, signedAt, strokes]
 
     ContractorSignInSites:
       type: object
