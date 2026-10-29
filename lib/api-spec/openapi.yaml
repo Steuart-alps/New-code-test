@@ -5998,7 +5998,7 @@ components:
             - $ref: "#/components/schemas/BusinessDashboardAi"
     BusinessDashboardAiAmounts:
       type: object
-      required: [addonPence, topUpPence, invoicedTopUpPence, incomePence, costPence, marginPence, requests]
+      required: [addonPence, topUpPence, invoicedTopUpPence, incomePence, costPence, marginPence, requests, lapsedPence]
       properties:
         addonPence: { type: integer, description: The AI add-on paid through Stripe }
         topUpPence: { type: integer, description: Top-ups paid through Stripe }
@@ -6007,6 +6007,7 @@ components:
         costPence: { type: integer, description: What Claude charged, converted from dollars }
         marginPence: { type: integer }
         requests: { type: integer }
+        lapsedPence: { type: integer, description: Paid-for AI use that lapsed unused after 12 months and came back to ALPS (already part of the margin) }
     BusinessDashboardAi:
       type: object
       required: [months, businesses, totals, usdToGbp, addonIncomeAvailable]
@@ -8419,6 +8420,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        completedInHouseBy:
+          type: string
+          nullable: true
+          description: The competent person who did the latest completion in house instead of a contractor (no contractor certificate is due for it).
         notes:
           type: string
           nullable: true
@@ -8570,6 +8575,11 @@ components:
           nullable: true
           pattern: '^\d{4}-\d{2}-\d{2}$'
           description: Date the check was done (YYYY-MM-DD), only with status completed. Not in the future in the account's timezone; defaults to today. The next due date is counted from it.
+        completedInHouseBy:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: Only with status completed. The competent person who did the check in house instead of a contractor; no contractor certificate is then due for this completion. Leave out (or null) for a contractor.
       required:
         - status
 

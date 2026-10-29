@@ -2,7 +2,7 @@ import { Router, type Request, type RequestHandler } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId, isDepartmentLead } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, requireUserManager, getClientId, denyViewers, getActiveDepartmentId, isDepartmentLead } from "../middleware/requireAuth";
 import { requireService } from "../lib/services";
 import { filterName } from "../lib/contentFilter";
 import { getEffectiveOptionList } from "../lib/formOptions";
@@ -524,7 +524,8 @@ const LIST_READING_ACCESS: Record<ListReadingKind, RequestHandler[]> = {
   contractors: [requireClientAdmin],
   "fire-call-points": [requireClientAdmin, requireService("firetrack")],
   "greentrack-equipment": [requireClientAdmin, requireService("greentrack")],
-  "staff-roster": [requireClientAdmin],
+  // Managers too: they upload their site's roster for the monthly roster check.
+  "staff-roster": [requireUserManager],
 };
 
 /** Runs the access rule for the :kind in the path; unknown kinds are 404. */

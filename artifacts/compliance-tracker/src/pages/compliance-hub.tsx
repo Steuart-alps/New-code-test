@@ -5,22 +5,28 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertTriangle, BookOpen, CheckCircle2, ExternalLink, Plus, ShieldCheck, UserRoundCheck } from "lucide-react";
+import { AlertTriangle, BookOpen, ClipboardList, ExternalLink, Plus, ShieldCheck, UserRoundCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { fetchWithOverrideReason, withCsrfToken } from "@/lib/api";
 import { useFocusNewRow } from "@/hooks/use-focus-new-row";
 import { sortByLabel } from "@/lib/sort-options";
+import { BUSINESS_TYPE_OPTIONS } from "@/lib/onboarding";
+import { PickOrTypeSelect, usePeopleAndContractors, type PickGroup } from "@/components/pick-or-type-select";
+import { CorrectiveActionUpdate } from "@/components/corrective-action-update";
 
 type Appointment = { area: string; person: string; evidence?: string | null };
 type Profile = {
   nation: "england" | "wales" | "scotland" | "northern_ireland" | "multi_nation";
   operationType: string; responsiblePersonName: string; responsiblePersonRole: string;
   responsiblePersonEmail?: string | null; competentAppointments: Appointment[];
-  reviewCadence: string; nextReviewDate: string; haccpSystemReviewed: boolean;
+  reviewCadence: string; nextReviewDate: string;
+  // No longer shown here (the HACCP review is a yearly KitchenTrack check and
+  // the written scheme is recorded in LegionellaTrack), but saved back as
+  // loaded so nothing recorded is lost.
+  haccpSystemReviewed: boolean;
   waterWrittenSchemeReference?: string | null;
 };
 type Guidance = { track: string; title: string; classification: string; jurisdiction: string; applicability: string; owner: string; url: string; reviewedAt: string; reviewNote: string };
@@ -55,16 +61,34 @@ function withoutStandIns(profile: Profile): { profile: Profile; standIns: Set<St
   return { profile: cleared, standIns };
 }
 
-const emptyAction = {
-  sourceTrack: "FireTrack", sourceRecordId: "", title: "", severity: "medium" as const,
-  ownerName: "", dueDate: "", interimControl: "", correctiveAction: "", evidenceReference: "",
+// Dropdown choices. Each list ends with "Other (type it in)", and a value
+// typed before (or not in a list) shows in the box under it.
+const operationTypeOptions = BUSINESS_TYPE_OPTIONS.filter(option => option.value !== "other").map(option => option.label);
+const roleOptions = sortByLabel([
+  "Business owner", "Director", "General manager", "Club manager / secretary", "Premises / facilities manager",
+  "Health and safety manager", "Head of department", "Operations manager",
+], role => role);
+// Most frequent first: this list reads in time order, not A to Z.
+const reviewCadenceOptions = [
+  "Every 3 months and after material change", "Every 6 months and after material change",
+  "Annual review and after material change", "Every 2 years and after material change",
+];
+const appointmentAreaOptions = sortByLabel([
+  "Asbestos", "Electrical safety", "Fire safety", "Food safety", "Gas safety", "Health and safety advice",
+  "Legionella / water hygiene", "Lifting equipment (LOLER)", "Pool and spa water", "Pressure systems",
+  "First aid", "Trees", "Work equipment (PUWER)", "COSHH / LEV",
+], area => area);
+const severityLabels: Record<Action["severity"], string> = { low: "Low", medium: "Medium", high: "High", critical: "Critical" };
+const statusLabels: Record<Action["status"], string> = {
+  open: "Open", in_progress: "In progress", awaiting_verification: "Awaiting verification", verified: "Verified closed",
 };
-const trackOptions = sortByLabel(["DailyTrack AM", "DailyTrack PM", "KitchenTrack", "FireTrack", "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack", "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack", "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack", "COSHHTrack"], track => track);
 
 export default function ComplianceHubPage() {
   const { activeClientId, user } = useAuth();
   const canAdmin = useCanAdmin();
   const canEdit = user?.role !== "client_viewer";
+  const peopleAndContractors = usePeopleAndContractors(canEdit);
+  const [emails, setEmails] = useState<Map<string, string>>(new Map());
   const { toast } = useToast();
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const newRow = useFocusNewRow();
@@ -73,12 +97,10 @@ export default function ComplianceHubPage() {
   const [gaps, setGaps] = useState<ComplianceGap[]>([]);
   const [disclaimer, setDisclaimer] = useState("");
   const [actions, setActions] = useState<Action[]>([]);
-  const [actionDraft, setActionDraft] = useState(emptyAction);
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
-  const [savingAction, setSavingAction] = useState(false);
   const [editingAction, setEditingAction] = useState<number | null>(null);
-  const [actionUpdate, setActionUpdate] = useState({ status: "open", evidenceReference: "", verificationNotes: "" });
+  const [tab, setTab] = useState("profile");
   const loadGeneration = useRef(0);
   const standIns = useRef(new Set<StandInField>());
   const clientQuery = user?.role === "consultant" && activeClientId ? `?clientId=${activeClientId}` : "";
@@ -116,6 +138,10 @@ export default function ComplianceHubPage() {
       setGaps(loadedGuidance.gaps ?? []);
       setDisclaimer(loadedGuidance.disclaimer);
       setActions(loadedActions);
+      // Picking a person with a login fills in their email.
+      const users = canAdmin ? await request<{ name: string; email: string; active?: boolean }[]>("/users").catch(() => []) : [];
+      if (generation !== loadGeneration.current) return;
+      setEmails(new Map(users.filter(u => u.active !== false && u.email).map(u => [u.name, u.email])));
     } catch (error: any) {
       if (generation !== loadGeneration.current) return;
       toast({ title: "Couldn't load Compliance Hub", description: error.message, variant: "destructive" });
@@ -157,20 +183,6 @@ export default function ComplianceHubPage() {
     } finally { setSavingProfile(false); }
   }
 
-  async function createAction() {
-    const generation = loadGeneration.current;
-    setSavingAction(true);
-    try {
-      await request<Action>("/compliance-hub/actions", { method: "POST", body: JSON.stringify(actionDraft) });
-      if (generation !== loadGeneration.current) return;
-      setActionDraft(emptyAction);
-      await refresh();
-      toast({ title: "Corrective action logged", description: "Assign evidence and verification before closing it." });
-    } catch (error: any) {
-      toast({ title: "Couldn't log action", description: error.message, variant: "destructive" });
-    } finally { setSavingAction(false); }
-  }
-
   async function sendToFixTrack(id: number) {
     const generation = loadGeneration.current;
     try {
@@ -183,37 +195,23 @@ export default function ComplianceHubPage() {
     }
   }
 
-  async function updateAction(id: number) {
-    const generation = loadGeneration.current;
-    try {
-      await request<Action>(`/compliance-hub/actions/${id}`, { method: "PATCH", body: JSON.stringify(actionUpdate) });
-      if (generation !== loadGeneration.current) return;
-      setEditingAction(null);
-      await refresh();
-      toast({ title: actionUpdate.status === "verified" ? "Action verified closed" : "Corrective action updated" });
-    } catch (error: any) {
-      toast({ title: "Couldn't update action", description: error.message, variant: "destructive" });
-    }
-  }
-
-  function beginEditingAction(action: Action) {
-    setEditingAction(action.id);
-    setActionUpdate({ status: action.status, evidenceReference: action.evidenceReference ?? "", verificationNotes: action.verificationNotes ?? "" });
-  }
+  // Actions are logged on their track now. Ones logged here before (other than
+  // IncidentTrack's, which show on the incident) stay until they are closed.
+  const earlierActions = actions.filter(action => action.status !== "verified" && action.sourceTrack !== "IncidentTrack");
 
   return (
     <AppLayout title="Compliance Hub">
       <Card className="border-primary/30 bg-primary/5">
         <CardContent className="flex gap-3 p-5 text-sm text-foreground">
           <ShieldCheck className="h-5 w-5 shrink-0 text-primary mt-0.5" />
-          <div><strong>Evidence, not a compliance certificate.</strong> {disclaimer || "This workspace helps organise records, source material and corrective actions."}</div>
+          <div><strong>Evidence, not a compliance certificate.</strong> {disclaimer || "This workspace helps organise who is accountable and the sources that apply."}</div>
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="profile" className="space-y-6">
+      <Tabs value={tab === "actions" && earlierActions.length === 0 ? "profile" : tab} onValueChange={setTab} className="space-y-6">
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="profile">Accountability profile</TabsTrigger>
-          <TabsTrigger value="actions">Corrective actions {actions.filter(a => a.status !== "verified").length ? `(${actions.filter(a => a.status !== "verified").length})` : ""}</TabsTrigger>
+          {earlierActions.length > 0 && <TabsTrigger value="actions">Earlier actions ({earlierActions.length})</TabsTrigger>}
           <TabsTrigger value="guidance">Sources & scope</TabsTrigger>
         </TabsList>
 
@@ -226,19 +224,28 @@ export default function ComplianceHubPage() {
               <div className="space-y-2"><Label>Primary jurisdiction</Label><Select value={profile.nation} disabled={!canAdmin} onValueChange={nation => setProfile({ ...profile, nation: nation as Profile["nation"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
                 <SelectItem value="england">England</SelectItem><SelectItem value="wales">Wales</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem><SelectItem value="multi_nation">Multiple UK nations</SelectItem>
               </SelectContent></Select></div>
-              <Field label="Premises / operation type" value={profile.operationType} disabled={!canAdmin} onChange={operationType => setProfile({ ...profile, operationType })} placeholder="e.g. hospitality venue with commercial kitchen" />
-              <Field label="Responsible person" value={profile.responsiblePersonName} disabled={!canAdmin} onChange={responsiblePersonName => setProfile({ ...profile, responsiblePersonName })} placeholder="Named duty holder" selectOnFocus />
-              <Field label="Responsible person's role" value={profile.responsiblePersonRole} disabled={!canAdmin} onChange={responsiblePersonRole => setProfile({ ...profile, responsiblePersonRole })} placeholder="e.g. Business owner, director or premises manager" />
+              <PickField id="hub-operation-type" label="Premises / operation type" value={profile.operationType} disabled={!canAdmin}
+                groups={[{ options: operationTypeOptions }]} typedPlaceholder="e.g. hospitality venue with commercial kitchen"
+                onChange={operationType => setProfile({ ...profile, operationType })} />
+              <PickField id="hub-responsible-person" label="Responsible person" value={profile.responsiblePersonName} disabled={!canAdmin}
+                groups={peopleAndContractors.slice(0, 1)} otherLabel="Someone else (type their name)" typedPlaceholder="Named duty holder"
+                onChange={responsiblePersonName => setProfile({ ...profile, responsiblePersonName, responsiblePersonEmail: emails.get(responsiblePersonName) ?? profile.responsiblePersonEmail })} />
+              <PickField id="hub-responsible-role" label="Responsible person's role" value={profile.responsiblePersonRole} disabled={!canAdmin}
+                groups={[{ options: roleOptions }]} typedPlaceholder="e.g. Business owner, director or premises manager"
+                onChange={responsiblePersonRole => setProfile({ ...profile, responsiblePersonRole })} />
               <Field label="Responsible person's email (optional)" type="email" value={profile.responsiblePersonEmail ?? ""} disabled={!canAdmin} onChange={responsiblePersonEmail => setProfile({ ...profile, responsiblePersonEmail })} />
-              <Field label="Review cadence" value={profile.reviewCadence} disabled={!canAdmin} onChange={reviewCadence => setProfile({ ...profile, reviewCadence })} placeholder="e.g. Annual and after significant change" selectOnFocus />
-              <div className="space-y-2"><Label>Next review date</Label><Input type="date" disabled={!canAdmin} value={profile.nextReviewDate} onChange={e => setProfile({ ...profile, nextReviewDate: e.target.value })} /></div>
-              <div className="space-y-2"><Label>HACCP system review</Label><Select disabled={!canAdmin} value={profile.haccpSystemReviewed ? "reviewed" : "not-reviewed"} onValueChange={v => setProfile({ ...profile, haccpSystemReviewed: v === "reviewed" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="not-reviewed">Not yet confirmed</SelectItem><SelectItem value="reviewed">Reviewed for this operation</SelectItem></SelectContent></Select></div>
-              <div className="space-y-2 md:col-span-2"><Label>Water written-scheme reference (where water systems, pools or spas apply)</Label><Input disabled={!canAdmin} value={profile.waterWrittenSchemeReference ?? ""} onChange={e => setProfile({ ...profile, waterWrittenSchemeReference: e.target.value })} placeholder="Document title, revision and storage reference" /><p className="text-xs text-muted-foreground">Record the current risk-assessed written scheme; its controls and monitoring frequencies must not be assumed from generic defaults.</p></div>
+              <PickField id="hub-review-cadence" label="Review cadence" value={profile.reviewCadence} disabled={!canAdmin}
+                groups={[{ options: reviewCadenceOptions }]} typedPlaceholder="e.g. Annual and after significant change"
+                onChange={reviewCadence => setProfile({ ...profile, reviewCadence })} />
+              <div className="space-y-2"><Label htmlFor="hub-next-review">Next review date</Label><Input id="hub-next-review" type="date" disabled={!canAdmin} value={profile.nextReviewDate} onChange={e => setProfile({ ...profile, nextReviewDate: e.target.value })} /></div>
               <div ref={newRow.ref} className="md:col-span-2 space-y-3 pt-2">
                 <div><Label>Competent-person appointments</Label><p className="text-xs text-muted-foreground mt-1">Record the person and evidence of appointment/competence for specialist risk areas. This is not a substitute for checking qualifications.</p></div>
-                {profile.competentAppointments.map((appointment, index) => <div key={index} className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
-                  <Input disabled={!canAdmin} value={appointment.area} placeholder="Area (e.g. Legionella)" onChange={e => setProfile({ ...profile, competentAppointments: profile.competentAppointments.map((a, i) => i === index ? { ...a, area: e.target.value } : a) })} />
-                  <Input disabled={!canAdmin} value={appointment.person} placeholder="Person / organisation" onChange={e => setProfile({ ...profile, competentAppointments: profile.competentAppointments.map((a, i) => i === index ? { ...a, person: e.target.value } : a) })} />
+                {profile.competentAppointments.map((appointment, index) => <div key={index} className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto] md:items-start">
+                  <PickOrTypeSelect disabled={!canAdmin} value={appointment.area} groups={[{ options: appointmentAreaOptions }]} placeholder="Choose the area…"
+                    typedPlaceholder="Area" onChange={area => setProfile({ ...profile, competentAppointments: profile.competentAppointments.map((a, i) => i === index ? { ...a, area } : a) })} />
+                  <PickOrTypeSelect disabled={!canAdmin} value={appointment.person} groups={peopleAndContractors} placeholder="Choose the person or contractor…"
+                    otherLabel="Someone else (type the name)" typedPlaceholder="Person / organisation"
+                    onChange={person => setProfile({ ...profile, competentAppointments: profile.competentAppointments.map((a, i) => i === index ? { ...a, person } : a) })} />
                   <Input disabled={!canAdmin} value={appointment.evidence ?? ""} placeholder="Evidence reference" onChange={e => setProfile({ ...profile, competentAppointments: profile.competentAppointments.map((a, i) => i === index ? { ...a, evidence: e.target.value } : a) })} />
                   {canAdmin && <Button variant="ghost" onClick={() => setProfile({ ...profile, competentAppointments: profile.competentAppointments.filter((_, i) => i !== index) })}>Remove</Button>}
                 </div>)}
@@ -249,28 +256,15 @@ export default function ComplianceHubPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="actions" className="space-y-6">
-          {canEdit && <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-primary" />Log a corrective action</CardTitle><CardDescription>Link any finding to its track and record. A different client admin or consultant must verify closure after evidence is recorded.</CardDescription></CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2"><Label>Source track</Label><Select value={actionDraft.sourceTrack} onValueChange={sourceTrack => setActionDraft({ ...actionDraft, sourceTrack })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{trackOptions.map(track => <SelectItem key={track} value={track}>{track}</SelectItem>)}</SelectContent></Select></div>
-              <Field label="Record reference (optional)" value={actionDraft.sourceRecordId} onChange={sourceRecordId => setActionDraft({ ...actionDraft, sourceRecordId })} placeholder="e.g. Fire check #42" />
-              <Field label="Finding / action title" value={actionDraft.title} onChange={title => setActionDraft({ ...actionDraft, title })} placeholder="Describe the issue that needs controlling" />
-              <Field label="Action owner" value={actionDraft.ownerName} onChange={ownerName => setActionDraft({ ...actionDraft, ownerName })} placeholder="Named person or contractor" />
-              <div className="space-y-2"><Label>Severity</Label><Select value={actionDraft.severity} onValueChange={severity => setActionDraft({ ...actionDraft, severity: severity as typeof actionDraft.severity })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{["low", "medium", "high", "critical"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></div>
-              <Field type="date" label="Due date (optional)" value={actionDraft.dueDate} onChange={dueDate => setActionDraft({ ...actionDraft, dueDate })} />
-              <div className="space-y-2 md:col-span-2"><Label>Interim control (optional)</Label><Textarea value={actionDraft.interimControl} onChange={e => setActionDraft({ ...actionDraft, interimControl: e.target.value })} placeholder="What has been done now to reduce risk while the permanent action is open?" /></div>
-              <div className="space-y-2 md:col-span-2"><Label>Corrective action</Label><Textarea value={actionDraft.correctiveAction} onChange={e => setActionDraft({ ...actionDraft, correctiveAction: e.target.value })} placeholder="Permanent action needed" /></div>
-              <div className="space-y-2 md:col-span-2"><Label>Evidence reference (optional until verification)</Label><Input value={actionDraft.evidenceReference} onChange={e => setActionDraft({ ...actionDraft, evidenceReference: e.target.value })} placeholder="Document title, certificate, photo record or storage link" /></div>
-              <div className="md:col-span-2"><Button disabled={savingAction} onClick={createAction}>{savingAction ? "Logging…" : "Log corrective action"}</Button></div>
-            </CardContent>
-          </Card>}
-          <div className="space-y-3">{loading ? <p className="text-muted-foreground">Loading corrective actions…</p> : actions.length === 0 ? <Card><CardContent className="p-6 text-muted-foreground">No corrective actions are logged for this client.</CardContent></Card> : actions.map(action => <Card key={action.id} className={action.status === "verified" ? "opacity-75" : ""}><CardContent className="p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row gap-3 sm:items-start sm:justify-between"><div><div className="flex items-center gap-2 flex-wrap"><h3 className="font-bold">{action.title}</h3><Badge variant={action.status === "verified" ? "secondary" : "outline"}>{action.status.replaceAll("_", " ")}</Badge><Badge variant={action.severity === "critical" || action.severity === "high" ? "destructive" : "outline"}>{action.severity}</Badge></div><p className="text-sm text-muted-foreground mt-1">{action.sourceTrack}{action.sourceRecordId ? ` · ${action.sourceRecordId}` : ""} · Owner: {action.ownerName}{action.dueDate ? ` · Due ${action.dueDate}` : ""}</p></div><div className="flex flex-wrap gap-2">{action.fixTrackIssueId ? <a className="text-sm font-medium text-primary underline self-center" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a> : canEdit && action.status !== "verified" && !/green/i.test(action.sourceTrack) && <Button variant="outline" size="sm" onClick={() => sendToFixTrack(action.id)}>Send to FixTrack</Button>}{canEdit && action.status !== "verified" && <Button variant="outline" size="sm" onClick={() => beginEditingAction(action)}>Update / verify</Button>}</div></div>
+        {earlierActions.length > 0 && <TabsContent value="actions" className="space-y-4">
+          <Card><CardHeader><CardTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-primary" />Earlier corrective actions</CardTitle>
+            <CardDescription>Corrective actions are now logged on each track. These were logged here before; finish them off here or send them to FixTrack. Once verified closed they leave this list.</CardDescription></CardHeader></Card>
+          {earlierActions.map(action => <Card key={action.id}><CardContent className="p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-start sm:justify-between"><div><div className="flex items-center gap-2 flex-wrap"><h3 className="font-bold">{action.title}</h3><Badge variant="outline">{statusLabels[action.status]}</Badge><Badge variant={action.severity === "critical" || action.severity === "high" ? "destructive" : "outline"}>{severityLabels[action.severity]}</Badge></div><p className="text-sm text-muted-foreground mt-1">{action.sourceTrack}{action.sourceRecordId ? ` · ${action.sourceRecordId}` : ""} · Owner: {action.ownerName}{action.dueDate ? ` · Due ${action.dueDate}` : ""}</p></div><div className="flex flex-wrap gap-2">{action.fixTrackIssueId ? <a className="text-sm font-medium text-primary underline self-center" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a> : canEdit && !/green/i.test(action.sourceTrack) && <Button variant="outline" size="sm" onClick={() => sendToFixTrack(action.id)}>Send to FixTrack</Button>}{canEdit && <Button variant="outline" size="sm" onClick={() => setEditingAction(action.id)}>Update / verify</Button>}</div></div>
             <div className="grid gap-3 md:grid-cols-2 text-sm"><div><span className="font-medium">Corrective action: </span>{action.correctiveAction}</div>{action.interimControl && <div><span className="font-medium">Interim control: </span>{action.interimControl}</div>}{action.evidenceReference && <div><span className="font-medium">Evidence: </span>{action.evidenceReference}</div>}{action.verificationNotes && <div><span className="font-medium">Verification: </span>{action.verificationNotes}</div>}</div>
-            {editingAction === action.id && <div className="grid gap-3 border-t pt-4 md:grid-cols-2"><div className="space-y-2"><Label>Action status</Label><Select value={actionUpdate.status} onValueChange={status => setActionUpdate({ ...actionUpdate, status })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="open">Open</SelectItem><SelectItem value="in_progress">In progress</SelectItem><SelectItem value="awaiting_verification">Awaiting verification</SelectItem><SelectItem value="verified">Verified closed</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Evidence reference</Label><Input value={actionUpdate.evidenceReference} onChange={e => setActionUpdate({ ...actionUpdate, evidenceReference: e.target.value })} /></div><div className="space-y-2 md:col-span-2"><Label>Verification notes {actionUpdate.status === "verified" ? "(required)" : ""}</Label><Textarea value={actionUpdate.verificationNotes} onChange={e => setActionUpdate({ ...actionUpdate, verificationNotes: e.target.value })} placeholder="Who verified the action, what they checked and when" /><p className="text-xs text-muted-foreground">Verified closure is available only from “Awaiting verification”, by a different client admin or consultant. It cannot be edited afterwards.</p></div><div className="flex gap-2 md:col-span-2"><Button onClick={() => updateAction(action.id)}>Save action update</Button><Button variant="ghost" onClick={() => setEditingAction(null)}>Cancel</Button></div></div>}
-          </CardContent></Card>)}</div>
-        </TabsContent>
+            {editingAction === action.id && <CorrectiveActionUpdate action={action} onCancel={() => setEditingAction(null)} onSaved={async () => { setEditingAction(null); await refresh(); }} />}
+          </CardContent></Card>)}
+        </TabsContent>}
 
         <TabsContent value="guidance" className="space-y-5">
           <Card><CardHeader><CardTitle className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-primary" />Source register</CardTitle><CardDescription>Public authoritative signposts and scope notes. Reviewed {guidanceReviewedAt || "recently"}; review applicability after a change in activity, premises, incident or law.</CardDescription></CardHeader></Card>
@@ -282,6 +276,10 @@ export default function ComplianceHubPage() {
   );
 }
 
-function Field({ label, value, onChange, type = "text", placeholder, disabled, selectOnFocus }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string; disabled?: boolean; selectOnFocus?: boolean }) {
-  return <div className="space-y-2"><Label>{label}</Label><Input type={type} value={value} disabled={disabled} placeholder={placeholder} selectOnFocus={selectOnFocus} onChange={e => onChange(e.target.value)} /></div>;
+function PickField({ id, label, ...props }: { id: string; label: string; value: string; onChange: (value: string) => void; groups: PickGroup[]; otherLabel?: string; typedPlaceholder?: string; disabled?: boolean }) {
+  return <div className="space-y-2"><Label htmlFor={id}>{label}</Label><PickOrTypeSelect id={id} typedLabel={label} {...props} /></div>;
+}
+
+function Field({ label, value, onChange, type = "text", placeholder, disabled }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string; disabled?: boolean }) {
+  return <div className="space-y-2"><Label>{label}</Label><Input type={type} value={value} disabled={disabled} placeholder={placeholder} onChange={e => onChange(e.target.value)} /></div>;
 }

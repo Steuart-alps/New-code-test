@@ -138,7 +138,8 @@ export async function itemActionStates(clientId: number, itemIds?: number[], exe
 /**
  * Checks whose contractor visit has happened (the check was completed, or the
  * date the contractor booked has passed) with no certificate added on or
- * after the visit day, or dated on or after it. The same rule as the
+ * after the visit day, or dated on or after it. A completion done in house by
+ * a competent person (completed_in_house_by) is not a contractor visit. The same rule as the
  * certificate chase (lib/certificateFollowUp.ts), from the visit day on.
  */
 export async function certificateOutstandingItemIds(clientId: number, itemIds?: number[], executor: Executor = db): Promise<number[]> {
@@ -150,12 +151,16 @@ export async function certificateOutstandingItemIds(clientId: number, itemIds?: 
           (ci.completed_at AT TIME ZONE 'UTC')::date,
           CASE WHEN (ci.visit_scheduled_at AT TIME ZONE 'UTC')::date <= CURRENT_DATE
             THEN (ci.visit_scheduled_at AT TIME ZONE 'UTC')::date END
-        ) AS visit_day
+        ) AS visit_day,
+        CASE WHEN ci.completed_in_house_by IS NOT NULL THEN (ci.completed_at AT TIME ZONE 'UTC')::date END AS in_house_day
       FROM compliance_items ci
       WHERE ci.client_id = ${clientId} AND ci.contractor_id IS NOT NULL
         AND (ci.completed_at IS NOT NULL OR ci.visit_scheduled_at IS NOT NULL) ${idFilter}
     ) v
     WHERE v.visit_day IS NOT NULL
+      -- Done in house by a competent person: no contractor certificate is due,
+      -- unless a contractor visit booked after it has since happened.
+      AND v.visit_day IS DISTINCT FROM v.in_house_day
       AND NOT EXISTS (
         SELECT 1 FROM certificates c
         WHERE c.item_id = v.item_id

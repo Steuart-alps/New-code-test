@@ -282,25 +282,51 @@ try {
     (${freeAi.clientId}, 'register_reading', 'done', 1000000, '2031-02-04T10:00:00Z'),
     (${freeAi.clientId}, 'register_reading', 'failed', 500000, '2031-02-28T23:59:00Z'),
     (${freeAi.clientId}, 'register_reading', 'done', 7000000, '2031-03-01T00:00:00Z')`);
+  // Paid-for allowance that lapses back to ALPS (12-month rollover), replayed oldest first.
+  const lapseAi = await createTenant("ai-finance-lapse");
+  await db.execute(sql`UPDATE clients SET name = 'Lapse Co' WHERE id = ${lapseAi.clientId}`);
+  await db.execute(sql`INSERT INTO ai_allowance_grants (client_id, period_key, allowance_pence, starts_at, expires_at) VALUES
+    (${lapseAi.clientId}, 'trial', 400, '2029-11-01T00:00:00Z', '2031-01-10T00:00:00Z'),
+    (${lapseAi.clientId}, 'addon:2029-12', 1000, '2029-12-01T00:00:00Z', '2031-01-01T00:00:00Z'),
+    (${lapseAi.clientId}, 'addon:2030-01', 1000, '2030-01-01T00:00:00Z', '2031-02-01T00:00:00Z'),
+    (${lapseAi.clientId}, 'addon:2030-02', 1000, '2030-02-01T00:00:00Z', '2031-02-25T00:00:00Z'),
+    (${freeAi.clientId}, 'included:2029-12', 1000, '2029-12-01T00:00:00Z', '2031-01-01T00:00:00Z')`);
+  await db.execute(sql`INSERT INTO ai_top_ups (client_id, request_id, amount_pence, allowance_pence, status, created_at, settled_at, expires_at) VALUES
+    (${lapseAi.clientId}, 'lapse-1', 600, 400, 'paid', '2030-01-10T10:00:00Z', '2030-01-10T10:00:00Z', '2031-02-01T00:00:00Z')`);
+  // $5 in December 2029 comes out of that month's £10 (it lapses soonest), leaving £6.
+  await db.execute(sql`INSERT INTO ai_usage (client_id, feature, status, cost_usd_micros, created_at) VALUES
+    (${lapseAi.clientId}, 'report_reading', 'done', 5000000, '2029-12-15T10:00:00Z')`);
+
+  const now = new Date("2031-02-20T00:00:00Z");
   const ai = await alerts.getAiFinance(
     { from: new Date("2031-01-01T00:00:00Z"), to: new Date("2031-03-01T00:00:00Z") },
-    { aiPriceId: null, usdToGbp: 0.8 },
+    { aiPriceId: null, usdToGbp: 0.8, now },
   );
-  const amounts = (row) => [row.addonPence, row.topUpPence, row.invoicedTopUpPence, row.incomePence, row.costPence, row.marginPence, row.requests];
+  const amounts = (row) => [row.addonPence, row.topUpPence, row.invoicedTopUpPence, row.incomePence, row.costPence, row.marginPence, row.requests, row.lapsedPence];
   assert.equal(ai.addonIncomeAvailable, true);
-  assert.deepEqual(amounts(ai.totals), [1500 + 1200 + 1500, 600, 600, 5400, 280, 5120, 3]);
+  // Lapsed: £6 left of December's allowance (January), then January's £10 and
+  // the £4 top-up (February). Not the trial's or the free business's own
+  // allowance, and not February's, which has not lapsed by now.
+  assert.deepEqual(amounts(ai.totals), [1500 + 1200 + 1500, 600, 600, 5400, 280, 5120, 3, 600 + 1400]);
   assert.deepEqual(ai.months.map((m) => [m.month, ...amounts(m)]), [
-    ["2031-01", 1500, 600, 0, 2100, 160, 1940, 1],
-    ["2031-02", 2700, 0, 600, 3300, 120, 3180, 2],
+    ["2031-01", 1500, 600, 0, 2100, 160, 1940, 1, 600],
+    ["2031-02", 2700, 0, 600, 3300, 120, 3180, 2, 1400],
   ]);
   assert.deepEqual(ai.businesses.map((b) => [b.businessName, b.free, b.clientId, ...amounts(b)]), [
-    ["Paid AI Co", false, paidAi.clientId, 4200, 600, 0, 4800, 160, 4640, 1],
-    ["Pilot Co", true, freeAi.clientId, 0, 0, 600, 600, 120, 480, 2],
+    ["Paid AI Co", false, paidAi.clientId, 4200, 600, 0, 4800, 160, 4640, 1, 0],
+    ["Pilot Co", true, freeAi.clientId, 0, 0, 600, 600, 120, 480, 2, 0],
+    ["Lapse Co", false, lapseAi.clientId, 0, 0, 0, 0, 0, 0, 0, 2000],
   ]);
+  // Later, February's allowance has lapsed too.
+  const later = await alerts.getAiFinance(
+    { from: new Date("2031-01-01T00:00:00Z"), to: new Date("2031-03-01T00:00:00Z") },
+    { aiPriceId: null, usdToGbp: 0.8, now: new Date("2031-04-01T00:00:00Z") },
+  );
+  assert.equal(later.totals.lapsedPence, 3000);
   // A month with nothing still shows, so the chart has no gaps.
   const quietMonths = await alerts.getAiFinance(
     { from: new Date("2031-04-01T00:00:00Z"), to: new Date("2031-06-01T00:00:00Z") },
-    { aiPriceId: null, usdToGbp: 0.8 },
+    { aiPriceId: null, usdToGbp: 0.8, now },
   );
   assert.deepEqual(quietMonths.months.map((m) => [m.month, m.incomePence, m.costPence]), [["2031-04", 0, 0], ["2031-05", 0, 0]]);
   assert.deepEqual(quietMonths.businesses, []);

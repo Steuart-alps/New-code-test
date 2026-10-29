@@ -72,6 +72,7 @@ import { useLocalToday } from "@/hooks/use-local-today";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
 import { CoshhSignOffSection } from "@/components/coshh-sign-offs";
 import { DocumentSignOffSection } from "@/components/document-sign-offs";
+import { matchSpokenItem, spokenDate, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { sortByLabel, sortedEntries } from "@/lib/sort-options";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -310,7 +311,7 @@ export default function TrainTrackPage() {
   // The matrix uses the active roster rather than certificate holders so it
   // exposes staff who are missing a required certificate. The endpoint omits
   // inactive staff by default.
-  const { data: activeStaff = [] } = useQuery<StaffMember[]>({
+  const { data: activeStaff = [], isFetched: staffFetched } = useQuery<StaffMember[]>({
     queryKey: ["staff-roster", activeClientId],
     queryFn: () => apiFetch("/staff-roster"),
     enabled: !!activeClientId,
@@ -331,6 +332,30 @@ export default function TrainTrackPage() {
     [formOptions],
   );
   const otherTrainingEnabled = trainingTypeOptions.includes("Other");
+
+  // Say it: "Jane Smith completed fire marshal training today" opens a new
+  // certificate with the person and course matched to the lists.
+  useSayItFill(["training"], fill => {
+    const v = fill.values;
+    const said = (key: string) => (typeof v[key] === "string" ? v[key] as string : "");
+    const member = matchSpokenItem(said("staffName"), activeStaff);
+    const course = matchSpokenItem(said("trainingType"), trainingTypeOptions.filter(t => t !== "Other").map((name, id) => ({ id, name })));
+    const completedDate = spokenDate(v.date);
+    const trainingType = course?.name ?? (otherTrainingEnabled ? "Other" : "");
+    openAdd();
+    setTab("certificate");
+    setCertForm({
+      ...emptyCert(),
+      staffName: member?.name ?? said("staffName"),
+      staffRosterId: member ? String(member.id) : "",
+      trainingType,
+      customType: course ? "" : trainingType === "Other" ? said("trainingType") : "",
+      completedDate,
+      expiryDate: course ? suggestExpiry(course.name, completedDate) : "",
+      siteId: fill.siteId ? String(fill.siteId) : "",
+      notes: withSpokenNote("", fill.text),
+    });
+  }, staffFetched && !!formOptions);
 
   // split by type
   const certs     = useMemo(() => allRecords.filter(r => r.record_type === "certificate"), [allRecords]);

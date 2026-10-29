@@ -29,6 +29,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetHeader, SheetDescription } from "@/components/ui/sheet";
 import alpsLogo from "@/assets/alps-logo.png";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
+import { SayItButton } from "@/components/say-it-button";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { CancellationBanner } from "@/components/cancellation-banner";
 import { StorageLimitBanner } from "@/components/storage-limit-banner";
@@ -36,6 +37,14 @@ import { EmailVerificationBanner } from "@/components/email-verification-banner"
 import { ManagedByBadge } from "@/components/managed-by-badge";
 import { NotificationBell } from "@/components/notification-bell";
 import { QuickTutorial, openQuickTutorial } from "@/components/quick-tutorial";
+import { APP_SCROLL_ID } from "@/lib/page-scroll";
+
+// Pages for setting up the business and accounts, where there's nothing to
+// say a reading or an action about; the dashboard has its own large Say it.
+const noSayItRoutes = [
+  "/dashboard", "/settings", "/users", "/setup", "/sites", "/categories", "/staff-roster", "/clients", "/portfolio",
+  "/business-dashboard", "/feedback", "/privacy-governance", "/account-security",
+];
 
 const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/daily-track-am", moduleKey: "daily_am" },
@@ -348,6 +357,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
   const moduleActionKey = moduleActionRoutes.find(route => location.startsWith(route.prefix))?.moduleKey;
   // The guidance applies to track (module) records, so only show it there.
   const isTrackPage = moduleActionKey !== undefined || location.startsWith("/green-track");
+  const showSayIt = !noSayItRoutes.some(prefix => location === prefix || location.startsWith(`${prefix}/`));
   const [trackGuidanceDismissed, dismissTrackGuidance] = useTrackGuidanceDismissed(user?.id);
 
   const primaryColor = client?.primaryColor ?? "#7FA8C9";
@@ -357,7 +367,9 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
     : "??";
 
   return (
-    <div className="min-h-screen bg-background flex flex-col md:flex-row font-sans">
+    // On desktop the sidebar and the page scroll separately: the frame is one
+    // screen high and each column has its own scroll bar (printing shows all).
+    <div className="min-h-screen md:h-screen md:overflow-hidden print:h-auto print:overflow-visible bg-background flex flex-col md:flex-row font-sans">
       {/* Sidebar - Desktop */}
       <aside className="hidden md:flex flex-col w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border z-20 relative">
         <div className="min-h-[80px] flex items-center px-6 py-4 border-b border-sidebar-border">
@@ -373,7 +385,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </Link>
         </div>
         
-        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-6 scrollbar-hide">
+        <nav data-testid="desktop-sidebar-nav" className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-6 space-y-6 scrollbar-hide">
           <PinnedNavSection
             items={pinnedNav.items}
             location={location}
@@ -608,6 +620,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            {showSayIt && <SayItButton compact />}
             <DepartmentSwitcher />
             <Link
               href="/account-security"
@@ -680,7 +693,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         </header>
 
         {/* Page Content */}
-        <div className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
+        <div id={APP_SCROLL_ID} data-testid="page-scroll" className="flex-1 min-h-0 overflow-auto print:overflow-visible p-4 sm:p-6 lg:p-8">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -693,7 +706,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             <EmailVerificationBanner />
             {isTrackPage && !trackGuidanceDismissed && (
               <div className="flex items-center justify-between gap-3 rounded-sm border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-950">
-                <span>Track records support your site-specific controls; review the applicable UK sources, appointments and corrective actions.</span>
+                <span>Track records support your site-specific controls; review the applicable UK sources and competent-person appointments.</span>
                 <div className="flex shrink-0 items-center gap-2">
                   <Link href="/compliance-hub" className="font-semibold underline underline-offset-2">Compliance Hub</Link>
                   <button type="button" onClick={dismissTrackGuidance} aria-label="Dismiss this guidance" title="Don't show again"
