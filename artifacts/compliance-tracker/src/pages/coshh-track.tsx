@@ -44,7 +44,7 @@ const PPE = [
   { key: "footwear", label: "Safety footwear" },
 ] as const;
 const CHECK_TYPES = [
-  { key: "lev_examination", label: "LEV thorough examination", short: "Extraction (LEV) tests", subject: "Extraction system", subjectHint: "For example: spray booth, welding fume arm, dust extractor", by: "Examiner or company", months: 14 },
+  { key: "lev_examination", label: "LEV thorough examination", short: "Extraction (LEV) tests", subject: "Extraction system", subjectHint: "For example: spray booth, welding fume arm, dust extractor", by: "Examiner or company", months: 12 },
   { key: "health_surveillance", label: "Health check", short: "Health checks", subject: "Person checked", subjectHint: "Name of the member of staff", by: "Checked by (e.g. occupational health)", months: 12 },
   { key: "exposure_monitoring", label: "Exposure monitoring", short: "Air monitoring", subject: "Area or task monitored", subjectHint: "For example: kitchen deep clean, workshop", by: "Carried out by", months: 12 },
   { key: "staff_briefing", label: "Staff briefing", short: "Staff briefings", subject: "Person briefed", subjectHint: "Name of the member of staff", by: "Briefed by", months: 12 },
@@ -495,7 +495,7 @@ export default function CoshhTrackPage() {
           <Info className="w-4 h-4 shrink-0 mt-0.5" />
           <p>
             Under the COSHH Regulations 2002 you assess the risks from hazardous substances, put controls in place, keep
-            them working (extraction systems are examined at least every 14 months), provide health checks where the
+            them working (extraction systems are examined by a contractor every 12 months, and never more than 14 months apart), provide health checks where the
             assessment calls for them, and tell staff about the risks. List your products and safety data sheets in
             the <button type="button" className="underline font-medium" onClick={() => setTab("substances")}>Substances</button> tab
             (your COSHH register), then assess each one.
