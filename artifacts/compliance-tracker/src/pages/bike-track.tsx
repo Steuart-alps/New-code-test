@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { matchSpokenItem, useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { beginApiMutation, fetchWithOverrideReason, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 import { sortByLabel } from "@/lib/sort-options";
 import { TrackContractorChecks } from "@/components/track-contractor-checks";
@@ -908,12 +909,15 @@ function LogServiceDialog({
   bikes,
   onClose,
   onSaved,
+  spoken,
 }: {
   open: boolean;
   service: ServiceRow | null;
   bikes: BikeRow[];
   onClose: () => void;
   onSaved: () => void;
+  /** Filled in from Say it ("service bike 4, new brake pads"). */
+  spoken?: { bikeId: number; notes: string } | null;
 }) {
   const { toast } = useToast();
   const [bikeId, setBikeId] = useState(service ? String(service.bikeId) : "");
@@ -943,6 +947,12 @@ function LogServiceDialog({
     setCostPence(service?.costPence ? String(service.costPence / 100) : "");
     setNotes(service?.notes ?? "");
   }, [service]);
+
+  useEffect(() => {
+    if (!open || !spoken || service) return;
+    setBikeId(String(spoken.bikeId));
+    setNotes(spoken.notes);
+  }, [open, spoken, service]);
 
   async function handleSave() {
     if (!bikeId && !service) return;
@@ -1074,6 +1084,7 @@ export default function BikeTrackPage() {
   const [deleteServiceId, setDeleteServiceId] = useState<number | null>(null);
   const [scanBikeId, setScanBikeId] = useState<number | null>(null);
   const [hireBikeId, setHireBikeId] = useState<number>();
+  const [spokenService, setSpokenService] = useState<{ bikeId: number; notes: string } | null>(null);
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
@@ -1136,6 +1147,31 @@ export default function BikeTrackPage() {
     else if (bike.active && bike.status === "available") { setHireBikeId(bike.id); setShowNewHire(true); }
     else { setActiveTab("fleet"); setSearch(bike.ref); }
   }, [scanBikeId, bikesLoading, hiresLoading]);
+
+  // Say it: "bike 4 back", "hire out bike 4" or "service bike 4, new brake pads".
+  useSayItFill(["bike"], fill => {
+    const bike = matchSpokenItem(fill.item, bikes.filter(b => b.active).map(b => ({
+      ...b, name: `Bike ${b.ref}`, aliases: [b.ref, b.name],
+    })));
+    if (!bike) {
+      toast({ title: `Couldn't find ${fill.item ?? "that bike"}`, description: "Choose the bike from the list." });
+      setActiveTab("fleet");
+      return;
+    }
+    if (fill.values.intent === "service") {
+      setActiveTab("services");
+      setSpokenService({ bikeId: bike.id, notes: withSpokenNote("", fill.text) });
+      setLogService("new");
+      return;
+    }
+    const hire = hires.find(h => h.bikeId === bike.id && h.status === "active");
+    if (fill.values.intent !== "hire" && hire) { setActiveTab("hires"); setReturnHire(hire); }
+    else if (fill.values.intent !== "return" && bike.status === "available") { setHireBikeId(bike.id); setShowNewHire(true); }
+    else {
+      toast({ title: `${bike.ref} is ${bike.status}`, description: fill.values.intent === "return" ? "It isn't out on hire." : "It can't be hired out right now." });
+      setActiveTab("fleet"); setSearch(bike.ref);
+    }
+  }, !bikesLoading && !hiresLoading);
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["bikes"] });
@@ -1849,8 +1885,9 @@ export default function BikeTrackPage() {
         open={logService !== null}
         service={logService === "new" ? null : logService}
         bikes={bikes}
-        onClose={() => setLogService(null)}
+        onClose={() => { setLogService(null); setSpokenService(null); }}
         onSaved={invalidate}
+        spoken={spokenService}
       />
 
       <AlertDialog open={deleteServiceId !== null} onOpenChange={v => { if (!v) setDeleteServiceId(null); }}>

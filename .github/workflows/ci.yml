@@ -122,6 +122,8 @@ jobs:
         run: pnpm --filter @workspace/compliance-tracker run test:nav-groups
       - name: Dropdown A to Z order test
         run: pnpm --filter @workspace/compliance-tracker run test:sort-options
+      - name: Old Word (.doc) import reading test
+        run: pnpm --filter @workspace/compliance-tracker run test:word-doc
 
       - name: Reload after a new release test
         run: pnpm --filter @workspace/compliance-tracker run test:new-release-reload
@@ -299,6 +301,9 @@ jobs:
 
       - name: Departments under sites tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:departments-under-sites
+
+      - name: Monthly staff roster check tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:roster-check
 
       - name: Today by department dashboard card tests (production schema base)
         run: pnpm --filter @workspace/api-server run test:today-by-department

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
+import { useSayItFill, withSpokenNote } from "@/lib/say-it-fill";
 import { format, parseISO, isValid } from "date-fns";
 import { sortByLabel } from "@/lib/sort-options";
 
@@ -118,12 +119,14 @@ interface PremisesSummary {
 
 // ─── InspectionDialog ───────────────────────────────────────────────────────────
 
-function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
+function InspectionDialog({ open, inspection, onClose, onSaved, sites, spoken }: {
   open: boolean;
   inspection: PremisesInspection | null;
   onClose: () => void;
   onSaved: () => void;
   sites: { id: number; name: string }[];
+  /** A new inspection filled in from Say it. */
+  spoken?: { area: string; findings: string; actionRequired: string; siteId: string } | null;
 }) {
   const { toast } = useToast();
   const apiFetch = usePremisesApi();
@@ -168,8 +171,9 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
       inspectedBy: inspection?.inspectedBy ?? "",
       staffRosterId: (inspection as any)?.staffRosterId ?? null,
       siteId: inspection?.siteId == null ? "all" : String(inspection.siteId),
+      ...(!inspection && spoken ? spoken : {}),
     });
-  }, [open, inspection, inspectionTypes]);
+  }, [open, inspection, inspectionTypes, spoken]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
@@ -309,6 +313,21 @@ export default function PremisesTrackPage() {
   const [dialog, setDialog]         = useState(false);
   const [editItem, setEditItem]     = useState<PremisesInspection | null>(null);
   const [deleteId, setDeleteId]     = useState<number | null>(null);
+  const [spoken, setSpoken]         = useState<{ area: string; findings: string; actionRequired: string; siteId: string } | null>(null);
+
+  // Say it: "stairwell, loose handrail on the top flight" opens a new
+  // inspection with the area, findings and any action needed filled in.
+  useSayItFill(["premises-inspection"], fill => {
+    const said = (key: string) => (typeof fill.values[key] === "string" ? fill.values[key] as string : "");
+    setEditItem(null);
+    setSpoken({
+      area: said("area"),
+      findings: withSpokenNote(said("findings"), fill.text),
+      actionRequired: said("actionRequired"),
+      siteId: fill.siteId ? String(fill.siteId) : "all",
+    });
+    setDialog(true);
+  });
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -668,7 +687,8 @@ ${sorted.map(r => `<tr>
         inspection={editItem}
         sites={sites}
         onSaved={refetchAll}
-        onClose={() => { setDialog(false); setEditItem(null); }}
+        onClose={() => { setDialog(false); setEditItem(null); setSpoken(null); }}
+        spoken={spoken}
       />
 
       {/* ── Confirm delete ───────────────────────────────────────────────────── */}

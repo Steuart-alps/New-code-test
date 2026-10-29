@@ -8,6 +8,7 @@ import { ACCOUNT_TIMEZONE_SETTING, normalizeAccountTimezone } from "../middlewar
 import { addDays, isCalendarDay, occursOn, todayIn } from "../lib/taskSchedule";
 import { submittedDailyChecklists } from "../lib/dailyChecklistCompletion";
 import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "../lib/departmentSites";
+import { ROSTER_CHECK_MODULE, ROSTER_CHECK_NOTES, isRosterCheck, rosterCheckOccurrence } from "../lib/rosterChecks";
 
 // Staff tasks: "My tasks today" for staff and task assignment for managers.
 // Managers (consultants, client admins, department managers for their own
@@ -20,6 +21,10 @@ import { departmentSiteId, sitesTableVisibleTo, siteVisibleToDepartment } from "
 // site's AM / PM checklist for the day is submitted. Other modules hold many
 // different checks per site and day (fire, water, kitchen...), so their tasks
 // are still ticked by hand.
+//
+// The monthly staff roster check (lib/rosterChecks.ts) is created by
+// ComplyTrack, stays open all month until answered, and is answered Yes / No /
+// N/A rather than ticked: Yes is recorded by uploading the updated roster.
 const router = Router();
 
 const AUTO_COMPLETE_PERIOD: Partial<Record<string, "am" | "pm">> = { dailytrack_am: "am", dailytrack_pm: "pm" };
@@ -46,9 +51,16 @@ const taskFields = {
 const createSchema = z.object(taskFields).strict();
 const patchSchema = z.object({
   ...Object.fromEntries(Object.entries(taskFields).map(([k, v]) => [k, (v as z.ZodTypeAny).optional()])),
+  // The edit form sends the module back unchanged, roster check included.
+  module: z.enum([...TASK_MODULES, ROSTER_CHECK_MODULE]).nullable().optional(),
   active: z.boolean().optional(),
 }).strict();
-const completeSchema = z.object({ date: day, note: z.string().trim().max(1000).nullable().optional() }).strict();
+const completeSchema = z.object({
+  date: day,
+  note: z.string().trim().max(1000).nullable().optional(),
+  /** Roster checks only: "no" or "na" (Yes is recorded by uploading the roster). */
+  answer: z.enum(["yes", "no", "na"]).optional(),
+}).strict();
 const undoSchema = z.object({ date: day }).strict();
 
 type Viewer = NonNullable<Request["currentUser"]>;
@@ -88,6 +100,22 @@ function canUndo(user: Viewer, completion: ShownCompletion | null, today: string
   if (!completion || completion.automatic || user.role === "client_viewer") return false;
   if (managerScope(user) !== null) return true;
   return completion.completedBy === user.id && todayIn(timeZone, completion.completedAt) === today;
+}
+
+/**
+ * The occurrence a task has on a day: a one-off task's due date, the roster
+ * check's month (open all month), otherwise the day itself.
+ */
+function occurrenceOn(task: { recurrence: string; startsOn: string; module: string | null }, date: string): string {
+  if (task.recurrence === "once") return task.startsOn;
+  if (isRosterCheck(task)) return rosterCheckOccurrence(task, date) ?? date;
+  return date;
+}
+
+/** Whether the task has an occurrence to do on the day (a roster check: any day of its month). */
+function dueOn(task: { recurrence: string; startsOn: string; module: string | null }, date: string): boolean {
+  if (isRosterCheck(task)) return rosterCheckOccurrence(task, date) != null;
+  return occursOn(task, date);
 }
 
 /** Tasks the user may see: business-wide ones plus sites in their department scope. */
@@ -178,9 +206,10 @@ async function validateScope(user: Viewer, clientId: number, value: { siteId: nu
 
 function present(row: VisibleRow, user: Viewer, date: string, completions: Map<string, ShownCompletion>, today: string, timeZone: string, departmentSite: number | null) {
   const { task } = row;
-  // An open one-off task stays on the list after its due date until done.
-  const occurrenceDate = task.recurrence === "once" ? task.startsOn : date;
-  const dueOnDate = occursOn(task, date);
+  // An open one-off task stays on the list after its due date until done;
+  // a roster check stays open all month.
+  const occurrenceDate = occurrenceOn(task, date);
+  const dueOnDate = dueOn(task, date);
   const completion = completions.get(`${task.id}:${occurrenceDate}`) ?? null;
   return {
     id: task.id,
@@ -197,7 +226,7 @@ function present(row: VisibleRow, user: Viewer, date: string, completions: Map<s
     active: task.active,
     occurrenceDate,
     dueOnDate,
-    overdue: task.recurrence === "once" && !completion && task.startsOn < today,
+    overdue: (task.recurrence === "once" || (isRosterCheck(task) && dueOnDate)) && !completion && occurrenceDate < today,
     completion: completion ? { completedByName: completion.completedByName, completedAt: completion.completedAt, note: completion.note, automatic: completion.automatic } : null,
     canUndo: canUndo(user, completion, today, timeZone),
     assignedToMe: isAssignedTo(user, task),
@@ -209,7 +238,7 @@ function present(row: VisibleRow, user: Viewer, date: string, completions: Map<s
 /** Ticked completions, then automatic ones for occurrences not ticked. */
 async function completionsFor(clientId: number, rows: VisibleRow[], date: string) {
   const map = new Map<string, ShownCompletion>();
-  const occurrence = (row: VisibleRow) => row.task.recurrence === "once" ? row.task.startsOn : date;
+  const occurrence = (row: VisibleRow) => occurrenceOn(row.task, date);
   const taskIds = rows.map((r) => r.task.id);
   if (!taskIds.length) return map;
   const dates = [...new Set(rows.map(occurrence))];
@@ -267,7 +296,7 @@ router.get("/tasks", requireAuth, async (req, res) => {
   let rows = await visibleTasks(clientId, req);
   if (query.data.scope === "mine") {
     rows = rows.filter((row) => row.task.active && isAssignedTo(user, row.task)
-      && (occursOn(row.task, date) || (row.task.recurrence === "once" && row.task.startsOn < date)));
+      && (dueOn(row.task, date) || (row.task.recurrence === "once" && row.task.startsOn < date)));
   }
   const completions = await completionsFor(clientId, rows, date);
   const departmentSite = await scopeSiteId(user);
@@ -324,7 +353,14 @@ router.patch("/tasks/:id", requireAuth, denyViewers, async (req, res) => {
   const row = (await visibleTasks(clientId, req)).find((r) => r.task.id === id);
   if (!row) return res.status(404).json({ error: "Task not found" });
   if (!canManageRow(user, row, await scopeSiteId(user))) return res.status(403).json({ error: "Only managers can edit this task" });
-  const changes = parsed.data as Partial<z.infer<typeof createSchema>> & { active?: boolean };
+  const changes = { ...parsed.data } as Omit<Partial<z.infer<typeof createSchema>>, "module"> & { module?: string | null; active?: boolean };
+  if (isRosterCheck(row.task)) {
+    // A roster check keeps its link, month-by-month schedule and site; only
+    // who does it, its wording and archiving change.
+    for (const key of ["module", "recurrence", "startsOn", "siteId"] as const) delete changes[key];
+  } else if (changes.module === ROSTER_CHECK_MODULE) {
+    return res.status(400).json({ error: "The staff roster check is set up by ComplyTrack" });
+  }
   const next = {
     siteId: "siteId" in changes ? changes.siteId ?? null : row.task.siteId,
     assigneeUserId: "assigneeUserId" in changes ? changes.assigneeUserId ?? null : row.task.assigneeUserId,
@@ -357,11 +393,25 @@ router.post("/tasks/:id/complete", requireAuth, denyViewers, async (req, res) =>
   if (!occursOn(row.task, date)) return res.status(400).json({ error: "The task is not due on that date" });
   const today = await accountToday(clientId);
   if (date > today) return res.status(400).json({ error: "You cannot complete a task before its date" });
-  if (!isManager && row.task.recurrence !== "once" && date < addDays(today, -1)) {
+  const rosterCheck = isRosterCheck(row.task);
+  let note = parsed.data.note ?? null;
+  if (rosterCheck) {
+    const { answer } = parsed.data;
+    if (!answer) return res.status(400).json({ error: "Answer the roster check: Yes, No or N/A" });
+    if (answer === "yes") return res.status(400).json({ error: "Upload the updated roster to answer Yes" });
+    // Answered any day of its month; the person it is assigned to can answer
+    // only the current month, managers any month.
+    if (!isManager && date !== rosterCheckOccurrence(row.task, today)) {
+      return res.status(403).json({ error: "Only this month's roster check can be answered. Ask a manager to record older ones." });
+    }
+    note = note ? `${ROSTER_CHECK_NOTES[answer]}: ${note}` : ROSTER_CHECK_NOTES[answer];
+  } else if (parsed.data.answer) {
+    return res.status(400).json({ error: "Only the staff roster check takes an answer" });
+  } else if (!isManager && row.task.recurrence !== "once" && date < addDays(today, -1)) {
     return res.status(403).json({ error: "Only today's and yesterday's tasks can be completed. Ask a manager to record older ones." });
   }
   const [created] = await db.insert(taskCompletionsTable).values({
-    clientId, taskId: id, occurrenceDate: date, completedBy: user.id, completedByName: user.name, note: parsed.data.note ?? null,
+    clientId, taskId: id, occurrenceDate: date, completedBy: user.id, completedByName: user.name, note: note?.slice(0, 1000) ?? null,
   }).onConflictDoNothing().returning();
   if (!created) return res.status(409).json({ error: "This task is already marked done" });
   res.status(201).json(created);
