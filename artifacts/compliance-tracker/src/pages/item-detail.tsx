@@ -429,6 +429,9 @@ export default function ItemDetailPage() {
                 <div>
                   <p className="text-xs text-emerald-700">{item.status === "completed" ? "Completed" : "Last completed"}</p>
                   <p className="font-medium">{fmt(item.completedAt)}</p>
+                  {item.completedInHouseBy && (
+                    <p className="text-xs text-muted-foreground" data-testid="completed-in-house-by">Done in house by {item.completedInHouseBy}</p>
+                  )}
                 </div>
               )}
             </div>

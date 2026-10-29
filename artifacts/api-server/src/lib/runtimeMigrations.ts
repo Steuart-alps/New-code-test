@@ -2323,6 +2323,11 @@ async function runRuntimeMigrationsOnce() {
     await migrateContractorSignIn();
     await migrateContractorVisitNotNeeded();
     await migrateGreenkeepingDailyChecks();
+    await addFireAlarmPanelToSavedPremisesChecks();
+
+    // ---- A compliance check done in house by a competent person (Oct 2026) ----
+    // Mirrors lib/db/src/schema/compliance-items.ts completedInHouseBy.
+    await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "completed_in_house_by" text`);
 
     // ---- The person responsible for an action, issue or check (Oct 2026) ----
     await migrateAssignees();
@@ -6637,4 +6642,57 @@ async function migrateGreenkeepingDailyChecks() {
   `);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "uq_green_machine_not_in_use_machine_date" ON "green_machine_not_in_use" ("machine_id", "check_date")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_green_machine_not_in_use_client_date" ON "green_machine_not_in_use" ("client_id", "check_date")`);
+}
+
+/**
+ * One-off (Oct 2026): FireTrack's weekly alarm panel check is retired because
+ * the panel is looked at on every premises opening and closing check. A
+ * business that saved its own premises opening or closing list (Settings on
+ * the card) does not get the new default item, so it is added to each saved
+ * list that has no panel item yet, after the call point item (else at the
+ * end). Nothing is removed. Runs once, recorded in runtime_migration_progress,
+ * so a manager who later takes the item out is not overridden on the next
+ * boot. Returns the number of lists changed, or null when it had already run.
+ */
+const PREMISES_ALARM_PANEL_ITEM = "premises_checks_fire_alarm_panel_v1";
+/** Mirrors the default premises opening and closing items in the web app. */
+export const FIRE_ALARM_PANEL_CHECK_LABEL =
+  "Fire alarm panel shows normal: no fault, fire or disabled zone lights (report any fault at once)";
+
+export async function addFireAlarmPanelToSavedPremisesChecks(): Promise<number | null> {
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "runtime_migration_progress" (
+    "name" text PRIMARY KEY,
+    "last_id" integer NOT NULL DEFAULT 0,
+    "updated_at" timestamp NOT NULL DEFAULT now()
+  )`);
+  const item = JSON.stringify({ label: FIRE_ALARM_PANEL_CHECK_LABEL, checked: false });
+  const changed = await db.transaction(async (tx) => {
+    const claimed = await tx.execute(sql`INSERT INTO runtime_migration_progress (name)
+      VALUES (${PREMISES_ALARM_PANEL_ITEM}) ON CONFLICT (name) DO NOTHING RETURNING name`);
+    if (claimed.rows.length === 0) return null;
+    const updated = await tx.execute(sql`
+      UPDATE checklist_templates t
+      SET items = (
+        SELECT jsonb_agg(x.elem ORDER BY x.ord)
+        FROM (
+          SELECT e.elem, e.ord::numeric AS ord
+          FROM jsonb_array_elements(t.items) WITH ORDINALITY AS e(elem, ord)
+          UNION ALL
+          SELECT ${item}::jsonb, COALESCE((
+            SELECT max(e.ord) FROM jsonb_array_elements(t.items) WITH ORDINALITY AS e(elem, ord)
+            WHERE e.elem->>'label' ILIKE '%call point%' OR e.elem->>'label' ILIKE '%break glass%'
+          ), jsonb_array_length(t.items)) + 0.5
+        ) x
+      ), updated_at = now()
+      WHERE t.checklist_type IN ('premises_opening', 'premises_closing')
+        AND jsonb_typeof(t.items) = 'array'
+        AND NOT EXISTS (
+          SELECT 1 FROM jsonb_array_elements(t.items) AS e(elem) WHERE e.elem->>'label' ILIKE '%panel%'
+        )
+      RETURNING t.id
+    `);
+    return updated.rows.length;
+  });
+  if (changed !== null) logger.info({ changed }, "Added the fire alarm panel item to saved premises opening and closing checks");
+  return changed;
 }

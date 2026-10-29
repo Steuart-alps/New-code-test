@@ -6,23 +6,32 @@ import { API_BASE, apiFetch } from "@/lib/api";
 interface ManagedBy { practiceName: string; hasLogo: boolean; updatedAt: string }
 
 /**
- * "Managed by <practice>" strip for people in a business linked to a
- * consultant who has set practice branding. Consultants never see it (it is
- * their own branding); nothing renders when no branding is set.
+ * The consultant practice that looks after the business (null when none has
+ * set practice branding). Consultants don't load it: it is their own.
  */
-export function ManagedByBadge() {
+export function useManagedBy() {
   const { user, activeClientId } = useAuth();
-  const [logoFailed, setLogoFailed] = useState(false);
-  const enabled = !!user && user.role !== "consultant";
-  const { data } = useQuery<ManagedBy | null>({
+  return useQuery<ManagedBy | null>({
     queryKey: ["managed-by", user?.id, activeClientId],
-    enabled,
+    enabled: !!user && user.role !== "consultant",
     staleTime: 10 * 60 * 1000,
     queryFn: async () => {
       const response = await apiFetch("/managed-by");
       return response.ok ? response.json() : null;
     },
   });
+}
+
+/**
+ * "Managed by <practice>" strip for people in a business linked to a
+ * consultant who has set practice branding. Consultants never see it (it is
+ * their own branding); nothing renders when no branding is set.
+ */
+export function ManagedByBadge() {
+  const { user } = useAuth();
+  const [logoFailed, setLogoFailed] = useState(false);
+  const enabled = !!user && user.role !== "consultant";
+  const { data } = useManagedBy();
   if (!enabled || !data?.practiceName) return null;
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="managed-by">
