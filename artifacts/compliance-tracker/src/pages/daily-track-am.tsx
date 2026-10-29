@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { format } from "date-fns";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
@@ -9,13 +9,14 @@ import { fetchMobileChecklistSubmission, MobileChecklistSubmissionCard, type Mob
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { useListSites } from "@workspace/api-client-react";
+import { useChecklistSite } from "@/hooks/use-checklist-site";
+import { ChecklistSiteSelect } from "@/components/checklist-site-select";
+import { carryAnswers, createChecklistDraftStore, hasAnswers, type ChecklistDraftSlot } from "@/lib/checklist-carry";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sunrise, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, Settings2 } from "lucide-react";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
 
@@ -151,7 +152,7 @@ const CHECKLIST_LABELS: Record<string, string> = {
 // ── Checklist card ────────────────────────────────────────────────────────────
 
 export function ChecklistCard({
-  type, siteId, siteName, date, existing, onSaved, canAdmin,
+  type, siteId, siteName, date, existing, onSaved, canAdmin, draft,
 }: {
   type: string;
   siteId: number | null;
@@ -160,6 +161,7 @@ export function ChecklistCard({
   existing?: Checklist;
   onSaved: () => void;
   canAdmin: boolean;
+  draft?: ChecklistDraftSlot<ChecklistItem>;
 }) {
   const [templateItems, setTemplateItems] = useState<ChecklistItem[] | null>(null);
   const [templateLoading, setTemplateLoading] = useState(true);
@@ -187,24 +189,39 @@ export function ChecklistCard({
 
   const { user } = useAuth();
   const { toast } = useToast();
-  const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? effectiveDefault);
-  const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
-  const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
-  const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
-  const [saving, setSaving] = useState(false);
   const submitted = !!existing?.submittedAt;
+  // Ticks made before the site or date was changed (or before a reload) are
+  // carried onto this card, unless this one is already submitted.
+  const carried = submitted ? undefined : draft?.get();
+  const startItems = () => {
+    const base = existing?.items ?? effectiveDefault;
+    return carried ? carryAnswers(base, carried.items, item => item.label) : base;
+  };
+  const [items, setItems] = useState<ChecklistItem[]>(startItems);
+  const [completedBy, setCompletedBy] = useState(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+  const [managerNote, setManagerNote] = useState(carried?.managerNote || (existing?.managerNote ?? ""));
+  const [saving, setSaving] = useState(false);
+  const touched = useRef(false);
 
   useEffect(() => {
-    setItems(existing?.items ?? effectiveDefault);
-    setCompletedBy(existing?.completedBy ?? user?.name ?? "");
-    setManagerNote(existing?.managerNote ?? "");
+    setItems(startItems());
+    setCompletedBy(carried?.completedBy || (existing?.completedBy ?? user?.name ?? ""));
+    setStaffRosterId(carried ? carried.staffRosterId : (existing as any)?.staffRosterId ?? null);
+    setManagerNote(carried?.managerNote || (existing?.managerNote ?? ""));
   }, [existing, type, templateItems]);
 
-  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
-  const passRemaining = () => { if (submitted) return; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
+  useEffect(() => {
+    if (touched.current && !submitted) draft?.set({ items, completedBy, staffRosterId, managerNote });
+  }, [items, completedBy, staffRosterId, managerNote]);
+
+  const edit = <T,>(set: (value: T) => void) => (value: T) => { touched.current = true; set(value); };
+  const setResult = (i: number, result: ChecklistResult) => { if (submitted) return; touched.current = true; setItems(prev => prev.map((item, idx) => idx === i ? withResult(item, result) : item)); };
+  const passRemaining = () => { if (submitted) return; touched.current = true; setItems(prev => prev.map(item => itemResult(item) ? item : withResult(item, "pass"))); };
 
   const setNote = (i: number, note: string) => {
     if (submitted) return;
+    touched.current = true;
     setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item));
   };
 
@@ -228,6 +245,8 @@ export function ChecklistCard({
         return;
       }
       toast({ title: submit ? "Checklist submitted" : "Draft saved" });
+      touched.current = false;
+      draft?.set(undefined);
       onSaved();
     } catch {
       toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
@@ -261,6 +280,10 @@ export function ChecklistCard({
           </div>
         </div>
 
+        {carried && hasAnswers(carried.items) && !touched.current && (
+          <p className="text-xs text-blue-700 mb-3">Your unsaved ticks are filled in below. Save or submit to keep them.</p>
+        )}
+
         {templateLoading && !existing ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -284,12 +307,12 @@ export function ChecklistCard({
           <div className="space-y-3 border-t pt-3">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <StaffPerformerSelect label="Completed by" value={completedBy} onChange={setCompletedBy} onRosterIdChange={setStaffRosterId} />
+                <StaffPerformerSelect label="Completed by" value={completedBy} onChange={edit(setCompletedBy)} onRosterIdChange={edit(setStaffRosterId)} />
               </div>
               {canAdmin && (
                 <div className="space-y-1">
                   <Label className="text-xs">Manager note</Label>
-                  <Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" />
+                  <Input value={managerNote} onChange={e => edit(setManagerNote)(e.target.value)} placeholder="Optional" className="h-8 text-sm" />
                 </div>
               )}
             </div>
@@ -306,6 +329,10 @@ export function ChecklistCard({
               </Button>
             </div>
           </div>
+        )}
+
+        {submitted && draft?.get() && hasAnswers(draft.get()!.items) && (
+          <p className="text-xs text-amber-700 mb-3">This checklist is already submitted. Your unsaved ticks are kept: choose another site or date to use them.</p>
         )}
 
         {submitted && (
@@ -346,17 +373,18 @@ export function ChecklistCard({
 export default function DailyTrackAmPage() {
   const { activeClientId, hasService } = useAuth();
   const canAdmin = useCanAdmin();
-  const { data: sites = [] } = useListSites();
+  const { sites, siteId: selectedSiteId, setSiteId, ready: siteReady } = useChecklistSite();
+  // Unsaved ticks per checklist, kept while the site or date changes.
+  const [drafts] = useState(createChecklistDraftStore);
+  const loadSeq = useRef(0);
 
   const today = format(new Date(), "yyyy-MM-dd");
   const _qs = new URLSearchParams(window.location.search);
   const [date, setDate] = useState(_qs.get("date") ?? today);
-  const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [mobileSubmission, setMobileSubmission] = useState<MobileChecklistSubmission | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
   const selectedSiteName = sites.find(s => s.id === selectedSiteId)?.name;
   const hasStandaloneDailyTrack = hasService("dailytrack_am");
   const visibleTypes = [
@@ -365,6 +393,9 @@ export default function DailyTrackAmPage() {
   ];
 
   const load = useCallback(async () => {
+    if (!siteReady) return;
+    // A slower answer for the previous site or date must not replace this one.
+    const seq = ++loadSeq.current;
     setLoading(true);
     const params = new URLSearchParams({ date });
     if (selectedSiteId) params.set("siteId", String(selectedSiteId));
@@ -372,10 +403,12 @@ export default function DailyTrackAmPage() {
       apiFetch(`/daily-track-am?${params}`),
       hasStandaloneDailyTrack ? fetchMobileChecklistSubmission(selectedSiteId, date, "am") : Promise.resolve(null),
     ]);
-    if (r.ok) setChecklists(await r.json());
+    const rows = r.ok ? await r.json() : null;
+    if (seq !== loadSeq.current) return;
+    if (rows) setChecklists(rows);
     setMobileSubmission(mobile);
     setLoading(false);
-  }, [date, selectedSiteId, activeClientId, hasStandaloneDailyTrack]);
+  }, [date, selectedSiteId, siteReady, activeClientId, hasStandaloneDailyTrack]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -399,16 +432,7 @@ export default function DailyTrackAmPage() {
           <Label className="text-xs">Date</Label>
           <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-9" />
         </div>
-        <div className="space-y-1 flex-1 min-w-[180px]">
-          <Label className="text-xs">Site</Label>
-          <Select value={siteId} onValueChange={setSiteId}>
-            <SelectTrigger className="h-9"><SelectValue placeholder="Select site…" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No site filter</SelectItem>
-              {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <ChecklistSiteSelect sites={sites} value={selectedSiteId} onChange={setSiteId} />
         <div className="flex items-end">
           <Button variant="outline" size="sm" onClick={load} className="h-9 gap-1.5">
             <RotateCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -416,7 +440,7 @@ export default function DailyTrackAmPage() {
         </div>
       </div>
 
-      {loading ? (
+      {loading || !siteReady ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -431,6 +455,7 @@ export default function DailyTrackAmPage() {
               existing={getChecklist(type)}
               onSaved={load}
               canAdmin={canAdmin}
+              draft={drafts.slot(type)}
             />
           ))}
         </div>
