@@ -105,6 +105,7 @@ import type {
   FireCallPoint,
   FireCallPointImportRequest,
   FireCallPointImportResult,
+  FireDrillAttendance,
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
@@ -122,6 +123,7 @@ import type {
   GetCoshhTrackStatusParams,
   GetDailyTrackHistoryParams,
   GetFeedbackScreenshotParams,
+  GetFireDrillAttendanceParams,
   GetFireSafetyConfigParams,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
@@ -7839,6 +7841,90 @@ export function useGetFireSafetyStatus<TData = Awaited<ReturnType<typeof getFire
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFireSafetyStatusQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFireDrillAttendanceUrl = (params?: GetFireDrillAttendanceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/fire-safety/drill-attendance?${stringifiedParams}` : `/api/fire-safety/drill-attendance`
+}
+
+/**
+ * @summary Active roster staff with the latest fire drill each took part in
+ */
+export const getFireDrillAttendance = async (params?: GetFireDrillAttendanceParams, options?: RequestInit): Promise<FireDrillAttendance> => {
+
+  return customFetch<FireDrillAttendance>(getGetFireDrillAttendanceUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFireDrillAttendanceQueryKey = (params?: GetFireDrillAttendanceParams,) => {
+    return [
+    `/api/fire-safety/drill-attendance`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFireDrillAttendanceQueryOptions = <TData = Awaited<ReturnType<typeof getFireDrillAttendance>>, TError = ErrorType<void>>(params?: GetFireDrillAttendanceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireDrillAttendance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFireDrillAttendanceQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFireDrillAttendance>>> = ({ signal }) => getFireDrillAttendance(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFireDrillAttendance>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFireDrillAttendanceQueryResult = NonNullable<Awaited<ReturnType<typeof getFireDrillAttendance>>>
+export type GetFireDrillAttendanceQueryError = ErrorType<void>
+
+
+/**
+ * @summary Active roster staff with the latest fire drill each took part in
+ */
+
+export function useGetFireDrillAttendance<TData = Awaited<ReturnType<typeof getFireDrillAttendance>>, TError = ErrorType<void>>(
+ params?: GetFireDrillAttendanceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireDrillAttendance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFireDrillAttendanceQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

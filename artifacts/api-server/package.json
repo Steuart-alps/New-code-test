@@ -16,6 +16,7 @@
     "test:owner-late-edit-reason": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/owner-late-edit-reason.mjs",
     "test:departments-under-sites": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/departments-under-sites.mjs",
     "test:fire-call-points": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-call-points.mjs",
+    "test:fire-drill-records": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/fire-drill-records.mjs",
     "test:equipment-labels": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/equipment-labels.mjs",
     "test:inspection-reports": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/inspection-reports.mjs",
     "test:report-reading": "bash tests/run-bundled-unit.sh tests/report-reading.ts esm",

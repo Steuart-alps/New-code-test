@@ -26,7 +26,7 @@ export const EXTENDED_AUDITED_TABLES = [
   "coshh_acknowledgements", "coshh_assessments", "coshh_checks",
   "coshh_substances", "daily_checklist_submissions", "daily_checklist_teams", "daily_checklists",
   "daily_manager_signoffs", "departments", "doc_acknowledgements",
-  "fire_call_points", "fix_track_email_dispatches", "fix_track_issue_activity", "fix_track_quote_submissions",
+  "fire_call_points", "fire_drill_attendance", "fix_track_email_dispatches", "fix_track_issue_activity", "fix_track_quote_submissions",
   "green_application_products", "green_applications",
   "green_defects", "green_fuel_logs", "green_hour_readings", "green_machine_not_in_use", "green_machines", "green_pre_use_checks",
   "green_products", "green_puwer_inspections", "green_service_records", "green_stock_movements",

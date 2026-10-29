@@ -92,6 +92,8 @@ export function buildTrainingMatrix(
   staff: MatrixStaffMember[],
   siteId: string,
   today = new Date(),
+  /** Columns shown even when nobody has a record of that type yet. */
+  alwaysTypes: string[] = [],
 ): TrainingMatrix {
   const matchesSite = <T extends { site_id: number | null }>(row: T) =>
     siteId === "all" || String(row.site_id) === siteId;
@@ -119,7 +121,7 @@ export function buildTrainingMatrix(
     return { key: String(member.id), staffId: member.id, name: member.name, label };
   });
 
-  const types = Array.from(new Set(scopedCertificates.map(record => record.training_type || "Other")))
+  const types = Array.from(new Set([...scopedCertificates.map(record => record.training_type || "Other"), ...alwaysTypes]))
     .sort((a, b) => a.localeCompare(b));
 
   const unmatchedCertificates: MatrixCertificate[] = [];
@@ -181,4 +183,38 @@ export function trainingMatrixToCsv(
   ];
   return rows.map(row => row.map(csvCell).join(","))
     .join("\r\n");
+}
+
+/** The training matrix column for FireTrack drill attendance. */
+export const FIRE_DRILL_TRAINING_TYPE = "Fire drill";
+
+export type StaffDrillAttendance = {
+  staffRosterId: number;
+  name: string;
+  siteId: number | null;
+  lastDrillDate: string | null;
+};
+
+/**
+ * Each roster member's latest fire drill as a matrix record that "expires"
+ * `months` months later, so the matrix shows Missing for staff never ticked
+ * present at a drill and Expired once their last one is too old. The record
+ * takes the person's roster site, so it follows them in the site filter.
+ */
+export function fireDrillMatrixRecords(staff: StaffDrillAttendance[], months: number): MatrixCertificate[] {
+  return staff.flatMap(person => {
+    if (!person.lastDrillDate) return [];
+    const [year, month, day] = person.lastDrillDate.slice(0, 10).split("-").map(Number);
+    const expiry = new Date(Date.UTC(year, month - 1 + months, 1));
+    const lastDay = new Date(Date.UTC(expiry.getUTCFullYear(), expiry.getUTCMonth() + 1, 0)).getUTCDate();
+    expiry.setUTCDate(Math.min(day, lastDay));
+    return [{
+      staff_roster_id: person.staffRosterId,
+      staff_name: person.name,
+      training_type: FIRE_DRILL_TRAINING_TYPE,
+      completed_date: person.lastDrillDate,
+      expiry_date: expiry.toISOString().slice(0, 10),
+      site_id: person.siteId,
+    }];
+  });
 }

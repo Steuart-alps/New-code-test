@@ -34,6 +34,7 @@ import {
   certificatesTable,
   complianceItemsTable,
   fireSafetyChecksTable,
+  fireDrillAttendanceTable,
   foodSafetyRecordsTable,
   legionellaChecksTable,
   trackControlProfilesTable,
@@ -270,6 +271,7 @@ food-safety/
   records.csv                    — daily food safety diary entries
 fire-safety/
   checks.csv                     — fire safety checks
+  drill-attendance.csv           — staff present at each fire drill
   control-profiles.csv           — site-specific risk controls and frequencies
   evidence-requirements.csv      — required FireTrack evidence profile
   evidence.csv                   — recorded and independently reviewed evidence
@@ -633,6 +635,7 @@ router.get(
 
         // ── Fire safety ────────────────────────────────────────────────────────
         await out.csv("fire-safety/checks.csv", () => db.select().from(fireSafetyChecksTable).where(eq(fireSafetyChecksTable.clientId, cid)));
+        await out.csv("fire-safety/drill-attendance.csv", () => db.select().from(fireDrillAttendanceTable).where(eq(fireDrillAttendanceTable.clientId, cid)));
         await out.csv("fire-safety/control-profiles.csv", () => db.select().from(trackControlProfilesTable).where(and(
           eq(trackControlProfilesTable.clientId, cid),
           eq(trackControlProfilesTable.module, "fire"),

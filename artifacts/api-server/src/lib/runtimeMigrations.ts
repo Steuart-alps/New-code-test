@@ -6244,6 +6244,24 @@ async function migrateFireCallPoints() {
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_db" real`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_method" text`);
   await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "sound_level_bedhead" boolean`);
+  // Oct 2026: fire drills record the time of the drill, how long the
+  // evacuation took and which roster staff were present. Older drills stay
+  // blank. Mirrors lib/db/src/schema/fire-safety-checks.ts.
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "drill_time" text`);
+  await db.execute(sql`ALTER TABLE "fire_safety_checks" ADD COLUMN IF NOT EXISTS "evacuation_seconds" integer`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fire_drill_attendance" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "fire_check_id" integer NOT NULL REFERENCES "fire_safety_checks"("id") ON DELETE CASCADE,
+      "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "staff_name" text NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_check" ON "fire_drill_attendance" ("fire_check_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fire_drill_attendance_client_staff" ON "fire_drill_attendance" ("client_id", "staff_roster_id")`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_fire_drill_attendance_check_staff" ON "fire_drill_attendance" ("fire_check_id", "staff_roster_id")`);
 }
 
 // Equipment list and QR labels (Oct 2026). Water checks and Compliance Checks
