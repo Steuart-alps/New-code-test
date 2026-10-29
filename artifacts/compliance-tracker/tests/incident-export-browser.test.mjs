@@ -9,6 +9,8 @@ import { chromium } from "@playwright/test";
 // filter (and combinations of them) this checks that the on-screen register,
 // the exported rows and the RIDDOR-outstanding footer all describe the same
 // records, and that an invalid date range never opens the print flow.
+// It also checks the "Log Incident" form's defaults (today's local date, the
+// signed-in user as reporter) and the HSE RIDDOR link with the adviser note.
 // API responses mirror artifacts/api-server/src/routes/incidents.ts.
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const freePort = async () => {
@@ -132,6 +134,7 @@ const CASES = [
 
 // ─── API fixture ─────────────────────────────────────────────────────────────
 
+let managedBy = null;
 const json = (route, data, code = 200) => route.fulfill({ status: code, contentType: "application/json", body: JSON.stringify(data) });
 const unexpectedRequests = [];
 async function routeApi(route) {
@@ -150,7 +153,7 @@ async function routeApi(route) {
     case "/api/billing/cancellation-status": return json(route, { accessEndsAt: null });
     // The header's notification bell (#92).
     case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
-    case "/api/managed-by": return json(route, null);
+    case "/api/managed-by": return json(route, managedBy);
     // Setup is finished, so the "Add your team first" gate stays out of the way.
     case "/api/setup/state": return json(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
     // The app-wide storage limit banner (#156).
@@ -393,9 +396,42 @@ try {
     assertExportMatchesScreen(`corrected range ${JSON.stringify(filters)}`, corrected, screen, exported);
   }
 
+  // ─── Log Incident defaults and RIDDOR guidance ───────────────────────────
+  // 00:30 on 2 July in London is still 1 July in UTC: the form uses the local day.
+  managedBy = { practiceName: "ALPS Consultancy", hasLogo: false, updatedAt: "2026-07-01T00:00:00Z" };
+  await page.clock.setFixedTime(new Date("2026-07-01T23:30:00Z"));
+  await openRegister(page);
+  const hseHref = "https://www.hse.gov.uk/riddor/report.htm";
+  const outstandingAlert = page.getByText(/RIDDOR-reportable incidents have not yet been reported/).locator("..");
+  assert.equal(await outstandingAlert.getByTestId("link-hse-riddor").getAttribute("href"), hseHref, "the outstanding alert links to the HSE");
+  const footerNote = page.getByTestId("riddor-adviser-note").first();
+  assert.match(await footerNote.innerText(), /speak to your health and safety adviser at ALPS Consultancy before\s+you report/);
+  const footerLink = footerNote.getByTestId("link-hse-riddor");
+  assert.equal(await footerLink.getAttribute("href"), hseHref);
+  assert.equal(await footerLink.getAttribute("target"), "_blank", "the HSE site opens in a new tab");
+  assert.equal(await footerLink.getAttribute("rel"), "noopener noreferrer");
+
+  await page.getByRole("button", { name: "Log Incident" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByText("Log Incident / Accident").waitFor();
+  assert.equal(await dialog.locator('input[type="date"]').first().inputValue(), "2026-07-02", "the date defaults to today on this device");
+  assert.equal(await dialog.getByPlaceholder("Name of person completing this form").inputValue(), "Incident Manager",
+    "Reported by defaults to the signed-in user");
+  assert.equal(await dialog.getByPlaceholder(/Describe exactly what happened/).getAttribute("spellcheck"), "true", "notes boxes are spell checked");
+  assert.equal(await dialog.getByPlaceholder("e.g. Kitchen, Car park, Reception").getAttribute("spellcheck"), "true", "text boxes are spell checked");
+  assert.equal(await dialog.locator('input[type="date"]').first().getAttribute("spellcheck"), null, "date boxes are not");
+  await dialog.getByRole("button", { name: "Next: Actions & RIDDOR →" }).click();
+  const dialogNote = dialog.getByTestId("riddor-adviser-note");
+  assert.match(await dialogNote.innerText(), /ALPS Consultancy/, "the RIDDOR section recommends the adviser");
+  assert.equal(await dialogNote.getByTestId("link-hse-riddor").getAttribute("href"), hseHref);
+  await dialog.getByLabel("This incident is RIDDOR reportable").click();
+  assert.equal(await dialog.getByRole("link", { name: /Report it on the HSE website/ }).getAttribute("href"), hseHref,
+    "the 'must be reported' warning links to the HSE");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
   assert.deepEqual(unexpectedRequests, []);
   assert.deepEqual(pageErrors, []);
-  console.log(`Incident export browser checks passed: ${CASES.length} filter cases match screen and export (rows and RIDDOR-outstanding footer), and invalid date ranges never open the print flow.`);
+  console.log(`Incident export browser checks passed: ${CASES.length} filter cases match screen and export (rows and RIDDOR-outstanding footer), invalid date ranges never open the print flow, and Log Incident defaults and the HSE RIDDOR link work.`);
 } catch (error) {
   console.error("Incident register page:", browser ? await browser.contexts()[0]?.pages()[0]?.locator("body").innerText().catch(() => "") : "");
   throw error;
