@@ -4285,6 +4285,26 @@ export const ReadImportListResponse = zod.object({
 
 
 /**
+ * For "Upload your lists", where many files are dropped at once. Claude only says which of the business's imports the file is (PAT appliances, RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster); the rows are read later by that import. Uses the AI allowance but not the monthly reading number. The file is not stored. Off until the server has an Anthropic API key.
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const sortImportListBodyFileNameMax = 255;
+
+
+
+export const SortImportListBody = zod.object({
+  "fileName": zod.string().max(sortImportListBodyFileNameMax),
+  "mimeType": zod.string().describe('image\/jpeg, image\/png, image\/webp, image\/gif, application\/pdf, .docx or text\/plain'),
+  "data": zod.string().describe('The file as base64 (8 MB at most before encoding)'),
+  "siteId": zod.number().nullish().describe('The site the list is for, if the person chose one')
+})
+
+export const SortImportListResponse = zod.object({
+  "kind": zod.union([zod.literal('pat-appliances'),zod.literal('room-track-rooms'),zod.literal('contractors'),zod.literal('fire-call-points'),zod.literal('greentrack-equipment'),zod.literal('staff-roster'),zod.literal(null)]).nullable().describe('The import the file belongs in; null when it is none of them')
+})
+
+
+/**
  * @summary Rename, move, archive or restore a call point (managers)
  */
 export const UpdateFireCallPointParams = zod.object({

@@ -307,6 +307,8 @@ export * from './hotTubOperatingRangesTemperature';
 export * from './importExtinguisherPoints200';
 export * from './importExtinguisherPointsBody';
 export * from './importListReadResult';
+export * from './importListSortResult';
+export * from './importListSortResultKind';
 export * from './incidentConfig';
 export * from './inspectionReport';
 export * from './inspectionReportAction';

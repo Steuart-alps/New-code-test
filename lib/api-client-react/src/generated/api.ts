@@ -177,6 +177,7 @@ import type {
   ImportExtinguisherPoints200,
   ImportExtinguisherPointsBody,
   ImportListReadResult,
+  ImportListSortResult,
   IncidentConfig,
   InspectionReport,
   InspectionReportDetail,
@@ -9148,6 +9149,78 @@ export const useReadImportList = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReadImportListMutationOptions(options));
+    }
+
+export const getSortImportListUrl = () => {
+
+
+
+
+  return `/api/imports/sort-list`
+}
+
+/**
+ * For "Upload your lists", where many files are dropped at once. Claude only says which of the business's imports the file is (PAT appliances, RoomTrack rooms, contractors, FireTrack call points, GreenTrack equipment or the staff roster); the rows are read later by that import. Uses the AI allowance but not the monthly reading number. The file is not stored. Off until the server has an Anthropic API key.
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const sortImportList = async (patRegisterReadRequest: PatRegisterReadRequest, options?: RequestInit): Promise<ImportListSortResult> => {
+
+  return customFetch<ImportListSortResult>(getSortImportListUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(patRegisterReadRequest)
+  }
+);}
+
+
+
+
+
+export const getSortImportListMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sortImportList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sortImportList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext> => {
+
+const mutationKey = ['sortImportList'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sortImportList>>, {data: BodyType<PatRegisterReadRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  sortImportList(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SortImportListMutationResult = NonNullable<Awaited<ReturnType<typeof sortImportList>>>
+    export type SortImportListMutationBody = BodyType<PatRegisterReadRequest>
+    export type SortImportListMutationError = ErrorType<void>
+
+    /**
+ * @summary Say which import a photo, scan, PDF or Word list belongs in (owners and consultants)
+ */
+export const useSortImportList = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sortImportList>>, TError,{data: BodyType<PatRegisterReadRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sortImportList>>,
+        TError,
+        {data: BodyType<PatRegisterReadRequest>},
+        TContext
+      > => {
+      return useMutation(getSortImportListMutationOptions(options));
     }
 
 export const getUpdateFireCallPointUrl = (id: number,) => {
