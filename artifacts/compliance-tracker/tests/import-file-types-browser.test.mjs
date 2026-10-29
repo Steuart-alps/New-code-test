@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { chromium } from "@playwright/test";
 
@@ -12,6 +12,7 @@ import { chromium } from "@playwright/test";
 //   - cells pasted from Excel (text plus a picture) are imported as rows,
 //     never sent to AI;
 //   - a spreadsheet dropped on the AI box goes the usual spreadsheet way;
+//   - an old Word (.doc) table is read in the browser;
 //   - pasting into a text box is left alone;
 //   - without the add-on, a pasted screenshot gets a plain message and the
 //     picker lists only spreadsheets.
@@ -105,7 +106,7 @@ function paste(page, selector, { files = [], text } = {}) {
 function drop(page, testId, file) {
   return page.evaluate(({ testId, file, bytes }) => {
     const transfer = new DataTransfer();
-    transfer.items.add(new File([typeof file.text === "string" ? file.text : new Uint8Array(bytes)], file.name, { type: file.type }));
+    transfer.items.add(new File([typeof file.text === "string" ? file.text : new Uint8Array(file.bytes ?? bytes)], file.name, { type: file.type }));
     const target = document.querySelector(`[data-testid="${testId}"]`);
     if (!target) throw new Error(`No element for ${testId}`);
     for (const type of ["dragenter", "dragover", "drop"]) target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
@@ -165,10 +166,18 @@ try {
     assert.deepEqual(previews(requests)[3].body.rows, [["Bea Gas", "bea@gas.test"]]);
     await chooseAnother(page);
 
+    // An old Word (.doc) table is read in the browser, never sent to AI.
+    await drop(page, "input-contractors-file-drop", { name: "contacts.doc", type: "application/msword", bytes: [...readFileSync(new URL("fixtures/word-doc/fields.doc", import.meta.url))] });
+    await waitFor(() => previews(requests).length === 5, "the .doc table to be previewed");
+    assert.equal(reads(requests).length, 2, "a .doc file is not sent to AI");
+    assert.deepEqual(previews(requests)[4].body.headers, ["Name", "Email"]);
+    assert.deepEqual(previews(requests)[4].body.rows, [["Kim Lee", "kim@example.test"]]);
+    await chooseAnother(page);
+
     // Pasting into a text box is left alone.
     assert.equal(await paste(page, "[data-testid=harness-text-box]", { text: "a\tb\nc\td" }), false);
     await new Promise(resolve => setTimeout(resolve, 300));
-    assert.equal(previews(requests).length, 4);
+    assert.equal(previews(requests).length, 5);
     assert.deepEqual(pageErrors, []);
     await page.close();
   }
@@ -188,7 +197,7 @@ try {
     await waitFor(() => previews(requests).length === 1, "the pasted cells to be previewed");
     assert.deepEqual(pageErrors, []);
   }
-  console.log("Import file type browser checks passed: spreadsheet, photo, screenshot, PDF, pasted screenshot and pasted Excel cells.");
+  console.log("Import file type browser checks passed: spreadsheet, photo, screenshot, PDF, pasted screenshot, pasted Excel cells and an old Word (.doc) table.");
 } catch (error) {
   console.error("Import dialog:", browser ? await browser.contexts().at(-1)?.pages().at(-1)?.locator("body").innerText().catch(() => "") : "");
   throw error;

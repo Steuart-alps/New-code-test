@@ -35,6 +35,10 @@ export const complianceItemsTable = pgTable("compliance_items", {
   frequencyMonths: integer("frequency_months"),
   notificationSentAt: timestamp("notification_sent_at"),
   completedAt: timestamp("completed_at"),
+  /** The competent person who did the latest completion in house, instead of
+   *  a contractor (e.g. an annual emergency lighting test). Such a completion
+   *  needs no contractor certificate. Null = a contractor, or not said. */
+  completedInHouseBy: text("completed_in_house_by"),
   notes: text("notes"),
   /** Legacy raw scheduling token. Always NULL once runtime migrations have
    *  moved it to scheduleTokenHash; kept so older rows can be migrated. */
@@ -57,6 +61,7 @@ export const insertComplianceItemSchema = createInsertSchema(complianceItemsTabl
   createdAt: true,
   updatedAt: true,
   completedAt: true,
+  completedInHouseBy: true,
   notificationSentAt: true,
   // Set only through the equipment list, which checks the item's business.
   equipmentId: true,
