@@ -141,6 +141,8 @@ async function routeApi(route) {
       case "/api/billing/cancellation-status": return json(route, { accessEndsAt: null });
       case "/api/notifications": return json(route, { notifications: [], unreadCount: 0 });
       case "/api/managed-by": return json(route, null);
+      // Setup is finished, so the "Add your team first" gate stays out of the way.
+      case "/api/setup/state": return json(route, { needsSetup: false, canManage: true, team: { recorders: 2, aloneAt: null, ready: true } });
       case "/api/sites": return json(route, [SITE]);
       case "/api/staff-roster": return json(route, roster);
       // Mirrors lib/fireDrillAttendance.ts: latest drill each person was ticked at.
