@@ -14,6 +14,7 @@ import { useAuth, useCanAdmin, useIsConsultant } from "@/context/auth-context";
 import { roleLabel } from "@/lib/roles";
 import { departmentLabel } from "@/lib/departments";
 import { apiFetch as authenticatedApiFetch, withActiveClient, withCsrfToken } from "@/lib/api";
+import { SetupServiceCheckoutOption, offerSetupService, type SetupServiceBilling } from "@/components/setup-service-checkout";
 import { BusinessTypeCard } from "@/components/business-type-card";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
@@ -1853,6 +1854,8 @@ interface BillingConfig {
   dataDeletedAt?: string | null;
   /** Every module free with no trial end (set up by ALPS); nothing to pay. */
   complimentary?: boolean;
+  /** "Would you like ALPS to set you up?" at the first checkout. */
+  setupService?: SetupServiceBilling;
   services?: {
     entitled: "all" | string[];
     addons: string[];
@@ -2155,12 +2158,15 @@ function BillingCard() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickedAddons, setPickedAddons] = useState<Set<string>>(new Set());
   const [pickedBundle, setPickedBundle] = useState(false);
+  const [pickedSetupService, setPickedSetupService] = useState(false);
   const purchasableAddons = CHECKOUT_ADDONS.filter((addon) => !addon.comingSoon);
   const openCheckoutPicker = () => {
     const selected = config?.services?.selected ?? [];
     const known = new Set(purchasableAddons.map((addon) => addon.key));
     setPickedBundle(selected.includes("bundle"));
     setPickedAddons(new Set(selected.filter((key) => known.has(key))));
+    // Ticked already when they asked on the setup page.
+    setPickedSetupService(offerSetupService(config?.setupService) && !!config?.setupService?.requestedAt);
     setPickerOpen(true);
   };
   const pickedTotal = checkoutPerSiteTotal(pickedAddons.size, pickedBundle);
@@ -2188,6 +2194,7 @@ function BillingCard() {
         body: JSON.stringify({
           bundle: pickedBundle,
           services: pickedBundle ? [] : Array.from(pickedAddons),
+          ...(pickedSetupService && offerSetupService(config?.setupService) ? { setupService: true } : {}),
         }),
       });
       if (!data.url) throw new Error("Could not start checkout");
@@ -2577,6 +2584,9 @@ function BillingCard() {
             <p className="text-xs text-emerald-800">
               Your selection reaches the £{pickedTotal} per-site cap, so you'll get ComplyTrack Complete — every module — for the same price.
             </p>
+          )}
+          {offerSetupService(config?.setupService) && (
+            <SetupServiceCheckoutOption fee={config!.setupService!.fee} checked={pickedSetupService} onChange={setPickedSetupService} />
           )}
           <DialogFooter className="items-center gap-3 sm:justify-between">
             <span className="text-sm font-semibold">£{pickedTotal} per site / month</span>
